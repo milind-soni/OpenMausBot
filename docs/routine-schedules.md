@@ -96,7 +96,11 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   The next date advances without replaying every missed minute. Routines found
   late in the same pass start 15 seconds apart (at most 40 steps, then again
   from the first), so a long downtime does not start them all in one second.
-  A "when my limit resets" routine runs however late it is found.
+  A "when my limit resets" routine runs however late it is found. When the
+  scheduler itself got to a routine late because it was waiting on another
+  run's start (a pass ended after the run came due), the row says that
+  instead ("…because the scheduler was held up starting another run") and the
+  occurrences passed over are not counted as missed in the health report.
   Queued/running/waiting work for the same cron routine does not accumulate
   overlapping copies (a run is waiting while teammates still owe it results on
   the job runtime, docs/runtime-contract.md §9).
@@ -114,9 +118,21 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
     record; one that has is not made again, whatever brought it back (a
     `routines.json` put back from a copy, a clock set back, an edit made while
     the clock was wrong, a second process on the same files). A start is
-    appended to the ledger and flushed to disk before its turn begins; if that
-    write fails, the run stays queued and is tried at the next pass. A retry
+    appended to the ledger and flushed to disk before its turn begins. A retry
     is a further start of the same record, counted on it.
+  - **A ledger that cannot be written never stops a schedule.** A write that
+    fails is logged once and made again with the next save; it fails neither
+    the save nor any other run. A scheduled start waits at most three
+    scheduler passes for the ledger; after that it starts without a record,
+    and so does every later one until the ledger can be written again, with
+    `routines.json` alone keeping a run from starting twice, as before there
+    was a ledger. Meanwhile the health report says `unreadable: true`. A run
+    someone started by hand never waits for the ledger.
+  - **A clock that was ahead.** A row closed without starting says nothing
+    about a time that has not come: a record reaching past now is cut back to
+    now when that is seen, and cut again to just before an occurrence that
+    comes due inside it, so every occurrence after the clock is put right is
+    made and run. A record of a run that did start keeps its time.
   - **Leases.** A started occurrence's record carries a lease naming the
     machine and process that run it, renewed every minute for three, and given
     up at a clean shutdown. A process that starts on the same machine takes a
@@ -138,8 +154,9 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
     200 newest for 90 days, and the file never holds more than 10,000. A
     record that has not ended is never dropped. A torn last line (a crash in
     the middle of an append) is dropped at the next start and the rest kept;
-    a ledger that is lost is made again from the run rows, and its sequence
-    number carries on from the mark.
+    a ledger that is lost, or left empty, is made again from the run rows,
+    and its sequence number carries on from the mark; neither is taken for a
+    restore.
   - **Earlier versions.** A version from before the ledger reads and writes
     `routines.json` as it always did and ignores the two new files, so going
     back loses no routine and no run row. Coming forward again, the ledger
@@ -157,7 +174,8 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   failed: it starts once more ("Starting again shortly after a failure: its
   turn ended without reporting back"), and a second loss fails it. A run that
   waits on you or on work it handed on is never taken for lost, nor is a room
-  goal's run. The five minutes are added up a pass at a time, so the hours a
+  goal's run, nor one whose turn is parked waiting for a computer another
+  conversation holds: that turn resumes by itself when the computer is free. The five minutes are added up a pass at a time, so the hours a
   computer slept are not in them.
 - Every occurrence that does not run leaves a **Missed** row with its reason in
   the routine's log. Occurrences skipped behind the same earlier run share one

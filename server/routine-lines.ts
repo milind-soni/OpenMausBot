@@ -35,6 +35,7 @@ export const ROUTINE_LINE = {
   "routines.server.missedTooLate": "Missed because {why} until more than {hours} hours after its time",
   "routines.server.part.computerOff": "this computer was asleep or OpenMausBot was not running",
   "routines.server.part.cloudDown": "this Cloud was asleep or restarting",
+  "routines.server.part.heldUp": "the scheduler was held up starting another run",
   "routines.server.restored": "Not run again: this schedule was restored from a backup made before this run had its turn",
   "routines.server.restoredMany": "Not run again: {count} scheduled runs from before this schedule was restored from a backup",
   "routines.server.duplicate": "Not started: this scheduled run had already started once",

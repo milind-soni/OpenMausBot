@@ -1816,17 +1816,17 @@ epoch milliseconds; counters run from 0 to 1e9.
 | --- | --- |
 | `v` | `1` |
 | `seq` | Goes up by at least 1 with every change to this section other than the day's window moving: a row made, started, finished or closed, a routine added, changed, turned on or off or deleted, `unreadable` changing. It is saved with the ledger, so a restart never lowers it; a lower value means the schedule was restored from a backup. Renewing a run's lease does not raise it |
-| `unreadable` | The saved routines cannot be read, so nothing runs; the next three fields are then `null` |
+| `unreadable` | The saved routines cannot be read, so nothing runs; or the ledger cannot be written, so runs start without it and this section cannot say what is due. The next three fields are then `null` |
 | `nextDueAt` | The earliest scheduled-for time among occurrences that have no run row yet, over routines whose bot takes runs now; `null` when nothing is scheduled. It may be past |
 | `oldestUnconfirmed` | The due occurrence with the earliest scheduled-for time of which no attempt has started: `{ dueAt, state, since }`, with `state` `due` (no run row yet; `since` is `dueAt`) or `queued` (a row waits to start; `since` is when it was made). `null` when every due occurrence is decided. A routine whose bot is paused counts here too |
 | `lastConfirmed` | The decided occurrence with the latest scheduled-for time: `{ dueAt, startedAt, state }`. `state` is `running` (started and not finished: waiting on a person, or for its retry, included), `ran`, `failed`, `missed` or `skipped`; `startedAt` is when its first attempt started, `null` for `missed` and `skipped`. A record that counts several occurrences stands at the last of them |
-| `due.boot`, `due.day` | `{ ran, failed, missed, late, retried }` since this process started, and over the last 24 hours from the saved ledger: occurrences that finished well; that finished failed (a run someone stopped after it started counts here); that were closed without starting (`missed` and `skipped` together, each occurrence a record counts); whose first attempt started more than 5 minutes after its time; and starts after the first |
+| `due.boot`, `due.day` | `{ ran, failed, missed, late, retried }` since this process started, and over the last 24 hours from the saved ledger: occurrences that finished well; that finished failed (a run someone stopped after it started counts here); that were closed without starting (`missed` and `skipped` together, each occurrence a record counts); whose first attempt started more than 5 minutes after its time; and starts after the first. Occurrences passed over only because the scheduler was held up starting another run are not counted as missed |
 | `slowStops` | Since boot, the times stopping a turn took the scheduler longer than 10 seconds and it went on without waiting |
 
 What a reader may rely on: an occurrence that is due and has not started
 shows in `oldestUnconfirmed` at or before its time; a past `nextDueAt` always
 comes with it; the report right after an occurrence's first start names it in
-`lastConfirmed` (the start is written to the ledger before the turn begins),
+`lastConfirmed` (the start is written to the ledger before the turn begins, unless the ledger cannot be written),
 unless one due later is already decided; and after a boot an overdue
 occurrence shows as `due` or `queued` until the scheduler starts it or closes
 it as missed, never moved past in silence. Two gaps are known: a routine that

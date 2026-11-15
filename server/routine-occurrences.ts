@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 
 import { ROUTINE_SUPERSEDED } from "./routine-execution.ts";
-import { occurrenceEnded, RoutineLedger, type Occurrence, type OccurrenceLease, type OccurrenceReason, type OccurrenceState } from "./routine-ledger.ts";
+import { occurrenceEnded, occurrenceLastAt, RoutineLedger, type Occurrence, type OccurrenceLease, type OccurrenceReason, type OccurrenceState } from "./routine-ledger.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 
 /** How long a started occurrence's lease lasts without being renewed, and how often it is renewed while its run lives. */
@@ -16,6 +16,8 @@ export const LEASE_BEAT_MS = 60_000;
 /** A first start later than this after the scheduled time counts as late. */
 export const LATE_START_MS = 5 * 60_000;
 export const ROUTINE_TURN_GONE = "its turn ended without reporting back";
+/** How many scheduler passes a start is held back for a ledger that cannot be written, before it starts unrecorded. */
+export const UNRECORDED_START_PASSES = 3;
 
 export interface OccurrenceCounts { ran: number; failed: number; missed: number; late: number; retried: number }
 
@@ -54,12 +56,14 @@ function stateOf(run: Row, attempts: number): OccurrenceState {
   if (run.status === "running" || run.status === "waiting") return "running";
   if (run.status === "completed") return "ran";
   if (run.skipped) return run.skipped.behind.startsWith("down:") ? "missed" : "skipped";
+  if (String(run.errorParams?.why ?? "").endsWith("heldUp")) return "skipped";
   return attempts > 0 ? "failed" : run.status === "cancelled" ? "skipped" : "missed";
 }
 
 function reasonOf(run: Row, state: OccurrenceState): OccurrenceReason | undefined {
   if (state === "queued" || state === "running" || state === "ran") return undefined;
   const behind = run.skipped?.behind, code = run.errorCode, why = String(run.errorParams?.why ?? "");
+  if (behind?.startsWith("late:") || why.endsWith("heldUp")) return "scheduler-late";
   if (behind) return behind.startsWith("no-start:") ? "computer-no-start" : behind.startsWith("down:cloud") ? "cloud-down" : behind.startsWith("down:") ? "computer-off" : behind.startsWith("restored:") ? "restored" : "previous-run-active";
   if (code === "routines.server.missedTooLate" || code === "routines.server.missedOne" || code === "routines.server.missedMany") return why.endsWith("cloudDown") ? "cloud-down" : "computer-off";
   if (code === "routines.server.busyTooLong" || code === "routines.server.stillBusy") return "bot-busy";
@@ -71,16 +75,29 @@ function reasonOf(run: Row, state: OccurrenceState): OccurrenceReason | undefine
   return state === "failed" ? "failed" : "not-started";
 }
 
+/** The record with nothing in it after `end`: a span is shortened to there, and one that begins later is void. */
+function cutAt(record: Occurrence, end: number): Occurrence {
+  const { count, lastAt, ...rest } = record, last = Math.min(lastAt ?? record.dueAt, end);
+  const ended = { ...rest, cut: end, ...(record.endedAt === undefined ? {} : { endedAt: Math.min(record.endedAt, Math.max(0, end)) }) };
+  if (record.dueAt > end) return { ...ended, void: true };
+  const kept = count === undefined || lastAt === undefined || lastAt <= record.dueAt ? 1 : Math.max(1, Math.round(count * (last - record.dueAt) / (lastAt - record.dueAt)));
+  return kept > 1 && last > record.dueAt ? { ...ended, count: kept, lastAt: last } : ended;
+}
+
 function recordOf(run: Row, before: Occurrence | undefined, now: number, holder: Omit<OccurrenceLease, "until">): Occurrence {
   const started = starts(run, before), state = stateOf(run, started.attempts), reason = reasonOf(run, state);
   const held = run.status === "running" || run.status === "waiting";
   const lease = !held ? undefined : before?.lease?.boot === holder.boot ? before.lease : { ...holder, until: now + LEASE_MS };
-  return {
+  const record: Occurrence = {
     routineId: run.routineId, dueAt: before?.dueAt ?? run.skipped?.firstAt ?? run.scheduledFor, state, ...(reason ? { reason } : {}), ...started,
     madeAt: before?.madeAt ?? run.createdAt, ...(ACTIVE.has(run.status) ? {} : { endedAt: run.finishedAt ?? now }),
     ...(run.skipped && run.skipped.count > 1 ? { count: run.skipped.count, lastAt: run.skipped.lastAt } : {}),
     runIds: before?.runIds.includes(run.id) ? before.runIds : [run.id], ...(lease ? { lease } : {}),
   };
+  if (ACTIVE.has(run.status) || started.attempts > 0) return record;
+  // A row closed without starting says nothing about a time after the one it was cut at, or, read with no record, after now.
+  const cut = before ? before.cut : now;
+  return cut !== undefined && (before?.cut !== undefined || occurrenceLastAt(record) > cut) ? cutAt(record, cut) : record;
 }
 
 /** Field by field, whatever order they are in: a record read back from the file lists them in its own. */
@@ -102,6 +119,10 @@ export class Occurrences {
   private rowIds = new Set<string>();
   private fingerprint: string | undefined;
   private unreadable = false;
+  /** The ledger cannot be written, and runs start without it: routines.json alone keeps a run from starting twice. */
+  degraded = false;
+  private failing = false;
+  private refused = 0;
   private held: { version: number; records: Occurrence[] } = { version: -1, records: [] };
 
   constructor(routinesFile: string, now: () => number, machine?: string) {
@@ -112,11 +133,12 @@ export class Occurrences {
   }
 
   /** Works out every scheduled row's record from the rows about to be saved. A change that holds a start is written at
-   * once, and throws when it cannot be: a turn never begins before its start is on disk. Any other change is written by
-   * the function returned, which the caller runs once routines.json itself is saved, so the ledger never says more
-   * than the rows do; a write that fails there is made again with the next save. `counting` false at start, when the
-   * rows are older than this process and nothing they say happened in it. */
+   * once, before the turn begins; any other by the function returned, which the caller runs once routines.json itself
+   * is saved, so the ledger never says more than the rows do. A write that fails is logged once and made again with
+   * the next save: it never fails the save, or the start. `counting` false at start, when the rows are older than this
+   * process and nothing they say happened in it. */
   observe(routines: readonly Scheduled[], runs: readonly Row[], counting = true): () => void {
+    this.trim();
     const now = this.now(), rows = runs.filter(isOccurrenceRun), ids = new Set(rows.map((run) => run.id));
     const put = new Map<string, { before: Occurrence | undefined; after: Occurrence }>(), seen = new Map<string, string>();
     let starting = false;
@@ -128,7 +150,7 @@ export class Occurrences {
       const before = this.ledger.ofRun(run.id);
       if (!before) {
         const dueAt = run.skipped?.firstAt ?? run.scheduledFor, key = `${run.routineId}\n${dueAt}`;
-        const taken = put.get(key)?.after ?? this.ledger.covering(run.routineId, dueAt);
+        const taken = put.get(key)?.after ?? this.standing(run.routineId, dueAt);
         // A second row for an occurrence that has its record gets none of its own, and is never started.
         if (taken && (put.has(key) || !this.unclaimed(taken, ids))) continue;
       }
@@ -148,24 +170,49 @@ export class Occurrences {
     // At start the routines are as the last process left them: with no record to change, nothing is written.
     if (put.size === 0 && remove.length === 0 && (fingerprint === this.fingerprint || !counting)) { this.rowIds = ids; this.fingerprint = fingerprint; return () => {}; }
     const write = () => {
-      this.ledger.write([...put.values()].map(({ after }) => JSON.parse(JSON.stringify(after)) as Occurrence), remove);
+      try { this.ledger.write([...put.values()].map(({ after }) => JSON.parse(JSON.stringify(after)) as Occurrence), remove); }
+      catch (error) { return this.failed(error); }
+      this.written();
       this.rowIds = ids;
       this.fingerprint = fingerprint;
       for (const [id, mark] of seen) this.signatures.set(id, mark);
       for (const id of this.signatures.keys()) if (!ids.has(id)) this.signatures.delete(id);
       if (counting) for (const { before, after } of put.values()) this.count(before, after);
     };
-    if (starting) { write(); return () => {}; }
-    return () => {
-      try { write(); } catch (error) { console.error("routines: could not write the run ledger; the next save writes it", error); }
-    };
+    if (!starting) return write;
+    write();
+    return () => {};
+  }
+
+  /** Whether a queued run may start now. A scheduled occurrence waits while the ledger cannot take its start, for
+   * UNRECORDED_START_PASSES passes; after that it starts unrecorded, and so does every other until the ledger can be
+   * written again: a run that starts matters more than its record. Any other run never waits. */
+  ready(run: Row): boolean {
+    if (!isOccurrenceRun(run) || this.degraded) return true;
+    if (this.ledger.writable()) { this.refused = 0; return true; }
+    this.refused += 1;
+    if (this.refused <= UNRECORDED_START_PASSES) return false;
+    this.degraded = true;
+    console.error(`routines: the run ledger ${this.ledger.file} cannot be written; scheduled runs start without it until it can`);
+    return true;
+  }
+
+  private failed(error: unknown): void {
+    if (!this.failing) console.error("routines: could not write the run ledger; each save tries again", error);
+    this.failing = true;
+  }
+
+  private written(): void {
+    if (this.degraded) console.error("routines: the run ledger can be written again");
+    this.failing = false; this.degraded = false; this.refused = 0;
   }
 
   /** The occurrence already has a record that stands, so no row is made for it again: it ran, was closed, or is another
    * row's. The file is read again first when another process has written to it. */
   decided(routineId: string, dueAt: number): boolean {
     this.refresh();
-    const record = this.ledger.covering(routineId, dueAt);
+    this.trim(routineId, dueAt);
+    const record = this.standing(routineId, dueAt);
     if (!record || this.unclaimed(record, this.rowIds)) return false;
     this.duplicates += 1;
     console.warn("routines: a scheduled occurrence that already has its record was not made again");
@@ -177,7 +224,7 @@ export class Occurrences {
     if (!isOccurrenceRun(run)) return false;
     this.refresh();
     if (this.ledger.ofRun(run.id)) return false;
-    const record = this.ledger.covering(run.routineId, run.skipped?.firstAt ?? run.scheduledFor);
+    const record = this.standing(run.routineId, run.skipped?.firstAt ?? run.scheduledFor);
     if (!record || this.unclaimed(record, new Set([...this.rowIds].filter((id) => id !== run.id)))) return false;
     this.duplicates += 1;
     return true;
@@ -205,7 +252,7 @@ export class Occurrences {
     const now = this.now(), due = this.mine().filter((record) => record.lease!.until - now <= LEASE_MS - LEASE_BEAT_MS);
     if (due.length === 0) return;
     try { this.ledger.write(due.map((record) => ({ ...record, lease: { ...this.holder, until: now + LEASE_MS } })), [], false); }
-    catch (error) { console.error("routines: could not renew a run's lease", error); }
+    catch (error) { this.failed(error); }
   }
 
   /** At shutdown: the leases are given up, so whichever process starts next on this data need not wait for them. */
@@ -220,9 +267,32 @@ export class Occurrences {
   sequence(unreadable: boolean): number {
     if (unreadable !== this.unreadable) {
       try { this.ledger.write([]); this.unreadable = unreadable; }
-      catch (error) { console.error("routines: could not write the run ledger; the next save writes it", error); }
+      catch (error) { this.failed(error); }
     }
     return this.ledger.seq;
+  }
+
+  /** The record that stands for the occurrence, leaving out one closed for a time that had not come. */
+  private standing(routineId: string, dueAt: number): Occurrence | undefined {
+    const record = this.ledger.covering(routineId, dueAt);
+    return record?.void ? undefined : record;
+  }
+
+  /** A record that reaches past now was written while the clock was ahead. One closed without starting is cut back to
+   * now; and since nothing says when the clock was put right, one already cut is cut again to just before `due` when
+   * that occurrence of its routine is asked about, so an occurrence that has not had its time is still made. One that
+   * ran keeps its key, and only its end time is brought back. */
+  private trim(routineId?: string, due?: number): void {
+    const now = this.now(), end = Math.min(now, (due ?? Infinity) - 1), put: Occurrence[] = [];
+    for (const record of routineId === undefined ? this.ledger.all() : this.ledger.ofRoutine(routineId)) {
+      if (!occurrenceEnded(record) || record.void) continue;
+      const last = occurrenceLastAt(record), ahead = last > now || (record.cut !== undefined && last > end);
+      if (record.attempts === 0 && ahead) put.push(cutAt(record, end));
+      else if (record.attempts > 0 && (record.endedAt ?? 0) > now) put.push({ ...record, endedAt: now });
+    }
+    if (put.length === 0) return;
+    try { this.ledger.write(put.map((record) => JSON.parse(JSON.stringify(record)) as Occurrence)); this.signatures.clear(); }
+    catch (error) { this.failed(error); }
   }
 
   private refresh(): void {
@@ -235,7 +305,7 @@ export class Occurrences {
   }
 
   private count(before: Occurrence | undefined, after: Occurrence): void {
-    const was = before?.attempts ?? 0, closed = (record: Occurrence | undefined) => record && (record.state === "missed" || record.state === "skipped") ? record.count ?? 1 : 0;
+    const was = before?.attempts ?? 0, closed = (record: Occurrence | undefined) => record && !record.void && record.reason !== "scheduler-late" && (record.state === "missed" || record.state === "skipped") ? record.count ?? 1 : 0;
     if (after.state === "ran" && before?.state !== "ran") this.counts.ran += 1;
     if (after.state === "failed" && before?.state !== "failed") this.counts.failed += 1;
     this.counts.missed += Math.max(0, closed(after) - closed(before));

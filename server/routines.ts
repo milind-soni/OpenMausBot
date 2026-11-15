@@ -347,7 +347,7 @@ export class RoutineManager {
   private frozenPending = false;
   private readonly bootedAt: number;
   private readonly checking = new Set<string>(); private readonly progress = new RunProgressSave(() => this.file, () => this.save()); private readonly gate = createRunGate<RoutineRun>((run, signal) => this.options.prepareRun?.(cloneRun(run), signal) ?? null, () => this.tickInBackground());
-  private readonly ledger: Occurrences; private readonly watch: RunWatch;
+  private readonly ledger: Occurrences; private readonly watch: RunWatch; private passedAt = -Infinity;
 
   constructor(options: RoutineManagerOptions) {
     this.options = withBoundedStops(options, this.slowStops);
@@ -444,7 +444,7 @@ export class RoutineManager {
   scheduleReport(): ScheduleSection {
     const next = this.unreadable ? [] : this.routines.filter((routine) => routine.enabled && !routine.checks && routine.nextRunAt != null && this.targetState(routine) !== "missing")
       .map((routine) => ({ at: routine.nextRunAt!, paused: routine.target !== "room-goal" && Boolean(this.options.pausedText?.(routine.botId)) }));
-    return scheduleSection({ seq: this.ledger.sequence(this.unreadable), unreadable: this.unreadable, slowStops: this.slowStops.count, next, records: this.ledger.ledger.all(), boot: this.ledger.counts, now: this.now() });
+    return scheduleSection({ seq: this.ledger.sequence(this.unreadable), unreadable: this.unreadable || this.ledger.degraded, slowStops: this.slowStops.count, next, records: this.ledger.ledger.all(), boot: this.ledger.counts, now: this.now() });
   }
   /** A routine's scheduled occurrences as the ledger holds them, newest first: ids, times, counts and fixed words. */
   occurrences(routineId: string): Occurrence[] { return this.ledger.ledger.ofRoutine(routineId).sort((a, b) => b.dueAt - a.dueAt).map((record) => structuredClone(record)); }
@@ -1051,7 +1051,7 @@ export class RoutineManager {
               delete routine.wakeAt;
               continue;
             }
-            const plan = planOccurrence(routine, now, this.options.home?.cloud === true), scheduledFor = plan.scheduledFor;
+            const plan = planOccurrence(routine, now, this.options.home?.cloud === true, this.passedAt >= routine.nextRunAt!), scheduledFor = plan.scheduledFor;
             if (this.ledger.decided(routine.id, scheduledFor)) { this.advancePastOccurrence(routine, now, plan.through); continue; }
             const once = runsOnce(routine.schedule), blocker = once ? undefined : blockingRun(this.runs, routine.id), spaced = once ? null : noStartSpacing(routine, this.runs);
             const scheduledQueued = this.runs.some(run => run.routineId === routine.id && run.status === "queued" &&
@@ -1138,7 +1138,7 @@ export class RoutineManager {
         }
         if (state === "missing") { this.failRun(run, this.missingTargetMessage(run.target)); continue; }
         const paused = run.target === "room-goal" ? null : this.options.pausedText?.(run.botId);
-        if (this.ledger.startedElsewhere(run)) { const line = codedLine("error", "routines.server.duplicate"); Object.assign(run, line.codes); void this.cancelRun(run.id, line.text); continue; }
+        if (!this.ledger.ready(run)) continue; if (this.ledger.startedElsewhere(run)) { const line = codedLine("error", "routines.server.duplicate"); Object.assign(run, line.codes); void this.cancelRun(run.id, line.text); continue; }
         if (paused) { if (triggerSource !== "manual" && this.options.held?.(run.botId)) void this.cancelRun(run.id, paused); else this.failRun(run, paused); continue; } const gated = triggerSource === "manual" ? false : this.gate.hold(run); if (gated === true) { if (this.options.preparing && run.attention !== this.options.preparing) { run.attention = this.options.preparing; this.emitRun(run); } continue; } if (gated) { this.failRun(run, gated); continue; }
         const startedAt = this.now();
         const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
@@ -1195,7 +1195,7 @@ export class RoutineManager {
         }
       }
     } finally {
-      this.ticking = false;
+      this.ticking = false; this.passedAt = this.now();
     }
   }
 

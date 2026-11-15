@@ -152,6 +152,18 @@ describe("the mark beside the ledger", () => {
     expect(w.open().opened.restoredThrough).toBeNull();
   });
 
+  it("takes an empty ledger for a lost one, never for a restore", () => {
+    const w = world(), { ledger } = w.open();
+    for (const hour of [0, 1, 2]) ledger.write([ran(START + hour * HOUR)]);
+    for (const empty of ["", "\n", "  \n"]) {
+      writeFileSync(w.ledger, empty);
+      const opened = w.open();
+      expect(opened.opened).toEqual({ state: "missing", restoredThrough: null });
+      expect(opened.ledger.seq).toBe(4);
+      expect(opened.ledger.sync()).toBe(false);
+    }
+  });
+
   it("reads the file again only when another process has written to it", () => {
     const w = world(), mine = w.open().ledger;
     mine.write([ran(START)]);

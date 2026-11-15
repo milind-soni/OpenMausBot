@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { failedTurnTool } from "../shared/failed-turn.ts";
 import type { PlaceRow } from "../shared/place-view.ts";
 import { TRIAL_CREDIT_REFUSED } from "../shared/trial-credit.ts";
@@ -222,6 +222,11 @@ describe("the ledger", () => {
     }
     expect(caps).toEqual([100, 100]);
     expect(world().health.report(null)).toMatchObject({ routines: [], schedule: null });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const broken = world({ routines: () => { throw new Error("Quarterly-Secret-Plan"); }, schedule: () => { throw new Error("Quarterly-Secret-Plan"); } }).health.report(null);
+    expect(broken).toMatchObject({ v: 1, routines: [], schedule: null, turns: { started15m: 0 } });
+    expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain("Quarterly");
+    vi.restoreAllMocks();
   });
 });
 

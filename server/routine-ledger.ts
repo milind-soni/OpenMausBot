@@ -14,7 +14,7 @@ export const OCCURRENCE_STATES: readonly OccurrenceState[] = ["queued", "running
 
 /** Why an occurrence ended as it did, as a fixed word. */
 export const OCCURRENCE_REASONS = [
-  "previous-run-active", "computer-no-start", "bot-busy", "computer-off", "cloud-down", "restored", "run-limit",
+  "previous-run-active", "computer-no-start", "bot-busy", "computer-off", "cloud-down", "scheduler-late", "restored", "run-limit",
   "superseded", "restarted", "turn-gone", "cancelled", "failed", "not-started",
 ] as const;
 export type OccurrenceReason = typeof OCCURRENCE_REASONS[number];
@@ -39,6 +39,10 @@ export interface Occurrence {
   /** The occurrences it stands for, when more than one, and the scheduled-for time of the last. */
   count?: number;
   lastAt?: number;
+  /** A record written while the clock was ahead stands for nothing after this time, however far its row says it reaches. */
+  cut?: number;
+  /** Closed for a time that had not come: it stands for no occurrence, and one due at its time is still made. */
+  void?: true;
   /** The run rows it produced. */
   runIds: string[];
   lease?: OccurrenceLease;
@@ -81,6 +85,7 @@ export function loadOccurrence(value: unknown): Occurrence | null {
     ...(optionalTime(saved.lastStartAt) === undefined ? {} : { lastStartAt: saved.lastStartAt }),
     ...(optionalTime(saved.endedAt) === undefined ? {} : { endedAt: saved.endedAt }),
     ...(counted ? { count: saved.count, lastAt: saved.lastAt } : {}),
+    ...(optionalTime(saved.cut) === undefined ? {} : { cut: saved.cut }), ...(saved.void === true ? { void: true as const } : {}),
     ...(lease && typeof lease.machine === "string" && ID.test(lease.machine) && typeof lease.boot === "string" && ID.test(lease.boot) && time(lease.until)
       ? { lease: { machine: lease.machine, boot: lease.boot, until: lease.until } } : {}),
   };
@@ -178,6 +183,15 @@ export class RoutineLedger {
     if (counted) this.writeMark();
   }
 
+  /** Whether the file can be appended to now. */
+  writable(): boolean {
+    try {
+      mkdirSync(dirname(this.file), { recursive: true });
+      appendFileSync(this.file, "", { mode: 0o600 });
+      return true;
+    } catch { return false; }
+  }
+
   /** Reads the file again when something else has written to it since this process last did. True when it had. A
    * file that cannot be read just now leaves what is in memory as it is. */
   sync(): boolean {
@@ -223,7 +237,8 @@ export class RoutineLedger {
   private read(text: string | null): LedgerOpened["state"] {
     this.byRoutine.clear(); this.byRun.clear(); this.changes += 1;
     this.sequence = 0; this.lines = 0; this.bytes = 0; this.total = 0; this.endsMidLine = false;
-    if (text === null) return "missing";
+    // An empty file holds no ledger: it is made again from the rows, like one that is not there.
+    if (text === null || text.trim() === "") { this.bytes = text === null ? 0 : Buffer.byteLength(text); this.endsMidLine = Boolean(text) && !text!.endsWith("\n"); return "missing"; }
     this.bytes = Buffer.byteLength(text);
     this.endsMidLine = text.length > 0 && !text.endsWith("\n");
     let damaged = this.endsMidLine;
@@ -245,7 +260,8 @@ export class RoutineLedger {
   /** Ended records past their keep, oldest first. A record that has not ended is never dropped here. */
   private expired(): Occurrence[] {
     const now = this.now(), gone: Occurrence[] = [], kept: Occurrence[] = [];
-    const endedAt = (record: Occurrence) => record.endedAt ?? occurrenceLastAt(record);
+    // Never later than now: a time stamped while the clock was ahead does not keep a record past its keep.
+    const endedAt = (record: Occurrence) => Math.min(now, record.endedAt ?? occurrenceLastAt(record));
     for (const records of this.byRoutine.values()) {
       const ended = [...records.values()].filter(occurrenceEnded).sort((a, b) => occurrenceLastAt(b) - occurrenceLastAt(a));
       ended.forEach((record, index) => {

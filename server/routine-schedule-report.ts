@@ -25,11 +25,12 @@ const whole = (value: number, max: number) => Math.min(max, Math.max(0, Math.rou
 const counts = (value: OccurrenceCounts): OccurrenceCounts => ({ ran: whole(value.ran, MAX_COUNT), failed: whole(value.failed, MAX_COUNT), missed: whole(value.missed, MAX_COUNT), late: whole(value.late, MAX_COUNT), retried: whole(value.retried, MAX_COUNT) });
 
 /** The last 24 hours, from the saved records. A record that counts a span of occurrences gives the share of them that
- * falls in the day. */
+ * falls in the day. Occurrences passed over only because the scheduler itself was held up are no misses and are left out. */
 export function dayCounts(records: Iterable<Occurrence>, now: number): OccurrenceCounts {
   const day: OccurrenceCounts = { ran: 0, failed: 0, missed: 0, late: 0, retried: 0 }, from = now - DAY_MS;
   const within = (at: number | undefined) => at !== undefined && at > from && at <= now;
   for (const record of records) {
+    if (record.void || record.reason === "scheduler-late") continue;
     if (record.attempts > 0 && within(record.startedAt)) {
       if (record.startedAt! - record.dueAt > LATE_START_MS) day.late += 1;
       day.retried += record.attempts - 1;
@@ -63,6 +64,7 @@ export function scheduleSection({ seq, unreadable, slowStops, next, records, boo
   let oldest: ScheduleSection["oldestUnconfirmed"] = null, last: Occurrence | null = null;
   for (const { at } of next) if (at <= now && (!oldest || at < oldest.dueAt)) oldest = { dueAt: whole(at, MAX_TIME), state: "due", since: whole(at, MAX_TIME) };
   for (const record of all) {
+    if (record.void) continue;
     if (record.state === "queued") {
       if (record.dueAt <= now && (!oldest || record.dueAt < oldest.dueAt)) oldest = { dueAt: whole(record.dueAt, MAX_TIME), state: "queued", since: whole(record.madeAt, MAX_TIME) };
     } else if (!last || occurrenceLastAt(record) > occurrenceLastAt(last)) last = record;

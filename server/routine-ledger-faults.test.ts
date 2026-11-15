@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CATCH_UP_STAGGER_MS } from "./routine-catch-up.ts";
 import { ledgerPaths, type Occurrence } from "./routine-ledger.ts";
-import { LEASE_MS } from "./routine-occurrences.ts";
+import { LEASE_MS, UNRECORDED_START_PASSES } from "./routine-occurrences.ts";
 import { TURN_GONE_MS } from "./routine-run-watch.ts";
 import type { ScheduleSection } from "./routine-schedule-report.ts";
 import { RoutineManager, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
@@ -330,6 +330,67 @@ describe("a clock that is set back or forward", () => {
     expect(h.report().seq).toBeGreaterThanOrEqual(seq);
     await h.tickAt(START + DAY + 2 * HOUR);
     expect(h.started).toEqual(["thread-1", "thread-2"]);
+  });
+});
+
+describe("a clock that was days ahead", () => {
+  it("does not let the span it closed swallow the occurrences that come after the clock is put right", async () => {
+    const h = harness();
+    const routine = h.manager.create(every(60));
+    await h.tickAt(START + 3 * DAY + 5 * MINUTE);
+    h.done("thread-1");
+    expect(h.runs()[0]!.skipped).toMatchObject({ firstAt: START + HOUR, lastAt: START + 3 * DAY - HOUR });
+
+    h.at(START + 2 * HOUR + 10 * MINUTE);
+    h.manager.update(routine.id, { name: "Fix the newest bugs" });
+    h.manager.update(routine.id, { schedule: { type: "interval", everyMinutes: 60, anchorAt: START + 30 * MINUTE } });
+    expect(h.routine().nextRunAt).toBe(START + 2 * HOUR + 30 * MINUTE);
+    const span = h.records().find((record) => record.state === "missed")!;
+    expect(span).toMatchObject({ dueAt: START + HOUR, cut: START + 2 * HOUR + 10 * MINUTE, endedAt: START + 2 * HOUR + 10 * MINUTE });
+    expect(span.lastAt ?? span.dueAt).toBeLessThanOrEqual(START + 2 * HOUR + 10 * MINUTE);
+    for (const half of [5, 7, 9]) await h.tickAt(START + half * 30 * MINUTE).then(() => h.done(`thread-${(half - 1) / 2}`));
+    expect(h.started).toEqual(["thread-1", "thread-2", "thread-3", "thread-4"]);
+
+    // Asked about only when the occurrence is already due, with nothing saved since the clock went back.
+    const late = harness();
+    late.manager.create(every(60));
+    await late.tickAt(START + 3 * DAY + 5 * MINUTE);
+    late.done("thread-1");
+    late.manager.close();
+    const saved = JSON.parse(readFileSync(late.file, "utf8")) as { routines: Array<Record<string, unknown>> };
+    saved.routines[0]!.nextRunAt = START + 5 * HOUR;
+    writeFileSync(late.file, JSON.stringify(saved));
+    late.at(START + 5 * HOUR + MINUTE);
+    late.kill();
+    await late.manager.tick();
+    expect(late.started).toEqual(["thread-1", "thread-2"]);
+    late.done("thread-2");
+    await late.tickAt(START + 6 * HOUR);
+    expect(late.started).toEqual(["thread-1", "thread-2", "thread-3"]);
+    expect(late.report().due.day.missed).toBeLessThanOrEqual(5);
+  });
+});
+
+describe("a scheduler pass held up by another run's start", () => {
+  it("says so for what it passed over, and does not count it as missed", async () => {
+    const file = folder();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const h = harness(START, file, { startTurn: async (_botId, threadId) => { h.started.push(threadId); if (threadId === "thread-1") await gate; } });
+    h.manager.create(every(24 * 60, { anchorAt: undefined, schedule: { type: "interval" as const, everyMinutes: 1_440, anchorAt: START + HOUR } }));
+    h.manager.create(every(60, { name: "Half past", botId: "maus-2", schedule: { type: "interval" as const, everyMinutes: 60, anchorAt: START + 90 * MINUTE } }));
+    h.at(START + HOUR);
+    const held = h.manager.tick();
+    h.at(START + 3 * HOUR + 40 * MINUTE);
+    release();
+    await held;
+    await h.manager.tick();
+    expect(h.started).toEqual(["thread-1", "thread-2"]);
+    const passed = h.runs().find((run) => run.skipped)!;
+    expect(passed).toMatchObject({ status: "missed", seenAt: START + 3 * HOUR + 40 * MINUTE, error: "Missed 2 scheduled runs because the scheduler was held up starting another run",
+      skipped: { count: 2, firstAt: START + 90 * MINUTE, lastAt: START + 150 * MINUTE } });
+    expect(h.records(passed.routineId).at(-1)).toMatchObject({ state: "skipped", reason: "scheduler-late" });
+    expect(h.report().due).toMatchObject({ boot: { missed: 0, late: 1 }, day: { missed: 0 } });
   });
 });
 
@@ -667,23 +728,69 @@ describe("the files", () => {
     expect(h.report().seq).toBe(unreadable.seq);
   });
 
-  it("does not fail a save when the ledger cannot be written, but never starts a run it could not record", async () => {
+  it("holds a start back a few passes for a ledger that cannot be written, then runs without it, and never stops another run or a save", async () => {
     const h = harness();
-    h.manager.create(every(60));
+    const hourly = h.manager.create(every(60));
+    const other = h.manager.create(every(24 * 60, { name: "Weekly digest", botId: "maus-2" }));
     vi.spyOn(console, "error").mockImplementation(() => {});
     const { ledger } = ledgerPaths(h.file);
-    rmSync(ledger);
     // A folder where the file should be: every append fails, on Windows as on any other system.
+    rmSync(ledger);
     mkdirSync(ledger);
-    h.manager.update(h.routine().id, { name: "Fix the newest bugs" });
-    expect(h.routine().name).toBe("Fix the newest bugs");
-    await expect(h.tickAt(START + HOUR)).rejects.toThrow();
+
+    await h.tickAt(START + HOUR);
     expect(h.started).toEqual([]);
-    expect(h.runs()).toMatchObject([{ status: "queued" }]);
+    h.manager.runNow(other.id);
+    for (let pass = 1; pass <= UNRECORDED_START_PASSES - 1; pass += 1) await h.tickAt(START + HOUR + pass * 10_000);
+    expect(h.started, "the run someone started by hand does not wait behind it").toEqual(["thread-1"]);
+    expect(h.report().unreadable).toBe(false);
+    await h.tickAt(START + HOUR + UNRECORDED_START_PASSES * 10_000);
+    expect(h.started).toEqual(["thread-1", "thread-2"]);
+    expect(h.report()).toMatchObject({ unreadable: true, nextDueAt: null, oldestUnconfirmed: null, lastConfirmed: null });
+
+    h.done("thread-1");
+    h.done("thread-2");
+    const saved = () => (JSON.parse(readFileSync(h.file, "utf8")) as { runs: RoutineRun[] }).runs.map((run) => run.status).sort();
+    expect(saved()).toEqual(["completed", "completed"]);
+    for (let hour = 2; hour <= 6; hour += 1) {
+      await h.tickAt(START + hour * HOUR);
+      h.done(`thread-${hour + 1}`);
+    }
+    expect(h.started).toHaveLength(7);
+    expect(saved().filter((status) => status === "completed")).toHaveLength(7);
+    expect(h.failed).toEqual([]);
+
+    // A process that starts while the ledger is still unwritable loads, picks a cut run up and saves its end.
+    await h.tickAt(START + 7 * HOUR);
+    h.kill();
+    expect(h.runs().at(-1)).toMatchObject({ status: "queued", retried: "restarted" });
+    for (let pass = 1; pass <= UNRECORDED_START_PASSES + 1; pass += 1) await h.tickAt(START + 7 * HOUR + pass * 20_000);
+    expect(h.started.at(-1)).toBe("thread-8");
+    h.event("thread-8", "turn.started");
+    h.done("thread-8");
+    expect(saved().filter((status) => status === "completed")).toHaveLength(8);
 
     rmSync(ledger, { recursive: true });
-    await h.tickAt(START + HOUR + MINUTE);
-    expect(h.started).toEqual(["thread-1"]);
-    expect(h.records()).toMatchObject([{ dueAt: START + HOUR, state: "running", attempts: 1 }]);
+    await h.tickAt(START + 8 * HOUR);
+    expect(h.report()).toMatchObject({ unreadable: false, lastConfirmed: { dueAt: START + 8 * HOUR, state: "running" } });
+    expect(h.records(hourly.id).filter((record) => record.state === "ran")).toHaveLength(7);
+  });
+
+  it("makes an empty ledger again from the rows, and takes it for no restore", async () => {
+    const h = harness();
+    h.manager.create(every(60));
+    await h.tickAt(START + HOUR);
+    h.done("thread-1");
+    h.bot("busy");
+    await h.tickAt(START + 2 * HOUR);
+    h.manager.close();
+    writeFileSync(ledgerPaths(h.file).ledger, "");
+    h.at(START + 2 * HOUR + MINUTE);
+    h.kill();
+    expect(h.runs().map((run) => run.status)).toEqual(["completed", "queued"]);
+    expect(h.records()).toMatchObject([{ dueAt: START + 2 * HOUR, state: "queued" }, { dueAt: START + HOUR, state: "ran" }]);
+    h.bot("ready");
+    await h.manager.tick();
+    expect(h.started).toEqual(["thread-1", "thread-2"]);
   });
 });

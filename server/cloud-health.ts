@@ -265,6 +265,11 @@ export function boxSummary(report: BoxReport | undefined): { box: BoxReport["box
   return { box: report.box, reason: report.reason, checks: report.checks ? `${report.checks.passed}/${report.checks.total}` : null, failed, boxed: report.boxed, refused: report.refused, broker, hardening: report.hardening };
 }
 
+/** What the scheduler says of itself, or `fallback` when asking it throws: the rest of the report is still answered. The log names no cause, which could quote a routine. */
+function guarded<T>(read: () => T, fallback: T): T {
+  try { return read(); } catch { console.error("cloud health: the scheduler's part of the report could not be read"); return fallback; }
+}
+
 /** The report's body, at most CLOUD_HEALTH_MAX_BYTES of JSON. */
 export function createCloudHealth(deps: CloudHealthDeps) {
   const now = deps.now ?? Date.now;
@@ -305,7 +310,7 @@ export function createCloudHealth(deps: CloudHealthDeps) {
       const memory = memoryBytes(), browser = deps.browser(), first = deps.firstHour?.();
       const base = {
         v: 1 as const, version, image, bootedAt: ledger.bootedAt, at: now(),
-        turns: read.turns, routines: (deps.routines?.(ROUTINE_CAP) ?? []).filter((routine) => match(ID, routine.routineId)), schedule: deps.schedule?.() ?? null,
+        turns: read.turns, routines: guarded(() => deps.routines?.(ROUTINE_CAP) ?? [], []).filter((routine) => match(ID, routine.routineId)), schedule: guarded(() => deps.schedule?.() ?? null, null),
         engines: engines(), connectors: connectorState(),
         browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
         box: boxSummary(deps.box?.()),

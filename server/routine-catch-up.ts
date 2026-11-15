@@ -22,7 +22,8 @@ export const CATCH_UP_STAGGER_STEPS = 40;
 /** Occurrences walked one by one before the rest are estimated from their spacing. */
 const WALK_LIMIT = 2_000;
 
-type DownWhy = Extract<RoutineLineKey, "routines.server.part.computerOff" | "routines.server.part.cloudDown">;
+type DownWhy = Extract<RoutineLineKey, "routines.server.part.computerOff" | "routines.server.part.cloudDown" | "routines.server.part.heldUp">;
+const WHY_WORD: Record<DownWhy, string> = { "routines.server.part.computerOff": "down:computer", "routines.server.part.cloudDown": "down:cloud", "routines.server.part.heldUp": "late" };
 
 /** From the occurrence at `first`, the newest one at or before `now`, and how many there are up to it. Past WALK_LIMIT
  * the count is an estimate. */
@@ -75,15 +76,17 @@ function missedFields(count: number, firstAt: number, lastAt: number, why: DownW
   const counts = count > 1 || !told;
   return {
     status: "missed", finishedAt: now, error: line.text, ...line.codes, ...(told ? {} : { seenAt: now }),
-    ...(counts ? { skipped: { count, firstAt, lastAt, behind: `down:${why.endsWith("cloudDown") ? "cloud" : "computer"}:${now}`, ...(told ? { told: true as const } : {}) } } : {}),
+    ...(counts ? { skipped: { count, firstAt, lastAt, behind: `${WHY_WORD[why]}:${now}`, ...(told ? { told: true as const } : {}) } } : {}),
   };
 }
 
-/** What to do with the routine's next run, which is due: run it; or, found late, run the newest occurrence passed and
+/** `heldUp`: a scheduler pass ended after the run came due, so the scheduler was at work and only got to it late (it was
+ * waiting on another run's start): what it passed over is then said to be that, not a computer asleep or a Cloud down.
+ * What to do with the routine's next run, which is due: run it; or, found late, run the newest occurrence passed and
  * close the older ones; or, with the newest too old as well, close them all on one row the owner is told about. A
  * limit reset is a state, not a moment: it still holds however late the computer wakes. */
-export function planOccurrence(routine: Pick<Routine, "schedule" | "nextRunAt">, now: number, cloud: boolean): OccurrencePlan {
-  const first = routine.nextRunAt!, why: DownWhy = cloud ? "routines.server.part.cloudDown" : "routines.server.part.computerOff";
+export function planOccurrence(routine: Pick<Routine, "schedule" | "nextRunAt">, now: number, cloud: boolean, heldUp = false): OccurrencePlan {
+  const first = routine.nextRunAt!, why: DownWhy = heldUp ? "routines.server.part.heldUp" : cloud ? "routines.server.part.cloudDown" : "routines.server.part.computerOff";
   const late = now - first > CATCH_UP_LATE_MS;
   const { latest, count } = late ? passedOccurrences(routine.schedule, first, now) : { latest: first, count: 1 };
   if (now - latest > CATCH_UP_MS && routine.schedule.type !== "limit_reset") {

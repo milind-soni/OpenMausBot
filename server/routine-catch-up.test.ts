@@ -77,6 +77,13 @@ describe("what a due routine does", () => {
     expect(plan({ type: "once", at: START }, START, START + 13 * HOUR).fields).toMatchObject({ status: "missed" });
   });
 
+  it("says the scheduler was held up, not that the computer was asleep, when a pass ended after the run came due", () => {
+    const held = planOccurrence({ schedule: interval(60), nextRunAt: START + HOUR }, START + 3 * HOUR + 10 * MINUTE, true, true);
+    expect(held).toMatchObject({ scheduledFor: START + 3 * HOUR, late: true });
+    expect(held.older!.fields).toMatchObject({ error: "Missed 2 scheduled runs because the scheduler was held up starting another run", errorParams: { why: "routines.server.part.heldUp" } });
+    expect(held.older!.fields.skipped!.behind).toMatch(/^late:/);
+  });
+
   it("spreads late starts over steps and wraps, so the last one is never far off", () => {
     expect(staggered(START, 0)).toEqual({});
     expect(staggered(START, 3)).toEqual({ retryAt: START + 3 * CATCH_UP_STAGGER_MS });

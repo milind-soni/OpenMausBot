@@ -10015,6 +10015,7 @@
   "routines.server.missedTooLate": "Não rodou porque {why} até mais de {hours} horas depois do horário",
   "routines.server.part.computerOff": "este computador estava em repouso ou o OpenMausBot não estava aberto",
   "routines.server.part.cloudDown": "este Cloud estava dormindo ou reiniciando",
+  "routines.server.part.heldUp": "o agendador ficou preso iniciando outra execução",
   "routines.server.restored": "Não rodou de novo: este agendamento foi restaurado de um backup feito antes de esta execução ter a vez dela",
   "routines.server.restoredMany": "Não rodaram de novo: {count} execuções agendadas de antes de este agendamento ser restaurado de um backup",
   "routines.server.duplicate": "Não iniciou: esta execução agendada já tinha iniciado uma vez",
