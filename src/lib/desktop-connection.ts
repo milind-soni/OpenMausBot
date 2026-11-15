@@ -84,7 +84,7 @@ function forwardPaste(screen: HTMLElement, client: RFB, signal: AbortSignal): vo
   screen.addEventListener("keydown", (event) => {
     if (pasteModifier.test(event.code)) held = event.code;
     const modifier = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-    if (client.viewOnly || !modifier || event.altKey || event.shiftKey || event.key.toLowerCase() !== "v") return;
+    if (client.viewOnly || !modifier || event.altKey || event.shiftKey || !isPasteKey(event)) return;
     event.stopPropagation();
   }, { capture: true, signal });
   screen.addEventListener("keyup", (event) => { if (event.code === held) held = null; }, { capture: true, signal });
@@ -93,6 +93,12 @@ function forwardPaste(screen: HTMLElement, client: RFB, signal: AbortSignal): vo
     event.preventDefault();
     pasteOnDesktop(client, event.clipboardData?.getData("text/plain") ?? "", held);
   }, { signal });
+}
+
+/** V, or the physical V key on a layout whose letter there isn't Latin (Russian "м"), as the browser itself pastes on. */
+function isPasteKey(event: KeyboardEvent): boolean {
+  const key = event.key.toLowerCase();
+  return key === "v" || (event.code === "KeyV" && !/^[a-z]$/.test(key));
 }
 
 /** `held` is the modifier the person holds that noVNC already sent down: Ctrl stays down for their own release; a Mac's

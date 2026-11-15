@@ -182,6 +182,15 @@ describe("pasting into a desktop", () => {
     expect(client.keys).toEqual([[0xffe3, "ControlLeft", true], [0x76, "KeyV"], [0xffe3, "ControlLeft", false]]);
   });
 
+  it("the V key pastes on a non-Latin layout too, but a Latin layout's other letter there stays a key", async () => {
+    const { client, forwarded, press, paste } = await desktop("win32");
+    press("м", { code: "KeyV", ctrlKey: true }); // Russian layout
+    press("k", { code: "KeyV", ctrlKey: true }); // Dvorak: Ctrl+K, not a paste
+    paste("Привет");
+    expect(forwarded).toEqual(["k"]);
+    expect(client.pasted).toEqual(["Привет"]);
+  });
+
   it("other shortcuts still reach the desktop as keys: Ctrl+V on a Mac, ⌘⇧V", async () => {
     const { client, forwarded, press } = await desktop("darwin");
     press("v", { code: "KeyV", ctrlKey: true });
