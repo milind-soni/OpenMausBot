@@ -6,7 +6,7 @@
 // The export's shape, the repairs for what a chat window does to it and its credential refusal adapt an MIT-licensed
 // importer; see NOTICE.
 import {
-  AGENT_MAX_SKILLS, PACKAGE_FORMAT, PACKAGE_MAX_CONNECTIONS, PACKAGE_VERSION, SEED_FILE_MAX_BYTES,
+  AGENT_MAX_SKILLS, PACKAGE_FORMAT, PACKAGE_MAX_CONNECTIONS, PACKAGE_V2_VERSION, SEED_FILE_MAX_BYTES,
   parsePackageDocument, utf8Bytes, type PackageDocument, type PackageRoutineSchedule,
 } from "./package-format.ts";
 import { BOT_PROFILE_LIMITS } from "./bot-profile.ts";
@@ -498,7 +498,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
   const packageId = `${agentKey}-${hash.toString(16).padStart(8, "0").slice(0, 6)}`;
   const draft: PackageDocument = {
     format: PACKAGE_FORMAT,
-    version: PACKAGE_VERSION,
+    version: PACKAGE_V2_VERSION,
     package: {
       id: packageId,
       release: "1.0.0",

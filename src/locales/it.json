@@ -1666,7 +1666,7 @@
   "teamShare.skip.skill_changed": "è cambiata dopo la revisione",
   "teamShare.skip.skill_conflict": "due bot hanno abilità diverse con questo nome",
   "teamShare.skip.bot_skill_limit": "un bot può condividere al massimo 30 abilità (prima quelle attive)",
-  "teamShare.skip.team_skill_limit": "un reparto può condividere al massimo 60 abilità",
+  "teamShare.skip.team_skill_limit": "un reparto può condividere al massimo 120 abilità",
   "teamShare.field.soul": "istruzioni permanenti",
   "teamShare.field.notes": "note iniziali",
   "teamShare.field.brief": "istruzioni condivise",
@@ -5764,6 +5764,7 @@
   "botSettings.search": "Cerca",
   "botSettings.searchAria": "Cerca nelle impostazioni",
   "botSettings.searchNone": "Nessun risultato per “{query}”",
+  "botSettings.searchLoading": "Cerco tra le app collegate…",
   "botSettings.sections.skills": "Abilità",
   "botSettings.sections.memory": "Memoria",
   "botSettings.sections.routines": "Routine",
@@ -7124,5 +7125,6 @@
   "computer.recovery.restart": "Riavvia computer",
   "computer.recovery.restartTitle": "Ferma e riavvia questo computer cloud. I programmi aperti vengono chiusi; i suoi file restano.",
   "computer.recovery.replace": "Sostituisci computer",
-  "computer.recovery.replaceTitle": "Elimina questo computer cloud e ne dà uno nuovo al bot. I file che sono solo lì vanno persi."
+  "computer.recovery.replaceTitle": "Elimina questo computer cloud e ne dà uno nuovo al bot. I file che sono solo lì vanno persi.",
+  "composer.command.burstDesc": "Esegui molte parti di un lavoro insieme, poi unisci i risultati"
 }

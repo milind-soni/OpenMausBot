@@ -1783,7 +1783,7 @@
   "teamShare.skip.skill_changed": "검토한 뒤에 바뀌었어요",
   "teamShare.skip.skill_conflict": "두 봇에 같은 이름의 서로 다른 스킬이 있어요",
   "teamShare.skip.bot_skill_limit": "봇 하나는 스킬을 최대 30개까지 공유할 수 있어요(켜진 스킬이 먼저 들어가요)",
-  "teamShare.skip.team_skill_limit": "부서 하나는 스킬을 최대 60개까지 공유할 수 있어요",
+  "teamShare.skip.team_skill_limit": "부서 하나는 스킬을 최대 120개까지 공유할 수 있어요",
   "teamShare.field.soul": "상시 지침",
   "teamShare.field.notes": "시작 메모",
   "teamShare.field.brief": "공유 지침",
@@ -6405,6 +6405,7 @@
   "botSettings.search": "검색",
   "botSettings.searchAria": "설정 검색",
   "botSettings.searchNone": "“{query}”와(과) 일치하는 항목이 없어요",
+  "botSettings.searchLoading": "연결된 앱을 찾고 있어요…",
   "botSettings.sections.skills": "스킬",
   "botSettings.sections.memory": "메모리",
   "botSettings.sections.routines": "루틴",
@@ -7785,5 +7786,6 @@
   "settings.browser.proxyConfigured": "새로 여는 기본 브라우저 연결에 이 SOCKS5 프록시를 사용합니다. My Chrome에는 적용되지 않으며, 사설·로컬 주소는 기존 차단 규칙을 유지합니다.",
   "settings.browser.proxyInactive": "저장되어 있지만 지원되는 환경에서 기본 브라우저를 사용할 때만 적용됩니다.",
   "settings.browser.proxySave": "저장",
-  "settings.browser.proxyClear": "삭제"
+  "settings.browser.proxyClear": "삭제",
+  "composer.command.burstDesc": "작업의 여러 부분을 한 번에 실행한 뒤 결과 합치기"
 }
