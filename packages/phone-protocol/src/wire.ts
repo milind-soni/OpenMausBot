@@ -514,6 +514,9 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
    * route (the Slack worker): nobody typed it in one of this workspace's
    * clients. A Live call never reads it back as what the caller typed. */
   relayed?: boolean;
+  /** A user line a routine, webhook, room coordination or another bot's
+   * message started a turn with: the person did not write it. */
+  automated?: boolean;
   /** Which person sent this user message, when the workspace has more than
    * one. Absent reads as the profile name. */
   sender?: ResolvedSender;

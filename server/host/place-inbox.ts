@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import type { InboxItem, InboxRow, InboxView } from "../../shared/inbox.ts";
 import type { Notification } from "../../shared/notification.ts";
-import { personWait, type PersonWait } from "../../shared/person-wait.ts";
+import { overtakenQuestions, personWait, type PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
 import { ASK_NOTIFICATIONS } from "../ask-routing.ts";
 import { writeFileAtomic } from "../atomic.ts";
@@ -62,8 +62,10 @@ export function placeInboxViewer(auth: RequestAuth, cloud: { personal: boolean; 
 
 export interface PlaceInboxDeps {
   dataDir: string;
-  store: Pick<Store, "bot" | "botByThread" | "taskByThread" | "groupByThread" | "appendMessage" | "patchTask" | "patchGroup" | "messagesFor" | "onChange">;
+  store: Pick<Store, "bot" | "botByThread" | "taskByThread" | "groupByThread" | "appendMessage" | "patchTask" | "patchGroup" | "messagesFor" | "activePath" | "onChange">;
   openCards(): OpenCardRow[];
+  /** A running turn waits on this card's answer. */
+  live(threadId: string, requestId: string): boolean;
   viewer(auth: RequestAuth): InboxViewer;
   sees(auth: RequestAuth, threadId: string): boolean;
   /** Whose answer counts on this card; decided where cards are answered, so a row never offers what the answer would refuse. */
@@ -136,10 +138,17 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
   function askRows(auth: RequestAuth): InboxRow[] {
     if (deps.viewer(auth).kind === "nobody") return [];
     const rows = new Map<string, InboxRow>();
+    const passed = new Map<string, Set<string>>();
+    const overtaken = (threadId: string, messageId: string): boolean => {
+      let questions = passed.get(threadId);
+      if (!questions) passed.set(threadId, questions = overtakenQuestions(store.activePath(threadId), Boolean(store.groupByThread(threadId))));
+      return questions.has(messageId);
+    };
     for (const row of deps.openCards()) {
       let card: OptionCardData | null = null;
       try { card = row.card ? JSON.parse(row.card) as OptionCardData : null; } catch { continue; }
       if (!card || !personWait({ id: row.id, at: row.at, kind: "options", card }) || !deps.sees(auth, row.threadId) || !deps.mayAnswer(auth, row.threadId, card.requestId!)) continue;
+      if (overtaken(row.threadId, row.id) && !deps.live(row.threadId, card.requestId!)) continue;
       const bot = (row.fromBotId ? store.bot(row.fromBotId) : undefined) ?? store.botByThread(row.threadId);
       if (!bot) continue;
       const group = store.groupByThread(row.threadId);
