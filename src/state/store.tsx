@@ -555,7 +555,7 @@ export interface AppState {
   connected: boolean;
   hydrated?: true;
   error: string | null;
-  notice: { kind: "thread-gone" | "bot-gone" | "steer-images" | "note"; botName: string | null; text?: string } | null;
+  notice: { kind: "thread-gone" | "bot-gone" | "steer-images" | "steer-held" | "note"; botName: string | null; text?: string } | null;
   revealThread: { threadId: string; nonce: number } | null;
   mascotMotion: {
     botId: string;
@@ -2310,8 +2310,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 for (const queueId of body.queueIds ?? []) {
                   rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
                 }
-              } else if (body?.queued === true && body.blockedBy === "images") {
-                wrapped({ type: "notice", notice: { kind: "steer-images", botName: null } });
+              } else if (body?.queued === true && body.blockedBy) {
+                wrapped({ type: "notice", notice: { kind: body.blockedBy === "images" ? "steer-images" : "steer-held", botName: null } });
               }
               action.onSettled?.();
             })
@@ -2341,8 +2341,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 for (const queueId of body.queueIds ?? []) {
                   rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
                 }
-              } else if (body?.queued === true && body.blockedBy === "images") {
-                wrapped({ type: "notice", notice: { kind: "steer-images", botName: null } });
+              } else if (body?.queued === true && body.blockedBy) {
+                wrapped({ type: "notice", notice: { kind: body.blockedBy === "images" ? "steer-images" : "steer-held", botName: null } });
               }
               action.onSettled?.();
             })

@@ -542,7 +542,8 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
           ok: true,
           queued: true,
           threadId: targetThreadId,
-          ...(decision.action === "queue" && decision.blockedBy ? { blockedBy: decision.blockedBy } : {}),
+          ...(decision.action === "queue" && decision.blockedBy ? { blockedBy: decision.blockedBy }
+            : groupThreadIsWorking(current.id, targetThreadId) ? { blockedBy: "running-turn" } : {}),
         });
       }
       const replyTo = resolveHeldReplyTarget(held, resolveReplyTarget);
@@ -608,8 +609,11 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
         return json(res, 404, { error: "no such room" });
       }
       restoreHeldChannelQueue(held);
-      if (after && !groupThreadIsWorking(after.id, targetThreadId)) drainQueuedChannelSends();
-      return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
+      if (after && !groupThreadIsWorking(after.id, targetThreadId)) {
+        drainQueuedChannelSends();
+        return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
+      }
+      return json(res, 200, { ok: true, queued: true, threadId: targetThreadId, blockedBy: "running-turn" });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/members\/([\w-]+)\/compact$/);
     if (m && method === "POST") {

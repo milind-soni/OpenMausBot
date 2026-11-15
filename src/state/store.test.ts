@@ -2971,13 +2971,15 @@ describe("restoring the open conversation", () => {
       expect(stored.get(LAST_CONVERSATION_KEY)).toBe("bot-2");
     });
 
-    it("a pressed Steer that stays queued for its pictures says why, and a plain queued answer stays quiet", async () => {
+    it("a pressed Steer that stays queued behind a running turn says why, and a plain queued answer stays quiet", async () => {
       const { stream } = await boot();
       stream.send(hello());
       await settle();
       const answers: Record<string, unknown> = {
         "/api/bots/bot-1/queue/q-image/steer": { ok: true, queued: true, threadId: "bot-1-thread", blockedBy: "images" },
         "/api/groups/room-1/queue/q-room/steer": { ok: true, queued: true, threadId: "room-thread", blockedBy: "images" },
+        "/api/bots/bot-1/queue/q-held/steer": { ok: true, queued: true, threadId: "bot-1-thread", blockedBy: "running-turn" },
+        "/api/groups/room-1/queue/q-room-held/steer": { ok: true, queued: true, threadId: "room-thread", blockedBy: "running-turn" },
         "/api/bots/bot-1/queue/q-plain/steer": { ok: true, queued: true, threadId: "bot-1-thread" },
       };
       vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}))));
@@ -2998,6 +3000,18 @@ describe("restoring the open conversation", () => {
       await settle();
       expect(settled).toHaveBeenCalledTimes(3);
       expect(seen.notice).toEqual({ kind: "steer-images", botName: null });
+
+      flushSync(() => dispatch({ type: "notice", notice: null }));
+      flushSync(() => dispatch({ type: "steerQueued", botId: "bot-1", queueId: "q-held", onSettled: settled }));
+      await settle();
+      expect(settled).toHaveBeenCalledTimes(4);
+      expect(seen.notice).toEqual({ kind: "steer-held", botName: null });
+
+      flushSync(() => dispatch({ type: "notice", notice: null }));
+      flushSync(() => dispatch({ type: "steerGroupQueued", groupId: "room-1", queueId: "q-room-held", onSettled: settled }));
+      await settle();
+      expect(settled).toHaveBeenCalledTimes(5);
+      expect(seen.notice).toEqual({ kind: "steer-held", botName: null });
     });
 
     it("the provider restores the conversation remembered on this device", async () => {

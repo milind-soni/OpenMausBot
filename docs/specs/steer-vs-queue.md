@@ -48,6 +48,12 @@ Native mid-turn steering EXISTS; no child kill or restart is needed.
   the engine may already be running them, and a replay would execute them
   twice. Callers record them once (transcript + queue settled) instead.
 
+When a pressed Steer leaves the words queued while the turn is still working
+(no live speaker, an engine without steering, or `"refused"`), the steer routes
+answer `{ queued: true, blockedBy: "running-turn" }` and the composer says the
+message stays queued and goes next. Once the turn has ended the queue drains
+and the answer stays a plain `{ queued: true }`.
+
 Open items to pin down in Phase 2 (not blockers): exact `turn/steer` param
 fields beyond threadId (input items, approval/effort passthrough, turn-id
 guard), its response/event sequence (`turn/aborted` -> resumed items?), and
