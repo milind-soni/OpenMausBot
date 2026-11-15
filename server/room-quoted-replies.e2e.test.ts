@@ -9,6 +9,7 @@ let fixture: VerificationServer;
 let upstream: Server;
 const bots: Bot[] = [];
 let routingCalls = 0;
+let keyChecks = 0;
 
 const api = async (method: string, path: string, body?: unknown) => {
   const response = await fetch(fixture.info.url + path, {
@@ -31,7 +32,10 @@ beforeAll(async () => {
     for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw || "{}");
     if (req.url === "/v1/systemone") {
-      if (body.questions?.answer?.type === "noul") return json({ answers: { answer: { type: "noul", noul: 0.99 } } });
+      if (body.questions?.answer?.type === "noul") {
+        keyChecks++;
+        return json({ answers: { answer: { type: "noul", noul: 0.99 } } });
+      }
       routingCalls++;
       const choice = bots[1]!.id;
       return json({ answers: { answer: { type: "choice", choice, confidence: 0.99, probabilities: { [choice]: 0.99 } } } });
@@ -44,10 +48,12 @@ beforeAll(async () => {
   if (!address || typeof address === "string") throw new Error("fixture provider address missing");
   fixture = await launchVerificationServer();
   const endpoint = `http://127.0.0.1:${address.port}`;
+  await api("PATCH", "/api/config", { decider: { baseUrl: endpoint } });
   await api("PATCH", "/api/config", {
     openaiCompat: { key: "fixture-room-key", url: `${endpoint}/v1`, model: "fixture-model" },
-    decider: { key: "tsk_room_fixture", baseUrl: endpoint, enabled: true, jobs: { roomRouting: true } },
+    decider: { key: "tsk_room_fixture", enabled: true, jobs: { roomRouting: true } },
   });
+  expect(keyChecks).toBe(1);
   for (const name of ["Atlas", "Boreal", "Cyra"]) {
     const { bot } = await control(["new-bot", "--name", name]);
     await control(["set-model", "--bot", bot.id, "--instance", "openaiCompat", "--model", "fixture-model"]);
