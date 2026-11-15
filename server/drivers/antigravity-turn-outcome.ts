@@ -8,7 +8,8 @@
 //     session's own unlinked log);
 //   - apps/server/src/provider/acp/AntigravityProfilePaths.ts (the proof that
 //     no component of a path below the profile is a link).
-// The failure is a plain error for the shared ACP runtime to throw, worded as every engine's usage limit is.
+// The failure is a plain error for the shared ACP runtime to throw, worded as every engine's usage limit is. A reset
+// time is taken only inside the coming eight days, and a log or step too large to read quickly is not read.
 import type { Stats } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { join } from "node:path";
@@ -40,6 +41,11 @@ const GO_DURATION_UNIT_MS: Record<string, number> = {
   h: 3_600_000,
 };
 const NATIVE_SESSION_ID = /^[\w-]+$/;
+// A log or an error step past these sizes is not read: the turn then ends as the runtime reported it.
+const MAX_LOG_BYTES = 256 * 1024 * 1024;
+const MAX_STEP_BYTES = 1024 * 1024;
+// Google's longest window is a week; a reset further off, or not in the future, is not a reset time.
+const MAX_RESET_AHEAD_MS = 8 * 24 * 3_600_000;
 const CONVERSATION_SEGMENTS = ["antigravity-acp", "conversations"];
 
 interface LastStep {
@@ -84,26 +90,43 @@ function lastStepIndex(database: DatabaseSync): number {
   return typeof index === "number" ? index : -1;
 }
 
+// `length()` reads a blob's size from its record header; `substr()` loads the whole blob, so it runs only for an
+// error step of a size worth loading.
 const lastStepAfter = (index: number) => (database: DatabaseSync): LastStep | undefined => {
-  const row = database
-    .prepare(
-      `SELECT step_type AS type, substr(step_payload, 1, ?) AS payload
-       FROM steps WHERE idx > ? ORDER BY idx DESC LIMIT 1`,
-    )
-    .get(MAX_ERROR_PAYLOAD_BYTES, index);
+  const row = database.prepare("SELECT idx, step_type AS type, length(step_payload) AS bytes FROM steps WHERE idx > ? ORDER BY idx DESC LIMIT 1").get(index);
   if (typeof row?.type !== "number") return undefined;
-  return { type: row.type, payload: row.payload instanceof Uint8Array ? row.payload : null };
+  if (row.type !== ERROR_STEP_TYPE || typeof row.bytes !== "number" || row.bytes > MAX_STEP_BYTES) return { type: row.type, payload: null };
+  const payload = database.prepare("SELECT substr(step_payload, 1, ?) AS payload FROM steps WHERE idx = ?").get(MAX_ERROR_PAYLOAD_BYTES, row.idx)?.payload;
+  return { type: row.type, payload: payload instanceof Uint8Array ? payload : null };
 };
 
 function resetAtFrom(text: string, now: number): number | undefined {
+  const within = (at: number) => Number.isFinite(at) && at > now && at <= now + MAX_RESET_AHEAD_MS;
   const timestamp = RESET_TIMESTAMP.exec(text)?.[1];
-  const at = timestamp === undefined ? Number.NaN : Date.parse(timestamp);
-  if (Number.isFinite(at)) return at;
+  // A bare number is no timestamp, though Date.parse reads "5" as a year.
+  const at = timestamp === undefined || !/^\d{4}-\d{2}-\d{2}T/u.test(timestamp) ? Number.NaN : Date.parse(timestamp);
+  if (within(at)) return at;
   const delay = RESET_DELAY.exec(text)?.[1] ?? RETRY_DELAY.exec(text)?.[1];
   if (delay === undefined) return undefined;
   let delayMs = 0;
   for (const [, amount, unit] of delay.matchAll(GO_DURATION_PART)) delayMs += Number(amount) * (GO_DURATION_UNIT_MS[unit!] ?? 0);
-  return delayMs > 0 ? Math.round(now + delayMs) : undefined;
+  const after = Math.round(now + delayMs);
+  return within(after) ? after : undefined;
+}
+
+/** Which of the account's separately metered allowances a model draws on: Gemini's own, a separately metered Gemini
+ * family, or the one every other model shares. */
+export function antigravityQuotaFamily(model: string): string {
+  if (!/^gemini-/iu.test(model)) return "shared";
+  return /(?:^|-)argon(?:-|$)/iu.test(model) ? "gemini-argon" : /(?:^|-)carbon(?:-|$)/iu.test(model) ? "gemini-carbon" : "gemini";
+}
+
+/** A quota belongs to one allowance, not the account: it holds the models that draw on the same one as `model`, and
+ * leaves the account's other models running. */
+export function antigravityLimitFacts(model: string | undefined, known: Iterable<string>): { limit: "model"; limitModels?: string[] } {
+  if (!model) return { limit: "model" };
+  const family = antigravityQuotaFamily(model);
+  return { limit: "model", limitModels: [...new Set([model, ...[...known].filter((id) => antigravityQuotaFamily(id) === family)])] };
 }
 
 function usageLimit(provider: string, text: string, now: number, timeZone?: string): AcpReportedFailure {
@@ -164,6 +187,7 @@ export async function watchAntigravityPromptOutcome(
   if (before === undefined) return typedOnly;
   let startIndex = before.startIndex;
   if (startIndex === undefined) {
+    if ((before.identity?.size ?? 0) > MAX_LOG_BYTES) return typedOnly;
     try {
       startIndex = readSteps(join(before.root, ...segments), lastStepIndex) ?? -1;
     } catch {
@@ -177,7 +201,7 @@ export async function watchAntigravityPromptOutcome(
     const sameFile = after !== undefined
       && (before.identity === undefined || (after.info.dev === before.identity.dev && after.info.ino === before.identity.ino));
     let step: LastStep | undefined;
-    if (sameFile) {
+    if (sameFile && after.info.size <= MAX_LOG_BYTES) {
       try {
         step = readSteps(after.path, lastStepAfter(from));
       } catch {

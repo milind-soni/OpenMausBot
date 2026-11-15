@@ -1,3 +1,7 @@
+// Adapted from pingdotgg/t3code@b732621b51, MIT License, Copyright (c) 2026
+// T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified:
+//   - apps/server/src/provider/acp/AntigravityTurnOutcome.test.ts (the error
+//     payload fixtures and the cases of the two reader tests).
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -10,7 +14,7 @@ import type { ProviderInstance } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import { antigravityTokenPath } from "./antigravity-acp.ts";
-import { watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
+import { antigravityLimitFacts, antigravityQuotaFamily, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
 const USER_INPUT = 14;
@@ -82,12 +86,31 @@ describe("watchAntigravityPromptOutcome", () => {
     const quota = await turn([[USER_INPUT, input], [ERROR_MESSAGE, QUOTA_ERROR]]);
     expect(quota).toMatchObject({ acpUsageLimit: true, facts: { limitResetsAt: 3_600_000, text: { key: "chat.notice.usageLimitResets" } } });
     expect(quota!.message).toMatch(new RegExp(`^This ${NAME.replace(/[()]/g, "\\$&")} account has reached its usage limit, which resets .+\\. Until then, switch this bot to another AI\\.$`));
+    // A turn that adds no step is not failed by the error step the turn before it left.
+    expect(await turn([])).toBeUndefined();
     // The earlier error step is outside this turn.
     expect(await turn([[USER_INPUT, input], [PLANNER_RESPONSE, QUOTED_NOTICE]], { stopReason: "end_turn", usage: { inputTokens: 42, outputTokens: 3, totalTokens: 54 } }))
       .toBeUndefined();
     expect(await turn([[USER_INPUT, input], [ERROR_MESSAGE, RATE_LIMIT_ERROR]])).toMatchObject({ acpUsageLimit: true, facts: { limitResetsAt: 42_000 } });
-    expect(await turn([[USER_INPUT, input], [ERROR_MESSAGE, TIMESTAMP_ERROR]]))
-      .toMatchObject({ acpUsageLimit: true, facts: { limitResetsAt: Date.parse("2026-11-20T10:00:00Z") } });
+    const stamped = async (stamp: string, at: number) => {
+      const check = await watchAntigravityPromptOutcome(NAME, directory, sessionId, () => at);
+      append(join(conversations, `${sessionId}.db`), [[USER_INPUT, input], [ERROR_MESSAGE, TIMESTAMP_ERROR.replace("2026-11-20T10:00:00Z", stamp)]]);
+      return (await check({ stopReason: "end_turn" }))!.facts.limitResetsAt;
+    };
+    const day = 24 * 3_600_000, noon = Date.parse("2026-11-18T12:00:00Z");
+    expect(await stamped("2026-11-20T10:00:00Z", noon)).toBe(Date.parse("2026-11-20T10:00:00Z"));
+    expect(await stamped("2026-11-26T12:00:00Z", noon)).toBe(noon + 8 * day);
+    // A reset that is past, too far off, or no time at all falls back to the delay beside it (an hour).
+    for (const stamp of ["2001-01-01T00:00:00Z", "2026-11-18T12:00:00Z", "2026-11-26T12:00:01Z", "+275760-09-13T00:00:00Z", "5", "soon"]) {
+      expect(await stamped(stamp, noon)).toBe(noon + 3_600_000);
+    }
+    const delayed = async (delay: string) => {
+      const check = await watchAntigravityPromptOutcome(NAME, directory, sessionId, () => noon);
+      append(join(conversations, `${sessionId}.db`), [[USER_INPUT, input], [ERROR_MESSAGE, QUOTA_ERROR.replace("quotaResetDelay:3600s", `quotaResetDelay:${delay}`)]]);
+      return (await check({ stopReason: "end_turn" }))!.facts.limitResetsAt;
+    };
+    expect(await delayed("192h")).toBe(noon + 8 * day);
+    for (const delay of ["99999999h", "193h", "0s"]) expect(await delayed(delay)).toBeUndefined();
     const invalid = await turn([[USER_INPUT, input], [ERROR_MESSAGE, INVALID_ARGUMENT_ERROR]]);
     expect(invalid).toMatchObject({ acpUsageLimit: false, message: `${NAME} stopped with an error (HTTP 400; ${NAME} says: "Request contains an invalid argument").` });
     expect(invalid!.facts.limitResetsAt).toBeUndefined();
@@ -123,6 +146,31 @@ describe("watchAntigravityPromptOutcome", () => {
     const corrupt = await watchAntigravityPromptOutcome(NAME, directory, own);
     expect(await corrupt({ stopReason: "end_turn" })).toBeUndefined();
     expect(await corrupt({ stopReason: "refusal" })).toMatchObject({ acpUsageLimit: true, message: USAGE_LIMIT });
+  });
+
+  it("does not load a step that is no error, or an error step too large to read quickly", async () => {
+    const { directory, conversations } = profile();
+    const file = join(conversations, "big.db");
+    const huge = "x".repeat(2 * 1024 * 1024);
+    const turn = async (steps: ReadonlyArray<readonly [number, string]>) => {
+      const check = await watchAntigravityPromptOutcome(NAME, directory, "big", () => 0);
+      append(file, steps);
+      return check({ stopReason: "end_turn" });
+    };
+    expect(await turn([[USER_INPUT, "hello"], [PLANNER_RESPONSE, huge]])).toBeUndefined();
+    // The error step is the evidence; its text is not read, so the failure names no reason and no reset.
+    const failure = await turn([[USER_INPUT, "hello"], [ERROR_MESSAGE, QUOTA_ERROR + huge]]);
+    expect(failure).toMatchObject({ acpUsageLimit: false, message: `${NAME} stopped with an error.` });
+  });
+
+  it("holds only the models that share the quota that ran out", () => {
+    expect(["gemini-3.8-flash", "gemini-4-argon", "gemini-4-argon-high", "gemini-carbon-2", "claude-sonnet-5", "gpt-6", "agy-model"].map(antigravityQuotaFamily))
+      .toEqual(["gemini", "gemini-argon", "gemini-argon", "gemini-carbon", "shared", "shared", "shared"]);
+    const known = ["gemini-3.8-flash", "gemini-3.8-pro", "gemini-4-argon", "claude-sonnet-5", "gpt-6"];
+    expect(antigravityLimitFacts("claude-sonnet-5", known)).toEqual({ limit: "model", limitModels: ["claude-sonnet-5", "gpt-6"] });
+    expect(antigravityLimitFacts("gemini-3.8-flash-high", known)).toEqual({ limit: "model", limitModels: ["gemini-3.8-flash-high", "gemini-3.8-flash", "gemini-3.8-pro"] });
+    expect(antigravityLimitFacts("gemini-4-argon", known)).toEqual({ limit: "model", limitModels: ["gemini-4-argon"] });
+    expect(antigravityLimitFacts(undefined, known)).toEqual({ limit: "model" });
   });
 
   it("gives no failure for a session id that is no file name, a missing profile, or a log replaced during the prompt", async () => {
@@ -169,12 +217,14 @@ describe("an Antigravity turn whose reply was an upstream failure", () => {
     const { created, directory, stepsFile } = await instance("antigravity-outcome-quota", [[USER_INPUT, "hello"], [ERROR_MESSAGE, QUOTA_ERROR]]);
     const recorder = recordEvents(created.adapter);
     const before = Date.now();
-    const { turnId } = await created.adapter.sendTurn({ threadId: "quota", text: "hello", approvalMode: "full", cwd: directory });
+    const { turnId } = await created.adapter.sendTurn({ threadId: "quota", text: "hello", model: "gemini-3.8-flash", approvalMode: "full", cwd: directory });
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
     const events = recorder.events.filter((event) => event.turnId === turnId);
-    const error = events.find((event) => event.type === "runtime.error") as { message: string; limit?: string; limitResetsAt?: number; text?: { key: string } };
+    const error = events.find((event) => event.type === "runtime.error") as { message: string; limit?: string; limitModels?: string[]; limitResetsAt?: number; text?: { key: string } };
     expect(error.message).toMatch(/account has reached its usage limit, which resets .+\. Until then, switch this bot to another AI\.$/);
-    expect(error).toMatchObject({ limit: "engine", text: { key: "chat.notice.usageLimitResets" } });
+    // The quota is that model family's, not the account's: the account's other models are not held.
+    expect(error).toMatchObject({ limit: "model", limitModels: expect.arrayContaining(["gemini-3.8-flash"]), text: { key: "chat.notice.usageLimitResets" } });
+    expect(error.limitModels!.every((model) => model.startsWith("gemini-"))).toBe(true);
     expect(error.limitResetsAt).toBeGreaterThanOrEqual(before + 3_600_000);
     expect(error.limitResetsAt).toBeLessThanOrEqual(Date.now() + 3_600_000);
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "quota" });

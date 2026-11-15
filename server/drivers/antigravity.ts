@@ -27,7 +27,7 @@ import {
   validateAntigravityRuntime,
   verifyAntigravityBrowserHelper,
 } from "./antigravity-acp.ts";
-import { watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
+import { antigravityLimitFacts, watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import {
   antigravityManagedInstallAvailable,
@@ -72,6 +72,8 @@ export function antigravitySignInError(error: unknown): boolean {
 
 const managedAsset = resolveAntigravityReleaseAsset();
 const runtimeProcesses = new AntigravityProcesses();
+/** Every model id an account here has been offered, beside the bundled catalog's. */
+const offeredModels = new Set<string>();
 
 const support: AcpSupport = {
   driverKind: "antigravityAgent",
@@ -117,11 +119,13 @@ const support: AcpSupport = {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
     const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
     if (!(await antigravityProfileAuthenticated(profile))) throw new Error(support.loginNote);
-    return probeAntigravityModels({
+    const catalog = await probeAntigravityModels({
       runtime,
       profile,
       fallbackDefault: currentEngineCatalog("antigravity").default,
     });
+    for (const option of catalog.options) offeredModels.add(option.id);
+    return catalog;
   },
 
   pickAuthMethod: (methods) => methods.some((method) => method.id === "oauth-personal")
@@ -137,6 +141,8 @@ const support: AcpSupport = {
   },
   processStarted: (child, instanceId) => runtimeProcesses.track(instanceId, child),
   sessionSetupParams: antigravitySessionSetup,
+  // One model family's quota is not the account's: Gemini and the models that share another allowance keep running.
+  limitFacts: (_text, model) => antigravityLimitFacts(model, [...support.models.options.map((option) => option.id), ...offeredModels]),
   promptOutcome: (instanceId, sessionId) => watchAntigravityPromptOutcome(support.displayName, antigravityProfileDirectory(instanceId), sessionId),
   requireAuthenticationBeforeSpawn: true,
   isAuthenticated: async (env, config, instanceId) => {
