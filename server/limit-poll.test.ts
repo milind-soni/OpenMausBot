@@ -16,7 +16,7 @@ const accounts = [{ id: "claude", name: "Claude", driver: "claude" as const, env
 /** Claude's usage as its endpoint answers: [percent used, when the window resets]. */
 const usage = (fiveHour: [number, number], weekly: [number, number]): PlanUsageReport => ({
   fetchedAt: iso(Date.now()),
-  providers: [{ id: "claude", name: "Claude", driver: "claude", ok: true, error: null, ...parseClaudeUsage({
+  providers: [{ id: "claude", name: "Claude", driver: "claude", ok: true, error: null, reason: null, ...parseClaudeUsage({
     five_hour: { utilization: fiveHour[0], resets_at: iso(fiveHour[1]) },
     seven_day: { utilization: weekly[0], resets_at: iso(weekly[1]) },
   }) }],

@@ -8,6 +8,7 @@ vi.mock("react", async (original) => ({
   useState: (initial: unknown) => [initial === null ? fixture.report : initial === true ? false : typeof initial === "function" ? (initial as () => unknown)() : initial, () => {}],
 }));
 vi.mock("@/state/store", () => ({ api: vi.fn() }));
+import { setSidebarPlanUsage } from "@/lib/sidebar-preferences";
 import { PlanUsage } from "./PlanUsage";
 
 describe("Plan usage presentation", () => {
@@ -65,6 +66,15 @@ describe("Plan usage presentation", () => {
     expect(html).not.toContain('role="meter"');
     expect(html).not.toContain("100% left");
   });
+
+  it("leaves out a Copilot engine nobody signed in to, but keeps a Copilot check that failed", () => {
+    const copilot = (reason: string) => ({ id: `copilot-${reason}`, name: "GitHub Copilot", driver: "copilot", ok: false, reason, error: `Copilot ${reason}` });
+    fixture.report = { providers: [copilot("signedOut"), copilot("noPlan"), copilot("failed")] };
+    const html = renderToStaticMarkup(createElement(PlanUsage));
+    expect(html).not.toContain("Copilot signedOut");
+    expect(html).not.toContain("Copilot noPlan");
+    expect(html).toContain("Copilot failed");
+  });
 });
 
 describe("Usage & billing in Simple mode", () => {
@@ -82,6 +92,13 @@ describe("Usage & billing in Simple mode", () => {
     expect(busiestWeekly(null)).toBeNull();
   });
 
+  it("falls back to the fullest monthly allowance, such as Copilot's premium requests", async () => {
+    const { busiestMonthly } = await import("./PlanUsage");
+    const copilot = { ...provider("copilot", true, null), extra: [{ label: "Monthly", kind: "monthly" as const, usedPercent: 31, remainingPercent: 69, resetsAt: null }] };
+    expect(busiestMonthly({ providers: [provider("claude", true, null), copilot] })).toMatchObject({ provider: { id: "copilot" }, extra: { usedPercent: 31 } });
+    expect(busiestMonthly({ providers: [{ ...copilot, ok: false }] })).toBeNull();
+  });
+
   it("stands a plan's monthly budget in for the weekly figure when it has none", async () => {
     const { monthlySpend } = await import("./PlanUsage");
     const budget = { label: "Monthly spend", remainingPercent: 91, usedPercent: 9, resetsAt: null };
@@ -89,5 +106,25 @@ describe("Usage & billing in Simple mode", () => {
     expect(monthlySpend({ providers: [{ ...provider("claude", true, 40), extra: [budget] }] })).toBeNull();
     expect(monthlySpend({ providers: [{ ...provider("claude", false, null), extra: [budget] }] })).toBeNull();
     expect(monthlySpend(null)).toBeNull();
+  });
+});
+
+describe("the sidebar switch on the plan usage card", () => {
+  const switchOf = (markup: string) => /role="switch" aria-checked="(true|false)"/.exec(markup)?.[1];
+
+  it("says whether the meter shows in the sidebar", () => {
+    fixture.report = { fetchedAt: "2026-10-02T09:00:00Z", providers: [] };
+    setSidebarPlanUsage(true);
+    expect(switchOf(renderToStaticMarkup(createElement(PlanUsage)))).toBe("true");
+    setSidebarPlanUsage(false);
+    expect(switchOf(renderToStaticMarkup(createElement(PlanUsage)))).toBe("false");
+  });
+
+  it("names the switch by its visible label", () => {
+    fixture.report = { fetchedAt: "2026-10-02T09:00:00Z", providers: [] };
+    const markup = renderToStaticMarkup(createElement(PlanUsage));
+    const id = /<button[^>]*id="([^"]+)"[^>]*role="switch"/.exec(markup)?.[1];
+    expect(id).toBeTruthy();
+    expect(markup).toContain(`<label for="${id}"`);
   });
 });
