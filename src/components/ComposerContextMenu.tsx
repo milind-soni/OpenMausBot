@@ -74,20 +74,31 @@ function currentContext(bot: Bot, messages: readonly Message[]) {
   return compactedSinceReading(messages) ? undefined : bot.tasks?.find((task) => task.threadId === bot.threadId)?.usage?.context;
 }
 
+/** A summary only reaches the engine's session with the next turn, so until that turn has ended the engine still counts
+ * the conversation as it was before. */
+function summaryNotCounted(messages: readonly Message[], busy: boolean): boolean {
+  if (!busy) return compactedSinceReading(messages);
+  const summary = messages.findLastIndex((message) => message.kind === "compaction");
+  const asked = messages.findLastIndex((message) => message.role === "user");
+  return compactedSinceReading(messages.slice(0, Math.max(asked, summary + 1)));
+}
+
 const lastBreakdown = new Map<string, { moment: string; breakdown: ContextBreakdown }>();
 
 /** The engine's own count, asked for while the panel is open and again whenever a turn starts or ends. The last answer
- * shows until the new one lands, unless the conversation was summarized or started fresh since. */
+ * shows until the new one lands; none is asked for or shown between a summary or fresh start and the end of the next turn. */
 function useContextBreakdown(bot: Bot | undefined, open: boolean): ContextBreakdown | null {
   const id = bot?.id;
   const threadId = bot?.threadId;
   const busy = Boolean(bot?.busy);
   const messages = bot ? visibleMessages(bot) : [];
   const slot = `${id}:${threadId ?? ""}`;
-  const moment = `${messages.filter((message) => message.kind === "compaction").length}:${compactedSinceReading(messages)}`;
+  const withheld = summaryNotCounted(messages, busy);
+  const moment = `${messages.filter((message) => message.kind === "compaction").length}:${withheld}`;
   const [answer, setAnswer] = useState<{ slot: string; moment: string; breakdown: ContextBreakdown | null } | null>(null);
   useEffect(() => {
-    if (!open || !id || !threadId) return;
+    if (withheld) lastBreakdown.delete(slot);
+    if (!open || !id || !threadId || withheld) return;
     let current = true;
     void api<{ breakdown: ContextBreakdown | null }>(`/api/bots/${id}/context`, { method: "POST", body: JSON.stringify({ threadId }) })
       .then((reply) => reply?.breakdown ?? null, () => null)
@@ -96,8 +107,8 @@ function useContextBreakdown(bot: Bot | undefined, open: boolean): ContextBreakd
         if (current) setAnswer({ slot, moment, breakdown });
       });
     return () => { current = false; };
-  }, [open, id, threadId, slot, moment, busy]);
-  if (!open) return null;
+  }, [open, id, threadId, slot, moment, busy, withheld]);
+  if (!open || withheld) return null;
   if (answer?.slot === slot && answer.moment === moment) return answer.breakdown;
   const last = lastBreakdown.get(slot);
   return last?.moment === moment ? last.breakdown : null;

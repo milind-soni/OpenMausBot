@@ -150,6 +150,45 @@ describe("the composer's context button", () => {
     expect(panel()!.querySelector("[data-context-breakdown]")).toBeNull();
   });
 
+  it("shows no count after the chat was summarized, even when the engine still answers, until a new turn ends", async () => {
+    const before: ContextBreakdown = {
+      tokens: 6_000, window: 200_000,
+      categories: [{ id: "system_prompt", kind: "used", tokens: 1_900 }, { id: "messages", kind: "used", tokens: 4_100 }, { id: "free_space", kind: "free", tokens: 194_000 }],
+    };
+    const bot = chat({ tokens: 12, window: 200_000 }, { id: "b4" });
+    const unread = () => {
+      expect(words()).not.toContain("6k");
+      expect(panel()!.querySelector("[data-context-meter]")?.getAttribute("data-context-meter") ?? "").not.toBe("3");
+      expect(panel()!.querySelector("[data-context-breakdown]")).toBeNull();
+    };
+    breakdown = before;
+    await render({ bot });
+    await press(trigger());
+    expect(words()).toContain("6k of 200k tokens");
+
+    const summarized = [...bot.messages!, line("m3", "bot", "compaction")];
+    await render({ bot: { ...bot, messages: summarized } as Bot });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(words()).toContain("No reading yet");
+    unread();
+    await press(trigger());
+    await press(trigger());
+    expect(words()).toContain("No reading yet");
+    unread();
+
+    const asked = [...summarized, line("m4", "user"), line("m5", "bot")];
+    await render({ bot: { ...bot, busy: true, messages: asked } as Bot });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    unread();
+
+    breakdown = { tokens: 18_000, window: 200_000, categories: [{ id: "messages", kind: "used", tokens: 18_000 }, { id: "free_space", kind: "free", tokens: 182_000 }] };
+    await render({ bot: { ...bot, messages: asked } as Bot });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(words()).toContain("9% used");
+    expect(words()).toContain("18k of 200k tokens");
+    expect([...panel()!.querySelectorAll("[data-context-breakdown] dd")].map((cell) => cell.textContent)).toEqual(["18k · 9%", "182k · 91%"]);
+  });
+
   it("keeps the total alone when the engine has no count, and the last count on screen while a new one loads", async () => {
     await render({ bot: chat({ tokens: 136_000, window: 200_000 }, { id: "b2" }) });
     await press(trigger());
