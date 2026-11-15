@@ -110,7 +110,7 @@ import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
 import { createHomeWindow, installHomeWindowIpc } from "./home-window.mjs";
 import { createTeamProfileSeeds } from "./team-profile-seed.mjs";
 import { createHomePlaces } from "./home-places.mjs"; import { openStartPlace } from "./start-place.mjs"; import { createDesktopRing, installAccounts } from "./accounts-main.mjs"; import { createAddedCloudNotice, installCloudRail, railPlaces } from "./cloud-rail.mjs"; import { createPlaceInboxWatch } from "./place-inbox-watch.mjs"; import { homeLook, otherOwnClouds, withoutOldCloudHome } from "./cloud-list.mjs"; import { installPlaceLook } from "./place-look.mjs"; import { CHROME_RAIL_PATH, createChromeRail } from "./chrome-rail.mjs"; import { openComputerSettings } from "./open-computer-settings.mjs";
-import { createWindowStateFile } from "./window-state-file.mjs";
+import { createWindowStateFile } from "./window-state-file.mjs"; import { systemProxyEnvironment } from "./system-proxy.mjs";
 import { createEnvironmentsFile, ENVIRONMENTS_SAVE_FAILED } from "./environments-file.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
@@ -1109,7 +1109,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     userData: app.getPath("userData"),
   });
   const childEnv = managedComposioChildEnvironment(composioBrokerUrl(), secureCredentials, {
-    ...process.env,
+    ...process.env, ...(await systemProxyEnvironment()), // A Mac app opened from Finder never gets the shell's proxy.
     // The parent owns the data-dir lease; a child only validates it, so fallback-port children never replace it.
     ...desktopDataDirLease.utilityServerLeaseEnvironment(),
     OMB_DATA_DIR: dataDir,

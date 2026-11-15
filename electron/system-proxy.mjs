@@ -1,0 +1,54 @@
+// A Mac app opened from Finder or the Dock never gets the shell's proxy variables, so on a network that only reaches the
+// internet through a proxy set in System Settings, the server's HTTPS calls (ChatGPT sign-in, model APIs) fail.
+import { execFile } from "node:child_process";
+
+const PROXY_ENV = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
+/** Node's env proxy, unlike curl, does not exempt loopback, and matches an IPv6 host only bracketed ("[::1]"). */
+const LOOPBACK = ["localhost", "127.0.0.1", "::1", "[::1]"];
+
+/** The HTTPS proxy at the top level of `scutil --proxy`, with its exceptions, or null when it is off or half set.
+ * Only HTTPS: on Node 24 a plain http:// request through an env proxy hangs, so http:// stays direct. No PAC or SOCKS. */
+export function macProxyFromScutil(output) {
+  const top = {};
+  const exceptions = [];
+  let depth = 0;
+  let inExceptions = false;
+  for (const raw of String(output ?? "").split("\n")) {
+    const line = raw.trim();
+    if (line === "}") {
+      depth -= 1;
+      if (depth === 1) inExceptions = false;
+      continue;
+    }
+    const match = /^(\S+) : (.*)$/.exec(line);
+    if (line.endsWith("{")) {
+      if (depth === 1 && match?.[1] === "ExceptionsList") inExceptions = true;
+      depth += 1;
+      continue;
+    }
+    if (!match) continue;
+    if (depth === 1) top[match[1]] = match[2].trim();
+    else if (depth === 2 && inExceptions && match[2].trim()) exceptions.push(match[2].trim());
+  }
+  const host = top.HTTPSProxy;
+  const port = Number(top.HTTPSPort);
+  if (top.HTTPSEnable !== "1" || !host || !Number.isInteger(port) || port <= 0 || port > 65535) return null;
+  return { https: `http://${host.includes(":") ? `[${host}]` : host}:${port}`, exceptions };
+}
+
+function scutilProxy() {
+  return new Promise((resolve) => {
+    execFile("/usr/sbin/scutil", ["--proxy"], { timeout: 2_000, encoding: "utf8" }, (error, stdout) => resolve(error ? "" : String(stdout)));
+  });
+}
+
+/** The env the server child needs to use the Mac's system HTTPS proxy: nothing off a Mac, when the environment already
+ * names a proxy (it always wins), without a system proxy, or when scutil fails. A NO_PROXY already set is kept. */
+export async function systemProxyEnvironment({ platform = process.platform, env = process.env, read = scutilProxy } = {}) {
+  if (platform !== "darwin" || PROXY_ENV.some((name) => env[name])) return {};
+  const proxy = macProxyFromScutil(await read());
+  if (!proxy) return {};
+  const own = [env.NO_PROXY, env.no_proxy].flatMap((list) => (list ?? "").split(",")).map((entry) => entry.trim()).filter(Boolean);
+  const bypass = [...new Set([...own, ...proxy.exceptions, ...LOOPBACK])].join(",");
+  return { HTTPS_PROXY: proxy.https, https_proxy: proxy.https, NO_PROXY: bypass, no_proxy: bypass, NODE_USE_ENV_PROXY: "1" };
+}
