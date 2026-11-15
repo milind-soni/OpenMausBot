@@ -158,7 +158,8 @@ export function DecisionModelSettings() {
   const included = configured && decider?.included === true;
   const usingShared = openrouter && configured && decider?.keySource === "shared";
   const sharedKey = openrouter && decider?.sharedKey === true;
-  const ownKey = configured && !included && !usingShared;
+  const borrowedGemini = configured && decider?.provider === "gemini";
+  const ownKey = configured && !included && !usingShared && !borrowedGemini;
   const enabled = decider?.enabled ?? false;
   const roomRouting = decider?.jobs.roomRouting ?? true;
   const [value, setValue] = useState("");

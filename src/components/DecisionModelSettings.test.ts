@@ -199,6 +199,14 @@ describe("DecisionModelSettings", () => {
     expect(view.test.props.disabled).toBe(false);
   });
 
+  it("a Gemini key saved for speech or images is switchable here, but has no key to clear", () => {
+    fixture.config = status({ provider: "gemini", configured: true, enabled: false, jobs: { roomRouting: true } });
+    const view = render();
+    expect(view.master.props.disabled).toBe(false);
+    expect(view.save.props.disabled).toBe(true);
+    expect(view.html).not.toContain("Clear");
+  });
+
   it("with an own key saved as well, shows Connected and offers Clear, as without Cloud Pro", () => {
     fixture.config = status({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
     const view = render();
