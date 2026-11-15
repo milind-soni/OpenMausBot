@@ -37037,7 +37037,8 @@
       "sidebar.newBotOn.asleep": "8f27c03517f86b5fedc5cbdf7bc50e8d761809c4a9f3ab3e277cbca202b47fc8",
       "sidebar.newBotOn.noAi": "90560bfa52da1eeef7f9a7e212ab43b68e8a9104bf02cff500b08e8440d3e86a",
       "sidebar.newBotOn.onlyThere": "ee143ffe98b9c13337df5499526fa6b85e2df7f1b595a43f94dd907a74ab3789",
-      "sidebar.newBotOn.onlyHere": "5fa107188d3ebf59545c5522c3540371a95d16a3625a4f57e84f093849baabc4"
+      "sidebar.newBotOn.onlyHere": "5fa107188d3ebf59545c5522c3540371a95d16a3625a4f57e84f093849baabc4",
+      "sidebar.newBotOn.needsUpdate": "2fe10ee88189ee8ef942992b455e968fed8af782c1e7353b5a1ac4c54365c1b0"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47281,7 +47282,8 @@
       "sidebar.newBotOn.asleep": "8f27c03517f86b5fedc5cbdf7bc50e8d761809c4a9f3ab3e277cbca202b47fc8",
       "sidebar.newBotOn.noAi": "90560bfa52da1eeef7f9a7e212ab43b68e8a9104bf02cff500b08e8440d3e86a",
       "sidebar.newBotOn.onlyThere": "ee143ffe98b9c13337df5499526fa6b85e2df7f1b595a43f94dd907a74ab3789",
-      "sidebar.newBotOn.onlyHere": "5fa107188d3ebf59545c5522c3540371a95d16a3625a4f57e84f093849baabc4"
+      "sidebar.newBotOn.onlyHere": "5fa107188d3ebf59545c5522c3540371a95d16a3625a4f57e84f093849baabc4",
+      "sidebar.newBotOn.needsUpdate": "2fe10ee88189ee8ef942992b455e968fed8af782c1e7353b5a1ac4c54365c1b0"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",

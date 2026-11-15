@@ -67,7 +67,7 @@ export type NewBotChoice = import("../../electron/places-together.mjs").NewBotCh
 
 /** What differs about making a bot in the other place, as facts: it sleeps, no AI is ready there, or which AIs are
  * ready on one side only. Nothing when the two sides match or the other place could not be asked. */
-export function newBotDifference(hereAis: readonly string[], choice: NewBotChoice | null):
+export function newBotDifference(hereAis: readonly string[], choice: (Pick<NewBotChoice, "home" | "state"> & { ais: readonly string[] | null }) | null):
   { kind: "asleep" } | { kind: "noAi" } | { kind: "ais"; onlyThere: string[]; onlyHere: string[] } | null {
   if (!choice) return null;
   if (choice.home === "cloud" && (choice.state === "asleep" || choice.state === "waking")) return { kind: "asleep" };
@@ -75,8 +75,14 @@ export function newBotDifference(hereAis: readonly string[], choice: NewBotChoic
   if (!choice.ais.length) return { kind: "noAi" };
   const fold = (name: string) => name.trim().toLowerCase();
   const here = new Set(hereAis.map(fold)), there = new Set(choice.ais.map(fold));
-  const onlyThere = choice.ais.filter((name) => !here.has(fold(name))), onlyHere = hereAis.filter((name) => !there.has(fold(name)));
+  const onlyThere = [...choice.ais].filter((name) => !here.has(fold(name))), onlyHere = hereAis.filter((name) => !there.has(fold(name)));
   return onlyThere.length || onlyHere.length ? { kind: "ais", onlyThere, onlyHere } : null;
+}
+
+/** An AI's name for a line the person reads: the name they gave it, or its engine's name when that name holds an
+ * email address, which is never shown beside another place. */
+export function aiLabel(name: string, kind: string, engineName: (kind: string) => string): string {
+  return /\S@\S/.test(name) ? engineName(kind) : name;
 }
 
 /** The other place as the ＋ shows it, asked each time the menu opens. */

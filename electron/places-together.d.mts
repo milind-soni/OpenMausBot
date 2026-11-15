@@ -26,7 +26,7 @@ export interface PlacesTogetherState {
   here: BotHome;
   /** The other place's bots while the switch is on. `state`: how that place is doing: asleep, waking and offline keep the
    * bots it gave last; "signin" is a My Cloud this window has not signed in to yet, which lists none. */
-  other: { home: BotHome; state: "ready" | "loading" | "asleep" | "waking" | "offline" | "signin"; bots: PlaceBotRow[] } | null;
+  other: { home: BotHome; state: "ready" | "loading" | "asleep" | "waking" | "offline" | "signin"; bots: PlaceBotRow[]; newBot?: boolean } | null;
 }
 
 /** `window.ogb.placesTogether`: this computer's page and My Cloud's own page. */
@@ -39,7 +39,8 @@ export interface PlacesTogetherBridge {
   onChanged(callback: () => void): () => void;
   /** The other place as the ＋ shows it: how it is doing and the AIs ready there (null while it can't be asked). Null with the switch off. */
   newBotChoice(): Promise<NewBotChoice | null>;
-  /** Opens the other place, which makes a new bot there by its own rules. False with the switch off. */
+  /** Opens the other place, which makes a new bot there by its own rules. False with the switch off, and for a place
+   * whose page would not hear it (`other.newBot` false: it runs a version from before this). */
   newBot(): Promise<boolean>;
   /** The other place asked this one to make a new bot. */
   onNewBot(callback: () => void): () => void;
@@ -48,7 +49,8 @@ export interface PlacesTogetherBridge {
 export interface NewBotChoice {
   home: BotHome;
   state: NonNullable<PlacesTogetherState["other"]>["state"];
-  ais: string[] | null;
+  /** Each ready AI's name as the person sees it there, and its kind. */
+  ais: Array<{ name: string; kind: string }> | null;
 }
 
 export const PLACES_TOGETHER_FILE: string;

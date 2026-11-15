@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import type { NewBotChoice, PlacesTogetherState } from "@/lib/places-together";
 
-const store = vi.hoisted(() => ({ instances: [] as Array<{ displayName: string; driverKind: string; snapshot: { state: string } }> }));
+const store = vi.hoisted(() => ({ instances: [] as Array<{ displayName: string; driverKind: string; snapshot: { state: string; freeFallback?: boolean } }> }));
 vi.mock("@/state/store-select", () => ({ useStoreSelector: (select: (state: unknown) => unknown) => select(store) }));
 
 import { resetPlacesTogetherForTest } from "@/lib/places-together";
@@ -30,7 +30,7 @@ const render = async () => { await act(async () => root.render(createElement(Men
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   said = joined("computer");
-  choice = { home: "cloud", state: "ready", ais: ["Claude", "Included AI"] };
+  choice = { home: "cloud", state: "ready", ais: [{ name: "Claude", kind: "claudeAgent" }, { name: "Included AI", kind: "included" }] };
   store.instances = [{ displayName: "Claude", driverKind: "claude", snapshot: { state: "available" } }, { displayName: "Codex", driverKind: "codex", snapshot: { state: "available" } }];
   window.ogb = { placesTogether: page } as never;
   for (const fn of [...Object.values(page), onHere, onClose]) fn.mockClear();
@@ -79,7 +79,32 @@ it("on My Cloud's page the Cloud comes first; a sleeping Cloud and a place with 
 });
 
 it("says nothing extra when both places have the same AIs", async () => {
-  choice = { home: "cloud", state: "ready", ais: ["Codex", "Claude"] };
+  choice = { home: "cloud", state: "ready", ais: [{ name: "Codex", kind: "codex" }, { name: "Claude", kind: "claudeAgent" }] };
   await render();
   expect(document.body.querySelector("[data-new-bot-differs]")).toBeNull();
+});
+
+it("counts an AI that only works through free no-login models on neither side", async () => {
+  store.instances = [{ displayName: "Claude", driverKind: "claude", snapshot: { state: "available" } }, { displayName: "OpenCode", driverKind: "opencode", snapshot: { state: "available", freeFallback: true } }];
+  choice = { home: "cloud", state: "ready", ais: [{ name: "Claude", kind: "claudeAgent" }] };
+  await render();
+  expect(document.body.querySelector("[data-new-bot-differs]")).toBeNull();
+});
+
+it("never shows an account's email address in the line: the engine's name stands in", async () => {
+  store.instances = [{ displayName: "Claude", driverKind: "claude", snapshot: { state: "available" } }];
+  choice = { home: "cloud", state: "ready", ais: [{ name: "Claude", kind: "claudeAgent" }, { name: "alice@example.com", kind: "codex" }] };
+  await render();
+  expect(document.body.querySelector("[data-new-bot-differs]")!.textContent).toBe("Signed in only there: OpenAI.");
+});
+
+it("a Cloud whose page would not hear the request shows the item disabled with one plain line, and a click does nothing", async () => {
+  said = { ...joined("computer"), other: { home: "cloud", state: "ready", bots: [], newBot: false } };
+  await render();
+  const item = items()[1] as HTMLButtonElement;
+  expect(item.disabled).toBe(true);
+  expect(item.textContent).toBe("New bot on My CloudMy Cloud needs its next update for this.");
+  await act(async () => item.click());
+  expect(page.newBot).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
 });

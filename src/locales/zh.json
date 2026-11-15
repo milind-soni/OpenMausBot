@@ -10240,5 +10240,6 @@
   "sidebar.newBotOn.asleep": "My Cloud 已休眠。这会唤醒它。",
   "sidebar.newBotOn.noAi": "那里还没有登录任何 AI。",
   "sidebar.newBotOn.onlyThere": "只在那里登录：{ais}。",
-  "sidebar.newBotOn.onlyHere": "只在这里登录：{ais}。"
+  "sidebar.newBotOn.onlyHere": "只在这里登录：{ais}。",
+  "sidebar.newBotOn.needsUpdate": "My Cloud 需要下一次更新才能这样做。"
 }

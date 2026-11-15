@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { matchingRows, newBotDifference, placedKey, type NewBotChoice, type PlaceBotRow } from "./places-together";
+import { aiLabel, matchingRows, newBotDifference, placedKey, type NewBotChoice, type PlaceBotRow } from "./places-together";
 
 const row = (home: "computer" | "cloud", id: string, name: string, over: Partial<PlaceBotRow> = {}): PlaceBotRow => ({ home, id, threadId: `t-${id}`, name, ...over });
 
@@ -20,7 +20,7 @@ describe("the other place's bots beside this page's own", () => {
 });
 
 describe("what differs about making a bot in the other place", () => {
-  const there = (ais: string[] | null, state: NewBotChoice["state"] = "ready", home: NewBotChoice["home"] = "cloud"): NewBotChoice => ({ home, state, ais });
+  const there = (ais: string[] | null, state: NewBotChoice["state"] = "ready", home: NewBotChoice["home"] = "cloud") => ({ home, state, ais });
 
   it("says which AIs are signed in on one side only", () => {
     expect(newBotDifference(["Claude", "Codex"], there(["claude", "Included AI"]))).toEqual({ kind: "ais", onlyThere: ["Included AI"], onlyHere: ["Codex"] });
@@ -37,5 +37,12 @@ describe("what differs about making a bot in the other place", () => {
     expect(newBotDifference(["Claude"], there(null, "asleep"))).toEqual({ kind: "asleep" });
     expect(newBotDifference(["Claude"], there([]))).toEqual({ kind: "noAi" });
     expect(newBotDifference([], there(null, "offline", "computer"))).toBeNull();
+  });
+
+  it("never words an AI by a name that holds an email address: its engine's name stands in", () => {
+    const engine = (kind: string) => `engine:${kind}`;
+    expect(aiLabel("Claude", "claudeAgent", engine)).toBe("Claude");
+    expect(aiLabel("alice@example.com", "codex", engine)).toBe("engine:codex");
+    expect(aiLabel("Work (alice@example.com)", "codex", engine)).toBe("engine:codex");
   });
 });

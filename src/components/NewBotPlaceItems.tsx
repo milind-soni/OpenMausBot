@@ -3,16 +3,23 @@
 import { useEffect, useState } from "react";
 import { Bot as BotIcon, Cloud } from "lucide-react";
 import { t } from "@/lib/i18n";
-import { newBotDifference, newBotInOtherPlace, readNewBotChoice, usePlacesTogether, type BotHome, type NewBotChoice } from "@/lib/places-together";
+import { aiLabel, newBotDifference, newBotInOtherPlace, readNewBotChoice, usePlacesTogether, type BotHome, type NewBotChoice } from "@/lib/places-together";
+import type { InstanceInfo } from "@/state/store";
 import { useStoreSelector } from "@/state/store-select";
-import { engineReady } from "./EngineLibrary";
+import { engineReady, providerName } from "./EngineLibrary";
 import { SIMPLE_MENU_META } from "./menu-recipe";
 
 const label = (home: BotHome): string => t(home === "cloud" ? "sidebar.newBotOn.cloud" : "sidebar.newBotOn.computer");
 const list = (names: readonly string[]): string => new Intl.ListFormat(undefined, { style: "short", type: "conjunction" }).format(names);
 
+const engineName = (kind: string): string => providerName({ driverKind: kind } as InstanceInfo);
+
+/** An AI a new bot could run on: installed and signed in, never one that only works through free no-login models. The
+ * same rule main applies to the other place's AIs. */
+export const readyForNewBot = (instance: InstanceInfo): boolean => engineReady(instance) && instance.snapshot.freeFallback !== true;
+
 function differenceLine(hereAis: readonly string[], choice: NewBotChoice | null): string | null {
-  const differs = newBotDifference(hereAis, choice);
+  const differs = newBotDifference(hereAis, choice && { ...choice, ais: choice.ais?.map((ai) => aiLabel(ai.name, ai.kind, engineName)) ?? null });
   if (!differs) return null;
   if (differs.kind === "asleep") return t("sidebar.newBotOn.asleep");
   if (differs.kind === "noAi") return t("sidebar.newBotOn.noAi");
@@ -30,7 +37,7 @@ export function useNewBotHereLabel(): string | null {
 export function NewBotOtherPlaceItem({ itemClass, onClose }: { itemClass: string; onClose(): void }) {
   const together = usePlacesTogether();
   const other = together?.on ? together.other?.home ?? null : null;
-  const hereAis = useStoreSelector((state) => state.instances.filter(engineReady).map((instance) => instance.displayName), (a, b) => a.join("\n") === b.join("\n"));
+  const hereAis = useStoreSelector((state) => state.instances.filter(readyForNewBot).map((instance) => aiLabel(instance.displayName, instance.driverKind, engineName)), (a, b) => a.join("\n") === b.join("\n"));
   const [choice, setChoice] = useState<NewBotChoice | null>(null);
   useEffect(() => {
     if (!other) return;
@@ -39,9 +46,11 @@ export function NewBotOtherPlaceItem({ itemClass, onClose }: { itemClass: string
     return () => { alive = false; };
   }, [other]);
   if (!other) return null;
-  const line = differenceLine(hereAis, choice);
+  const unable = together?.other?.newBot === false;
+  const line = unable ? t("sidebar.newBotOn.needsUpdate") : differenceLine(hereAis, choice);
   return (
-    <button type="button" role="menuitem" data-new-bot-home={other} className={itemClass} onClick={() => { onClose(); newBotInOtherPlace(); }}>
+    <button type="button" role="menuitem" data-new-bot-home={other} disabled={unable} className={`${itemClass} disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent`}
+      onClick={() => { onClose(); newBotInOtherPlace(); }}>
       {other === "cloud" ? <Cloud size={16} className="shrink-0 text-ink-secondary" /> : <BotIcon size={16} className="shrink-0 text-ink-secondary" />}
       <span className="flex min-w-0 flex-1 flex-col">
         <span>{label(other)}</span>

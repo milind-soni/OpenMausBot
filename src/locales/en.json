@@ -10947,5 +10947,6 @@
   "sidebar.newBotOn.asleep": "My Cloud is asleep. This wakes it.",
   "sidebar.newBotOn.noAi": "No AI is signed in there yet.",
   "sidebar.newBotOn.onlyThere": "Signed in only there: {ais}.",
-  "sidebar.newBotOn.onlyHere": "Signed in only here: {ais}."
+  "sidebar.newBotOn.onlyHere": "Signed in only here: {ais}.",
+  "sidebar.newBotOn.needsUpdate": "My Cloud needs its next update for this."
 }

@@ -10947,5 +10947,6 @@
   "sidebar.newBotOn.asleep": "O My Cloud está em repouso. Isto o ativa.",
   "sidebar.newBotOn.noAi": "Nenhuma IA está conectada lá ainda.",
   "sidebar.newBotOn.onlyThere": "Conectada só lá: {ais}.",
-  "sidebar.newBotOn.onlyHere": "Conectada só aqui: {ais}."
+  "sidebar.newBotOn.onlyHere": "Conectada só aqui: {ais}.",
+  "sidebar.newBotOn.needsUpdate": "O My Cloud precisa da próxima atualização para isso."
 }
