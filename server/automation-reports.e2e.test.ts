@@ -407,11 +407,12 @@ it("tells the main chat about a run missed while the computer was off, which has
     const main = bot.activeTaskId as string;
     const { routine } = await api("POST", "/api/routines", {
       name: "Inbox watch", prompt: "Do the Inbox watch check.", botId: bot.id,
-      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+      schedule: { type: "interval", everyMinutes: 1_440, anchorAt: Date.now() + 3_600_000 },
     });
     await restartable.stop();
     const file = join(restartable.dataDir, "routines.json");
     const saved = JSON.parse(readFileSync(file, "utf8"));
+    // Its one occurrence is more than 12 hours old, so nothing runs late in its place.
     saved.routines.find((each: any) => each.id === routine.id).nextRunAt = Date.now() - 13 * 3_600_000;
     writeFileSync(file, JSON.stringify(saved));
     await restartable.start();
