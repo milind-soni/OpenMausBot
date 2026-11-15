@@ -203,7 +203,7 @@ export function MessageActions({
         <div
           ref={menuRef}
           id={menuId}
-          role="menu"
+          role="menu" data-look="menu"
           aria-label={t("chat.messageActions")}
           onKeyDown={moveFocus}
           className={cn(

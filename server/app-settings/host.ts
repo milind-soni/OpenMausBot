@@ -8,6 +8,7 @@ import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE } from "../direct-apply.ts";
 import { serverLine } from "../server-lines.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
+import type { ThemeTool } from "../themes/tool.ts";
 import type { TakenPicture } from "./picture-file.ts";
 import { findSettings, personOnly, type SettingEntry, type WritableEntry } from "./registry.ts";
 
@@ -66,6 +67,8 @@ export interface AppSettingsDeps {
   requestCredential(bot: BotRecord, threadId: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
   connectorThread(botId: string, threadId: string): { group?: GroupRecord } | null;
   language(threadId: string): string | undefined;
+  /** The person's own themes; absent where the server offers none. */
+  themes?: ThemeTool;
   /** For a setting that takes a picture file: stores the file the bot names, or says why not. */
   pictures?: { take(turn: Turn, path: string): Promise<TakenPicture>; discard(avatarUrl: string): void };
 }
@@ -149,6 +152,22 @@ export function createAppSettings(deps: AppSettingsDeps) {
     return "refusal" in taken ? taken : { value: { ...rest, avatarUrl: taken.avatarUrl }, stored: taken.avatarUrl };
   }
 
+  /** A theme is the person's whose own message began the work, never a teammate's or a guest's. */
+  async function theme(turn: Turn, body: Record<string, unknown>) {
+    const themes = deps.themes;
+    if (!themes) return refuse(404, "Themes are not available on this server.");
+    const bot = store.bot(turn.botId);
+    if (!bot) return refuse(404, "This bot no longer exists.");
+    const person = deps.guestDriven(turn.threadId) ? null : themes.person(turn);
+    if (!person) return refuse(403, "A theme changes only for the person who asked, in their own conversation. This turn was not started by them here, so nothing changed.");
+    if (body.action === "theme") return themes.overview(person, body.id);
+    const asked = body.action === "set_theme" ? themes.wanted(person, body) : null;
+    if (asked && "error" in asked) return refuse(400, asked.error);
+    const budget = spendWrite(turn);
+    if (budget) return refuse(429, budget);
+    return asked ? apply(turn, bot, themes.entry(person), asked.wear, asked.change) : themes.addAsset(turn, person, body);
+  }
+
   return {
     async handle(body: Record<string, unknown>, turn: Turn): Promise<{ status: number; body: Record<string, unknown> }> {
       if (body.action === "find") {
@@ -163,7 +182,8 @@ export function createAppSettings(deps: AppSettingsDeps) {
           change: entry.tier === "owner-only" ? `only the person, in ${entry.where}` : entry.tier === "secret" ? "set with no value opens a secure card" : "set applies at once, with Undo on the card" }) });
       }
       if (body.action === "set") return set(turn, body);
-      return refuse(400, "action must be find, get or set.");
+      if (body.action === "theme" || body.action === "set_theme" || body.action === "add_theme_asset") return theme(turn, body);
+      return refuse(400, "action must be find, get, set, theme, set_theme or add_theme_asset.");
     },
 
     /** Undo on an applied card: restores the value read before the change, unless it changed since. */

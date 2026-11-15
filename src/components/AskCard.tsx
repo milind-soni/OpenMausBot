@@ -63,7 +63,7 @@ export function AskCard({
       role="group"
       aria-label={ariaLabel}
       data-tour={tour}
-      data-ask-card="pending"
+      data-ask-card="pending" data-look="ask-card"
       onKeyDown={onKeyDown}
       className={cn("w-full max-w-[560px] rounded-[18px] px-4 pb-3.5 pt-3 text-start", stays ? `sticky top-[60px] bottom-[72px] z-10 ${ELEVATED_FLOAT}` : ELEVATED_CARD)}
     >
@@ -246,7 +246,7 @@ export function AskSettledLine({
     <div
       role="group"
       aria-label={ariaLabel}
-      data-ask-card="settled"
+      data-ask-card="settled" data-look="ask-card"
       data-tone={tone}
       className="w-full max-w-[560px] text-start text-[13px] leading-[18px] text-ink-tertiary"
     >

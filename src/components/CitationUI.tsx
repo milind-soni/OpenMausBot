@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { cn } from "@/lib/cn";
 import { Quote, X } from "lucide-react";
 import {
   CITATION_MAX_COMMENT_LENGTH,
@@ -224,11 +225,14 @@ export function CitationBadge({
   onChange,
   onRemove,
   onNavigate,
+  solid = false,
 }: {
   citation: CitationAttachment;
   onChange?: (citation: CitationAttachment) => void;
   onRemove?: () => void;
   onNavigate?: () => Promise<boolean>;
+  /** Paint the tint on the thread colour: the composer floats over the transcript, and a see-through chip lets chat text show through it. */
+  solid?: boolean;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const detailsRef = useRef<HTMLDivElement>(null);
@@ -269,13 +273,13 @@ export function CitationBadge({
         onClick={() => { setUnavailable(false); setOpen((value) => !value); }}
         aria-expanded={open}
         aria-label={t("chat.citation.open", { quote: citation.quote.slice(0, 80) })}
-        className="inline-flex max-w-64 items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] text-accent-text hover:border-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
+        className={cn("inline-flex max-w-64 items-center gap-1.5 rounded-full border border-accent/30 px-2.5 py-1 text-[11px] text-accent-text hover:border-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60", solid ? "bg-app bg-linear-to-r from-accent/10 to-accent/10" : "bg-accent/10")}
       >
         <Quote size={11} className="shrink-0" aria-hidden="true" />
         <span className="truncate">{citation.quote.replace(/\s+/g, " ")}</span>
       </button>
       {onRemove && (
-        <button type="button" onClick={onRemove} aria-label={t("chat.citation.remove")} className="flex size-5 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"><X size={11} /></button>
+        <button type="button" onClick={onRemove} aria-label={t("chat.citation.remove")} className={cn("flex size-5 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink", solid && "bg-app")}><X size={11} /></button>
       )}
       {open && createPortal(
         <div

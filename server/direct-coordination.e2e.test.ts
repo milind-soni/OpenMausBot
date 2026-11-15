@@ -414,6 +414,24 @@ it("lets the opener find and close the completed task", () => fixture(async f =>
   expect((await f.messages(child.threadId)).some((message: any) => message.text === "Implemented and reviewer confirmed checks")).toBe(true);
 }), 45_000);
 
+it("lets a bot rename only the thread it is working in", () => fixture(async f => {
+  f.plan[f.chief.id] = {
+    steps: [{ tool: "rename_thread", arguments: { title: "Acme: carousel design" } }],
+    reply: "Renamed this thread",
+  };
+  f.save();
+  const before = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks.find((task: any) => task.threadId === f.chief.activeTaskId).title;
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Terminei o design e a skill de carrossel pra cliente Acme, pode dar um nome melhor a esta conversa?");
+  expect((await f.wait()).status).toBe("settled");
+  const step = f.evidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "rename_thread");
+  expect(step.response.result.isError).toBeFalsy();
+  expect(step.response.result.content[0].text).toContain("#Acme: carousel design");
+  const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
+  const renamed = chief.tasks.find((task: any) => task.threadId === f.chief.activeTaskId);
+  expect(renamed.title).toBe("Acme: carousel design");
+  expect(renamed.title).not.toBe(before);
+}), 45_000);
+
 it("does not treat self-opened work or an abandoned human branch as new human authority", () => fixture(async f => {
   await f.api("/api/config", { threads: { maxConcurrentPerBot: 1 } }, "PUT");
   const room = (await f.cli("new-channel", "--name", "Updates", "--members", f.chief.id, "--section", "Leadership")).channel;

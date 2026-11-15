@@ -27,6 +27,25 @@ Private tailnet webhook URLs are only reachable by callers on that tailnet.
 Without `OMB_HTTPS_HOST`, the bind address can be changed for HTTP access.
 Only use HTTPS hostname mapping with a trusted local TLS-terminating proxy.
 
+The TLS terminator does not have to sit on the same host. When the containers
+run on one machine and the terminator on another (a Cloudflare Tunnel on
+another machine of the same network, for instance), name the terminator in
+`OMB_TRUSTED_PROXY_CIDRS` and bind the port where the terminator can reach
+it:
+
+```sh
+OMB_BIND_ADDRESS=192.168.1.20 OMB_HTTPS_HOST=omb.example.com \
+OMB_TRUSTED_PROXY_CIDRS=192.168.1.50/32 docker compose up -d
+```
+
+`OMB_TRUSTED_PROXY_CIDRS` lists the addresses of the peers that may claim the
+HTTPS hostname, as Caddy sees them. Only those peers are treated as
+HTTPS; every other caller on the network stays plain HTTP even when it sends
+that hostname. Caddy refuses to start when `OMB_HTTPS_HOST` is set with a
+bind address other than `127.0.0.1` and no such list, so a reachable bind
+address always names the terminator. Leave the list empty with the default
+loopback bind, where the host itself is the only peer.
+
 Sign in and pair:
 
 ```sh
