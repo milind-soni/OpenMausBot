@@ -1,8 +1,9 @@
 // A Mac whose internet goes through a proxy set in System Settings: the server reaches HTTPS sites through it too.
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { describe, expect, it } from "vitest";
-import { cidrAsRange, macProxyFromScutil, systemProxyEnvironment } from "./system-proxy.mjs";
+import { cidrAsRange, createSystemProxyCache, macProxyFromScutil, systemProxyEnvironment } from "./system-proxy.mjs";
 
 const SCUTIL = `<dictionary> {
   ExceptionsList : <array> {
@@ -117,4 +118,26 @@ describe.runIf(envProxyWorks)("a server started with that env", () => {
     expect(await requestGoesThroughProxy("203.0.113.5")).toBe(true);
     expect(await requestGoesThroughProxy("169.254.1.2")).toBe(false);
   }, 15_000);
+});
+
+describe("main.mjs's use of the system proxy", () => {
+  it("never awaits between the shutdown check and the fork, so a recovery restart and a switch cannot both fork", () => {
+    const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    const start = source.indexOf("async function startServerOn(");
+    const launch = source.slice(start, source.indexOf("utilityProcess.fork(", start));
+    expect(start).toBeGreaterThan(-1);
+    expect(launch).toContain("if (desktopShutdownStarted)");
+    expect(launch).not.toMatch(/\bawait\b/);
+    expect(launch).toContain("...systemProxy.latest()");
+  });
+
+  it("keeps the last lookup until the next refresh, and starts empty", async () => {
+    const results = [{ HTTPS_PROXY: "http://a:1" }, {}];
+    const cache = createSystemProxyCache(async () => results.shift());
+    expect(cache.latest()).toEqual({});
+    await cache.refresh();
+    expect(cache.latest()).toEqual({ HTTPS_PROXY: "http://a:1" });
+    await cache.refresh();
+    expect(cache.latest()).toEqual({});
+  });
 });

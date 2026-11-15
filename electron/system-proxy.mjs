@@ -68,3 +68,10 @@ export async function systemProxyEnvironment({ platform = process.platform, env 
   const bypass = [...new Set([...own, ...proxy.exceptions.map(cidrAsRange), ...LOOPBACK])].join(",");
   return { HTTPS_PROXY: proxy.https, https_proxy: proxy.https, NO_PROXY: bypass, no_proxy: bypass, NODE_USE_ENV_PROXY: "1" };
 }
+
+/** The last lookup, read without waiting when a server child launches: an await between startServerOn's shutdown check
+ * and its fork would let a recovery restart and an environment switch both fork a child. */
+export function createSystemProxyCache(lookup = systemProxyEnvironment) {
+  let latest = {};
+  return { latest: () => latest, async refresh() { latest = await lookup(); } };
+}
