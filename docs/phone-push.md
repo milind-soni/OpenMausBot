@@ -206,9 +206,9 @@ and its phones keep today's behaviour.
 
 - On iPhone, approvals, questions and sign-in requests are sent with
   `interruption-level: time-sensitive`, so they break through Focus. That
-  needs the Time Sensitive Notifications capability and entitlement
-  (`TIME_SENSITIVE_NOTIFICATIONS` in the app's `app.config.ts`), which is a
-  separate switch; without it they arrive as ordinary alerts.
+  needs the Time Sensitive Notifications entitlement, which the phone app's
+  preview and production builds carry (`timeSensitiveNotifications` in its
+  `app.config.ts`); a development build shows them as ordinary alerts.
 - On Android a push uses the app's existing channels: `approval_question`
   (high importance) for approvals, questions and sign-ins, and `bot_messages`
   for finished replies. A phone that never opened the new app has no channels
