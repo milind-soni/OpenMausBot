@@ -425,34 +425,35 @@ test("registerDesktopPrefs works on the store main hands it", async () => {
   assert.equal(prefs.analytics(), false);
 });
 
-test("the window draws its own frame until the person turns it off, and the choice survives a restart", () => {
+test("the window keeps the system's frame until the person turns the app's frame on, and the choice survives a restart", () => {
   let saved = null, writes = 0;
   const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); writes++; } });
-  assert.equal(prefs.windowFrame(), true);
-  prefs.setWindowFrame(true);
-  assert.equal(writes, 0, "turning on a frame that is on writes nothing");
+  assert.equal(prefs.windowFrame(), false);
   prefs.setWindowFrame(false);
-  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).windowFrame(), false);
-  prefs.setWindowFrame("off");
-  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).windowFrame(), true, "only false turns it off");
-  assert.equal(createDesktopPrefs({ read: () => ({ windowFrame: "no" }), write: () => {} }).windowFrame(), true);
+  assert.equal(writes, 0, "turning off a frame that is off writes nothing");
+  prefs.setWindowFrame(true);
+  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).windowFrame(), true);
+  prefs.setWindowFrame("on");
+  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).windowFrame(), false, "only true turns it on");
+  assert.equal(createDesktopPrefs({ read: () => ({ windowFrame: "yes" }), write: () => {} }).windowFrame(), false);
+  assert.equal(createDesktopPrefs({ read: () => ({ windowFrame: true }), write: () => {} }).windowFrame(), true, "someone who turned it on keeps it");
 });
 
 test("Settings reads and changes the window's frame on any page of the window; on Windows the change waits for a restart", async () => {
   const prefs = createDesktopPrefs({ read: () => null, write: () => {} });
   const handlers = new Map();
-  let made = true, changes = 0, asking = "server";
+  let made = false, changes = 0, asking = "server";
   const register = (restarts) => registerDesktopPrefs({ prefs, ipcMain: { handle: (c, h) => handlers.set(c, h), on: () => {} }, read: () => null, write: () => {},
     page: () => asking, cloudOffered: async () => false, frame: { made: () => made, restarts, changed: () => { changes++; } } });
   register(false);
-  assert.deepEqual(await handlers.get("window-frame:state")({}), { on: true, restart: false });
-  assert.deepEqual(await handlers.get("window-frame:set")({}, false), { on: false, restart: false }, "macOS: at once");
+  assert.deepEqual(await handlers.get("window-frame:state")({}), { on: false, restart: false }, "off until the person turns it on");
+  assert.deepEqual(await handlers.get("window-frame:set")({}, true), { on: true, restart: false }, "macOS: at once");
   assert.equal(changes, 1, "the pages hear it");
   register(true);
-  assert.deepEqual(await handlers.get("window-frame:state")({}), { on: false, restart: true }, "Windows: the window was made with its frame");
-  assert.deepEqual(await handlers.get("window-frame:set")({}, true), { on: true, restart: false }, "back as it was made: nothing to restart");
+  assert.deepEqual(await handlers.get("window-frame:state")({}), { on: true, restart: true }, "Windows: the window was made without its frame");
+  assert.deepEqual(await handlers.get("window-frame:set")({}, false), { on: false, restart: false }, "back as it was made: nothing to restart");
   made = null;
-  assert.deepEqual(await handlers.get("window-frame:set")({}, false), { on: false, restart: false }, "no window yet");
+  assert.deepEqual(await handlers.get("window-frame:set")({}, true), { on: true, restart: false }, "no window yet");
   asking = null;
   assert.throws(() => handlers.get("window-frame:set")({}, true), /only available in this app's window/);
 });

@@ -119,7 +119,7 @@ export function createChromeRail({ createView, preload, args, url, wanted, prefs
     attach(next) {
       win = next;
       shown = false; expanded = false; held = false; offered = false; hung = false; told = "";
-      framed = prefs()?.windowFrame?.() !== false;
+      framed = prefs()?.windowFrame?.() === true;
       // The window's first document has the same time as any other to offer the button and to draw the frame.
       if (choseHidden()) startGrace(); else stopGrace();
       awaitFrame();

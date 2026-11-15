@@ -133,7 +133,7 @@ const { MIN_BOUNDS, normalizeUnreadCount, resolveWindowState } = require("./wind
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // vite binds IPv4; a bare "localhost" can resolve to ::1.
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
-let SERVER_PORT = 8799;
+let SERVER_PORT = (!app.isPackaged && Number(process.env.OMB_DEV_SERVER_PORT)) || 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
 let desktopViewerWindow = null;
 let desktopViewerOwner = null;
@@ -1968,7 +1968,7 @@ function createWindow({ deferNavigation = false } = {}) {
     icon: APP_ICON,
     backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     autoHideMenuBar: process.platform !== "darwin",
-    ...windowChromeOptions(process.platform, windowFrameMade = desktopPrefs?.windowFrame() !== false),
+    ...windowChromeOptions(process.platform, windowFrameMade = desktopPrefs?.windowFrame() === true),
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.cjs"),
@@ -2782,7 +2782,7 @@ ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mo
 }));
 
 // Electron fixes a Windows window's title bar when the window is made; on macOS the choice applies at once.
-const windowFrameNow = () => (process.platform === "win32" ? windowFrameMade : null) ?? desktopPrefs?.windowFrame() !== false;
+const windowFrameNow = () => (process.platform === "win32" ? windowFrameMade : null) ?? desktopPrefs?.windowFrame() === true;
 async function broadcastDesktopCapabilities() {
   const localConnection = await cuaReady;
   const build = (remote) =>
