@@ -13,6 +13,7 @@ import {
   sweepManagedEndpointCleanup,
 } from "./endpoints";
 import { registerPushDevice, sendPush, unregisterPushDevice } from "./push";
+import { sendActivityPush } from "./push-activity";
 import { issueRelayToken, relayAdoption } from "./relay";
 import { releaseTunnels, tunnelReleaseHealth } from "./tunnel-release";
 import { capacityHealth, reportEndpointAccountProblems, scanTunnelCapacity } from "./tunnel-capacity";
@@ -146,6 +147,9 @@ async function route(
   }
   if (request.method === "POST" && url.pathname === "/v1/installations/self/push/send") {
     return sendPush(request, env, pushFetch, requestId);
+  }
+  if (request.method === "POST" && url.pathname === "/v1/installations/self/push/activity") {
+    return sendActivityPush(request, env, pushFetch, requestId);
   }
 
   const rotate = url.pathname.match(ROTATE_ROUTE);

@@ -81,3 +81,18 @@ describe("migration 0017", () => {
     ).bind("e".repeat(64), long).run()).rejects.toThrow();
   });
 });
+
+describe("migration 0018", () => {
+  it("gives every existing push token the alert purpose and refuses an unknown one", async () => {
+    const rows = await env.DB.prepare("SELECT purpose FROM installation_push_devices LIMIT 1").all();
+    expect(rows.success).toBe(true);
+    const db = env.PUSH_MIGRATION_DB;
+    // 0017's test left one apns row in this database, written before 0018 existed.
+    const kept = await db.prepare("SELECT purpose FROM installation_push_devices WHERE token_hash = ?").bind("c".repeat(64)).first<{ purpose: string }>();
+    expect(kept?.purpose).toBe("alert");
+    await expect(db.prepare(
+      `INSERT INTO installation_push_devices (installation_id, token_hash, platform, token, environment, purpose, created_at, updated_at)
+       VALUES ('inst_1', ?, 'apns', ?, 'production', 'banner', 1, 1)`,
+    ).bind("f".repeat(64), "ab".repeat(32)).run()).rejects.toThrow();
+  });
+});

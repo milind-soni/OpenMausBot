@@ -17,6 +17,8 @@ import {
 } from "./push-fcm";
 
 export type PushPlatform = "apns" | "fcm";
+/** What an APNs token is for: alerts, one Live Activity's updates, or starting a Live Activity (push-to-start). */
+export type PushPurpose = "alert" | "activity" | "activity-start";
 
 export type ApnsEnvironment = "production" | "sandbox";
 
@@ -79,6 +81,7 @@ const registerSchema = z.union([
   z.strictObject({
     v: z.literal(1),
     platform: z.literal("apns").optional(),
+    purpose: z.enum(["alert", "activity", "activity-start"]).optional(),
     token: z.string().regex(TOKEN),
     environment: z.enum(["production", "sandbox"]),
   }),
@@ -240,7 +243,7 @@ export async function pushCollapseId(request: PushSendRequest): Promise<string> 
   return request.collapseId ?? (await sha256(`${request.notification.kind}:${request.notification.threadId}`)).slice(0, 32);
 }
 
-interface PushConfig {
+export interface PushConfig {
   apns: ApnsConfig | null;
   fcm: FcmConfig | null;
 }
@@ -250,11 +253,11 @@ export function readPushConfig(env: Env): PushConfig | null {
   return config.apns || config.fcm ? config : null;
 }
 
-function unavailable(): never {
+export function unavailable(): never {
   throw new HTTPError(503, "push_unavailable");
 }
 
-async function parse<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
+export async function parse<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
   const parsed = schema.safeParse(await readBoundedJSON(request));
   if (!parsed.success) throw new HTTPError(400, "invalid_request");
   return parsed.data;
@@ -286,6 +289,7 @@ export async function registerPushDevice(request: Request, env: Env): Promise<Re
   const body = await parse(request, registerSchema);
   const platform: PushPlatform = body.platform ?? "apns";
   const environment: ApnsEnvironment = body.environment ?? "production";
+  const purpose: PushPurpose = body.platform === "fcm" ? "alert" : body.purpose ?? "alert";
   if (platform === "fcm" && !config.fcm) unavailable();
   if (platform === "apns") {
     const apns = config.apns ?? unavailable();
@@ -297,16 +301,16 @@ export async function registerPushDevice(request: Request, env: Env): Promise<Re
   const tokenHash = await sha256(body.token);
   const [updated, inserted] = await env.DB.batch([
     env.DB.prepare(
-      `UPDATE installation_push_devices SET platform = ?, environment = ?, updated_at = ?
+      `UPDATE installation_push_devices SET platform = ?, environment = ?, purpose = ?, updated_at = ?
         WHERE installation_id = ? AND token_hash = ?`,
-    ).bind(platform, environment, now, installation.installation_id, tokenHash),
+    ).bind(platform, environment, purpose, now, installation.installation_id, tokenHash),
     env.DB.prepare(
       `INSERT INTO installation_push_devices
-        (installation_id, token_hash, platform, token, environment, created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?
+        (installation_id, token_hash, platform, token, environment, purpose, created_at, updated_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?
         WHERE (SELECT COUNT(*) FROM installation_push_devices WHERE installation_id = ?) < ?
        ON CONFLICT(installation_id, token_hash) DO NOTHING`,
-    ).bind(installation.installation_id, tokenHash, platform, body.token, environment, now, now, installation.installation_id, PUSH_DEVICE_LIMIT),
+    ).bind(installation.installation_id, tokenHash, platform, body.token, environment, purpose, now, now, installation.installation_id, PUSH_DEVICE_LIMIT),
   ]);
   if (updated?.meta.changes === 0 && inserted?.meta.changes === 0) throw new HTTPError(409, "push_device_limit");
   return json({ registered: true });
@@ -321,23 +325,46 @@ export async function unregisterPushDevice(request: Request, env: Env): Promise<
   return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
 }
 
-interface DeviceRow {
+export interface DeviceRow {
   token: string;
   platform: PushPlatform;
   environment: ApnsEnvironment;
+  purpose: PushPurpose;
 }
 
-export async function sendPush(
+/** What one provider request is: APNs headers and body for a token, or an FCM message. */
+export type PlannedDelivery =
+  | { kind: "apns"; config: ApnsConfig; pushType: "alert" | "liveactivity"; priority: 5 | 10; expiresInSeconds: number; collapseId?: string; payload: unknown }
+  | { kind: "fcm"; config: FcmConfig; payload: unknown };
+
+export async function sendPush(request: Request, env: Env, pushFetch: typeof fetch, requestId: string): Promise<Response> {
+  return sendToRegistered(request, env, pushFetch, requestId, sendSchema, async (body, row, config) => {
+    if (row.purpose !== "alert") return errorResponse(404, "push_device_unknown");
+    const collapseId = await pushCollapseId(body);
+    if (row.platform === "apns" && config.apns) {
+      return { kind: "apns", config: config.apns, pushType: "alert", priority: 10, expiresInSeconds: APNS_EXPIRATION_SECONDS, collapseId, payload: apnsPayload(body) };
+    }
+    if (row.platform === "fcm" && config.fcm) return { kind: "fcm", config: config.fcm, payload: fcmPayload(body, body.token, collapseId) };
+    return errorResponse(503, "push_unavailable");
+  });
+}
+
+/**
+ * The shared half of every send: parse, authenticate (the device read rides in the authentication's own D1 batch),
+ * check the token is this installation's, take from both rate windows, ask the provider, and map its answer.
+ */
+export async function sendToRegistered<T extends { token: string }>(
   request: Request,
   env: Env,
   pushFetch: typeof fetch,
   requestId: string,
+  schema: z.ZodType<T>,
+  plan: (body: T, row: DeviceRow, config: PushConfig, now: number) => Promise<PlannedDelivery | Response>,
 ): Promise<Response> {
-  // Parse before authenticating so the device read rides in the authentication's own D1 batch.
-  let body: PushSendRequest | null = null;
+  let body: T | null = null;
   let parseError: HTTPError | null = null;
   try {
-    body = await parse(request, sendSchema);
+    body = await parse(request, schema);
   } catch (error) {
     if (!(error instanceof HTTPError)) throw error;
     parseError = error;
@@ -345,17 +372,17 @@ export async function sendPush(
   const tokenHash = body ? await sha256(body.token) : "";
   const { installation, row } = await requireInstallationAndRead<DeviceRow>(request, env, body
     ? (installationId) => env.DB.prepare(
-      "SELECT token, platform, environment FROM installation_push_devices WHERE installation_id = ? AND token_hash = ?",
+      "SELECT token, platform, environment, purpose FROM installation_push_devices WHERE installation_id = ? AND token_hash = ?",
     ).bind(installationId, tokenHash)
     : null);
   const config = readPushConfig(env) ?? unavailable();
   if (parseError || !body) throw parseError ?? new HTTPError(400, "invalid_request");
   // Only a token this installation registered, so a relay credential cannot be pointed at somebody else's phone.
   if (!row || row.token !== body.token) return errorResponse(404, "push_device_unknown");
-  const apns = row.platform === "apns" ? config.apns : null;
-  const fcm = row.platform === "fcm" ? config.fcm : null;
 
   const now = Date.now();
+  const planned = await plan(body, row, config, now);
+  if (planned instanceof Response) return planned;
   // Read both windows before taking from either, so a send refused by one limit does not spend the other.
   const limits = [
     { action: "push_send", limit: PUSH_SEND_LIMIT },
@@ -370,10 +397,9 @@ export async function sendPush(
   const taken = await env.DB.batch(limits.map(({ action, limit }) => limitStatement(env, installation.installation_id, action, limit, now)));
   if (taken.some((result) => result.meta.changes === 0)) return rateLimited(60);
 
-  let outcome: Delivery;
-  if (apns) outcome = await deliverApns(apns, row.environment, body, pushFetch, now);
-  else if (fcm) outcome = await deliverFcm(fcm, body, pushFetch, now);
-  else return errorResponse(503, "push_unavailable");
+  const outcome = planned.kind === "apns"
+    ? await deliverApns(planned, row.environment, body.token, pushFetch, now)
+    : await deliverFcm(planned.config, JSON.stringify(planned.payload), pushFetch, now);
   if (outcome.kind === "sent") {
     await env.DB.prepare("UPDATE installation_push_devices SET last_sent_at = ? WHERE installation_id = ? AND token_hash = ?")
       .bind(now, installation.installation_id, tokenHash)
@@ -405,14 +431,14 @@ const DEAD_TOKEN_REASONS = new Set(["BadDeviceToken", "DeviceTokenNotForTopic", 
 const PROVIDER_TOKEN_REASONS = new Set(["ExpiredProviderToken", "InvalidProviderToken", "MissingProviderToken"]);
 
 async function deliverApns(
-  config: ApnsConfig,
+  planned: Extract<PlannedDelivery, { kind: "apns" }>,
   environment: ApnsEnvironment,
-  request: PushSendRequest,
+  token: string,
   apnsFetch: typeof fetch,
   now: number,
 ): Promise<Delivery> {
-  const payload = JSON.stringify(apnsPayload(request));
-  const collapseId = await pushCollapseId(request);
+  const { config } = planned;
+  const payload = JSON.stringify(planned.payload);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let providerToken: string;
     try {
@@ -422,15 +448,16 @@ async function deliverApns(
     }
     let response: Response;
     try {
-      response = await apnsFetch(`${APNS_HOSTS[environment]}/3/device/${request.token}`, {
+      response = await apnsFetch(`${APNS_HOSTS[environment]}/3/device/${token}`, {
         method: "POST",
         headers: {
           authorization: `bearer ${providerToken}`,
-          "apns-topic": config.bundleId,
-          "apns-push-type": "alert",
-          "apns-priority": "10",
-          "apns-expiration": String(Math.floor(now / 1_000) + APNS_EXPIRATION_SECONDS),
-          "apns-collapse-id": collapseId,
+          // A Live Activity push goes to the app's topic with Apple's fixed suffix.
+          "apns-topic": planned.pushType === "liveactivity" ? `${config.bundleId}.push-type.liveactivity` : config.bundleId,
+          "apns-push-type": planned.pushType,
+          "apns-priority": String(planned.priority),
+          "apns-expiration": String(Math.floor(now / 1_000) + planned.expiresInSeconds),
+          ...(planned.collapseId ? { "apns-collapse-id": planned.collapseId } : {}),
           "content-type": "application/json",
         },
         body: payload,
@@ -459,8 +486,7 @@ async function deliverApns(
   return { kind: "credentials", status: 403, reason: "provider token refused twice" };
 }
 
-async function deliverFcm(config: FcmConfig, request: PushSendRequest, pushFetch: typeof fetch, now: number): Promise<Delivery> {
-  const payload = JSON.stringify(fcmPayload(request, request.token, await pushCollapseId(request)));
+async function deliverFcm(config: FcmConfig, payload: string, pushFetch: typeof fetch, now: number): Promise<Delivery> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const access = await fcmAccessToken(config, pushFetch, now);
     if (access.kind !== "ok") return access;
