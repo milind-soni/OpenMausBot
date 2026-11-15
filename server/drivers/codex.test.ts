@@ -18,6 +18,7 @@ import { publishedMessages, replyProblems } from "../harness/text-items.testkit.
 import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
 import { CodexDriver, codexNativeIncomingLogMessage, codexUpdateCommand } from "./codex.ts";
 import { codexCliOverrides } from "./codex-process.ts";
+import { codexReleaseUpdate } from "./codex-update.ts";
 import { parseToml } from "../toml-lite.ts";
 import * as codexProcess from "./codex-process.ts";
 import { CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, codexSignInRefused, codexUserError } from "./codex-errors.ts";
@@ -1962,7 +1963,6 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
             OMB_BOT_ID: "captain",
             OMB_THREAD_ID: "t-agents",
             OMB_COMMS_TOKEN: "peer-comms-secret",
-            OMB_TURN_DEPTH: "0",
           },
         },
       },
@@ -3627,6 +3627,12 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(codexUpdateCommand("'C:\\Program Files\\ag.exe' codex", "win32")).toBe(
       "& 'C:\\Program Files\\ag.exe' 'codex' update",
     );
+  });
+
+  it("shows no update card on My Cloud, whose Codex updates with the Cloud", async () => {
+    expect(await codexReleaseUpdate("0.150.0", "codex", false)).toMatchObject({ title: "Update Codex to 0.156.1", command: "codex update" });
+    expect(await codexReleaseUpdate("0.150.0", "codex", true)).toBeUndefined();
+    expect(await codexReleaseUpdate("0.156.1", "codex", true)).toBeUndefined();
   });
 
   it("marks a Codex 401 as setup so the UI offers sign-in instead of Retry", async () => {

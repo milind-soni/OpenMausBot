@@ -337,6 +337,23 @@ describe("the inbox of a place that is no team's", () => {
     expect(f.inbox.markDone(OWNER, "not-a-line")).toBe("unknown");
   });
 
+  it("reads every line and open ask at once for the viewer who has them, answers nothing, and repeats harmlessly", () => {
+    const f = setup();
+    f.guests.set("guest-chat", "p_guest");
+    f.ask("eli-main", "q");
+    f.inbox.message("eli", "eli-main", "News");
+    f.inbox.message("eli", "guest-chat", "For the guest");
+    expect(f.inbox.markAllRead(OWNER)).toBe(2);
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.kind, row.tab, row.unread])).toEqual(expect.arrayContaining([["ask", "needs-you", false], ["message", "info", false]]));
+    expect(f.inbox.count(OWNER), "the ask still waits on them").toBe(1);
+    expect(f.inbox.markDone(OWNER, "card-q")).toBe("an ask");
+    expect(f.inbox.view(GUEST).rows.map((row) => row.unread), "the guest's line is not the owner's to read").toEqual([true]);
+    expect(f.inbox.markAllRead(OWNER)).toBe(0);
+    expect(f.inbox.markAllRead(SHELL)).toBe(0);
+    const again = setup({ openCards: () => f.cards, store: f.store as unknown as PlaceInboxDeps["store"] }, f.dataDir);
+    expect(again.inbox.view(OWNER).rows.every((row) => !row.unread)).toBe(true);
+  });
+
   it("opening a conversation reads what waited there", () => {
     const f = setup();
     f.inbox.message("eli", "eli-main", "News");

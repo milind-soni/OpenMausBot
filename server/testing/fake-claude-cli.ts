@@ -1294,8 +1294,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
       const tail = steered.length ? ` + steered: ${steered.join(" | ")}` : "";
       replaySteered();
       out({ type: "assistant", message: { content: [{ type: "text", text: `reply to: ${promptText(prompt)}${tail}` }] } });
-      const gate = process.env.FAKE_CLAUDE_SLOW_FINISH_GATE;
-      if (!lateContinuation && gate && readFileSync(gate, "utf8").trim() === "fail") {
+      if (!lateContinuation && finishGate && readFileSync(finishGate, "utf8").trim() === "fail") {
         out({ type: "result", is_error: true, stop_reason: "error", result: "fixture turn failed" });
         turnRunning = false;
         finishIfDone();

@@ -6,6 +6,7 @@ import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, instanceConfigs, type AppConfig } fro
 import { boundRetentionDays, decisionsCsv, readDecisionRange, readDecisions, type DecisionRow } from "../decision-log.ts";
 import { flushNativeLog } from "../drivers/native.ts";
 import { editionForMembers, editionStatus, entitled } from "../enterprise.ts";
+import { reportableServerVersion } from "../environment.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "../fleet-client.ts";
 import { noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { loadPlanUsage, planAccountsFromInstances } from "../plan-usage.ts";
@@ -44,13 +45,14 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
     store, cfg, staticDir: STATIC_DIR, sharedWorkspaceFullAccessEnabled, adminActivityRecording,
     configStatus, broadcast, browserEngineInstall, browserEngineInstallError,
   } = deps;
+  const version = reportableServerVersion();
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const shown = deps.threadShown?.(auth) ?? (() => true);
     const decision = deps.records?.decisionRow(auth) ?? ((row: DecisionRow) => row);
     // The packaged app's port fallback: the forked child proves it is ours by echoing its pid.
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
+      return json(res, 200, { app: "openmausbot", ...(version ? { version } : {}), pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
         guardedMessages: 1, guardedRequests: 1, guardedFullAccess: 1, guardedOnBehalfOf: 1,
         ...(sharedWorkspaceFullAccessEnabled() ? { sharedWorkspaceFullAccess: 1 } : {}),
       }, ...(deps.boxOn ? { box: deps.boxOn() ? "on" : "off" } : {}) });

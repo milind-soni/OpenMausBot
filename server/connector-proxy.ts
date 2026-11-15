@@ -12,7 +12,7 @@ import {
   withConnectionParameters,
 } from "./connector-advertisement.ts";
 import { APP_TOOL_NAMES_ENV, APP_TOOLS_ENV, appToolAnswer, appToolCall, appToolEntries, parseAppToolsEnv } from "./connector-app-tools.ts";
-import { ARGUMENT_REFUSAL, argumentRefusalNote, fitArguments, fittedArgumentsNote } from "./connector-arguments.ts";
+import { ARGUMENT_REFUSAL, argumentRefusalNote, fitArguments, fittedArgumentsNote, preservesNumericText } from "./connector-arguments.ts";
 import { annotateFailedCall } from "./connector-scope-hint.ts";
 import { withSignedOutHint } from "./connector-signed-out-hint.ts";
 import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
@@ -371,9 +371,28 @@ input.on("line", (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
   let message: Json;
+  const unsafeContainers = new WeakSet<object>();
+  const unsafeArgumentOwners = new WeakSet<object>();
   try {
-    message = JSON.parse(trimmed) as Json;
+    message = JSON.parse(trimmed, function (key: string, value: unknown, context?: { source?: string }) {
+      const unsafe = typeof value === "number"
+        ? context?.source === undefined || !preservesNumericText(context.source, value)
+        : value !== null && typeof value === "object" && unsafeContainers.has(value);
+      if (unsafe) {
+        unsafeContainers.add(this);
+        if (key === "arguments") unsafeArgumentOwners.add(this);
+      }
+      return value;
+    }) as Json;
   } catch {
+    return;
+  }
+  if (message.method === "tools/call" && message.params !== null && typeof message.params === "object"
+    && unsafeArgumentOwners.has(message.params)) {
+    if (message.id !== undefined) send(textResult(message.id,
+      'This connected-app call was not sent: an argument contains a numeric literal that cannot be preserved. '
+      + 'Send precision-sensitive IDs as JSON strings when the tool schema accepts strings, for example '
+      + '{"record_id":"9007199254740993"}; otherwise check the original value before retrying.', true));
     return;
   }
   void handle(message).catch((error) => {

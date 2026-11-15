@@ -101,11 +101,11 @@ describe("the keys page", () => {
     expect(rowsShown()).not.toContain("elevenlabs");
   });
 
-  it("offers the Live calls service, OpenAI, Azure OpenAI or Fish Audio, on the separate live key row", () => {
+  it("offers the Live calls service, OpenAI, Azure OpenAI, Fish Audio, Gemini or ElevenLabs, on the separate live key row", () => {
     setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
     page();
     const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
-    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure", "fish"]);
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure", "fish", "gemini", "elevenlabs"]);
     expect(select.value).toBe("azure");
     expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
   });
@@ -144,6 +144,36 @@ describe("the keys page", () => {
     expect(fish.querySelector<HTMLAnchorElement>('a[href*="fish.audio"]')).not.toBeNull();
     expect([...fish.querySelectorAll<HTMLInputElement>("input")].every((input) => input.type === "password")).toBe(true);
     expect(row("liveCalls")).toBeNull();
+  });
+
+  it("drops a key typed on the Live key row when the Live calls service changes, so it is never saved for the other service", () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "fish" } });
+    page();
+    const field = () => row("liveKey")!.querySelector<HTMLInputElement>('input[type="password"]')!;
+    type(field(), "typed-for-fish-audio");
+    expect(field().value).toBe("typed-for-fish-audio");
+
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, provider: "elevenlabs" } }));
+    expect(row("liveKey")!.textContent).toContain("ElevenLabs");
+    expect(field().value).toBe("");
+  });
+
+  it("shows nothing of a key save that finishes after the Live calls service changed", async () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "fish" } });
+    let answer: (value: unknown) => void = () => {};
+    fx.api.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    page();
+    const field = () => row("liveKey")!.querySelector<HTMLInputElement>('input[type="password"]')!;
+    paste(field(), "typed-for-fish-audio");
+    expect(fx.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ body: JSON.stringify({ tts: { fishKey: "typed-for-fish-audio" } }) }));
+
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, provider: "elevenlabs" } }));
+    await answered(() => answer({ ...fx.config }));
+    expect(row("liveKey")!.textContent).toContain("ElevenLabs");
+    expect(row("liveKey")!.textContent).not.toContain("didn't stay saved");
+    expect(fx.api).toHaveBeenCalledTimes(1);
   });
 
   it("opens a section that holds a saved key, and counts what is connected", () => {

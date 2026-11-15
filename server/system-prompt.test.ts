@@ -483,6 +483,7 @@ describe("longCommandsPrompt", () => {
       expect(text).not.toContain("nohup");
       expect(text).toContain("trust only the command's own fresh exit code and output");
       expect(text).toContain("cannot set a wait, so finish it in this turn");
+      expect(text).toContain("Work a bot handed you for the person's own request may set one wait_until (not a trigger), cannot cancel it");
     }
   });
 

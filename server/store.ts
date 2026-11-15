@@ -53,7 +53,7 @@ export type {
 export type { GroupTask as GroupTaskRecord, BotProject as BotProjectRecord } from "../shared/wire.ts";
 export type { InstalledPlaybook, InstalledPackageMetadata, MausColor, MausExpression } from "../shared/wire.ts";
 
-export type Message = WireMessage;
+export type Message = WireMessage & { /** The turn an attach_file line was sent in; never makes it that turn's reply. */ sentInTurn?: string };
 
 export interface GroupPackageStamp {
   installId: string;
@@ -1556,7 +1556,7 @@ export class Store {
     return changed;
   }
 
-  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {
+  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "browserProfile" | "lastProfileRequestId">>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
     const next = { ...bot, ...reshowWhenMoved(bot, patch) };

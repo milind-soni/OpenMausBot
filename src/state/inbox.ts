@@ -109,6 +109,23 @@ export function readInboxRow(row: Pick<InboxRow, "id" | "unread">): void {
   void mark(row.id, "read", { unread: true });
 }
 
+const marking = store(false);
+export const useInboxMarkingAll = (): boolean => useSyncExternalStore(marking.subscribe, marking.get, marking.get);
+
+/** The person read every line: none is bold, and no ask is answered or moves tab. */
+export function markAllInboxRead(): void {
+  if (marking.get()) return;
+  const view = list.get();
+  if (view) { shown = ++sent; list.set({ ...view, rows: view.rows.map((row) => (row.unread ? { ...row, unread: false } : row)) }); }
+  const seq = ++sent;
+  marking.set(true);
+  void api<InboxView>("/api/inbox/read-all", { method: "POST", background: true }).catch(() => null).then((next) => {
+    marking.set(false);
+    if (next && Array.isArray(next.rows)) return show(seq, next);
+    void refreshInbox();
+  });
+}
+
 /** An ask the person just answered here: it leaves the list at once, before the server's next read says so. */
 export const settleInboxRow = (row: Pick<InboxRow, "id">): void => patchRow(row.id, { tab: "done", unread: false });
 

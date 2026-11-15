@@ -213,6 +213,8 @@ export interface SendTurnInput {
   mcpFromUserConfig?: boolean;
   /** Claude Code loads the person's own `~/.claude/skills` from this folder's `.claude/skills` (`--add-dir`). */
   userSkillsDir?: string;
+  /** Harness-selected SKILL.md files available to this turn; a driver may stage their folders for native file access. */
+  skillFiles?: readonly string[];
   /** The bot's own Claude Code settings: `.claude/settings.json` in its working folder, else in its own folder. A Claude
    * turn in any other folder takes their hooks, plugins, permission rules and env. */
   botSettingsFile?: string;
@@ -363,7 +365,8 @@ export interface ProviderSnapshot {
   update?: {
     title: string;
     message: string;
-    command: string;
+    /** Absent when there is nothing to run here, e.g. My Cloud's engines update with the Cloud. */
+    command?: string;
   };
   /** On a subscription a reported cost is notional. */
   billing?: "metered" | "subscription";

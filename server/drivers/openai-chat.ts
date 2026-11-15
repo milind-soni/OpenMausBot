@@ -21,7 +21,7 @@ import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent,
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
-import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
+import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
 import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
@@ -430,7 +430,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               const bodyError = body ? completionError(body, "completion error") : null;
               if (bodyError) throw bodyError;
             }
-            throw new ChatProtocolError("Stream ended before completion");
+            throw new StreamTruncatedError("Stream ended before completion");
           }
           resetIdleTimer();
           buffer += decoder.decode(value, { stream: true });
@@ -599,6 +599,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const seenCalls = new Set<string>();
       let nudges = 0;
       let unread: string[] = [];
+      const deliveredAsides: string[] = [];
       let callsAtNudge = -1;
       const repeats = options.localModel ? new ChatRepeatGuard() : undefined;
       let unreadable = false, askedAgain = false;
@@ -621,7 +622,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           abort.signal.throwIfAborted();
             // Between rounds, never inside a tool batch.
           unread = turnEntry.asides.splice(0);
-          if (unread.length) messages.push({ role: "user", content: unread.join("\n\n") });
+          if (unread.length) {
+            messages.push({ role: "user", content: unread.join("\n\n") });
+            deliveredAsides.push(...unread);
+          }
           turnEntry.ending = round === MAX_CHAT_ROUNDS - 1;
           native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
           let attempt = 0;
@@ -714,12 +718,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 tools.definitions.length = 0;
                 continue;
               }
-              // Once a call has been handled, never replay it through a turn retry.
-              if (options.retryScale === undefined || abort.signal.aborted || streamed || seenCalls.size ||
-                  error instanceof ChatProtocolError || !verdict.transient || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
+              // Never replay a handled call. A stream closed before any completion marker ran nothing upstream, so it may resend even where the caller never opted into retries.
+              const truncation = error instanceof StreamTruncatedError, retryScale = truncation ? options.retryScale ?? 1 : options.retryScale;
+              if (retryScale === undefined || abort.signal.aborted || streamed || seenCalls.size || (!truncation && (error instanceof ChatProtocolError || !verdict.transient)) || attempt >= RETRY_MAX_ATTEMPTS - 1) throw error;
               const delayMs = computeBackoff(attempt++);
-              emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt, delayMs, reason: verdict.reason });
-              await interruptibleDelay(delayMs * options.retryScale, abort.signal).promise;
+              emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt, delayMs, reason: truncation ? "stream_truncated" : verdict.reason });
+              await interruptibleDelay(delayMs * retryScale, abort.signal).promise;
               abort.signal.throwIfAborted();
             }
           }
@@ -799,7 +803,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             let fatal: Error | undefined, title = call.function.name, skipRepeatCount = false;
             try {
               let args: unknown;
-              try { args = JSON.parse(call.function.arguments); }
+              try { args = JSON.parse(call.function.arguments.trim() || "{}"); } // An empty argument string is a tool with no arguments.
               catch { throw new ChatProtocolError("tool arguments are not complete JSON"); }
               if (!object(args)) throw new ChatProtocolError("tool arguments must be a JSON object");
               const inputPreview = preview(args);
@@ -907,14 +911,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           const continuable = classifyContinuable(stopReason, failure);
           if (continuable) {
             const handoffPath = writeTurnHandoff({
-              threadId: turn.threadId,
-              turnId,
-              model,
-              usage,
-              hasUsage,
-              failure,
-              toolCalls: seenCalls.size,
-              messages,
+              threadId: turn.threadId, turnId, model,
+              usage, hasUsage, failure, toolCalls: seenCalls.size,
+              task: turn.text, updates: deliveredAsides,
+              messages: messages.slice(messages.indexOf(request) + 1),
             });
             if (handoffPath) emit({ ...base(turn.threadId, turnId), type: "cap.exhausted", handoffPath, reason: continuable });
           }

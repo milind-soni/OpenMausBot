@@ -40,6 +40,8 @@ export interface ProxyOptions {
     pairRequestId?: unknown,
   ) => { token: string; device: unknown } | { error: string };
   serverName: () => string;
+  /** The desktop app's version: told only to a paired device. */
+  version?: string;
   /** Every host the phone could dial later, best first, sent with the pairing
    * response as an advisory fallback list. */
   hosts?: () => string[];
@@ -65,6 +67,8 @@ export type ProxyListener = "lan" | "origin";
 const UPDATE_APP = { error: "update_app" } as const;
 
 const PAIRING_SESSION_PATHS = new Set(["POST /api/pair", "GET /api/health"]);
+
+const RELEASE_VERSION = /^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[0-9A-Za-z.-]{1,64})?(\+[0-9A-Za-z.-]{1,64})?$/;
 
 /** A token presented inside a session must belong to the device whose psk opened it. */
 function e2eRefusal(context: E2EContext, method: string, path: string, deviceId: string | undefined): string | null {
@@ -382,9 +386,10 @@ export function createProxyHandler(options: ProxyOptions) {
   const capabilityStreams = new Map<string, Set<() => void>>();
   /** Each device's open `/api/events` streams, for the events the sidecar itself sends. */
   const eventStreams = new Map<string, Set<(event: string) => void>>();
+  const version = options.version !== undefined && RELEASE_VERSION.test(options.version) ? options.version : undefined;
   const endpointsFor = (deviceId: string | null) => {
     const descriptor = options.e2eDescriptor?.(deviceId) ?? null;
-    return { ...endpointSnapshot(options), ...(descriptor ? { e2e: descriptor } : {}) };
+    return { ...endpointSnapshot(options), ...(version ? { version } : {}), ...(descriptor ? { e2e: descriptor } : {}) };
   };
   const handle = function handle(req: IncomingMessage, res: ServerResponse, listener: ProxyListener = "lan"): void {
     const target = requestTarget(req.url);
@@ -552,7 +557,7 @@ export function createProxyHandler(options: ProxyOptions) {
               return;
             }
             finished = true;
-            sendJson(res, 200, { app: "openmausbot" });
+            sendJson(res, 200, { app: "openmausbot", ...(device && version ? { version } : {}) });
           });
           return;
         }

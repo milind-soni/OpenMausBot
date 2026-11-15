@@ -51,16 +51,23 @@ engine stays warm instead of relaunching every turn. The same bot on the same
 thread, with the same grants and approval level, holds the same bearer, and
 the harness honours it only while one of that thread's turns runs. Stop, a
 stall, a deleted bot or thread, a changed grant or approval level, or a
-provider reload gives the next turn a new bearer. The computer gets a new
-bearer every turn: its tools bridge into a machine that can stop between
-turns (an idle Local VM, a VPS that Auto starts), and a warm engine would not
-restart a bridge whose machine went away. The per-turn limits (bots
-created, threads opened, room posts, and not checking a delegation in the
-turn that made it) are counted by the harness for each turn, not by the
+provider reload gives the next turn a new bearer. What only one turn may do
+is not such a grant: its depth, the hand-off it runs for and whether it may
+author skills live in that turn's record, which the harness reads on every
+call. So a teammate's report, the person's next message and each new job a
+teammate takes all run in the same Claude process and ACP session, in direct
+chats and in rooms alike; the engine is never told its depth. The computer
+gets a new bearer every turn: its tools bridge into a machine that can stop
+between turns (an idle Local VM, a VPS that Auto starts), and a warm engine
+would not restart a bridge whose machine went away. The per-turn limits
+(bots created, threads opened, room posts, and not checking a delegation in
+the turn that made it) are counted by the harness for each turn, not by the
 proxy, which a warm engine keeps across turns.
 
 ```sh
 pnpm exec vitest run server/session-credentials.e2e.test.ts server/post-to-room.test.ts server/vps-routing.test.ts
+pnpm exec vitest run server/delta-context.e2e.test.ts -t "keeps the source's and the teammate's engines|keeps an ACP teammate's session"
+pnpm exec vitest run server/room-coordination.e2e.test.ts -t "keeps each member's engine"
 ```
 
 A message steered into a running Claude turn is folded in only before a

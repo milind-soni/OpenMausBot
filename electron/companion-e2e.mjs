@@ -94,6 +94,16 @@ export function createCompanionE2E({
     },
     /** A pairing window opened or a device changed: the relay may be needed now. */
     reconcile,
+    /** A person is about to pair, or this computer just got a new installation credential: with Anywhere on, ask for
+     * the relay token now instead of once a code is open, so the encrypted connection (and its key, the first time)
+     * is on before the code shows. The 30 s recheck stops the token again while nothing needs the relay. */
+    async prime() {
+      lastState = await companionState().catch(() => null);
+      onState(lastState);
+      if (lastState?.enabled !== true || lastState.error || lastState.routes?.relay?.on !== true) return;
+      if (tokens.running) return tokens.refreshNow();
+      tokens.start();
+    },
     /** A fresh sidecar knows nothing yet. */
     spawned: sync,
     /** The sidecar's relay refused the token (4401). */

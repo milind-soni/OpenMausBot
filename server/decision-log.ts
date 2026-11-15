@@ -40,6 +40,7 @@ export type DecisionSource =
   | "outbound"
   | "team-memory"
   | "outside-write"
+  | "app-settings"
   | "auto-review"
   | "auto-review-shadow";
 

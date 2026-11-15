@@ -5,6 +5,7 @@ import {
   attachmentAudioUrl,
   attachmentBasename,
   attachmentImageUrl,
+  clipboardFilesToAttach,
   clipboardHasImages,
   clipboardImageFiles,
   composeMessage,
@@ -464,6 +465,23 @@ describe("clipboardImageFiles", () => {
     const svg = new File(["<svg/>"], "shot.svg", { type: "image/svg+xml" });
     const png = new File(["image"], "shot.png", { type: "image/png" });
     expect(clipboardImageFiles({ items: [mockClipboardItem("file", svg.type, svg), mockClipboardItem("string", png.type, png)], files: [svg] })).toEqual([]);
+  });
+});
+
+describe("clipboardFilesToAttach", () => {
+  it("attaches a copied archive or document, with any pictures copied beside it", () => {
+    const zip = new File([new Uint8Array([0x50, 0x4b])], "Project.ZIP", { type: "application/x-zip-compressed" });
+    const tarball = new File([new Uint8Array([0x1f, 0x8b])], "logs.tar.gz", { type: "" });
+    const png = new File(["image"], "shot.png", { type: "image/png" });
+    expect(clipboardFilesToAttach({ files: [zip] })).toEqual([zip]);
+    expect(clipboardFilesToAttach({ files: [tarball, png] })).toEqual([tarball, png]);
+  });
+
+  it("leaves pictures alone and plain text to the text paste", () => {
+    const png = new File(["image"], "shot.png", { type: "image/png" });
+    expect(clipboardFilesToAttach({ files: [png] })).toEqual([]);
+    expect(clipboardFilesToAttach({ files: [] })).toEqual([]);
+    expect(clipboardFilesToAttach(null)).toEqual([]);
   });
 });
 

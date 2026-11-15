@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { delimiter, join } from "node:path";
 import { homedir } from "node:os";
 
+import { PHONE_STEP_TOOLS, type PhoneStepTool } from "../../shared/phone-steps.ts";
 import { CONTROL_ACT_WITHIN_MS, CONTROL_WAIT_MS } from "../control-client.ts";
 
 type Json = Record<string, unknown>;
@@ -288,21 +289,182 @@ function nodeLines(nodes: UiNode[]) {
   }).join("\n") || "No accessible Android UI text is visible.";
 }
 
-export const TOOLS = [
+const SINGLE_TOOLS = [
   { name: "status", description: "Check physical USB Android devices and USB-debugging authorization before any Android phone task.", inputSchema: { type: "object", properties: {} } },
-  { name: "read_screen", description: "Read visible text, accessibility labels, resource ids, and pixel bounds from the connected Android screen. Use after every action to verify the result.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
+  { name: "read_screen", description: "Read visible text, accessibility labels, resource ids, and pixel bounds from the connected Android screen. Use it before choosing what to act on. To act and see the result in one call, put the action and read_screen in one batch.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "screenshot", description: "Capture the connected Android screen when accessibility text is insufficient. Returns a PNG image.", inputSchema: { type: "object", properties: { serial: { type: "string" } } } },
   { name: "list_apps", description: "List installed launchable Android package names, optionally filtered by a human app name. Prefer open_app first.", inputSchema: { type: "object", properties: { query: { type: "string" }, serial: { type: "string" } } } },
   { name: "open_app", description: "Open an installed Android app directly by its English name, such as Uber or Skyscanner, or by its package name. Do not scan the app drawer first.", inputSchema: { type: "object", properties: { name: { type: "string" }, serial: { type: "string" } }, required: ["name"] } },
-  { name: "tap_text", description: "Tap visible Android text or an accessibility label, then use read_screen to verify.", inputSchema: { type: "object", properties: { text: { type: "string" }, exact: { type: "boolean" }, index: { type: "integer", minimum: 0 }, serial: { type: "string" } }, required: ["text"] } },
+  { name: "tap_text", description: "Tap visible Android text or an accessibility label.", inputSchema: { type: "object", properties: { text: { type: "string" }, exact: { type: "boolean" }, index: { type: "integer", minimum: 0 }, serial: { type: "string" } }, required: ["text"] } },
   { name: "tap", description: "Tap Android screen pixel coordinates obtained from read_screen or screenshot.", inputSchema: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, serial: { type: "string" } }, required: ["x", "y"] } },
-  { name: "swipe", description: "Swipe the Android screen in a direction, then use read_screen to verify.", inputSchema: { type: "object", properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] }, serial: { type: "string" } }, required: ["direction"] } },
+  { name: "swipe", description: "Swipe the Android screen in a direction.", inputSchema: { type: "object", properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] }, serial: { type: "string" } }, required: ["direction"] } },
   { name: "type_text", description: "Type text into the focused Android field. Letters, digits, spaces and _.,@- always work; other text, such as Chinese, emoji or +, needs the ADBKeyBoard keyboard selected on the phone. Set clear to true to empty the field first, which also needs ADBKeyBoard. Never enter passwords or payment details. A one-time code only for a sign-in the person asked for, into the app it was sent for.", inputSchema: { type: "object", properties: { text: { type: "string", maxLength: 256 }, clear: { type: "boolean" }, serial: { type: "string" } }, required: ["text"] } },
   { name: "press", description: "Press an Android navigation or keyboard key. wakeup turns the screen on and sleep turns it off.", inputSchema: { type: "object", properties: { key: { type: "string", enum: Object.keys(KEYCODES) }, serial: { type: "string" } }, required: ["key"] } },
 ] as const;
 
+type StepAction = PhoneStepTool | "wait";
+export type PhoneStep = Json & { action: StepAction };
+type StepRule = { ok: (step: Json) => boolean; needs: string; example?: Json };
+type FieldSchema = { type?: string; enum?: readonly string[]; [keyword: string]: unknown };
+
+const STEP_ACTIONS: readonly StepAction[] = [...PHONE_STEP_TOOLS, "wait"];
+const MAX_STEPS = 10;
+const DEFAULT_WAIT_SECONDS = 2;
+const MAX_WAIT_SECONDS = 60;
+const STEP_FIELD_NOTES: Record<string, string> = {
+  name: "the app's English name or package name",
+  text: "the visible text to tap, or the text to type",
+  exact: "true to match the whole text, not part of it",
+  index: "which match of the text, from 0",
+  x: "pixel x from read_screen or screenshot",
+  y: "pixel y from read_screen or screenshot",
+  direction: "which way to swipe",
+  key: "the key to press",
+  seconds: `how long to wait, 0 to ${MAX_WAIT_SECONDS}, default ${DEFAULT_WAIT_SECONDS}`,
+};
+const STEP_EXAMPLES: Record<StepAction, Json> = {
+  open_app: { action: "open_app", name: "Settings" },
+  tap_text: { action: "tap_text", text: "Search" },
+  tap: { action: "tap", x: 540, y: 1200 },
+  swipe: { action: "swipe", direction: "up" },
+  type_text: { action: "type_text", text: "iPad mini" },
+  press: { action: "press", key: "enter" },
+  read_screen: { action: "read_screen" },
+  wait: { action: "wait", seconds: 3 },
+};
+const inPixels = (value: unknown) => Number.isFinite(value) && Number(value) >= 0 && Number(value) <= 10_000;
+const STEP_RULES: Partial<Record<StepAction, StepRule[]>> = {
+  open_app: [{ ok: (step) => String(step.name).trim() !== "", needs: "name, an app's English name or package name" }],
+  tap_text: [
+    { ok: (step) => String(step.text).trim() !== "", needs: "text that is not blank" },
+    { ok: (step) => step.index === undefined || (Number.isInteger(step.index) && Number(step.index) >= 0), needs: "index as a whole number from 0", example: { action: "tap_text", text: "Search", index: 1 } },
+  ],
+  tap: [{ ok: (step) => inPixels(step.x) && inPixels(step.y), needs: "x and y from 0 to 10000" }],
+  type_text: [{ ok: (step) => [...String(step.text)].length <= 256, needs: "text of at most 256 characters" }],
+  wait: [{ ok: (step) => step.seconds === undefined || Number(step.seconds) >= 0, needs: `seconds as a number from 0 to ${MAX_WAIT_SECONDS}` }],
+};
+
+function stepSchema(action: StepAction): { properties: Record<string, FieldSchema>; required?: readonly string[] } {
+  if (action === "wait") return { properties: { seconds: { type: "number", minimum: 0 } } };
+  return SINGLE_TOOLS.find((tool) => tool.name === action)!.inputSchema;
+}
+
+const stepFields = (action: StepAction) => Object.keys(stepSchema(action).properties).filter((field) => field !== "serial");
+const fieldOwners = (field: string) => STEP_ACTIONS.filter((action) => stepFields(action).includes(field));
+
+function stepProperties() {
+  const properties: Record<string, FieldSchema> = {
+    action: { type: "string", enum: STEP_ACTIONS, description: "What the step does: a phone tool's name, or wait." },
+  };
+  for (const action of STEP_ACTIONS) {
+    for (const field of stepFields(action)) {
+      const owners = fieldOwners(field).join(" and ");
+      const note = STEP_FIELD_NOTES[field];
+      properties[field] ??= { ...stepSchema(action).properties[field], description: note ? `${owners}: ${note}.` : owners };
+    }
+  }
+  return properties;
+}
+
+const STEP_PROPERTIES = stepProperties();
+
+const lower = (value: unknown) => String(value).toLowerCase();
+const toNumber = (value: unknown) => (typeof value === "number" ? value : typeof value === "string" && value.trim() !== "" ? Number(value) : Number.NaN);
+
+function coerce(field: string, value: unknown): unknown {
+  const { type, enum: choices } = STEP_PROPERTIES[field];
+  if (type === "number" || type === "integer") return toNumber(value);
+  if (type === "boolean") return value === "true" || value === "false" ? value === "true" : value;
+  if (type === "string") return choices ? lower(value) : typeof value === "boolean" ? value : String(value);
+  return value;
+}
+
+function typeRules(action: StepAction): StepRule[] {
+  return stepFields(action).flatMap((field): StepRule[] => {
+    const { type, enum: choices } = stepSchema(action).properties[field];
+    if (type === "boolean") {
+      return [{ ok: (step) => step[field] === undefined || typeof step[field] === "boolean", needs: `${field} as true or false`, example: { ...STEP_EXAMPLES[action], [field]: true } }];
+    }
+    if (choices) return [{ ok: (step) => step[field] === undefined || choices.includes(String(step[field])), needs: `${field} as one of ${choices.join(", ")}` }];
+    if (type === "string") return [{ ok: (step) => step[field] === undefined || typeof step[field] === "string", needs: `${field} as a string, not true or false` }];
+    return [];
+  });
+}
+
+const BATCH_HINT = "To do several steps, or to act and then read the screen, in one call, use batch.";
+const takesBatchHint = (name: string) => name !== "read_screen" && (PHONE_STEP_TOOLS as readonly string[]).includes(name);
+
+export const TOOLS = [
+  ...SINGLE_TOOLS.map((tool) => (takesBatchHint(tool.name) ? { ...tool, description: `${tool.description} ${BATCH_HINT}` } : tool)),
+  {
+    name: "batch",
+    description: `Run up to ${MAX_STEPS} phone steps in order in one call. A step is one of open_app, tap_text, tap, swipe, type_text, press, read_screen or wait, with that tool's fields: {action, ...fields}. Add read_screen as the last step to see the result; the batch returns the screen only at a read_screen step. A wait step (0 to ${MAX_WAIT_SECONDS} s) gives content time to load. It stops at the first failing step. End a batch where the next screen is uncertain, such as after a step that may open a dialog, and read it before acting further. Example: {"steps":[{"action":"tap_text","text":"Search"},{"action":"type_text","text":"iPad mini"},{"action":"press","key":"enter"},{"action":"wait","seconds":3},{"action":"read_screen"}]}`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        steps: { type: "array", maxItems: MAX_STEPS, items: { type: "object", properties: STEP_PROPERTIES, required: ["action"] } },
+        serial: { type: "string" },
+      },
+      required: ["steps"],
+    },
+  },
+] as const;
+
 type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; isError?: boolean };
 const textResult = (text: string, isError = false): ToolResult => ({ content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) });
+
+const isStepAction = (value: unknown): value is StepAction => STEP_ACTIONS.includes(value as StepAction);
+const refusal = (problem: string) => new Error(`${problem}. No step was performed.`);
+
+function parseJson(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+export function parseSteps(raw: unknown): PhoneStep[] {
+  const steps = parseJson(raw);
+  if (!Array.isArray(steps) || !steps.length) {
+    throw refusal(`steps needs a list of 1 to ${MAX_STEPS} steps, e.g. {"steps":[{"action":"tap_text","text":"Search"},{"action":"read_screen"}]}`);
+  }
+  if (steps.length > MAX_STEPS) throw refusal(`A batch runs at most ${MAX_STEPS} steps, not ${steps.length}; split them into several batches`);
+  return steps.map((step, index) => parseStep(parseJson(step), index + 1));
+}
+
+function parseStep(raw: unknown, n: number): PhoneStep {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw refusal(`Step ${n} needs to be an object such as ${JSON.stringify(STEP_EXAMPLES.tap_text)}`);
+  const { serial } = raw as Json;
+  if (serial !== undefined && serial !== null && serial !== "") {
+    const named = typeof serial === "string" || typeof serial === "number" ? String(serial) : "<serial>";
+    throw refusal(`Step ${n} names a serial, but a batch runs on one phone; set serial once beside steps, e.g. ${JSON.stringify({ serial: named, steps: [STEP_EXAMPLES.read_screen] })}`);
+  }
+  const step: Json = {};
+  for (const [field, value] of Object.entries(raw)) {
+    if (!Object.hasOwn(STEP_PROPERTIES, field) || value === null || value === "") continue;
+    step[field] = typeof value === "object" ? value : coerce(field, value);
+  }
+  const { action } = step;
+  if (action === "screenshot") throw refusal(`Step ${n}: screenshot returns an image and cannot be a batch step; use read_screen, or call screenshot after the batch`);
+  if (action === "batch") throw refusal(`Step ${n}: a batch cannot be a batch step; put its steps in this list`);
+  if (!isStepAction(action)) throw refusal(`Step ${n} needs an action from ${STEP_ACTIONS.join(", ")}, e.g. ${JSON.stringify(STEP_EXAMPLES.tap_text)}`);
+  const example = JSON.stringify(STEP_EXAMPLES[action]);
+  const foreign = Object.keys(step).find((field) => field !== "action" && !stepFields(action).includes(field));
+  if (foreign === "seconds") {
+    const seconds = Number.isFinite(step.seconds) && Number(step.seconds) >= 0 ? step.seconds : STEP_EXAMPLES.wait.seconds;
+    throw refusal(`Step ${n} (${action}) does not take seconds; put a separate ${JSON.stringify({ action: "wait", seconds })} step after it`);
+  }
+  if (foreign) throw refusal(`Step ${n} (${action}) does not take ${foreign}, which belongs to ${fieldOwners(foreign).join(" or ")}; write it like ${example}`);
+  const missing = (stepSchema(action).required ?? []).filter((field) => step[field] === undefined);
+  if (missing.length) throw refusal(`Step ${n} (${action}) needs ${missing.join(" and ")}, e.g. ${example}`);
+  const nested = Object.keys(step).find((field) => typeof step[field] === "object");
+  if (nested) throw refusal(`Step ${n} (${action}) needs ${nested} as a single value, not a list or an object, e.g. ${example}`);
+  const broken = [...(STEP_RULES[action] ?? []), ...typeRules(action)].find((rule) => !rule.ok(step));
+  if (broken) throw refusal(`Step ${n} (${action}) needs ${broken.needs}, e.g. ${JSON.stringify(broken.example ?? STEP_EXAMPLES[action])}`);
+  return { ...step, action };
+}
 
 // The harness reserves the phone per turn from the first real tool call. Retained MCP processes can
 // outlive their turn, so every call revalidates the claim.
@@ -342,13 +504,64 @@ export function createPhoneClaim(
   };
 }
 
-async function callTool(name: string, args: Json, adb: Adb, onDevice: OnDevice): Promise<ToolResult> {
+async function wait(requested: unknown): Promise<string> {
+  const seconds = Math.min(requested === undefined ? DEFAULT_WAIT_SECONDS : Number(requested), MAX_WAIT_SECONDS);
+  await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+  return seconds < Number(requested) ? `Waited ${seconds} s (a wait is at most ${MAX_WAIT_SECONDS} s)` : `Waited ${seconds} s`;
+}
+
+const actOn = (onDevice: OnDevice) => async (serial: string, { action, ...fields }: PhoneStep): Promise<string> => {
+  const [first] = (await callToolOn(onDevice, serial, action, fields)).content;
+  return first.type === "text" ? first.text : "";
+};
+
+// Mid-batch, earlier steps did run, so a claim text's words that the call was not performed would be false.
+const midBatchClaimReason = (message: string) => message.replace(/ This call was (?:not|NOT) performed[^.]*\.|, so (?:this call|it) was NOT performed/, "").replace(/\.$/, "");
+// A step fails with a claim text when the phone is refused between two of its commands.
+const reason = (problem: unknown) => midBatchClaimReason(problem instanceof Error ? problem.message : String(problem));
+const EARLIER_AND_LATER_STEPS = "Steps before it were done; do not repeat them. Later steps were not performed.";
+
+export async function runSteps(
+  serial: string,
+  steps: PhoneStep[],
+  ensureClaim: EnsureClaim,
+  perform: (serial: string, step: PhoneStep) => Promise<string>,
+): Promise<ToolResult> {
+  const lines: string[] = [];
+  for (const [index, step] of steps.entries()) {
+    const n = index + 1;
+    // Stopping the turn revokes its phone claim while this process lives on, so each later step rechecks it.
+    if (n > 1) {
+      const claim = await ensureClaim(true);
+      if (!claim.ok) return textResult([...lines, `Stopped before step ${n}: ${midBatchClaimReason(claim.message)}. ${EARLIER_AND_LATER_STEPS}`].join("\n"));
+    }
+    let output: string;
+    try {
+      output = step.action === "wait" ? await wait(step.seconds) : await perform(serial, step);
+    } catch (error) {
+      // An error flag leads models to redo the whole call, so it marks only a first-step failure, where no finished step is redone.
+      return textResult([...lines, `Step ${n} failed: ${reason(error)}. Its effect is unknown; call read_screen or screenshot before trying it again. ${EARLIER_AND_LATER_STEPS}`].join("\n"), n === 1);
+    }
+    lines.push(step.action === "read_screen" ? `${n}. read_screen:\n${output}` : `${n}. ${step.action}: ${output}`);
+  }
+  return textResult(lines.join("\n"));
+}
+
+async function callTool(name: string, args: Json, adb: Adb, onDevice: OnDevice, ensureClaim: EnsureClaim): Promise<ToolResult> {
   if (name === "status") {
     const available = Boolean(resolveAdbPath());
     const devices = available ? await usbDevices(adb) : [];
     return textResult(JSON.stringify({ available, devices }, null, 2));
   }
+  if (name === "batch") {
+    const steps = parseSteps(args.steps);
+    return runSteps(await readySerial(adb, args.serial), steps, ensureClaim, actOn(onDevice));
+  }
   const serial = await readySerial(adb, args.serial);
+  return callToolOn(onDevice, serial, name, args);
+}
+
+async function callToolOn(onDevice: OnDevice, serial: string, name: string, args: Json): Promise<ToolResult> {
   if (name === "read_screen") return textResult(nodeLines(await readNodes(onDevice, serial)));
   if (name === "screenshot") {
     const png = await onDevice(serial, ["exec-out", "screencap", "-p"], true);
@@ -419,7 +632,7 @@ export async function callPhoneTool(name: string, args: Json, ensureClaim: Ensur
   const claim = await ensureClaim();
   if (!claim.ok) return textResult(claim.message, true);
   try {
-    return await callTool(name, args, adb, claimedDevice(ensureClaim, adb));
+    return await callTool(name, args, adb, claimedDevice(ensureClaim, adb), ensureClaim);
   } catch (error) {
     return textResult(error instanceof Error ? error.message : String(error), true);
   }
@@ -429,18 +642,31 @@ const send = (message: Json) => process.stdout.write(`${JSON.stringify(message)}
 const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
 const rpcError = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
 
+// MCP: a client that gives up on a call sends notifications/cancelled with that call's request id.
+const callsCancelled = new Map<unknown, boolean>();
+
 async function handle(message: Json, ensureClaim: EnsureClaim) {
   const id = message.id;
   const method = message.method;
   const params = (message.params ?? {}) as Json;
   if (method === "initialize") return ok(id, { protocolVersion: String(params.protocolVersion ?? "2024-11-05"), capabilities: { tools: {} }, serverInfo: { name: "openmausbot-phone", version: "1" } });
+  if (method === "notifications/cancelled" && callsCancelled.has(params.requestId)) callsCancelled.set(params.requestId, true);
   if (method === "notifications/initialized" || method === "notifications/cancelled") return;
   if (method === "ping") return ok(id, {});
   if (method === "tools/list") return ok(id, { tools: TOOLS });
   if (method === "tools/call") {
     const name = String(params.name ?? "");
     if (!TOOLS.some((tool) => tool.name === name)) return rpcError(id, -32602, `Unknown tool: ${name}`);
-    return ok(id, await callPhoneTool(name, (params.arguments ?? {}) as Json, ensureClaim));
+    if (name === "batch") callsCancelled.set(id, false);
+    const stillWanted: EnsureClaim = async (midCall) => {
+      const stillClaimed = await ensureClaim(midCall);
+      return callsCancelled.get(id) ? { ok: false, message: "The client cancelled this call." } : stillClaimed;
+    };
+    try {
+      return ok(id, await callPhoneTool(name, (params.arguments ?? {}) as Json, stillWanted));
+    } finally {
+      callsCancelled.delete(id);
+    }
   }
   if (id !== undefined) rpcError(id, -32601, `Method not found: ${String(method)}`);
 }

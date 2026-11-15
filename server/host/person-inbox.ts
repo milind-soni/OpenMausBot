@@ -521,6 +521,15 @@ export function createPersonInbox(deps: PersonInboxDeps) {
       if (!item.seen) { item.seen = true; save(); touch(item.threadId); }
       return true;
     },
+    /** The person read every line of their inbox that still waits on them; an ask stays open, only unmarked as new. */
+    markAllRead(person: string): number {
+      const unread = items.filter((item) => item.person === person && !item.seen && !settled(item));
+      if (!unread.length) return 0;
+      for (const item of unread) item.seen = true;
+      save();
+      for (const inbox of new Set(unread.map((item) => item.threadId))) touch(inbox);
+      return unread.length;
+    },
     /** The person wrote in a conversation: their inbox's list changes when a message from there waited on them. */
     wrote(person: string, threadId: string): void {
       const inboxes = new Set(items.filter((item) => item.person === person && item.kind === "message" && item.origin?.threadId === threadId && !item.answered && !item.done)

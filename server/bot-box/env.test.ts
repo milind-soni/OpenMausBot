@@ -32,12 +32,12 @@ const SERVER_ONLY_OMB: ReadonlySet<string> = new Set([
   "OMB_COMPANION_TAILNET_NAME", "OMB_COMPOSIO_API", "OMB_COMPOSIO_BROKER", "OMB_COMPOSIO_BROKER_TOKEN",
   "OMB_COMPOSIO_BROKER_URL", "OMB_COMPOSIO_TOOLKITS_API", "OMB_COMPUTER_CALL_ACT_WITHIN_MS",
   "OMB_COMPUTER_CALL_WAIT_MS", "OMB_COMPUTER_WAIT_MAX_MS", "OMB_CONTROL_PLANE_URL", "OMB_CONTROL_PORT",
-  "OMB_CREDENTIAL_STORE", "OMB_CUSTOM_IMAGE_KEY", "OMB_DATA_DIR", "OMB_DECISION_RETENTION_DAYS",
+  "OMB_CREDENTIAL_STORE", "OMB_CUSTOM_DECIDER_KEY", "OMB_CUSTOM_IMAGE_KEY", "OMB_DATA_DIR", "OMB_DECISION_RETENTION_DAYS",
   "OMB_DEEPSEEK_API_KEY", "OMB_DESKTOP_LAUNCH_ID", "OMB_DESKTOP_PARENT", "OMB_DEVS_STATUS_MS",
   "OMB_DEV_TRUST_LOCAL_BROWSER", "OMB_DISABLE_ANNOUNCEMENTS", "OMB_DISABLE_MODEL_CATALOG_FETCH", "OMB_DISABLE_MODEL_MANIFEST_FETCH", "OMB_DUCKDB_DIR", "OMB_DUCKDB_MAX_TEMP_SIZE",
   "OMB_DUCKDB_MEMORY_LIMIT", "OMB_ELEVENLABS_API", "OMB_ENTERPRISE_DIR", "OMB_ENVIRONMENT_LABEL", "OMB_EOF",
   "OMB_FIRST_REPLY_NOTICE_MS", "OMB_FISH_AUDIO_API", "OMB_FISH_AUDIO_API_KEY", "OMB_FISH_LIVE_AGENT_ID", "OMB_FISH_LIVE_URL", "OMB_FLEET_SOCKET", "OMB_GATE_",
-  "OMB_GEMINI_API_KEY", "OMB_GEMINI_IMAGE_KEY", "OMB_GEMINI_TTS_API", "OMB_GOAL_WAIT_MAX_MS",
+  "OMB_GEMINI_API_KEY", "OMB_GEMINI_IMAGE_KEY", "OMB_GEMINI_LIVE_MODEL", "OMB_GEMINI_LIVE_URL", "OMB_GEMINI_TTS_API", "OMB_GOAL_WAIT_MAX_MS",
   "OMB_GREENFERENCE_API_KEY", "OMB_GROQ_API_KEY", "OMB_HELPER_INSTANCE", "OMB_HELPER_MODEL", "OMB_HOOKS", "OMB_HOOK_",
   "OMB_HOSTED_", "OMB_HOSTED_MODELS", "OMB_HOSTED_MODEL_TOKEN", "OMB_HOSTED_MODEL_URL", "OMB_INSTALLATION_CREDENTIAL",
   "OMB_JEV_API_KEY", "OMB_LAN", "OMB_LICENSE_KEY", "OMB_LINUX_GPU", "OMB_LIVE_PROVIDER", "OMB_LOCAL_VM_UPDATE_WAIT_MS",
@@ -62,7 +62,7 @@ const ROOT = new URL("../../", import.meta.url);
 
 /** The `OMB_` names in the code the server runs, and in what starts it (the desktop app). */
 function knownOmbNames(): string[] {
-  const files = execFileSync("git", ["ls-files", "server", "shared", "enterprise/server", "electron"], { cwd: ROOT, encoding: "utf8" })
+  const files = execFileSync("git", ["ls-files", "server", "shared", "packages", "enterprise/server", "electron"], { cwd: ROOT, encoding: "utf8" })
     .split("\n").filter((file) => /\.(?:ts|mts|mjs|cjs|js)$/.test(file) && !/\.test\.|\/testing\/|node-test/.test(file));
   const names = new Set<string>();
   for (const file of files) for (const match of readFileSync(new URL(file, ROOT), "utf8").matchAll(/\bOMB_[A-Z0-9_]+\b/g)) names.add(match[0]);

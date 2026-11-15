@@ -158,7 +158,7 @@ function RoomTextMessage({
   const { state, dispatch } = useStore();
   const user = m.role === "user";
   const reactor = useReactor();
-  const speaker = otherSpeaker(m, state.config?.team && reactor !== "user" ? reactor : null);
+  const speaker = otherSpeaker(m, reactor !== "user" ? reactor : null);
   const rawText = user ? (m.text ?? "") : stripLeakedSystemHarnessMessages(m.text ?? "");
   const cited = user && m.text ? splitTranscriptCitations(m.text) : null;
   const attachments = user && m.text ? splitTranscriptAttachments(cited?.display ?? m.text) : null;
@@ -202,8 +202,8 @@ function RoomTextMessage({
     </MessageActions>
   );
   return (
-    <div {...{ [MESSAGE_ROW]: "" }} className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
-      {speaker && <div className="mb-0.5 px-1 text-[12px] font-medium text-ink-secondary">{speaker}</div>}
+    <div {...{ [MESSAGE_ROW]: "" }} data-look={user ? "message-user" : "message-bot"} className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
+      {speaker && <div className="mb-0.5 px-1 text-right text-[12px] [overflow-wrap:anywhere] font-medium text-ink-secondary">{speaker}</div>}
       <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
         {user && (
           <MessageActions side="user" menu={[...userMessageMenu({ messageId: m.id, pin }), ...forkAction]}>
@@ -212,7 +212,7 @@ function RoomTextMessage({
           </MessageActions>
         )}
         <div
-          data-chat-bubble={simple ? "simple" : ""}
+          data-chat-bubble={simple ? "simple" : ""} data-look={user ? "user-bubble" : "bot-bubble"}
           className={cn(
             tabled ? "w-full" : "w-fit",
             simple ? cn(!tabled && SIMPLE_BUBBLE_MAX, SIMPLE_BUBBLE_TEXT) : "max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl text-[15px] leading-relaxed",
@@ -994,7 +994,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
   useEffect(() => setMembersOpen(false), [group.id]);
 
   return (
-    <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
+    <main data-look="chat" className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <GroupCallOverlay group={group} members={members} />
       {membersOpen && !remoteClient && !group.dm && (
         <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />

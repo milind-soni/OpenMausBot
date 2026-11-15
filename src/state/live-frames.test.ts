@@ -69,7 +69,7 @@ afterAll(() => {
 describe("live frames the store does not keep", () => {
   it("come from the app's one stream", () => {
     expect(seen.bots.map((candidate) => candidate.id)).toEqual(["bot"]);
-    expect(FixtureEventSource.opened.map((source) => source.url)).toEqual(["/api/events?screens=off"]);
+    expect(FixtureEventSource.opened.map((source) => source.url)).toEqual(["/api/events?screens=off&window=1"]);
   });
 
   it("hand a screen frame to its listener without touching app state", async () => {

@@ -50,7 +50,7 @@ vi.mock("./ActivitySection", () => ({ ActivitySection: marker("activity") }));
 vi.mock("./UsageSection", () => ({ UsageSection: marker("usage") }));
 vi.mock("./ImportSettings", () => ({ ImportSettings: marker("import") }));
 vi.mock("./VaultSettings", () => ({ VaultSettings: marker("logins") }));
-vi.mock("./BrowserSettingsRows", () => ({ BuiltInBrowserRow: marker("browser"), ServerSitesRow: () => null }));
+vi.mock("./BrowserSettingsRows", () => ({ BuiltInBrowserRow: marker("browser"), ServerSitesRow: () => null, BrowserProxyRow: () => null }));
 vi.mock("./WindowPlaceTitle", () => ({ useWindowPlace: () => null, windowPlaceName: () => "This computer" }));
 
 const { SettingsModal } = await import("./SettingsModal");

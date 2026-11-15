@@ -59,13 +59,13 @@ export interface LiveEventsHandlers {
   retryMaxMs?: number;
 }
 
-/** `screens: false` asks the server to leave out live screen frames. */
+/** `screens: false` asks the server to leave out live screen frames; `window=1` tells it an app window is open. */
 export function liveEventsUrl(options?: { since?: string | null; screens?: boolean }): string {
   const params = new URLSearchParams();
   if (options?.since) params.set("since", options.since);
   if (options?.screens === false) params.set("screens", "off");
-  const query = params.toString();
-  return query ? `${LIVE_EVENTS_PATH}?${query}` : LIVE_EVENTS_PATH;
+  params.set("window", "1");
+  return `${LIVE_EVENTS_PATH}?${params}`;
 }
 
 export interface LiveFrameListener {
