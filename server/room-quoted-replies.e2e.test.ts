@@ -11,6 +11,7 @@ const bots: Bot[] = [];
 let routingCalls = 0;
 let routingOptions: string[] = [];
 let keyChecks = 0;
+let replyGate: { started: boolean; release: Promise<void> } | undefined;
 
 const api = async (method: string, path: string, body?: unknown) => {
   const response = await fetch(fixture.info.url + path, {
@@ -43,6 +44,13 @@ beforeAll(async () => {
       return json({ answers: { answer: { type: "choice", choice, confidence: 0.99, probabilities: { [choice]: 0.99 } } } });
     }
     res.writeHead(200, { "content-type": "text/event-stream" });
+    const gate = replyGate;
+    replyGate = undefined;
+    if (gate) {
+      res.flushHeaders();
+      gate.started = true;
+      await gate.release;
+    }
     res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "I received your message." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
   });
   await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
@@ -104,6 +112,40 @@ it("lets an explicit mention override the quoted bot", async () => {
   const before = routingCalls;
   expect((await round(room, "@Cyra please review this.", quote.id)).replies.map((message) => message.from?.botId)).toEqual([bots[2]!.id]);
   expect(routingCalls).toBe(before);
+}, 120_000);
+
+it.each([
+  ["quoted then unquoted", "atlas", undefined, [0, 1]],
+  ["unquoted then quoted", undefined, "atlas", [1, 0]],
+  ["different quoted bots", "atlas", "boreal", [0, 1]],
+  ["the same quoted bot", "atlas", "atlas", [0]],
+  ["both unquoted", undefined, undefined, [1]],
+] as const)("routes queued %s messages without changing their reply targets", async (_name, firstTarget, secondTarget, responders) => {
+  const { room, quote } = await quotedRoom();
+  const secondQuote = (await round(room, "@Boreal please post your status.")).replies[0]!;
+  expect(secondQuote.from?.botId).toBe(bots[1]!.id);
+  const quoteIds = { atlas: quote.id, boreal: secondQuote.id };
+  const before = new Set((await messages(room)).map((message) => message.id));
+  let release!: () => void;
+  const gate = { started: false, release: new Promise<void>((resolve) => { release = resolve; }) };
+  replyGate = gate;
+  try {
+    await api("POST", `/api/groups/${room.id}/messages`, { text: "@Cyra keep this room busy.", threadId: room.threadId });
+    await expect.poll(() => gate.started, { timeout: 30_000 }).toBe(true);
+    for (const [index, target] of [firstTarget, secondTarget].entries()) {
+      const sent = await api("POST", `/api/groups/${room.id}/messages`, {
+        text: `Please review detail ${index + 1}.`, threadId: room.threadId,
+        ...(target ? { replyToId: quoteIds[target] } : {}),
+      });
+      expect(sent.queued).toBe(true);
+    }
+  } finally {
+    replyGate = undefined;
+    release();
+  }
+  expect((await control(["wait", "--channel", room.id, "--timeout", "30"])).status).toBe("settled");
+  const replies = (await messages(room)).filter((message) => !before.has(message.id) && message.kind === "text" && message.role === "bot");
+  expect(replies.map((message) => message.from?.botId)).toEqual([bots[2]!.id, ...responders.map((index) => bots[index]!.id)]);
 }, 120_000);
 
 it("still asks the decision model for a reply to a person's message", async () => {

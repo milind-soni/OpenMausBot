@@ -4,6 +4,7 @@ import {
   _queuedChannelCount,
   cancelChannelMessage,
   drainChannelMessages,
+  headChannelGroup,
   holdChannelQueue,
   queuedChannelMessage,
   queueChannelMessage,
@@ -11,8 +12,49 @@ import {
   restoreHeldChannelQueue,
   resolveHeldReplyTarget,
   settleHeldChannelQueueHead,
+  type ChannelQueueItem,
 } from "./channel-queue.ts";
 import { saveChatFollowup } from "./message-db.ts";
+
+describe("channel queue batches", () => {
+  const item = (id: string, options: Partial<ChannelQueueItem> = {}): ChannelQueueItem => ({
+    id, text: id, mode: "chat", queuedAt: 1_000, ...options,
+  });
+
+  it.each([
+    ["quoted then unquoted", "reply-a", undefined, 1],
+    ["unquoted then quoted", undefined, "reply-a", 1],
+    ["different replies", "reply-a", "reply-b", 1],
+    ["the same reply", "reply-a", "reply-a", 2],
+    ["both unquoted", undefined, undefined, 2],
+  ] as const)("batches %s messages by their reply target", (_name, firstReply, secondReply, count) => {
+    const first = item("first", { replyToId: firstReply });
+    const second = item("second", { replyToId: secondReply, queuedAt: 1_001 });
+    expect(headChannelGroup([first, second])).toEqual([first, second].slice(0, count));
+  });
+
+  it.each([
+    ["API", { via: "api" }],
+    ["goal", { mode: "goal" }],
+    ["pointed", { pointed: { refs: [], blocks: { atlas: "picked page" } } }],
+  ] satisfies Array<[string, Partial<ChannelQueueItem>]>)("keeps %s sends separate even with the same reply target", (_name, options) => {
+    const first = item("first", { replyToId: "reply-a", ...options });
+    const second = item("second", { replyToId: "reply-a", ...options });
+    expect(headChannelGroup([first, second])).toEqual([first]);
+  });
+
+  it("keeps different people separate even with the same reply target", () => {
+    const first = item("first", { replyToId: "reply-a", sender: { id: "priya", name: "Priya" } });
+    const second = item("second", { replyToId: "reply-a", sender: { id: "alex", name: "Alex" } });
+    expect(headChannelGroup([first, second])).toEqual([first]);
+  });
+
+  it("still coalesces one person's replies after their display name changes", () => {
+    const first = item("first", { replyToId: "reply-a", sender: { id: "priya", name: "Priya" } });
+    const second = item("second", { replyToId: "reply-a", sender: { id: "priya", name: "Priya Shah" } });
+    expect(headChannelGroup([first, second])).toEqual([first, second]);
+  });
+});
 
 describe("channel queue", () => {
   it("keeps readable citation prompts byte-for-byte through room queue and steer hold", () => {
@@ -207,6 +249,20 @@ describe("channel queue", () => {
     expect(run).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ id: tail.id, text: "still waits its own turn" })] }));
     expect(_queuedChannelCount("thread-e")).toBe(0);
+  });
+
+  it("keeps a different reply target queued after steering the head", () => {
+    const head = queueChannelMessage("group-replies", "thread-replies", "first reply", { replyToId: "reply-a" });
+    const tail = queueChannelMessage("group-replies", "thread-replies", "second reply", { replyToId: "reply-b" });
+    const held = holdChannelQueue("group-replies", "thread-replies", head.id)!;
+
+    settleHeldChannelQueueHead(held);
+    const run = vi.fn();
+    drainChannelMessages(() => false, run);
+    expect(run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      items: [expect.objectContaining({ id: tail.id, replyToId: "reply-b" })],
+    }));
+    expect(_queuedChannelCount("thread-replies")).toBe(0);
   });
 
   it("drains an idle thread queue while another thread in the same group is working", () => {

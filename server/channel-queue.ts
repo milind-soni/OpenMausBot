@@ -209,13 +209,13 @@ export function headChannelGroup(items: readonly ChannelQueueItem[]): ChannelQue
   return drainCoalesceHead(items, coalesceIdentity, (item) => item.queuedAt, DRAIN_COALESCE_MAX_ITEMS);
 }
 
-/** An API send has no person behind it and never merges, nor does a goal; unattributed local sends are one identity. */
+/** API, goal and pointed sends never merge; a chat burst shares one sender and reply target. */
 function coalesceIdentity(item: ChannelQueueItem): string {
   if (item.via === "api") return `api:${item.id}`;
   if (item.mode !== "chat") return `mode:${item.mode}:${item.id}`;
   if (item.pointed) return `pointed:${item.id}`;
-  if (item.sender) return `person:${item.sender.id ?? item.sender.name}`;
-  return "person:local";
+  const sender = item.sender ? `person:${item.sender.id ?? item.sender.name}` : "person:local";
+  return JSON.stringify([sender, item.replyToId ?? null]);
 }
 
 export function queuedChannelSends(threadId: string): number {
