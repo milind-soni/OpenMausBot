@@ -10189,5 +10189,8 @@
   "burst.status.failed": "失败",
   "burst.status.cancelled": "已取消",
   "burst.error.action": "操作没有成功，请稍后再试。",
-  "activity.tool.team.burst": "并行处理"
+  "activity.tool.team.burst": "并行处理",
+  "devices.computers.pairButton": "配对电脑",
+  "devices.computers.pairTitle": "配对另一台电脑",
+  "devices.computers.typeCode": "在另一台电脑上，在 {app} 中打开“连接到服务器”并输入此代码。"
 }

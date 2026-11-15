@@ -10351,5 +10351,8 @@
   "burst.status.failed": "失敗",
   "burst.status.cancelled": "已取消",
   "burst.error.action": "操作沒有成功，請稍後再試。",
-  "activity.tool.team.burst": "平行處理"
+  "activity.tool.team.burst": "平行處理",
+  "devices.computers.pairButton": "配對電腦",
+  "devices.computers.pairTitle": "配對另一台電腦",
+  "devices.computers.typeCode": "在另一台電腦上，於 {app} 開啟「連線到伺服器」並輸入這組代碼。"
 }
