@@ -1,5 +1,6 @@
 import { jsonPayload } from "../../server/memory-capture.ts";
 import { parseDream, type DreamConversation, type DreamLine } from "../../server/memory-dream.ts";
+import { passageMatcher } from "../../server/memory-entries.ts";
 import { checkDreamFacts } from "../../server/memory-fact-checks.ts";
 import { contradictionCandidates } from "../../server/memory-tidy.ts";
 
@@ -16,6 +17,8 @@ export interface DreamCase {
   conversations: Array<{ title?: string; lines: DreamLine[] }>;
   /** MEMORY.md as the bot has it before the dream. */
   notebook: string;
+  /** Passages the person asked their bots to forget; the case's own, never this machine's profile. */
+  forgotten?: string[];
   expect: {
     learned: Expected[];
     outdated: Array<Expected & { line: number }>;
@@ -28,7 +31,7 @@ export interface DreamScore {
   json: boolean;
   learned: string[];
   outdated: Array<{ line: number; now: string }>;
-  /** Parsed entries the fact checks refused. */
+  /** Parsed entries the fact checks or the forgotten passages refused. */
   dropped: number;
   found: number;
   expected: number;
@@ -53,8 +56,11 @@ export function scoreDream(testCase: DreamCase, answer: string): DreamScore {
   const conversations = dreamConversationsOf(testCase);
   const notebook = notebookOf(testCase);
   const parsed = parseDream(answer, conversations.length, notebook.length);
-  const learned = parsed.learned.filter((item) => checkDreamFacts(item.text, item.from, item.evidence, conversations)).map((item) => item.text);
-  const outdated = parsed.outdated.filter((item) => checkDreamFacts(item.now, item.from, item.evidence, conversations)).map(({ line, now }) => ({ line, now }));
+  const forgotten = (testCase.forgotten ?? []).map(passageMatcher).filter((match): match is (text: string) => boolean => match !== null);
+  const kept = (text: string, from: readonly number[], evidence: readonly string[] | undefined) =>
+    checkDreamFacts(text, from, evidence, conversations) && !forgotten.some((matches) => matches(text));
+  const learned = parsed.learned.filter((item) => kept(item.text, item.from, item.evidence)).map((item) => item.text);
+  const outdated = parsed.outdated.filter((item) => kept(item.now, item.from, item.evidence)).map(({ line, now }) => ({ line, now }));
   const dropped = parsed.learned.length + parsed.outdated.length - learned.length - outdated.length;
   const foundLearned = testCase.expect.learned.filter((expected) => learned.some((text) => covers(expected, text))).length;
   const foundOutdated = testCase.expect.outdated.filter((expected) => outdated.some((item) => item.line === expected.line && covers(expected, item.now))).length;

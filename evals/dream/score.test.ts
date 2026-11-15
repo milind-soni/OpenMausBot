@@ -59,6 +59,13 @@ describe("dream scoring", () => {
     expect(scoreDream(testCase, answer({})).pass).toBe(false);
   });
 
+  it("drops what the person asked to forget, as whole words, the way runDream does", () => {
+    const testCase = byId("outdated-note-after-a-move");
+    const moved = answer({ outdated: [{ line: 0, now: "The person lives in Bangalore", from: [1], evidence: ["I moved to Bangalore last month"] }] });
+    expect(scoreDream({ ...testCase, forgotten: ["bangalore"] }, moved)).toMatchObject({ outdated: [], dropped: 1, pass: false });
+    expect(scoreDream({ ...testCase, forgotten: ["galore"] }, moved)).toMatchObject({ dropped: 0, pass: true });
+  });
+
   it("adds up a run", () => {
     const pass = scoreDream(byId("one-chat-is-not-a-pattern"), answer({}));
     const fail = scoreDream(byId("one-chat-is-not-a-pattern"), "no");
