@@ -5,7 +5,11 @@ type Element = ReactElement<{ children?: ReactNode; align?: string; alt?: string
 const elements = (children: ReactNode): Element[] => Children.toArray(children).filter(isValidElement) as Element[];
 function plain(node: ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(plain).join("");
+  if (Array.isArray(node)) return node.map((child, index) => {
+    const previous = node[index - 1];
+    // A Markdown break emits both <br> and a formatting newline; only the break belongs in copied cell text.
+    return typeof child === "string" && isValidElement(previous) && previous.type === "br" ? child.replace(/^\n/, "") : plain(child);
+  }).join("");
   if (!isValidElement(node)) return "";
   const element = node as Element;
   if (element.type === "br") return "\n";
