@@ -333,7 +333,11 @@ What the owner provides and does, in order. Nothing here has been done.
 
 **Control plane** (`cloudflare/control-plane/README.md`, "Phone push relay")
 
-5. Apply the D1 migration `0017_push_platforms.sql` (after `0008`).
+5. Apply the D1 migrations `0017_push_platforms.sql` (after `0008`) and
+   `0018_push_purpose.sql` (Live Activity and push-to-start tokens). Live
+   Activities and Android's ongoing notification need no further secret: they
+   use the same APNs key (topic `<bundle id>.push-type.liveactivity`) and the
+   same Firebase project.
 6. Set the secrets: `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY` (the
    `.p8`), `APNS_BUNDLE_ID` (`com.openmausbot.app`), optionally
    `APNS_ENVIRONMENTS=production,sandbox` to accept development builds, and
