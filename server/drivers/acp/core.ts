@@ -130,13 +130,9 @@ export interface AcpSupport {
   loginNote: string;
   /** How a user installs this harness's CLI; surfaced by the setup UI. */
   install?: EngineInstall;
-  /** The CLI's own device-code login (`grok login --device-auth`), run with the turns' binary and
-   * environment and confirmed by isAuthenticated. */
-  deviceSignIn?: DeviceSignIn;
-  /** The agent's own ACP `authenticate` as a sign-in from the app: it spawns one sign-in session, sends
-   * initialize + authenticate, and the engine itself opens the person's browser and blocks the request until
-   * the person finishes there. The spec holds only this CLI's differences. */
-  browserSignIn?: AcpBrowserSignInSpec;
+  /** Sign-ins from the app, run with the turns' binary and environment: the CLI's own device-code login (`grok login
+   * --device-auth`, confirmed by isAuthenticated), or its ACP `authenticate` with the engine opening the browser (browser-auth.ts). */
+  deviceSignIn?: DeviceSignIn; browserSignIn?: AcpBrowserSignInSpec;
   /** CLI argv AFTER the binary name to enter ACP stdio mode. */
   spawnArgs(config: AcpConfig, turn: SendTurnInput): string[];
   /** Provider credential variables this ACP child is allowed to inherit. */
@@ -373,16 +369,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       } else if (support.resolveModelsOnCreate !== false) {
         await refreshModels();
       }
-      const deviceSignIn = support.deviceSignIn
-        ? new DeviceAuthController(support.deviceSignIn, { cli: config.cli, environment: () => childEnv(), onAuthenticated: refreshModels })
-        : null;
-      const browserSignIn = support.browserSignIn
-        ? new AcpBrowserAuth(support.browserSignIn, {
-            cli: config.cli,
-            environment: () => childEnv(),
-            onAuthenticated: refreshModels,
-          })
-        : null;
+      const deviceSignIn = support.deviceSignIn ? new DeviceAuthController(support.deviceSignIn, { cli: config.cli, environment: () => childEnv(), onAuthenticated: refreshModels }) : null;
+      const browserSignIn = support.browserSignIn ? new AcpBrowserAuth(support.browserSignIn, { cli: config.cli, environment: () => childEnv(), onAuthenticated: refreshModels }) : null;
       const listeners = new Set<RuntimeEventListener>();
       let disposing = false;
       const requireRunning = () => {
@@ -1625,8 +1613,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         },
         refreshModels: support.resolveModels ? () => refreshModels(true) : undefined,
         ...(startupModelRefresh ? { startupModelRefresh } : {}),
-        ...(support.deviceSignIn && deviceSignIn ? deviceAuthInstanceSurface(deviceSignIn, support.deviceSignIn) : {}),
-        ...(support.browserSignIn && browserSignIn ? acpBrowserAuthInstanceSurface(browserSignIn, support.browserSignIn) : {}),
+        ...(support.deviceSignIn && deviceSignIn ? deviceAuthInstanceSurface(deviceSignIn, support.deviceSignIn) : {}), ...(support.browserSignIn && browserSignIn ? acpBrowserAuthInstanceSurface(browserSignIn, support.browserSignIn) : {}),
         snapshot,
         adapter: {
           provider: DRIVER_KIND,
@@ -1673,8 +1660,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         },
         dispose: async () => {
           disposing = true;
-          await deviceSignIn?.dispose();
-          await browserSignIn?.dispose();
+          await deviceSignIn?.dispose(); await browserSignIn?.dispose();
           const disposingSessions = Array.from(sessions);
           for (const { stop } of active.values()) stop();
           for (const [threadId, session] of disposingSessions) {
