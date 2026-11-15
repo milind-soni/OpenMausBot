@@ -14,8 +14,8 @@ Right away, for every bot it pauses:
 Until it is resumed, a paused bot takes no new work:
 
 - a message to it is refused with a line saying it is paused and how to resume it;
-- its routines and webhooks don't run: each run that comes due fails with the same line, and the routine's card says
-  its bot is paused;
+- its routines and webhooks don't run: each run that comes due is let go quietly, with the same line in its run log,
+  so nothing lands under To review; the routine's card says its bot is paused. A run started by hand fails with the line;
 - another bot that tries to hand it work is told it is paused, and not to route around it;
 - in a room it is skipped, and the room goes on with its other members;
 - the bot API and the headless CLI get `409` with code `bot_held`.
