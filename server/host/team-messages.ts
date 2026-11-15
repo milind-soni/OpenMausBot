@@ -428,10 +428,6 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     route(notification: Notification, how: { routine?: boolean; summary?: boolean } = {}): Notification | null {
       return !team && deps.place ? deps.place.route(notification, how) : inbox.route(notification, how);
     },
-    /** Work handed on finished: on a place that is no team's, a line in the inbox (place-inbox.ts). */
-    handedResult(work: { botId: string; threadId: string; groupId?: string; text: string }, requester: { botId: string; threadId: string }): void {
-      if (!team) deps.place?.handedResult(work, requester);
-    },
     stop(): void {
       unsubscribe();
       inbox.stop();

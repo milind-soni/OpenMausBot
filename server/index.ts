@@ -3970,7 +3970,7 @@ const handoffTicks = createHandoffTicks(), coordinator: Coordinator = createCoor
       if (parent.groupId ? !group || !store.groupTaskByThread(group.id, parent.threadId) : !store.taskByThread(parent.botId, parent.threadId)) return;
       const bot = store.bot(child.botId);
       if (store.messagesFor(parent.threadId).some(m => m.roomRequest?.id === child.id && m.roomRequest.phase === "result")) return;
-      const problem = roomHandoffProblem(child, parent); if (child.status === "completed" && !problem && child.mode === "work" && !child.statusOnly) teamMessages.handedResult({ botId: child.botId, threadId: child.threadId, ...(child.groupId ? { groupId: child.groupId } : {}), text: redactSecretsInText(child.result) }, { botId: parent.botId, threadId: parent.threadId });
+      const problem = roomHandoffProblem(child, parent);
       store.appendMessage(parent.threadId, {
         role: "bot", kind: "activity",
         roomRequest: { id: child.id, phase: "result" },
