@@ -255,6 +255,18 @@ describe("AI engines", () => {
     expect(fx.engines.map((engine) => engine.instanceId)).toEqual(["claude", "openai-compat-gw"]);
   });
 
+  it("refuses a local server already added at the same address, so Settings never lists it twice", async () => {
+    const fx = fixture();
+    await fx.set("engines", JSON.stringify({ kind: "lmstudio", url: "http://127.0.0.1:1234/v1" }));
+    const again = await fx.set("engines", JSON.stringify({ kind: "lmstudio", url: "http://127.0.0.1:1234/v1/" }));
+    expect(again).toMatchObject({ status: 409, body: { error: "\"LM Studio\" at http://127.0.0.1:1234/v1 is already an engine (openai-compat-2). Use that one; do not add it again." } });
+    expect(fx.engineCalls).toHaveLength(1);
+    expect(fx.cards()).toHaveLength(1);
+    // Another address is another server.
+    await fx.set("engines", JSON.stringify({ kind: "lmstudio", url: "http://127.0.0.1:1235/v1" }));
+    expect(fx.engineCalls).toHaveLength(2);
+  });
+
   it("an engine that needs a key takes only a saved key's id, which the server reads as it adds it; the key is shown nowhere", async () => {
     const fx = fixture();
     const missing = await fx.set("engines", JSON.stringify({ kind: "openai-compat", name: "Proxy", url: "https://proxy.example/v1", keyFrom: "mistralApiKey" }));
