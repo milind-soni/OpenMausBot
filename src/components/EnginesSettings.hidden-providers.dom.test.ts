@@ -9,7 +9,7 @@ import { setLocale, t } from "@/lib/i18n";
 import { BUILT_IN_INSTANCE_DRIVERS } from "@/lib/built-in-instances";
 
 const server = vi.hoisted(() => ({
-  all: [] as InstanceInfo[], hidden: new Set<string>(), calls: [] as Array<{ method: string; path: string; body?: unknown }>,
+  all: [] as InstanceInfo[], hidden: new Set<string>(), calls: [] as Array<{ method: string; path: string; body?: unknown }>, refuseUnhide: false,
 }));
 const fixture = vi.hoisted(() => ({ state: { instances: [] as InstanceInfo[], bots: [] as Bot[], config: {} as Record<string, unknown> } }));
 vi.mock("@/state/store", async (original) => {
@@ -36,6 +36,7 @@ vi.mock("@/state/store", async (original) => {
       const patch = /^\/api\/instances\/([\w.-]+)$/.exec(path);
       if (patch && method === "PATCH") {
         const { hidden } = JSON.parse(init!.body!) as { hidden?: boolean };
+        if (hidden === false && server.refuseUnhide) throw new Error("provider settings are already being updated");
         if (hidden === true) server.hidden.add(patch[1]!);
         if (hidden === false) server.hidden.delete(patch[1]!);
         return { instances: visible() };
@@ -64,6 +65,7 @@ beforeEach(() => {
   server.all = [codex, kimi(true)];
   server.hidden = new Set();
   server.calls = [];
+  server.refuseUnhide = false;
   fixture.state = { instances: [...server.all], bots: [], config: {} };
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
@@ -102,6 +104,7 @@ describe("Settings → AI: a provider hidden from its own card", () => {
     expect(hiddenRow.textContent).toContain(t("settings.ai.hiddenStatus"));
     expect(hiddenRow.querySelector("svg")).toBeTruthy();
 
+    expect(hiddenRow.querySelector('[data-unhide-engine="kimi"]')?.getAttribute("aria-label")).toBe("Unhide Kimi");
     await click(hiddenRow.querySelector('[data-unhide-engine="kimi"]'));
     expect(server.calls).toContainEqual({ method: "PATCH", path: "/api/instances/kimi", body: { hidden: false } });
     expect(rows()).toContain("kimi");
@@ -118,12 +121,26 @@ describe("Settings → AI: a provider hidden from its own card", () => {
     expect(hiddenRows()).toEqual(["kimi"]);
   });
 
+  it("keeps a hidden provider listed, with the server's refusal, when Unhide fails", async () => {
+    server.hidden.add("kimi");
+    server.refuseUnhide = true;
+    fixture.state = { ...fixture.state, instances: [codex] };
+    await render();
+    await click(container.querySelector('[data-unhide-engine="kimi"]'));
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("provider settings are already being updated");
+    expect(hiddenRows()).toEqual(["kimi"]);
+    expect(rows()).not.toContain("kimi");
+  });
+
   it("signs a connected CLI out from its card without hiding it", async () => {
     await render();
     await click(rowButton("kimi"));
     const signOut = container.querySelector('[data-engine-sign-out="kimi"] button');
     expect(signOut?.textContent).toBe("Sign out");
+    expect(signOut?.getAttribute("aria-label")).toBe("Sign out of Kimi");
     await click(signOut);
+    // The dialog says the CLI's own sign-in on this computer goes too.
+    expect(document.body.querySelector("[data-sign-out-cli]")?.textContent).toBe(t("accounts.signOutCliBody", { name: "Kimi" }));
     const confirm = [...document.body.querySelectorAll("button")].filter((button) => button.textContent === "Sign out").at(-1);
     await click(confirm);
     expect(server.calls).toContainEqual({ method: "POST", path: "/api/instances/kimi/auth/sign-out" });
@@ -133,6 +150,42 @@ describe("Settings → AI: a provider hidden from its own card", () => {
     expect(rows()).toContain("kimi");
     expect(rowButton("kimi")?.textContent).not.toBe("Manage");
     expect(hiddenRows()).toEqual([]);
+  });
+});
+
+describe("Settings → AI: Sign out on other CLI sign-ins", () => {
+  const grok: InstanceInfo = {
+    instanceId: "grok", driverKind: "grokAgent", displayName: "Grok", cliDefault: "grok",
+    snapshot: { state: "available", authenticated: true }, models: { default: "grok", options: [] },
+    authentication: { method: "device-code", signOut: true },
+  };
+  const vibe = (account?: { method: "api-key" }): InstanceInfo => ({
+    instanceId: "mistralVibe", driverKind: "mistralVibeAgent", displayName: "Mistral (Vibe)", cliDefault: "vibe-acp",
+    snapshot: { state: "available", authenticated: true, ...(account ? { account } : {}) }, models: { default: "mistral-medium-3.5", options: [] },
+    authentication: { method: "browser", signOut: true },
+  });
+
+  it.each([["Grok", grok], ["Mistral (Vibe)", vibe()]] as const)("signs %s out through its own sign-out", async (name, engine) => {
+    server.all = [codex, engine];
+    fixture.state = { ...fixture.state, instances: [...server.all] };
+    await render();
+    await click(rowButton(engine.instanceId));
+    const signOut = container.querySelector(`[data-engine-sign-out="${engine.instanceId}"] button`);
+    expect(signOut?.getAttribute("aria-label")).toBe(`Sign out of ${name}`);
+    await click(signOut);
+    expect(document.body.querySelector("[data-sign-out-cli]")?.textContent).toContain(name);
+    await click([...document.body.querySelectorAll("button")].filter((button) => button.textContent === "Sign out").at(-1));
+    expect(server.calls).toContainEqual({ method: "POST", path: `/api/instances/${engine.instanceId}/auth/sign-out` });
+    expect(server.calls.some((call) => call.method === "PATCH")).toBe(false);
+  });
+
+  it("offers no Sign out to an engine an API key signs in", async () => {
+    server.all = [codex, vibe({ method: "api-key" })];
+    fixture.state = { ...fixture.state, instances: [...server.all] };
+    await render();
+    await click(rowButton("mistralVibe"));
+    expect(container.querySelector('[data-engine-card="mistralVibe"]')).toBeTruthy();
+    expect(container.querySelector('[data-engine-sign-out="mistralVibe"]')).toBeNull();
   });
 });
 

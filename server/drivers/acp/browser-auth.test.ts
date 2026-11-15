@@ -127,6 +127,38 @@ describe.skipIf(process.platform === "win32")("AcpBrowserAuth", () => {
     await auth.dispose();
   });
 
+  it("refuses to sign out an engine an API key signs in, and removes nothing", async () => {
+    const home = tempHome();
+    homes.push(home);
+    const removed: string[] = [];
+    const auth = new AcpBrowserAuth(spec({
+      removeCredentials: (env) => { removed.push(env.HOME!); },
+      signedIn: () => true,
+      signedInByApiKey: (env) => Boolean(env.MISTRAL_API_KEY),
+    }), { cli: process.execPath, environment: () => ({ ...process.env, HOME: home, MISTRAL_API_KEY: "fixture-key" }) });
+    await expect(auth.signOut()).rejects.toThrow("Mistral is signed in by an API key here");
+    expect(removed).toEqual([]);
+    await auth.dispose();
+  });
+
+  it("reports a sign-out the engine contradicts instead of success", async () => {
+    const home = tempHome();
+    homes.push(home);
+    let signedIn = true;
+    const removed: string[] = [];
+    const auth = new AcpBrowserAuth(spec({ removeCredentials: (env) => { removed.push(env.HOME!); }, signedIn: () => signedIn }), {
+      cli: process.execPath,
+      environment: () => ({ ...process.env, HOME: home }),
+    });
+    await expect(auth.signOut()).rejects.toThrow("Mistral still reports a sign-in on this server");
+    expect(removed).toEqual([home]);
+    signedIn = false;
+    removed.length = 0;
+    await auth.signOut();
+    expect(removed).toEqual([home]);
+    await auth.dispose();
+  });
+
   it("appends the server hint when the cli path is missing (ENOENT)", async () => {
     const home = tempHome();
     homes.push(home);

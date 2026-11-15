@@ -31,7 +31,7 @@ import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { acpTurnSteering, advertisedCommands, type AcpSteerSupport } from "./steer.ts";
 import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts";
-import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts";
+import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts"; import { apiKeyAccount } from "./api-key-account.ts";
 
 export function skipSubscriptionAuthForLocalInject(model: string | undefined): boolean {
   return Boolean(decodeInjectId(model));
@@ -1547,7 +1547,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           });
         });
         if (!probe.version) return { state: "unavailable", reason: probe.reason, ...(probe.other ? { notEngineCli: true } : {}) };
-        return { state: "available", version: probe.version, authenticated: await support.isAuthenticated(env, config, instanceId, instanceEnvNames(input.environment, env)) };
+        const authenticated = await support.isAuthenticated(env, config, instanceId, instanceEnvNames(input.environment, env)); return { state: "available", version: probe.version, authenticated, ...apiKeyAccount(env, support.credentialEnv, authenticated) };
       };
 
     /** Memory upkeep's one-shot: a fresh process and session, no MCP servers, an empty folder, and

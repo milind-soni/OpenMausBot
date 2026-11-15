@@ -35,6 +35,9 @@ export interface AcpBrowserSignInSpec {
   /** Remove the engine's own stored sign-in (its cache files, its keychain entry); the person's pasted
    * provider key in Connections is not this engine's to remove. */
   removeCredentials?(env: Env): void | Promise<void>;
+  /** A provider key the engine runs on (a key pasted in Connections, or the server's environment): it keeps the engine
+   * signed in, so sign-out refuses instead of removing the engine's own sign-in to no effect. */
+  signedInByApiKey?(env: Env): boolean;
 }
 
 export interface AcpBrowserAuthOptions {
@@ -231,7 +234,15 @@ export class AcpBrowserAuth {
     if (!this.spec.removeCredentials) throw new Error(`Signing out of ${this.spec.product} is not available from here.`);
     if (this.flow) throw new Error(`Finish or cancel the ${this.spec.product} sign-in in progress before signing out.`);
     if (this.stopping) await this.takeStopping();
-    await this.spec.removeCredentials(this.options.environment());
+    const env = this.options.environment();
+    if (this.spec.signedInByApiKey?.(env)) {
+      throw new Error(`${this.spec.product} is signed in by an API key here, which signing out cannot remove. Remove the key under Settings → Connections to disconnect it.`);
+    }
+    await this.spec.removeCredentials(env);
+    // Checked again, as device-auth.ts does: a success the engine contradicts is not reported as one.
+    if (this.spec.signedIn?.(env)) {
+      throw new Error(`${this.spec.product} still reports a sign-in on this server. Update ${this.spec.product} and check its login status before trying again.`);
+    }
   }
 
   /** One waiter takes the outstanding termination; later callers see null. */

@@ -53,7 +53,7 @@ export function HiddenProviderRows({ hidden }: { hidden: HiddenProvider[] }) {
           <span className="truncate text-[14px] leading-5 text-ink">{entry.displayName}</span>
           <span className="truncate text-[13px] leading-[18px] text-ink-secondary">{t("settings.ai.hiddenStatus")}</span>
         </span>
-        <button type="button" data-unhide-engine={entry.instanceId} disabled={busy !== null} onClick={() => unhide(entry.instanceId)} className="ui-button ml-3 shrink-0 disabled:opacity-50">
+        <button type="button" data-unhide-engine={entry.instanceId} disabled={busy !== null} onClick={() => unhide(entry.instanceId)} aria-label={t("engines.unhideAria", { name: entry.displayName })} className="ui-button ml-3 shrink-0 disabled:opacity-50">
           {busy === entry.instanceId ? t("engines.unhiding") : t("engines.unhide")}
         </button>
       </div>
@@ -75,7 +75,7 @@ export function HiddenEngines() {
         {hidden.map((entry) => (
           <div key={entry.instanceId} className="flex items-center justify-between gap-3 rounded-lg bg-control px-3 py-2">
             <span className="min-w-0 truncate text-[13px] text-ink">{entry.displayName}</span>
-            <button type="button" data-unhide-engine={entry.instanceId} disabled={busy !== null} onClick={() => unhide(entry.instanceId)}
+            <button type="button" data-unhide-engine={entry.instanceId} disabled={busy !== null} onClick={() => unhide(entry.instanceId)} aria-label={t("engines.unhideAria", { name: entry.displayName })}
               className="shrink-0 text-[12px] font-medium text-accent hover:underline disabled:opacity-50">
               {busy === entry.instanceId ? t("engines.unhiding") : t("engines.unhide")}
             </button>
