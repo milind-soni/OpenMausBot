@@ -26,10 +26,12 @@ async function render(forceOpen = false) {
   await act(async () => {
     root.render(
       createElement("div", { [MESSAGE_ROW]: "" },
-        createElement("p", null, "an answer"),
+        createElement("div", { "data-chat-bubble": "" }, createElement("p", null, "an answer")),
+        createElement("span", { "data-outside": "" }, "gap"),
         createElement(MessageActions, {
           side: "bot",
           forceOpen,
+          contextItems: [{ key: "reply", icon: null, label: "Reply", onSelect: () => picked.push("reply") }],
           menu: [
             { key: "pin", icon: null, label: "Pin message", onSelect: () => picked.push("pin") },
             { key: "raw", icon: null, label: "Show raw markdown", onSelect: () => picked.push("raw") },
@@ -121,6 +123,31 @@ describe("message actions row", () => {
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
+    expect(items()).toHaveLength(0);
+  });
+
+  const rightClick = async (target: Element) => {
+    const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 });
+    await act(async () => { target.dispatchEvent(event); });
+    return event.defaultPrevented;
+  };
+
+  it("opens the menu with the inline actions first on a right-click of the bubble", async () => {
+    await render();
+    expect(await rightClick(body())).toBe(true);
+    expect(items().map((item) => item.textContent)).toEqual(["Reply", "Pin message", "Show raw markdown"]);
+    await act(async () => items()[0]!.click());
+    expect(picked).toEqual(["reply"]);
+    await act(async () => more().click());
+    expect(items().map((item) => item.textContent)).toEqual(["Pin message", "Show raw markdown"]);
+  });
+
+  it("leaves the native menu for a selection or a right-click beside the bubble", async () => {
+    await render();
+    expect(await rightClick(host.querySelector("[data-outside]")!)).toBe(false);
+    window.getSelection()!.selectAllChildren(body());
+    expect(await rightClick(body())).toBe(false);
+    window.getSelection()!.removeAllRanges();
     expect(items()).toHaveLength(0);
   });
 

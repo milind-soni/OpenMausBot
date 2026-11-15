@@ -45,12 +45,15 @@ export function MessageActions({
   forceOpen = false,
   className,
   menu: items = [],
+  contextItems = [],
   children,
 }: {
   side: "user" | "bot";
   forceOpen?: boolean;
   className?: string;
   menu?: MessageMenuItem[];
+  /** Added before `menu` when a right-click on the bubble opens it, for the actions that are inline buttons otherwise. */
+  contextItems?: MessageMenuItem[];
   children?: ReactNode;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -59,9 +62,11 @@ export function MessageActions({
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pointAt, setPointAt] = useState<{ x: number; y: number; clientX: number; clientY: number } | null>(null);
+  const offered = pointAt ? [...contextItems, ...items] : items;
   // use() may run conditionally: a closed menu has no reason to follow the turn.
-  const busy = menuOpen && items.some((item) => item.idleOnly) ? use(ChatBusyContext) : false;
-  const menu = busy ? items.filter((item) => !item.idleOnly) : items;
+  const busy = menuOpen && offered.some((item) => item.idleOnly) ? use(ChatBusyContext) : false;
+  const menu = busy ? offered.filter((item) => !item.idleOnly) : offered;
   const [hovered, setHovered] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
   const [tapped, setTapped] = useState(false);
@@ -70,6 +75,8 @@ export function MessageActions({
   const mirrored = side === "user";
   const streaming = use(StreamingReplyContext);
   const shown = !streaming && (forceOpen || menuOpen || hovered || keyboardFocus || tapped);
+  const canPointRef = useRef(false);
+  canPointRef.current = !streaming && items.length + contextItems.length > 0;
 
   useEffect(() => {
     const row = rootRef.current?.closest<HTMLElement>(`[${MESSAGE_ROW}]`) ?? rootRef.current;
@@ -109,6 +116,17 @@ export function MessageActions({
       if (window.getSelection()?.toString()) return;
       setTapped((value) => !value);
     };
+    const context = (event: MouseEvent) => {
+      if (!canPointRef.current || (event as Partial<PointerEvent>).pointerType === "touch") return;
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest("[data-chat-bubble]") || target.closest(INTERACTIVE)) return;
+      if (window.getSelection()?.toString().trim()) return;
+      const box = rootRef.current?.getBoundingClientRect();
+      if (!box) return;
+      event.preventDefault();
+      setPointAt({ x: event.clientX - box.left, y: event.clientY - box.top, clientX: event.clientX, clientY: event.clientY });
+      setMenuOpen(true);
+    };
     row.addEventListener("pointerenter", enter);
     row.addEventListener("pointerleave", leave);
     row.addEventListener("focusin", focusIn);
@@ -117,6 +135,7 @@ export function MessageActions({
     row.addEventListener("pointermove", move);
     row.addEventListener("pointerup", up);
     row.addEventListener("pointercancel", cancel);
+    row.addEventListener("contextmenu", context);
     return () => {
       if (press) clearTimeout(press.timer);
       row.removeEventListener("pointerenter", enter);
@@ -127,6 +146,7 @@ export function MessageActions({
       row.removeEventListener("pointermove", move);
       row.removeEventListener("pointerup", up);
       row.removeEventListener("pointercancel", cancel);
+      row.removeEventListener("contextmenu", context);
     };
   }, []);
 
@@ -139,6 +159,12 @@ export function MessageActions({
   useLayoutEffect(() => {
     if (!menuOpen) return;
     const menuBox = menuRef.current?.getBoundingClientRect();
+    if (pointAt && menuBox) {
+      setMenuAbove(pointAt.clientY + menuBox.height > window.innerHeight - 8 && pointAt.clientY - menuBox.height > 8);
+      setMenuFlipped(pointAt.clientX + menuBox.width > window.innerWidth - 8 && pointAt.clientX - menuBox.width >= 8);
+      menuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]:not(:disabled)")?.focus();
+      return;
+    }
     const more = moreRef.current?.getBoundingClientRect();
     if (menuBox && more) setMenuAbove(more.bottom + 4 + menuBox.height > window.innerHeight - 8 && more.top - 4 - menuBox.height > 8);
     const rowBox = rootRef.current?.getBoundingClientRect();
@@ -151,7 +177,7 @@ export function MessageActions({
       setMenuFlipped(mirrored ? !fitsEnd && fitsStart : !fitsStart && fitsEnd);
     }
     menuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]:not(:disabled)")?.focus();
-  }, [menuOpen]);
+  }, [menuOpen, pointAt]);
 
   const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]:not(:disabled)") ?? [])];
@@ -184,11 +210,14 @@ export function MessageActions({
       }}
     >
       {children}
-      {menu.length > 0 && (
+      {items.length > 0 && (
         <button
           ref={moreRef}
           type="button"
-          onClick={() => setMenuOpen((value) => !value)}
+          onClick={() => {
+            setPointAt(null);
+            setMenuOpen((value) => !value);
+          }}
           aria-label={t("chat.messageActions")}
           title={t("chat.messageActions")}
           aria-haspopup="menu"
@@ -206,10 +235,11 @@ export function MessageActions({
           role="menu" data-look="menu"
           aria-label={t("chat.messageActions")}
           onKeyDown={moveFocus}
+          style={pointAt ? { left: pointAt.x, top: pointAt.y, translate: `${menuFlipped ? "-100%" : "0"} ${menuAbove ? "-100%" : "0"}` } : undefined}
           className={cn(
             "absolute z-40 min-w-52 max-w-[calc(100vw-2rem)] overflow-hidden", MENU_SHEET,
-            menuAbove ? "bottom-full mb-1" : "top-full mt-1",
-            mirrored !== menuFlipped ? "end-0" : "start-0",
+            !pointAt && (menuAbove ? "bottom-full mb-1" : "top-full mt-1"),
+            !pointAt && (mirrored !== menuFlipped ? "end-0" : "start-0"),
           )}
         >
           {menu.map((item) => (

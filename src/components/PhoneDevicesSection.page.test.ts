@@ -4,19 +4,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CompanionState, PhoneSetupController } from "./PhoneSetupFlow";
 
-const f = vi.hoisted(() => ({ state: null as object | null }));
+const f = vi.hoisted(() => ({ state: null as object | null, bridge: {} as object, account: null as object | null }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: {} } }) }));
 vi.mock("./PhonesList", () => ({ PhonesList: () => null }));
 vi.mock("./PhoneSetupFlow", () => ({
-  companionBridge: () => ({}),
+  companionBridge: () => f.bridge,
   companionAccountBridge: () => null,
-  usePhoneSetupController: () => ({ state: f.state, busy: false, accountBusy: false, account: null, accountAct: () => undefined, act: vi.fn(), accountError: null, error: null, useLocal: vi.fn(), start: vi.fn(), cancel: vi.fn(), refreshTailscale: vi.fn() }),
+  usePhoneSetupController: () => ({ state: f.state, busy: false, accountBusy: false, account: f.account, accountAct: () => undefined, act: vi.fn(), accountError: null, error: null, useLocal: vi.fn(), start: vi.fn(), cancel: vi.fn(), refreshTailscale: vi.fn() }),
   PhoneSetupFlowView: () => "PAIRING_CODE_VIEW",
   companionAccountActionError: () => null,
   loadCompanionBridgeState: () => null,
   shouldHydrateCompanionEmail: () => false,
 }));
-import { OpenCodeRow, PairDeviceDialog, PhoneDevicesSection, reachLine, routeStateText } from "./PhoneDevicesSection";
+import { OpenCodeRow, PairDeviceDialog, PhoneDevicesSection, reachLine, routeStateText, showHttpsAddressRow } from "./PhoneDevicesSection";
 
 const off = { on: false, since: null };
 const NOV_7 = new Date(2026, 10, 7).getTime();
@@ -32,6 +32,8 @@ const c = () => ({ busy: false, act: vi.fn(), useLocal: vi.fn(), start: vi.fn(),
 const page = (simple = false) => renderToStaticMarkup(createElement(PhoneDevicesSection, { simple })).replaceAll("&#x27;", "'");
 
 beforeEach(() => {
+  f.bridge = {};
+  f.account = null;
   f.state = state();
 });
 
@@ -80,6 +82,74 @@ describe("Phone & devices", () => {
     expect(html).toMatch(/Paired[\s\S]*?>Pair a phone<[\s\S]*?Ada's iPhone/);
     expect(html, "a switch that is on needs no line saying so").not.toContain("On · since");
     expect(html).not.toContain("data-reach-fold");
+  });
+});
+
+describe("Your other computers", () => {
+  it("shows in Simple mode with nothing on, outside More ways in, and in Advanced the same", () => {
+    for (const simple of [true, false]) {
+      const html = page(simple);
+      expect(html, String(simple)).toMatch(/data-settings-block="computers"[\s\S]*?Your other computers[\s\S]*?Needs Tailscale on both\.[\s\S]*?data-route-row="tailscale-computers"[\s\S]*?role="switch"/);
+      expect(html, String(simple)).not.toContain("More ways in");
+    }
+  });
+
+  it("stays its own row once Tailscale is on, after the ways a phone reaches this computer", () => {
+    f.state = state({ routes: routes({ tailscale: true }) });
+    const html = page(true);
+    expect(html).toMatch(/data-settings-block="reach"[\s\S]*?data-route-row="tailscale"[\s\S]*?data-settings-block="computers"[\s\S]*?data-route-row="tailscale-computers"/);
+    expect(html.match(/data-route-row="tailscale-computers"/g)).toHaveLength(1);
+  });
+});
+
+describe("Keep this computer awake", () => {
+  const awake = (html: string) => html.match(/<div role="group"[^>]*>(?:(?!<div role="group").)*?Keep this computer awake[\s\S]*?<button[^>]*role="switch"[^>]*>/)![0];
+
+  it("can be turned on when Your other computers is the only way in that is on", () => {
+    f.state = state({ routes: { ...routes({ tailscale: true }), tailscale: { on: true, since: NOV_7, name: "mac.tail1.ts.net", computers: true } } });
+    const row = awake(page(true));
+    expect(row).not.toContain("data-settings-inert");
+    expect(row).not.toContain('disabled=""');
+    f.state = state();
+    expect(page(true)).not.toContain("Keep this computer awake");
+  });
+});
+
+describe("the HTTPS address row", () => {
+  const current = { renewPairing: async () => state() };
+  const held = { available: true, status: "ready", endpoint: "https://c-0123456789abcdef0123456789abcdef.mausbot.si" };
+
+  it("is hidden on a build with the encrypted connection that holds no web address, whether or not the phone link is running", () => {
+    expect(showHttpsAddressRow({ routes: routes({ wifi: true }) }, null, current)).toBe(false);
+    expect(showHttpsAddressRow({ routes: routes() }, { }, current)).toBe(false);
+    f.bridge = current;
+    f.account = { available: true, status: "ready" };
+    for (const enabled of [false, true]) {
+      f.state = state({ enabled, routes: routes({ wifi: true, tailscale: true }) });
+      const html = page(false);
+      expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="true"[\s\S]*?data-route-row="tailscale"/);
+      expect(html).not.toContain('data-route-row="https"');
+      expect(html).not.toContain("HTTPS address");
+    }
+  });
+
+  it("stays while the account still holds an address, with Set up when the route is off", () => {
+    expect(showHttpsAddressRow({ routes: routes() }, held, current)).toBe(true);
+    f.bridge = current;
+    f.account = held;
+    f.state = state({ routes: routes({ wifi: true, tailscale: true }) });
+    expect(page(false)).toMatch(/HTTPS address[\s\S]*?data-route-row="https"[\s\S]*?>Set up</);
+  });
+
+  it("stays while the route is on, and on a build before the encrypted connection", () => {
+    expect(showHttpsAddressRow({ routes: routes({ https: true }) }, null, current)).toBe(true);
+    expect(showHttpsAddressRow({ routes: routes() }, null, {})).toBe(true);
+    expect(showHttpsAddressRow({ routes: routes() }, null, null)).toBe(true);
+    f.bridge = current;
+    f.state = state({ routes: routes({ https: true }), endpoints: [{ url: held.endpoint, kind: "hosted", priority: 0 }] });
+    const html = page(true);
+    expect(html).toMatch(/HTTPS address[\s\S]*?data-route-row="https"[\s\S]*?>Turn off</);
+    expect(html).toContain("On · c-0123456789abcdef0123456789abcdef.mausbot.si");
   });
 });
 

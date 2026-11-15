@@ -30,7 +30,7 @@ export type PairingInputProblem = "emailCode" | "oldCode" | "scriptKey" | "notAC
 /** English for each problem; src/locales/en.json carries the same sentences under the same keys. */
 export const PAIRING_INPUT_PROBLEM_TEXT = {
   "serverError.pair.emailCode": "That's a sign-in code from an email. Pairing needs a 12-character code like 7KQ2-M9XD-H4TP.",
-  "serverError.pair.oldCode": "That's a code from an older MausBot. Make a new one on the other computer: Phone & devices → Pair a device.",
+  "serverError.pair.oldCode": "That code is for the phone app. Pairing here needs a 12-character code like 7KQ2-M9XD-H4TP, made in Settings → Phone & devices on the computer or server you are connecting to.",
   "serverError.pair.scriptKey": "That's a script key. Pairing needs a pairing code.",
   "serverError.pair.notACode": "That isn't a pairing code. Pairing needs a 12-character code like 7KQ2-M9XD-H4TP.",
 } as const;

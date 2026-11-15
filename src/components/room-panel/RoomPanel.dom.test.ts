@@ -148,12 +148,12 @@ describe("Who responds", () => {
     ]);
   });
 
-  it("says who answers instead while Jev is off", async () => {
+  it("says who answers instead while the decision model is off", async () => {
     fixture.config = jev(false);
     render(room({ defaultResponder: { kind: "auto", fallbackBotId: "paper" } }));
     click($('[data-panel-page="responder"]'));
     await settle();
-    expect($('[data-panel-choice="auto"]')?.textContent).toBe("Let MausBot chooseJev is off, so plain messages go to Paperwork; @mentions override this");
+    expect($('[data-panel-choice="auto"]')?.textContent).toBe("Let MausBot chooseThe decision model is off, so plain messages go to Paperwork; @mentions override this");
     expect($('[data-panel-choice="auto"]')?.getAttribute("aria-checked")).toBe("true");
   });
 });
