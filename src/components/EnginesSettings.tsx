@@ -20,6 +20,9 @@ import { Select } from "./Select";
 import { SettingsFoldRow, SettingsGroup, SettingsMark, SettingsRows, StatusDot } from "./SettingsPrimitives";
 import { OllamaModels, ollamaShortStatus } from "./OllamaStatusLine";
 import { InstanceProviderMark } from "./ProviderIcons";
+import { HiddenEngines, HiddenProviderRows, useHiddenProviders } from "./HiddenProviders";
+
+export { HiddenEngines };
 
 interface ProbeResult {
   ok: boolean;
@@ -324,8 +327,9 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
   );
 }
 
-/** Remove drops an added account; Sign out forgets a signed-in account's Google sign-in, the first one too. */
-function AntigravityAccountAction({ instance, action }: { instance: InstanceInfo; action: "remove" | "signOut" }) {
+/** Remove drops an added Antigravity account; Sign out forgets a signed-in account's sign-in (Antigravity's Google one, or
+ * a CLI's own login such as Kimi's) and never hides the provider, which stays listed with Set up. */
+function EngineAccountAction({ instance, action }: { instance: InstanceInfo; action: "remove" | "signOut" }) {
   const { state, dispatch, refreshInstances } = useStore();
   const [confirming, setConfirming] = useState(false);
   const [running, setRunning] = useState(false);
@@ -403,13 +407,16 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
             <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t("engineSetup.claude.connectedAccount")}</p>
           )
       )}
+      {instance.driverKind !== "antigravityAgent" && engineReady(instance) && instance.snapshot.authenticated === true && instance.authentication?.signOut === true && (
+        <div data-engine-sign-out={instance.instanceId} className="mt-3"><EngineAccountAction instance={instance} action="signOut" /></div>
+      )}
       {instance.freeUpSpace && <AntigravityFreeSpace instance={instance} />}
       {instance.driverKind === "antigravityAgent" && (
         <div className="mt-3 space-y-3">
           {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
           <AntigravityAddAccount source={instance} />
-          {instance.snapshot.authenticated === true && instance.authentication?.signOut === true && <AntigravityAccountAction instance={instance} action="signOut" />}
-          {instance.instanceId.startsWith("antigravity-") && <AntigravityAccountAction instance={instance} action="remove" />}
+          {instance.snapshot.authenticated === true && instance.authentication?.signOut === true && <EngineAccountAction instance={instance} action="signOut" />}
+          {instance.instanceId.startsWith("antigravity-") && <EngineAccountAction instance={instance} action="remove" />}
         </div>
       )}
       <EngineAdvanced instance={instance} />
@@ -458,6 +465,8 @@ function SimpleEngines({ rows, isReady, renderEngine, more }: {
   more: { id: string; open: boolean; onToggle: () => void };
 }) {
   const [opened, setOpened] = useState<string | null>(null);
+  // A hidden provider is gone from the instance list, so without these rows nothing in Settings brings it back.
+  const hidden = useHiddenProviders();
   const featured = rows.filter((instance) => isReady(instance) || instance.authentication !== undefined);
   const others = rows.filter((instance) => !featured.includes(instance));
   const row = (instance: InstanceInfo, compact: boolean) => {
@@ -469,57 +478,15 @@ function SimpleEngines({ rows, isReady, renderEngine, more }: {
     <SettingsGroup label={t("settings.ai.providers")} actions={<RefreshEngines />}>
       <SettingsRows icons>
         {featured.map((instance) => row(instance, false))}
-        {others.length > 0 && (
-          <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(others.length)} open={more.open} onToggle={more.onToggle}
+        {others.length + hidden.length > 0 && (
+          <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(others.length + hidden.length)} open={more.open} onToggle={more.onToggle}
             leading={<span aria-hidden="true" />}>
             {others.map((instance) => row(instance, true))}
+            <HiddenProviderRows hidden={hidden} />
           </SettingsFoldRow>
         )}
       </SettingsRows>
     </SettingsGroup>
-  );
-}
-
-/** Providers someone hid: listed apart, folded, each one click from coming back. */
-export function HiddenEngines() {
-  const { state, refreshInstances } = useStore();
-  const [hidden, setHidden] = useState<Array<{ instanceId: string; displayName: string }>>([]);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    // An older server has no such route: nothing is hidden there.
-    api<{ instances?: Array<{ instanceId: string; displayName: string }> } | undefined>("/api/instances/hidden")
-      .then((result) => { if (alive) setHidden(Array.isArray(result?.instances) ? result.instances : []); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [state.instances]);
-  if (hidden.length === 0) return null;
-  const unhide = (instanceId: string) => {
-    setBusy(instanceId);
-    setError(null);
-    api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify({ hidden: false }) })
-      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
-      .catch((e) => setError(e.message))
-      .finally(() => setBusy(null));
-  };
-  return (
-    <details data-hidden-engines className="px-4">
-      <summary className="cursor-pointer text-[13px] font-medium text-ink-secondary hover:text-ink">{t("engines.hiddenTitle", { count: String(hidden.length) })}</summary>
-      <p className="mt-2 text-[12px] text-ink-secondary">{t("engines.hiddenHint")}</p>
-      <div className="mt-2 flex flex-col gap-1.5">
-        {hidden.map((entry) => (
-          <div key={entry.instanceId} className="flex items-center justify-between gap-3 rounded-lg border border-hairline/40 bg-inset px-3 py-2">
-            <span className="min-w-0 truncate text-[13px] text-ink">{entry.displayName}</span>
-            <button type="button" data-unhide-engine={entry.instanceId} disabled={busy !== null} onClick={() => unhide(entry.instanceId)}
-              className="shrink-0 text-[12px] font-medium text-accent hover:underline disabled:opacity-50">
-              {busy === entry.instanceId ? t("engines.unhiding") : t("engines.unhide")}
-            </button>
-          </div>
-        ))}
-      </div>
-      {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
-    </details>
   );
 }
 
