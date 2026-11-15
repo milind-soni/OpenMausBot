@@ -14,7 +14,7 @@ import {
   settleHeldChannelQueueHead,
   type ChannelQueueItem,
 } from "./channel-queue.ts";
-import { saveChatFollowup } from "./message-db.ts";
+import { chatFollowups, saveChatFollowup } from "./message-db.ts";
 
 describe("channel queue batches", () => {
   const item = (id: string, options: Partial<ChannelQueueItem> = {}): ChannelQueueItem => ({
@@ -27,10 +27,33 @@ describe("channel queue batches", () => {
     ["different replies", "reply-a", "reply-b", 1],
     ["the same reply", "reply-a", "reply-a", 2],
     ["both unquoted", undefined, undefined, 2],
-  ] as const)("batches %s messages by their reply target", (_name, firstReply, secondReply, count) => {
+  ] as const)("drains %s messages by their reply target", (name, firstReply, secondReply, count) => {
+    const groupId = `group-drain-${name}`;
+    const threadId = `thread-drain-${name}`;
+    const first = queueChannelMessage(groupId, threadId, "first", { replyToId: firstReply });
+    const second = queueChannelMessage(groupId, threadId, "second", { replyToId: secondReply });
+    const run = vi.fn();
+    try {
+      drainChannelMessages((_groupId, candidate) => candidate !== threadId, run);
+      expect(run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        items: [first, second].slice(0, count).map(({ id }) => expect.objectContaining({ id })),
+      }));
+    } finally {
+      cancelChannelMessage(groupId, first.id);
+      cancelChannelMessage(groupId, second.id);
+    }
+  });
+
+  it.each([
+    ["quoted then unquoted", "reply-a", undefined],
+    ["unquoted then quoted", undefined, "reply-a"],
+    ["different replies", "reply-a", "reply-b"],
+    ["the same reply", "reply-a", "reply-a"],
+    ["both unquoted", undefined, undefined],
+  ] as const)("steers %s messages in the same person's burst", (_name, firstReply, secondReply) => {
     const first = item("first", { replyToId: firstReply });
     const second = item("second", { replyToId: secondReply, queuedAt: 1_001 });
-    expect(headChannelGroup([first, second])).toEqual([first, second].slice(0, count));
+    expect(headChannelGroup([first, second])).toEqual([first, second]);
   });
 
   it.each([
@@ -251,18 +274,33 @@ describe("channel queue", () => {
     expect(_queuedChannelCount("thread-e")).toBe(0);
   });
 
-  it("keeps a different reply target queued after steering the head", () => {
+  it("settles the steered reply burst durably and restores the tail before messages queued during the hold", () => {
     const head = queueChannelMessage("group-replies", "thread-replies", "first reply", { replyToId: "reply-a" });
-    const tail = queueChannelMessage("group-replies", "thread-replies", "second reply", { replyToId: "reply-b" });
+    const second = queueChannelMessage("group-replies", "thread-replies", "second reply", { replyToId: "reply-b" });
+    const plain = queueChannelMessage("group-replies", "thread-replies", "plain line");
+    const tail = queueChannelMessage("group-replies", "thread-replies", "another person's turn", { sender: { name: "Priya" } });
     const held = holdChannelQueue("group-replies", "thread-replies", head.id)!;
+    const late = queueChannelMessage("group-replies", "thread-replies", "arrived during the hold");
 
+    const steeredIds = headChannelGroup(held.items).map(({ id }) => id);
     settleHeldChannelQueueHead(held);
+    const pendingIds = chatFollowups("channel").filter((row) => row.threadId === "thread-replies").map((row) => row.id);
+    const queuedBeforeRestart = _queuedChannelCount("thread-replies");
+    restoreChannelMessages();
+    const queuedAfterRestart = _queuedChannelCount("thread-replies");
+
     const run = vi.fn();
-    drainChannelMessages(() => false, run);
-    expect(run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      items: [expect.objectContaining({ id: tail.id, replyToId: "reply-b" })],
-    }));
-    expect(_queuedChannelCount("thread-replies")).toBe(0);
+    drainChannelMessages((_groupId, threadId) => threadId !== "thread-replies", run);
+    drainChannelMessages((_groupId, threadId) => threadId !== "thread-replies", run);
+    const remaining = _queuedChannelCount("thread-replies");
+    for (const queued of [head, second, plain, tail, late]) cancelChannelMessage("group-replies", queued.id);
+
+    expect(steeredIds).toEqual([head.id, second.id, plain.id]);
+    expect(pendingIds).toEqual([tail.id, late.id]);
+    expect(queuedBeforeRestart).toBe(2);
+    expect(queuedAfterRestart).toBe(2);
+    expect(run.mock.calls.map(([input]) => input.items.map((queued: ChannelQueueItem) => queued.id))).toEqual([[tail.id], [late.id]]);
+    expect(remaining).toBe(0);
   });
 
   it("drains an idle thread queue while another thread in the same group is working", () => {
