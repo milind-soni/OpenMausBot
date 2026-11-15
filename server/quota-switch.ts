@@ -8,12 +8,13 @@ import { recoveryCapabilityError } from "./automatic-recovery.ts";
 import type { EngineAccess, ModelCatalog, ModelSelection, ProviderAdapter, ProviderSnapshot } from "./contracts.ts";
 import type { Coordinator } from "./coordinator.ts";
 import { readyToRun, selectDefaultModelSelection, type SelectableInstance } from "./default-model-selection.ts";
+import { classifyError } from "./drivers/retry.ts";
 import { PROBE_TIMEOUT_MS } from "./engine-install.ts";
 import { spokenLineFields } from "./live-call-record.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import type { BotRecord, Message, Store, TaskRecord } from "./store.ts";
 import type { TurnStops } from "./turn-outcome.ts";
-import { takeoverRefusal, type LimitTakeover, type TakeoverScope } from "./host/limit-takeover.ts";
+import { signedOutStop, type LimitTakeover, type TakeoverScope } from "./host/limit-takeover.ts";
 
 export interface QuotaSwitchEngine {
   instanceId: string;
@@ -73,7 +74,8 @@ const ENDED: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"])
 /** Why a failed turn stopped, when it was its AI's usage limit or a sign-out. A tool call's failure names the tool,
  * never the engine's own limit, whatever its words. */
 export function turnLimitScope(event: SettledTurn, flags: { limit?: TakeoverScope } | undefined, cause: string | undefined): TakeoverScope | undefined {
-  return takeoverRefusal(event.stopReason, cause, flags?.limit);
+  return signedOutStop(event.stopReason, cause) ? "signed-out"
+    : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
 }
 
 /** On unless OMB_QUOTA_SWITCH=0: a limited AI's work carries on with another AI by itself. Off, only the backups
