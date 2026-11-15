@@ -12,7 +12,7 @@ import { augmentedPath } from "../../env-path.ts";
 import { calibrateIdentity, chromeFingerprint, loadOrCalibrateIdentity, type CalibratedIdentity } from "./calibrate.ts";
 import { needsNoSandbox, type ChromeIdentity } from "./identity.ts";
 import { installChromeForTesting, type ChromeForTestingPin, type DownloadProgress } from "./install.ts";
-import { chromeHost, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
+import { chromeHost, installedGoogleChrome, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
 import { IdentitySidecars } from "./sidecar.ts";
 import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, writeLauncher, type LauncherBox, type LauncherSettings, type Screen } from "./wrapper.ts";
 
@@ -119,7 +119,9 @@ export class ChromeLauncher implements BrowserLaunch {
   /** agent-browser runs its own headless shell, which many sites refuse, only because no Google Chrome is installed here. */
   runsShellForWantOfChrome(): boolean {
     const plan = this.plan();
-    return plan.kind === "legacy" && plan.noChrome === true;
+    if (plan.kind === "legacy") return plan.noChrome === true;
+    // A download that failed leaves the engine on its own shell; an installed Chrome it would use instead does not.
+    return this.state.kind === "failed" && plan.kind === "download" && installedGoogleChrome(this.host) === null;
   }
 
   /** Keep the shared agent-browser launcher and sidecar in the application's current language. */

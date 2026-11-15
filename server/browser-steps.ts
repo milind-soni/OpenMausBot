@@ -457,12 +457,13 @@ export class BrowserSteps {
       const delta = await this.health.read(call.session, read, call.ctx?.threadId ?? null, state.noDaemon);
       if (this.ports.takeStarted(call.session)) await this.started(call, steps, true, out);
       const pageHost = this.health.pageHost(call.session);
+      const late = state.late ? this.health.visible(call.session, state.late) : null;
       const visible = delta ? this.health.visible(call.session, delta) : null;
+      const refused = [late, visible].some((seen) => seen?.requests.some((request) => request.status === 403 && request.type.toLowerCase() === "document"));
       const lines = [
-        state.late ? healthLine(this.health.visible(call.session, state.late), [], "late", SETTLE_CAP_MS / 1000, pageHost) : null,
+        late ? healthLine(late, [], "late", SETTLE_CAP_MS / 1000, pageHost) : null,
         visible ? healthLine(visible, recording ? unansweredWorthSaying(pending) : [], state.action ? "after" : "late", SETTLE_CAP_MS / 1000, pageHost) : null,
-        visible?.requests.some((request) => request.status === 403 && request.type.toLowerCase() === "document")
-          && !attachesToChrome(call.spec.env) && this.shellForWantOfChrome() ? SHELL_REFUSED : null,
+        refused && !attachesToChrome(call.spec.env) && this.shellForWantOfChrome() ? SHELL_REFUSED : null,
         browserEgress.takeNotice(call.session),
       ];
       for (const text of lines) if (text) out.parts.push({ type: "text", text });

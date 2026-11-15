@@ -218,6 +218,19 @@ describe("the Chrome launcher", () => {
     expect(existsSync(chrome.path)).toBe(false);
   });
 
+  it("counts a failed Chrome download as the engine's own shell, but not when an installed Google Chrome is what the engine uses", async () => {
+    const bare = launcher(mac({ chrome: false }));
+    expect(bare.runsShellForWantOfChrome()).toBe(false);
+    await bare.prepare();
+    expect(bare.env()).toEqual({});
+    expect(bare.runsShellForWantOfChrome()).toBe(true);
+    const machine = mac();
+    const managed = launcher({ ...machine, host: { ...machine.host, exists: (path: string) => path.endsWith("com.google.Chrome.plist") || machine.host.exists(path) } });
+    await managed.prepare();
+    expect(managed.env()).toEqual({});
+    expect(managed.runsShellForWantOfChrome()).toBe(false);
+  });
+
   it("keeps what the host needs behind the error a viewer gets, when Chrome cannot start there", async () => {
     const named = mkdtempSync(join(tmpdir(), "omb-named-"));
     folders.push(named);
