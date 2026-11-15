@@ -1,7 +1,8 @@
-// Slack for Team Clouds, the Team Cloud's side (docs/team-slack.md). One MausBot Slack app is installed per company;
-// Slack's events arrive at the Admin, which hands each message to the team's Cloud with a session it opened for the
-// member who wrote it, so here the message is that member's own request. This module holds the contract's wire shapes,
-// the record of the messages taken (the idempotency key and what the Admin has been told) and the signed report back.
+// Slack for Clouds, the Cloud's side (docs/team-slack.md). One MausBot Slack app is installed per company or person;
+// Slack's events arrive at the Admin, which hands each message to the Cloud with a session it opened for the member who
+// wrote it (on a personal Cloud, for its owner), so here the message is that person's own request. This module holds
+// the contract's wire shapes, the record of the messages taken (the idempotency key and what the Admin has been told)
+// and the signed report back.
 // Security invariants: the Slack bot token never reaches this machine; nothing the Admin sends beyond the member's own
 // session and this contract's signature is authority; a report carries a message's id, state and final answer only.
 import { createHash, createHmac, randomBytes } from "node:crypto";
@@ -68,7 +69,9 @@ const recordSchema = z.object({
   closed: z.literal(true).optional(),
 });
 export type TeamSlackRecord = z.infer<typeof recordSchema>;
-const fileSchema = z.object({ version: z.literal(1), messages: z.array(recordSchema) });
+const fileSchema = z.object({ version: z.literal(1), messages: z.array(recordSchema),
+  /** A personal Cloud only: the conversations a Slack channel's message opened, kept after their messages are dropped. */
+  channels: z.array(z.string().regex(/^[\w-]{1,128}$/)).optional() });
 
 export const teamSlackKey = (record: Pick<TeamSlackRecord, "state" | "waiting">): string => record.state === "waiting" ? `waiting:${record.waiting ?? "question"}` : record.state;
 /** Nothing more will be said about it: the Admin has its final state, or asked for no more. */
@@ -78,9 +81,13 @@ export const teamSlackOver = (record: TeamSlackRecord): boolean => record.closed
 export function createTeamSlackMessages(options: { dataDir: string; now?: () => number; max?: number }) {
   const file = join(options.dataDir, TEAM_SLACK_FILE), now = options.now ?? Date.now, max = options.max ?? MAX_MESSAGES;
   const records = new Map<string, TeamSlackRecord>();
+  const channels = new Set<string>();
   try {
     const parsed = fileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
-    if (parsed.success) for (const record of parsed.data.messages) records.set(record.id, record);
+    if (parsed.success) {
+      for (const record of parsed.data.messages) records.set(record.id, record);
+      for (const threadId of parsed.data.channels ?? []) channels.add(threadId);
+    }
     else console.warn("team slack: the record of Slack messages can't be read; starting empty");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn("team slack: the record of Slack messages can't be read; starting empty");
@@ -91,12 +98,21 @@ export function createTeamSlackMessages(options: { dataDir: string; now?: () => 
     // Past the cap, what is over goes first: a run still tracked keeps its report and its Stop.
     for (const [id, record] of records) { if (records.size <= max) break; if (teamSlackOver(record)) records.delete(id); }
     while (records.size > max) records.delete(records.keys().next().value!);
-    try { writeFileAtomic(file, `${JSON.stringify({ version: 1, messages: [...records.values()] })}\n`, { mode: 0o600 }); }
+    while (channels.size > max) channels.delete(channels.values().next().value!);
+    try { writeFileAtomic(file, `${JSON.stringify({ version: 1, messages: [...records.values()], ...(channels.size ? { channels: [...channels] } : {}) })}\n`, { mode: 0o600 }); }
     catch (error) { console.warn(`team slack: could not save the record of Slack messages (${error instanceof Error ? error.name : "error"})`); }
   };
   return {
     get: (id: string): TeamSlackRecord | undefined => records.get(id),
     all: (): TeamSlackRecord[] => [...records.values()],
+    /** A personal Cloud's conversation that a Slack channel's message opened: never the chat its bot opens to. */
+    channelThread: (threadId: string): boolean => channels.has(threadId),
+    /** On a personal Cloud: a Slack channel's message opened this conversation, or (`opened` false) it was not kept. */
+    channel(threadId: string, opened: boolean): void {
+      if (opened ? channels.has(threadId) : !channels.delete(threadId)) return;
+      if (opened) channels.add(threadId);
+      save();
+    },
     put(record: TeamSlackRecord): void {
       records.set(record.id, record);
       save();
