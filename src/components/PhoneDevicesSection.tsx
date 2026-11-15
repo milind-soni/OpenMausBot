@@ -22,6 +22,7 @@ import { showTunnelRetiredNotice } from "../lib/phone-link";
 import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
 import { TailnetComputers } from "./TailnetComputers";
+import { RemoteAccessCheckRow } from "./RemoteAccessCheck";
 import { LearnMore, SettingRow, SettingsFoldRow, SettingsGroup, SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
 import { DialogTitle } from "./settings/SettingsDialog";
@@ -480,6 +481,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
               <Switch checked={state.keepAwake} aria-label={t("remote.keepAwakeAria")} disabled={c.busy || !anyRoute}
                 onClick={() => void c.act((companion) => companion.keepAwake(!state.keepAwake))} />
             </SettingRow>
+            <RemoteAccessCheckRow account={c.account} state={state} />
             {moreWays && (
               <SettingsFoldRow id="more-ways" title={t("devices.moreWays")} open={moreOpen} onToggle={() => setMoreOpen(!moreOpen)}>
                 <SettingRow title="Tailscale" subtitle={<>{t("remote.tailscaleSwitch.short", { app: productName() })}{" "}<LearnMore href={TAILSCALE_HELP} /></>}

@@ -131,4 +131,58 @@ describe("app_settings theme actions", () => {
     expect((await call({ action: "add_theme_asset", id: "missing", path: join(workspace, "Stars Big.png") })).status).toBe(404);
     expect(themes.list("owner").themes[0]!.assets).toEqual(["stars-big.png", "upload-1.png"]);
   });
+
+  it("lists the look changes and goes back by steps, by index and on its own undo, each with a card that has Undo", async () => {
+    const { call, themes, changed, undo, messages } = fixture();
+    const edit = (accent: string) => call({ action: "set_theme", id: "neon", theme: JSON.stringify({ ...NEON, accent }) });
+    await edit("#ff2bd6");
+    await edit("#00ff88");
+    await edit("#8a2be2");
+    await call({ action: "set_theme", id: "midnight" });
+    const listed = JSON.parse(String((await call({ action: "theme_history" })).body.text));
+    expect(listed.changes.map((change: { index: number; what: string }) => `${change.index} ${change.what}`)).toEqual(["1 wore the built-in midnight skin", "2 edited Neon", "3 edited Neon", "4 made Neon"]);
+    expect(listed.changes[1].look).toEqual({ theme: "Neon", canvas: "#0b1020", accent: "#8a2be2" });
+
+    expect((await call({ action: "undo_theme" })).body.text).toContain("Undo the last look change (wore the built-in midnight skin)");
+    expect(themes.list("owner").active).toBe("neon");
+    expect(changed.at(-1)).toEqual({ person: "owner", skin: "system" });
+    expect(messages.at(-1)!.card.appSettingRequest).toMatchObject({ settingId: "appearance.theme", after: expect.stringContaining("Undo the last look change") });
+
+    expect((await call({ action: "undo_theme", steps: "1" })).status).toBe(200);
+    expect(themes.list("owner").active).toBeNull();
+    expect(changed.at(-1)).toEqual({ person: "owner", skin: "midnight" });
+
+    const history = JSON.parse(String((await call({ action: "theme_history" })).body.text)).changes;
+    const green = history.find((change: { look: { accent?: string } }) => change.look.accent === "#00ff88");
+    expect((await call({ action: "undo_theme", index: green.index })).status).toBe(200);
+    expect(themes.read("owner", "neon")?.accent).toBe("#00ff88");
+    expect(themes.list("owner").active).toBe("neon");
+
+    expect((await call({ action: "undo_theme", steps: 2 })).status).toBe(200);
+    expect(themes.read("owner", "neon")?.accent).toBe("#8a2be2");
+    expect(themes.list("owner").active).toBe("neon");
+
+    const purple = JSON.parse(String((await call({ action: "theme_history" })).body.text)).changes.find((change: { what: string; look: { accent?: string } }) => change.what === "made Neon");
+    expect((await call({ action: "undo_theme", index: purple.index })).status).toBe(200);
+    expect(themes.read("owner", "neon")?.accent).toBe("#ff2bd6");
+    expect(await undo()).toEqual({ claimed: true, state: "undone" });
+    expect(themes.read("owner", "neon")?.accent).toBe("#8a2be2");
+
+    expect((await call({ action: "undo_theme", index: 1 })).body).toEqual({ error: "That is how it looks now." });
+    expect((await call({ action: "undo_theme", steps: 99 })).status).toBe(400);
+    expect((await fixture().call({ action: "undo_theme" })).status).toBe(400);
+    expect((await fixture({ person: null }).call({ action: "undo_theme" })).status).toBe(403);
+    expect((await fixture({ guest: true }).call({ action: "theme_history" })).status).toBe(403);
+  });
+
+  it("goes back to the default look with none, and that is a change undo goes back on", async () => {
+    const { call, themes, changed } = fixture();
+    await call({ action: "set_theme", id: "neon", theme: JSON.stringify(NEON) });
+    expect((await call({ action: "set_theme", id: "none" })).status).toBe(200);
+    expect(themes.list("owner").active).toBeNull();
+    expect(changed.at(-1)).toEqual({ person: "owner" });
+    expect(JSON.parse(String((await call({ action: "theme_history" })).body.text)).changes[0]).toMatchObject({ index: 1, what: "back to default", look: "default" });
+    expect((await call({ action: "undo_theme" })).status).toBe(200);
+    expect(themes.list("owner").active).toBe("neon");
+  });
 });

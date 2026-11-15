@@ -1,4 +1,4 @@
-import type { WireBot } from "../../shared/wire.ts";
+import type { BotCreateResponse, WireBot } from "../../shared/wire.ts";
 import { freshLook } from "../bot-look.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
@@ -270,7 +270,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           messages: store.messagesFor(bot.threadId),
           activeLeafId: store.activeLeaf(bot.threadId),
         },
-      });
+      } satisfies BotCreateResponse<ReturnType<typeof store.messagesFor>[number]>);
     }
     return PASS;
   };

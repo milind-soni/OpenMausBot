@@ -99,10 +99,12 @@ describe("what the app may do", () => {
     ["GET", "/api/threads/th_1/export"],
     ["POST", "/api/threads/th_1/respond"],
     ["GET", "/api/search"],
+    ["GET", "/api/bots/bot_123/skills"],
     ["POST", "/api/attachments"],
     ["GET", "/api/attachments/avatar-123.webp"],
     ["GET", "/api/attachments/voice-note-1.mp3"],
     ["GET", "/api/attachments/voice-note-1.wav"],
+    ["DELETE", "/api/attachments/3f2c9a1e-photo.jpg"],
     ["POST", "/api/files"],
     ["GET", "/api/tts/voices"],
     ["POST", "/api/tts/prepare"],
@@ -190,6 +192,38 @@ describe("what it may not", () => {
       ["POST", "/api/mcp/servers/warehouse/sign-in"],
     ] as Array<[string, string]>) {
       expect(allowed(method, path), `${method} ${path}`).toBe(false);
+    }
+  });
+
+  it("reads a bot's skills and changes none of them", () => {
+    expect(ask("GET", "/api/bots/bot_123/skills", false)?.status).toBe(401);
+    for (const [method, path] of [
+      ["POST", "/api/bots/bot_123/skills"],
+      ["PUT", "/api/bots/bot_123/skills"],
+      ["PATCH", "/api/bots/bot_123/skills"],
+      ["DELETE", "/api/bots/bot_123/skills"],
+      ["GET", "/api/bots/bot_123/skills/research"],
+      ["PATCH", "/api/bots/bot_123/skills/research"],
+      ["POST", "/api/bots/bot_123/skills/import"],
+      ["GET", "/api/bots/bot_123/../skills"],
+      ["GET", "/api/skills"],
+    ] as Array<[string, string]>) {
+      expect(allowed(method, path), `${method} ${path}`).toBe(false);
+    }
+  });
+
+  it("discards one uploaded file by its generated name, never a path", () => {
+    expect(ask("DELETE", "/api/attachments/3f2c9a1e-photo.jpg", false)?.status).toBe(401);
+    for (const path of [
+      "/api/attachments",
+      "/api/attachments/../config.json",
+      "/api/attachments/..%2Fconfig.json",
+      "/api/attachments/sub/photo.jpg",
+      "/api/attachments/photo",
+      "/api/attachments/.hidden",
+      "/api/attachments/photo.jpg.",
+    ]) {
+      expect(allowed("DELETE", path), path).toBe(false);
     }
   });
 
