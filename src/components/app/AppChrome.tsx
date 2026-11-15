@@ -70,7 +70,6 @@ export function AppHeader({
   );
 }
 
-/** The compact page card's footer: what the page is, with the card's own tools shown on hover, focus and touch. */
 export function PageCardFooter({ title, detail, updated, infoId, infoOpen, onInfo, onReload, reloading = false }: {
   title: string;
   detail: string;
