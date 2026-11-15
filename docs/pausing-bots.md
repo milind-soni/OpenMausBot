@@ -8,7 +8,7 @@ It is the one switch for "stop all effort for now", for example to save what is 
 
 Right away, for every bot it pauses:
 
-- every conversation that is working stops, as Stop does, including the work it handed to other bots;
+- every conversation that is working stops, as Stop does, including the work it handed to other bots and its turn in a room;
 - a routine run in progress is cancelled.
 
 Until it is resumed, a paused bot takes no new work:
