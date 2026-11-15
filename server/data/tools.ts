@@ -558,14 +558,14 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const plans = planLoad(input);
   const replace = input.replace !== false;
   const existing = new Set((await ctx.database.listTables()).map((table) => table.name.toLowerCase()));
+  const tables: LoadedTable[] = [];
   const unique = (base: string): string => {
     const stem = tableNameFrom(base);
     let name = stem;
-    for (let n = 2; !replace && existing.has(name.toLowerCase()); n++) name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
-    existing.add(name.toLowerCase());
+    for (let n = 2; tables.some((table) => table.name === name) || (!replace && existing.has(name)); n++) name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
+    existing.add(name);
     return name;
   };
-  const tables: LoadedTable[] = [];
   const warnings: string[] = [];
   const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>) => {
     const sql = `CREATE ${replace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${relation}`;
