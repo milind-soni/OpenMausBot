@@ -550,7 +550,9 @@ export function EngineSetup({
   /** A Cloud's "not installed" reason only says to install it in a terminal or use Set CLI; the card says what to do instead. */
   const cloudReasonHidden = cloudCantInstall || (cloudHome && !signInOnly && Boolean(install?.server) && instance.snapshot.notEngineCli !== true);
   const deviceSignIn = signInOnly && instance.authentication?.method === "device-code";
-  const engineBrowserSignIn = signInOnly && instance.authentication?.method === "browser";
+  /** The engine opens the browser itself (Mistral Vibe). A managed engine reports "browser" too for its link and pasted
+   * redirect (Antigravity); that sign-in stays in ManagedEngineSetup. */
+  const engineBrowserSignIn = signInOnly && instance.authentication?.method === "browser" && !install?.managed;
   const browserSignIn = signInOnly && instance.authentication?.method === "browser-pkce";
   const pasteSignIn = signInOnly && instance.authentication?.method === "paste-code";
   const provider = deviceSignInProvider(instance.driverKind);

@@ -55,3 +55,31 @@ it("opens it on a desktop paired to another computer's server", async () => {
 it("keeps it folded on the person's own computer, where the redirect lands by itself", async () => {
   expect((await startSignIn(false, { remoteClient: { active: false } })).open).toBe(false);
 });
+
+
+function renderSignInCard(instance: InstanceInfo): void {
+  vi.stubGlobal("ogb", { platform: "darwin", openExternal: vi.fn(async () => {}), remoteClient: { active: false } });
+  const store = { state: { config: {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
+  flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance, intent: "cloud" }) })));
+}
+
+// Antigravity's link-and-redirect sign-in reports method "browser", the same word Mistral's engine-opens-the-browser
+// flow uses: its sign-in card must stay the Google one, not Mistral's.
+it("signs in with Google on the sign-in card, not with the Mistral button", () => {
+  renderSignInCard({ ...antigravity, authentication: { method: "browser", signOut: true } });
+  expect(host.textContent).not.toContain("Mistral");
+  expect(host.querySelector("[data-engine-browser-sign-in]")).toBeNull();
+  expect([...host.querySelectorAll("button")].some((b) => b.textContent?.includes("Sign in with Google"))).toBe(true);
+});
+
+it("keeps the engine-opens-the-browser card for an engine without a managed install (Mistral Vibe)", () => {
+  renderSignInCard({
+    instanceId: "vibe", driverKind: "mistralVibeAgent", displayName: "Mistral",
+    models: { default: "", options: [] },
+    snapshot: { state: "available", authenticated: false, version: "2.0.0" },
+    install: {},
+    authentication: { method: "browser", signOut: true },
+  });
+  expect(host.querySelector("[data-engine-browser-sign-in]")).not.toBeNull();
+  expect(host.textContent).toContain("Sign in to Mistral");
+});
