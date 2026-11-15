@@ -9,6 +9,9 @@ import { Select } from "./Select";
 import { WorkersAiKeyCard } from "./WorkersAiKeyCard";
 import { openKeySettings } from "./keys/key-focus";
 
+type CustomApi = "systemone" | "decisions" | "chat";
+const customApiOf = (api: string | undefined): CustomApi => (api === "decisions" || api === "chat" ? api : "systemone");
+
 const KEY_URL = { jev: "https://typesafe.ai", openrouter: "https://openrouter.ai/keys" } as const;
 const KEY_SLOT = {
   jev: { credential: "jevApiKey", field: "key" },
@@ -207,7 +210,7 @@ export function DecisionModelSettings() {
     return () => { cancelled = true; };
   }, [openrouter, models]);
 
-  const choose = (decision: { provider: Provider } | { openrouterModel: string; openrouterApi: "chat" | "decisions" } | { customApi: "systemone" | "decisions" }) => {
+  const choose = (decision: { provider: Provider } | { openrouterModel: string; openrouterApi: "chat" | "decisions" } | { customApi: CustomApi }) => {
     setValue("");
     setVerdict(null);
     void patch(decision);
@@ -319,13 +322,14 @@ export function DecisionModelSettings() {
               <SettingRow title={t("decider.custom.api")}>
                 <Select
                   data-testid="decider-custom-api"
-                  value={decider?.api === "decisions" ? "decisions" : "systemone"}
-                  onChange={(event) => choose({ customApi: event.target.value === "decisions" ? "decisions" : "systemone" })}
+                  value={customApiOf(decider?.api)}
+                  onChange={(event) => choose({ customApi: customApiOf(event.target.value) })}
                   disabled={switching}
                   aria-label={t("decider.custom.api")}
                 >
                   <option value="systemone">{t("decider.custom.api.systemone")}</option>
                   <option value="decisions">{t("decider.custom.api.decisions")}</option>
+                  <option value="chat">{t("decider.custom.api.chat")}</option>
                 </Select>
               </SettingRow>
             </>
