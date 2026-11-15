@@ -101,6 +101,7 @@ export function createBoatHealth(now: () => number = Date.now) {
       const at = boxes.get(boxId)?.lastAnsweredAt;
       return at !== null && at !== undefined && now() - at <= ms;
     },
+    lastAnsweredAt: (boxId: string): number | null => boxes.get(boxId)?.lastAnsweredAt ?? null,
     /** Some other computer answered recently, so the provider and the path to it work. */
     otherAnsweredWithin: (boxId: string, ms: number): boolean =>
       [...boxes].some(([id, health]) => id !== boxId && health.lastAnsweredAt !== null && now() - health.lastAnsweredAt <= ms),

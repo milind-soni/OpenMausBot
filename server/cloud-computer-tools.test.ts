@@ -9,6 +9,10 @@ let tools: typeof import("./cloud-computer-tools.ts");
 let holdCommand = false;
 let commandStatus = 200;
 let commandExit = 0;
+/** This many commands in a row get the gateway's 502 before the machine answers again. */
+let unansweredFirst = 0;
+/** The Boat starts a detached command and reports it running for ever. */
+let neverEnds = false;
 let commandStarted: (() => void) | undefined;
 const calls: Array<{ path: string; body: any; authorization?: string }> = [];
 const cfg: AppConfig = { box: { token: "synthetic-box-key" } } as AppConfig;
@@ -22,8 +26,11 @@ beforeAll(async () => {
     for await (const part of req) body += part;
     const path = req.url ?? "";
     calls.push({ path, body: body ? JSON.parse(body) : null, authorization: req.headers.authorization });
+    if (neverEnds && /\/commands\/7\?/.test(path)) { res.end(JSON.stringify({ running: true, status: "running", stdout: "compiling", stderr: "" })); return; }
+    if (neverEnds && path.endsWith("/commands") && JSON.parse(body).detached === true) { res.end(JSON.stringify({ processId: 7 })); return; }
     if (path.endsWith("/commands")) {
       commandStarted?.();
+      if (unansweredFirst > 0) { unansweredFirst--; res.writeHead(502); res.end(JSON.stringify({ ok: false, code: "upstream_unavailable" })); return; }
       if (commandStatus !== 200) { res.writeHead(commandStatus); res.end(JSON.stringify({ ok: false, code: "upstream_unavailable" })); return; }
       if (!holdCommand) res.end(JSON.stringify({ exitCode: commandExit, stdout: "captured", stderr: "" }));
       return;
@@ -38,17 +45,17 @@ beforeAll(async () => {
   vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", undefined);
   tools = await import("./cloud-computer-tools.ts");
 });
-beforeEach(() => { calls.length = 0; holdCommand = false; commandStarted = undefined; commandStatus = 200; commandExit = 0; });
+beforeEach(() => { calls.length = 0; holdCommand = false; commandStarted = undefined; commandStatus = 200; commandExit = 0; unansweredFirst = 0; neverEnds = false; });
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 
 type Recovery = NonNullable<Parameters<typeof import("./cloud-computer-tools.ts").cloudComputerRpc>[1]["recovery"]>;
-const rpc = (request: unknown, gate: { held: boolean; reason?: "person"; blockedReason?: string } = { held: false }, signal = new AbortController().signal, recovery?: Recovery) => {
+const rpc = (request: unknown, gate: { held: boolean; reason?: "person"; blockedReason?: string } = { held: false }, signal = new AbortController().signal, recovery?: Recovery, budgetMs?: number, settled?: (answered: boolean) => void) => {
   let gated = 0;
   let checks = 0;
   const done = tools.cloudComputerRpc(request as never, {
     cfg, boxId: () => "bx_23456789", signal,
     gate: async () => { gated++; return gate; },
-    assertActive: () => { checks++; }, recovery,
+    assertActive: () => { checks++; }, recovery, ...(budgetMs === undefined ? {} : { budgetMs }), ...(settled ? { settled } : {}),
   });
   return { done, gated: () => gated, checks: () => checks };
 };
@@ -217,15 +224,63 @@ describe("cloud computer tools", () => {
     server.closeAllConnections();
   });
 
+  it("hands a command that outlasts its call back still running, with a process id exec_status follows, instead of an error", async () => {
+    neverEnds = true;
+    const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "make all" } } }, {
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 37_000, assertActive: () => {}, gate: async () => ({ held: false }),
+    }) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
+    expect(result.isError).toBeFalsy();
+    const handed = JSON.parse(result.content[0]!.text!);
+    expect(handed).toMatchObject({ status: "running", stdout: "compiling", next: tools.EXEC_STILL_RUNNING });
+    expect(calls.filter(entry => entry.path.endsWith("/commands") && entry.body?.detached === true)).toHaveLength(1);
+    const status = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec_status", arguments: { process_id: handed.processId } } }, {
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, assertActive: () => {}, gate: async () => ({ held: false }),
+    }) as { content: Array<{ text?: string }> };
+    expect(JSON.parse(status.content[0]!.text!)).toMatchObject({ status: "running", processId: handed.processId });
+  }, 60_000);
+
+  it("sends pointer and key calls the direct way, in one round trip, and exec the way that survives a long run", async () => {
+    await rpc({ method: "tools/call", params: { name: "click", arguments: { x: 1, y: 2 } } }).done;
+    await rpc({ method: "tools/call", params: { name: "exec", arguments: { command: "pwd" } } }).done;
+    expect(calls.filter(entry => entry.path.endsWith("/commands")).map(entry => entry.body.detached === true)).toEqual([false, true]);
+  });
+
   describe("a computer that stopped answering", () => {
     const words = () => import("../shared/cloud-computer-recovery.ts");
-    const call = (name: string, args: Record<string, unknown>, recovery?: Recovery) =>
-      rpc({ method: "tools/call", params: { name, arguments: args } }, { held: false }, new AbortController().signal, recovery).done as Promise<{ isError?: boolean; content: Array<{ type: string; text?: string }> }>;
+    /** A call with little time left, so a computer that never answers is given up on at once. */
+    const SHORT = 6_000;
+    const call = (name: string, args: Record<string, unknown>, recovery?: Recovery, budgetMs: number | undefined = SHORT, settled?: (answered: boolean) => void) =>
+      rpc({ method: "tools/call", params: { name, arguments: args } }, { held: false }, new AbortController().signal, recovery, budgetMs, settled).done as Promise<{ isError?: boolean; content: Array<{ type: string; text?: string }> }>;
 
     it("says a call got no answer, instead of an empty failed result", async () => {
       commandStatus = 502;
-      const result = await call("click", { x: 1, y: 2 });
-      expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await words()).CLOUD_COMPUTER_NO_ANSWER }] });
+      const outcomes: boolean[] = [];
+      const result = await call("click", { x: 1, y: 2 }, undefined, SHORT, (answered) => outcomes.push(answered));
+      expect(result).toEqual({ isError: true, content: [{ type: "text", text: (await words()).CLOUD_COMPUTER_STILL_WAKING }] });
+      expect(outcomes).toEqual([false]);
+    });
+
+    it("rides out a short burst of gateway errors inside the call: the bot gets the result, and the command ran once", async () => {
+      unansweredFirst = 2;
+      const outcomes: boolean[] = [];
+      const result = await call("exec", { command: "printf fixture" }, undefined, 60_000, (answered) => outcomes.push(answered));
+      expect(result.isError).toBeFalsy();
+      expect(JSON.parse(result.content[0]!.text!)).toMatchObject({ ok: true, exitCode: 0, stdout: "captured" });
+      const sent = calls.filter(entry => entry.path.endsWith("/commands")).map(entry => String(entry.body.command));
+      const copies = sent.filter(command => command.includes("printf fixture"));
+      const key = /^k=([0-9a-f]{16});/.exec(copies[0]!)?.[1];
+      expect(key).toBeDefined();
+      // Every copy of the call carries the same claim, so the computer runs at most one of them.
+      expect(copies.length).toBeGreaterThanOrEqual(2);
+      expect(copies.every(command => command.startsWith(`k=${key};`))).toBe(true);
+      expect(sent.filter(command => command === "true").length).toBeGreaterThanOrEqual(1);
+      expect(outcomes).toEqual([true]);
+    });
+
+    it("takes a screenshot again once the computer answers, since a screenshot changes nothing", async () => {
+      unansweredFirst = 1;
+      const result = await call("screenshot", {}, undefined, 60_000);
+      expect(result.content[0]).toMatchObject({ type: "image", mimeType: "image/jpeg" });
     });
 
     it("refuses calls without touching the computer while it is being restarted or replaced", async () => {
