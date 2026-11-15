@@ -160,7 +160,7 @@ describe("RoutineRequestService", () => {
 
     it.each<Partial<RoutineInput>>([
       { enabled: false }, { botId: "bot-b" }, { target: "room-goal", groupId: "room-a" },
-      { runOn: "cloud" }, { continuity: true }, { timeoutMinutes: 10 }, { durationMinutes: 60 }, { overlap: "queue" },
+      { runOn: "cloud" }, { continuity: true }, { sameConversation: true }, { timeoutMinutes: 10 }, { durationMinutes: 60 }, { overlap: "queue" },
       { runOnStartup: true },
       { schedule: { type: "daily", time: "10:00", weekdays: [1, 3] } },
       { attachments: [{ id: "context", name: "Context", path: "/fixture/context.txt", kind: "file", size: 20 }] },
@@ -408,6 +408,16 @@ describe("RoutineRequestService", () => {
     });
     expect(JSON.stringify(card)).not.toContain(secret);
     expect(JSON.stringify(card)).toContain("redacted");
+  });
+
+  it("carries same_conversation from the proposal through the card to the created routine", async () => {
+    const { service, store, routines } = harness();
+    const proposed = await service.propose({ botId: "bot-a", threadId: "thread-a", proposal: createProposal({ sameConversation: true }) });
+    expect(proposed.detail).toContain("Continuity: Each run continues the previous run's conversation");
+    expect(proposed.detail).toContain("each run continues the previous run's conversation.");
+    expect(store.messagesFor("thread-a")[0]!.card!.routineRequest?.operation).toMatchObject({ action: "create", routine: { sameConversation: true } });
+    expect(service.resolve({ botId: "bot-a", threadId: "thread-a", requestId: proposed.requestId, behavior: "allow" }).state).toBe("applied");
+    expect(routines.listRoutines().find((routine) => routine.name === "Morning brief")?.sameConversation).toBe(true);
   });
 
   it("carries continuity from the proposal through the card to the created routine", async () => {
@@ -1921,6 +1931,12 @@ describe("consequenceLine", () => {
       "Will run 2 days a week; each run starts a fresh session.",
     );
     expect(consequenceLine({ type: "once", at: 0 })).toBe("Will run once; that run starts a fresh session.");
+  });
+
+  it("says a one-time run continues the conversation when it keeps one", () => {
+    expect(consequenceLine({ type: "once", at: 0 }, false, true)).toBe(
+      "Will run once; each run continues the previous run's conversation.",
+    );
   });
 });
 

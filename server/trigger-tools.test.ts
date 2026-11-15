@@ -107,7 +107,7 @@ describe("parseTriggerRequest", () => {
     expect(parseTriggerRequest({ ...source, action: "update", triggerId: "a1", changes: { event: "SLACK_X" } }, isSchedule))
       .toMatchObject({ ok: false, error: expect.stringContaining("delete it and create a new one") });
     expect(parseTriggerRequest({ ...source, action: "update", triggerId: "r1", changes: { sameConversation: true } }, isSchedule))
-      .toMatchObject({ ok: false, error: "same_conversation applies only to app-event and webhook triggers" });
+      .toMatchObject({ ok: true, kind: "schedule", proposal: { action: "update", routineId: "r1", changes: { sameConversation: true } } });
     expect(parseTriggerRequest({ ...source, action: "create", kind: "email", routine: {} }, isSchedule)).toMatchObject({ ok: false });
     expect(parseTriggerRequest({ ...source, action: "create", kind: "schedule", routine: {}, extra: 1 }, isSchedule)).toMatchObject({ ok: false });
   });
