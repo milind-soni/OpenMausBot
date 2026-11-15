@@ -65,9 +65,11 @@ describe("connect", () => {
   it("uses a given code, refuses to overwrite a token file unless --force, and reports a refused code", async () => {
     const file = join(dir, "token-2");
     writeFileSync(file, "old\n");
+    const before = requests.length;
     const refused = capture();
     expect(await runHeadless(["connect", origin, "--code", "abcd efgh jklm", "--out", file], { io: refused.io, env: {} })).toBe(2);
     expect(refused.err[0]).toContain("already exists");
+    expect(requests).toHaveLength(before);
     expect(await runHeadless(["connect", origin, "--code", "abcd efgh jklm", "--out", file, "--force"], { io: capture().io, env: {} })).toBe(0);
     expect(readFileSync(file, "utf8")).toBe("omb_sess_secret_token_value\n");
     // the file it replaced was readable by others; the token in it is not

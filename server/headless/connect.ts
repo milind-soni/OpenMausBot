@@ -64,6 +64,7 @@ function target(ctx: VerbContext): { candidates: string[]; secret: string | null
 export async function connectVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const out = flag(ctx.flags, "out")?.trim();
   if (!out) throw usageError("--out FILE is required: where to keep the script key");
+  if (existsSync(out) && ctx.flags.force !== true) throw usageError(`${out} already exists`, "pass --force to replace it");
   const { candidates, secret } = target(ctx);
   let origin = candidates[0]!;
   let described: { status: number; body: Rec } | null = null;
