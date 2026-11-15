@@ -118,7 +118,7 @@ import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { PagePaneContext } from "./app/PageTools";
-import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
+import { useTranscriptViewport } from "@/hooks/use-transcript-viewport"; import { staysInView } from "../../shared/person-wait";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { NewMessagesDivider } from "./NewMessagesDivider";
 import { unreadMessageIds } from "@/lib/unread-divider";
@@ -856,7 +856,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
     threadId: bot.threadId,
     messages,
     pinOn: [bot.busy, composerDock.pad],
-    hasMore: bot.hasMore,
+    hasMore: bot.hasMore, rests: staysInView,
   });
 
   const lastBotTextId = useMemo(
