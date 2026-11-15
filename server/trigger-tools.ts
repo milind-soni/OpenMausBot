@@ -31,10 +31,14 @@ function agentRun(run: RoutineRun) {
   };
 }
 
-function instructionsOf(text: string) {
+function instructionsOf(text: string, full = false) {
   // Instructions may hold a credential and the result goes back to the model: scrub the whole value before previewing.
   const safe = redactSecretsInText(text);
-  return { instructions: safe.slice(0, INSTRUCTIONS_SHOWN), instructionsTruncated: safe.length > INSTRUCTIONS_SHOWN };
+  return {
+    instructions: full ? safe : safe.slice(0, INSTRUCTIONS_SHOWN),
+    instructionsTruncated: !full && safe.length > INSTRUCTIONS_SHOWN,
+    instructionsRedacted: safe !== text,
+  };
 }
 
 function agentSchedule(schedule: Routine["schedule"]) {
@@ -157,7 +161,8 @@ export function listTriggers(input: {
     if (!routine && !webhook && !app) return { ...header, error: "No trigger with that id belongs to this bot. Call trigger_info without trigger_id to see its ids." };
     const fires = input.runs.filter((run) => run.routineId === input.triggerId).slice(0, FIRES_SHOWN).map(agentRun);
     const shown = routine ? agentRoutine(routine, latest.get(routine.id)) : webhook ? agentWebhook(webhook, latest.get(webhook.id)) : agentAppTrigger(app!, latest.get(app!.id));
-    return { ...header, trigger: { ...shown, recentFires: fires } };
+    const prompt = (routine ?? webhook ?? app)!.prompt;
+    return { ...header, trigger: { ...shown, ...instructionsOf(prompt, true), recentFires: fires } };
   }
   return {
     ...header,

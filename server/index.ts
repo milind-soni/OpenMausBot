@@ -466,7 +466,7 @@ import { createTeamMemoryRequests } from "./team-memory-requests.ts";
 import { createAgentCard } from "./chat-widgets.ts";
 import { createChatAppRoutes, createChatApps, createChatAppsMcp } from "./routes/chat-apps.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
-import { ProfileRequestService } from "./profile-requests.ts";
+import { ProfileRequestService } from "./profile-requests.ts"; import { browserProfileLabel } from "./bot-browser-profile.ts";
 import { ModelRequestService } from "./model-requests.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
 import { startsWithoutCloudComputer, teamSetupDecisionText as decisionText, type TeamSetupRequest } from "../shared/team-setup.ts";
@@ -9209,7 +9209,7 @@ const profileRequests = new ProfileRequestService({
   store,
   autoApply: appliesDirectly,
   canPersist: proposalPersistence,
-  validateTarget: chiefPeerTargetRule("profile"),
+  validateTarget: chiefPeerTargetRule("profile"), browserProfile: { guards: { profiles: () => cfg.browserProfiles ?? [], heldBy: (session) => browserRuntime.heldBy(session), currentBrowserSession: (botId, profile) => currentBrowserSession(botId, profile), turnRunning: (botId) => Boolean(hasDirectDispatch(botId) || activeGroupTurnForBot(botId) || routines?.activeRunForBot(botId)) }, cleanup: { closeForBot: (botId) => browserLive.closeForBot(botId), forgetTemporaryBrowser } },
 });
 const modelRequests = new ModelRequestService({
   store,
@@ -12947,7 +12947,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const options = (await selectableComputers(bot)).filter(option => !browserOnly || option.surface === "browser"), chosen = browserOnly ? undefined : chosenPlace(store.taskByThread(bot.id, internalCapability.threadId), bot.computer);
         const current = source ? source.mounted ?? "off" : await computerPreviewSurface(bot, bot.threadId);
         requireActiveInternalCapability();
-        if (method === "GET") return json(res, 200, { current, canSelect, ...(refusal ? { why: refusal } : browserOnly ? { why: HANDOFF_BROWSER_ONLY } : {}), ...(chosen ? { chosen, chosenNote: `The person chose ${surfaceLabel(chosen)} for this conversation, and auto keeps it while it is available. Select another place only when they ask for one or it is unavailable.` } : {}), options });
+        if (method === "GET") return json(res, 200, { current, canSelect, browserProfile: { id: bot.browserProfile ?? "", name: browserProfileLabel(bot.browserProfile, cfg.browserProfiles ?? []), changedBy: "the person, in this bot's Browser tab; a Chief of Staff can set it for an idle teammate with propose_profile" }, ...(refusal ? { why: refusal } : browserOnly ? { why: HANDOFF_BROWSER_ONLY } : {}), ...(chosen ? { chosen, chosenNote: `The person chose ${surfaceLabel(chosen)} for this conversation, and auto keeps it while it is available. Select another place only when they ask for one or it is unavailable.` } : {}), options });
         if (computerSelectionTurns.get(internalCapability.threadId) !== source) return json(res, 409, { error: "The user request ended before its computer was selected." });
         if (unoffered) return json(res, 409, { error: unoffered, options });
         const claim = autoVmClaims.get(internalCapability.threadId);

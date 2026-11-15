@@ -48,18 +48,20 @@ services:
     environment:
       OMB_HTTPS_HOST: ${OMB_HTTPS_HOST:-}
       OMB_BIND_ADDRESS: ${OMB_BIND_ADDRESS:-127.0.0.1}
+      OMB_TRUSTED_PROXY_CIDRS: ${OMB_TRUSTED_PROXY_CIDRS:-}
     command:
       - /bin/sh
       - -ec
       - |
-        export OMB_UPSTREAM_SCHEME=http
-        if [ -n "$$OMB_HTTPS_HOST" ] && [ "$$OMB_BIND_ADDRESS" != "127.0.0.1" ]; then
-          echo "OMB_HTTPS_HOST requires OMB_BIND_ADDRESS=127.0.0.1; forward HTTPS through a trusted local proxy." >&2
+        # HTTPS is claimed by the peer that terminates TLS, so a bind address
+        # that others can reach has to name that peer.
+        if [ -n "$$OMB_HTTPS_HOST" ] && [ "$$OMB_BIND_ADDRESS" != "127.0.0.1" ] && [ -z "$$OMB_TRUSTED_PROXY_CIDRS" ]; then
+          echo "OMB_HTTPS_HOST with OMB_BIND_ADDRESS=$$OMB_BIND_ADDRESS requires OMB_TRUSTED_PROXY_CIDRS naming the TLS terminator; forward HTTPS through a trusted local proxy." >&2
           exit 1
         fi
-        if [ -n "$$OMB_HTTPS_HOST" ]; then
-          export OMB_UPSTREAM_SCHEME=https
-        fi
+        # An empty list lets any peer claim the HTTPS hostname, which only the
+        # loopback bind keeps to the host itself.
+        export OMB_TRUSTED_PROXY_CIDRS="$${OMB_TRUSTED_PROXY_CIDRS:-0.0.0.0/0 ::/0}"
         exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     # Started with the server, not after it is healthy: Caddy reaches it over the socket
     # whenever it answers, so `up` never waits on the server's health, and HTTPS is back
