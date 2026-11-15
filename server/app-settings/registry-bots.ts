@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile.ts";
+import { TOOL_GROUP_LABELS, TOOL_GROUPS, type ToolGroup } from "../../shared/tool-groups.ts";
 import { EFFORT_LEVELS, MAUS_COLOR_NAMES } from "../../shared/wire.ts";
 import type { BotRecord } from "../store.ts";
 import { withoutKeys, type RegistryDeps, type SettingEntry, type WritableSpec } from "./registry.ts";
@@ -51,6 +52,9 @@ const OTHER = {
   computer: { label: "computer", value: z.enum(["auto", "cloud", "vm", "local", "browser", "off"]), shown: (kind: unknown) => COMPUTER[kind as keyof typeof COMPUTER], was: (one: BotRecord) => one.computer ?? "auto" },
 } as const;
 type OtherField = keyof typeof OTHER;
+const toolGroups = z.array(z.enum(TOOL_GROUPS)).max(TOOL_GROUPS.length).optional();
+const offNow = (one: BotRecord): ToolGroup[] => TOOL_GROUPS.filter((group) => one.toolsOff?.includes(group));
+const groupNames = (groups: readonly ToolGroup[]) => groups.map((group) => TOOL_GROUP_LABELS[group]).join(", ");
 
 export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchBot">, writable: (spec: WritableSpec) => SettingEntry): SettingEntry[] {
   const bot = (id: string) => deps.bots().find((candidate) => candidate.id === id);
@@ -120,6 +124,19 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
       current: () => { const helper = deps.bots().find((one) => one.defaultBot); return helper ? !helper.sidebarHidden : undefined; },
       describe: (show: boolean) => (deps.bots().some((one) => one.defaultBot) ? { change: show ? "Show MausBot in the sidebar" : "Take MausBot out of the sidebar; it keeps working" } : { refusal: "This place has no MausBot of its own." }),
       write: (show: boolean) => { const helper = deps.bots().find((one) => one.defaultBot); return helper ? deps.patchBot(helper.id, { sidebarHidden: !show }) : Promise.resolve("This place has no MausBot of its own."); },
+    }),
+    perBot({
+      id: "bots.tools", label: "Bot tool groups", where: "a bot's Settings",
+      help: `Turn groups of one bot's built-in tools off to make every request smaller, or back on: ${TOOL_GROUPS.map((group) => `${group} (${TOOL_GROUP_LABELS[group]})`).join(", ")}. Memory, X research, the browser and connected apps have their own settings.`,
+      synonyms: ["tools", "tool groups", "turn off tools", "meetings", "data", "pages", "publish", "images", "email", "tokens", "smaller requests"],
+      value: forBot({ turnOff: toolGroups, turnOn: toolGroups })
+        .refine((value) => Boolean(value.turnOff?.length || value.turnOn?.length), "name a group in turnOff or turnOn")
+        .refine((value) => !value.turnOff?.some((group) => value.turnOn?.includes(group)), "a group can't be in both turnOff and turnOn"),
+      allowed: `{"botId","turnOff"?:[...],"turnOn"?:[...]} with groups from ${TOOL_GROUPS.join(", ")}`,
+      read: everyBot((one) => (offNow(one).length ? `off: ${groupNames(offNow(one))}` : "all on")),
+      effect: (one, { turnOff = [], turnOn = [] }) => ({ change: `${one.name}: ${[turnOff.length ? `turn off ${groupNames(turnOff)}` : "", turnOn.length ? `turn on ${groupNames(turnOn)}` : ""].filter(Boolean).join("; ")}` }),
+      was: (one, { botId }) => ({ botId, turnOff: offNow(one), turnOn: TOOL_GROUPS.filter((group) => !offNow(one).includes(group)) }),
+      patch: (one, { turnOff = [], turnOn = [] }) => ({ toolsOff: TOOL_GROUPS.filter((group) => turnOff.includes(group) || (offNow(one).includes(group) && !turnOn.includes(group))) }),
     }),
     perBot({
       id: "bots.settings", label: "Other bot settings", help: `More of one bot's own settings: ${Object.values(OTHER).map((field) => field.label).join(", ")}.`, where: "a bot's Settings",

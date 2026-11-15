@@ -102,7 +102,8 @@ describe("what a request needs", () => {
     expect(memberBotPatchViolation({ color: "teal", name: "Mine" }, "chat", true, true)).toBeNull();
     expect(memberBotPatchViolation({ color: "teal" }, "edit", false, true)).toBeNull();
     expect(memberBotPatchViolation({ soul: "x" }, "chat")).toBe("soul");
-    expect(memberBotPatchViolation({ soul: "x", modelSelection: {}, threadId: "t", composio: true, connectorTools: {}, mcpServers: [] }, "edit")).toBeNull();
+    expect(memberBotPatchViolation({ soul: "x", modelSelection: {}, threadId: "t", composio: true, connectorTools: {}, mcpServers: [], toolsOff: ["data"] }, "edit")).toBeNull();
+    expect(memberBotPatchViolation({ toolsOff: ["data"] }, "chat")).toBe("toolsOff");
     for (const field of ["approvalMode", "autoApprove", "alwaysAllow", "cwd", "computer", "section", "chiefOfStaff", "peers", "visibility", "access", "reportsTo", "browserProfile"]) {
       expect(memberBotPatchViolation({ [field]: null }, "edit"), field).toBe(field);
     }
