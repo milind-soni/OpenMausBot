@@ -328,6 +328,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET", "PUT", "DELETE"], path: /^\/api\/phones\/self$/ },
   { methods: ["GET"], path: /^\/api\/phones\/self\/jobs$/ },
   { methods: ["POST"], path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
+  // This phone's own closed-app alert registration, keyed by its session (routes/phone-push.ts).
+  { methods: ["GET", "PUT", "DELETE"], path: /^\/api\/push\/device$/ },
   { methods: ["GET"], path: /^\/api\/health$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
   { methods: ["GET"], path: /^\/api\/brand$/ },
