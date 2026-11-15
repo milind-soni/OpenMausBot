@@ -37031,7 +37031,13 @@
       "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
       "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
       "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8",
-      "together.state.signin": "010c70e3503b8907767eb9dd465788bb7698d05ccddc383e0685031935a70db2"
+      "together.state.signin": "010c70e3503b8907767eb9dd465788bb7698d05ccddc383e0685031935a70db2",
+      "sidebar.newBotOn.computer": "176820cb9508e2bea1ff6e6fc3682f0fd1f40432ea13da222725fb7d7666cd13",
+      "sidebar.newBotOn.cloud": "73bae32207d218e788c314dd82fdf2bf2d1a6e80febdb0101a3d897c0bd269db",
+      "sidebar.newBotOn.asleep": "8f27c03517f86b5fedc5cbdf7bc50e8d761809c4a9f3ab3e277cbca202b47fc8",
+      "sidebar.newBotOn.noAi": "90560bfa52da1eeef7f9a7e212ab43b68e8a9104bf02cff500b08e8440d3e86a",
+      "sidebar.newBotOn.onlyThere": "ee143ffe98b9c13337df5499526fa6b85e2df7f1b595a43f94dd907a74ab3789",
+      "sidebar.newBotOn.onlyHere": "5fa107188d3ebf59545c5522c3540371a95d16a3625a4f57e84f093849baabc4"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47269,7 +47275,13 @@
       "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
       "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
       "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8",
-      "together.state.signin": "010c70e3503b8907767eb9dd465788bb7698d05ccddc383e0685031935a70db2"
+      "together.state.signin": "010c70e3503b8907767eb9dd465788bb7698d05ccddc383e0685031935a70db2",
+      "sidebar.newBotOn.computer": "176820cb9508e2bea1ff6e6fc3682f0fd1f40432ea13da222725fb7d7666cd13",
+      "sidebar.newBotOn.cloud": "73bae32207d218e788c314dd82fdf2bf2d1a6e80febdb0101a3d897c0bd269db",
+      "sidebar.newBotOn.asleep": "8f27c03517f86b5fedc5cbdf7bc50e8d761809c4a9f3ab3e277cbca202b47fc8",
+      "sidebar.newBotOn.noAi": "90560bfa52da1eeef7f9a7e212ab43b68e8a9104bf02cff500b08e8440d3e86a",
+      "sidebar.newBotOn.onlyThere": "ee143ffe98b9c13337df5499526fa6b85e2df7f1b595a43f94dd907a74ab3789",
+      "sidebar.newBotOn.onlyHere": "5fa107188d3ebf59545c5522c3540371a95d16a3625a4f57e84f093849baabc4"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",

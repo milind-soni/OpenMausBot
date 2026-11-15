@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { botRow, botRows, CLOUD_EVERY_MS, createPlacesTogether, FRESH_MS, installPlacesTogether, LOOK_EVERY_MS, OPEN_WAIT_MS, otherHome, parseTogether } from "./places-together.mjs";
+import { botRow, botRows, CLOUD_EVERY_MS, createPlacesTogether, FRESH_MS, installPlacesTogether, LOOK_EVERY_MS, OPEN_WAIT_MS, otherHome, parseTogether, readyAis } from "./places-together.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLOUD = "https://mine.cloud.test";
 const answer = (status, body, headers = {}) => ({ ok: status < 400, status, headers: { get: (name) => headers[name] ?? null }, json: async () => body, body: { cancel: async () => {} } });
 const bot = (id, name, over = {}) => ({ id, threadId: `t-${id}`, name, title: "", color: "blue", mascotBody: "classic", ...over });
+const ai = (displayName, snapshot = {}) => ({ instanceId: displayName.toLowerCase(), driverKind: "claude", displayName, snapshot: { state: "available", ...snapshot } });
 const settle = () => new Promise((done) => setImmediate(done));
 
 function setup(over = {}) {
@@ -18,13 +20,14 @@ function setup(over = {}) {
     cloud: { origin: CLOUD, account: "acct-a", asleep: false }, computer: true, shown: "computer", focused: true, napped: 0, checks: 0, admin: true, timeouts: [], opening: new Promise(() => {}),
     bots: { computer: [bot("scout", "Scout")], cloud: [bot("scout", "Scout"), bot("nova", "Nova", { unread: true })] },
     reply: { computer: null, cloud: null },
+    instances: { computer: [ai("Claude"), ai("Codex")], cloud: [ai("Claude"), ai("Included AI")] },
   };
   f.together = createPlacesTogether({
     pref: { read: () => f.saved, write: (value) => { f.saved = value; } },
     cloud: () => f.cloud, computer: () => f.computer,
     powerChecked: async () => { f.checks += 1; f.asked.push(["admin"]); return typeof f.admin === "function" ? f.admin() : f.admin; },
-    local: async (route, init) => { f.asked.push(["computer", route, init]); return f.reply.computer ?? answer(200, { bots: f.bots.computer }); },
-    cloudFetch: async (url, init) => { f.asked.push(["cloud", url, init]); return typeof f.reply.cloud === "function" ? f.reply.cloud() : f.reply.cloud ?? answer(200, { bots: f.bots.cloud }); },
+    local: async (route, init) => { f.asked.push(["computer", route, init]); return f.reply.computer ?? answer(200, route === "/api/instances" ? { instances: f.instances.computer } : { bots: f.bots.computer }); },
+    cloudFetch: async (url, init) => { f.asked.push(["cloud", url, init]); return typeof f.reply.cloud === "function" ? f.reply.cloud() : f.reply.cloud ?? answer(200, url.endsWith("/api/instances") ? { instances: f.instances.cloud } : { bots: f.bots.cloud }); },
     napped: () => { f.napped += 1; },
     shown: () => f.shown, focused: () => f.focused, openPlace: (home) => { f.opened.push(home); return f.opening; },
     send: (channel, value) => { f.sent.push([channel, value]); },
@@ -389,7 +392,7 @@ test("only this computer's page and My Cloud's own page are answered", async () 
   const handlers = new Map();
   const f = setup();
   installPlacesTogether({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, asking: (event) => event.page, together: f.together });
-  assert.deepEqual([...handlers.keys()], ["places-together:state", "places-together:set", "places-together:open"]);
+  assert.deepEqual([...handlers.keys()], ["places-together:state", "places-together:set", "places-together:open", "places-together:new-bot-choice", "places-together:new-bot"]);
   for (const handler of handlers.values()) assert.throws(() => handler({ page: null }, "nova"), /Only this computer's page and My Cloud's page/);
   assert.equal(handlers.get("places-together:state")({ page: "local" }).here, "computer");
   assert.equal(handlers.get("places-together:state")({ page: "cloud" }).here, "cloud");
@@ -412,5 +415,99 @@ test("main wires it to the one rule for this app's own pages, and the preload of
   const preload = readFileSync(join(HERE, "preload.cjs"), "utf8");
   assert.match(preload.match(/const REMOTE_SAFE = new Set\(\[([^\]]*)\]\)/)[1], /"placesTogether"/);
   const bridge = preload.slice(preload.indexOf("  placesTogether: "), preload.indexOf("  twoPlaces: {"));
-  assert.deepEqual(bridge.match(/"places-together:[a-z]+"/g), ['"places-together:state"', '"places-together:set"', '"places-together:open"', '"places-together:changed"', '"places-together:changed"']);
+  assert.deepEqual(bridge.match(/"places-together:[a-z-]+"/g), ['"places-together:state"', '"places-together:set"', '"places-together:open"', '"places-together:changed"', '"places-together:changed"', '"places-together:new-bot-choice"', '"places-together:new-bot"']);
+});
+
+test("the ＋'s other place: that place opens and is told to make the bot itself, once its page has loaded", async () => {
+  const f = setup();
+  assert.equal(f.together.newBot("computer"), true);
+  await settle();
+  assert.deepEqual([f.opened, f.sent], [["cloud"], []]);
+  assert.deepEqual(f.asked, [], "main never makes the bot, nor asks either place for anything");
+  f.shown = "cloud";
+  f.together.arrived();
+  assert.deepEqual(f.sent, [["places-together:new-bot", null]]);
+  f.sent.length = 0;
+  assert.equal(f.together.newBot("cloud"), true);
+  await settle();
+  f.shown = "computer";
+  f.together.arrived();
+  assert.deepEqual([f.opened, f.sent], [["cloud", "computer"], [["places-together:new-bot", null]]]);
+  const off = setup({ saved: { v: 1, on: false } });
+  assert.equal(off.together.newBot("computer"), false);
+  assert.equal(await off.together.newBotChoice("computer"), null);
+  await settle();
+  assert.deepEqual([off.opened, off.asked], [[], []]);
+});
+
+test("a later click replaces the one still waiting: a new bot asked for, then a bot opened, opens only the bot", async () => {
+  const f = setup();
+  await f.together.refresh("cloud");
+  f.together.newBot("computer");
+  f.together.open("computer", "nova");
+  f.shown = "cloud";
+  f.together.arrived();
+  assert.deepEqual(f.sent, [["desktop-notifications:open", { botId: "nova", threadId: "t-nova" }]]);
+});
+
+test("the ＋ learns which AIs are ready in the other place, asked as background work and never of a sleeping Cloud", async () => {
+  const f = setup();
+  assert.deepEqual(await f.together.newBotChoice("computer"), { home: "cloud", state: "loading", ais: ["Claude", "Included AI"] });
+  const [side, url, init] = f.asked.at(-1);
+  assert.deepEqual([side, url, init.headers["x-omb-background"]], ["cloud", `${CLOUD}/api/instances`, "1"]);
+  assert.deepEqual((await f.together.newBotChoice("cloud")).ais, ["Claude", "Codex"]);
+  f.cloud = { origin: CLOUD, asleep: true };
+  f.asked.length = 0;
+  assert.deepEqual(await f.together.newBotChoice("computer"), { home: "cloud", state: "asleep", ais: null });
+  assert.equal(f.asked.length, 0);
+  f.cloud = { origin: CLOUD, asleep: false };
+  f.reply.cloud = answer(500, {});
+  assert.equal((await f.together.newBotChoice("computer")).ais, null);
+});
+
+test("an AI counts as ready only when it is installed and signed in", () => {
+  assert.deepEqual(readyAis({ instances: [ai("Claude"), ai("Codex", { authenticated: false }), ai("Gemini", { state: "unavailable" }), ai("OpenCode", { freeFallback: true }),
+    { ...ai("Cline"), driverKind: "clineAgent" }, { ...ai("Cline 2", { authenticated: true }), driverKind: "clineAgent" }, { ...ai("Own endpoint", { authenticated: false }), access: "custom" }, ai("Claude")] }),
+  ["Claude", "Cline 2", "Own endpoint"]);
+  assert.deepEqual(readyAis(null), []);
+});
+
+test("the preload holds a new bot asked for before the page has listened", async () => {
+  const require = createRequire(import.meta.url);
+  const channels = new Map(), invoked = [];
+  let api = null;
+  const electron = require.resolve("electron");
+  const held = require.cache[electron];
+  require.cache[electron] = { id: electron, filename: electron, loaded: true, exports: {
+    ipcRenderer: { on: (channel, run) => channels.set(channel, run), removeListener: () => undefined, invoke: async (...args) => { invoked.push(args); return true; }, send: () => undefined, sendSync: () => undefined },
+    contextBridge: { exposeInMainWorld: (_name, exposed) => { api = exposed; } }, webUtils: { getPathForFile: () => "" },
+  } };
+  const preload = require.resolve("./preload.cjs");
+  delete require.cache[preload];
+  process.argv.push("--omb-company-desktop=1");
+  try { require(preload); } finally { process.argv.pop(); if (held) require.cache[electron] = held; else delete require.cache[electron]; delete require.cache[preload]; }
+  channels.get("places-together:new-bot")({});
+  let made = 0;
+  const stop = api.placesTogether.onNewBot(() => { made += 1; });
+  assert.equal(made, 1);
+  channels.get("places-together:new-bot")({});
+  assert.equal(made, 2);
+  stop();
+  assert.equal(await api.placesTogether.newBot(), true);
+  assert.deepEqual(invoked.at(-1), ["places-together:new-bot"]);
+});
+
+test("the ＋ asks My Cloud under the list's own rule: only after the Admin's fresh word, and never for a window not in use", async () => {
+  const f = setup();
+  f.admin = () => { f.cloud = { ...f.cloud, asleep: true }; return true; };
+  assert.deepEqual(await f.together.newBotChoice("computer"), { home: "cloud", state: "asleep", ais: null });
+  assert.equal(f.cloudAsked(), 0);
+  const g = setup();
+  g.focused = false;
+  assert.equal((await g.together.newBotChoice("computer")).ais, null);
+  assert.deepEqual(g.asked, []);
+  const h = setup();
+  h.admin = false;
+  assert.equal((await h.together.newBotChoice("computer")).ais, null);
+  assert.equal(h.cloudAsked(), 0);
 });

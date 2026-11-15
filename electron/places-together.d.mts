@@ -37,6 +37,18 @@ export interface PlacesTogetherBridge {
   /** Opens the other place at one of its listed bots. False when main does not list that bot. */
   open(botId: string): Promise<boolean>;
   onChanged(callback: () => void): () => void;
+  /** The other place as the ＋ shows it: how it is doing and the AIs ready there (null while it can't be asked). Null with the switch off. */
+  newBotChoice(): Promise<NewBotChoice | null>;
+  /** Opens the other place, which makes a new bot there by its own rules. False with the switch off. */
+  newBot(): Promise<boolean>;
+  /** The other place asked this one to make a new bot. */
+  onNewBot(callback: () => void): () => void;
+}
+
+export interface NewBotChoice {
+  home: BotHome;
+  state: NonNullable<PlacesTogetherState["other"]>["state"];
+  ais: string[] | null;
 }
 
 export const PLACES_TOGETHER_FILE: string;

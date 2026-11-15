@@ -55,6 +55,14 @@ export function botRow(bot, home) {
     ...(body ? { mascotBody: body } : {}), ...(face ? { mascotFaceColor: face } : {}), ...(bot.chiefOfStaff === true ? { chief: true } : {}), ...rowState(bot) };
 }
 
+/** The AIs a place's `GET /api/instances` answer says are ready to use, by name: what a new bot there could run on. */
+export function readyAis(body) {
+  const instances = record(body) && Array.isArray(body.instances) ? body.instances : [];
+  const ready = (instance) => record(instance) && record(instance.snapshot) && instance.snapshot.state === "available" && instance.snapshot.freeFallback !== true
+    && (instance.driverKind === "clineAgent" ? instance.snapshot.authenticated === true : instance.access === "custom" || instance.snapshot.authenticated !== false);
+  return [...new Set(instances.filter(ready).map((instance) => text(instance.displayName, 60)).filter(Boolean))].slice(0, 20);
+}
+
 /** A place's `GET /api/bots` answer as rows, in that place's own order. */
 export function botRows(body, home) {
   const bots = record(body) && Array.isArray(body.bots) ? body.bots : [];
@@ -137,11 +145,11 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     if (had) tell();
   }
 
-  async function ask(home) {
+  async function ask(home, route = "/api/bots?messages=0") {
     const signal = AbortSignal.timeout(TIMEOUT_MS);
-    if (home === "computer") return local("/api/bots?messages=0", { signal, headers: { accept: "application/json" } });
+    if (home === "computer") return local(route, { signal, headers: { accept: "application/json" } });
     const { origin } = cloud();
-    return cloudFetch(`${origin}/api/bots?messages=0`, { credentials: "include", cache: "no-store", redirect: "error", signal, headers: { accept: "application/json", ...BACKGROUND_HEADERS } });
+    return cloudFetch(`${origin}${route}`, { credentials: "include", cache: "no-store", redirect: "error", signal, headers: { accept: "application/json", ...BACKGROUND_HEADERS } });
   }
 
   /** Whether My Cloud may be asked now, and what its list says when it may not. */
@@ -258,6 +266,33 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       go(home, "desktop-notifications:open", { botId: row.id, threadId: row.threadId });
       return true;
     },
+    /** What the ＋ shows about the other place before a bot is made there: how it is doing, and the AIs ready there
+     * (null while it can't be asked). My Cloud is asked under the same rule as its list: only right after the Admin
+     * said it is awake, and only while the person is using the window; the person opening the ＋ is that use. */
+    async newBotChoice(asking) {
+      sameScope();
+      if (!active()) return null;
+      const home = otherHome(asking), mine = epoch, unknown = (state = otherOf(asking).state) => ({ home, state, ais: null });
+      try {
+        if (home === "cloud") {
+          if (signIn || !focused()) return unknown();
+          const may = await cloudMayBeAsked(mine);
+          if (may !== "ask") return may === null ? null : unknown(may === "asleep" ? "asleep" : undefined);
+        }
+        const response = await ask(home, "/api/instances");
+        if (mine !== epoch) return null;
+        if (home === "cloud" && asleepAnswer(response)) { napped(); return unknown("asleep"); }
+        if (!response?.ok) { await response?.body?.cancel?.(); return unknown(); }
+        return { home, state: otherOf(asking).state, ais: readyAis(await response.json()) };
+      } catch { return unknown(); }
+    },
+    /** The ＋'s choice of the other place: that place opens and makes the bot itself, by its own rules and limits. */
+    newBot(asking) {
+      sameScope();
+      if (!active()) return false;
+      go(otherHome(asking), "places-together:new-bot", null);
+      return true;
+    },
     /** The window finished loading a page: a click that was waiting for this place lands now. My Cloud on screen is
      * signed in, so it may be asked again. */
     arrived() {
@@ -297,5 +332,7 @@ export function installPlacesTogether({ ipcMain, asking, together }) {
     return together.set(page, value === true);
   });
   ipcMain.handle("places-together:open", (event, botId) => together.open(side(event), String(botId)));
+  ipcMain.handle("places-together:new-bot-choice", (event) => together.newBotChoice(side(event)));
+  ipcMain.handle("places-together:new-bot", (event) => together.newBot(side(event)));
   return together;
 }

@@ -23,6 +23,12 @@ ipcRenderer.on("chat:open", (_event, link) => {
   for (const listener of chatLinkListeners) listener(link);
 });
 
+let pendingNewBot = false;
+const newBotListeners = new Set();
+ipcRenderer.on("places-together:new-bot", () => {
+  if (!newBotListeners.size) { pendingNewBot = true; return; }
+  for (const listener of newBotListeners) listener();
+});
 let pendingNotificationOpen = null;
 const notificationOpenListeners = new Set();
 ipcRenderer.on("desktop-notifications:open", (_event, target) => {
@@ -578,6 +584,14 @@ const bridge = {
       const handler = () => cb();
       ipcRenderer.on("places-together:changed", handler);
       return () => ipcRenderer.removeListener("places-together:changed", handler);
+    },
+    newBotChoice: () => ipcRenderer.invoke("places-together:new-bot-choice"),
+    newBot: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:new-bot") : Promise.reject(new Error("Choose where the new bot lives.")),
+    onNewBot: cb => {
+      newBotListeners.add(cb);
+      if (pendingNewBot) { pendingNewBot = false; cb(); }
+      return () => newBotListeners.delete(cb);
     },
   } : undefined,
   // This computer's page only (never in REMOTE_SAFE, and main refuses any other): bots in two places, brought together on one.
