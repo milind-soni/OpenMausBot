@@ -10700,6 +10700,7 @@
   "settings.ai.ready": "Pronto",
   "settings.ai.notSetUp": "Não configurado",
   "settings.ai.attention": "Precisa de atenção",
+  "settings.ai.hiddenStatus": "Oculto em todas as listas de modelos",
   "settings.ai.otherServices": "Outros serviços",
   "backup.exportShort": "Protegido por senha. Logins salvos não são incluídos.",
   "backup.importShort": "Traga de volta bots e conversas de um arquivo de backup.",

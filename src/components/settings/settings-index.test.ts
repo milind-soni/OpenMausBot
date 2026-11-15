@@ -160,6 +160,8 @@ describe("search", () => {
   it.each(["cancel", "billing", "invoice", "subscription", "refund"])("puts Plan & billing first for “%s”", (query) => expect(first(query)?.page).toBe("plan"));
   it.each(["voice", "microphone", "dictation"])("puts the Talk shortcut first for “%s” on the desktop", (query) => expect(first(query)?.id).toBe("talk"));
   it("puts All bots on You and your bots", () => expect(first("all bots")?.page).toBe("bots"));
+  it.each(["kimi", "hidden providers", "unhide"])("puts AI › Providers first for “%s”", (query) => expect(first(query)?.id).toBe("providers"));
+  it("finds AI › Providers for “cursor” beside importing from Cursor", () => expect(find("cursor").map((hit) => hit.entry.id)).toEqual(expect.arrayContaining(["providers", "ai-apps"])));
   it("finds Activity in Data where it exists: a browser, for an admin", () => {
     expect(first("activity", PEOPLE["a team admin"])?.anchor).toBe("activity");
     expect(find("activity", fullContext()).some((hit) => hit.entry.anchor === "activity")).toBe(false);

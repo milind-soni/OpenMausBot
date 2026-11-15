@@ -10717,6 +10717,7 @@
   "settings.ai.ready": "Ready",
   "settings.ai.notSetUp": "Not set up",
   "settings.ai.attention": "Needs attention",
+  "settings.ai.hiddenStatus": "Hidden from every model list",
   "settings.ai.otherServices": "Other services",
   "backup.exportShort": "Password-protected. Saved logins are not included.",
   "backup.importShort": "Bring back bots and conversations from a backup file.",
