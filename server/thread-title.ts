@@ -4,8 +4,15 @@ import { toolResultPrefix } from "./tool-results.ts";
 
 export const UNTITLED_TASK = "New task";
 
+const PASTE_WRAPPER_LINE = /^\s*<\/?pasted-text(?:\s+index="\d+")?\s*>\s*$/i;
+
 export function titleFromMessage(text: string): string {
-  const line = text.trim().split("\n")[0]!.trim();
+  const lines = text.trim().split("\n");
+  // A message that opens with a paste is named by the pasted text, not the wrapper the composer puts around it.
+  const opensWithPaste = PASTE_WRAPPER_LINE.test(lines[0]!) && /<\/pasted-text>/i.test(text);
+  const line = opensWithPaste
+    ? lines.map((candidate) => candidate.trim()).find((candidate) => candidate && !PASTE_WRAPPER_LINE.test(candidate)) ?? ""
+    : lines[0]!.trim();
   return line.length > 48 ? `${toolResultPrefix(line, 47)}…` : line || UNTITLED_TASK;
 }
 
