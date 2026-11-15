@@ -99,6 +99,7 @@
   "server.connect.secretHandoff": "अपने फ़ोन या कंप्यूटर पर OpenMausBot से {label} सुरक्षित रूप से दें। इसे कभी चैट में नहीं जोड़ा जाता।",
   "server.connect.secretFile": "{bot} के कमांड इसे 24 घंटे तक एक निजी फ़ाइल से पढ़ सकते हैं; इसे कभी चैट में नहीं जोड़ा जाता।",
   "server.connect.secretRef": "{bot} को OpenMausBot के अपने टूल के लिए एक बार इस्तेमाल होने वाला रेफ़रेंस मिलता है और वह इसे कभी नहीं देखता।",
+  "server.connect.secretSavedAsRef": "{label} पहले से सहेजा हुआ है, पर सिर्फ़ OpenMausBot के अपने टूल के लिए। {bot} को अपने कमांड के लिए यह फ़ाइल के रूप में चाहिए, इसलिए इसे यहाँ फिर से डालें।",
   "server.connect.secretNeverRead": "{bot} इसका इस्तेमाल कर सकता है, लेकिन इसे कभी वापस नहीं पढ़ सकता।",
   "server.connect.emailOutgoingLabel": "{address} का आउटगोइंग सर्वर",
   "server.connect.emailOutgoingNote": "बताएँ कि यह मेल कहाँ से भेजता है। {bot} पासवर्ड कभी नहीं देखता।",
