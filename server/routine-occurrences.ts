@@ -83,7 +83,9 @@ function recordOf(run: Row, before: Occurrence | undefined, now: number, holder:
   };
 }
 
-const same = (a: Occurrence, b: Occurrence) => JSON.stringify(a) === JSON.stringify(b);
+/** Field by field, whatever order they are in: a record read back from the file lists them in its own. */
+const ordered = (record: Occurrence) => JSON.stringify(Object.entries(record).filter(([, value]) => value !== undefined).sort(([a], [b]) => a < b ? -1 : 1));
+const same = (a: Occurrence, b: Occurrence) => ordered(a) === ordered(b);
 const machineName = (value: string | undefined) => (value ?? hostname()).replace(/[^\w:-]/g, "-").slice(0, 64) || "local";
 
 export class Occurrences {

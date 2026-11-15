@@ -609,6 +609,20 @@ describe("the files", () => {
     expect(h.started).toEqual(["thread-1", "thread-2"]);
   });
 
+  it("writes nothing when a start finds nothing changed", async () => {
+    const h = harness();
+    h.manager.create(every(60));
+    await h.tickAt(START + HOUR);
+    h.done("thread-1");
+    h.manager.close();
+    const { ledger, mark } = ledgerPaths(h.file), before = [readFileSync(h.file, "utf8"), readFileSync(ledger, "utf8"), readFileSync(mark, "utf8")];
+    h.at(START + HOUR + 10 * MINUTE);
+    h.kill();
+    h.report();
+    h.manager.close();
+    expect([readFileSync(h.file, "utf8"), readFileSync(ledger, "utf8"), readFileSync(mark, "utf8")]).toEqual(before);
+  });
+
   it("keeps what can be read of a ledger with a torn or damaged line, and never lowers the sequence number when the ledger is lost", async () => {
     const h = harness();
     h.manager.create(every(60));
