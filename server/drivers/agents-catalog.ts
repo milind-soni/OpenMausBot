@@ -20,7 +20,7 @@ import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
 import { PERSON_TOOL_DEFINITIONS } from "./agents-person-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES, X_TOOL_NAMES } from "./agents-research-tools.ts";
 import type { CatalogProfile } from "./agents-catalog-profile.ts";
-import { advertisedSchema } from "./agents-schema.ts";
+import { advertisedSchema } from "./agents-schema.ts"; import { withoutToolsOff } from "./agents-tool-groups.ts";
 export { catalogProfileFromEnv, type CatalogProfile } from "./agents-catalog-profile.ts";
 
 export const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
@@ -953,7 +953,7 @@ const CLOUD_HOME_SURFACE = {
 };
 
 export function availableTools(profile: CatalogProfile) {
-  const tools = catalogTools(profile);
+  const tools = withoutToolsOff(catalogTools(profile), profile.toolsOff ?? []);
   const placed = profile.cloudHome
     ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
       ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: CLOUD_HOME_SURFACE } } }

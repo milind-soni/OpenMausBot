@@ -178,6 +178,16 @@ describe("a turn's Email tools", () => {
     expect(host.prompt({ id: "b", name: "A" })).toContain("me@shop.example");
     expect(host.prompt({ id: "b", name: "A" })).not.toContain(PASSWORD);
     expect(host.prompt({ id: "b", name: "A", composio: false })).toBe("");
+    expect(empty.host.available()).toBe(false);
+    expect(host.available()).toBe(true);
+  });
+
+  it("a bot with Email turned off is neither given the tools nor told about them", async () => {
+    const { host } = await fixture();
+    const off = { id: "b", name: "A", toolsOff: ["email"] };
+    expect(host.integration(off, () => "cap", "http://127.0.0.1:1")).toBeNull();
+    expect(host.prompt(off)).toBe("");
+    expect(host.integration({ ...off, toolsOff: ["data", "pages"] }, () => "cap", "http://127.0.0.1:1")).not.toBeNull();
   });
 });
 

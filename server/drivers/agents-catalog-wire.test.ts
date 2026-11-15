@@ -66,6 +66,8 @@ function profiles(): Record<string, Profile> {
   // The plan's included app hosting reaches only a Cloud home the Admin wired for it; the fullest profile carries it.
   all["skills+shared+voice+x+team+images+hosting"] = { env: { ...all["skills+shared+voice+x+team+images"]!.env, OMB_APP_HOSTING: "1" } };
   all["default+hosting"] = { env: { ...all.default!.env, OMB_APP_HOSTING: "1" } };
+  // A bot whose person turned groups off; the fullest profile has every group on.
+  all["default+tools-off"] = { env: { ...all.default!.env, OMB_TOOLS_OFF: "pages,meetings" } };
   return all;
 }
 
@@ -115,6 +117,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+images": 65825,
   "skills+shared+voice+x+team+images+hosting": 77649,
   "default+hosting": 66915,
+  "default+tools-off": 61242,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -282,6 +285,15 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
+  it("leaves out only the tools of the groups a bot has off", () => {
+    const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
+    const PAGE_TOOLS = ["show_html", "publish_page", "unpublish_page"];
+    expect(names(wires["default+tools-off"]!)).toEqual(names(wires.default!).filter((tool) => !PAGE_TOOLS.includes(tool)));
+    for (const [name, profile] of Object.entries(PROFILES)) {
+      expect(names(wires[name]!).includes("show_html"), name).toBe(profile.env.OMB_TOOLS_OFF === undefined);
+    }
+  });
+
   it("ignores the switches that once picked a catalog profile", () => {
     expect(wires["default+legacy-switches"]).toBe(wires.default);
     const profile = catalogProfileFromEnv({ OMB_BOT_ID: "bot-golden", OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1", OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1", OMB_ACTIVE_WAITS: "0" });
@@ -347,7 +359,7 @@ describe("agents proxy tools/list golden", () => {
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(name).includes("select_computer"), name).toBe(profile.env.OMB_COMPUTER_SELECTION === "1");
       expect(names(name).includes("show_widget"), name).toBe(true);
-      expect(names(name).includes("show_html"), name).toBe(true);
+      expect(names(name).includes("show_html"), name).toBe(profile.env.OMB_TOOLS_OFF === undefined);
       expect(names(name).includes("wait_until"), name).toBe(profile.env.OMB_ROOM !== "1");
     }
   });

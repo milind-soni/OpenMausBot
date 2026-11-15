@@ -464,7 +464,7 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("claude")).toBeNull();
   });
 
-  it("re-reads usage every few minutes while an engine is held, with nothing else waiting, and so ends a hold that reset early", async () => {
+  it("re-reads usage every few minutes while an engine is held and turns run, with nothing else waiting, and so ends a hold that reset early", async () => {
     vi.useFakeTimers({ now: NOW });
     let usage = report(claude([100, NOW + 23 * HOUR], [8, NOW + 5 * 24 * HOUR]));
     const loadUsage = vi.fn(async () => ({ ...usage, fetchedAt: iso(Date.now()) }));
@@ -472,7 +472,9 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     instance.start();
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(loadUsage, "nothing held, nothing waiting: no reads").not.toHaveBeenCalled();
-    instance.noteRefusal("claude", Date.now() + 23 * HOUR);
+    // A turn on Claude meets its limit: the home is in use.
+    instance.noteRuntimeEvent("claude", { eventId: "e", provider: "claudeAgent", createdAt: iso(Date.now()), threadId: "t1", type: "runtime.error",
+      message: "limit", limitResetsAt: Date.now() + 23 * HOUR } as RuntimeEvent);
     await vi.advanceTimersByTimeAsync(6_000);
     expect(instance.blockedUntil("claude"), "the read soon after the refusal still shows the full window").not.toBeNull();
     usage = report(claude([2, NOW + 5 * HOUR], [8, NOW + 5 * 24 * HOUR]));
