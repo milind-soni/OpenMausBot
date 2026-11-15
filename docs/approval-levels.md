@@ -259,10 +259,11 @@ including Gemini.
 
 The native Antigravity CLI (1.5.0 and later) rejects `yolo` and `auto_edit`,
 so it stays in its `default` mode at every level and asks before each action.
-On Auto the app answers those requests itself, and on Auto-accept edits it
-answers the edit requests, so neither level shows more approval cards than it
-does on the pinned runtime. A turn fails rather than start when the CLI does
-not confirm `default`.
+On Auto the app answers those requests itself, never-list commands excepted.
+On Auto-accept edits it answers a request only when it is a plain file edit
+inside the turn's folder: one that names a command, gives no location, or
+reaches outside that folder is asked as usual. A turn fails rather than start
+when the CLI offers no mode or does not confirm `default`.
 
 A computer that already has the pinned runtime keeps it. To move an
 Antigravity account to the native CLI, set its **CLI path** to `antigravity`
@@ -315,7 +316,7 @@ multi-question card renders its structured form on current apps instead.
 | Claude | Native `default` | Native `acceptEdits` | Native `auto` | Native `bypassPermissions` |
 | Cursor | Native default | not offered | Native `--auto-review` | Native `--force` |
 | Antigravity | Native `default` | Native `auto_edit` | Legacy `auto` behaves as Ask; UI Auto selects Full access | Native `yolo` plus automatic approval of remaining tool-permission requests; shown as Auto |
-| Antigravity (native CLI, 1.5.0 and later) | Native `default` | Native `default`; the app answers its edit requests itself | as Antigravity | Native `default`; the app answers every tool-permission request, never-list commands excepted; shown as Auto |
+| Antigravity (native CLI, 1.5.0 and later) | Native `default` | Native `default`; the app answers file edits inside the turn's folder itself | as Antigravity | Native `default`; the app answers every tool-permission request, never-list commands excepted; shown as Auto |
 | Grok Build | Native `default` | Native `acceptEdits` | Native `--permission-mode auto`; availability of Grok's reviewer depends on its feature rollout | Native `bypassPermissions` plus automatic approval of remaining tool-permission requests |
 | OpenCode | Ask | not offered | Ask | Approve individual ACP permission requests, never task questions |
 | Qwen Code | Native `default` | Native `--approval-mode auto-edit` | Native `--approval-mode auto` (Qwen's LLM classifier approves safe actions, blocks risky ones) | `--yolo`, plus automatic approval of remaining ACP permission requests |

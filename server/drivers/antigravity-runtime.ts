@@ -27,6 +27,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 
 import { DATA_DIR } from "../config.ts";
+import { outsideBoxOptions } from "../procs.ts";
 import { antigravityRuntimesRoot } from "../engine-roots.ts";
 import { extractZipMember, readZipDirectory } from "../zip-archive.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -74,8 +75,6 @@ export async function retryOnWindowsFileLock<T>(step: () => Promise<T>, options:
 
 const INSTALL_RECORD = ".install-complete.json";
 
-/** What the engine's CLI path is set to for the native CLI this app installs, as `agy` stands for the pinned runtime. */
-export const ANTIGRAVITY_NATIVE_ALIAS = "antigravity";
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const CLI_VERSION_PROBE_MS = 5_000;
 
@@ -179,9 +178,10 @@ async function nativeCliVersion(executablePath: string, env: NodeJS.ProcessEnv):
   const stamp = `${info.size}:${info.mtimeMs}`;
   const known = cliVersions.get(executablePath);
   if (known?.stamp === stamp) return known.version;
+  // Security: the probe runs outside the bot box, so the program-trust rule decides whether it may run at all.
+  const options = outsideBoxOptions(executablePath, { env, timeout: CLI_VERSION_PROBE_MS, killSignal: "SIGKILL" as const, maxBuffer: 64 * 1024, windowsHide: true, encoding: "utf8" as const });
   const output = await new Promise<string>((done) => {
-    execFile(executablePath, ["--version"], { env, timeout: CLI_VERSION_PROBE_MS, killSignal: "SIGKILL", maxBuffer: 64 * 1024, windowsHide: true, encoding: "utf8" },
-      (error, stdout, stderr) => done(error ? "" : `${stdout}\n${stderr}`));
+    execFile(executablePath, ["--version"], options, (error, stdout, stderr) => done(error ? "" : `${stdout}\n${stderr}`));
   });
   const triple = parseVersionTriple(output);
   const version = triple && versionAtLeast(triple, [1, 5, 0]) ? triple.join(".") : null;
@@ -197,8 +197,14 @@ async function externalRuntime(candidate: string, source: "override" | "path", e
   const harnessPath = join(dirname(executablePath), names.harness);
   if (await executableFile(harnessPath)) return { executablePath, harnessPath, source, version: null };
   if (!ANTIGRAVITY_NATIVE_CLI || env === undefined || !isAntigravityCliName(executablePath)) return null;
-  const version = await nativeCliVersion(executablePath, env).catch(() => null);
+  const version = await nativeCliVersion(executablePath, env);
   return version === null ? null : { executablePath, harnessPath: null, source, version };
+}
+
+/** Whether the engine's CLI path asks for the native CLI this app installs: the bare name, as the CLI itself is named. */
+export function isAntigravityNativeAlias(cli: string | undefined): boolean {
+  const name = cli?.trim() ?? "";
+  return ANTIGRAVITY_NATIVE_CLI && !/[\\/]/u.test(name) && isAntigravityCliName(name);
 }
 
 /** Legacy `agy` commands (saved absolute paths, Windows shims) migrate without editing user config. */
@@ -209,7 +215,7 @@ export async function resolveAntigravityRuntime(
 ): Promise<AntigravityRuntime> {
   const override = binaryPath?.trim();
   const legacyCli = override !== undefined && /(?:^|[\\/])agy(?:\.(?:cmd|bat|exe|ps1))?$/iu.test(override);
-  const native = ANTIGRAVITY_NATIVE_CLI && override === ANTIGRAVITY_NATIVE_ALIAS;
+  const native = isAntigravityNativeAlias(override);
   if (override && override !== "agy" && !native) {
     for (const candidate of pathCandidates(override, env)) {
       const found = await externalRuntime(candidate, "override", env);
@@ -274,8 +280,8 @@ async function extractPinnedArchive(
 }
 
 /** A computer the app already put a pinned runtime on keeps it: only a new install, one that already runs the native
- * CLI, or a CLI path that asks for it takes the CLI. Null when the pinned runtime is the one to install; the CLI's own
- * failure is thrown only when nothing else may stand in. */
+ * CLI, or a CLI path that asks for it takes the CLI. Null when the pinned runtime is the one to install: the CLI's own
+ * failure is thrown unless this is a new install the pinned runtime can stand in for. */
 async function installNativeCli(options: AntigravityInstallOptions, root: string): Promise<AntigravityRuntime | null> {
   if (!ANTIGRAVITY_NATIVE_CLI || options.asset !== undefined) return null;
   const pinned = resolveAntigravityReleaseAsset();
@@ -291,8 +297,7 @@ async function installNativeCli(options: AntigravityInstallOptions, root: string
     }
     return await installAntigravityCli(release, { root, fetchImpl: options.fetchImpl, validate: options.validate, retry: retryOnWindowsFileLock });
   } catch (error) {
-    if (options.native || !pinned) throw error;
-    if (active) return active;
+    if (options.native || !pinned || active) throw error;
     console.warn(`antigravity: the native CLI could not be installed (${error instanceof Error ? error.message : String(error)}); installing the pinned runtime instead`);
     return null;
   }
@@ -421,7 +426,7 @@ async function installOnce(options: AntigravityInstallOptions): Promise<Antigrav
 }
 
 export function installAntigravityRuntime(options: AntigravityInstallOptions = {}): Promise<AntigravityRuntime> {
-  const key = runtimeRoot(options.baseDir);
+  const key = `${runtimeRoot(options.baseDir)}\0${options.asset !== undefined ? "pinned" : options.native ? "native" : "default"}`;
   const existing = installs.get(key);
   if (existing) return existing;
   const running = installOnce(options).finally(() => installs.delete(key));
@@ -429,23 +434,31 @@ export function installAntigravityRuntime(options: AntigravityInstallOptions = {
   return running;
 }
 
-let lastCliUpdateCheck: number | undefined;
+let channelAnswer: { at: number; version: string } | undefined;
 
-/** The native CLI's version when it is the runtime in use here and Google's channel has a newer one. The channel is
- * asked at most once an hour. */
+/** The native CLI's version when an account here runs it and Google's channel has a newer one. An account runs it
+ * when its CLI path asks for it, or when no pinned runtime is installed to go first. The channel's answer is kept for
+ * an hour, so an update found while the engine is busy is still there on the next look; a channel that did not answer
+ * is asked again. */
 export async function antigravityCliUpdate(options: {
   baseDir?: string; now?: number; latest?: () => Promise<AntigravityCliReleaseAsset | null>; asset?: AntigravityReleaseAsset | null;
+  /** Every engine's configured CLI path. */
+  configuredClis?: readonly string[];
 } = {}): Promise<string | null> {
   if (!ANTIGRAVITY_NATIVE_CLI) return null;
   const root = runtimeRoot(options.baseDir);
   const active = await activeAntigravityCli(root);
+  if (!active?.version) return null;
   const pinned = options.asset === undefined ? resolveAntigravityReleaseAsset() : options.asset;
-  if (!active?.version || (pinned && await completedRelease(join(root, "versions", pinned.sha256), pinned))) return null;
+  const pinnedFirst = pinned ? (await completedRelease(join(root, "versions", pinned.sha256), pinned)) !== null : false;
+  if (pinnedFirst && !(options.configuredClis ?? []).some(isAntigravityNativeAlias)) return null;
   const now = options.now ?? Date.now();
-  if (lastCliUpdateCheck !== undefined && now - lastCliUpdateCheck < UPDATE_CHECK_INTERVAL_MS) return null;
-  lastCliUpdateCheck = now;
-  const latest = await (options.latest ?? latestAntigravityCliRelease)();
-  return latest && isNewer(latest.version, active.version) ? active.version : null;
+  if (channelAnswer === undefined || now - channelAnswer.at >= UPDATE_CHECK_INTERVAL_MS || now < channelAnswer.at) {
+    const latest = await (options.latest ?? latestAntigravityCliRelease)();
+    if (!latest) return null;
+    channelAnswer = { at: now, version: latest.version };
+  }
+  return isNewer(channelAnswer.version, active.version) ? active.version : null;
 }
 
 /** The newest runtime the app installed here, when it is not the pinned one; null when the pinned one is installed or none is. */

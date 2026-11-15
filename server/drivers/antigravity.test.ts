@@ -848,7 +848,7 @@ describe("Antigravity driver over shared ACP", () => {
   it("uses managed setup and defaults to approval cards", () => {
     expect(AntigravityDriver.defaultConfig()).toEqual({ cli: "agy", fullAuto: false, workspace: undefined });
     expect(AntigravityDriver.install?.docsUrl).toContain("antigravity-acp");
-    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity" });
+    expect(AntigravityDriver.install?.managed).toEqual({ label: "Install official Antigravity", downloadBytes: resolveAntigravityReleaseAsset()?.archiveBytes ?? 0, sizeUnknown: true });
     expect(antigravityPermissionMode(false)).toBe("default");
     expect(antigravityPermissionMode(false, "ask")).toBe("default");
     expect(antigravityPermissionMode(false, "auto")).toBe("default");

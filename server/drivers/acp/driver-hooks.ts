@@ -22,7 +22,7 @@ export interface AcpDriverHooks {
   clientInfo?(instanceId: string): { name: string; version: string } | undefined;
   /** Whether the driver answers this permission request with "allow" itself, with no card: for an agent that asks
    * about actions the turn's approval level already covers. Never consulted for a question or a never-list command. */
-  allowsAlone?(instanceId: string, turn: { approvalMode?: string }, toolCall: { kind?: unknown }): boolean;
+  allowsAlone?(instanceId: string, turn: { approvalMode?: string; cwd?: string }, toolCall: { kind?: unknown; rawInput?: unknown; locations?: unknown }): boolean;
   /** Called before each session/prompt. The check it returns gets that prompt's result and names the failure the agent
    * reported as an ordinary reply, which then fails the turn. Neither may throw. */
   promptOutcome?(instanceId: string, sessionId: string): Promise<(result: unknown) => Promise<Error | undefined>>;

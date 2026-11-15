@@ -10,7 +10,7 @@
 // Release withdrawal is left out, and the archive is read in process instead of by the system's tar.
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { writeFileAtomic } from "../atomic.ts";
@@ -147,6 +147,17 @@ async function extractOnlyExecutable(archivePath: string, directory: string, nam
   });
 }
 
+/** Staging folders an install that was cut short left behind. Another process may be installing here right now, so
+ * only a folder older than any download may run is removed. */
+async function sweepStaleStaging(versions: string, now = Date.now()): Promise<void> {
+  for (const name of await readdir(versions).catch(() => [] as string[])) {
+    if (!name.startsWith(".install-")) continue;
+    const path = join(versions, name);
+    const info = await stat(path).catch(() => null);
+    if (info?.isDirectory() && now - info.mtimeMs > DOWNLOAD_TIMEOUT_MS + 15 * 60_000) await rm(path, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 /** Download `asset`, check it against the channel's checksum, start it once to confirm what it is, publish it beside
  * the other releases and make it the active one. A release already installed is checked again and made active. */
 export async function installAntigravityCli(asset: AntigravityCliReleaseAsset, options: AntigravityCliInstallOptions): Promise<AntigravityRuntime> {
@@ -162,12 +173,15 @@ export async function installAntigravityCli(asset: AntigravityCliReleaseAsset, o
     if (installed.version !== asset.version) throw new Error("The existing managed release has the wrong version. Remove it before reinstalling.");
     return installed;
   };
-  if (await stat(destination).then(() => true, () => false)) {
+  await sweepStaleStaging(versions);
+  if (await installedAntigravityCli(options.root, releaseId, platform)) {
     const existing = await finish();
     await options.validate?.(existing, asset.version);
     activate(options.root, releaseId);
     return existing;
   }
+  // What is left of a release whose files were damaged or removed: it is installed again.
+  await rm(destination, { recursive: true, force: true, maxRetries: 4, retryDelay: 250 });
   try {
     const disk = await statfs(versions, { bigint: true });
     const required = BigInt(MAX_DOWNLOAD_BYTES + MAX_EXECUTABLE_BYTES + FREE_SPACE_MARGIN);

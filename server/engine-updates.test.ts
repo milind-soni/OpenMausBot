@@ -347,6 +347,28 @@ describe("a runtime the app manages itself", () => {
       await removeTempDir(scratch);
     }
   });
+
+  it("names the version a runtime really moved to, and counts an install that changed nothing as failed", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-engine-updates-"));
+    try {
+      const lines: string[] = [];
+      let installs: string | void = "1.5.8";
+      const managed = { older: async () => "1.5.7", install: async () => installs, folder: join(scratch, "runtimes") };
+      const engines = createEngineUpdater({
+        plans: [{ driverKind: "managedEngine", name: "Managed", pin: { target: "1.4.3", minimum: "1.4.3" }, managed }],
+        baseDir: scratch, statePath: join(scratch, "state.json"), turnRunning: () => false, log: (line) => lines.push(line),
+        liveCommands: () => [], steps: noSteps(),
+      });
+      await engines.check();
+      expect(lines).toEqual(["Engine update: Managed 1.5.7 → 1.5.8"]);
+      expect(engines.shown("managedEngine").autoUpdated?.version).toBe("1.5.8");
+      installs = "1.5.7";
+      await engines.check();
+      expect(lines[1]).toBe("Engine update: Managed stays on 1.5.7; 1.5.7 could not be installed (the install left the same version in place). Trying again later.");
+    } finally {
+      await removeTempDir(scratch);
+    }
+  });
 });
 
 describe.skipIf(process.platform === "win32")("the ACP handshake", () => {
