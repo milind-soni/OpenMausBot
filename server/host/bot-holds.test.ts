@@ -47,7 +47,8 @@ describe("pausing a bot or a department", () => {
     const { make, dataDir } = setup();
     make().set("department", "Support", true);
     expect(make().heldBots()).toEqual(["cy"]);
-    expect(statSync(join(dataDir, "paused-bots.json")).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX mode bits: Node reports 0o666 for any writable file there.
+    if (process.platform !== "win32") expect(statSync(join(dataDir, "paused-bots.json")).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(join(dataDir, "paused-bots.json"), "utf8"))).toMatchObject({ bots: [], departments: ["Support"] });
   });
 
