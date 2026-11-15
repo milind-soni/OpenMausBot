@@ -1706,7 +1706,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...action.bot,
         computer: action.bot.computer,
         toolScope: action.bot.toolScope, managedSections: action.bot.managedSections,
-        vpsAlias: action.bot.vpsAlias,
+        vpsAlias: action.bot.vpsAlias, liveVoice: action.bot.liveVoice,
         messages: action.bot.messages ?? [],
         hasMore: action.bot.hasMore,
         awaitingThreadSnapshot: false,
