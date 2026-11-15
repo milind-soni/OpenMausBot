@@ -74,6 +74,22 @@ describe("Mistral (Vibe) ACP driver", () => {
     expect(vibeSignedIn({ VIBE_HOME: join(scratch, "absent"), MISTRAL_API_KEY: "fixture-key" }, probe)).toBe(true);
   });
 
+  it("reports a pasted key as an API-key account and keeps sign-out from removing the CLI's own sign-in", async () => {
+    const home = join(scratch, "vibe-home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "whoami_cache.json"), JSON.stringify({ customer_id: "cus-fixture" }));
+    const keyed = await create({ MISTRAL_API_KEY: "fixture-key" });
+    expect(await keyed.instance.snapshot()).toMatchObject({ state: "available", authenticated: true, account: { method: "api-key" } });
+    await expect(keyed.instance.signOut!()).rejects.toThrow("signed in by an API key");
+    expect(existsSync(join(home, "whoami_cache.json"))).toBe(true);
+    await keyed.instance.dispose();
+    instance = undefined;
+    const own = await create();
+    const snapshot = await own.instance.snapshot();
+    expect(snapshot).toMatchObject({ state: "available", authenticated: true });
+    expect(snapshot.account).toBeUndefined();
+  });
+
   it("treats an injected keychain probe as a sign-in marker (orchestration of the fresh sign-in)", () => {
     const env = { VIBE_HOME: join(scratch, "absent") };
     expect(vibeSignedIn(env, () => false)).toBe(false);

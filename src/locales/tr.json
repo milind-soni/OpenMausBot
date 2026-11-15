@@ -6006,5 +6006,8 @@
   "computer.recovery.restartTitle": "Bu bulut bilgisayarı durdurup yeniden başlatır. Açık programlar kapanır; dosyaları kalır.",
   "computer.recovery.replace": "Bilgisayarı değiştir",
   "computer.recovery.replaceTitle": "Bu bulut bilgisayarı siler ve bota yenisini verir. Yalnızca üzerinde olan dosyalar kaybolur.",
-  "composer.command.burstDesc": "Bir işin birçok parçasını aynı anda çalıştırın, sonra sonuçları birleştirin"
+  "composer.command.burstDesc": "Bir işin birçok parçasını aynı anda çalıştırın, sonra sonuçları birleştirin",
+  "devices.computers.pairButton": "Bilgisayar eşle",
+  "devices.computers.pairTitle": "Başka bir bilgisayar eşle",
+  "devices.computers.typeCode": "Diğer bilgisayarınızda {app} içinde Sunucuya bağlan'ı açın ve bu kodu yazın."
 }

@@ -1,5 +1,6 @@
 import { processAlive } from "./browser-processes.ts";
 import type { ProviderAdapter, RuntimeEvent } from "./contracts.ts";
+import type { ServerTextParams } from "../shared/server-text.ts";
 import { sampleProcessTree, type ProcessSample } from "./drivers/acp/quiet-status.ts";
 import { redactSecretsInText } from "../shared/redact.ts";
 
@@ -39,11 +40,22 @@ export function stuckCommand(turn: Partial<Pick<WatchedTurn, "runningTools">>, s
   return oldest ? { command: redactSecretsInText(oldest.command), minutes: Math.max(1, Math.round((stopAt - oldest.startedAt) / 60_000)) } : null;
 }
 
+/** Why the watchdog stopped a turn: it went silent, or the process running its engine exited and the turn can never
+ * answer. */
+export type StallReason = "silent" | "engine-exited";
+
+/** The silence that stops a turn whose engine process has exited: its engine can never answer it, so it waits only long
+ * enough for the driver to report the turn's own end, and not for the tool limit. */
+export const ENGINE_EXIT_STALL_MS = 2 * 60_000;
+
 /** What the person is told when the watchdog stops a turn silent for silentMs: the shell command still running, with how
- * long it ran, so they know what looked stuck; otherwise how long the turn was silent. */
-export function stallNotice(turn: Partial<Pick<WatchedTurn, "runningTools">>, silentMs: number, stopAt: number) {
+ * long it ran, so they know what looked stuck; otherwise how long the turn was silent. A turn whose engine process
+ * exited is told that instead: no silence of its own stopped it. */
+export function stallNotice(turn: Partial<Pick<WatchedTurn, "runningTools">>, silentMs: number, stopAt: number, reason: StallReason = "silent"):
+  { key: "chat.notice.engineExited"; params: ServerTextParams } | { key: "chat.notice.stalledCommand"; params: { command: string; minutes: number } } | { key: "chat.notice.stalled"; params: { minutes: number } } {
+  if (reason === "engine-exited") return { key: "chat.notice.engineExited", params: {} };
   const stuck = stuckCommand(turn, stopAt);
-  return stuck ? { key: "chat.notice.stalledCommand" as const, params: stuck } : { key: "chat.notice.stalled" as const, params: { minutes: Math.round(silentMs / 60_000) } };
+  return stuck ? { key: "chat.notice.stalledCommand", params: stuck } : { key: "chat.notice.stalled", params: { minutes: Math.round(silentMs / 60_000) } };
 }
 
 // Number() also reads "Infinity" and "1e309" as numbers, and an endless limit would switch the watchdog off.
@@ -58,6 +70,14 @@ export function engineProcessGone(adapter: Pick<ProviderAdapter, "enginePid"> | 
   if (!adapter?.enginePid) return false;
   const pid = adapter.enginePid(threadId);
   return pid === undefined || !alive(pid);
+}
+
+/** The engine's process for the thread's turn has exited: the driver names one and that process is gone. A driver that
+ * names no process for the turn proves nothing (the turn may not have started one yet), so this is false for it. */
+export function engineProcessExited(adapter: Pick<ProviderAdapter, "enginePid"> | null | undefined, threadId: string, alive = processAlive): boolean {
+  if (!adapter?.enginePid) return false;
+  const pid = adapter.enginePid(threadId);
+  return pid !== undefined && !alive(pid);
 }
 
 /** The CPU time used by the processes the thread's engine started since `since` (what a tool call started then runs, not
@@ -77,14 +97,21 @@ export interface TurnWatchdogOptions {
   toolStallMs: number;
   /** The silence that stops a parked turn whose engine is known to be gone: longer than any wait the harness bounds itself. */
   parkedStallMs: number;
+  /** The silence that stops a turn whose engine process has exited: its engine can never answer it, so it does not wait
+   * for the tool limit, only long enough for the driver to report the turn's own end. */
+  engineExitStallMs: number;
   checkMs: number;
   /** The turn's engine is known to have no process left for it; absent or false, a parked turn waits on. */
   engineGone?: (turn: WatchedTurn) => boolean;
+  /** The turn's engine process has exited: the driver names one for the turn and that process is gone. Absent or false,
+   * the turn waits for the silence its tools bound. */
+  engineExited?: (turn: WatchedTurn) => boolean;
   /** The CPU time the processes of the turn's shell command started at `since` have used, null when unknown. Read once
    * per sweep after a turn running one has been silent for stallMs: time gained since the last read counts as an event. */
   commandCpuMs?: (turn: WatchedTurn, since: number) => Promise<number | null>;
-  /** silentMs: the silence that stopped the turn, stallMs, toolStallMs or parkedStallMs. */
-  onStall: (turn: WatchedTurn, silentMs: number) => void;
+  /** silentMs: the silence that stopped the turn, stallMs, toolStallMs, parkedStallMs or engineExitStallMs. reason: why
+   * the turn was stopped, so the person is told what actually happened to it. */
+  onStall: (turn: WatchedTurn, silentMs: number, reason: StallReason) => void;
   /** The conversations shown working that nothing holds but a watched turn (no dispatch, engine or settling turn): one no
    * watched turn holds either is freed once it has stayed so for stallMs. */
   unheld?: { threads(): Iterable<{ threadId: string; botId: string }>; free(threadId: string, botId: string): void };
@@ -193,20 +220,24 @@ export class TurnWatchdog {
     const at = this.now();
     for (const turn of this.turns.values()) {
       if (sleptMs) turn.lastEventAt = Math.min(at, turn.lastEventAt + sleptMs);
-      const silentMs = this.silenceLimit(turn);
-      if (silentMs === null) continue;
+      const limit = this.silenceLimit(turn);
+      if (limit === null) continue;
+      // server/testing/group-local-vm-hooks.mjs rewrites the silentMs comparison below: keep that name.
+      const { ms: silentMs, reason } = limit;
       if (at - turn.lastEventAt >= this.opts.stallMs) this.readCommandCpu(turn);
       if (at - turn.lastEventAt < silentMs) continue;
       this.turns.delete(turn.threadId);
-      this.opts.onStall(turn, silentMs);
+      this.opts.onStall(turn, silentMs, reason);
     }
     this.freeUnheld(at);
   }
 
   /** null: the turn may wait on, parked while its engine is not known to be gone. */
-  private silenceLimit(turn: WatchedTurn): number | null {
-    if (parked(turn)) return this.opts.engineGone?.(turn) ? this.opts.parkedStallMs : null;
-    return turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs;
+  private silenceLimit(turn: WatchedTurn): { ms: number; reason: StallReason } | null {
+    if (parked(turn)) return this.opts.engineGone?.(turn) ? { ms: this.opts.parkedStallMs, reason: "silent" } : null;
+    // The engine's process is gone: nothing can finish this turn, so it waits for the driver's own word, not for a tool's.
+    if (this.opts.engineExited?.(turn)) return { ms: this.opts.engineExitStallMs, reason: "engine-exited" };
+    return { ms: turn.runningTools.size > 0 ? Math.max(this.opts.stallMs, this.opts.toolStallMs) : this.opts.stallMs, reason: "silent" };
   }
 
   /** Reads the CPU time of a silent turn's shell command; one whose time changed since the last read is working (it gained

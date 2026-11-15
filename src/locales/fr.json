@@ -3804,5 +3804,8 @@
   "computer.recovery.restartTitle": "Arrête puis relance cet ordinateur cloud. Les programmes ouverts sont fermés ; ses fichiers restent.",
   "computer.recovery.replace": "Remplacer l'ordinateur",
   "computer.recovery.replaceTitle": "Supprime cet ordinateur cloud et en donne un nouveau au bot. Les fichiers qui ne sont que dessus sont perdus.",
-  "composer.command.burstDesc": "Lancer plusieurs parties d'un travail en même temps, puis fusionner les résultats"
+  "composer.command.burstDesc": "Lancer plusieurs parties d'un travail en même temps, puis fusionner les résultats",
+  "devices.computers.pairButton": "Associer un ordinateur",
+  "devices.computers.pairTitle": "Associer un autre ordinateur",
+  "devices.computers.typeCode": "Sur votre autre ordinateur, ouvrez Se connecter à un serveur dans {app} et saisissez ce code."
 }

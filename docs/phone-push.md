@@ -216,6 +216,100 @@ and its phones keep today's behaviour.
 - The categories (Allow and Deny on an approval, Answer on a question) are the
   ones the app registers today.
 
+## Compared with the reference app, and why push goes through the control plane
+
+The owner asked for push "like the reference app does it, with a relay". This
+section says what the reference app actually does, how each part maps onto
+MausBot, and which design we keep.
+
+### How the reference app does it
+
+- **Who sends.** The user's own server process, running on their machine,
+  watches its own event stream and posts each conversation's state (phase,
+  project and thread title, model name, timestamps, a deep link) to a hosted
+  service it calls its relay: a Cloudflare Worker with a database. The server
+  authenticates with a per-environment credential plus a short signed proof
+  that can be used once. The hosted service never detects events itself.
+- **What the hosted service knows.** Device tokens and preferences, the Live
+  Activity tokens, which environments each account linked, and the per-thread
+  state above: titles and phases, never message text (failure details are
+  replaced with a fixed sentence). It fans each state out to every device of
+  every account linked to that environment, through APNs (alerts and Live
+  Activity updates) and FCM (data-only messages).
+- **When the user's machine is off.** Nothing new is sent. The hosted service
+  expires old rows (running after 2 hours, waiting after 24 hours, finished
+  after 15 minutes) and a cron job ends idle Live Activities; the cards also go
+  stale after 10 minutes.
+- **The phone.** It registers once per account with a stable device id and the
+  raw APNs or FCM token, re-registers when the token rotates, on every return
+  to the foreground, and when a stored signature (token, app version, OS
+  version, preferences) changes. Calls go one at a time, and a generation
+  counter stops a late answer from overwriting a sign-out. Live Activities are
+  always started on the phone, in the foreground; their update tokens are
+  registered, and the hosted service updates and ends them by push. It does
+  not start them by push: the reference app records that remote start proved
+  too unreliable. On Android, a native module handles FCM data messages
+  without a foreground service and shows one ongoing "agent activity"
+  notification plus alerts.
+
+### How that maps onto MausBot
+
+| The reference app | MausBot |
+| --- | --- |
+| The user's server watches its events and decides | The computer or Cloud (`server/phone-push.ts`) does the same |
+| Hosted relay: holds the APNs and Firebase keys, stores tokens, sends | The control plane's push routes (`cloudflare/control-plane/src/push.ts`) |
+| Server authenticates with an environment credential | The installation credential the computer already has |
+| Device registration goes to the hosted relay, per account | Registration goes to each computer over the phone's existing link, and the computer registers it with the control plane |
+| Live Activity tokens registered, updates and ends by push | The same (`/api/push/activity`, control plane `push/activity`) |
+| Android ongoing notification from FCM data, no foreground service | The same (the phone app's `bot-activity` module) |
+
+MausBot also has something called a relay: MausBot Relay (`relay1`, `relay2`,
+`relay/` in this repository). It is a different thing. It splices the phone's
+end-to-end encrypted connection to the computer and cannot read a byte of it,
+so it never sees an event, a bot name or a token. The reference app's relay is
+a hosted service that receives plain state from the user's server and talks to
+Apple and Google. In MausBot that service is the control plane.
+
+### Should push go through MausBot Relay as well, or instead?
+
+What it would buy:
+
+- **The relay knows when a phone's link is down.** So does the computer: the
+  relay's view is the same session the computer holds, seen from the middle.
+  The computer also knows when a phone on Wi-Fi or a tunnel is gone, which the
+  relay never sees.
+- **One hosted hop.** We already have one: computer → control plane → Apple or
+  Google. Going through the relay would add a hop (computer → relay → Apple),
+  because the relay would still have to learn what to send from the computer.
+- **Fewer moving parts.** It would be more. The relay nodes are long-running
+  containers on two hosts, built to carry bytes they cannot read. They would
+  need the APNs key and the Firebase service account on each node, a token
+  store, rate limits and dead-token handling. That is a second sender to
+  secure and keep in step with the control plane, which already does all of
+  this and is covered by tests.
+
+What it would cost or break:
+
+- **Cloud homes and many phones never touch the relay.** A Cloud is reached
+  directly over HTTPS, and many phones use Wi-Fi or a tunnel. Only the
+  control plane can serve them all.
+- **It weakens what the relay promises.** Today a relay compromise exposes
+  only ciphertext and connection metadata. With push it would also expose
+  device tokens and the keys that can alert every MausBot phone.
+- **Credentials would sit outside Cloudflare's secret store,** on hosts we
+  patch ourselves.
+
+**Recommendation: keep the control plane as the sender. It already is our
+equivalent of the reference app's relay:** a single hosted service that holds
+the Apple and Google keys, receives content-free state from the user's own
+machine, and sends. MausBot Relay stays a blind splice. What we take from the
+reference app is everything around the sender: the phone's registration
+robustness, Live Activities updated and ended by push from tokens the phone
+registers, and an ongoing "working" notification on Android driven by FCM data
+messages. MausBot keeps one difference on purpose: the phone registers with
+each computer, not with a hosted account, because a phone can be paired
+without any MausBot account at all.
+
 ## Switching it on
 
 What the owner provides and does, in order. Nothing here has been done.
@@ -239,7 +333,11 @@ What the owner provides and does, in order. Nothing here has been done.
 
 **Control plane** (`cloudflare/control-plane/README.md`, "Phone push relay")
 
-5. Apply the D1 migration `0017_push_platforms.sql` (after `0008`).
+5. Apply the D1 migrations `0017_push_platforms.sql` (after `0008`) and
+   `0018_push_purpose.sql` (Live Activity and push-to-start tokens). Live
+   Activities and Android's ongoing notification need no further secret: they
+   use the same APNs key (topic `<bundle id>.push-type.liveactivity`) and the
+   same Firebase project.
 6. Set the secrets: `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY` (the
    `.p8`), `APNS_BUNDLE_ID` (`com.openmausbot.app`), optionally
    `APNS_ENVIRONMENTS=production,sandbox` to accept development builds, and

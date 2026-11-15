@@ -177,6 +177,7 @@ export const mistralVibeSupport: AcpSupport = {
       }
     },
     removeCredentials: removeMistralVibeSignIn,
+    signedInByApiKey: (env) => nonEmpty(env.MISTRAL_API_KEY),
   },
   // Model is a session config option (see header); ids pass through unchanged.
   selectModel: { configId: "model" },

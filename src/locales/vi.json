@@ -6006,5 +6006,8 @@
   "computer.recovery.restartTitle": "Dừng rồi khởi động lại máy tính đám mây này. Các chương trình đang mở sẽ bị đóng; tệp vẫn còn.",
   "computer.recovery.replace": "Thay máy tính",
   "computer.recovery.replaceTitle": "Xóa máy tính đám mây này và cho bot một máy mới. Các tệp chỉ có trên máy này sẽ bị mất.",
-  "composer.command.burstDesc": "Chạy nhiều phần của một công việc cùng lúc, rồi gộp kết quả"
+  "composer.command.burstDesc": "Chạy nhiều phần của một công việc cùng lúc, rồi gộp kết quả",
+  "devices.computers.pairButton": "Ghép nối máy tính",
+  "devices.computers.pairTitle": "Ghép nối máy tính khác",
+  "devices.computers.typeCode": "Trên máy tính kia, mở Kết nối với máy chủ trong {app} và nhập mã này."
 }

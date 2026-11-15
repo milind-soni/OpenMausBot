@@ -224,6 +224,22 @@ shape.
   success. Limits: 600 sends per installation and 60 per token per hour (`429
   rate_limited`, `Retry-After: 60`).
 
+- `register` also takes `"purpose": "activity"` (one Live Activity's update
+  token) or `"activity-start"` (the app's Live Activity push-to-start token) for
+  an APNs token; the default is `alert`. A send is refused (`404
+  push_device_unknown`) for a token registered for another purpose: alerts go
+  to `alert` tokens, a start to the `activity-start` token, an update or end to
+  that activity's own token.
+- `activity` `{ "v": 1, "token", "event": "start" | "update" | "end", "alert"?,
+  "activity": { "botId", "botName", "kind": "needsYou" | "working", "headline",
+  "since", "link", "color", "gradient", "body" } }` starts, updates or ends a
+  bot's Live Activity on iPhone, or sends an FCM token the data message the
+  Android app turns into its ongoing "working" notification. The schema is as
+  strict as `send`'s: `headline` is one line of at most 120 characters (the
+  phone's own words, "Scout needs you", with the name filled in), `link` must
+  be the app's chat link, colours are `#rrggbb`, and there is no field for a
+  line of text or an answer. Same limits and answers as `send`.
+
 `collapseId` is the identifier the phone gives the notification the live
 stream would have posted (`openmaus.<threadId>.<seq>`), so a push and that
 notification replace each other instead of showing twice. Without one, the
@@ -248,6 +264,19 @@ The provider token is an ES256 JWT signed with WebCrypto (no dependency):
 Its `iat` is the start of the current 50-minute window, so every isolate
 signs for the same window and Apple's 20-to-60-minute refresh rule holds
 however many isolates send; each isolate caches its token for the window.
+
+**Live Activities.** `POST https://api.push.apple.com/3/device/<token>`
+with `apns-push-type: liveactivity`, `apns-topic: <bundle id>.push-type.liveactivity`,
+priority 10 for a start or a ringing update and 5 otherwise, a 15-minute
+expiration, and `{ "aps": { "timestamp", "event", "content-state": { "name":
+"BotActivity", "props": <the app's BotActivityProps as JSON, with an empty line
+and no answers> }, "stale-date" (now + 15 min) | "dismissal-date" (an end),
+"attributes-type": "LiveActivityAttributes" and "attributes": { "url" } (a
+start), "alert"? } }`. `BotActivity` and `LiveActivityAttributes` are the
+names the phone app's Live Activity is registered under (expo-widgets). For an
+FCM token: a data-only message `{ "omb_kind": "activity", "event", "bot_id",
+"bot_name", "kind", "headline", "since", "link", "alert", "sent_at" }`, priority
+`HIGH` when the bot needs the person or the activity ends, else `NORMAL`.
 
 **FCM.** An OAuth access token from `https://oauth2.googleapis.com/token`
 (the JWT bearer grant: an RS256 assertion signed with the service account's
@@ -276,7 +305,8 @@ platform, the provider's status and reason only, never the token or payload.
 Without the secrets for a platform its routes answer `503 push_unavailable`
 and harnesses back off for an hour. Revoking an installation deletes its
 tokens. D1 stores, per row, the installation id, the token, its SHA-256, the
-platform, the environment and timestamps (`migrations/0008`, `0017`).
+platform, the purpose, the environment and timestamps (`migrations/0008`, `0017`,
+`0018`).
 
 **Secrets the maintainer sets** (all with `wrangler secret put <NAME>
 --config wrangler.jsonc`; none belongs in `vars`, this file, or CI output):
@@ -292,7 +322,7 @@ platform, the environment and timestamps (`migrations/0008`, `0017`).
 
 They are deliberately not in `secrets.required`: the Worker is complete
 without them, with phone push off, until the keys exist. Apply
-`migrations/0008` and `0017` before deploying the Worker that uses them. For
+`migrations/0008`, `0017` and `0018` before deploying the Worker that uses them. For
 a local trial with `wrangler dev`, `.dev.vars` is read only for declared
 names, so add these names to `secrets.required` in a local, uncommitted copy
 of the config.
@@ -887,7 +917,7 @@ Before a production deployment, an operator must:
    and added later (see **Several Cloudflare accounts**).
 7. Replace `ALLOWED_ORIGINS` with a comma-separated allow-list of exact HTTPS
    application origins. Wildcards are deliberately unsupported.
-8. Optional, for closed-app phone alerts: apply `migrations/0008` and `0017`, then set
+8. Optional, for closed-app phone alerts: apply `migrations/0008`, `0017` and `0018`, then set
    the APNs and FCM secrets listed under **Phone push relay**. Without them the
    push routes answer `503 push_unavailable` and nothing else changes.
 9. Deploy the Worker and verify that `GET <BETTER_AUTH_URL>/healthz` returns

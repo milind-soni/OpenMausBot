@@ -67,6 +67,14 @@ it("names a teammate's line on a shared server without a team, and not the viewe
   expect(row("noted").textContent).not.toContain("Ada");
 });
 
+it("sets a person's name in the same type as a bot's name", () => {
+  draw(luna([line("o1", { name: "Olive", id: "p_olive" }, "plant is memory-Fernando")]), {});
+  const name = [...row("plant is memory-Fernando").querySelectorAll("div")].find((element) => element.textContent === "Olive")!;
+  expect(name.className).toContain("text-[13px]");
+  expect(name.className).toContain("font-semibold");
+  expect(name.className).toContain("text-ink-secondary");
+});
+
 it("says a member's own MausBot is theirs, not everyone's", () => {
   draw(luna([], { defaultBot: { person: "ada@acme.test" } } as Partial<Bot>));
   expect(container.textContent).not.toContain(t("team.sharedHeader", { team: "Acme" }));
