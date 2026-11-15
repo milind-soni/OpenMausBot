@@ -81,10 +81,15 @@ export async function latestAntigravityCliRelease(options: {
     const response = await (options.fetchImpl ?? fetch)(`${ANTIGRAVITY_CLI_MANIFEST_BASE}/${target}.json`, {
       redirect: "error", signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS),
     });
-    if (!response.ok) return null;
-    const text = await response.text();
-    if (text.length > MANIFEST_MAX_BYTES) return null;
-    return parseAntigravityCliRelease(JSON.parse(text), platform, arch, musl);
+    if (!response.ok || !response.body) return null;
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      bytes += chunk.length;
+      if (bytes > MANIFEST_MAX_BYTES) return null;
+      chunks.push(Buffer.from(chunk));
+    }
+    return parseAntigravityCliRelease(JSON.parse(Buffer.concat(chunks).toString("utf8")), platform, arch, musl);
   } catch {
     return null;
   }

@@ -34,12 +34,13 @@ import { antigravityLimitFacts, watchAntigravityPromptOutcome } from "./antigrav
 import { splitAntigravityThinking } from "./antigravity-models.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import {
-  ANTIGRAVITY_NATIVE_ALIAS,
   antigravityManagedInstallAvailable,
+  isAntigravityNativeAlias,
   installAntigravityRuntime,
   resolveAntigravityRuntime,
 } from "./antigravity-runtime.ts";
 import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
+import { acpFileEditWithin } from "./permission-command.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { AntigravityProcesses } from "./antigravity-processes.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
@@ -116,7 +117,8 @@ const support: AcpSupport = {
   install: {
     docsUrl: "https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp",
     ...(antigravityManagedInstallAvailable()
-      ? { managed: { label: "Install official Antigravity", ...(managedAsset && !ANTIGRAVITY_NATIVE_CLI ? { downloadBytes: managedAsset.archiveBytes } : {}) } }
+      // A client from before the native CLI shows this size whatever else is sent: the pinned archive's, or none.
+      ? { managed: { label: "Install official Antigravity", downloadBytes: managedAsset?.archiveBytes ?? 0, ...(ANTIGRAVITY_NATIVE_CLI ? { sizeUnknown: true as const } : {}) } }
       : {}),
   },
   images: true,
@@ -178,7 +180,8 @@ const support: AcpSupport = {
   limitFacts: (_text, model) => antigravityLimitFacts(model, [...support.models.options.map((option) => option.id), ...offeredModels]),
   clientInfo: (instanceId) => antigravityClientInfo(launched.get(instanceId)?.version),
   // In `default` the native CLI asks before every edit; Auto-accept edits answers those, as `auto_edit` did.
-  allowsAlone: (instanceId, turn, toolCall) => launched.get(instanceId)?.nativeCli === true && turn.approvalMode === "edits" && toolCall.kind === "edit",
+  // Security: only a file edit inside the turn's folder is answered; one that names a command or another place is asked.
+  allowsAlone: (instanceId, turn, toolCall) => launched.get(instanceId)?.nativeCli === true && turn.approvalMode === "edits" && acpFileEditWithin(toolCall, turn.cwd),
   promptOutcome: (instanceId, sessionId) => watchAntigravityPromptOutcome(support.displayName, antigravityProfileDirectory(instanceId), sessionId),
   requireAuthenticationBeforeSpawn: true,
   isAuthenticated: async (env, config, instanceId) => {
@@ -205,12 +208,15 @@ const support: AcpSupport = {
     }
   },
 
-  configureSession: async ({ request, sessionId, env, config, turn, configOptions }) => {
+  configureSession: async ({ request, sessionId, instanceId, config, turn, configOptions }) => {
+    const nativeCli = launched.get(instanceId)?.nativeCli === true;
     if (!Array.isArray(configOptions) || !configOptions.some(option => option?.id === "mode")) {
+      // The native CLI answers by the turn's level only in `default`; with no mode to confirm, nothing says it is there.
+      if (nativeCli) throw new Error("Antigravity did not report its permission mode.");
       return;
     }
     const level = antigravityPermissionMode(config.fullAuto, turn.approvalMode);
-    const wanted = (await resolveAntigravityRuntime(config.cli, env)).harnessPath === null ? antigravityCliSessionMode(level) : level;
+    const wanted = nativeCli ? antigravityCliSessionMode(level) : level;
     const result = await request("session/set_config_option", {
       sessionId,
       configId: "mode",
@@ -275,7 +281,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
             installRuntime: async () => {
               installFailure = undefined;
               try {
-                await installAntigravityRuntime({ validate: validateAntigravityRuntime, native: input.config.cli?.trim() === ANTIGRAVITY_NATIVE_ALIAS });
+                await installAntigravityRuntime({ validate: validateAntigravityRuntime, native: isAntigravityNativeAlias(input.config.cli) });
               } catch (error) {
                 installFailure = error instanceof Error ? error.message : String(error);
                 throw error;
