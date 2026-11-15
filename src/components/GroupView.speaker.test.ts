@@ -101,6 +101,8 @@ describe("room speaker names", () => {
     const shared = markup(messages);
     expect(shared).toContain(">Olive<");
     expect(shared).not.toContain(">Ada<");
+    const nameClasses = shared.match(/class="([^"]*)">Olive</)![1].split(" ");
+    expect(nameClasses).toEqual(expect.arrayContaining(["text-[13px]", "font-semibold", "text-ink-secondary"]));
     viewer.reactor = "user";
     const solo = markup(messages);
     expect(solo).not.toContain(">Olive<");
