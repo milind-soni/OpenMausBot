@@ -222,10 +222,12 @@ export class TurnWatchdog {
       if (sleptMs) turn.lastEventAt = Math.min(at, turn.lastEventAt + sleptMs);
       const limit = this.silenceLimit(turn);
       if (limit === null) continue;
+      // server/testing/group-local-vm-hooks.mjs rewrites the silentMs comparison below: keep that name.
+      const { ms: silentMs, reason } = limit;
       if (at - turn.lastEventAt >= this.opts.stallMs) this.readCommandCpu(turn);
-      if (at - turn.lastEventAt < limit.ms) continue;
+      if (at - turn.lastEventAt < silentMs) continue;
       this.turns.delete(turn.threadId);
-      this.opts.onStall(turn, limit.ms, limit.reason);
+      this.opts.onStall(turn, silentMs, reason);
     }
     this.freeUnheld(at);
   }
