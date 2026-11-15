@@ -67,12 +67,14 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
 
   useEffect(() => cancel, []);
   useEffect(() => { if (!has) close(); }, [has]);
+  // React reports entering the sheet while the pointer is still leaving the row, so each side checks where the pointer went.
+  const within = (target: EventTarget | null) => target instanceof Node && Boolean(sheet.current?.contains(target) || anchor.current?.parentElement?.contains(target));
+  const leave = (event: Pick<PointerEvent, "pointerType" | "relatedTarget">) => { if (event.pointerType === "mouse" && !within(event.relatedTarget)) later(() => setPlace(null), PEEK_CLOSE_MS); };
   useEffect(() => {
     const row = anchor.current?.parentElement;
     if (!row || !has) return;
     // offsetParent is null while the disclosure is hidden, which it is on a phone-width window.
     const enter = (event: PointerEvent) => { if (event.pointerType === "mouse" && event.buttons === 0 && anchor.current?.offsetParent) later(show, PEEK_OPEN_MS); };
-    const leave = (event: PointerEvent) => { if (event.pointerType === "mouse") later(() => setPlace(null), PEEK_CLOSE_MS); };
     row.addEventListener("pointerenter", enter);
     row.addEventListener("pointerleave", leave);
     return () => { row.removeEventListener("pointerenter", enter); row.removeEventListener("pointerleave", leave); };
@@ -80,7 +82,7 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
   useEffect(() => {
     if (!open) return;
     if (focusSheet.current) { focusSheet.current = false; sheet.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus(); }
-    const away = (event: Event) => { if (!(event.target instanceof Node) || !sheet.current?.contains(event.target)) close(); };
+    const away = (event: Event) => { if (!(event.target instanceof Node) || event.target.contains(anchor.current)) close(); };
     window.addEventListener("resize", close);
     window.addEventListener("scroll", away, true);
     return () => { window.removeEventListener("resize", close); window.removeEventListener("scroll", away, true); };
@@ -117,13 +119,13 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
   return (
     <>
       <button ref={anchor} type="button" data-bot-threads-peek={bot.id} aria-haspopup="menu" aria-expanded={open}
-        aria-label={t("task.expandNamed", { name: bot.name })} title={t("task.expandNamed", { name: bot.name })}
+        aria-label={t("task.expandNamed", { name: bot.name })} title={open ? undefined : t("task.expandNamed", { name: bot.name })}
         onClick={(event) => { if (open) { close(); return; } focusSheet.current = event.detail === 0; show(); }} className={slot}>
         <ChevronRight size={14} className="rtl:-scale-x-100" />
       </button>
       {motion.shown && shown && createPortal(
         <div ref={sheet} role="menu" aria-label={bot.name} data-bot-threads-sheet={bot.id} style={{ left: shown.left, top: shown.top, width: SHEET_WIDTH }}
-          onPointerEnter={cancel} onPointerLeave={(event) => { if (event.pointerType === "mouse") later(() => setPlace(null), PEEK_CLOSE_MS); }} onKeyDown={onKeyDown}
+          onPointerEnter={cancel} onPointerLeave={leave} onKeyDown={onKeyDown}
           className={cn(MENU_SHEET, "fixed z-[60] gap-0", motion.className)} {...motion.exitProps}>
           <button type="button" role="menuitem" className={MENU_ROW} onClick={() => pick({ type: "newTask", botId: bot.id })}>
             <span className={MENU_GUTTER}><Plus size={14} className={MENU_ICON} /></span>
