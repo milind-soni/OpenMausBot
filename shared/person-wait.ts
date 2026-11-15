@@ -65,3 +65,9 @@ export function restingOnPerson(path: readonly WaitRow[]): PersonWait | undefine
   }
   return undefined;
 }
+
+/** A key to enter or an app to connect, still open: the cards that stay in view until the person answers them. */
+export function staysInView(row: WaitRow): boolean {
+  const kind = personWait(row)?.kind;
+  return kind === "password" || kind === "connect";
+}
