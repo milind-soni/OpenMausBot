@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -62,4 +62,28 @@ it("does not mint a session automatically when the output file already exists", 
   expect(refused.err[0]).toContain("already exists");
   expect(readFileSync(file, "utf8")).toBe("keep this token\n");
   expect((await api("/api/auth/sessions")).sessions).toHaveLength(before);
+}, 120_000);
+
+it.skipIf(process.platform === "win32")("refuses a dangling output link before consuming a pairing code", async () => {
+  const file = join(dir, "dangling-token");
+  const target = join(dir, "missing-token");
+  symlinkSync(target, file);
+  const { code } = await api("/api/auth/pairing", { label: "CLI symlink fixture" });
+  const before = (await api("/api/auth/sessions")).sessions.length;
+  const refused = capture();
+  expect.soft(await runHeadless(["connect", fixture.info.url, "--code", code, "--out", file], { io: refused.io, env: {} })).toBe(2);
+  expect.soft(refused.err[0]).toContain("already exists");
+  expect(lstatSync(file).isSymbolicLink()).toBe(true);
+  expect(readlinkSync(file)).toBe(target);
+  expect(existsSync(target)).toBe(false);
+  expect.soft((await api("/api/auth/sessions")).sessions).toHaveLength(before);
+
+  const retried = capture();
+  const status = await runHeadless(["connect", fixture.info.url, "--code", code, "--out", file, "--force", "--json"], { io: retried.io, env: {} });
+  expect(status, retried.err.join("\n")).toBe(0);
+  expect((await api("/api/auth/sessions")).sessions).toHaveLength(before + 1);
+  expect(lstatSync(file).isSymbolicLink()).toBe(true);
+  const token = readFileSync(target, "utf8").trim();
+  expect(token).not.toBe("");
+  expect(JSON.stringify([refused.out, refused.err, retried.out, retried.err])).not.toContain(token);
 }, 120_000);
