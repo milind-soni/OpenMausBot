@@ -268,7 +268,7 @@ export interface TaskUsage {
   costUsd: number | null;
   turns: number;
   lastTurn?: { input: number; output: number; cachedInput?: number; costUsd: number | null };
-  context?: { tokens: number; window?: number };
+  context?: { tokens: number; window?: number; breakdown?: import("../lib/context-usage").ContextBreakdown };
 }
 
 export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "access" | "yourAccess" | "onlyPeopleAdded"> {
