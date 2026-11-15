@@ -164,6 +164,8 @@ const guardedSendSchema = z.object({
   }).strict().refine((who) => Boolean(who.email || who.name)).optional(),
 }).strict().refine((send) => (send.text === undefined) !== (send.reaction === undefined));
 
+const CONTEXT_BREAKDOWN_WAIT_MS = 5_000;
+
 export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler {
   const {
     store, registry, handoffs, liveTurn, phoneSecretSubmissions, directTurnDispatchClaims, groupSpeakers,
@@ -492,6 +494,20 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (threadBusy(bot.id, bot.threadId)) return json(res, 409, userError("serverError.chat.busyFresh"));
       if (phoneSecretSubmissions.hasThread(bot.threadId)) return json(res, 409, userError("serverError.chat.savingCredential"));
       return json(res, 200, { ok: true, message: startFresh(store, bot.id, bot.threadId), threadId: bot.threadId });
+    }
+
+    m = path.match(/^\/api\/bots\/([\w-]+)\/context$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      requirePinnedClientThread(m[1], body?.threadId);
+      const bot = requestedTaskBot(m[1], body?.threadId);
+      const notYours = cloudThreadRefusal(auth, bot.threadId);
+      if (notYours) return json(res, 403, { error: notYours });
+      // After Start fresh the engine process still holds the conversation the person left, until the next turn replaces it.
+      const stale = store.taskByThread(bot.id, bot.threadId)?.rewound === true;
+      const breakdown = stale ? null : await registry.get(bot.modelSelection.instanceId)?.adapter
+        .contextBreakdown?.(bot.threadId, { signal: AbortSignal.timeout(CONTEXT_BREAKDOWN_WAIT_MS) }) ?? null;
+      return json(res, 200, { threadId: bot.threadId, breakdown });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages\/([\w-]+)\/edit$/);
