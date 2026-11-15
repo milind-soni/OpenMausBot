@@ -548,7 +548,8 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
         const found: EmailHeader[] = [];
         let page: string | undefined;
         let size = GMAIL_PAGE;
-        for (let index = 0; index < GMAIL_PAGES; index++) {
+        // Only whole pages count toward GMAIL_PAGES; a shortened answer is asked again smaller, at most twice per read.
+        for (let pages = 0; pages < GMAIL_PAGES;) {
           const data = await call(GMAIL_FETCH_TOOL, {
             user_id: "me", query: `in:inbox after:${seconds(sinceMs)} -category:promotions -category:social`,
             max_results: size, include_payload: false, verbose: false, ...(page ? { page_token: page } : {}),
@@ -557,6 +558,7 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
             size = Math.max(GMAIL_PAGE_MIN, Math.floor(size / 2));
             continue;
           }
+          pages++;
           found.push(...parsed("gmail", () => emailsFromData(data)));
           page = nextPageOf(data);
           if (!page) break;

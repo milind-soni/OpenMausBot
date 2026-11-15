@@ -114,6 +114,24 @@ describe("a check's reads", () => {
     expect(frames.filter((frame) => frame.slug === "GMAIL_FETCH_EMAILS").every((frame) => Number(frame.args!.max_results) <= 50)).toBe(true);
   });
 
+  it("asking again at a smaller size does not use up the pages a read may take", async () => {
+    const messages = Array.from({ length: 90 }, (_, index) => ({ messageId: `m${index}`, threadId: `t${index}`, messageTimestamp: new Date(Date.UTC(2026, 9, 22, 0, index)).toISOString(), sender: "x@y.test", subject: "s" }));
+    // Four whole pages of 20, then the next page comes back shortened at 20 and at 10, and whole at 5.
+    const { deps, frames } = relay({
+      GMAIL_FETCH_EMAILS: (args) => {
+        const size = Number(args.max_results);
+        const start = Number(args.page_token ?? 0);
+        const page = messages.slice(start, start + size);
+        if (start >= 80 && size > 5) return { successful: true, data_preview: { messages: [...page.slice(0, 2), `...${page.length - 2} more items`] } };
+        return { successful: true, data: { messages: page, ...(start + size < messages.length ? { nextPageToken: String(start + size) } : {}) } };
+      },
+    });
+    const read = await createConnectedReads(deps).session().emails(0, 100);
+    expect(frames.filter((frame) => frame.slug === "GMAIL_FETCH_EMAILS").map((frame) => Number(frame.args!.max_results))).toEqual([20, 20, 20, 20, 20, 10, 5, 5]);
+    expect(read).toMatchObject({ more: false });
+    expect(read.emails).toHaveLength(90);
+  });
+
   it("a shortened answer is an error that says so, never an empty list", async () => {
     const { deps } = relay({ GMAIL_FETCH_EMAILS: () => ({ successful: true, data_preview: { messages: ["...50 more items"] } }) });
     const mail = await createConnectedReads(deps).session().emails(0, 5).catch((error: unknown) => error);
