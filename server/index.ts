@@ -7689,8 +7689,7 @@ async function beginTurn(
           peerAsk: opts?.peerAsk,
           sender: opts?.sender,
           ...spokenLineFields(opts?.via, opts?.callId),
-          ...(opts?.relayed ? { relayed: true } : {}),
-          ...(automated ? { automated: true } : {}),
+          ...(opts?.relayed ? { relayed: true } : {}), ...(automated ? { automated: true } : {}),
         });
   }
   const personLine = !opts?.coordination && !opts?.cardContinuation && !opts?.automationSource && !opts?.compactOnly
