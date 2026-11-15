@@ -102,8 +102,12 @@ export function usePanelResize({
     return Math.max(minWidth, Math.min(configuredMax, maxAllowedByChat));
   }, [id, maxWidth, minWidth, minChatWidth]);
 
+  // The user's chosen width. Only user actions (drag, keyboard, reset) change and persist it;
+  // window and neighbour changes clamp the rendered width without overwriting this preference.
+  const preferredRef = useRef<number>(getStoredPanelWidth(id, defaultWidth));
+
   const [width, setWidthState] = useState<number>(() => {
-    const raw = getStoredPanelWidth(id, defaultWidth);
+    const raw = preferredRef.current;
     if (typeof window === "undefined") return raw;
     const effMax = getEffectiveMaxWidth();
     return Math.max(minWidth, Math.min(raw, effMax));
@@ -112,16 +116,28 @@ export function usePanelResize({
   const widthRef = useRef(width);
   widthRef.current = width;
 
-  const updateWidth = useCallback(
-    (newWidth: number) => {
+  const applyWidth = useCallback(
+    (newWidth: number): number => {
       const effMax = getEffectiveMaxWidth();
       const clamped = Math.max(minWidth, Math.min(newWidth, effMax));
-      setWidthState(clamped);
-      setStoredPanelWidth(id, clamped);
-      window.dispatchEvent(new CustomEvent("gbs-panel-resize", { detail: { id, width: clamped } }));
-      onResize?.(clamped);
+      if (clamped !== widthRef.current) {
+        widthRef.current = clamped;
+        setWidthState(clamped);
+        window.dispatchEvent(new CustomEvent("gbs-panel-resize", { detail: { id, width: clamped } }));
+        onResize?.(clamped);
+      }
+      return clamped;
     },
     [id, minWidth, getEffectiveMaxWidth, onResize],
+  );
+
+  const updateWidth = useCallback(
+    (newWidth: number) => {
+      const clamped = applyWidth(newWidth);
+      preferredRef.current = clamped;
+      setStoredPanelWidth(id, clamped);
+    },
+    [id, applyWidth],
   );
 
   const resetToDefault = useCallback(() => {
@@ -129,15 +145,12 @@ export function usePanelResize({
     updateWidth(def);
   }, [defaultWidth, updateWidth]);
 
-  // Window resize & other panels resize clamp
+  // Window resize & other panels resize: fit the preferred width into the space available,
+  // growing back toward it when space returns. Never persisted.
   useEffect(() => {
     const handleCheckClamp = () => {
-      const effMax = getEffectiveMaxWidth();
-      if (widthRef.current > effMax) {
-        updateWidth(effMax);
-      } else if (widthRef.current < minWidth) {
-        updateWidth(minWidth);
-      }
+      if (isDraggingRef.current) return;
+      applyWidth(preferredRef.current);
     };
 
     handleCheckClamp();
@@ -147,7 +160,7 @@ export function usePanelResize({
       window.removeEventListener("resize", handleCheckClamp);
       window.removeEventListener("gbs-panel-resize", handleCheckClamp);
     };
-  }, [minWidth, getEffectiveMaxWidth, updateWidth]);
+  }, [applyWidth]);
 
   // Pointer drag event handlers
   const handlePointerDown = useCallback(
