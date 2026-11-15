@@ -68,7 +68,7 @@ function resolve(role: string, name: unknown, columns: DataColumn[]): Resolved {
       candidates,
     });
   }
-  return { column, cls: columnClass(column.type), id: quoteIdentifier(column.name) };
+  return { column, cls: columnClass(column.type), id: `src.${quoteIdentifier(column.name)}` };
 }
 
 type Encoding = Record<string, unknown>;
