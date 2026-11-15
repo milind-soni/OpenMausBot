@@ -16,6 +16,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import type { WireMessage } from "../shared/wire.ts";
 import { createToolBridge, type BridgeTool } from "./drivers/agents-bridge.ts";
+import { ALWAYS_LOAD_META, DEFER_TOOLS_ENV } from "./drivers/agents-claude-defer.ts";
 import { gateServer } from "./mcp-gate-config.ts";
 import { AGENTS_TOOL_BRIDGE_PROMPT } from "./system-prompt.ts";
 import { turnEvidence } from "./turn-outcome.ts";
@@ -113,10 +114,14 @@ it("keeps a turn on the whole catalog until the switch is on, then mounts the br
     const before = await launched();
     const unbridged = before.mcpConfig.mcpServers.agents!;
     expect(unbridged.env.OMB_AGENTS_TOOL_BRIDGE).toBe("0");
+    // A Claude turn marks all but a few tools deferred (agents-claude-defer.ts); the bridge, once on, lists none so marked.
+    expect(unbridged.env[DEFER_TOOLS_ENV]).toBe("1");
     expect(before.systemPrompt).not.toContain("find_tool");
     let whole: BridgeTool[] = [];
     await withServer(unbridged, async (ask) => {
-      whole = (await ask("tools/list")).result!.tools!;
+      const listed = (await ask("tools/list")).result!.tools! as Array<BridgeTool & { _meta?: Record<string, unknown> }>;
+      expect(listed.some((tool) => tool._meta?.[ALWAYS_LOAD_META] === false)).toBe(true);
+      whole = listed.map(({ _meta: _marks, ...tool }) => tool);
       expect(whole.map((tool) => tool.name)).toEqual(expect.arrayContaining(["coordinate_bots", "trigger", "trigger_info", "session_search"]));
       expect(whole.map((tool) => tool.name)).not.toEqual(expect.arrayContaining(["find_tool"]));
       expect(whole.length).toBeGreaterThan(25);
