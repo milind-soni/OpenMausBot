@@ -157,11 +157,12 @@ async function readSse(
         if (options.perEventLimit) bytes += Buffer.byteLength(normalized);
       }
       let separator: number;
-      while ((separator = buffer.indexOf("\n\n")) !== -1) {
+      while ((separator = buffer.startsWith("\n") ? 0 : buffer.indexOf("\n\n")) !== -1) {
+        const separatorLength = separator === 0 ? 1 : 2;
         const block = buffer.slice(0, separator);
-        buffer = buffer.slice(separator + 2);
+        buffer = buffer.slice(separator + separatorLength);
         if (options.perEventLimit) {
-          const eventBytes = Buffer.byteLength(block) + 2;
+          const eventBytes = Buffer.byteLength(block) + separatorLength;
           if (eventBytes > maxBytes) throw new McpHttpError("protocol", "event stream too large");
           bytes -= eventBytes;
         }

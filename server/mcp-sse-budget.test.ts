@@ -60,6 +60,35 @@ describe("a persistent MCP SSE connection's byte budget", () => {
     }
   });
 
+  it.each([
+    { name: "LF", newline: "\n", split: false },
+    { name: "CRLF", newline: "\r\n", split: false },
+    { name: "CR", newline: "\r", split: false },
+    { name: "split LF", newline: "\n", split: true },
+    { name: "split CRLF", newline: "\r\n", split: true },
+    { name: "split CR", newline: "\r", split: true },
+  ])("keeps empty $name events out of later replies' byte budgets", async ({ newline, split }) => {
+    const fixture = legacy((id) => {
+      const text = ("\n" + reply(id)).replaceAll("\n", newline);
+      return split ? Array.from(text) : [text];
+    }, encode(reply(1)).byteLength);
+    try {
+      for (let i = 0; i < 2; i++) {
+        await expect(fixture.client.request("tools/list", {}, AbortSignal.timeout(1_000))).resolves.toEqual({ tools: [] });
+        expect(fixture.cancelled).toBe(false);
+      }
+    } finally { await fixture.client.close(); }
+  });
+
+  it("still rejects an oversized reply after an empty event", async () => {
+    const fixture = legacy((id) => ["\n", reply(id)], encode(reply(1)).byteLength - 1);
+    try {
+      await expect(fixture.client.request("tools/list", {}, AbortSignal.timeout(1_000))).rejects.toThrow("event stream too large");
+      expect(fixture.cancelled).toBe(true);
+      expect(fixture.body.locked).toBe(false);
+    } finally { await fixture.client.close(); }
+  });
+
   it("keeps the aggregate byte limit for one streamable HTTP response", async () => {
     const notification = event({ jsonrpc: "2.0", method: "notifications/progress", params: { progress: 1 } });
     const client = new RemoteMcpClient({ type: "http", url: "https://fixture.example/mcp", headers: {} }, {
