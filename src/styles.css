@@ -1218,9 +1218,17 @@
   src: local("Noto Sans Hebrew"), local("Arial Hebrew"), local("SF Hebrew");
   unicode-range: U+0590-05FF, U+FB1D-FB4F;
 }
-/* A reply with a table is as wide as the message; its prose keeps the reading width. */
+/* A reply with a table is as wide as its widest table, and never narrower than the reading width. The prose's
+   percentage min-width counts for nothing while the reply is measured, so only a table can widen it past the
+   reading width; once the reply has its width, the same min-width outranks max-width and the prose fills it. */
+.chat-wide .chat-md {
+  width: fit-content;
+  min-width: min(100%, var(--chat-prose-max));
+  max-width: 100%;
+}
 .chat-wide .chat-md > :not(.chat-table) {
   max-width: var(--chat-prose-max);
+  min-width: 100%;
 }
 
 /* A reply's long unbroken text (a URL, a run of letters) wraps inside its bubble instead of running past the window.
