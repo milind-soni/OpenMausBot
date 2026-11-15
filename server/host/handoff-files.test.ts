@@ -220,6 +220,26 @@ describe("receiving", () => {
     expect(statSync(copy).mode & 0o777).toBe(0o644);
   });
 
+  it("moves a file from one bot's computer to another's, each seeing only its own workspace", async () => {
+    const files = setup();
+    const senderVm = join(ROOT, `sender-vm-${serial}`), receiverVm = join(ROOT, `receiver-vm-${serial}`);
+    mkdirSync(join(senderVm, "out"), { recursive: true });
+    mkdirSync(receiverVm);
+    writeFileSync(join(senderVm, "out", "report.pdf"), "made in the sender's computer");
+    node("root", "ana", "t-ana");
+    const to = node("a1", "ben", "t-ben", { parentId: "root" });
+    const staged = await files.stage(["/home/cua/workspace/out/report.pdf"], (path) => saveBotAttachment({ path, roots: [work], guest: { root: "/home/cua/workspace", host: senderVm }, byContent: true }));
+    await expect(files.stage(["/home/cua/workspace/../secrets.pdf"], (path) => saveBotAttachment({ path, roots: [work], guest: { root: "/home/cua/workspace", host: senderVm }, byContent: true }))).rejects.toMatchObject({ message: expect.stringContaining("Nothing was sent") });
+    files.sent("a1", ANA, staged.files);
+    vmHome = receiverVm;
+    const text = files.forTurn(to, false, "first").text;
+    expect(readFileSync(join(receiverVm, "inbox", "ana", "a1", "report.pdf"), "utf8")).toBe("made in the sender's computer");
+    expect(readFileSync(join(folderOf("ben", "t-ben"), "inbox", "ana", "a1", "report.pdf"), "utf8")).toBe("made in the sender's computer");
+    expect(text).toContain("Also in your Local VM: /home/cua/workspace/inbox/ana/a1/");
+    expect(text).not.toContain(senderVm);
+    expect(readdirSync(senderVm)).toEqual(["out"]);
+  });
+
   it("says so when a passed file is no longer kept", async () => {
     const files = setup();
     const { to, staged } = await handed(files, [write("report.pdf")]);

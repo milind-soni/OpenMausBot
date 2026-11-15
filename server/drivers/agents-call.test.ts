@@ -534,8 +534,8 @@ describe("coordinate_bots", () => {
     const { result, calls } = await coordinate({ ...BASE, files: ["report.pdf", "/home/cua/workspace/chart.png"] });
     expect(result.isError).toBeFalsy();
     expect(calls[0]!.body).toEqual({ botIds: ["bot-scout"], message: "Review the draft.", files: ["report.pdf", "/home/cua/workspace/chart.png"] });
-    expect((await coordinate({ ...BASE, files: [] })).calls[0]!.body).not.toHaveProperty("files");
-    for (const files of ["report.pdf", [1], [" "], ["a", "b", "c", "d", "e", "f"]]) {
+    for (const blank of [[], [""], null, ""]) expect((await coordinate({ ...BASE, files: blank })).calls[0]!.body, JSON.stringify(blank)).not.toHaveProperty("files");
+    for (const files of ["report.pdf", [1], ["a", "b", "c", "d", "e", "f"]]) {
       const refused = await coordinate({ ...BASE, files });
       expect(refused.result.isError, JSON.stringify(files)).toBe(true);
       expect(refused.calls).toEqual([]);
