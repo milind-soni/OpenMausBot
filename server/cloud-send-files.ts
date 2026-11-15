@@ -4,7 +4,7 @@
 // My Cloud takes a file in parts (POST, owner's session only), resumable from the bytes it holds, and never writes over
 // a file it has: a file there that is not the one the move put there is a conflict, and the sender keeps both.
 import { createHash, randomUUID } from "node:crypto";
-import { createReadStream, type Stats } from "node:fs";
+import { constants, type Stats } from "node:fs";
 import { link, lstat, mkdir, open, readdir, rename, stat, unlink } from "node:fs/promises";
 import { statfsSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
@@ -19,6 +19,7 @@ import { validRelative } from "./workspace-backup-paths.ts";
 
 /** A part of a file, well under My Cloud's request limits. */
 export const FILE_PART_BYTES = 8 * 1024 * 1024;
+const NOFOLLOW_READ = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
 const MAX_FILES = 200_000;
 const PARTIAL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SHA = /^[a-f0-9]{64}$/u;
@@ -41,21 +42,31 @@ export function movedFilePath(path: string): boolean {
 }
 
 const hashes = new Map<string, string>();
-async function fileSha256(full: string, info: Stats): Promise<string> {
+async function fileSha256(full: string, info: Stats): Promise<string | null> {
   const key = `${full}\0${info.dev}\0${info.ino}\0${info.size}\0${info.mtimeMs}\0${info.ctimeMs}`;
   // A restored mtime does not restore ctime; recent writes can still share a coarse filesystem timestamp.
   const settled = Date.now() - Math.max(info.mtimeMs, info.ctimeMs) >= 2_000;
   const known = settled ? hashes.get(key) : undefined;
   if (known) return known;
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(full)) hash.update(chunk as Buffer);
-  const digest = hash.digest("hex");
-  if (settled) {
-    // As many as one listing holds, oldest out first: a listing never pushes out what it hashed itself.
-    if (hashes.size >= MAX_FILES) hashes.delete(hashes.keys().next().value!);
-    hashes.set(key, digest);
+  const handle = await open(full, NOFOLLOW_READ).catch(() => null);
+  if (!handle) return null;
+  try {
+    const handleStat = await handle.stat().catch(() => null);
+    if (!handleStat || !handleStat.isFile() || handleStat.ino !== info.ino || handleStat.dev !== info.dev) {
+      return null;
+    }
+    const hash = createHash("sha256");
+    for await (const chunk of handle.createReadStream()) hash.update(chunk as Buffer);
+    const digest = hash.digest("hex");
+    if (settled) {
+      // As many as one listing holds, oldest out first: a listing never pushes out what it hashed itself.
+      if (hashes.size >= MAX_FILES) hashes.delete(hashes.keys().next().value!);
+      hashes.set(key, digest);
+    }
+    return digest;
+  } finally {
+    await handle.close();
   }
-  return digest;
 }
 
 /** Every bot file on this server, links never followed. */
@@ -70,7 +81,10 @@ export async function listBotFiles(dataDir: string, botIds: readonly string[]): 
       const info = await lstat(join(dataDir, path)).catch(() => null);
       if (!info || name === "node_modules") continue;
       if (info.isDirectory()) { if (!CARRIED_OTHERWISE.test(`${path}/`) && !omittedFromWorkspaceBackup(path)) await walk(path); continue; }
-      if (info.isFile() && movedFilePath(path)) out.push({ path, size: info.size, sha256: await fileSha256(join(dataDir, path), info) });
+      if (info.isFile() && movedFilePath(path)) {
+        const digest = await fileSha256(join(dataDir, path), info);
+        if (digest) out.push({ path, size: info.size, sha256: digest });
+      }
     }
   };
   for (const id of botIds) {
@@ -126,11 +140,19 @@ async function realFolders(dataDir: string, path: string): Promise<boolean> {
 }
 
 async function sha256Of(full: string): Promise<string | null> {
+  const handle = await open(full, NOFOLLOW_READ).catch(() => null);
+  if (!handle) return null;
   try {
+    const info = await handle.stat().catch(() => null);
+    if (!info || !info.isFile()) return null;
     const hash = createHash("sha256");
-    for await (const chunk of createReadStream(full)) hash.update(chunk as Buffer);
+    for await (const chunk of handle.createReadStream()) hash.update(chunk as Buffer);
     return hash.digest("hex");
-  } catch { return null; }
+  } catch {
+    return null;
+  } finally {
+    await handle.close();
+  }
 }
 
 const putSchema = z.object({ path: z.string().max(4096), size: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER), sha256: z.string().regex(SHA),
@@ -141,18 +163,27 @@ const partSchema = z.object({ path: z.string().max(4096), offset: z.coerce.numbe
 /** Up to `length` bytes of a bot file from `offset`, never through a link. */
 async function readPart(dataDir: string, { path, offset, length }: z.infer<typeof partSchema>): Promise<Buffer | null> {
   let at = dataDir;
+  let lastInfo: Stats | null = null;
   for (const part of path.split("/")) {
     at = join(at, part);
     const info = await lstat(at).catch(() => null);
     if (!info || info.isSymbolicLink()) return null;
+    lastInfo = info;
   }
-  const handle = await open(at, "r").catch(() => null);
+  if (!lastInfo || !lastInfo.isFile()) return null;
+  const handle = await open(at, NOFOLLOW_READ).catch(() => null);
   if (!handle) return null;
   try {
+    const handleStat = await handle.stat().catch(() => null);
+    if (!handleStat || !handleStat.isFile() || handleStat.ino !== lastInfo.ino || handleStat.dev !== lastInfo.dev) {
+      return null;
+    }
     const buffer = Buffer.alloc(length);
     const { bytesRead } = await handle.read(buffer, 0, length, offset);
     return buffer.subarray(0, bytesRead);
-  } finally { await handle.close(); }
+  } finally {
+    await handle.close();
+  }
 }
 
 /** One part of a file: 200 `{ received }` until the last, then 201 `{ stored }`, or 409 `{ conflict }` when the path holds a

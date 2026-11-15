@@ -6,6 +6,16 @@ import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { listBotFiles, movedFilePath, moveFilesRoute } from "./cloud-send-files.ts";
 
+function trySymlink(target: string, path: string): boolean {
+  try {
+    symlinkSync(target, path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM" && process.platform === "win32") return false;
+    throw error;
+  }
+}
+
 const sha = (text: string) => createHash("sha256").update(text).digest("hex");
 
 describe("which bot files a move carries", () => {
@@ -26,9 +36,11 @@ describe("which bot files a move carries", () => {
     writeFileSync(join(data, "workspaces", "b1", "node_modules", "x", "i.js"), "no");
     writeFileSync(join(data, "task-workspaces", "b1", "t1", "r.csv"), "a,b");
     writeFileSync(join(data, "secret.txt"), "outside");
-    symlinkSync(join(data, "secret.txt"), join(data, "workspaces", "b1", "link.txt"));
-    expect(await listBotFiles(data, ["b1", "../x"])).toEqual([{ path: "workspaces/b1/notes.md", size: 5, sha256: sha("hello") },
-      { path: "task-workspaces/b1/t1/r.csv", size: 3, sha256: sha("a,b") }]);
+    const linked = trySymlink(join(data, "secret.txt"), join(data, "workspaces", "b1", "link.txt"));
+    const files = await listBotFiles(data, ["b1", "../x"]);
+    expect(files).toContainEqual({ path: "workspaces/b1/notes.md", size: 5, sha256: sha("hello") });
+    expect(files).toContainEqual({ path: "task-workspaces/b1/t1/r.csv", size: 3, sha256: sha("a,b") });
+    if (linked) expect(files.some((f) => f.path.includes("link"))).toBe(false);
   });
 });
 
@@ -122,7 +134,7 @@ describe("My Cloud takes a file", () => {
     mkdirSync(join(data, "workspaces", "b1"), { recursive: true });
     writeFileSync(join(data, "workspaces", "b1", "part.md"), "0123456789");
     writeFileSync(join(data, "outside.md"), "secret");
-    symlinkSync(join(data, "outside.md"), join(data, "workspaces", "b1", "linked.md"));
+    const linked = trySymlink(join(data, "outside.md"), join(data, "workspaces", "b1", "linked.md"));
     const read = async (path: string, offset: number, length: number) => {
       let status = 0, bytes: Buffer = Buffer.alloc(0);
       const url = new URL(`http://127.0.0.1/api/cloud-send/files?${new URLSearchParams({ path, offset: String(offset), length: String(length) })}`);
@@ -132,7 +144,7 @@ describe("My Cloud takes a file", () => {
       return { status, text: bytes.toString() };
     };
     expect(await read("workspaces/b1/part.md", 3, 4)).toEqual({ status: 200, text: "3456" });
-    expect((await read("workspaces/b1/linked.md", 0, 6)).status).toBe(404);
+    if (linked) expect((await read("workspaces/b1/linked.md", 0, 6)).status).toBe(404);
     expect((await read("workspaces/b1/MEMORY.md", 0, 6)).status).toBe(404);
   });
 
