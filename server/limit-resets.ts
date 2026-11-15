@@ -116,6 +116,8 @@ export class LimitResetClock {
   private checkedAt = 0;
   /** The last runtime event of any turn: while turns run, usage is kept five minutes fresh (limit-poll.ts). */
   private lastTurnAt = -Infinity;
+  /** Reads in a row that failed: a quiet home retries them sooner than its hourly read (limit-poll.ts). */
+  private failures = 0;
   private loading: Promise<void> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private soon: ReturnType<typeof setTimeout> | null = null;
@@ -257,10 +259,14 @@ export class LimitResetClock {
     const accounts = this.options.accounts();
     this.loading = (async () => {
       try {
-        if (accounts.length) this.noteUsage(await this.load(accounts, force));
-        else this.checkedAt = this.now();
+        if (!accounts.length) { this.checkedAt = this.now(); this.failures = 0; return; }
+        const report = await this.load(accounts, force);
+        // No account answered (offline, a laptop just woke): a quiet home tries again in minutes, not in an hour.
+        this.failures = report.providers.length && report.providers.every((row) => !row.ok) ? this.failures + 1 : 0;
+        this.noteUsage(report);
       } catch {
         this.checkedAt = this.now();
+        this.failures += 1;
       }
     })().finally(() => {
       this.loading = null;
@@ -274,7 +280,7 @@ export class LimitResetClock {
     // while turns run, else just after each known reset and hourly (limit-poll.ts), so a quiet home reads nothing more.
     this.timer = setInterval(() => {
       if (!this.holding() && !this.options.waiting?.()) return;
-      if (limitReadDue({ now: this.now(), checkedAt: this.checkedAt, lastTurnAt: this.lastTurnAt, resets: this.knownResets() })) void this.refresh(false);
+      if (limitReadDue({ now: this.now(), checkedAt: this.checkedAt, lastTurnAt: this.lastTurnAt, resets: this.knownResets(), failures: this.failures })) void this.refresh(false);
     }, 60_000);
     this.timer.unref?.();
   }

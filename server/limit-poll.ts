@@ -11,8 +11,9 @@ export const LIMIT_POLL_MS = 5 * 60_000;
 export const LIMIT_ACTIVE_MS = 15 * 60_000;
 /** With nothing running, the most usage goes unread while something holds or waits. */
 export const LIMIT_IDLE_POLL_MS = 60 * 60_000;
-/** A known reset is read this long after its time: a minute after the automation waiting for it starts, so the new
- * window's reset re-times an automation that repeats, never one still due for this reset. */
+/** A known reset is read this long after its time, a minute after the automation waiting for it starts. A read that
+ * lands sooner (another window's, a person's, the first after a wake) leaves an automation still owed a run for this
+ * reset where it is too (limit-reset-owed.ts); the new window re-times it once that run was made. */
 export const RESET_READ_AFTER_MS = AFTER_RESET_MS + 60_000;
 
 export interface LimitReadState {
@@ -23,12 +24,21 @@ export interface LimitReadState {
   lastTurnAt: number;
   /** The reset times known now: the holds' and the usage windows'. */
   resets: readonly number[];
+  /** Reads in a row that failed (no account answered, or the read threw); 0 after one that worked. */
+  failures?: number;
+}
+
+/** After a failed read on a quiet home, the next comes this long later, doubled after each further failure, at most hourly. */
+export function retryAfterFailureMs(failures: number): number {
+  return Math.min(LIMIT_POLL_MS * 2 ** Math.max(0, failures - 1), LIMIT_IDLE_POLL_MS);
 }
 
 /** Whether the clock's minute tick reads usage now. Called only while an engine is held or an automation waits. */
-export function limitReadDue({ now, checkedAt, lastTurnAt, resets }: LimitReadState): boolean {
+export function limitReadDue({ now, checkedAt, lastTurnAt, resets, failures = 0 }: LimitReadState): boolean {
   const age = now - checkedAt;
+  // The clock was set back past the last read: nothing measured from it holds, so read now and start again from there.
+  if (age < 0) return true;
   if (now - lastTurnAt < LIMIT_ACTIVE_MS) return age >= LIMIT_POLL_MS - 1_000;
   if (resets.some((reset) => checkedAt < reset + RESET_READ_AFTER_MS && reset + RESET_READ_AFTER_MS <= now)) return true;
-  return age >= LIMIT_IDLE_POLL_MS;
+  return age >= (failures > 0 ? retryAfterFailureMs(failures) : LIMIT_IDLE_POLL_MS);
 }
