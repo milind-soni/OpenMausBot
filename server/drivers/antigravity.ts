@@ -27,6 +27,7 @@ import {
   validateAntigravityRuntime,
   verifyAntigravityBrowserHelper,
 } from "./antigravity-acp.ts";
+import { watchAntigravityPromptOutcome } from "./antigravity-turn-outcome.ts";
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import {
   antigravityManagedInstallAvailable,
@@ -136,6 +137,7 @@ const support: AcpSupport = {
   },
   processStarted: (child, instanceId) => runtimeProcesses.track(instanceId, child),
   sessionSetupParams: antigravitySessionSetup,
+  promptOutcome: (instanceId, sessionId) => watchAntigravityPromptOutcome(support.displayName, antigravityProfileDirectory(instanceId), sessionId),
   requireAuthenticationBeforeSpawn: true,
   isAuthenticated: async (env, config, instanceId) => {
     try {
