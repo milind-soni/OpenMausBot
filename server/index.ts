@@ -7505,7 +7505,6 @@ async function finalScreenFrame(_botId: string, threadId: string): Promise<Frame
 }
 
 function threadTitleGate(bot: Pick<BotRecord, "modelSelection">): { ok: true; instance: ProviderInstance } | { ok: false; refusal: string } {
-  if (!llmThreadTitlesEnabled(cfg)) return { ok: false, refusal: "generated thread titles are turned off on this server" };
   if (hostedModels && !hostedModels.allows(bot.modelSelection)) return { ok: false, refusal: hostedModels.error() };
   const instance = registry.get(bot.modelSelection.instanceId);
   if (!instance?.generateText) return { ok: false, refusal: "this bot's model can't generate a title — rename the thread instead" };
@@ -12445,7 +12444,7 @@ function liveSignedIn(auth: RequestAuth): boolean {
 /** On the bot's own engine, which already saw the requests, so nothing new reaches OpenAI. */
 function liveCallTitle(botId: string, threadId: string, excerpt: string): Promise<string | null> | null {
   const bot = store.projectBotForTask(botId, threadId);
-  if (!bot) return null;
+  if (!bot || !llmThreadTitlesEnabled(cfg)) return null;
   const gate = threadTitleGate(bot);
   return gate.ok ? generateThreadTitle(gate.instance, excerpt, "call") : null;
 }
