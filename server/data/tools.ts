@@ -448,11 +448,13 @@ function csvOptions(options: LoadInput["options"], extra: Record<string, string>
 function readerExpression(reader: "csv" | "tsv" | "json" | "parquet" | "xlsx", target: string | string[], input: LoadInput, many: boolean): string {
   const path = Array.isArray(target) ? `[${target.map(quoteLiteral).join(", ")}]` : quoteLiteral(target);
   const multi: Record<string, string> = many ? { union_by_name: "true", filename: "true" } : {};
+  const unionByName = input.options?.union_by_name ?? (many ? true : undefined);
+  const fileOptions = `${unionByName === undefined ? "" : `, union_by_name=${unionByName}`}${many ? ", filename=true" : ""}`;
   switch (reader) {
     case "csv": return `read_csv(${path}${csvOptions(input.options, multi)})`;
     case "tsv": return `read_csv(${path}${csvOptions({ ...input.options, delimiter: input.options?.delimiter ?? "\t" }, multi)})`;
-    case "json": return `read_json_auto(${path}${many ? ", union_by_name=true, filename=true" : ""}${input.options?.ignore_errors ? ", ignore_errors=true" : ""})`;
-    case "parquet": return `read_parquet(${path}${many ? ", union_by_name=true, filename=true" : ""})`;
+    case "json": return `read_json_auto(${path}${fileOptions}${input.options?.ignore_errors ? ", ignore_errors=true" : ""})`;
+    case "parquet": return `read_parquet(${path}${fileOptions})`;
     case "xlsx": {
       const parts = [path];
       if (input.sheet) parts.push(`sheet=${quoteLiteral(input.sheet)}`);
