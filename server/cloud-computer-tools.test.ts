@@ -241,7 +241,7 @@ describe("cloud computer tools", () => {
   it("hands a command that outlasts its call back still running, with a process id exec_status follows, instead of an error", async () => {
     neverEnds = true;
     const result = await tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "make forever" } } }, {
-      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 37_000, assertActive: () => {}, gate: async () => ({ held: false }),
+      cfg, boxId: () => "bx_23456789", signal: new AbortController().signal, budgetMs: 32_000, assertActive: () => {}, gate: async () => ({ held: false }),
     }) as { isError?: boolean; content: Array<{ type: string; text?: string }> };
     expect(result.isError).toBeFalsy();
     const handed = JSON.parse(result.content[0]!.text!);
@@ -293,7 +293,7 @@ describe("cloud computer tools", () => {
 
     it("stops a sixth one when its call's time runs out, instead of leaving it, and says how to see and stop the others", async () => {
       await fiveDevServers();
-      const sixth = await exec("devserver forever", 37_000);
+      const sixth = await exec("devserver forever", 32_000);
       expect(sixth).toEqual({ isError: true, content: [{ type: "text", text: tools.TOO_MANY_LEFT_RUNNING }] });
       expect(tools.TOO_MANY_LEFT_RUNNING).toMatch(/background: true.*ps -eo.*kill <pid>/s);
       const sent = calls.filter(entry => entry.path.endsWith("/commands")).map(entry => String(entry.body.command));
@@ -301,7 +301,7 @@ describe("cloud computer tools", () => {
       expect(sent.some(command => command.startsWith(`k=${key}; p=;`) && command.includes("kill -TERM"))).toBe(true);
       // With one of the five gone, the next long command is handed back as usual.
       forever.delete(5);
-      const next = await exec("watcher forever", 37_000);
+      const next = await exec("watcher forever", 32_000);
       expect(next.isError).toBeFalsy();
       expect(JSON.parse(next.content[0]!.text!)).toMatchObject({ status: "running" });
     }, 120_000);

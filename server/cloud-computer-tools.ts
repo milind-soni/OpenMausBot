@@ -57,7 +57,10 @@ export const EXEC_STILL_RUNNING = "The command is still running on the cloud com
 export const TOO_MANY_LEFT_RUNNING = `This command ran past this call's time limit, and this cloud computer already has ${COMMAND_WALL.leftRunningMax} commands left running from earlier exec calls, `
   + "so this one was stopped. Start a command that keeps running (a server, a watcher, a long build) with background: true. To see what is running, exec "
   + "`ps -eo pid,etime,args --sort=start_time | tail -n 30`; to stop one, exec `kill <pid>`. Short commands like these always run.";
-/** Pointer moves, clicks, keys and the like take well under a second; this is far below the provider's 40 s limit on a direct command. */
+/** Only reached through a relay that does not start commands in the background: the provider itself ended the command. */
+export const EXEC_STOPPED_AT_LIMIT = "The cloud computer's provider stopped this command after 30 seconds, its limit for a command run this way. The command did not fail by itself and is "
+  + "no longer running; what it had done up to then stays. Start it again with background: true, then follow it with exec_status.";
+/** Pointer moves, clicks, keys and the like take well under a second; this ends five seconds before the provider would stop a direct command at 30 s. */
 const QUICK_CALL_MS = 25_000;
 const COPY_TOOLS = new Set(["copy_from_computer", "copy_to_computer"]);
 export const cloudComputerCallBudgetMs = (name: unknown): number =>
@@ -161,6 +164,7 @@ export async function runCloudComputerTool(
       status: "running", processId: processIdOn(boxId, result.processId), stdout: result.stdout.slice(-STDOUT_TAIL_CHARS), stderr: result.stderr.slice(-STDERR_TAIL_CHARS), next: EXEC_STILL_RUNNING,
     }) }] };
   }
+  if (name === "exec" && result.providerLimit) return { isError: true, content: [{ type: "text", text: EXEC_STOPPED_AT_LIMIT }] };
   if (name === "exec" && result.timedOut) return { isError: true, content: [{ type: "text", text: EXEC_LATE }] };
   return { isError: !result.ok, content: [{ type: "text", text: JSON.stringify(result) }] };
 }

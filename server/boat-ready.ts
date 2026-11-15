@@ -1,6 +1,7 @@
-// Boat reports a resumed sandbox `idle` before its command agent answers: seen 2026-11-14, a sandbox stayed `idle`,
-// `health: "ok"` for up to half an hour after a resume while every command hung, with `hydrated: false` and its last
-// snapshot `in_progress`. So the provider's state alone never means ready here: a short `true` has to come back as well.
+// Boat's `state` says a sandbox is ready; it does not say that its command agent answers. Its gateway answers 502 after
+// about 40 s when a sandbox is too slow to answer, which was seen on sandboxes that had just been resumed, with
+// `hydrated: false` and a snapshot `in_progress`. So the provider's state alone never means ready here: a short `true`
+// has to come back as well.
 // Unverified: that `hydrated`, `hydration`, `lastSnapshotStatus`, `health` and `degradedSince` are sent on every read. They
 // only lengthen the wait when present; absent, the wait is the short one.
 import { setTimeout as delay } from "node:timers/promises";
@@ -13,8 +14,8 @@ import { cloudComputerCounters, type CloudComputerCounters } from "./cloud-compu
 import type { AppConfig } from "./config.ts";
 
 export const READY_WAIT = {
-  /** A live machine answers `true` in about 0.2 s. Eight seconds is forty times that, and well under the 40 s a relay
-   * holds a hung command, so a probe that hangs costs a turn seconds, not most of a minute. */
+  /** A live machine answers `true` in about 0.2 s. Eight seconds is forty times that, and well under the 40 s the provider's
+   * gateway holds a command to a sandbox that does not answer, so a probe that hangs costs a turn seconds, not most of a minute. */
   probeTimeoutMs: 8_000,
   /** Between probes that got no answer. */
   probeGapMs: 3_000,

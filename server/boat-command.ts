@@ -1,9 +1,11 @@
-// Boat's synchronous POST /sandboxes/{id}/commands answers 502 once a command has run for about 40 s, and the command
-// keeps running on the sandbox (seen 2026-11-15 through a relay whose own limit is 180 s: every failed command took
-// 40.05 to 40.21 s, the slowest that succeeded 39.9 s). So a command that may run that long is never sent that way: it
-// is started `detached`, which answers at once with a processId, and followed with GET /sandboxes/{id}/commands/{id}
-// until it ends or the caller's own time is up. A relay that does not forward `detached` runs the command to the end
-// and answers with its result, which is taken as it comes.
+// Boat stops a synchronous POST /sandboxes/{id}/commands after 30 s: it answers 200 with `timedOut: true`,
+// `exitCode: 143` and `signal: "SIGTERM"`, and the process is gone (checked on a real sandbox 2026-11-15). Apart from
+// that, its gateway answers 502 after about 40 s when a sandbox is too slow to answer at all. So a command that may run
+// that long is never sent that way: it is started `detached`, which answers at once with a processId, and followed with
+// GET /sandboxes/{id}/commands/{id} (`running`, `status`, `exitCode`, `stdout`, `stderr`, `stdoutTruncated`,
+// `stderrTruncated`, `known`) until it ends or the caller's own time is up. The same check found a detached command to
+// run with the same folder, user, HOME, shell and PATH as a synchronous one, and no tty either way. A relay that does
+// not forward `detached` runs the command synchronously and answers with its result, which is taken as it comes.
 // Unverified: how many bytes of output `tailBytes` may ask for. A longer output arrives cut, and says so.
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -12,9 +14,9 @@ import { boatHealth, unansweredStatus } from "./boat-health.ts";
 import type { AppConfig } from "./config.ts";
 
 export const COMMAND_WALL = {
-  /** A command given no more time than this by its caller is sent the synchronous way: it cannot reach the 40 s wall,
-   * and it answers in one round trip. */
-  syncSafeMs: 30_000,
+  /** A command given no more time than this by its caller is sent the synchronous way, in one round trip: its caller
+   * gives up five seconds before the provider would stop it at 30 s. */
+  syncSafeMs: 25_000,
   /** The end of each output stream that is read back once the command has ended: 256 KiB. */
   tailBytes: 262_144,
   /** While it runs only this much is read, since each read is thrown away but the last. */
@@ -40,6 +42,8 @@ export interface CommandOutcome {
   unanswered?: true;
   /** A 503, which may be a relay's account-wide refusal rather than this machine. */
   busy?: true;
+  /** The provider stopped a synchronous command at its 30 s limit: not the command's own failure, and it no longer runs. */
+  providerLimit?: true;
   /** Only the end of the output came back. */
   outputCut?: true;
   /** The computer restarted or lost track of the command, so how it ended is not known. */
@@ -88,7 +92,7 @@ export async function processMayStillRun(cfg: AppConfig, boxId: string, processI
   try {
     const response = await boatFetch(cfg, `/sandboxes/${boxId}/commands/${processId}?tailBytes=1`, { signal: AbortSignal.timeout(timeoutMs) });
     const body: any = await response.json().catch(() => null);
-    return response.status !== 404 && !(response.ok && body?.running === false);
+    return response.status !== 404 && !(response.ok && (body?.running === false || body?.known === false));
   } catch {
     return true;
   }
@@ -103,7 +107,7 @@ export async function commandsLeftRunning(cfg: AppConfig, boxId: string): Promis
     try {
       const response = await boatFetch(cfg, `/sandboxes/${boxId}/commands/${processId}?tailBytes=1`, { signal: AbortSignal.timeout(5_000) });
       const body: any = await response.json().catch(() => null);
-      if (response.status === 404 || (response.ok && body?.running === false)) { forgetLeftRunning(boxId, processId); return false; }
+      if (response.status === 404 || (response.ok && (body?.running === false || body?.known === false))) { forgetLeftRunning(boxId, processId); return false; }
       return response.ok && body?.running === true;
     } catch {
       return false;
@@ -134,7 +138,7 @@ export async function runToEnd(
   const processId = body?.processId;
   if (processId === undefined && (typeof body?.exitCode === "number" || body?.timedOut === true)) {
     if (typeof body.exitCode === "number") boatHealth.answered(boxId);
-    return { ok: body.exitCode === 0, exitCode: body.exitCode ?? null, stdout: text(body.stdout), stderr: text(body.stderr), ...(body.timedOut === true ? { timedOut: true as const } : {}) };
+    return { ok: body.exitCode === 0, exitCode: body.exitCode ?? null, stdout: text(body.stdout), stderr: text(body.stderr), ...(body.timedOut === true ? { timedOut: true as const, providerLimit: true as const } : {}) };
   }
   if (!Number.isSafeInteger(processId) || processId < 1) {
     return { ok: false, exitCode: null, stdout: "", stderr: "The cloud computer did not say which process it started, so the command may be running." };
@@ -162,7 +166,7 @@ export async function runToEnd(
       signal?.throwIfAborted();
       continue;
     }
-    if (status.status === 404) {
+    if (status.status === 404 || (status.ok && seen?.known === false)) {
       untrackProcess(boxId, processId);
       return { ok: false, exitCode: null, stdout: text(last?.stdout), stderr: COMMAND_LOST, lost: true };
     }

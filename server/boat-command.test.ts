@@ -1,12 +1,14 @@
-// A loopback Boat with the provider's real limit, scaled down: a synchronous command that runs past the wall is answered
-// 502 while its process keeps running. No network, no real computer.
+// A loopback Boat with the provider's two real limits, scaled down a hundred times: a synchronous command is stopped at
+// 30 s and answered 200 with `timedOut`, exit code 143 and SIGTERM; and the gateway answers 502 after 40 s when the
+// computer is too slow to answer at all. No network, no real computer.
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "./config.ts";
 
-/** The provider's 40 s, as 300 ms. */
+/** The provider's 30 s, as 300 ms, and its gateway's 40 s, as 400 ms. */
 const WALL_MS = 300;
+const GATEWAY_MS = 400;
 const BOX = "bx_23456789";
 const cfg = { box: { token: "synthetic-box-key" } } as AppConfig;
 
@@ -19,6 +21,10 @@ let failReads = 0;
 let forgetsDetached = false;
 let gone = false;
 let truncates = false;
+/** The computer is too slow to answer, so the gateway gives up on every synchronous command. */
+let tooSlow = false;
+/** The status read answers 200 with `known: false`, as the provider does for a process it has no record of. */
+let unknownProcess = false;
 
 /** `sleep <ms>; exit <code>` in the fake's own words: `ms:<n>` and `exit:<n>` anywhere in the command. */
 const spec = (command: string) => ({ ms: Number(/ms:(\d+)/.exec(command)?.[1] ?? 5), exitCode: Number(/exit:(\d+)/.exec(command)?.[1] ?? 0) });
@@ -37,6 +43,7 @@ beforeAll(async () => {
       if (failReads > 0) { failReads--; return send(res, 502, { ok: false }); }
       const found = processes.find((process) => process.id === Number(read[1]));
       if (!found || gone) return send(res, 404, { ok: false, code: "not_found" });
+      if (unknownProcess) return send(res, 200, { known: false, running: false, status: "unknown", exitCode: null, stdout: "", stderr: "" });
       const live = running(found);
       return send(res, 200, { running: live, status: live ? "running" : "exited", exitCode: live ? null : found.exitCode, stdout: live ? "partial" : found.stdout, stderr: "", ...(truncates ? { stdoutTruncated: true } : {}) });
     }
@@ -45,8 +52,12 @@ beforeAll(async () => {
     const started: Process = { id: processes.length + 1, command: String(body.command), startedAt: Date.now(), endsAt: Date.now() + ms, exitCode, stdout: `ran ${ms}` };
     processes.push(started);
     if (body.detached === true && !forgetsDetached) return send(res, 200, { processId: started.id });
-    // Synchronous: the answer waits for the command, and the wall cuts it off without stopping the process.
-    if (ms > WALL_MS) return void setTimeout(() => send(res, 502, { ok: false, code: "upstream_unavailable" }), WALL_MS);
+    if (tooSlow) { started.endsAt = started.startedAt; return void setTimeout(() => send(res, 502, { ok: false, code: "upstream_unavailable" }), GATEWAY_MS); }
+    // Synchronous: the answer waits for the command, and at the limit the provider stops the process and says so.
+    if (ms > WALL_MS) {
+      started.endsAt = started.startedAt + WALL_MS;
+      return void setTimeout(() => send(res, 200, { exitCode: 143, signal: "SIGTERM", timedOut: true, stdout: "", stderr: "" }), WALL_MS);
+    }
     setTimeout(() => send(res, 200, { exitCode, stdout: started.stdout, stderr: "" }), ms);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -59,7 +70,7 @@ let boat: typeof import("./boat.ts");
 let command: typeof import("./boat-command.ts");
 let health: typeof import("./boat-health.ts");
 beforeEach(async () => {
-  processes = []; requests = []; failReads = 0; forgetsDetached = false; gone = false; truncates = false;
+  processes = []; requests = []; failReads = 0; forgetsDetached = false; gone = false; truncates = false; tooSlow = false; unknownProcess = false;
   vi.resetModules();
   boat = await import("./boat.ts");
   command = await import("./boat-command.ts");
@@ -68,23 +79,31 @@ beforeEach(async () => {
 const posts = () => requests.filter((request) => request.method === "POST");
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe("the provider's limit on a synchronous command", () => {
-  it("answers 502 once a command runs past it, and the command keeps running: the behaviour to defend against", async () => {
+describe("the provider's limits on a synchronous command", () => {
+  it("stops a command at 30 s and says so: the result is marked as the provider's limit, not the command's own failure", async () => {
     const out = await boat.runCommand(cfg, BOX, `build ms:${WALL_MS * 2}`, { timeoutMs: command.COMMAND_WALL.syncSafeMs });
-    expect(out).toMatchObject({ ok: false, exitCode: null, unanswered: true });
+    expect(out).toMatchObject({ ok: false, exitCode: 143, timedOut: true, providerLimit: true });
     expect(posts()).toEqual([expect.objectContaining({ detached: false })]);
-    expect(running(processes[0]!)).toBe(true);
+    await sleep(20);
+    expect(running(processes[0]!)).toBe(false);
   });
 
-  it("does not make the computer count as not responding: only a short probe that fails does", async () => {
+  it("is never reached by a command sent the synchronous way: its caller gives up five seconds earlier", () => {
+    expect(command.COMMAND_WALL.syncSafeMs).toBeLessThanOrEqual(25_000);
+  });
+
+  it("a gateway that gives up on a slow computer does not make it count as not responding: only a short probe that fails does", async () => {
     const silent: string[] = [];
     health.boatHealth.onNotResponding((boxId) => silent.push(boxId));
-    for (let builds = 0; builds < 4; builds++) await boat.runCommand(cfg, BOX, `build ms:${WALL_MS * 2}`, { timeoutMs: command.COMMAND_WALL.syncSafeMs });
-    await sleep(100);
+    tooSlow = true;
+    for (let builds = 0; builds < 3; builds++) {
+      expect(await boat.runCommand(cfg, BOX, "ls ms:5", { timeoutMs: command.COMMAND_WALL.syncSafeMs })).toMatchObject({ ok: false, exitCode: null, unanswered: true });
+    }
+    tooSlow = false;
+    await sleep(150);
     expect(processes.some((process) => process.command === "true")).toBe(true);
     expect(silent).toEqual([]);
     expect(health.boatHealth.notRespondingSince(BOX)).toBeNull();
-    expect(health.boatHealth.answeredWithin(BOX, 5_000)).toBe(true);
   });
 });
 
@@ -123,7 +142,7 @@ describe("the commands a bot's exec calls left running", () => {
 });
 
 describe("a command that may run long", () => {
-  it("runs to its end however far past the wall, once, with its own exit code and output", async () => {
+  it("runs to its end however far past the provider's limit, once, with its own exit code and output", async () => {
     const out = await boat.runCommand(cfg, BOX, `build ms:${WALL_MS * 3} exit:2`);
     expect(out).toEqual({ ok: false, exitCode: 2, stdout: `ran ${WALL_MS * 3}`, stderr: "" });
     expect(requests.filter((request) => request.method === "GET" && request.tail === command.COMMAND_WALL.tailBytes)).toHaveLength(1);
@@ -182,10 +201,18 @@ describe("a command that may run long", () => {
     await expect(boat.runCommand(cfg, BOX, "cat ms:10")).resolves.toMatchObject({ ok: true, outputCut: true });
   });
 
-  it("takes the result as it comes from a relay that does not forward the detached flag", async () => {
+  it("takes the result as it comes from a relay that does not forward the detached flag, the provider's limit included", async () => {
     forgetsDetached = true;
     await expect(boat.runCommand(cfg, BOX, "pwd ms:20")).resolves.toEqual({ ok: true, exitCode: 0, stdout: "ran 20", stderr: "" });
     expect(requests.filter((request) => request.method === "GET")).toHaveLength(0);
+    await expect(boat.runCommand(cfg, BOX, `build ms:${WALL_MS * 2}`)).resolves.toMatchObject({ ok: false, exitCode: 143, timedOut: true, providerLimit: true });
+  });
+
+  it("takes a process the provider says it does not know as lost", async () => {
+    const pending = boat.runCommand(cfg, BOX, "build ms:2000");
+    await sleep(100);
+    unknownProcess = true;
+    await expect(pending).resolves.toMatchObject({ ok: false, lost: true });
   });
 
   it("stops following, and throws, when the caller gives up", async () => {
@@ -200,8 +227,8 @@ describe("a command that may run long", () => {
     expect(command.trackedProcesses(BOX).size).toBe(0);
   });
 
-  it("is sent the direct way when its caller gives it less time than the wall, and the probe always is", async () => {
-    await boat.runCommand(cfg, BOX, "click ms:5", { timeoutMs: 25_000 });
+  it("is sent the direct way when its caller gives it no more than the sync-safe time, and the probe always is", async () => {
+    await boat.runCommand(cfg, BOX, "click ms:5", { timeoutMs: command.COMMAND_WALL.syncSafeMs });
     await boat.probeBoat(cfg, BOX);
     expect(posts().filter((request) => request.command === "click ms:5" || request.command === "true").map((request) => request.detached)).toEqual([false, false]);
   });

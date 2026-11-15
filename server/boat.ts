@@ -361,7 +361,7 @@ export async function runCommand(cfg: AppConfig, boxId: string, command: string,
   if (unanswered) suspect(); else if (!probe && res.ok && typeof body?.exitCode === "number") boatHealth.answered(boxId);
   return {
     ok: res.ok && body?.exitCode === 0, exitCode: body?.exitCode ?? null, stdout: body?.stdout ?? "",
-    stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const } : {}), ...(unanswered ? { unanswered: true as const } : {}), ...(res.status === 503 ? { busy: true as const } : {}),
+    stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const, providerLimit: true as const } : {}), ...(unanswered ? { unanswered: true as const } : {}), ...(res.status === 503 ? { busy: true as const } : {}),
   };
 }
 
