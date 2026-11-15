@@ -1871,7 +1871,7 @@
   "teamShare.skip.skill_changed": "確認後に変更されています",
   "teamShare.skip.skill_conflict": "同名で内容の異なるスキルを持つボットが 2 体います",
   "teamShare.skip.bot_skill_limit": "ボットが共有できるスキルは最大 30 件です（オンのスキルを優先）",
-  "teamShare.skip.team_skill_limit": "部署が共有できるスキルは最大 60 件です",
+  "teamShare.skip.team_skill_limit": "部署が共有できるスキルは最大 120 件です",
   "teamShare.field.soul": "常時適用する指示",
   "teamShare.field.notes": "初期メモ",
   "teamShare.field.brief": "共有の指示",
@@ -6653,6 +6653,7 @@
   "botSettings.search": "検索",
   "botSettings.searchAria": "設定を検索",
   "botSettings.searchNone": "「{query}」に一致するものはありません",
+  "botSettings.searchLoading": "接続済みのアプリを確認しています…",
   "botSettings.sections.skills": "スキル",
   "botSettings.sections.memory": "メモリー",
   "botSettings.sections.routines": "ルーティン",
@@ -8095,5 +8096,6 @@
   "computer.recovery.restart": "コンピューターを再起動",
   "computer.recovery.restartTitle": "このクラウドコンピューターを停止して起動し直します。開いているプログラムは閉じられますが、ファイルは残ります。",
   "computer.recovery.replace": "コンピューターを置き換え",
-  "computer.recovery.replaceTitle": "このクラウドコンピューターを削除し、ボットに新しいものを用意します。ここにしかないファイルは失われます。"
+  "computer.recovery.replaceTitle": "このクラウドコンピューターを削除し、ボットに新しいものを用意します。ここにしかないファイルは失われます。",
+  "composer.command.burstDesc": "作業の多くの部分を同時に実行し、結果をまとめます"
 }
