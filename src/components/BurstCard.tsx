@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { api, openThread, useStore } from "@/state/store";
+import { serverErrorText } from "@/lib/server-error";
+import { api, ApiError, openThread, useStore } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
 import type { BurstCardData, BurstChildRow, BurstChildStatus, BurstView } from "../../shared/burst";
@@ -52,7 +53,7 @@ export function BurstCard({ card }: { card: BurstCardData }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<BurstView | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string>();
   const moved = `${card.phase}:${card.counts.done}:${card.counts.running}:${card.counts.failed}:${card.counts.cancelled}`;
   const live = open || editing;
 
@@ -65,12 +66,12 @@ export function BurstCard({ card }: { card: BurstCardData }) {
 
   async function press(action: "run" | "cancel" | "retry" | "edit", body?: unknown): Promise<boolean> {
     setBusy(true);
-    setError(false);
+    setError(undefined);
     try {
       await api(`/api/bursts/${card.burstId}/${action}`, { method: "POST", ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
       return true;
-    } catch {
-      setError(true);
+    } catch (failure) {
+      setError(serverErrorText(failure instanceof ApiError ? failure.body : undefined, t("burst.error.action")));
       return false;
     } finally {
       setBusy(false);
@@ -109,14 +110,14 @@ export function BurstCard({ card }: { card: BurstCardData }) {
               )}
             </>
           )}
-          {error && <p className="text-[12px] text-danger">{t("burst.error.action")}</p>}
+          {error && <p className="text-[12px] text-danger">{error}</p>}
           {editing && view && <BurstEditor view={view} busy={busy} onBack={() => setEditing(false)} onSave={(plan) => { void press("edit", plan).then((ok) => { if (ok) setEditing(false); }); }} />}
           {!editing && (
             <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
               {preview ? (
                 <>
                   <button type="button" disabled={busy} onClick={() => { void press("run"); }} className={PRIMARY}>{t("burst.run")}</button>
-                  <button type="button" disabled={busy} onClick={() => { setError(false); setEditing(true); }} className={BUTTON}>{t("burst.edit")}</button>
+                  <button type="button" disabled={busy} onClick={() => { setError(undefined); setEditing(true); }} className={BUTTON}>{t("burst.edit")}</button>
                   <button type="button" disabled={busy} onClick={() => { void press("cancel"); }} className={BUTTON}>{t("burst.cancel")}</button>
                 </>
               ) : (
