@@ -347,6 +347,7 @@ describe("phone batch step parsing", () => {
     { case: "an endless wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: "Infinity" }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":3} step after it. No step was performed.' },
     { case: "a list as a wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: [5] }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":3} step after it. No step was performed.' },
     { case: "a swipe shorter than 50 pixels", raw: [{ action: "swipe", direction: "up", distance: 10 }], error: 'Step 1 (swipe) needs x and y from 0 to 10000, distance from 50 to 10000 and duration_ms from 50 to 2000, e.g. {"action":"swipe","direction":"up","x":300,"y":1400,"distance":400,"duration_ms":800}. No step was performed.' },
+    { case: "a swipe step lasting 2001 ms", raw: [{ action: "swipe", direction: "up", duration_ms: 2001 }], error: 'Step 1 (swipe) needs x and y from 0 to 10000, distance from 50 to 10000 and duration_ms from 50 to 2000, e.g. {"action":"swipe","direction":"up","x":300,"y":1400,"distance":400,"duration_ms":800}. No step was performed.' },
     { case: "a tap held for 0 ms", raw: [{ action: "tap", x: 540, y: 900, duration_ms: 0 }], error: 'Step 1 (tap) needs duration_ms from 50 to 2000, e.g. {"action":"tap","x":540,"y":900,"duration_ms":1000}. No step was performed.' },
     { case: "a tap held for 49 ms", raw: [{ action: "tap", x: 540, y: 900, duration_ms: 49 }], error: 'Step 1 (tap) needs duration_ms from 50 to 2000, e.g. {"action":"tap","x":540,"y":900,"duration_ms":1000}. No step was performed.' },
     { case: "a tap held for 2001 ms", raw: [{ action: "tap", x: 540, y: 900, duration_ms: 2001 }], error: 'Step 1 (tap) needs duration_ms from 50 to 2000, e.g. {"action":"tap","x":540,"y":900,"duration_ms":1000}. No step was performed.' },
@@ -808,12 +809,23 @@ describe("phone MCP calls claim before each command sent to the phone", () => {
     ["tap", { x: 10, y: 20 }, [onPhone("shell", "input", "tap", "10", "20")], "Tapped 10,20"],
     ["tap", { x: 540, y: 900, duration_ms: 1000 }, [onPhone("shell", "input", "swipe", "540", "900", "540", "900", "1000")], "Pressed 540,900 for 1000 ms"],
     ["tap", { x: 540, y: 900, duration_ms: null }, [onPhone("shell", "input", "tap", "540", "900")], "Tapped 540,900"],
+    ["tap", { x: 10.4, y: 20.6 }, [onPhone("shell", "input", "tap", "10", "21")], "Tapped 10,21"],
+    ["tap", { x: 540, y: 900, duration_ms: "" }, [onPhone("shell", "input", "tap", "540", "900")], "Tapped 540,900"],
+    ["tap", { x: 540, y: 900, duration_ms: 50 }, [onPhone("shell", "input", "swipe", "540", "900", "540", "900", "50")], "Pressed 540,900 for 50 ms"],
+    ["tap", { x: 540, y: 900, duration_ms: "999.6" }, [onPhone("shell", "input", "swipe", "540", "900", "540", "900", "1000")], "Pressed 540,900 for 1000 ms"],
     ["swipe", { direction: "up" }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1440", "540", "480", "260")], "Swiped up"],
     ["swipe", { direction: "down", x: 300, y: 1430, distance: 375, duration_ms: 1500 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "300", "1430", "300", "1805", "1500")], "Swiped from 300,1430 to 300,1805 in 1500 ms"],
     ["swipe", { direction: "left", distance: 300 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "810", "960", "510", "960", "260")], "Swiped from 810,960 to 510,960 in 260 ms"],
     ["swipe", { direction: "up", x: "300" }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "300", "1440", "300", "480", "260")], "Swiped from 300,1440 to 300,480 in 260 ms"],
     ["swipe", { direction: "up", x: "", y: null, distance: null, duration_ms: null }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1440", "540", "480", "260")], "Swiped up"],
     ["swipe", { direction: "up", distance: 49.6 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1440", "540", "1390", "260")], "Swiped from 540,1440 to 540,1390 in 260 ms"],
+    ["swipe", { direction: "down" }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "480", "540", "1440", "260")], "Swiped down"],
+    ["swipe", { direction: "left" }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "810", "960", "270", "960", "260")], "Swiped left"],
+    ["swipe", { direction: "right" }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "270", "960", "810", "960", "260")], "Swiped right"],
+    ["swipe", { direction: "up", duration_ms: 2000.4 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1440", "540", "480", "2000")], "Swiped from 540,1440 to 540,480 in 2000 ms"],
+    ["swipe", { direction: "up", y: 1000 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1000", "540", "40", "260")], "Swiped from 540,1000 to 540,40 in 260 ms"],
+    ["swipe", { direction: "down", x: 0, y: 0 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "0", "0", "0", "960", "260")], "Swiped from 0,0 to 0,960 in 260 ms"],
+    ["swipe", { direction: "right", x: 10000, y: 10000, distance: 10000 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "10000", "10000", "20000", "10000", "260")], "Swiped from 10000,10000 to 20000,10000 in 260 ms"],
     ["type_text", { text: "hi" }, [onPhone("shell", "input", "text", "hi")], "Typed text into the focused Android field"],
     ["press", { key: "home" }, [onPhone("shell", "input", "keyevent", "KEYCODE_HOME")], "Pressed home"],
   ])("%s sends its commands when every claim is granted", async (name, args, deviceCommands, text) => {
@@ -828,13 +840,19 @@ describe("phone MCP calls claim before each command sent to the phone", () => {
   const SWIPE_FIELDS_ERROR = 'swipe needs x and y from 0 to 10000, distance from 50 to 10000 and duration_ms from 50 to 2000, e.g. {"direction":"up","x":300,"y":1400,"distance":400,"duration_ms":800}';
   const TAP_HOLD_ERROR = 'tap needs duration_ms from 50 to 2000, e.g. {"x":540,"y":900,"duration_ms":1000}';
   it.each([
-    ...[{ distance: 0 }, { distance: 49 }, { distance: -5 }, { distance: 10001 }, { distance: "abc" }, { duration_ms: 0 }, { duration_ms: 0.4 }, { duration_ms: 49 }, { duration_ms: 2001 }, { x: -1 }, { y: 10001 }]
+    ...[{ distance: 0 }, { distance: 49 }, { distance: -5 }, { distance: 10001 }, { distance: "abc" }, { duration_ms: 0 }, { duration_ms: 0.4 }, { duration_ms: 49 }, { duration_ms: 2001 }, { x: -1 }, { y: 10001 }, { x: 10001 }, { y: -1 }, { distance: 49.4 }, { x: true }]
       .map((field): [string, Record<string, unknown>, string] => ["swipe", { direction: "up", ...field }, SWIPE_FIELDS_ERROR]),
     ...[0, 49, 2001].map((duration_ms): [string, Record<string, unknown>, string] => ["tap", { x: 540, y: 900, duration_ms }, TAP_HOLD_ERROR]),
   ])("%s refuses %j and sends nothing to the phone", async (name, args, error) => {
     const { commands, call } = phone();
     expect(await call(name, args)).toEqual({ content: [{ type: "text", text: error }], isError: true });
     expect(commands).toEqual([DEVICES]);
+  });
+
+  it.each(["sideways", "constructor", "__proto__", "toString"])("swipe refuses the direction %j once it has read the screen size, and swipes nothing", async (direction) => {
+    const { commands, call } = phone();
+    expect(await call("swipe", { direction })).toEqual({ content: [{ type: "text", text: "Invalid swipe direction" }], isError: true });
+    expect(commands).toEqual([DEVICES, onPhone("shell", "wm", "size")]);
   });
 
   it("only a call's first claim may wait for a person: each one before a command says it comes from the middle of the call", async () => {
@@ -876,6 +894,22 @@ describe("phone MCP calls claim before each command sent to the phone", () => {
     const { commands, call } = phone();
     expect(await call("batch", { steps: [{ action: "swipe", direction: "up", distance: "400" }, { action: "read_screen" }] })).toEqual({ content: [{ type: "text", text: '1. swipe: Swiped from 540,1440 to 540,1040 in 260 ms\n2. read_screen:\n0: "Where to? · Destination" bounds=12,100,400,180 class=android.widget.TextView' }] });
     expect(commands).toEqual([DEVICES, onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1440", "540", "1040", "260"), DUMP]);
+  });
+
+  it("swipe sends whole numbers for a screen whose width and height are odd", async () => {
+    const commands: string[][] = [];
+    const adb = async (args: string[]) => {
+      commands.push(args);
+      const line = args.join(" ");
+      return Buffer.from(line.includes("devices -l") ? DEVICE_LIST : line.includes("wm size") ? "Physical size: 1081x1921\n" : "");
+    };
+    await callPhoneTool("swipe", { direction: "up" }, async () => ({ ok: true }), adb);
+    expect(commands).toEqual([DEVICES, onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "541", "1441", "541", "480", "260")]);
+  });
+
+  it("a held tap answers with the point and the time it was pressed, and nothing more", async () => {
+    const { call } = phone();
+    expect(await call("tap", { x: 540, y: 900, duration_ms: 1000 })).toEqual({ content: [{ type: "text", text: "Pressed 540,900 for 1000 ms" }] });
   });
 
   it.each([

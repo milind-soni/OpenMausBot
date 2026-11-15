@@ -633,7 +633,7 @@ async function callToolOn(onDevice: OnDevice, serial: string, name: string, args
       left: { x: width * 0.75, y: height / 2, dx: -1, dy: 0, distance: width / 2 },
       right: { x: width * 0.25, y: height / 2, dx: 1, dy: 0, distance: width / 2 },
     };
-    const move = moves[direction];
+    const move = Object.hasOwn(moves, direction) ? moves[direction] : undefined;
     if (!move) throw new Error("Invalid swipe direction");
     const or = (value: unknown, fallback: number) => (given(value) ? rounded(value) : fallback);
     const x = or(args.x, move.x); const y = or(args.y, move.y); const distance = or(args.distance, move.distance);
