@@ -3246,17 +3246,13 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
       -webkit-backdrop-filter: blur(28px) saturate(150%);
       backdrop-filter: blur(28px) saturate(150%);
     }
-    main.bg-app .glass-bar[data-glass-fade]::before,
-    main.bg-app [data-composer-backdrop] {
+    main.bg-app .glass-bar[data-glass-fade]::before {
       background: color-mix(in srgb, var(--color-app) 35%, transparent);
       -webkit-backdrop-filter: blur(20px) saturate(140%);
       backdrop-filter: blur(20px) saturate(140%);
     }
     main.bg-app .glass-bar[data-glass-fade]::before {
       mask-image: linear-gradient(to bottom, black 40%, transparent);
-    }
-    main.bg-app [data-composer-backdrop] {
-      mask-image: linear-gradient(to bottom, transparent, black 20px);
     }
   }
   /* In Tailwind's own layer, at a utility's weight, so hover and expanded fills still win over the glass. */

@@ -763,13 +763,6 @@ export function Composer({
           onEdit={locked ? undefined : editQueued}
         /><TeamAudienceLabel bot={bot} group={group} />
         <div className="relative">
-          {/* Plain canvas behind the composer and the strip below it, so the transcript ends at the composer
-              with no fade. Simple mode starts it at the composer's top edge, Advanced at its middle. */}
-          <div
-            aria-hidden
-            data-composer-backdrop
-            className={cn("pointer-events-none absolute -left-5 -right-5 bg-app", advanced ? "-bottom-3 top-1/2" : cn("top-0", simpleDock ? "-bottom-4" : "-bottom-3"))}
-          />
         <div ref={shellRef} data-tour="composer" data-multiline={multiline ? "" : undefined} className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : simpleDock ? cn(SIMPLE_COMPOSER, multiline ? "rounded-[18px]" : "rounded-[22px]") : cn("rounded-2xl px-2 py-1.5", ELEVATED_FLOAT))}>
         {singleRow && !locked && (
           <div className="flex shrink-0 items-center">
