@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { codexReleaseUpdate } from "./codex-update.ts";
+import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
 
 const releases = vi.hoisted(() => ({ latest: "0.169.0" as string | null, pinned: "0.167.0" as string | undefined }));
 vi.mock("./codex-release.ts", async (original) => ({
@@ -24,8 +24,12 @@ it("keeps the app updater when the advertised release is the pinned version", as
 });
 
 it("keeps the configured executable's update command when a terminal update is needed", async () => {
-  const update = await codexReleaseUpdate("codex-cli 0.167.0", "'/Applications/My Codex/codex'", false);
-  expect(update?.command).toBe(`${process.platform === "win32" ? "& " : ""}'/Applications/My Codex/codex' update`);
+  const cli = "'/Applications/My Codex/codex'";
+  const update = await codexReleaseUpdate("codex-cli 0.167.0", cli, false);
+  // PowerShell runs a quoted path only behind its call operator, so the command differs by the host's platform.
+  expect(codexUpdateCommand(cli, "darwin")).toBe("'/Applications/My Codex/codex' update");
+  expect(codexUpdateCommand(cli, "win32")).toBe("& '/Applications/My Codex/codex' update");
+  expect(update?.command).toBe(codexUpdateCommand(cli, process.platform));
 });
 
 it("does not show an update on My Cloud or for an already current copy", async () => {

@@ -100,8 +100,7 @@ describe("the provider's limits on a synchronous command", () => {
       expect(await boat.runCommand(cfg, BOX, "ls ms:5", { timeoutMs: command.COMMAND_WALL.syncSafeMs })).toMatchObject({ ok: false, exitCode: null, unanswered: true });
     }
     tooSlow = false;
-    await sleep(150);
-    expect(processes.some((process) => process.command === "true")).toBe(true);
+    await vi.waitFor(() => expect(processes.some((process) => process.command === "true")).toBe(true), { timeout: 30_000 });
     expect(silent).toEqual([]);
     expect(health.boatHealth.notRespondingSince(BOX)).toBeNull();
   });
@@ -151,7 +150,9 @@ describe("a command that may run long", () => {
     expect(command.trackedProcesses(BOX).size).toBe(0);
   });
 
-  it("keeps a quick command quick: about a tenth of a second and a few status reads on top of its own time", async () => {
+  // A slow runner (a Windows one takes three to five times as long per request) still has to stay well under "seconds":
+  // the count of status reads, which no machine's speed changes, is the tight half of this.
+  it("keeps a quick command quick: a few status reads and well under two seconds on top of its own time", async () => {
     const took: number[] = [];
     for (let run = 0; run < 5; run++) {
       const before = Date.now();
@@ -159,8 +160,9 @@ describe("a command that may run long", () => {
       took.push(Date.now() - before - 200);
     }
     const typical = [...took].sort((a, b) => a - b)[2]!;
-    expect(typical).toBeLessThan(400);
+    expect(typical).toBeLessThan(1_500);
     expect(requests.filter((request) => request.method === "GET").length).toBeLessThanOrEqual(5 * 4);
+    expect(command.COMMAND_WALL.pollMs.slice(0, 3).reduce((sum, ms) => sum + ms, 0)).toBeLessThan(300);
   });
 
   it("hands back a command still running when the caller's time is up: timed out, with its process id, not stopped", async () => {
@@ -174,7 +176,7 @@ describe("a command that may run long", () => {
   }, 45_000);
 
   it("reads a small tail while the command runs and the whole tail once, when it has ended", async () => {
-    await boat.runCommand(cfg, BOX, "build ms:700");
+    await boat.runCommand(cfg, BOX, "build ms:1500");
     const tails = requests.filter((request) => request.method === "GET").map((request) => request.tail);
     expect(tails.length).toBeGreaterThanOrEqual(3);
     expect(tails.at(-1)).toBe(command.COMMAND_WALL.tailBytes);
@@ -209,8 +211,8 @@ describe("a command that may run long", () => {
   });
 
   it("takes a process the provider says it does not know as lost", async () => {
-    const pending = boat.runCommand(cfg, BOX, "build ms:2000");
-    await sleep(100);
+    const pending = boat.runCommand(cfg, BOX, "build ms:20000");
+    await vi.waitFor(() => expect(command.trackedProcesses(BOX).size).toBe(1), { timeout: 30_000 });
     unknownProcess = true;
     await expect(pending).resolves.toMatchObject({ ok: false, lost: true });
   });
@@ -219,8 +221,7 @@ describe("a command that may run long", () => {
     const abort = new AbortController();
     const pending = boat.runCommand(cfg, BOX, "build ms:5000", { signal: abort.signal });
     const rejected = expect(pending).rejects.toThrow();
-    await sleep(100);
-    expect(command.trackedProcesses(BOX).size).toBe(1);
+    await vi.waitFor(() => expect(command.trackedProcesses(BOX).size).toBe(1), { timeout: 30_000 });
     abort.abort();
     await rejected;
     // Nobody follows it any more, so it no longer keeps the computer awake.
