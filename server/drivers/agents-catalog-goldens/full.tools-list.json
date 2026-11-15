@@ -1469,7 +1469,7 @@
           },
           "trigger_id": {
             "type": "string",
-            "description": "list: one trigger's details and recent fires."
+            "description": "Full instructions and fires; edit redactions in Automations."
           },
           "include_address": {
             "type": "boolean",
@@ -1876,6 +1876,11 @@
           "speakReplies": {
             "type": "boolean",
             "description": "Speak this bot's replies aloud as they settle, without being asked."
+          },
+          "browserProfile": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "With for_bot_id, only when the person asked: an idle teammate's browser profile, an existing one's name or id; \"\" = its own browser."
           },
           "reason": {
             "type": "string",
