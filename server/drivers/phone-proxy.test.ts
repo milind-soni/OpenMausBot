@@ -63,6 +63,55 @@ emulator-5554 device product:sdk model:Emulator transport_id:6
   });
 });
 
+// Lines cut, in their order, from four `dumpsys input_method` outputs of a Huawei Mate 9 (Android 9). Three are from a switch from the Baidu keyboard to ADBKeyBoard with a search
+// field taking input: before `ime set`, right after it (ADBKeyBoard is not bound yet, so the dump has no section for it) and once it shows. The fourth is the home screen with ADBKeyBoard as the keyboard.
+const BEFORE_THE_SWITCH = [
+  "  mCurMethodId=com.baidu.input_huawei/.ImeService",
+  "  mCurId=com.baidu.input_huawei/.ImeService mHaveConnect=true mBoundToMethod=true",
+  "  mShowRequested=true mShowExplicitlyRequested=false mShowForced=false mInputShown=true",
+  "  mServedInputConnectionWrapper=ControlledInputConnectionWrapper{connection=com.android.internal.widget.EditableInputConnection@c49480f finished=false mParentInputMethodManager.mActive=true}",
+  "Input method service state for com.baidu.input_huawei.ImeService@ca25e11:",
+  "  mWindowCreated=true mWindowAdded=true",
+  "  mWindowVisible=true mWindowWasVisible=true mInShowWindow=false",
+  "  mExtractedToken=0",
+  "  mIsInputViewShown=true mStatusIcon=0",
+  "Last computed insets:",
+  "",
+].join("\n");
+const SWITCHED_BUT_NOT_BOUND = [
+  "  mCurMethodId=com.android.adbkeyboard/.AdbIME",
+  "  mCurId=com.android.adbkeyboard/.AdbIME mHaveConnect=true mBoundToMethod=false",
+  "  mShowRequested=true mShowExplicitlyRequested=false mShowForced=false mInputShown=true",
+  "  mServedInputConnectionWrapper=ControlledInputConnectionWrapper{connection=com.android.internal.widget.EditableInputConnection@9c2709c finished=false mParentInputMethodManager.mActive=true}",
+  "",
+].join("\n");
+const SWITCHED_AND_SHOWN = [
+  "  mCurMethodId=com.android.adbkeyboard/.AdbIME",
+  "  mCurId=com.android.adbkeyboard/.AdbIME mHaveConnect=true mBoundToMethod=true",
+  "  mShowRequested=true mShowExplicitlyRequested=false mShowForced=false mInputShown=true",
+  "  mServedInputConnectionWrapper=ControlledInputConnectionWrapper{connection=com.android.internal.widget.EditableInputConnection@9c2709c finished=false mParentInputMethodManager.mActive=true}",
+  "Input method service state for com.android.adbkeyboard.AdbIME@a07f2f1:",
+  "  mWindowCreated=true mWindowAdded=true",
+  "  mWindowVisible=true mWindowWasVisible=true mInShowWindow=false",
+  "  mExtractedToken=0",
+  "  mIsInputViewShown=true mStatusIcon=0",
+  "Last computed insets:",
+  "",
+].join("\n");
+const ON_THE_HOME_SCREEN = [
+  "  mCurMethodId=com.android.adbkeyboard/.AdbIME",
+  "  mCurId=com.android.adbkeyboard/.AdbIME mHaveConnect=true mBoundToMethod=true",
+  "  mShowRequested=false mShowExplicitlyRequested=false mShowForced=false mInputShown=false",
+  "  mServedInputConnectionWrapper=null",
+  "Input method service state for com.android.adbkeyboard.AdbIME@3f66c6f:",
+  "  mWindowCreated=false mWindowAdded=false",
+  "  mWindowVisible=false mWindowWasVisible=false mInShowWindow=false",
+  "  mExtractedToken=0",
+  "  mIsInputViewShown=false mStatusIcon=0",
+  "Last computed insets:",
+  "",
+].join("\n");
+
 describe("phone MCP text input", () => {
   const ADB_KEYBOARD = "com.android.adbkeyboard/.AdbIME";
   const VENDOR_KEYBOARD = "com.baidu.input_huawei/.ImeService";
@@ -128,8 +177,8 @@ describe("phone MCP text input", () => {
 
   it("asks for ADBKeyBoard and types nothing when another keyboard is chosen", async () => {
     const phone = device(VENDOR_KEYBOARD);
-    await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
-    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
+    await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and switched on in the phone's keyboard list");
+    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"], ["ime", "list", "-s"]]);
   });
 
   const CLEAR = ["am", "broadcast", "-a", "ADB_CLEAR_TEXT", "-p", "com.android.adbkeyboard"];
@@ -181,9 +230,9 @@ describe("phone MCP text input", () => {
   it.each(["二手 iPad", "iPad"])("asks for ADBKeyBoard and changes nothing when another keyboard cannot clear (%s)", async (text) => {
     const phone = device(VENDOR_KEYBOARD);
     const refused = typePhoneText(phone.shell, text, true);
-    await expect(refused).rejects.toThrow("A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
+    await expect(refused).rejects.toThrow("A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and switched on in the phone's keyboard list");
     await expect(refused).rejects.toThrow("call type_text without clear and remove the old text with press delete");
-    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
+    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"], ["ime", "list", "-s"]]);
   });
 
   it("sends no text after a clear that failed", async () => {
@@ -210,6 +259,77 @@ describe("phone MCP text input", () => {
       await expect(typePhoneText(phone.shell, text, clear)).rejects.toThrow("Android text must be 1 to 256 characters");
       expect(phone.commands).toEqual([]);
     }
+  });
+
+  describe("with another keyboard as the default", () => {
+    const KEYBOARD = ["settings", "get", "secure", "default_input_method"];
+    const KEYBOARDS = ["ime", "list", "-s"];
+    const SWITCH = ["ime", "set", ADB_KEYBOARD];
+    const INPUT_STATE = ["dumpsys", "input_method"];
+    const INPUT = ["am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", "5LqM5omLIGlQYWQ="];
+    const RESTORE = ["ime", "set", VENDOR_KEYBOARD];
+    /** A phone whose keyboard list holds `switchedOn`, and whose input state reads as each of `dumps` in turn, then as the last of them. */
+    const switching = (dumps: string[], keyboard = VENDOR_KEYBOARD, switchedOn = [VENDOR_KEYBOARD, ADB_KEYBOARD]) => {
+      const phone = device(keyboard);
+      let reads = 0;
+      const shell = async (...command: string[]) => {
+        const reply = await phone.shell(...command);
+        if (command[0] === "dumpsys") return dumps[Math.min(reads++, dumps.length - 1)];
+        return command[1] === "list" ? `${switchedOn.join("\n")}\n` : reply;
+      };
+      return { commands: phone.commands, shell };
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it.each([
+      { clear: false, sends: [INPUT], says: SENT },
+      { clear: true, sends: [INPUT_STATE, CLEAR, INPUT], says: "Asked ADBKeyBoard to clear the field and sent the text. Use read_screen to check that the field holds only this text." },
+    ])("switches to ADBKeyBoard to type, then back to the person's keyboard (clear: $clear)", async ({ clear, sends, says }) => {
+      const phone = switching([SWITCHED_AND_SHOWN]);
+      await expect(typePhoneText(phone.shell, "二手 iPad", clear)).resolves.toBe(says);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE, ...sends, RESTORE]);
+    });
+
+    it.each([
+      ["ADBKeyBoard is not in the phone's keyboard list", VENDOR_KEYBOARD, [VENDOR_KEYBOARD]],
+      ["the default keyboard is not in that list", "com.example.keys/.Ime", [VENDOR_KEYBOARD, ADB_KEYBOARD]],
+      ["the default keyboard is not in that list and its id would run a command in the phone's shell", "a/b;reboot", [VENDOR_KEYBOARD, ADB_KEYBOARD]],
+      ["the phone's shell would not read the default keyboard's id as written", "com.x/.Ime$Inner", ["com.x/.Ime$Inner", ADB_KEYBOARD]],
+    ])("asks for ADBKeyBoard and switches nothing when %s", async (_case, keyboard, switchedOn) => {
+      const phone = switching([SWITCHED_AND_SHOWN], keyboard, switchedOn);
+      await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow(new Error("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and switched on in the phone's keyboard list. Ask the person to set it up, or type only those characters."));
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS]);
+    });
+
+    it("reads the input state again 200 ms later while ADBKeyBoard is not bound, and types once it shows", async () => {
+      const phone = switching([SWITCHED_BUT_NOT_BOUND, SWITCHED_AND_SHOWN]);
+      const typed = typePhoneText(phone.shell, "二手 iPad");
+      await vi.advanceTimersByTimeAsync(199);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE]);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(typed).resolves.toBe(SENT);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE, INPUT_STATE, INPUT, RESTORE]);
+    });
+
+    it.each([
+      ["is not bound", SWITCHED_BUT_NOT_BOUND],
+      ["does not show, as on the home screen", ON_THE_HOME_SCREEN],
+      ["has not taken over, though the other keyboard shows", BEFORE_THE_SWITCH],
+    ])("types nothing and switches back when at the tenth read, 1.8 s after the switch, ADBKeyBoard still %s", async (_state, dump) => {
+      const phone = switching([dump]);
+      const refused = expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow(new Error("No text field is taking input, so nothing was cleared or typed. Tap the field first, then call type_text again."));
+      await vi.advanceTimersByTimeAsync(1_799);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, ...Array(9).fill(INPUT_STATE)]);
+      await vi.advanceTimersByTimeAsync(1);
+      await refused;
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, ...Array(10).fill(INPUT_STATE), RESTORE]);
+    });
   });
 });
 
@@ -461,6 +581,10 @@ describe("phone MCP tool surface", () => {
       expect(tool(name).description).toMatch(/\. To do several steps, or to act and then read the screen, in one call, use batch\.$/);
       expect(tool(name).description).not.toContain("then use read_screen to verify");
     }
+  });
+
+  it("tells the bot that other text needs ADBKeyBoard switched on, not chosen as the keyboard", () => {
+    expect(tool("type_text").description).toContain("other text, such as Chinese, emoji or +, needs the ADBKeyBoard app switched on in the phone's keyboard list.");
   });
 
   it("keeps serial out of a step's fields", () => {
@@ -918,5 +1042,55 @@ describe("phone MCP calls claim before each command sent to the phone", () => {
     expect(result).toEqual({ content: [{ type: "text", text: HANDED_BACK_TEXT }], isError: true });
     expect(commands.filter((command) => command.includes("input"))).toEqual([]);
     hold.stop();
+  });
+
+  const KEYBOARD = onPhone("shell", "settings", "get", "secure", "default_input_method");
+  const KEYBOARDS = onPhone("shell", "ime", "list", "-s");
+  const SWITCH = onPhone("shell", "ime", "set", "com.android.adbkeyboard/.AdbIME");
+  const INPUT_STATE = onPhone("shell", "dumpsys", "input_method");
+  const RESTORE = onPhone("shell", "ime", "set", "com.baidu.input_huawei/.ImeService");
+  const OTHER_TEXT = { text: "二手" };
+
+  /** adb for a phone whose default keyboard is Baidu's, with ADBKeyBoard switched on in its keyboard list and showing as soon as it is set.
+   * `during` runs while adb runs each command. */
+  function adbOfPhoneWithAnotherKeyboard(during: (command: string) => void) {
+    const commands: string[][] = [];
+    const adb = async (args: string[]) => {
+      commands.push(args);
+      const line = args.join(" ");
+      during(line);
+      if (line.includes("devices -l")) return Buffer.from(DEVICE_LIST);
+      if (line.includes("default_input_method")) return Buffer.from("com.baidu.input_huawei/.ImeService\n");
+      if (line.includes("ime list -s")) return Buffer.from("com.baidu.input_huawei/.ImeService\ncom.android.adbkeyboard/.AdbIME\n");
+      return Buffer.from(line.includes("dumpsys input_method") ? SWITCHED_AND_SHOWN : "");
+    };
+    return { commands, adb };
+  }
+
+  const ONLY_THE_RESTORE = "only the command that puts the person's keyboard back";
+  const STEP_REFUSED = `Step 1 failed: A person has taken control of the phone. Do not act until they hand it back. To wait, call read_screen: each phone call waits up to 45 seconds and returns as soon as they hand the phone back. Meanwhile you may work on anything that does not need the phone. Its effect is unknown; call read_screen or screenshot before trying it again. ${EARLIER_AND_LATER}`;
+  it.each([
+    ["type_text", "nothing more", "its read of the default keyboard", OTHER_TEXT, KEYBOARD, [DEVICES, KEYBOARD], PERSON_TEXT],
+    ["type_text", ONLY_THE_RESTORE, "its read of the keyboard list", OTHER_TEXT, KEYBOARDS, [DEVICES, KEYBOARD, KEYBOARDS, RESTORE], PERSON_TEXT],
+    ["type_text", ONLY_THE_RESTORE, "the switch to ADBKeyBoard", OTHER_TEXT, SWITCH, [DEVICES, KEYBOARD, KEYBOARDS, SWITCH, RESTORE], PERSON_TEXT],
+    ["type_text", ONLY_THE_RESTORE, "the read that finds ADBKeyBoard shown", OTHER_TEXT, INPUT_STATE, [DEVICES, KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE, RESTORE], PERSON_TEXT],
+    ["batch", ONLY_THE_RESTORE, "the read that finds ADBKeyBoard shown", { steps: [{ action: "type_text", ...OTHER_TEXT }] }, INPUT_STATE, [DEVICES, KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE, RESTORE], STEP_REFUSED],
+  ])("%s sends %s once a person takes the phone during %s", async (name, _more, _moment, args, during, sent, says) => {
+    let taken = false;
+    const { commands, adb } = adbOfPhoneWithAnotherKeyboard((command) => {
+      if (command === during.join(" ")) taken = true;
+    });
+    const result = await callPhoneTool(name, args, async () => (taken ? REFUSED : { ok: true }), adb);
+    expect(result).toEqual({ content: [{ type: "text", text: says }], isError: true });
+    expect(commands).toEqual(sent);
+  });
+
+  it("type_text says the phone is still on ADBKeyBoard when the command that puts the person's keyboard back fails", async () => {
+    const { commands, adb } = adbOfPhoneWithAnotherKeyboard((command) => {
+      if (command === RESTORE.join(" ")) throw new Error("error: closed");
+    });
+    const result = await callPhoneTool("type_text", OTHER_TEXT, async () => ({ ok: true }), adb);
+    expect(result).toEqual({ content: [{ type: "text", text: "The phone is still on ADBKeyBoard, which shows no keys. Tell the person to choose their keyboard again in the phone's settings, and call read_screen to see whether the text arrived." }], isError: true });
+    expect(commands).toEqual([DEVICES, KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE, onPhone("shell", "am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", "5LqM5omL"), RESTORE]);
   });
 });
