@@ -131,9 +131,9 @@ export class LimitResetClock {
 
   /** The reset a limit-reset automation for this engine waits for: a refusal's own time unless usage shows a later
    * window still at its limit; otherwise the usage's. It may have passed, which means the limit has reset. */
-  resetAt(engine: string): number | null {
+  resetAt(engine: string, model?: string): number | null {
     const refused = this.guessed.has(engine) ? null : this.refusal(engine);
-    const usage = this.reading(engine);
+    const usage = this.meterFor(engine, model);
     if (refused === null) return usage?.resetsAt ?? null;
     return usage?.blocked && usage.resetsAt !== null && usage.resetsAt > refused ? usage.resetsAt : refused;
   }
@@ -143,10 +143,16 @@ export class LimitResetClock {
   blockedUntil(engine: string, model?: string): number | null {
     const now = this.now();
     const refused = this.refusal(engine);
-    const usage = this.reading(engine);
-    const meterHolds = usage?.driver !== "opencode" || !model || (typedOpenCodeModel(model) ?? model).startsWith(OPENCODE_GO_MODEL_PREFIX);
-    const until = Math.max(refused ?? 0, meterHolds && usage?.blocked && usage.resetsAt !== null ? usage.resetsAt : 0);
+    const usage = this.meterFor(engine, model);
+    const until = Math.max(refused ?? 0, usage?.blocked && usage.resetsAt !== null ? usage.resetsAt : 0);
     return until > now ? until : null;
+  }
+
+  /** The engine's usage reading when its meter covers `model` (every model when none is named): OpenCode's meter is
+   * the Go subscription's and never covers Zen's free models. */
+  private meterFor(engine: string, model?: string): EngineLimit | undefined {
+    const usage = this.reading(engine);
+    return usage?.driver !== "opencode" || !model || (typedOpenCodeModel(model) ?? model).startsWith(OPENCODE_GO_MODEL_PREFIX) ? usage : undefined;
   }
 
   limit(engine: string): EngineLimit | undefined {
