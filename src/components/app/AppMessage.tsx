@@ -279,7 +279,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       className={cn("w-full text-start", WIDTH)}
     >
       {compact ? (
-        <div className={cn(APP_SURFACE, "shadow-(--shadow-float)")}>
+        <div className={APP_SURFACE}>
           <div className="group/page relative">
             {reopen}
             {body}
