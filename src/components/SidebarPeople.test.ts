@@ -24,14 +24,22 @@ const line = (inbox: Message["inbox"], extra: Partial<Message> = {}): Message =>
 afterEach(() => setTeamPeople(null));
 
 describe("the team's people in the sidebar", () => {
-  it("lists everyone with their face, you first, and says what a click does", () => {
+  it("shows everyone as a row of faces, you first, and says what a click does", () => {
     setTeamPeople(asBen);
     const markup = render(createElement(SidebarPeople, { compact: false }));
-    expect(markup).toContain(">People<");
+    expect(markup).toContain('aria-label="People"');
     expect(markup.indexOf("ben@acme.test")).toBeLessThan(markup.indexOf("cleo@acme.test"));
     expect(markup).toMatch(/aria-label="Your inbox: everything sent to you"[^>]*data-person="ben@acme.test"/);
-    expect(markup).toContain("Ben (you)");
     expect(markup).toMatch(/aria-label="Write to Cleo"[^>]*data-person="cleo@acme.test"/);
+  });
+
+  it("is faces only: no row per person that reads as a chat with them, and no heading", () => {
+    setTeamPeople(asBen);
+    const markup = render(createElement(SidebarPeople, { compact: false }));
+    expect(markup).not.toContain(">People<");
+    expect(markup).not.toContain(">Cleo<");
+    expect(markup).not.toMatch(/>Ben[^<]*</);
+    expect(markup).toContain("flex-wrap");
   });
 
   it("shows nothing off a team, or for a team of one", () => {
@@ -47,11 +55,11 @@ describe("the team's people in the sidebar", () => {
     setTeamPeople({ ...asBen, admin: true });
     const listed = render(createElement(SidebarPeople, { compact: false }), { config });
     expect(listed).toContain(invite);
-    expect(listed).toContain("Invite someone</span>");
+    expect(listed).toContain('aria-label="Invite someone"');
     expect(listed.indexOf("cleo@acme.test")).toBeLessThan(listed.indexOf(invite));
     setTeamPeople({ ...asBen, people: [BEN], admin: true });
     const alone = render(createElement(SidebarPeople, { compact: false }), { config });
-    expect(alone).toContain(">People<");
+    expect(alone).toContain('aria-label="People"');
     expect(alone).toContain(invite);
     const rail = render(createElement(SidebarPeople, { compact: true }), { config });
     expect(rail).toContain(invite);

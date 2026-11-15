@@ -47,15 +47,25 @@ export function announceNewBot(dispatch: (action: Action) => void, bot: Bot, war
   if (paused) showCreatedPaused(bot.id);
 }
 
-/** A paired device may not read the host's New bot defaults: the host applies them to an empty request. Auto on this
- * computer needs the person's own OK, so a bot whose defaults ask for it starts on Ask. */
-async function createNewBot(section: string | undefined, bots: readonly Bot[], team: TeamPeople | null, request: typeof api) {
+let nameAsker: (() => Promise<string | null>) | null = null;
+/** Where New bot asks for the bot's name on a team (the dialog mounted with the app); null takes it away. */
+export function setNewBotNameAsker(ask: (() => Promise<string | null>) | null): void { nameAsker = ask; }
+
+/** A team's User makes a bot of their own, which takes the server's own defaults: its department, whom it answers to
+ * and what it may do are an admin's. A paired device may not read the host's New bot defaults: the host applies them to
+ * an empty request. Auto on this computer needs the person's own OK, so a bot whose defaults ask for it starts on Ask.
+ * `name`: the person's own choice, in place of a suggested one. */
+async function createNewBot(section: string | undefined, bots: readonly Bot[], team: TeamPeople | null, request: typeof api, name?: string) {
+  if (team?.admin === false) {
+    const { bot, paused } = await request<{ bot: Bot; paused?: true }>("/api/bots", { method: "POST", body: JSON.stringify(name ? { name } : {}) });
+    return { bot, warnings: [] as string[], startsOnAsk: false, ...(paused ? { paused } : {}) };
+  }
   if (typeof window !== "undefined" && window.ogb?.remoteClient?.active) {
-    const { bot, paused } = await request<{ bot: Bot; paused?: true }>("/api/bots", { method: "POST", body: JSON.stringify(section === undefined ? {} : { section }) });
+    const { bot, paused } = await request<{ bot: Bot; paused?: true }>("/api/bots", { method: "POST", body: JSON.stringify({ ...(section === undefined ? {} : { section }), ...(name ? { name } : {}) }) });
     return { bot, warnings: [] as string[], startsOnAsk: false, ...(paused ? { paused } : {}) };
   }
   const template = startingTemplate(await request<BotDefaultsAnswer>("/api/bot-defaults"), true);
-  template.profile.name = freeName(template.profile.name!, bots);
+  template.profile.name = name ?? freeName(template.profile.name!, bots);
   if (section !== undefined) template.profile.section = section;
   const draft = new BotCreationDraft(template, () => {}, request);
   const startsOnAsk = draft.bot.approvalMode === "auto" && draft.bot.computer === "local";
@@ -68,13 +78,22 @@ async function createNewBot(section: string | undefined, bots: readonly Bot[], t
   }
 }
 
-/** New bot: a bot made at once from the New bot defaults, with its chat open and ready for the first message. */
+/** New bot: a bot made at once from the New bot defaults, with its chat open and ready for the first message. On a team
+ * the person names it first, since everyone it is shared with reads that name. */
 export async function makeNewBot(action: Extract<Action, { type: "newBot" }>, bots: readonly Bot[], dispatch: (action: Action) => void,
   showThreads: boolean, request: typeof api = api): Promise<void> {
-  if (currentTeamPeople()?.admin === false) return;
+  const team = currentTeamPeople();
+  let name: string | undefined;
+  if (team && nameAsker) {
+    dispatch({ type: "botCreationPending", on: false });
+    const asked = await nameAsker();
+    if (asked === null) return;
+    name = asked;
+    dispatch({ type: "botCreationPending", on: true });
+  }
   let made: Awaited<ReturnType<typeof createNewBot>>;
   try {
-    made = await createNewBot(action.section, bots, currentTeamPeople(), request);
+    made = await createNewBot(action.section, bots, team, request, name);
   } catch (cause) {
     if (isBotLimitRefusal(cause)) return;
     const message = t("newBot.failed", { error: cause instanceof Error ? cause.message : String(cause) });

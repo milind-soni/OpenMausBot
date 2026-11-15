@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { SettingRow, SettingsEmptyRow, SettingsGroup, SettingsLook, SettingsRows } from "./SettingsPrimitives";
 import { ArrowLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { activeLocale, documentLanguage, t } from "@/lib/i18n";
 import { listenLiveFrames } from "@/lib/live-events";
+import { modelColor, modelFamily } from "@/lib/model-color";
 import { formatTokens, hasFiniteCost, headlineTokens } from "@/lib/usage";
-import { fetchTraces, formatCost, formatDuration, USAGE_PERIODS, usageExportHref, usagePeriodRange, type UsagePeriod } from "@/lib/usage-trace";
+import { currentBotName, fetchTraces, formatCost, formatDuration, runTitle, USAGE_PERIODS, usageExportHref, usagePeriodRange, type UsagePeriod } from "@/lib/usage-trace";
 import { api, useStore } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import type { TraceList, TraceRootSummary } from "../../shared/usage-trace";
@@ -26,6 +28,10 @@ export interface UsageGroup {
   output: number;
   cachedInput: number;
   costUsd: number | null;
+  /** The additive tokens the bar shows, summed row by row on the server. */
+  barTokens?: number;
+  /** The group broken down by the requested split, largest first. */
+  segments?: UsageGroup[];
 }
 
 interface UsageSummary {
@@ -55,6 +61,8 @@ const PERIOD_LABEL_KEYS: Record<UsagePeriod, LocaleKey> = {
 const LIVE_REFRESH_MS = 2_000;
 
 export function usageGroupLabel(groupBy: UsageGroupBy, group: Pick<UsageGroup, "key" | "label">): string {
+  if (group.key === "routine:private") return t("usage.history.privateRoutine");
+  if (group.key === "bot:private") return t("usage.history.privateBot");
   if (groupBy === "routine") return group.key === "manual" ? t("usage.history.notRoutine") : group.label;
   if (groupBy === "department") return group.label || t("usage.history.noDepartment");
   if (groupBy !== "user") return group.label;
@@ -64,38 +72,83 @@ export function usageGroupLabel(groupBy: UsageGroupBy, group: Pick<UsageGroup, "
   return group.label;
 }
 
-function useUsageGroups(range: { from: string; to: string }, groupBy: UsageGroupBy, version: number): UsageSummary | null {
+/** The tokens a bar shows: the server's additive sum when present, or the older aggregate. */
+function barTokens(group: UsageGroup): number {
+  return group.barTokens ?? headlineTokens(group);
+}
+
+/** Loads the usage summary for a range and grouping, optionally split by model, and refreshes with `version`. */
+function useUsageGroups(
+  range: { from: string; to: string },
+  groupBy: UsageGroupBy,
+  version: number,
+  splitBy?: "model",
+): UsageSummary | null {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
   useEffect(() => {
     let current = true;
-    void api(`/api/usage?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&groupBy=${groupBy}`)
+    void api(`/api/usage?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&groupBy=${groupBy}${splitBy ? `&splitBy=${splitBy}` : ""}`)
       .then((next: UsageSummary) => { if (current) setSummary(next); })
       .catch(() => { if (current) setSummary(null); });
     return () => { current = false; };
-  }, [range.from, range.to, groupBy, version]);
+  }, [range.from, range.to, groupBy, splitBy, version]);
   return summary;
 }
 
+/** One bar: a group's models stacked in their own colours, or a single solid bar when it has no split. */
+function Bar({ group, width, color }: { group: UsageGroup; width: number; color?: string }) {
+  const { state } = useStore();
+  const segments = group.segments ?? [];
+  const stack = segments.reduce((sum, piece) => sum + barTokens(piece), 0);
+  if (segments.length && stack > 0) {
+    return (
+      <span className="flex h-full" style={{ width: `${width}%` }}>
+        {segments.map((piece) => {
+          const tokens = barTokens(piece);
+          const share = Math.round((tokens / stack) * 100);
+          return (
+            <span
+              key={piece.key}
+              className="h-full"
+              data-model-color={modelColor(piece.key)}
+              style={{ width: `${(tokens / stack) * 100}%`, backgroundColor: modelColor(piece.key) }}
+              title={`${modelName(piece.label, state.instances)} · ${formatTokens(tokens)} · ${share}%`}
+            />
+          );
+        })}
+      </span>
+    );
+  }
+  return <span data-model-color={color} className={cn("block h-full rounded-full", !color && "bg-accent/70")} style={{ width: `${width}%`, backgroundColor: color }} />;
+}
+
+/** The six largest groups as proportional bars, with a model colour dot when the grouping is by model. */
 export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: readonly UsageGroup[] }) {
   const { state } = useStore();
-  const top = [...groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).slice(0, 6);
-  const max = Math.max(...top.map(headlineTokens), 0);
+  const settings = useContext(SettingsLook);
+  const top = [...groups].sort((a, b) => barTokens(b) - barTokens(a)).slice(0, 6);
+  const max = Math.max(...top.map(barTokens), 0);
   if (!top.length || max <= 0) return <p className="text-[13px] text-ink-secondary">{t("usage.page.whereEmpty")}</p>;
   return (
     <ul className="flex flex-col gap-2.5">
       {top.map((group) => {
         const bot = groupBy === "bot" ? state.bots.find((item) => `bot:${item.id}` === group.key) : undefined;
+        const family = !settings && groupBy === "model" ? modelFamily(group.key) : undefined;
+        const color = family ? modelColor(group.key) : undefined;
         return (
           <li key={group.key} className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-3 text-[13px]" title={t("usage.page.turns", { count: String(group.turns) })}>
             <span className="flex min-w-0 items-center gap-2 text-ink">
               {bot && <BotAvatar bot={bot} state="idle" size={18} animated={false} />}
-              <span className="truncate">{groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
+              {family && <span aria-hidden="true" title={family.label} data-model-color={color} className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
+              <span className="truncate">{bot ? bot.name : groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
             </span>
-            <span className="h-2 overflow-hidden rounded-full bg-raised">
-              <span className="block h-full rounded-full bg-accent/70" style={{ width: `${Math.max(2, (headlineTokens(group) / max) * 100)}%` }} />
+            <span className={cn("h-2 overflow-hidden rounded-full", settings ? "bg-ink/[0.08]" : "bg-raised")}>
+              {settings
+                ? <span className="block h-full rounded-full bg-ink" style={{ width: `${Math.max(2, (barTokens(group) / max) * 100)}%` }} />
+                : <Bar group={group} width={Math.max(2, (barTokens(group) / max) * 100)} color={color} />}
             </span>
             <span className="min-w-[4.5rem] text-right tabular-nums text-ink-secondary">
-              {formatTokens(headlineTokens(group))}
+              {formatTokens(barTokens(group))}
               {hasFiniteCost(group.costUsd) && group.costUsd > 0 && ` · ${formatCost(group.costUsd)}`}
             </span>
           </li>
@@ -105,18 +158,50 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
   );
 }
 
+/** The colours a stacked bar is made of, so its slices read without hovering. */
+function ModelLegend({ groups }: { groups: readonly UsageGroup[] }) {
+  const { state } = useStore();
+  const totals = new Map<string, { label: string; tokens: number }>();
+  for (const group of groups) {
+    for (const piece of group.segments ?? []) {
+      const seen = totals.get(piece.key);
+      totals.set(piece.key, { label: piece.label, tokens: (seen?.tokens ?? 0) + headlineTokens(piece) });
+    }
+  }
+  const items = [...totals.entries()].sort((a, b) => b[1].tokens - a[1].tokens);
+  if (items.length < 2) return null;
+  return (
+    <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
+      {items.map(([key, item]) => (
+        <li key={key} className="flex min-w-0 items-center gap-1.5 text-[11px] text-ink-secondary">
+          <span aria-hidden="true" data-model-color={modelColor(key)} className="size-2 shrink-0 rounded-full" style={{ backgroundColor: modelColor(key) }} />
+          <span className="max-w-[9rem] truncate">{modelName(item.label, state.instances)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The "Where it went" panel: bots on one side, the chosen grouping on the other, both split by model. */
 function WhereItWent({ range, version, onBudget }: { range: { from: string; to: string }; version: number; onBudget: (budget: BudgetState | null) => void }) {
   const [other, setOther] = useState<UsageGroupBy>("model");
-  const byBot = useUsageGroups(range, "bot", version);
-  const byOther = useUsageGroups(range, other, version);
+  const settings = useContext(SettingsLook);
+  const byBot = useUsageGroups(range, "bot", version, "model");
+  const byOther = useUsageGroups(range, other, version, other === "model" ? undefined : "model");
   useEffect(() => { onBudget(byBot?.budget ?? null); }, [byBot, onBudget]);
+  if (settings) return null;
   return (
     <section className="rounded-2xl border border-hairline/50 bg-card p-5" aria-label={t("usage.page.where")}>
       <h3 className="text-[15px] font-medium text-ink">{t("usage.page.where")}</h3>
       <div className="mt-4 grid gap-6 md:grid-cols-2">
         <div>
           <div className="mb-3 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">{t(GROUP_LABEL_KEYS.bot)}</div>
-          {byBot ? <GroupBars groupBy="bot" groups={byBot.groups} /> : <Loader2 size={14} className="animate-spin text-ink-secondary" />}
+          {byBot ? (
+            <>
+              <GroupBars groupBy="bot" groups={byBot.groups} />
+              <ModelLegend groups={byBot.groups} />
+            </>
+          ) : <Loader2 size={14} className="animate-spin text-ink-secondary" />}
         </div>
         <div>
           <div role="tablist" aria-label={t("usage.history.groupBy")} className="-mt-1 mb-2 flex flex-wrap gap-1">
@@ -139,13 +224,45 @@ function WhereItWent({ range, version, onBudget }: { range: { from: string; to: 
   );
 }
 
+const SETTINGS_GROUPINGS: readonly UsageGroupBy[] = ["bot", ...OTHER_GROUPINGS];
+
+/** Settings' Where it went: a select (by bot, model, person…) as the section's action, then one row per item. */
+function SettingsWhereItWent({ range, version, onBudget }: { range: { from: string; to: string }; version: number; onBudget: (budget: BudgetState | null) => void }) {
+  const { state } = useStore();
+  const [by, setBy] = useState<UsageGroupBy>("bot");
+  const byBot = useUsageGroups(range, "bot", version);
+  const groups = useUsageGroups(range, by, version);
+  useEffect(() => { onBudget(byBot?.budget ?? null); }, [byBot, onBudget]);
+  const top = groups?.groupBy === by ? [...groups.groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).filter((group) => headlineTokens(group) > 0).slice(0, 8) : null;
+  return (
+    <SettingsGroup label={t("usage.page.where")} block="where"
+      actions={<Select value={by} onChange={(event) => setBy(event.target.value as UsageGroupBy)} aria-label={t("usage.history.groupBy")}>
+        {SETTINGS_GROUPINGS.map((option) => <option key={option} value={option}>{t(GROUP_LABEL_KEYS[option])}</option>)}
+      </Select>}>
+      <SettingsRows>
+        {!top ? <SettingsEmptyRow>{t("common.checking")}</SettingsEmptyRow>
+          : top.length === 0 ? <SettingsEmptyRow>{t("usage.page.whereEmpty")}</SettingsEmptyRow>
+          : top.map((group) => (
+            <SettingRow key={group.key} title={by === "model" ? modelName(group.label, state.instances) : usageGroupLabel(by, group)}
+              subtitle={t("usage.page.turns", { count: String(group.turns) })}>
+              <span className="text-[13px] leading-5 tabular-nums text-ink-secondary">
+                {formatTokens(headlineTokens(group))}{hasFiniteCost(group.costUsd) && group.costUsd > 0 ? ` · ${formatCost(group.costUsd)}` : ""}
+              </span>
+            </SettingRow>
+          ))}
+      </SettingsRows>
+    </SettingsGroup>
+  );
+}
+
 function startedLabel(at: number): string {
   return new Date(at).toLocaleString(documentLanguage(activeLocale()), { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () => void }) {
   const { state } = useStore();
-  const title = root.title || t(`trace.source.${root.source}`, { bot: root.bots[0]?.name ?? "" });
+  const title = runTitle(root, state.bots);
+  const names = root.bots.map((entry) => currentBotName(state.bots, entry.id, entry.name)).join(", ");
   return (
     <li>
       <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-raised/50" data-testid="usage-run">
@@ -159,7 +276,7 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
         </span>
         <span className="min-w-0">
           <span className="block truncate text-[14px] text-ink">{title}</span>
-          <span className="block truncate text-[12px] text-ink-tertiary">{startedLabel(root.startedAt)} · {root.bots.map((bot) => bot.name).join(", ")}</span>
+          <span className="block truncate text-[12px] text-ink-tertiary">{startedLabel(root.startedAt)} · {names}</span>
         </span>
         <span className="flex items-center gap-3 text-[13px] tabular-nums text-ink-secondary">
           {root.running && <LiveBadge />}
@@ -176,6 +293,7 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
 
 /** The Usage page: a period's totals, where the money went, and every run as a trace. */
 export function UsageSection() {
+  const settings = useContext(SettingsLook);
   const [period, setPeriod] = useState<UsagePeriod>("month");
   const range = useMemo(() => usagePeriodRange(period), [period]);
   const [list, setList] = useState<TraceList | null>(null);
@@ -209,6 +327,50 @@ export function UsageSection() {
     void fetchTraces(range, list.next).then((page) => setList((current) => current ? { ...page, roots: [...current.roots, ...page.roots] } : page));
   };
   const untimed = list?.roots.some((root) => !root.timed);
+
+  if (settings) {
+    const totals = list?.totals;
+    return (
+      <div className="flex flex-col gap-6" data-testid="usage-page">
+        {open ? (
+          <TraceView id={open.id} at={open.at} actions={(
+            <button type="button" onClick={() => setOpen(null)} className="settings-quiet flex shrink-0 cursor-pointer items-center gap-1">
+              <ArrowLeft size={13} />{t("trace.back")}
+            </button>
+          )} />
+        ) : <>
+          {/* The period select is the section's one action; the totals are rows. */}
+          <SettingsGroup label={t("usage.page.summary")} block="totals"
+            actions={<Select value={period} onChange={(event) => { setPeriod(event.target.value as UsagePeriod); setOpen(null); }} aria-label={t("usage.history.period")}>
+              {USAGE_PERIODS.map((option) => <option key={option} value={option}>{t(PERIOD_LABEL_KEYS[option])}</option>)}
+            </Select>}
+            footnote={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
+            <SettingsRows>
+              <div data-testid="usage-totals" className="contents">
+                {totals ? <>
+                  <SettingRow title={t("trace.stat.cost")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{totals.costUsd ? t("usage.page.estimated", { cost: formatCost(totals.costUsd) }) : formatCost(0)}</span></SettingRow>
+                  <SettingRow title={t("usage.page.runs")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{String(list.roots.length)}{list.next !== undefined ? "+" : ""}</span></SettingRow>
+                  <SettingRow title={t("trace.stat.errors")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{String(totals.errors)}</span></SettingRow>
+                  <SettingRow title={t("trace.stat.time")}><span className="text-[13px] leading-5 tabular-nums text-ink-secondary">{totals.durationMs > 0 ? formatDuration(Math.max(1_000, totals.durationMs)) : "—"}</span></SettingRow>
+                </> : <SettingsEmptyRow>{t("common.checking")}</SettingsEmptyRow>}
+              </div>
+            </SettingsRows>
+          </SettingsGroup>
+          <SettingsWhereItWent range={range} version={version} onBudget={setBudget} />
+          <SettingsGroup label={t("usage.page.runs")} block="runs" footnote={untimed ? t("usage.page.untimedNote") : undefined}
+            actions={<a href={usageExportHref(range)} download className="ui-button ui-button-md rounded-full">{t("usage.history.export")}</a>}>
+            <SettingsRows>
+              {list && !list.roots.length && <SettingsEmptyRow>{t("usage.page.runsEmpty")}</SettingsEmptyRow>}
+              {list?.roots.length ? <ul className="flex flex-col p-1">{list.roots.map((root) => <RunRow key={root.id} root={root} onOpen={() => setOpen({ id: root.id, at: root.startedAt })} />)}</ul> : null}
+              {list?.next !== undefined && <div className="px-4 py-2"><button type="button" onClick={more} className="settings-quiet cursor-pointer">{t("usage.page.more")}</button></div>}
+            </SettingsRows>
+          </SettingsGroup>
+        </>}
+        <PlanUsage />
+        <UsageBudgetCards budget={budget} />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4" data-testid="usage-page">

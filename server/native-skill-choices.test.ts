@@ -1,22 +1,47 @@
-import { rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
+import { claudeDisabledNativeSkillRules } from "./drivers/claude-unusable-tools.ts";
 import { codexDisabledNativeSkillArgs, codexTurnConfigArgs, GUEST_CONFINED_CODEX_ARGS } from "./drivers/codex-guest.ts";
-import { disabledNativeSkillNames, isNativeSkillEnabled, setNativeSkillEnabled } from "./native-skill-choices.ts";
-import { nativeSkillListing } from "./native-skills.ts";
+import { setImportedSkillEnabled, storeImportedSkills } from "./imported-skills.ts";
+import { deniedNativeSkills, isNativeSkillEnabled, setNativeSkillEnabled } from "./native-skill-choices.ts";
+
+// HOME and the data folder are this test file's own temporary ones (server/testing/setup.ts).
+const HOME = join(DATA_DIR, "..");
+const CODEX_HOME = join(HOME, "codex-home");
+const env = { HOME, CODEX_HOME };
+const choicesFile = (botId: string) => join(DATA_DIR, "skill-state", botId, "native-skills.json");
 
 afterEach(() => {
   if (!DATA_DIR.startsWith(join(tmpdir(), "omb-test-home-"))) throw new Error(`refusing to clean ${DATA_DIR}: not this test's home`);
-  rmSync(join(DATA_DIR, "skill-state"), { recursive: true, force: true });
+  for (const dir of [join(DATA_DIR, "skill-state"), join(DATA_DIR, "imported-skills"), join(HOME, ".agents"), CODEX_HOME, join(HOME, "repo"), join(HOME, "brought")]) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
+
+const skillMd = (name: string) => `---\nname: ${name}\ndescription: Works with ${name}.\n---\n\nSteps.\n`;
+function plant(root: string, name: string): string {
+  mkdirSync(join(root, name), { recursive: true });
+  writeFileSync(join(root, name, "SKILL.md"), skillMd(name));
+  return join(root, name, "SKILL.md");
+}
+/** The path tables of a skills.config override, limited to this test's home: /etc/codex/skills belongs to the machine. */
+const paths = (args: string[]) => (args[1] ?? "").replace(/^skills\.config=\[|\]$/g, "").split("},{")
+  .map((table) => /path=("(?:[^"\\]|\\.)*")/.exec(table)?.[1]).filter((path): path is string => path !== undefined)
+  .map((path) => JSON.parse(path) as string).filter((path) => path.startsWith(HOME)).sort();
+function damage(botId: string) {
+  mkdirSync(join(DATA_DIR, "skill-state", botId), { recursive: true });
+  writeFileSync(choicesFile(botId), "{\"off\": [");
+}
 
 describe("per-bot native skill switches", () => {
   it("defaults every native skill to on", () => {
     expect(isNativeSkillEnabled("bot-a", "pdf")).toBe(true);
-    expect(disabledNativeSkillNames("bot-a")).toEqual([]);
+    expect(deniedNativeSkills("bot-a")).toEqual({ names: [], origins: [] });
   });
 
   it("persists off across reads and leaves other bots alone", () => {
@@ -28,31 +53,53 @@ describe("per-bot native skill switches", () => {
     expect(isNativeSkillEnabled("bot-a", "pdf")).toBe(true);
   });
 
-  it("lists a native skill as disabled when this bot switched it off", () => {
+  it("keeps every native skill on while the bot's saved switches can't be read, and lets a switch write a good file", () => {
+    damage("bot-a");
+    expect(isNativeSkillEnabled("bot-a", "pdf")).toBe(true);
+    expect(deniedNativeSkills("bot-a")).toEqual({ names: [], origins: [] });
+    expect(claudeDisabledNativeSkillRules("bot-a")).toEqual([]);
+    expect(codexTurnConfigArgs({ botId: "bot-a" }, env)).toEqual([]);
+    expect(setNativeSkillEnabled("bot-a", "pdf", false)).toEqual({ off: ["pdf"] });
+    expect(JSON.parse(readFileSync(choicesFile("bot-a"), "utf8"))).toEqual({ off: ["pdf"] });
+    expect(isNativeSkillEnabled("bot-a", "pdf")).toBe(false);
+  });
+});
+
+describe("Codex skills.config overrides for a bot's switched-off skills", () => {
+  it("selects each switched-off user skill by its SKILL.md path, leaving same-named repository skills alone", () => {
+    const agents = plant(join(HOME, ".agents", "skills"), "pdf");
+    const legacy = plant(join(CODEX_HOME, "skills"), "pdf");
+    plant(join(HOME, "repo", ".agents", "skills"), "pdf");
+    plant(join(HOME, ".agents", "skills"), "rex");
     setNativeSkillEnabled("bot-a", "pdf", false);
-    const listing = nativeSkillListing({
-      name: "pdf",
-      description: "Works with PDFs.",
-      folder: "/tmp/pdf",
-      file: "/tmp/pdf/SKILL.md",
-      source: "/tmp",
-      sha256: "a".repeat(64),
-    }, isNativeSkillEnabled("bot-a", "pdf"));
-    expect(listing).toMatchObject({ origin: "native", enabled: false, editable: false });
+
+    const args = codexDisabledNativeSkillArgs("bot-a", env);
+    expect(args[0]).toBe("-c");
+    expect(paths(args)).toEqual([agents, legacy].sort());
+    expect(args[1]).not.toContain("name=");
+    expect(codexDisabledNativeSkillArgs("bot-b", env)).toEqual([]);
+    expect(codexTurnConfigArgs({ botId: "bot-a", guestConfined: true }, env)).toEqual([...GUEST_CONFINED_CODEX_ARGS, ...args]);
+    expect(codexTurnConfigArgs({ botId: "bot-a" }, env)).toEqual(args);
   });
 
-  it("builds Codex skills.config overrides for disabled names only", () => {
-    setNativeSkillEnabled("bot-a", "pdf", false);
-    setNativeSkillEnabled("bot-a", "rex", false);
-    expect(codexDisabledNativeSkillArgs("bot-a")).toEqual([
-      "-c",
-      'skills.config=[{name="pdf",enabled=false},{name="rex",enabled=false}]',
-    ]);
-    expect(codexDisabledNativeSkillArgs("bot-b")).toEqual([]);
-    expect(codexTurnConfigArgs({ botId: "bot-a", guestConfined: true })).toEqual([
-      ...GUEST_CONFINED_CODEX_ARGS,
-      ...codexDisabledNativeSkillArgs("bot-a"),
-    ]);
-    expect(codexTurnConfigArgs({ botId: "bot-a" })).toEqual(codexDisabledNativeSkillArgs("bot-a"));
+  it("keeps a skill from this computer that the bot switched off out of Codex, from the folder it was brought in from", () => {
+    const origin = plant(join(HOME, "brought"), "renamed-folder");
+    const stored = storeImportedSkills([{
+      name: "rex",
+      entry: {
+        description: "Works with rex.", source: "codex", root: join(HOME, "brought"), origin: join(HOME, "brought", "renamed-folder"),
+        label: "rex", sha256: createHash("sha256").update(skillMd("rex")).digest("hex"), warnings: [],
+      },
+      skillMd: skillMd("rex"),
+      files: [],
+    }]);
+    expect(stored.map((entry) => entry.name)).toEqual(["rex"]);
+    expect(setImportedSkillEnabled("bot-a", "rex", false)).not.toHaveProperty("error");
+    expect(isNativeSkillEnabled("bot-a", "rex")).toBe(false);
+    expect(paths(codexDisabledNativeSkillArgs("bot-a", env))).toEqual([origin]);
+
+    setNativeSkillEnabled("bot-a", "rex", true);
+    expect(isNativeSkillEnabled("bot-a", "rex")).toBe(true);
+    expect(paths(codexDisabledNativeSkillArgs("bot-a", env))).toEqual([]);
   });
 });

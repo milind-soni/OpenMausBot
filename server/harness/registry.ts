@@ -9,6 +9,7 @@ import { withLocalContext } from "../drivers/local-inject.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
 import { withWslNotice } from "./wsl-launch.ts";
+import { modelManifest, startModelManifestRefresh } from "../model-manifest/manifest.ts";
 export { engineMemory } from "../engine-memory.ts";
 import { clientInstall } from "../contracts.ts";
 import type {
@@ -103,6 +104,9 @@ export function enginesByUse(selections: ReadonlyArray<{ instanceId: InstanceId 
 
 type SharedRead = { generation: number; settledAt?: number; read: Promise<ProviderSnapshot> };
 
+/** Engines that rebuild their model list from the manifest without starting a CLI, so a downloaded change applies at once. */
+const MANIFEST_REBUILT_DRIVERS = new Set(["claudeAgent", "grokAgent", "kimiAgent"]);
+
 export class ProviderRegistry {
   private byId = new Map<InstanceId, RegistryEntry>();
   private cliByInstance = new Map<InstanceId, string>();
@@ -112,6 +116,7 @@ export class ProviderRegistry {
   /** Engines the start-up read has not probed yet; null outside that read. */
   private unread: Set<InstanceId> | null = null;
   private snapshotGeneration = 0;
+  private manifestWatched = false;
   private readonly signedInListeners = new Set<(instanceId: InstanceId) => void>();
   /** Per instance object: settings that reload an engine make a new one, so its status is read afresh. */
   private readsOf = new WeakMap<ProviderInstance, { snapshot: ProviderSnapshot; at: number; generation: number }>();
@@ -132,7 +137,19 @@ export class ProviderRegistry {
     this.driversByKind = new Map(drivers.map((d) => [d.driverKind, d]));
   }
 
+  private watchModelManifest(): void {
+    if (this.manifestWatched) return;
+    this.manifestWatched = true;
+    modelManifest().onChange(() => {
+      for (const instance of this.instances()) {
+        if (MANIFEST_REBUILT_DRIVERS.has(instance.driverKind)) void this.refreshModels(instance.instanceId).catch(() => {});
+      }
+    });
+    startModelManifestRefresh();
+  }
+
   async load(configs: InstanceConfigMap, decorate?: (instance: ProviderInstance) => ProviderInstance) {
+    this.watchModelManifest();
     const slots = [...this.byId.keys()];
     const loaded = await Promise.all(
       Object.entries(configs).map(async ([instanceId, entry]) => {

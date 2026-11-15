@@ -740,7 +740,9 @@ type CardState = { status?: string; stopped?: boolean; resumed?: boolean };
 type StallFixture = {
   dataDir: string;
   clive: { id: string };
-  roots(): Array<{ status: string; outcome?: string; executions: number; cards?: string[] }>;
+  roots(): Array<{ status: string; outcome?: string; executions: number; cards?: string[]; assignee: { botId: string } }>;
+  api(method: string, path: string): Promise<{ body: { bots: Array<{ id: string; chiefOfStaff?: boolean; managedSections?: string[] }> } }>;
+  own(record: unknown): string;
   messages(threadId: string): Promise<Array<{ id: string; kind: string; tool?: { name: string }; secret?: CardState; connector?: CardState; signIn?: CardState }>>;
   turns(botId: string): Array<{ planKey?: string }>;
   open(name: string): void;
@@ -759,14 +761,20 @@ const stallOverCards = async (f: StallFixture, job: string, ids: string[]) => {
     .toEqual(["error: no activity for 20 minutes — the turn was stopped"]);
   const cards = (await f.messages(job)).filter((message) => ids.includes(message.id));
   expect(cards.map((message) => (message.secret ?? message.connector ?? message.signIn)?.stopped)).toEqual(ids.map(() => true));
+  // The main Chief got Clive's department when it was made, so it also hears of the stall, in a run of its own.
+  const chief = (await f.api("GET", "/api/bots?messages=0")).body.bots.find((bot) => bot.chiefOfStaff)!;
+  expect(chief.managedSections).toEqual(["Leadership"]);
+  await expect.poll(() => f.roots().filter((row) => row.assignee.botId === chief.id).map((row) => row.status), { timeout: 30_000 }).toEqual(["completed"]);
+  expect(f.turns(chief.id).map((record) => /incident report[\s\S]*Clive's run .* stopped after showing no activity/.test(f.own(record)))).toEqual([true]);
 };
 
 const answerStartsNothing = async (f: StallFixture, job: string) => {
   f.open("c0");
   f.script(f.clive.id, { key: "C-AFTER", match: ["AFTER-ANSWER"], reply: "AFTER-ANSWER-DONE: hello back." });
   await f.say(f.clive.id, job, "AFTER-ANSWER: hello after the card was answered.");
-  await expect.poll(() => f.roots().map((row) => row.status), { timeout: 30_000 }).toEqual(["failed", "completed"]);
-  expect(f.roots().map((row) => [row.outcome, row.executions])).toEqual([["stalled", 1], ["done", 1]]);
+  const roots = () => f.roots().filter((row) => row.assignee.botId === f.clive.id);
+  await expect.poll(() => roots().map((row) => row.status), { timeout: 30_000 }).toEqual(["failed", "completed"]);
+  expect(roots().map((row) => [row.outcome, row.executions])).toEqual([["stalled", 1], ["done", 1]]);
   expect(await f.said(job, "AFTER-ANSWER-DONE")).toBe(1);
   expect(f.turns(f.clive.id).map((record) => record.planKey)).toEqual(["C-AFTER"]);
 };

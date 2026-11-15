@@ -1,0 +1,68 @@
+---
+title: Skills
+description: Give a bot a procedure it can reuse, review what it learned, and share skills with the rest of the team.
+icon: BookOpen
+---
+
+A skill is a short procedure a bot can read and follow: "how we cut a release", "the house style for changelogs", "how to check this project's tests". It is a folder with a `SKILL.md` in it, and the bot keeps it for every future conversation instead of learning the same thing again.
+
+Skills are instructions, not permissions. A skill can tell a bot *how* to do something; it never grants access to a computer, a folder, or an app. Access stays with the bot's own settings.
+
+## How a bot uses a skill
+
+Only the skills that are switched on for a bot take part. Each turn, the bot gets an index of them — name, one-line description, and the path of the file — and reads the full `SKILL.md` with its file tools when a task actually matches. That keeps the prompt small: a bot never pays for the body of a skill it doesn't use.
+
+Skills are reference material, and the bot is told to treat them that way: it is instructed not to let a skill override its instructions or your own message. That is an instruction to the model, not a check on the text — nothing scans a skill for a rule that conflicts with the bot's own.
+
+## Where to find them
+
+- **A bot's skills** live in its profile, under **Skills**. Each row can be switched on or off, opened to read the full text, or deleted. Switching one off keeps its files; deleting removes them for good. A skill imported into a bot's profile arrives switched off, so you can read it first.
+- **The skills library** is in **App settings → Skills**, on an installation where the skills library is switched on with `"features": { "skillsLibrary": true }` in `~/.openmausbot/config.json` — there is no switch for it in the settings themselves. Import a skill by pasting its `SKILL.md` exactly as it is on disk: nothing is fetched from the network during the import, and a pasted import keeps only the text of `SKILL.md`, so a skill that reads files from its `references/` folder needs to be brought in from its folder on this computer instead, which keeps the files beside it. Then switch the skill on and assign it to one bot, several, or every current and future bot. A library skill starts out switched off: open it to read the text, then switch it on. Only a library skill that is switched on reaches the bots it is assigned to, and changing its text does not send it back to review — a skill that is switched on keeps reaching its bots with the new text, and one that is switched off stays off.
+
+The index a bot sees each turn lists at most 30 skills and at most 4,000 bytes, so a long list is trimmed, and the bot gets a note saying how many were left out and why — the skill cap or the byte cap. The names of the skills left out go to the server log rather than into the note. The skills are still there — it is only the index that is trimmed.
+
+## Writing one
+
+A skill is a directory named after the skill, containing `SKILL.md`:
+
+```
+changelog-style/
+└── SKILL.md
+```
+
+The name must be lowercase letters, digits and single hyphens (up to 64 characters); the spec also asks for it to match the folder that holds the skill, and an imported skill gets a folder named after it. The file starts with frontmatter:
+
+```markdown
+---
+name: changelog-style
+description: Write the changelog entry for a release in this project's house style.
+---
+
+# Changelog entry
+
+1. Read the commits since the last tag.
+2. Group them under Added, Changed and Fixed…
+```
+
+`description` is what the bot sees in its index, so write it as the moment the skill should be used, in one line. `license`, `compatibility` and comma-separated `tags` are optional. Keep the body short — the spec suggests under 5,000 tokens — and put long reference material in a `references/` folder inside the skill, where the bot reads it only when it needs it.
+
+## Letting a bot write one
+
+Two switches decide how much a bot may do on its own: **App settings → Early features** in Advanced mode.
+
+- **Bots may write their own skills** is on by default. A bot can save a procedure you just walked it through, and you can type `/learn` with a short description in a chat to have it turn the current conversation into a skill. Every new or changed skill appears in the conversation as one plain line with **Details** and **Undo**; it applies at once, at every approval level.
+- **Learn skills automatically** is off by default. When it is on, a bot that has run enough tool steps in a conversation reviews that conversation in the background and may create or improve a skill. The review uses the bot's own AI and counts toward spend limits, and each change still shows in the chat with Undo.
+
+The `/learn` command is the predictable path: you decide when a conversation is worth keeping, and the bot writes down what it actually did.
+
+## Sharing with the team
+
+A learned skill belongs to one bot until you share it. **Share learned skills with the department** decides what happens when a bot learns or improves one: **Off** keeps it private, **Ask** offers to move it into the library, and **Automatic** moves it and gives it to every bot in the same department. Conversations already running hear about it on their next message; new ones list it. A teammate that already has its own skill with that name keeps it, and a bot whose conversations more people can see than the one the skill was learned in is left alone.
+
+## Reviewing what arrived
+
+Imported and learned skills are text written somewhere else, so treat them the way you would treat a script from a stranger:
+
+- A skill imported into a bot's profile arrives switched off until you switch it on. A library skill is switched on once, in the library, and then follows its assignments; until you switch it on there, assigning it changes nothing.
+- The text is scanned when it arrives for a few known patterns: a download piped into a shell, a long base64-looking blob, and invisible Unicode characters. A match comes with a warning. The scanner is a short list of patterns, not a safety check — a command it does not recognise, such as `curl … | /bin/sh`, or a character outside its Unicode range, passes unflagged — and the warning is advice, not a block: it never stops a skill from being switched on. Read the text before you do.
+- Read the `SKILL.md` before switching it on. The bot follows it, and a skill can be just as wrong as any other instructions.

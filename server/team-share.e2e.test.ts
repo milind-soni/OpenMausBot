@@ -101,7 +101,7 @@ it("shares one team whole (minus chat history) and imports it back as new, inert
     const before = await ok("GET", "/api/bots");
     const library = await call("POST", "/api/teams/import", JSON.parse(readFileSync(join(FIXTURES, "library-only.v2.json"), "utf8")));
     expect(library).toMatchObject({ status: 201, body: { bots: [], section: "", presets: [{ key: "support", name: "Support agent" }] } });
-    const newer = await call("POST", "/api/teams/import", JSON.parse(readFileSync(join(FIXTURES, "newer.v3.json"), "utf8")));
+    const newer = await call("POST", "/api/teams/import", JSON.parse(readFileSync(join(FIXTURES, "newer.v4.json"), "utf8")));
     expect(newer).toEqual({ status: 400, body: { error: NEWER_PACKAGE_MESSAGE } });
     expect(await ok("GET", "/api/bots")).toEqual(before);
     expect(() => parsePackageDocument(saved.document)).not.toThrow();
@@ -142,6 +142,7 @@ it("never leaves Share team stuck on skills, and keeps keys out of connection ad
     const body = { format: "package", version: 2, team: "Crowded desk", dryRun: true };
     const all = await ok("POST", "/api/teams/export", body);
     expect(all.choices.skills).toEqual([...names, "pricing"].sort());
+    expect(all.document.version, "a package within the old 60-skill cap stays readable by older apps").toBe(2);
     expect(all.document.package.agents.find((agent: { key: string }) => agent.key === "morgan").skills).toHaveLength(30);
     expect(all.skipped).toEqual(expect.arrayContaining([
       { part: "skills[pricing]", reason: "skill_conflict" },

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 import { ChevronRight, Download, Loader2, RefreshCw } from "lucide-react";
 
 import { api } from "@/state/store";
@@ -8,7 +8,7 @@ import { intlLocale, t } from "@/lib/i18n";
 import { ACTIVITY_WHATS, activityQuery, describeEntry, formatValue, whoLabel, type ActivityEntry, type ActivityFilters, type ActivityWhat } from "@/lib/activity";
 import type { LocaleKey } from "@/locales";
 import { Select } from "./Select";
-import { Card } from "./SettingsPrimitives";
+import { Card, SETTINGS_INLINE_INPUT, SettingRow, SettingsEmptyRow, SettingsFormFoot, SettingsGroup, SettingsLook, SettingsRows } from "./SettingsPrimitives";
 
 const inputClass = "rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none [color-scheme:dark]";
 
@@ -59,6 +59,7 @@ export function ActivitySection() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const query = activityQuery(filters);
+  const settings = useContext(SettingsLook);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -81,6 +82,40 @@ export function ActivitySection() {
   }, [load]);
 
   const set = (patch: Partial<ActivityFilters>) => setFilters((current) => ({ ...current, ...patch }));
+  if (settings) {
+    // In Settings: one section (its description is the foot line), Export CSV as its one action, the filters as rows
+    // with their controls on one edge, and the entries in a card of their own.
+    return (
+      <SettingsGroup label={t("settings.section.activity")} block="activity" footnote={t("activity.subtitle", { days: String(days ?? 180) })}
+        actions={<a href={`/api/admin-activity.csv${query}`} download className="ui-button ui-button-md rounded-full">{t("activity.export")}</a>}>
+        <SettingsRows>
+          <SettingRow title={t("activity.who")}>
+            <input value={filters.who} onChange={(e) => set({ who: e.target.value })} placeholder={t("activity.whoPlaceholder")} aria-label={t("activity.who")}
+              className={cn(SETTINGS_INLINE_INPUT, "w-[200px] text-left")} />
+          </SettingRow>
+          <SettingRow title={t("activity.what")}>
+            <Select value={filters.what} onChange={(e) => set({ what: e.target.value as ActivityWhat })} aria-label={t("activity.what")}>
+              {ACTIVITY_WHATS.map((what) => <option key={what} value={what}>{t(`activity.what.${what}` as LocaleKey)}</option>)}
+            </Select>
+          </SettingRow>
+          <SettingRow title={t("activity.dates")}>
+            <input type="date" value={filters.from} max={filters.to || undefined} onChange={(e) => set({ from: e.target.value })} aria-label={t("activity.from")}
+              className={cn(SETTINGS_INLINE_INPUT, "w-[140px] text-left")} />
+            <input type="date" value={filters.to} min={filters.from || undefined} onChange={(e) => set({ to: e.target.value })} aria-label={t("activity.to")}
+              className={cn(SETTINGS_INLINE_INPUT, "w-[140px] text-left")} />
+          </SettingRow>
+          <SettingsFormFoot status={error ? <span role="alert" className="text-danger">{t("activity.error", { message: error })}</span>
+            : total > entries.length ? t("activity.more", { shown: String(entries.length), total: String(total) }) : undefined}>
+            <button type="button" onClick={() => void load()} disabled={loading} className="settings-quiet cursor-pointer">{loading ? t("common.checking") : t("activity.refresh")}</button>
+          </SettingsFormFoot>
+        </SettingsRows>
+        <SettingsRows>
+          {!error && entries.length === 0 && !loading && <SettingsEmptyRow>{t("activity.empty")}</SettingsEmptyRow>}
+          {entries.length > 0 && <ul className="flex flex-col px-4 py-1">{entries.map((entry, index) => <ActivityRow key={`${entry.at}-${index}`} entry={entry} />)}</ul>}
+        </SettingsRows>
+      </SettingsGroup>
+    );
+  }
   return (
     <Card title={t("activity.title")} subtitle={t("activity.subtitle", { days: String(days ?? 180) })}>
       <div className="flex flex-wrap items-end gap-2">

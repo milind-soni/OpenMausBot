@@ -8,7 +8,7 @@ if (!dataDir || dataDir !== process.env.HOME || process.env.OMB_TEST_LIMIT_CLOCK
   throw new Error('The limit clock requires an explicitly isolated fixture');
 }
 const seams = new Map([
-  [new URL('../../shared/limit-reset.ts', import.meta.url).href, ['export const AFTER_RESET_MS = 60_000;', 'export const AFTER_RESET_MS = 1_000;']],
+  [new URL('../../packages/phone-protocol/src/limit-reset.ts', import.meta.url).href, ['export const AFTER_RESET_MS = 60_000;', 'export const AFTER_RESET_MS = 1_000;']],
   [new URL('../routines.ts', import.meta.url).href, ['startDueTimer({ run: () => this.tick(),', 'startDueTimer({ retryMs: 250, run: () => this.tick(),']],
 ]);
 registerHooks({

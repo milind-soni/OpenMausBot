@@ -178,6 +178,26 @@ export const LIVE_VOICE_OPTIONS: ReadonlyArray<{ id: string; label: string }> = 
   { id: "tempo", label: "Tempo — Brazilian Portuguese, masculine" },
 ];
 
+/** Gemini Live's prebuilt voices (Gemini API docs, "Live API capabilities", voices), with the docs' one-word character.
+ * Gemini names them with a capital letter. */
+export const GEMINI_LIVE_VOICE_OPTIONS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "Puck", label: "Puck — upbeat (default)" },
+  { id: "Charon", label: "Charon — informative" },
+  { id: "Kore", label: "Kore — firm" },
+  { id: "Fenrir", label: "Fenrir — excitable" },
+  { id: "Aoede", label: "Aoede — breezy" },
+  { id: "Leda", label: "Leda — youthful" },
+  { id: "Orus", label: "Orus — firm" },
+  { id: "Zephyr", label: "Zephyr — bright" },
+];
+
+export const GEMINI_LIVE_DEFAULT_VOICE = "Puck";
+
+/** A saved Gemini voice when it is one of Gemini's, else the default. */
+export function geminiLiveVoice(voice: string | undefined): string {
+  return GEMINI_LIVE_VOICE_OPTIONS.find((option) => option.id === voice?.trim())?.id ?? GEMINI_LIVE_DEFAULT_VOICE;
+}
+
 /** A call's length as a clock: m:ss under an hour ("0:07", "1:42"),
  * h:mm:ss from an hour on ("1:02:05"). Whole seconds; a value that is not a
  * length reads as 0:00. */

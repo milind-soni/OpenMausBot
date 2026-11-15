@@ -4,8 +4,8 @@ import path from "node:path";
 
 /** `companion-settings.json` in the app's user data: each way into this computer and whether the person turned it on.
  * `wifi` is Same Wi-Fi (the device port on the LAN, and Bonjour), `relay` is Anywhere, through MausBot, `tailscale`
- * the tailnet address, `https` the HTTPS address (the managed tunnel). `notices` lists routes kept on by the update
- * that the person has not seen yet. */
+ * the tailnet address (with `computers` when the person's other computers may open this one's server over it), `https`
+ * the HTTPS address (the managed tunnel). `notices` lists routes kept on by the update that the person has not seen yet. */
 export const COMPANION_SETTINGS_VERSION = 2;
 export const ROUTES = Object.freeze(["wifi", "relay", "tailscale", "https"]);
 /** A device seen this recently counts as using its routes. */
@@ -20,7 +20,7 @@ export function defaultCompanionSettings() {
 function readRoute(value, route) {
   if (!value || typeof value !== "object" || value.on !== true) return off();
   const since = Number.isSafeInteger(value.since) ? value.since : null;
-  if (route === "tailscale") return { on: true, since, name: typeof value.name === "string" && /\.ts\.net$/i.test(value.name) ? value.name : null };
+  if (route === "tailscale") return { on: true, since, name: typeof value.name === "string" && /\.ts\.net$/i.test(value.name) ? value.name : null, ...(value.computers === true ? { computers: true } : {}) };
   return { on: true, since };
 }
 
@@ -62,10 +62,10 @@ export const anyRouteOn = (settings) => ROUTES.some((route) => settings?.routes?
 /** Same Wi-Fi and Tailscale are what the sidecar itself listens for; the relay and the HTTPS address reach it otherwise. */
 export const directRoutesOn = (settings) => ({ wifi: settings?.routes?.wifi?.on === true, tailscale: settings?.routes?.tailscale?.on === true });
 
-export function setRoute(settings, route, on, { now = Date.now(), name } = {}) {
+export function setRoute(settings, route, on, { now = Date.now(), name, computers } = {}) {
   if (!ROUTES.includes(route)) return settings;
   const current = settings.routes[route];
-  const next = on ? { on: true, since: current.on ? current.since : now, ...(route === "tailscale" ? { name: name !== undefined ? name : current.name ?? null } : {}) } : off();
+  const next = on ? { on: true, since: current.on ? current.since : now, ...(route === "tailscale" ? { name: name !== undefined ? name : current.name ?? null, ...((computers ?? current.computers) === true ? { computers: true } : {}) } : {}) } : off();
   return { ...settings, routes: { ...settings.routes, [route]: next }, notices: on ? settings.notices : settings.notices.filter((notice) => notice !== route) };
 }
 

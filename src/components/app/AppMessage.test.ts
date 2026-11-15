@@ -212,13 +212,13 @@ describe("a bot's page", () => {
     expect(frame().style.height).toBe("333px");
   });
 
-  it("in a room, shows the page to everyone with Full screen but no Point or Share, and sends nothing for anyone", async () => {
+  it("in a room, shows the page to everyone with Full screen and Point but no Share, and the page sends nothing for anyone", async () => {
     fetchMock.mockImplementation(async (path) => /\/app(\?|$)/.test(path) ? json(200, botHtmlDocument({ messageId: "a1", rev: 0, html: counter.html, room: true })) : json(202, { ok: true }));
     await mount(row(htmlPayload()), true);
     expect(find("[data-app]")!.hasAttribute("data-app-room")).toBe(true);
     expect(frame().getAttribute("sandbox")).toBe("allow-scripts allow-forms");
     expect(frame().getAttribute("srcdoc")).toContain("var room = true;");
-    expect(button("Point")).toBeUndefined();
+    expect(button("Point")).toBeTruthy();
     expect(button("Share")).toBeUndefined();
     expect(button("Full screen")).toBeTruthy();
     await handshake();

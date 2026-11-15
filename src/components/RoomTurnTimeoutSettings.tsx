@@ -1,3 +1,5 @@
+import { SETTINGS_INLINE_INPUT, SettingRow } from "./SettingsPrimitives";
+import { cn } from "@/lib/cn";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -48,15 +50,10 @@ export function RoomTurnTimeoutSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-2">
-      <label htmlFor="room-turn-timeout" className="text-[13px] font-medium text-ink">
-        {t("settings.roomTurns.label")}
-      </label>
-      <div
-        className={`flex max-w-[220px] items-center rounded-lg border bg-inset ${
-          error ? "border-danger/60" : "border-hairline/40 focus-within:border-focus"
-        }`}
-      >
+    <SettingRow title={t("settings.limits.groupTurn")} subtitle={t("settings.limits.groupTurnLine")}
+      message={error ? <span id="room-turn-timeout-error" role="alert" className="text-danger">{error}</span> : undefined}>
+      {/* The field and its unit fill the card's 160 px control column, so the field starts where the selects do. */}
+      <span className="flex w-[160px] items-center gap-2 text-[13px] leading-5 text-ink-secondary">
         <input
           id="room-turn-timeout"
           type="number"
@@ -66,8 +63,9 @@ export function RoomTurnTimeoutSettings() {
           inputMode="numeric"
           value={value}
           disabled={saving}
+          aria-label={t("settings.limits.groupTurn")}
           aria-invalid={Boolean(error)}
-          aria-describedby={error ? "room-turn-timeout-error room-turn-timeout-help" : "room-turn-timeout-help"}
+          title={t("settings.roomTurns.help")}
           onChange={(event) => {
             setValue(event.target.value);
             setDirty(true);
@@ -77,18 +75,10 @@ export function RoomTurnTimeoutSettings() {
           onKeyDown={(event) => {
             if (event.key === "Enter") event.currentTarget.blur();
           }}
-          className="min-w-0 flex-1 bg-transparent px-3 py-2 text-[14px] tabular-nums text-ink focus:outline-none"
+          className={cn(SETTINGS_INLINE_INPUT, "w-auto min-w-0 flex-1", error && "border-danger/60")}
         />
-        <span className="pr-3 text-[13px] text-ink-secondary">{t("settings.roomTurns.minutes")}</span>
-      </div>
-      <p id="room-turn-timeout-help" className="text-[12px] leading-relaxed text-ink-secondary">
-        {t("settings.roomTurns.help")}
-      </p>
-      {error ? (
-        <p id="room-turn-timeout-error" role="alert" className="text-[12px] text-danger">
-          {error}
-        </p>
-      ) : null}
-    </div>
+        {t("settings.roomTurns.minutes")}
+      </span>
+    </SettingRow>
   );
 }

@@ -4,17 +4,20 @@ import { relative } from "node:path";
 import type { McpChangeRequest } from "../../shared/mcp-request.ts";
 import type { WireMessage as Message } from "../../shared/wire.ts";
 import type { AppConfig } from "../config.ts";
+import { audienceWithin } from "../bot-visibility.ts";
 import { SERVER_PREFIXES } from "../drivers/agents-bridge.ts";
 import { MCP_CONFIG_BUSY, runsElsewhere, type McpConfig, type McpConfigRefusal } from "../host/mcp-config.ts";
 import { MCP_KEY_EXPIRED, type McpApplied, type McpCardAction, type McpUpdateFields } from "../host/mcp-requests.ts";
 import { holdsVaultPointer } from "../vault/mcp-keys.ts";
 import type { BotKept, BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { BOT_STRIPPED_KEYS, botChangeLines, botListing, botMayChange, botServerTarget, isSecretRef, mcpOwner, mergeBotUpdate } from "../mcp-bot-rules.ts";
+import { nameList } from "../mcp-health.ts";
 import type { McpAuthState, McpOAuthManager } from "../mcp-oauth.ts";
 import type { McpProbeResult } from "../mcp-probe.ts";
 import { publicMcpUrl, type HostLookup } from "../mcp-public-url.ts";
 import { isRemoteMcpServer, parseMcpServerMutation, parseStoredMcpServer, type StoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
 import { serverLine, type ServerLineKey } from "../server-lines.ts";
+import type { BotRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 const PATH = "/api/internal/mcp-servers";
@@ -71,7 +74,7 @@ export interface InternalMcpDeps {
   decide(summary: string, applied: Applied): void;
   activity(label: string, call: McpCall): void;
   language(): string | undefined;
-  /** The other bots that use this server now, by name. */
+  /** The other bots this server is set for, by name, even before it has started for them. */
   usedBy(name: string): string[];
   /** Shows the person a card for a change below Full access; the bot ends its turn and their answer resumes it. */
   requestApproval(proposal: { action: McpCardAction; name: string; subtitle: string; targetHash: string; fields?: McpUpdateFields }): { text: string };
@@ -94,6 +97,12 @@ type Ctx = Deps & { approved?: true };
 type Outcome = { status: number; text: string; dropped?: string[] } | { status: number; error: string; busy?: true };
 /** Which call a line is about, to find that call's own row. */
 export type McpCall = { action: McpAction; name?: string };
+
+/** The names of the other bots `given` holds, leaving out hidden ones and any whose audience is narrower than the
+ * sender's: everyone who sees the sender's chat or room may see the names, so a restricted bot's name stays with its own audience. */
+export function otherBotsGiven(bots: readonly BotRecord[], sender: BotRecord, given: (bot: BotRecord) => boolean): string[] {
+  return bots.filter((bot) => bot.id !== sender.id && !bot.hidden && audienceWithin(sender.visibility, bot.visibility) && given(bot)).map((bot) => bot.name);
+}
 
 export function createInternalMcpRoutes(deps: InternalMcpDeps): RouteHandler {
   return async ({ res, path, method, json }) => {
@@ -240,9 +249,10 @@ async function add(deps: Deps, name: string, fields: Record<string, unknown>, si
   }
   joinBotList(deps, name);
   const outcome = await probe(deps, name, server, signal);
+  const others = sharedWith(deps.usedBy(name));
   deps.decide(`Added MCP server ${name} and turned it on`, deps.fullAccess() ? "full-access" : "level");
-  say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.on"], outcome.line);
-  return { status: 201, text: `Added MCP server ${name} and turned it on. ${outcome.text}${selection(deps, name)}${where} ${WHEN.live.arrive}` };
+  say(deps, { action: "add", name }, ["server.mcp.added", { name }], ["server.mcp.on"], outcome.line, ...others.lines);
+  return { status: 201, text: `Added MCP server ${name} and turned it on. ${outcome.text}${selection(deps, name)}${where}${others.text} ${WHEN.live.arrive}` };
 }
 
 /** The update merged onto the saved entry, its secretRefs redeemed but not spent until `commit`. */
@@ -297,9 +307,10 @@ async function enable(deps: Ctx, name: string, server: StoredMcpServer, signal: 
   if ("error" in on) return refused(on);
   joinBotList(deps, name);
   const outcome = await probe(deps, name, server, signal);
+  const others = sharedWith(server.enabled ? [] : deps.usedBy(name));
   deps.decide(`Turned on MCP server ${name}`, "full-access");
-  say(deps, { action: "enable", name }, ["server.mcp.turnedOn", { name }], outcome.line);
-  return { status: 200, text: `Turned on MCP server ${name}. ${outcome.text}${selection(deps, name)} ${when(deps).arrive}` };
+  say(deps, { action: "enable", name }, ["server.mcp.turnedOn", { name }], outcome.line, ...others.lines);
+  return { status: 200, text: `Turned on MCP server ${name}. ${outcome.text}${selection(deps, name)}${others.text} ${when(deps).arrive}` };
 }
 
 function disable(deps: Deps, name: string): Outcome {
@@ -475,6 +486,14 @@ function joinBotList(deps: Deps, name: string): void {
 
 function selection(deps: Deps, name: string): string {
   return deps.canUse(name) ? "" : ` Your tool selection leaves ${name} out. The person can change that in your settings.`;
+}
+
+function sharedWith(others: readonly string[]): { text: string; lines: Line[] } {
+  if (!others.length) return { text: "", lines: [] };
+  return {
+    text: ` It is on for your other bots too: ${nameList(others)}. Tell the person that, and that they can switch it off for one bot in that bot's settings, under Apps it can use.`,
+    lines: [["server.mcp.alsoOn", { names: others.join(", ") }]],
+  };
 }
 
 function folderText(deps: Deps, server: StoredMcpServer, moved: ReadonlyArray<{ to: string }>): string {

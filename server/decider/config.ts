@@ -9,12 +9,14 @@ export const OPENROUTER_MODEL_ID_MAX = 128;
 export const WORKERS_AI_ACCOUNT_ID = /^[0-9a-f]{32}$/i;
 
 const optionalText = z.string().optional();
+export const CUSTOM_MODEL_ID_MAX = 128;
 
 /** The decision and extraction models (server/decider, server/extractor):
  * fast classifiers and extractors that pick and read things for bots, starting
  * with who answers a room message. `key` is the Jev key, `workersAiToken` a
  * Cloudflare Workers AI token for `workersAiAccountId` (Clef and Clairic), and
- * `openrouterKey` the OpenRouter one: write-only like every credential, and
+ * `openrouterKey` the OpenRouter one, `customKey` a custom gateway's at
+ * `customBaseUrl` (model `customModel`, protocol `customApi`): write-only like every credential, and
  * kept apart from each other and from the engine's OpenRouter key. `baseUrl` / `openrouterBaseUrl` point at a compatible
  * server instead of the vendor's (operator settings with no UI);
  * `openrouterModel` is an OpenRouter model id and `openrouterApi` says
@@ -24,9 +26,18 @@ const optionalText = z.string().optional();
  * log's retention. */
 export const deciderConfigSchema = z.object({
   enabled: z.boolean().optional(),
-  provider: z.enum(["jev", "openrouter", "off"]).optional(),
+  provider: z.enum(["jev", "openrouter", "custom", "off"]).optional(),
   key: optionalText,
   openrouterKey: optionalText,
+  customKey: optionalText,
+  customBaseUrl: z
+    .string()
+    .trim()
+    .max(2048)
+    .refine((value) => !value || /^https?:\/\//i.test(value), "the custom endpoint address must start with http:// or https://")
+    .optional(),
+  customModel: z.string().trim().max(CUSTOM_MODEL_ID_MAX).optional(),
+  customApi: z.enum(["systemone", "decisions"]).optional(),
   workersAiToken: optionalText,
   workersAiAccountId: z.string().trim().refine((value) => !value || WORKERS_AI_ACCOUNT_ID.test(value), "a Cloudflare account ID is 32 letters and digits").optional(),
   workersAiBaseUrl: z
@@ -60,8 +71,14 @@ export const deciderConfigSchema = z.object({
 /** The decision model; see `deciderConfigSchema`. */
 export interface DeciderConfig {
   enabled?: boolean;
-  provider?: "jev" | "openrouter" | "off";
+  provider?: "jev" | "openrouter" | "custom" | "off";
   key?: string;
+  customKey?: string;
+  /** The gateway's root, e.g. `https://gateway.example.com/v1`: requests go to `{customBaseUrl}/systemone` or `/decisions`. */
+  customBaseUrl?: string;
+  customModel?: string;
+  /** Absent is `systemone`. */
+  customApi?: "systemone" | "decisions";
   baseUrl?: string;
   openrouterKey?: string;
   openrouterModel?: string;

@@ -1265,6 +1265,41 @@ describe("Store", () => {
     }
   });
 
+  it("gives a new department to a Chief in charge of every department once the write that made it is saved", async () => {
+    const store = new Store(selection);
+    const lead = store.createBot({ name: "Lead", section: "Ops" });
+    // Made Chief only after Ops was made: Ops is its own department, never one it was given.
+    store.patchBot(lead.id, { chiefOfStaff: true, managedSections: [""] });
+    const planner = store.createBot({ name: "Planner" });
+    store.setChiefOfStaff(planner.id);
+    store.applyTeamSetup({ version: 1, requestId: "setup-new-team", botId: planner.id, threadId: planner.threadId,
+      reason: "Requested", createdAt: 1, requesterRevision: "fixture", newTeams: ["Research"], operations: [
+        { action: "create", botId: "researcher", threadId: "researcher-thread", fields: { name: "Researcher", section: "Research", modelSelection: selection() } },
+      ] });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(store.bot(lead.id)?.managedSections).toEqual(["", "Research"]);
+    // Planner was in charge of General alone; the setup's own grant is the only one it has.
+    expect(store.bot(planner.id)?.managedSections).toEqual(["Research"]);
+    const restored = new Store(selection);
+    expect(restored.bot("researcher")?.section).toBe("Research");
+    expect(restored.bot(lead.id)?.managedSections).toEqual(["", "Research"]);
+  });
+
+  it("gives the main Chief each department one run makes before the first grant lands, except one removed again", async () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ name: "Chief" });
+    store.setChiefOfStaff(chief.id);
+    store.createBot({ name: "First", section: "First team" });
+    store.createBot({ name: "Second", section: "Second team" });
+    // A failed import rolls its new department back the same way.
+    const member = store.createBot({ name: "Imported", section: "Imported team" });
+    store.deleteBot(member.id);
+    expect(store.changeEmptySection("Imported team", null)).toBeUndefined();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(store.bot(chief.id)?.managedSections).toEqual(["First team", "Second team"]);
+    expect(new Store(selection).bot(chief.id)?.managedSections).toEqual(["First team", "Second team"]);
+  });
+
   it("lands a created specialist in its proposed working folder, keeping the private workspace clean", () => {
     const store = new Store(selection);
     const chief = store.createBot({ name: "Chief", section: "Ops" });

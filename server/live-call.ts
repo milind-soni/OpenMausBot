@@ -9,6 +9,9 @@ export const DEFAULT_LIVE_VOICE = "marin";
 export const MAX_SDP_BYTES = 64 * 1024;
 export const LIVE_NEEDS_KEY = "Live calls use your own OpenAI key. Add it in Settings → API keys.";
 export const LIVE_NEEDS_AZURE = "Live calls through Azure OpenAI need the resource endpoint, the GPT-Live deployment name and its key. Add them in Call settings.";
+export const LIVE_NEEDS_FISH = "Live calls through Fish Audio use your Fish Audio API key. Add it in Settings → API keys.";
+export const LIVE_NEEDS_GEMINI = "Live calls through Gemini use your Gemini API key. Add it in Settings → API keys.";
+export const LIVE_NEEDS_ELEVENLABS = "Live calls through ElevenLabs use your ElevenLabs API key. Add it in Settings → API keys.";
 
 /** The client's data channel is untrusted: it may only hang up; every append goes over the sideband.
  * Exception: Azure OpenAI refuses `session.client`, so an Azure call goes without this list and its caller's channel keeps
@@ -44,12 +47,12 @@ export interface LiveEndpoint {
   provider: LiveProvider;
   /** The versioned API root, e.g. `https://api.openai.com/v1` or `https://my-res.openai.azure.com/openai/v1`. */
   apiBase: string;
-  /** The OpenAI model id, or the Azure deployment name. */
+  /** The OpenAI model id, the Azure deployment name, the Fish Audio agent id or ElevenLabs agent id ('' until one is set up) or the Gemini Live model id. */
   model: string;
 }
 
 export function liveProviderName(provider: LiveProvider): string {
-  return provider === "azure" ? "Azure OpenAI" : "OpenAI";
+  return provider === "azure" ? "Azure OpenAI" : provider === "fish" ? "Fish Audio" : provider === "gemini" ? "Gemini" : provider === "elevenlabs" ? "ElevenLabs" : "OpenAI";
 }
 
 /** Only a loopback http URL is accepted, read at call time. */
@@ -98,7 +101,7 @@ export function liveAttachUrl(sessionId: string, endpoint: LiveEndpoint = openAi
   return `${endpoint.apiBase.replace(/^http/, "ws")}/live/sessions/${encodeURIComponent(sessionId)}/attach`;
 }
 
-/** Azure OpenAI takes a resource key in `api-key`; OpenAI takes a bearer token. */
+/** Azure OpenAI takes a resource key in `api-key`; OpenAI and Fish Audio take a bearer token. */
 export function liveAuthHeaders(provider: LiveProvider, key: string): Record<string, string> {
   return provider === "azure" ? { "api-key": key } : { authorization: `Bearer ${key}` };
 }
@@ -256,9 +259,10 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
     );
   }
   if (!response.ok) {
-    const failure = await response.json().catch(() => null) as { error?: { param?: unknown } } | null;
+    const failure = await response.json().catch(() => null) as { error?: { param?: unknown; code?: unknown } } | null;
     const param = typeof failure?.error?.param === "string" ? failure.error.param : undefined;
-    throw new LiveSessionError(liveErrorMessage(response.status, param, endpoint.provider), response.status === 429 ? 429 : 502);
+    const code = typeof failure?.error?.code === "string" ? failure.error.code : undefined;
+    throw new LiveSessionError(liveErrorMessage(response.status, param, endpoint.provider, code), response.status === 429 ? 429 : 502);
   }
   const payload = await response.json().catch(() => null) as { session?: { id?: unknown }; transport?: { sdp?: unknown } } | null;
   const sessionId = payload?.session?.id;
@@ -269,7 +273,8 @@ export async function createLiveSession(input: CreateLiveSessionInput): Promise<
   return { sessionId, sdp };
 }
 
-export function liveErrorMessage(status: number, param?: string, provider: LiveProvider = "openai"): string {
+/** `code` is the provider's `error.code`: OpenAI answers 429 `insufficient_quota` when the account has no credit left, which waiting never fixes. */
+export function liveErrorMessage(status: number, param?: string, provider: LiveProvider = "openai", code?: string): string {
   const name = liveProviderName(provider);
   if (status === 400) {
     return param && /voice/i.test(param)
@@ -285,6 +290,7 @@ export function liveErrorMessage(status: number, param?: string, provider: LiveP
     if (status === 401) return "OpenAI rejected the API key. Check the key for Live calls.";
     if (status === 403) return "This OpenAI project has no access to GPT-Live. Check the project's model access and billing.";
     if (status === 404) return "GPT-Live is not available for this OpenAI project.";
+    if (status === 429 && code === "insufficient_quota") return "This OpenAI account has no credit left for Live calls. Add credit or raise the spending limit in OpenAI's billing settings, then call again.";
     if (status === 429) return "OpenAI is limiting Live sessions right now (rate limit or quota). Try again in a moment.";
   }
   if (status >= 500) return `${name} had a problem starting the call. Try again in a moment.`;

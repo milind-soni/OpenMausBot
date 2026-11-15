@@ -11,30 +11,43 @@ const SLEEP_CHECK_MS = 60_000;
  *
  * `wake()` starts the sidecar when the launch rule now holds (a way in is on and something is paired).
  */
-export function createPhoneLinkRoutes({ rememberRoute, routeOn, dismissNotice, state, running, wake, sleep, changed = () => {}, check = checkTailscale, now = Date.now, setTimer = setInterval, log = () => {} }) {
+export function createPhoneLinkRoutes({ rememberRoute, routeOn, dismissNotice, state, running, wake, sleep, changed = () => {}, check = checkTailscale, shareChanged = async () => {}, now = Date.now, setTimer = setInterval, log = () => {} }) {
   let activeSince = 0;
   let timer = null;
 
   async function setTailscale(on) {
     if (!on) {
       await rememberRoute("tailscale", false);
+      await shareChanged();
       return state();
     }
     const result = await check();
     if (result.state !== "ready") return { ...(await state()), tailscaleProblem: result.state };
     await rememberRoute("tailscale", true, { name: result.name });
+    await shareChanged();
     await wake();
+    return state();
+  }
+
+  /** Whether the person's other computers may open this one over Tailscale; a share needs the Tailscale route on. */
+  async function setTailscaleComputers(on) {
+    if (routeOn("tailscale")) {
+      await rememberRoute("tailscale", true, { computers: on });
+      await shareChanged();
+    }
     return state();
   }
 
   const api = {
     setTailscale,
+    setTailscaleComputers,
     /** Check again: asks Tailscale for the name only while the route is on, and starts nothing. */
     async checkTailscale() {
       if (!routeOn("tailscale")) return state();
       const result = await check();
       if (result.state !== "ready") return { ...(await state()), tailscaleProblem: result.state };
       await rememberRoute("tailscale", true, { name: result.name });
+      await shareChanged();
       return state();
     },
     async setRoute(route, on) {
@@ -65,6 +78,7 @@ export function createPhoneLinkRoutes({ rememberRoute, routeOn, dismissNotice, s
       const handle = (channel, run) => ipcMain.handle(channel, localOnly(channel, run));
       handle("companion:refresh-tailscale", () => api.checkTailscale());
       handle("companion:tailscale", (_event, on) => api.setTailscale(on === true));
+      handle("companion:tailscale-computers", (_event, on) => api.setTailscaleComputers(on === true));
       handle("companion:route", (_event, route, on) => api.setRoute(String(route), on === true));
       handle("companion:notice-dismiss", (_event, route) => api.dismissNotice(String(route)));
     },

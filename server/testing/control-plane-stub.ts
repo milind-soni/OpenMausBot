@@ -10,6 +10,8 @@ interface StubInstallation {
   platform: string;
   appVersion: string | null;
   credential: string;
+  /** What the installation last said it is (`kind`), if it said. */
+  kind?: string;
 }
 
 export interface ControlPlaneStub {
@@ -109,6 +111,7 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
         platform: String(body.platform ?? "linux"),
         appVersion: typeof body.appVersion === "string" ? body.appVersion : null,
         credential: newCredential(),
+        ...(typeof body.kind === "string" ? { kind: body.kind } : {}),
       };
       installations.set(inst.id, inst);
       return send(201, { installation: publicView(inst), credential: inst.credential, credentialExpiresAt: Date.now() + NINETY_DAYS });
@@ -132,6 +135,7 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
       if (method === "POST") {
         const body = await readJson(req);
         if (typeof body.appVersion === "string") inst.appVersion = body.appVersion;
+        if (typeof body.kind === "string") inst.kind = body.kind;
         if (reclaimedUntilProvision) issuedConnectorToken = reclaimedUntilProvision;
         reclaimedUntilProvision = null;
         return send(200, { endpoint: endpoint(), connectorToken: issuedConnectorToken });

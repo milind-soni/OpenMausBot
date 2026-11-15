@@ -16,7 +16,7 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 
 // Guards the TypeScript catalog the desktop and web apps use. The generator writes
 // the native catalogs only when given their paths (`--swift`, `--kotlin`).
-const TS_PATH = "../../shared/mascot-bodies.ts";
+const TS_PATH = "../../packages/phone-protocol/src/mascot-bodies.ts";
 
 // Normalised to LF: a clone whose git config disagrees with .gitattributes must
 // fail over generated content, not line endings.
@@ -57,7 +57,7 @@ describe("generated catalogs", () => {
       throw new Error(
         `Running \`pnpm gen:bodies\` failed while checking the catalogs for drift. ` +
           `The working tree may now hold a partially-written or reverted file — run ` +
-          `\`git status\` / \`git diff -- shared/mascot-bodies.ts\` ` +
+          `\`git status\` / \`git diff -- packages/phone-protocol/src/mascot-bodies.ts\` ` +
           `before trusting either file. Original error:\n${err.stderr?.toString() ?? err.message}`
       );
     }
@@ -71,7 +71,7 @@ describe("generated catalogs", () => {
     write(TS_PATH, before.ts);
 
     const drifts = [
-      describeDrift("shared/mascot-bodies.ts", before.ts, after.ts),
+      describeDrift("packages/phone-protocol/src/mascot-bodies.ts", before.ts, after.ts),
     ].filter(Boolean);
 
     if (drifts.length > 0) {

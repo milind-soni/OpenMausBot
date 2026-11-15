@@ -16,8 +16,8 @@ const HOME = { url: "https://acme.test/home", html: "<title>Home</title><h1>Welc
 let page: FakeLoginPage | null = null;
 afterEach(() => { page?.close(); page = null; });
 
-function setup(url: string, html: string, answer: (ask: EmailCodeAsk) => EmailCodeAnswer | Promise<EmailCodeAnswer>, over: Partial<FillLoginInput> & { onSleep?: (clock: number) => void } = {}) {
-  const { onSleep, ...inputOver } = over;
+function setup(url: string, html: string, answer: (ask: EmailCodeAsk) => EmailCodeAnswer | Promise<EmailCodeAnswer>, over: Partial<FillLoginInput> & { onSleep?: (clock: number) => void; active?: () => boolean } = {}) {
+  const { onSleep, active, ...inputOver } = over;
   page = new FakeLoginPage(url, html);
   const remembered: Array<[string, string]> = [];
   const asks: EmailCodeAsk[] = [];
@@ -27,6 +27,7 @@ function setup(url: string, html: string, answer: (ask: EmailCodeAsk) => EmailCo
     engine: (args) => page!.engine(args), insertText: (text) => page!.insertText(text), press: (key) => page!.press(key), click: (selector) => page!.click(selector),
     remember: (value, kind) => { remembered.push([kind, value]); },
     now: () => clock, sleep: async (ms) => { clock += ms; onSleep?.(clock); },
+    turnActive: active,
     emailCode: async (ask) => {
       asks.push(ask);
       const result = await answer(ask);
@@ -39,6 +40,66 @@ function setup(url: string, html: string, answer: (ask: EmailCodeAsk) => EmailCo
 
 const code = (): EmailCodeAnswer => ({ kind: "code", code: CODE, typed: () => {} });
 const saved = (over: Partial<FillCandidate> = {}): FillCandidate => ({ ...loginPlace("acme.test"), id: "l1", username: "ada@acme.test", source: "settings", secrets: async () => ({ password: "fake-S3cret!pass", totp: null }), ...over });
+
+describe("a code is entered only while its requesting turn remains active", () => {
+  it("discards a code returned after the turn ended", async () => {
+    let active = true;
+    const { page: current, run, typedCount } = setup("https://acme.test/verify", CODE_PAGE, () => { active = false; return code(); }, { active: () => active });
+    expect((await run()).ok).toBe(false);
+    expect(current.typed).toEqual([]);
+    expect(current.pressed).toEqual([]);
+    expect(typedCount()).toBe(0);
+  });
+
+  it("does not type a code when the turn ends during field focus", async () => {
+    let active = true;
+    const { page: current, run, typedCount } = setup("https://acme.test/verify", CODE_PAGE, code, { active: () => active });
+    current.window.document.querySelector("input")!.addEventListener("focus", () => { active = false; });
+    expect((await run()).ok).toBe(false);
+    expect(current.typed).toEqual([]);
+    expect(current.pressed).toEqual([]);
+    expect(typedCount()).toBe(0);
+  });
+
+  it("clears a partial code and stops between separate digit boxes", async () => {
+    let active = true;
+    const { page: current, run, typedCount } = setup("https://acme.test/verify", SIX_BOXES, code, { active: () => active });
+    current.window.document.querySelector("input")!.addEventListener("input", () => { active = false; });
+    expect((await run()).ok).toBe(false);
+    expect(current.typed).toEqual([CODE[0]]);
+    expect([...current.window.document.querySelectorAll("input")].every((input) => input.value === "")).toBe(true);
+    expect(current.pressed).toEqual([]);
+    expect(typedCount()).toBe(0);
+  });
+
+  it("does not press Enter when the turn ends while refocusing to submit", async () => {
+    let active = true;
+    const { page: current, run } = setup("https://acme.test/verify", CODE_PAGE, code, { active: () => active });
+    const engine = current.engine.bind(current);
+    current.engine = async (args) => {
+      const result = await engine(args);
+      if (args[1]?.endsWith(', "submit", null)')) active = false;
+      return result;
+    };
+    expect((await run()).ok).toBe(false);
+    expect(current.typed).toEqual([CODE]);
+    expect(current.pressed).toEqual([]);
+    expect(current.clicked).toEqual([]);
+    expect(current.window.document.querySelector("input")!.value).toBe("");
+  });
+
+  it("does not click the fallback submit button after the turn ends", async () => {
+    let active = true;
+    const buttonPage = '<p>We sent a code to your email.</p><input name="otp" autocomplete="one-time-code"><button type="button">Verify</button>';
+    const { page: current, run } = setup("https://acme.test/verify", buttonPage, code, {
+      active: () => active, onSleep: () => { active = false; },
+    });
+    expect((await run()).ok).toBe(false);
+    expect(current.pressed).toEqual(["Enter"]);
+    expect(current.clicked).toEqual([]);
+    expect(current.window.document.querySelector("input")!.value).toBe("");
+  });
+});
 
 describe("an emailed code inside fill_login", () => {
   it("fills the code as real input and tells the bot only that it did", async () => {

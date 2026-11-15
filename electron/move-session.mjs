@@ -4,7 +4,7 @@
 // interrupted or two computers moved together.
 
 /**
- * @typedef {{ call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>,
+ * @typedef {{ call(method: string, route: string, body?: unknown, options?: { timeoutMs?: number }): Promise<{ ok: boolean, status: number, body: any }>,
  *   upload(route: string, bytes: Uint8Array, type: string): Promise<{ ok: boolean, status: number, body: any }>,
  *   fetch(route: string, init?: RequestInit): Promise<Response>, close(): Promise<void> }} OwnerSession
  * @typedef {{ origin: string }} Target
@@ -54,7 +54,7 @@ export function createMoveSession({ open }) {
     async open(target) {
       await current(target).session;
       return {
-        call: (method, route, body) => using(target, (session) => session.call(method, route, body)),
+        call: (method, route, body, options) => using(target, (session) => session.call(method, route, body, options)),
         upload: (route, bytes, type) => using(target, (session) => session.upload(route, bytes, type)),
         fetch: (route, init) => using(target, async (session) => {
           const response = await session.fetch(route, init);

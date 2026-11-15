@@ -9,11 +9,9 @@ import {
   CUA_SOCKET,
   IMAGE as CUA_IMAGE,
   cuaExecArgs,
-  dockerSecurityIsHardened,
   imageLabelsMatch,
   managedImageDockerfile,
   wholeScreenshot,
-  type DockerHardeningConfig,
   BASE_IMAGE_DIGEST,
   BASE_IMAGE_LABEL,
   DRIVER_LABEL,
@@ -21,6 +19,7 @@ import {
   IMAGE_LAYER_VERSION,
   MANAGED_LABEL,
 } from "./container-computer.ts";
+import { desktopCapArgs, dockerSecurityIsHardened, type DockerHardeningConfig } from "./container-isolation.ts";
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
 import { DATA_DIR, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
@@ -295,7 +294,7 @@ function emptyStatus(botId: string, alias: string | null): VpsComputerStatus {
     desktopReady: false,
     desktop_error: null,
     ready: false,
-    problem: alias ? "Docker over SSH is not reachable" : "Configure a VPS SSH alias in Settings → API keys",
+    problem: alias ? "Docker over SSH is not reachable" : "Configure a VPS SSH alias in AI › Other services",
     image_ref: VPS_IMAGE,
     base_image_ref: BASE_IMAGE,
     driver_version: CUA_DRIVER_VERSION,
@@ -363,7 +362,7 @@ function hasNoPublishedPorts(config: {
 }
 
 function statusProblem(status: VpsComputerStatus): string | null {
-  if (!status.configured) return "Configure a VPS SSH alias in Settings → API keys";
+  if (!status.configured) return "Configure a VPS SSH alias in AI › Other services";
   if (!status.daemonUp) return "Docker over SSH could not reach the VPS; check the SSH alias and Docker on the VPS";
   if (!status.image) return `Prepare the pinned OpenMausBot Cua image on the VPS (Driver ${CUA_DRIVER_VERSION})`;
   if (status.container === "missing") return "No OpenMausBot container exists for this bot on the VPS";
@@ -762,12 +761,8 @@ export function vpsContainerRunArgs(
     "private",
     "--cgroupns",
     "private",
-    "--cap-drop",
-    "ALL",
-    "--cap-add",
-    "SETUID",
-    "--cap-add",
-    "SETGID",
+    // No host mounts, so root in this desktop can install packages without reaching the host's files.
+    ...desktopCapArgs("docker"),
     "--shm-size",
     "512m",
     // Without a restart policy Docker leaves the container down after a VPS reboot; unless-stopped still honors Stop.

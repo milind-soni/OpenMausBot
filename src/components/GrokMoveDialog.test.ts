@@ -10,8 +10,10 @@ vi.mock("@/lib/analytics", () => ({ track: f.track }));
 import { setLocale } from "@/lib/i18n";
 import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT } from "../../shared/grok-import";
 import { ComposerAttachments } from "./ComposerAttachments";
+import { GROK_BOT_MARK_PATH } from "./GrokBotMark";
 import { GrokMoveDialog } from "./GrokMoveDialog";
 import { GrokImportSection } from "./ImportSettings";
+import { SettingsLook } from "./SettingsPrimitives";
 
 const MEMORY = "The door sticks in the rain";
 const WHEN = "Weekdays around 9:00 AM Asia/Calcutta (may run up to 15 min early or 15 min late)";
@@ -206,6 +208,20 @@ describe("Move from Grok Bot", () => {
     expect(row.getAttribute("aria-expanded")).toBe("false");
     expect(host.querySelector("[data-grok-move]")!.parentElement!.className).toContain("hidden");
     expect(host.querySelector("[data-grok-move]")!.getAttribute("data-grok-move")).toBe("preview");
+  });
+
+  it("the row in the Settings window is titled Move from Grok Bot, wears the Grok Bot mark and opens the same move in place", async () => {
+    await act(async () => root.render(createElement(SettingsLook.Provider, { value: true }, createElement(GrokImportSection))));
+    const row = host.querySelector<HTMLElement>('[data-settings-block="grok-move"] [data-setting-row]')!;
+    expect(row.textContent).toContain("Move from Grok Bot");
+    expect(row.querySelector("[data-settings-slot] svg path")!.getAttribute("d")).toBe(GROK_BOT_MARK_PATH);
+    const start = row.querySelector<HTMLButtonElement>("[data-grok-move-open]")!;
+    expect(start.textContent).toBe("Start");
+    expect(host.querySelector("[data-grok-move]")).toBeNull();
+    await act(async () => { start.click(); });
+    await vi.waitFor(() => expect(host.querySelector("[data-grok-move]")).not.toBeNull());
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(start.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("scrolls inside the dialog, with its buttons always in view", async () => {

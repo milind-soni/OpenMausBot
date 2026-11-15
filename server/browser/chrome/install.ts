@@ -107,7 +107,7 @@ export const extractZip: Extract = (archive, directory) => new Promise((resolve,
   execFile(file, args, { timeout: EXTRACT_TIMEOUT_MS, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (error) => {
     if (error) {
       const noUnzip = file === "unzip" && (error as NodeJS.ErrnoException).code === "ENOENT";
-      reject(new Error(noUnzip ? "the Chrome archive could not be unpacked: unzip is not installed here (Debian/Ubuntu: sudo apt-get install unzip)" : `the Chrome archive could not be unpacked: ${error.message}`));
+      reject(new Error(noUnzip ? "the Chrome archive could not be unpacked: check that unzip is installed and on the server's PATH (Debian/Ubuntu: sudo apt-get install unzip)" : `the Chrome archive could not be unpacked: ${error.message}`));
     }
     else resolve();
   });

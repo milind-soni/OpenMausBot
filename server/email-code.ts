@@ -128,16 +128,20 @@ type Round = { code?: string; ambiguous?: boolean; wrongSender?: boolean; used?:
 /** One look through one mailbox, reading each matching message's body at most once for the whole wait. */
 async function look(box: CodeMailbox, options: CodeWaitOptions, read: Map<string, Extracted>): Promise<Round & { codes: Set<string> }> {
   const round: Round & { codes: Set<string> } = { codes: new Set() };
+  if (options.active?.() === false) return round;
   let listed: MailSummary[];
   try { listed = await box.list(options.askedAt - CLOCK_SKEW_MS); } catch { round.failed = true; return round; }
+  if (options.active?.() === false) return round;
   const recent = listed.filter((mail) => mail.at >= options.askedAt - CLOCK_SKEW_MS);
   round.wrongSender = recent.some((mail) => !sentBySite(mail.from, options.site) && CODE_MAIL_SUBJECT.test(mail.subject));
   const theirs = recent.filter((mail) => sentBySite(mail.from, options.site)).slice(0, BODIES_PER_MAILBOX);
   for (const mail of theirs) {
+    if (options.active?.() === false) return round;
     let result = read.get(mail.id);
     if (!result) {
       let text: string | null = null;
       try { text = await box.body(mail.id); } catch { text = null; }
+      if (options.active?.() === false) return round;
       if (text === null) { round.unreadable = true; continue; }
       result = extractCode(mail.subject, text, options.boxes);
       read.set(mail.id, result);
@@ -160,7 +164,9 @@ export async function waitForEmailCode(mailboxes: readonly CodeMailbox[], option
   const read = mailboxes.map(() => new Map<string, Extracted>());
   let wrongSender = false, used = false, unreadable = false, failedRounds = 0;
   for (;;) {
+    if (options.active?.() === false) break;
     const rounds = await Promise.all(mailboxes.map((box, index) => look(box, options, read[index]!)));
+    if (options.active?.() === false) break;
     const codes = new Set(rounds.flatMap((round) => [...round.codes]));
     if (rounds.some((round) => round.ambiguous) || codes.size > 1) return { kind: "miss", why: "ambiguous" };
     if (codes.size === 1) return { kind: "code", code: [...codes][0]! };
@@ -168,7 +174,7 @@ export async function waitForEmailCode(mailboxes: readonly CodeMailbox[], option
     used ||= rounds.some((round) => round.used);
     unreadable ||= rounds.some((round) => round.unreadable);
     failedRounds = rounds.every((round) => round.failed) ? failedRounds + 1 : 0;
-    if (failedRounds >= FAILED_ROUNDS || options.now() >= deadline || options.active?.() === false) break;
+    if (failedRounds >= FAILED_ROUNDS || options.now() >= deadline) break;
     await options.sleep(pollMs);
   }
   if (failedRounds >= FAILED_ROUNDS || unreadable) return { kind: "miss", why: "unreadable" };

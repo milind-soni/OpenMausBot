@@ -16,10 +16,11 @@ import { isStopCommand } from "../room-holds.ts";
 import { needsInputQuestion } from "../runtime-coordinator.ts";
 import { withDefault } from "../runtime/questions.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
-import { conversationLanguage } from "../server-lines.ts";
+import { conversationLanguage, serverLine } from "../server-lines.ts";
 import { settledWaitingChip } from "../waiting-on-person.ts";
 
 const OPEN_QUESTION = "needs-input-";
+const DAY_MS = 24 * 60 * 60_000;
 const NEEDS_INPUT_LINE = /^needs input:/i;
 
 export interface AskCardsDeps {
@@ -39,6 +40,7 @@ export interface AskCardsDeps {
   answerCard(input: { auth: RequestAuth; threadId: string; requestId: string; behavior: "answer"; message: string }): Promise<{ ok: true } | { ok: false; status: number; error: string }>;
   /** The conversation a card in `threadId` was asked in: an inbox copy's original. */
   answeredIn(threadId: string, requestId: string): string;
+  now?: () => number;
 }
 
 /** The name a bot's model calls its question tool by: its engine's, unless the bot's tool selection leaves it out. The
@@ -73,6 +75,7 @@ const ownQuestionCard = (message: Message): boolean =>
 
 export function createAskCards(deps: AskCardsDeps) {
   const { store, delegatorOf, notify } = deps;
+  const now = deps.now ?? Date.now;
   const waitingOnPersonChips = new Map<string, { threadId: string; messageId: string; name: string; kind: string }>();
 
   function showWaitingOnPersonChip(threadId: string, requestId: string, asker: BotRecord, kind: "approval" | "answer") {
@@ -170,6 +173,21 @@ export function createAskCards(deps: AskCardsDeps) {
       { avatarUrl: bot.avatarUrl, ...(room ? { group: { id: room.id, name: room.name } } : {}) }));
   }
 
+  /** Work handed on has waited a day on the person: one notification says what it needs and when it closes. Its open card
+   * is already its row in the inbox, so nothing is added there. */
+  function remind(node: HandoffView, closesAt: number): void {
+    const bot = store.bot(node.botId);
+    if (!bot) return;
+    const days = Math.max(1, Math.ceil((closesAt - now()) / DAY_MS));
+    const language = conversationLanguage(node.threadId);
+    const room = node.groupId ? store.group(node.groupId) : undefined;
+    const body = node.cards?.length ? serverLine(language, "server.teammates.stillWaitingCard", { days })
+      : serverLine(language, "server.teammates.stillWaiting", { days, question: withDefault(node.question ?? "").question.slice(0, 180) });
+    notify(buildNotification("question", bot, node.threadId, body, { avatarUrl: bot.avatarUrl, ...(room ? { group: { id: room.id, name: room.name } } : {}) }));
+    if (room) store.patchGroup(room.id, { unread: true });
+    else store.patchTask(bot.id, node.threadId, { unread: true });
+  }
+
   /** A question its requester decided, or that went on with its asker's default: its card says what was picked, and by
    * whom; the person can still change it. */
   function decided(node: HandoffView, answerer: string): void {
@@ -259,5 +277,5 @@ export function createAskCards(deps: AskCardsDeps) {
     questionCard({ id: `${botId}-${turnId}`, threadId, botId, executions: 1, createdAt: reply.at, startedAt: reply.at } as HandoffView, question);
   }
 
-  return { park, decided, closed, askedAgain, answerParked, answeredInWords, typed, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips };
+  return { park, remind, decided, closed, askedAgain, answerParked, answeredInWords, typed, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips };
 }

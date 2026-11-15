@@ -131,6 +131,27 @@ describe("openmausbot pair", () => {
     expect(printed()).not.toMatch(/[▀▄█]/);
   });
 
+  it("when the desktop app owns the server, says to pair from the app instead of showing the raw refusal", async () => {
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/health")) return Response.json({ app: "openmausbot", pid: 12345 });
+      if (url.endsWith("/api/auth/pairing")) {
+        return init?.method === "POST"
+          ? Response.json({ error: "forbidden: this change must come from the desktop app or a paired device" }, { status: 403 })
+          : Response.json({ pairings: [], publicUrl: null });
+      }
+      throw new Error(`Unexpected fixture request: ${url}`);
+    });
+    const failure = await runPair(options).then(() => null, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toContain("The OpenMausBot desktop app runs this server");
+    expect(message).toContain("Settings → Remote access");
+    // A terminal `serve` would not get the keys the app keeps in its own credential store, so it is not offered.
+    expect(message).not.toContain("openmausbot serve");
+    expect(message).not.toContain("server refused to mint a pairing code");
+  });
+
   it("says how to start a server when none runs", async () => {
     fetchMock.mockImplementation(async () => { throw new Error("offline"); });
     expect(await runPair(options)).toBe(1);

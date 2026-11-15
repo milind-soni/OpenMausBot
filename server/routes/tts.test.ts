@@ -68,10 +68,41 @@ describe("transcribe route", () => {
     expect(answers).toEqual([[400, { error: "content-type must be audio/wav" }]]);
   });
 
-  it("asks for a Fish key when none is saved", async () => {
+  it("asks for a Fish Audio or ElevenLabs key when neither is saved", async () => {
     const { answers } = await call("POST", "/api/tts/transcribe", {}, {} as AppConfig, upload(Buffer.from("x")));
     expect(answers[0]![0]).toBe(409);
-    expect((answers[0]![1] as { error: string }).error).toContain("Fish Audio key");
+    expect((answers[0]![1] as { error: string }).error).toContain("Fish Audio or ElevenLabs key");
+  });
+
+  it("hears through ElevenLabs Scribe with the person's own key when no Fish key is saved", async () => {
+    const seen: Array<{ url: string; key: string | null; model: unknown; file: unknown }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      const form = init.body as FormData;
+      seen.push({ url, key: new Headers(init.headers).get("xi-api-key"), model: form.get("model_id"), file: form.get("file") });
+      return new Response(JSON.stringify({ text: " สวัสดีครับ ", language_code: "tha" }), { status: 200 });
+    }));
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, { tts: { key: "el-own" } } as AppConfig, upload(Buffer.from("RIFF")));
+    expect(answers).toEqual([[200, { text: "สวัสดีครับ" }]]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toMatch(/\/v1\/speech-to-text$/);
+    expect(seen[0]!.key).toBe("el-own");
+    expect(seen[0]!.model).toBe("scribe_v2");
+    expect(seen[0]!.file).toBeInstanceOf(Blob);
+  });
+
+  it("keeps Fish Audio first when both keys are saved", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ text: "from fish" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, { tts: { fishKey: "fish-key", key: "el-own" } } as AppConfig, upload(Buffer.from("RIFF")));
+    expect(answers).toEqual([[200, { text: "from fish" }]]);
+    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain("/v1/asr");
+  });
+
+  it("names the Speech to Text permission when ElevenLabs refuses the key", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: { message: "missing_permissions" } }), { status: 401 })));
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, { tts: { key: "el-own" } } as AppConfig, upload(Buffer.from("RIFF")));
+    expect(answers[0]![0]).toBe(502);
+    expect((answers[0]![1] as { error: string }).error).toContain("Speech to Text permissions");
   });
 
   it("refuses audio over the cap", async () => {
@@ -101,6 +132,18 @@ it("keeps the English network refusal and its translation fields", async () => {
     expect(answers).toEqual([[502, {
       error: "Couldn't reach Fish Audio to hear you — check your connection.",
       errorKey: "serverError.voice.fishTranscribeConnection",
+    }]]);
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it("keeps the English ElevenLabs network refusal and its translation fields", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+  try {
+    const req = Object.assign(Readable.from([Buffer.from("RIFF")]), { headers: { "content-type": "audio/wav", "content-length": "4" } });
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, { tts: { key: "el-own" } } as AppConfig, req as never);
+    expect(answers).toEqual([[502, {
+      error: "Couldn't reach ElevenLabs to hear you — check your connection.",
+      errorKey: "serverError.voice.elevenLabsTranscribeConnection",
     }]]);
   } finally { vi.unstubAllGlobals(); }
 });

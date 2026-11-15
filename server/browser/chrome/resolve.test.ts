@@ -100,6 +100,9 @@ describe("which Chrome the bots' browser runs", () => {
     expect(resolveChromePlan(withPath(["/home/ada/.cache/puppeteer/chrome/linux-153.0.8010.47/chrome-linux64/chrome"]), managed)).toEqual(found);
     expect(resolveChromePlan(withPath(["/home/ada/.cache/ms-playwright/chromium-1200/chrome-linux/chrome"]), managed)).toEqual(found);
     expect(resolveChromePlan(withPath(["/pw/chromium-1200/chrome-linux64/chrome"], { PLAYWRIGHT_BROWSERS_PATH: "/pw" }), managed)).toEqual(found);
+    // agent-browser runs with the augmented PATH, so a browser only there counts too.
+    const augmented = { ...host("linux", ["/opt/extra/chromium"], { env: { PATH: "/usr/bin" } }), enginePath: () => "/opt/extra:/usr/bin" };
+    expect(resolveChromePlan(augmented, managed)).toEqual(found);
     // A cache entry without its browser executable is incomplete: the server still downloads.
     expect(resolveChromePlan(withPath(["/home/ada/.cache/puppeteer/chrome/linux-153.0.8010.47/README"]), managed)).toMatchObject({ kind: "download" });
     expect(resolveChromePlan(withPath(["/home/ada/.cache/ms-playwright/chromium-1200/INSTALLATION_COMPLETE"]), managed)).toMatchObject({ kind: "download" });

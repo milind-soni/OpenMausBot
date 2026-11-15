@@ -119,6 +119,69 @@ the full server with a made-up key and its `fetch` stubbed.
 `server/hosted-access.test.ts` does it for a shared workspace, with no key saved,
 so a caller who gets through stops at the setup prompt.
 
+## Fish Audio Live 3 as the Live provider
+
+With `live.provider: "fish"` (`OMB_LIVE_PROVIDER=fish`) a call uses the Fish
+Audio key from Settings → API keys (`tts.fishKey`, `OMB_FISH_AUDIO_API_KEY`),
+the same key Fish voices use; nothing else is asked. On the first call the
+harness sets up an agent on that key's account (`server/live-fish.ts`
+`setUpFishAgent`): a client tool `delegate` (`POST /v1/agent/tools`), an agent
+named "<product> Live calls" (`productName` in `server/brand.ts`: MausBot, or a
+white-label brand's name) on the `live3` engine in English with that tool (`POST /v1/agent/agents`),
+`overrides_allowed: ["system_prompt"]` (`PATCH /v1/agent/agents/{id}`), and a
+publish. It saves the agent as `live.fishAgentId` with `live.fishAgentFor`, a
+short SHA-256 print of the key, so a key for another account sets up its own
+agent. A saved agent that Fish answers `404` for is set up again once.
+`OMB_FISH_LIVE_AGENT_ID` names an operator's own agent, used with any key and
+never replaced. A Fish key saved as the Live key (`keyFor: "fish"`) is read as
+the Fish Audio key while none is saved.
+
+Each call is `POST https://api.fish.audio/v1/agent/sessions` with
+`{ agent_id, overrides: { system_prompt } }` and the key as a bearer token,
+redirects refused. Fish answers with a LiveKit token, which goes to the client
+as `transport: { type: "fish", session, relayToken }`; the client joins with
+`@fishaudio/agent-client` 1.0.0, which holds the microphone and the agent's
+audio. The agent's voice is its own; the Voice setting is hidden. Hanging up
+also calls `POST /v1/agent/sessions/{id}/end`. `OMB_FISH_LIVE_URL` points the
+harness at a fake Fish for tests and is honoured only as `http://127.0.0.1:<port>`;
+anything else falls back to Fish's own host.
+
+An OpenAI or Azure key is never sent to Fish, and the Fish key never to them.
+Without a Fish Audio key, `POST /api/live/session` answers `409` with
+`needsKey` and the Fish setup sentence.
+
+Fish has no server sideband. The client reports what it hears (final user
+transcripts, the agent's speaking spans, the `delegate` tool call, the end) to
+`POST /api/live/relay` with the call's random relay token, and long-polls the
+same route for the bot's answers. `FishRelay` (`server/live-fish.ts`) turns the
+reports into the GPT-Live sideband events `LiveCallController` already reads
+and the controller's appends into commands the client hands the agent: the
+answer to a pending `delegate` call as its tool result, anything later as a
+user message prefixed `[OpenMausBot]`. Every report is a strict, bounded zod
+shape; a wrong token or session answers `404`; the route needs the admin scope.
+The `delegate` tool's arguments are ignored: the request is what the client
+heard, as on GPT-Live.
+
+Because the harness hears a Fish call only through its client's reports, a
+Fish call is limited exactly like Azure (`fishLiveCallRefusal`), with the words
+`Live calls here go through Fish Audio, so only an admin or the owner of this
+server can start one.` The phone apps do not carry the Fish SDK yet, so a call
+from iOS or Android answers `400`. The client must report `connected` within
+`FISH_ATTACH_TIMEOUT_MS` (25 s, to allow a first microphone prompt).
+
+The person needs a Fish Audio API key with Agent credit (about $0.07 per
+minute of call). Live 3 speaks English only.
+
+Checked with fixtures only: `server/live-fish.test.ts` (agent setup, session request,
+errors, relay), `server/live-session-wiring.test.ts` (first-call setup, a
+removed agent, an operator's agent), `server/live-call-controller.test.ts` "with Fish Audio chosen"
+(a real `FishRelay` as the sideband: heard, delegated, the bot's answer back as
+the delegate result, End and Fish's own end), `server/routes/live.test.ts`
+(relay route), `server/live-settings.test.ts`, `server/live-access.test.ts`,
+`src/lib/live-call-fish.test.ts` (client relay with a fake SDK session) and
+`src/components/keys/KeysPage.dom.test.ts`. No call has been placed against
+Fish Audio's live service.
+
 ## User path
 
 Start a Live call from the call button's menu, say something the bot must act

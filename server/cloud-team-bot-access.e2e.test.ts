@@ -81,7 +81,7 @@ beforeAll(async () => {
   await until(idle);
   const lines = (await as("ada", "GET", `/api/threads/${payroll.threadId}/messages`)).body.messages as Array<{ id: string }>;
   lastLine = lines.at(-1)!.id;
-  const routine = (botId: string) => ({ name: "Weekly pay check", prompt: "Check this week's pay runs.", botId, schedule: { type: "interval", everyMinutes: 1440, anchorAt: Date.now() + 86_400_000 } });
+  const routine = (botId: string) => ({ name: "Weekly pay check", prompt: "Check this week's pay runs.", botId, resultsThreadId: null, schedule: { type: "interval", everyMinutes: 1440, anchorAt: Date.now() + 86_400_000 } });
   const adas = await as("ada", "POST", "/api/routines", routine(payroll.id));
   expect(adas.status, JSON.stringify(adas.body)).toBe(201);
   adaRoutine = adas.body.routine.id;

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TRIAL_CREDIT_REFUSED } from "../../shared/trial-credit.ts";
 import "../server-line-packs.ts";
+import { engineFailureMessage } from "../drivers/engine-errors.ts";
 import { AUTO_RETRY_LEAD, RETRY_BLOCKED } from "../incidents.ts";
 import type { RoutineFailureFacts } from "../routine-recovery.ts";
 import { createChiefNotices, MEMORY_RETRY_MS, MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
@@ -69,6 +70,8 @@ describe("why a Chief's retry of a teammate's thread is refused", () => {
 const CRASH = "claude exited 3 before result: fake-claude: simulated crash before result";
 const DENIED = "One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.";
 const RETRIED = "OpenMausBot already retried this run once by itself; the failure above is how that retry ended.";
+/** OpenCode 2.2.5's session/prompt answer for a model it has no SDK package for, as acpRpcError words it. */
+const NO_ROUTE = "Internal error: Unsupported package for chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017: unknown (session/prompt, service: session, provider.no-route)";
 
 describe("OpenMausBot's one automatic retry of a teammate's failed thread", () => {
   it("runs the thread once more before its Chief hears, then tells the Chief how that retry ended, and never retries the retry", () => {
@@ -104,6 +107,8 @@ describe("OpenMausBot's one automatic retry of a teammate's failed thread", () =
     ["a signed-out AI", { detail: "Not logged in · Please run /login" }],
     ["a used-up trial credit", { detail: TRIAL_CREDIT_REFUSED.used_up, facts: { setup: true, trialCredit: "used_up" } }],
     ["a turn cap", { detail: "Stopped after 40 tool calls without a final answer" }],
+    ["a model its engine has no route to", { detail: engineFailureMessage("OpenCode", NO_ROUTE)!, facts: { stopReason: "rpc_error" } }],
+    ["a model its engine has no route to, in the engine's words", { detail: NO_ROUTE, facts: { stopReason: "rpc_error" } }],
   ])("never retries a run ended by %s: the Chief hears at once", (_what, failure) => {
     const f = fixture();
     f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", ...failure });

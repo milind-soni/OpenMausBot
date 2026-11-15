@@ -60,6 +60,15 @@ describe("boatRefusal", () => {
     });
   });
 
+  it("keeps the Admin's limit beside its code, and none from a body that names none", () => {
+    const message = "Your Pro plan's 200 cloud computer hours for November are used up. They reset on 1 December.";
+    const fields = { reason: "hours_used", plan: "Pro", limit: 200, used: 200.4, resetsAt: "2026-12-01T00:00:00.000Z" };
+    const refused = boatRefusal(429, "boat create", { ok: false, type: "sandbox.error", status: 429, code: "limit_reached", message, ...fields,
+      error: { code: "limit_reached", message, status: 429, ...fields } }, true);
+    expect(refused).toMatchObject({ message, boatStatus: 429, boatCode: "limit_reached", boatLimit: fields });
+    expect(boatRefusal(429, "boat create", { ok: false, code: "limit_reached", message }, true)).not.toHaveProperty("boatLimit");
+  });
+
   it("never sets the status a route would answer with", () => {
     expect(boatRefusal(200, "boat create", { ok: false, message: "no sandbox" })).not.toHaveProperty("status");
     expect(boatRefusal(500, "boat create", { code: "Not A Code!" })).not.toHaveProperty("boatCode");

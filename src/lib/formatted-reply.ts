@@ -27,7 +27,7 @@ export interface ReplyBlock {
 
 const PIPE_ROW = /^ {0,3}\|/;
 const DELIMITER_ROW = /^ {0,3}\|?(?: *:?-+:? *\|)+(?: *:?-+:? *)?$/;
-const FENCE = /^ {0,3}(```|~~~)/;
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 /** Splits a reply into prose and its tables, so Simple mode can draw each table as its own card. A table starts at a
  * top-level line opening with "|" that a delimiter row follows, and runs while its lines open with "|"; nothing inside a
@@ -46,8 +46,16 @@ export function splitReplyBlocks(text: string): ReplyBlock[] {
   let fence: string | null = null;
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!;
-    const marker = FENCE.exec(line)?.[1];
-    if (marker && (!fence || marker === fence)) fence = fence ? null : marker;
+    const match = FENCE.exec(line);
+    const marker = match?.[1];
+    if (match && marker) {
+      const suffix = match[2] ?? "";
+      if (!fence) {
+        if (marker[0] === "~" || !suffix.includes("`")) fence = marker;
+      } else if (marker[0] === fence[0] && marker.length >= fence.length && /^[ \t]*$/.test(suffix)) {
+        fence = null;
+      }
+    }
     if (fence || marker || !PIPE_ROW.test(line) || !DELIMITER_ROW.test(lines[index + 1] ?? "")) {
       prose.push(line);
       continue;

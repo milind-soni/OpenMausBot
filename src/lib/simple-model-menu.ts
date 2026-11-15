@@ -4,6 +4,7 @@ import { t } from "./i18n";
 import { modelOptionLabel } from "./model-label";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "./custom-models";
 import { engineDisplayName, isCustomOnly, SIGN_IN_FAMILY_LABEL, signInFamily, splitEngineRail } from "./engine-rail";
+import { favoriteKey, favoriteModels } from "./favorite-models";
 import { localModelDetail } from "./local-model";
 import { displayModelLabel, shortModelLabel } from "./model-friendly";
 import { choiceIsSelected, modelChoices, takesTypedModels, type ModelChoice } from "./model-choices";
@@ -148,6 +149,7 @@ function currentRow(input: SimpleMenuInput): MenuCurrent {
   if (!active) return loading ? { ...row, pending: true } : { ...row, meta: t("model.simple.unavailable"), warning: true };
   if (!option && input.refreshing === active.instanceId) return { ...row, pending: true };
   if (option?.orgBlocked) return { ...row, meta: t("model.orgBlocked"), warning: true, blocked: true };
+  if (option?.needsCliUpdate) return { ...row, meta: t("engines.updateClaude"), warning: true, blocked: true };
   if (active.policy) return { ...row, meta: t("policy.managedBy", { organization: active.policy.organizationName }), warning: true };
   if (needsCli(active)) return { ...row, meta: t("model.setupRequired"), warning: true };
   if (needsSignIn(active) && !isCustomOnly(active) && !option?.custom) return { ...row, meta: t("model.signInRequired"), warning: true };
@@ -187,7 +189,7 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
         ...(repeated.has(option.label) && option.provider ? { route: option.provider } : {}),
         ...(detail ? { detail } : {}),
         current: currentSelection ? choiceIsSelected(option, currentSelection) : false,
-        blocked: option.orgBlocked === true,
+        blocked: option.orgBlocked === true || option.needsCliUpdate !== undefined,
       };
     };
     const mixed = own.length > 0 && own.length < all.length;
@@ -198,8 +200,10 @@ export function simpleModelMenu(input: SimpleMenuInput): SimpleMenu {
     }
     const others = all.filter((option) => (!currentSelection || !choiceIsSelected(option, currentSelection))
       && (!botSelection || !choiceIsSelected(option, botSelection)));
-    const suggested = suggestedModels(others, instance.models.default, undefined,
-      currentSelection === undefined ? GROUP_SUGGESTIONS : CURRENT_GROUP_SUGGESTIONS);
+    const starred = favoriteModels();
+    const favorites = others.filter((option) => starred.has(favoriteKey(instance.instanceId, option.id)));
+    const limit = currentSelection === undefined ? GROUP_SUGGESTIONS : CURRENT_GROUP_SUGGESTIONS;
+    const suggested = [...favorites, ...suggestedModels(others.filter((option) => !favorites.includes(option)), instance.models.default, undefined, Math.max(0, limit - favorites.length))];
     const rest = others.filter((option) => !suggested.includes(option));
     const open = expanded.has(instance.instanceId) || rest.length === 1;
     const rows = (open ? [...suggested, ...rest] : suggested).map(row);

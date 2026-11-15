@@ -1,16 +1,18 @@
 // Never log Tailscale's raw stderr (it can contain auth keys and node names): failures are classified into a closed set.
 import { execFile, spawn } from "node:child_process";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 
 import { tailscaleCandidates, tailscaleEnvironment } from "../companion/src/listener.ts";
+import { readTailscaleStatusJson, tailnetInterfaceAddresses, tailnetOrigin } from "../electron/tailnet.mjs";
 
 export interface TailscaleStatus {
   cli: string;
   dnsName: string | null;
   addresses: string[];
   backendState: string;
-  /** The tailnet hands out HTTPS certificates (`CertDomains` in `tailscale status --json`). */
+  /** The tailnet hands out HTTPS certificates (`CertDomains`, or `https` in `Self.CapMap`, in `tailscale status --json`). */
   httpsEnabled: boolean;
 }
 
@@ -80,13 +82,12 @@ export function parseTailscaleStatus(cli: string, stdout: string): TailscaleStat
   const dns = Reflect.get(Object(self), "DNSName");
   const ips = Reflect.get(Object(self), "TailscaleIPs");
   const state = Reflect.get(Object(parsed), "BackendState");
-  const certDomains = Reflect.get(Object(parsed), "CertDomains");
   return {
     cli,
     dnsName: typeof dns === "string" && dns ? dns.replace(/\.$/, "") : null,
     addresses: Array.isArray(ips) ? ips.filter((v): v is string => typeof v === "string") : [],
     backendState: typeof state === "string" ? state : "unknown",
-    httpsEnabled: Array.isArray(certDomains) && certDomains.length > 0,
+    httpsEnabled: readTailscaleStatusJson(stdout)?.https === true,
   };
 }
 
@@ -105,6 +106,32 @@ export async function tailscaleStatus(): Promise<{ status: TailscaleStatus } | {
     if (result.stderr) return { failure: classifyTailscaleStderr(result.stderr) };
   }
   return { failure: sawCli ? "unknown" : "not-installed" };
+}
+
+/** What keeps `tailscale serve` from fronting this server, while the tailnet itself still reaches it. */
+const LISTEN_INSTEAD: Partial<Record<TailscaleFailure, [why: string, fix: string]>> = {
+  "https-not-enabled": ["HTTPS certificates are off for this tailnet", "turn on HTTPS Certificates at https://login.tailscale.com/admin/dns and start again"],
+  "needs-operator": ["Tailscale won't let this user run tailscale serve", "run `sudo tailscale set --operator=$USER` once and start again"],
+  "other-server": ["the tailnet name's HTTPS address already fronts a different MausBot server", "stop that server and start again"],
+};
+
+/**
+ * When `tailscale serve` can't front this server, it listens on its own tailnet addresses instead, at
+ * `http://<name>:<port>` (WireGuard encrypts it). Null when that would not help either: another failure, no MagicDNS
+ * name, or no Tailscale interface here (userspace networking, as in most containers).
+ */
+export function tailnetListenFallback(failure: TailscaleFailure, status: TailscaleStatus, port: number, interfaces: NodeJS.Dict<Array<{ address: string }>> = networkInterfaces()):
+  { origin: string; env: { OMB_TAILNET_NAME: string }; line: string } | null {
+  const reason = LISTEN_INSTEAD[failure];
+  const local = tailnetInterfaceAddresses(interfaces);
+  const addresses = status.addresses.filter((address) => local.includes(address.toLowerCase()));
+  if (!reason || !status.dnsName || addresses.length === 0) return null;
+  const origin = tailnetOrigin(status.dnsName, port);
+  return {
+    origin,
+    env: { OMB_TAILNET_NAME: status.dnsName },
+    line: `tailscale: ${reason[0]}, so this server listens on ${origin} itself (only your tailnet can reach it, and WireGuard encrypts it). For an https:// address, ${reason[1]}.`,
+  };
 }
 
 /** Where a run that shares over Tailscale notes it, so the next start can turn off a share a crash left behind. */

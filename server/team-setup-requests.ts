@@ -10,7 +10,7 @@ import { validateBotCwd } from "./bot-cwd.ts";
 import { UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capabilities.ts";
 import { redactSecretsInText } from "./redact.ts"; import { chiefLevel } from "./chief-level.ts"; import { defaultBotRefusal } from "./default-bot.ts";
-import type { BotRecord, OptionCardData } from "./store.ts";
+import type { BotRecord, OptionCardData } from "./store.ts"; import { outsideDepartmentReason } from "./peer-roster.ts";
 import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupResult, TeamSetupUndo } from "../shared/team-setup.ts";
 
 const section = (value?: string) => value?.trim() || "";
@@ -18,9 +18,13 @@ const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((
 const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Department", cwd: "Working folder" };
 const modelSelectionText = (selection: ModelSelection) =>
   `${selection.instanceId}/${selection.model}${selection.variant ? ` (variant ${selection.variant})` : " (no variant)"}${selection.effort ? ` (effort ${selection.effort})` : ""}`;
+/** One setup may edit a whole department at once (a model switch, an added rule), but each new bot still needs a close review. */
+const MAX_SETUP_BOTS = 40;
+const MAX_NEW_BOTS = 8;
 const fieldsSchema = z.object({
   chiefOfStaff: z.boolean().optional(),
   name: z.string().optional(), title: z.string().optional(), description: z.string().optional(), soul: z.string().optional(),
+  soulAppend: z.string().trim().min(1).optional(),
   cwd: z.string().optional(),
   section: z.string().trim().max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials").optional(),
   modelSelection: z.object({ instanceId: z.string().trim().min(1), model: z.string().trim().min(1), effort: z.string().optional(), variant: z.string().optional() }).strict().optional(),
@@ -31,7 +35,7 @@ const planSchema = z.object({
   operations: z.array(z.discriminatedUnion("action", [
     z.object({ action: z.literal("create"), key: z.string().trim().min(1).max(80), fields: fieldsSchema }).strict(),
     z.object({ action: z.literal("update"), botId: z.string().min(1).max(128), fields: fieldsSchema }).strict(),
-  ])).min(1).max(24),
+  ])).min(1).max(MAX_SETUP_BOTS, `Review at most ${MAX_SETUP_BOTS} bots in one setup`),
 }).strict();
 
 export class TeamSetupError extends Error {
@@ -88,6 +92,8 @@ interface Options {
   ownsThread(botId: string, threadId: string): boolean;
   /** `request` only for a reviewed deletion; Undo of a creation deletes without one. */
   deleteBot(botId: string, revalidate: () => void, request?: TeamSetupRequest): Promise<void>;
+  /** Why deleting this bot would be refused now, as a person's hold reaches it; null when it would not. */
+  deletionRefusal(botId: string): string | null;
 }
 
 type RequestFrom = { botId: string; name: string; color: string };
@@ -157,7 +163,8 @@ export class TeamSetupRequestService {
         if (target) throw new TeamSetupError("A proposed bot already exists. Review a new proposal.", 409);
         if (!operation.fields.name?.trim() || !operation.fields.title?.trim() || !operation.fields.soul?.trim() || !operation.fields.modelSelection) throw new TeamSetupError("Each new bot needs a name, title, soul instructions, and exact model selection");
       } else {
-        if (!target || target.hidden || !this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError("A target bot is outside this Chief's authorized team", 403);
+        if (!target || target.hidden) throw new TeamSetupError("A target bot is outside this Chief's authorized team", 403);
+        if (!this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError(outsideDepartmentReason(chief, target), 403);
         if (teamSetupRevision(target, operation.fields) !== operation.expectedRevision) throw new TeamSetupError(`@${target.name} changed. This setup was cancelled; review a new proposal.`, 409);
         const sourceThreadId = immediate && target.id === chief.id ? request.threadId : undefined;
         if (this.options.targetBusy(target.id, sourceThreadId) && (confirming || target.id !== chief.id)) throw new TeamSetupError(`Stop @${target.name}'s work before changing its setup`, 409);
@@ -166,7 +173,7 @@ export class TeamSetupRequestService {
       if (fields.chiefOfStaff !== undefined && !chief.chiefOfStaff) throw new TeamSetupError(`Only the Chief of Staff changes who the Chief is; ${chief.name} doesn't.`, 403);
       if (confirming && target) this.options.validateChange?.(target, fields);
       const destination = fields.section ?? target?.section ?? chief.section;
-      if (!allowed(destination)) throw new TeamSetupError("The destination team is outside this Chief's authorized scope", 403);
+      if (!allowed(destination)) throw new TeamSetupError(outsideDepartmentReason(chief, { section: destination }), 403);
       if (!request.newTeams.includes(section(destination)) && !existingTeams.has(section(destination))) throw new TeamSetupError("The destination team no longer exists", 409);
       const next = { id: operation.botId, name: fields.name ?? target!.name, section: section(destination), chiefOfStaff: fields.chiefOfStaff ?? target?.chiefOfStaff, hidden: false,
         createdBy: target ? target.createdBy : botOwner(chief) ?? undefined, reportsTo: target?.reportsTo };
@@ -183,7 +190,8 @@ export class TeamSetupRequestService {
     }
     if (request.deletion) {
       const target = this.options.store.bot(request.deletion.botId);
-      if (!target || target.hidden || target.id === chief.id || !this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError("This deletion target is no longer an authorized teammate", 403);
+      if (!target || target.hidden || target.id === chief.id) throw new TeamSetupError("This deletion target is no longer an authorized teammate", 403);
+      if (!this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError(outsideDepartmentReason(chief, target), 403);
       if (target.defaultBot) throw new TeamSetupError(defaultBotRefusal(target.name), 409);
       if (teamSetupRevision(target) !== request.deletion.expectedRevision || this.options.targetBusy(target.id)) throw new TeamSetupError("The deletion target changed or is working. Review a new deletion proposal.", 409);
     }
@@ -197,12 +205,30 @@ export class TeamSetupRequestService {
     for (const operation of parsed.data.operations) {
       const key = operation.action === "create" ? `create:${operation.key}` : `update:${operation.botId}`;
       const previous = combined.get(key);
-      combined.set(key, { ...operation, fields: { ...previous?.fields, ...operation.fields } });
+      if (operation.fields.soul !== undefined && operation.fields.soulAppend !== undefined) throw new TeamSetupError("Use either soul or soulAppend for a bot, not both");
+      // Repeated added rules for one bot all land, in order; any other repeated field keeps its last value.
+      const soulAppend = [previous?.fields.soulAppend, operation.fields.soulAppend].filter(Boolean).join("\n\n") || undefined;
+      combined.set(key, { ...operation, fields: { ...previous?.fields, ...operation.fields, soulAppend } });
     }
-    if (combined.size > 8) throw new TeamSetupError("Review at most eight bots in one setup");
-    const operations: TeamSetupOperation[] = [...combined.values()].map((operation) => {
+    const entries = [...combined.values()];
+    if (entries.filter((operation) => operation.action === "create").length > MAX_NEW_BOTS) throw new TeamSetupError(`Review at most ${MAX_NEW_BOTS} new bots in one setup`);
+    const operations: TeamSetupOperation[] = entries.map((operation) => {
       const target = operation.action === "update" ? this.options.store.bot(operation.botId) : undefined;
-      const fields = this.fields({ ...operation.fields, section: operation.fields.section ?? target?.section ?? chief.section ?? "" }, target ?? undefined);
+      const { soulAppend, ...requested } = operation.fields;
+      if (soulAppend !== undefined) {
+        if (operation.action === "create") throw new TeamSetupError("soulAppend only adds to an existing bot's instructions; give a new bot its full soul");
+        if (requested.soul !== undefined) throw new TeamSetupError("Use either soul or soulAppend for a bot, not both");
+        // A bot this Chief may not change is never read here; validate() refuses it.
+        if (target && !target.hidden && this.options.hasTeamAuthority(chief, target.section)) {
+          // Re-saving runs the whole text through redaction; never let an added rule rewrite what the bot already had.
+          // Check the joined text: an added rule can complete a pattern that starts in the existing instructions.
+          const kept = (target.soul ?? "").trimEnd();
+          const joined = kept ? `${kept}\n\n${soulAppend}` : soulAppend;
+          if (!redactSecretsInText(joined).startsWith(kept)) throw new TeamSetupError(`@${target.name}'s instructions hold credential-like text; change them with a full soul instead`);
+          requested.soul = joined;
+        }
+      }
+      const fields = this.fields({ ...requested, section: requested.section ?? target?.section ?? chief.section ?? "" }, target ?? undefined);
       return { action: operation.action, botId: operation.action === "create" ? newId() : operation.botId,
         ...(operation.action === "create" ? { threadId: newId() } : {}),
         fields,
@@ -409,6 +435,8 @@ export class TeamSetupRequestService {
     const ids = Object.keys(revisions);
     if (changed(ids)) return { ...cannot(UNDO_STALE), stale: true };
     if (ids.some((id) => this.options.targetBusy(id))) return cannot("Wait for the bots this setup changed to finish their work, then undo.");
+    const refusal = created.map((id) => this.options.deletionRefusal(id)).find((reason) => reason !== null);
+    if (refusal) return cannot(refusal);
     try {
       for (const id of created) await this.options.deleteBot(id, () => { if (changed([id])) throw new TeamSetupError(UNDO_STALE, 409); });
       const restore = before.filter((entry) => Object.keys(entry.fields).length);

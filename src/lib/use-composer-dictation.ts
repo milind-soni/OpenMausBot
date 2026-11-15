@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { withOpenSettings } from "@/components/OpenSystemSettings";
-import { useStore } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { t } from "./i18n";
 import { fishSpeech } from "./fish-speech";
 import { listensHere, speechBridge } from "./speech";
@@ -12,7 +12,7 @@ export function useComposerDictation({ draftId, text, onText }: {
   onText: (text: string) => void;
 }) {
   const { capabilities } = useDesktopCapabilities();
-  const ready = listensHere(capabilities, useStore().state.config);
+  const ready = listensHere(capabilities, useStoreSelector((state) => state.config));
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<ReactNode>(null);
   const draft = useRef({ id: draftId, text });

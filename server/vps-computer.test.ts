@@ -15,7 +15,7 @@ vi.mock("node:child_process", async () => ({
 
 vi.mock("./vps-ssh.ts", async () => ({
   ...(await vi.importActual<typeof import("./vps-ssh.ts")>("./vps-ssh.ts")),
-  ensureVpsSshMaster: vi.fn().mockResolvedValue(undefined),
+  ensureVpsSshMaster: vi.fn().mockResolvedValue(0),
 }));
 
 import {
@@ -463,6 +463,9 @@ describe("VPS computer", () => {
     expect(status.ready).toBe(true);
     const run = provision.calls.find(({ args }) => args[2] === "run")?.args ?? [];
     expect(run).toContain("--memory");
+    expect(run.join(" "), "a VPS desktop has no host mounts, so root may install packages there")
+      .toContain("--cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add FSETID --cap-add SETGID --cap-add SETUID");
+    expect(run).not.toContain("no-new-privileges");
     expect(run[run.indexOf("--pids-limit") + 1], "Firefox needs room for its threads").toBe(String(PIDS_LIMIT));
     expect(run).toContain("--ipc");
     expect(run[run.indexOf("--ipc") + 1]).toBe("private");

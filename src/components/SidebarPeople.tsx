@@ -1,8 +1,7 @@
-// On a Team Cloud: the team's people, with their pictures, and, when the server says who is here, a dot on whoever is
-// here now, listed first. Your own row opens your inbox, your chat with your Chief where
-// everything sent to you arrives, with the inbox's list beside it, and counts the asks waiting on you there. Anyone
-// else's puts @their name in the composer, which reaches their inbox once sent. For the team's admins, one more row opens
-// the team's People page, where invitations are sent, so someone alone on a new team still has a way to bring people in.
+// On a Team Cloud: the team's people as a row of faces above the bots, you first, with a dot on whoever is here now when
+// the server says so. People are who you share with and who you mention, never a chat of their own: your own face opens
+// your inbox, a teammate's puts @their name in the composer on screen. For the team's admins, one more opens the team's
+// People page, where invitations are sent, so someone alone on a new team still has a way to bring people in.
 import { UserPlus } from "lucide-react";
 import { botOwner } from "../../shared/bot-owner";
 import { openAsksOf } from "@/lib/bot-unread";
@@ -98,10 +97,10 @@ export function SidebarPeople({ compact, onOpened }: { compact: boolean; onOpene
     } else if (inbox) openBot(dispatch, inbox, showThreads);
     focusComposer();
   };
+  const face = compact ? 22 : 26;
   return (
-    <section aria-label={t("sidebar.people.title")} data-sidebar-people className={cn(compact ? "px-1" : "px-2 pb-1")}>
-      {!compact && <div className="px-2 pb-0.5 pt-1 text-[11px] font-medium text-ink-tertiary">{t("sidebar.people.title")}</div>}
-      <ul className={cn("flex", compact ? "flex-col items-center gap-1" : "flex-col")}>
+    <section aria-label={t("sidebar.people.title")} data-sidebar-people className={cn(compact ? "px-1" : "px-2 pb-1.5 pt-0.5")}>
+      <ul className={cn("flex items-center gap-1", compact ? "flex-col" : "flex-wrap")}>
         {people.map((person) => {
           const label = !person.you ? teammateLabel(person, presence)
             : waiting ? t("sidebar.people.yourInboxWaiting", { count: waiting }) : t("sidebar.people.yourInbox");
@@ -109,15 +108,14 @@ export function SidebarPeople({ compact, onOpened }: { compact: boolean; onOpene
           return (
             <li key={person.email}>
               <button type="button" onClick={() => open(person)} aria-label={label} title={label} data-person={person.email}
-                className={cn("relative flex w-full min-w-0 items-center gap-2 rounded-lg text-left text-[13px] text-ink hover:bg-raised/60", compact ? "p-1" : "px-2 py-1")}>
+                className="relative flex rounded-full p-1 hover:bg-raised/60">
                 <span className="relative inline-flex shrink-0" data-person-here={here || undefined}>
-                  <PersonFace person={person} size={compact ? 22 : 18} />
-                  {here && <HereDot size={compact ? 22 : 18} />}
+                  <PersonFace person={person} size={face} />
+                  {here && <HereDot size={face} />}
                 </span>
-                {!compact && <span className="min-w-0 flex-1 truncate">{person.you ? t("sidebar.people.you", { name: person.name }) : person.name}</span>}
                 {person.you && waiting > 0 && (
                   <span aria-hidden="true" data-inbox-waiting={waiting}
-                    className={cn("rounded-full bg-warning px-1.5 text-[11px] font-semibold tabular-nums text-panel", compact && "absolute -right-0.5 -top-0.5 px-1 text-[10px]")}>{waiting}</span>
+                    className="absolute -right-0.5 -top-0.5 rounded-full bg-warning px-1 text-[10px] font-semibold tabular-nums text-panel">{waiting}</span>
                 )}
               </button>
             </li>
@@ -126,9 +124,10 @@ export function SidebarPeople({ compact, onOpened }: { compact: boolean; onOpene
         {invite && (
           <li>
             <a href={invite} target="_blank" rel="noreferrer" aria-label={t("sidebar.people.invite")} title={t("sidebar.people.invite")} data-people-invite
-              className={cn("flex w-full min-w-0 items-center gap-2 rounded-lg text-left text-[13px] text-ink-secondary hover:bg-raised/60 hover:text-ink", compact ? "justify-center p-1" : "px-2 py-1")}>
-              <UserPlus aria-hidden="true" size={compact ? 18 : 15} strokeWidth={1.75} className="shrink-0" />
-              {!compact && <span className="min-w-0 flex-1 truncate">{t("sidebar.people.invite")}</span>}
+              className="flex items-center justify-center rounded-full p-1 text-ink-secondary hover:bg-raised/60 hover:text-ink">
+              <span className="flex items-center justify-center rounded-full border border-dashed border-hairline" style={{ width: face, height: face }}>
+                <UserPlus aria-hidden="true" size={compact ? 13 : 14} strokeWidth={1.75} className="shrink-0" />
+              </span>
             </a>
           </li>
         )}

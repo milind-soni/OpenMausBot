@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 
 import { hasPriorRun } from "./prior-run";
 import { SIMPLE_ONLY } from "./simple-only";
+import { windowPrefChanged } from "./window-pref-changes";
 
 export const ADVANCED_MODE_KEY = "omb-advanced-mode";
 
@@ -69,6 +70,7 @@ export function setAdvancedMode(enabled: boolean): void {
   } catch {
   }
   notify();
+  windowPrefChanged();
 }
 
 export function useAdvancedMode(): boolean {

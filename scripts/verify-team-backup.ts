@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
 import { request } from "./mcp-server.ts";
 import { parseTeamBackup } from "../shared/team-backup.ts";
+import { inChargeOfEvery } from "../server/peer-roster.ts";
 
 export async function verifyTeamBackup(report: (event: unknown) => void = () => {}) {
   const fixture = await launchVerificationServer();
@@ -15,6 +16,11 @@ export async function verifyTeamBackup(report: (event: unknown) => void = () => 
     return result;
   };
   const post = (path: string, body: unknown) => request(path, { method: "POST", body: JSON.stringify(body) }, url);
+  const departments = async (): Promise<string[]> => (await request("/api/sidebar-sections", {}, url)).sections;
+  // The main Chief is in charge of every department, so each department an import adds becomes its too
+  // (server/department-grants.ts). Nothing else about an existing bot changes.
+  const granted = <T extends Parameters<typeof inChargeOfEvery>[0]>(bot: T, before: string[], after: string[]): T => inChargeOfEvery(bot, before)
+    ? { ...bot, managedSections: [...(bot.managedSections ?? []), ...after.filter((name) => !before.includes(name))] } : bot;
   try {
     const doctor = await command("doctor") as { ok: boolean };
     assert.equal(doctor.ok, true);
@@ -29,6 +35,7 @@ export async function verifyTeamBackup(report: (event: unknown) => void = () => 
     assert.equal(wait.status, "settled");
     const transcript = await command("messages", "--bot", bot.id, "--limit", "10");
     const before = await request("/api/bots", {}, url);
+    const departmentsBefore = await departments();
     const backup = parseTeamBackup(await post("/api/teams/export", { format: "backup", name: "Fixture backup" }));
     report({ command: "export backup", bots: backup.bots.length, conversations: backup.bots.reduce((n, bot) => n + bot.tasks.length, 0) });
     const imported = await post("/api/teams/import?mode=add", JSON.parse(JSON.stringify(backup)));
@@ -38,7 +45,9 @@ export async function verifyTeamBackup(report: (event: unknown) => void = () => 
     assert.equal(added.section, "Original team 2");
     assert.equal(added.soul, soul);
     const after = await request("/api/bots", {}, url);
-    for (const existing of before.bots) assert.deepEqual(after.bots.find((candidate: { id: string }) => candidate.id === existing.id), existing);
+    const departmentsAfter = await departments();
+    assert.ok(before.bots.some((existing: Parameters<typeof inChargeOfEvery>[0]) => inChargeOfEvery(existing, departmentsBefore)));
+    for (const existing of before.bots) assert.deepEqual(after.bots.find((candidate: { id: string }) => candidate.id === existing.id), granted(existing, departmentsBefore, departmentsAfter));
     for (const existing of before.groups) assert.deepEqual(after.groups.find((candidate: { id: string }) => candidate.id === existing.id), existing);
     assert.deepEqual(await command("messages", "--bot", bot.id, "--limit", "10"), transcript);
     const old = before.bots.find((candidate: { id: string }) => candidate.id === bot.id);
@@ -68,6 +77,7 @@ export async function verifyTeamBackup(report: (event: unknown) => void = () => 
       { format: "repeated Markdown package", path: "/api/teams/import?mode=add", body: packageExport.markdown },
     ].entries()) {
       const existing = await request("/api/bots", {}, url);
+      const existingDepartments = await departments();
       const result = await post(example.path, example.body);
       const section = `Fixture manifest ${index + 2}`;
       assert.ok(result.bots.length > 0);
@@ -75,9 +85,10 @@ export async function verifyTeamBackup(report: (event: unknown) => void = () => 
       assert.ok(result.groups.every((candidate: { section?: string }) => candidate.section === section));
       if (example.format.includes("project")) assert.equal(result.group.section, section);
       const current = await request("/api/bots", {}, url);
+      const currentDepartments = await departments();
       assert.equal(current.bots.length, existing.bots.length + result.bots.length);
       assert.equal(current.groups.length, existing.groups.length + result.groups.length);
-      for (const value of existing.bots) assert.deepEqual(current.bots.find((candidate: { id: string }) => candidate.id === value.id), value);
+      for (const value of existing.bots) assert.deepEqual(current.bots.find((candidate: { id: string }) => candidate.id === value.id), granted(value, existingDepartments, currentDepartments));
       for (const value of existing.groups) assert.deepEqual(current.groups.find((candidate: { id: string }) => candidate.id === value.id), value);
       assert.deepEqual(await command("messages", "--bot", bot.id, "--limit", "10"), transcript);
       report({ command: "import template", format: example.format, section, existingBotsKept: existing.bots.length, existingRoomsKept: existing.groups.length });

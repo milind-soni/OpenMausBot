@@ -109,7 +109,7 @@ export function createEmailHost(deps: EmailHostDeps) {
           const original = await run.readMessage(mailbox, guard, { mailbox: box, uid: args.reply_to_uid });
           if (original.messageId) threading = { inReplyTo: original.messageId };
         }
-        return emailText({ account: from, ...await run.sendMessage(mailbox, guard, { to: args.to, subject: args.subject, text: args.text, ...pick(args, ["cc", "bcc"]), ...threading }) });
+        return emailText({ account: from, ...await run.sendMessage(mailbox, guard, { to: args.to, subject: args.subject, text: args.text, ...pick(args, ["cc", "bcc", "html", "inline_images"]), ...threading }) });
       }
     }
   }

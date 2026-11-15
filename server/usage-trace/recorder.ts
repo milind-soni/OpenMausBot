@@ -332,7 +332,10 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
 
   /** OMB's own record of a tool it served: its timing replaces the engine's, or it stands alone when the engine reported none. */
   function receipt(threadId: string, served: ToolReceipt): void {
-    const turn = live.get(threadId) ?? ended.get(threadId)?.turn;
+    receiptFor(live.get(threadId) ?? ended.get(threadId)?.turn, served);
+  }
+
+  function receiptFor(turn: Turn | undefined, served: ToolReceipt): void {
     if (!turn || !Number.isFinite(served.startedAt) || !Number.isFinite(served.endedAt) || served.endedAt < served.startedAt) return;
     if (served.startedAt < turn.startedAt - RECEIPT_SLACK_MS || served.endedAt > now() + RECEIPT_SLACK_MS) return;
     if (!turn.endedAt) turn.lastEventAt = Math.max(turn.lastEventAt, served.endedAt);
@@ -398,6 +401,9 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
   /** Times one MCP request OMB serves itself (browser, computer, data, connected apps): a receipt once its answer is sent. */
   function timeServed(req: IncomingMessage, res: ServerResponse, threadId: string): void {
     const startedAt = now();
+    // A response can arrive after this turn settled or another one began.
+    // Keep its original owner, including when settle has removed it from ended.
+    const turn = live.get(threadId) ?? ended.get(threadId)?.turn;
     onJsonBody(res, (body) => {
       const request = parsedBodyOf(req) as { method?: unknown; params?: { name?: unknown; arguments?: unknown } } | undefined;
       const name = request?.method === "tools/call" ? request.params?.name : undefined;
@@ -406,7 +412,7 @@ export function createTraceRecorder(options: { dataDir: string; now?: () => numb
       const failed = answer.error !== undefined || answer.result?.isError === true;
       const detail = toolDetail(name, request?.params?.arguments);
       const error = failed ? errorLine(typeof answer.error === "string" ? answer.error : answer.result?.content?.find((part) => typeof part.text === "string")?.text) : undefined;
-      receipt(threadId, { name, startedAt, endedAt: now(), ok: !failed, ...(detail ? { detail } : {}), ...(error ? { error } : {}) });
+      receiptFor(turn, { name, startedAt, endedAt: now(), ok: !failed, ...(detail ? { detail } : {}), ...(error ? { error } : {}) });
       return body;
     });
   }

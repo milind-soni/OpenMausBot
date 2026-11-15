@@ -23,7 +23,7 @@ share a room whose lead is Pepper.
   that gate reports the app, and its row is Basil's.
 - `GET /api/threads/<room>/messages/<id>/app` answers both with `room: true` and `can` with `message`,
   `modelContext`, `serverTools` and `serverResources` off.
-- Both rows are live in the room, the page with Full screen but without Point or Share.
+- Both rows are live in the room, the page with Full screen and Point (a pick goes to the bot that made the page) but without Share.
 - A real mouse click on the page's send button makes the page report that `send()` resolved (it grows to 300px; a
   refusal would leave it at 240px), and a click on the board's "Paint it red" is answered by the host with the room's
   refusal. The renderer makes no request but GETs meanwhile, the room gains no message and no app row gains context,
@@ -32,7 +32,7 @@ share a room whose lead is Pepper.
 Evidence (with `OMB_UI_EVIDENCE_DIR`): `room-pages-shown.png`, `room-pages-clicked-send.png`,
 `room-pages-clicked-app.png` and `room-pages.json` (the rows, the page document's head, the requests and the console).
 
-What it looks like when the recipe passes: both rows in the room, the page without Point or Share
+What it looks like when the recipe passes: both rows in the room, the page without Share
 (`evidence/room-pages/shown.png`); the page after a real click on its send button, which resolved and posted nothing
 (`evidence/room-pages/clicked-send.png`); and the board after a click on "Paint it red", answered by the host with the
 room's refusal (`evidence/room-pages/clicked-app.png`).

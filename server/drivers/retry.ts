@@ -34,12 +34,12 @@ export interface ErrorClassification {
 const TRANSIENT_PATTERNS: Array<{ pattern: RegExp; reason: TransientReason }> = [
   { pattern: /\b(?:429|rate.?limit|too many requests)\b/i, reason: "rate_limited" },
   { pattern: /\boverloaded\b|\bcapacity\b/i, reason: "overloaded" },
-  { pattern: /\b5\d{2}\b|\binternal server error\b|\bbad gateway\b|\bservice unavailable\b/i, reason: "server_error" },
+  { pattern: /\b5\d{2}\b|\binternal server error\b|\binternal service failure\b|\bServiceUnavailableError\b|\bbad gateway\b|\bservice unavailable\b/i, reason: "server_error" },
   // Codex's ChatGPT workspace routing lookup (codex-cli 0.160); only its "unauthorized" variant is a sign-in problem.
   { pattern: /\bworkspace routing discovery (?:failed|timed out)\b/i, reason: "server_error" },
   {
     pattern:
-      /\b(?:econnreset|econnrefused|epipe|etimedout|eai_again|connection reset|connection refused|socket hang up|network error|fetch failed)\b/i,
+      /\b(?:econnreset|econnrefused|epipe|etimedout|eai_again|unexpected_eof_while_reading|connection reset|connection refused|socket hang up|network error|fetch failed)\b/i,
     reason: "connection_reset",
   },
   { pattern: /\btimeout(ed)?\b|\btimed? out\b/i, reason: "timeout" },
@@ -50,6 +50,13 @@ const TRANSIENT_PATTERNS: Array<{ pattern: RegExp; reason: TransientReason }> = 
  * team's shared budget", "You're out of usage credits", "You're out of extra usage". */
 export const USAGE_LIMIT = /\busage limit\b|\bhit your (?:(?!rate\b)[\w'’-]+ ){0,3}(?:limit|budget)\b|\b(?:weekly|daily|monthly|subscription|usage|session|5-hour) limit reached\b|\bout of (?:usage(?: credits)?|extra usage|credits)\b/i;
 
+/** An engine that cannot run the model it was given, whatever the turn: OpenCode 2.2.5 answers session/prompt for a model
+ * it has no route to with `{code: -32603, message: "Internal error: Unsupported package for <provider>/<model>: …",
+ * data: {service: "session", errorName: "provider.no-route"}}`. */
+export const MODEL_NO_ROUTE = /\bunsupported package for\b|\bprovider\.no-route\b/i;
+/** The same failure in the plain words a person is shown, which stay as final as the raw ones. */
+const MODEL_NO_ROUTE_PLAIN = /\bcan't use (?:the|this bot's) model\b/i;
+
 const TERMINAL_PATTERNS: Array<{ pattern: RegExp; reason: TerminalReason }> = [
   {
     pattern: /\b(?:40[13]|unauthorized|forbidden|invalid api key|missing bearer|authentication required|not logged in|logged out)\b/i,
@@ -59,10 +66,13 @@ const TERMINAL_PATTERNS: Array<{ pattern: RegExp; reason: TerminalReason }> = [
   { pattern: USAGE_LIMIT, reason: "quota" },
   { pattern: /\b402\b|\bquota\b|\bbilling\b|\bsubscription\b/i, reason: "quota" },
   { pattern: /\bmodel not found\b|\bunknown model\b|\bdoes not exist for model\b|\bunsupported model\b/i, reason: "unknown_model" },
-  { pattern: /\b400\b|\b422\b|\binvalid request\b|\bmalformed\b|\bunexpected status\b/i, reason: "invalid_request" },
+  { pattern: MODEL_NO_ROUTE, reason: "unknown_model" },
+  { pattern: MODEL_NO_ROUTE_PLAIN, reason: "unknown_model" },
+  { pattern: /\b400\b|\b422\b|\binvalid request\b|\bmalformed\b/i, reason: "invalid_request" },
   { pattern: /\b404\b|\bno such thread\b|\bthread gone\b/i, reason: "not_found" },
   // A turn the user stopped must never come back as an auto-retry.
   { pattern: /\b(?:interrupted|cancelled by user)\b/i, reason: "interrupted" },
+  { pattern: /\bcertificate[ _]verify[ _]failed\b/i, reason: "unknown" },
 ];
 
 interface CliExit {

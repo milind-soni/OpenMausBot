@@ -61,7 +61,8 @@ export function createMcpKeys(deps: McpKeysDeps) {
       return kept && now() - kept.at < LINKED_KEPT_MS ? kept.value : UNREAD;
     }
     const secret = deps.store.secret(item);
-    if (!secret) return REMOVED;
+    // Security: an MCP server serves the whole team, so a member's own secret is never its key.
+    if (!secret || secret.person) return REMOVED;
     if (botId !== undefined && !loginUsableBy(secret, botId)) return KEPT;
     if (botId !== undefined && now() - (lastMarked.get(item) ?? 0) >= MARK_USED_MS) { lastMarked.set(item, now()); deps.store.markUsed(item); }
     return secret.value;

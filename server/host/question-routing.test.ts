@@ -122,6 +122,16 @@ describe("an answer passed on by another bot", () => {
     expect(w.answeredNodes.map((one) => one.text)).toEqual(["Excel"]);
   });
 
+  it("leaves a carried question alone when the sender chose another thread itself, and still answers it unnamed when it chose none", async () => {
+    const w = world();
+    const node = parked(w);
+    const turn = { id: "root", carrying: [node.id] } as HandoffView;
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: turn, target: DACHS, message: "Also check the tests.", threadId: "other-work", selected: true })).toBeUndefined();
+    expect(w.answeredNodes).toEqual([]);
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: turn, target: DACHS, message: "Excel", threadId: "other-work" })).toMatchObject({ outcome: "injected", requestId: node.id });
+    expect(w.answeredNodes.map((one) => one.text)).toEqual(["Excel"]);
+  });
+
   it("takes the requester's message to the thread its earlier work waits in as the answer, in a later turn and unnamed", async () => {
     const w = world();
     const node = parked(w);

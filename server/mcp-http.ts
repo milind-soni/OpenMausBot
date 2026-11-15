@@ -82,6 +82,10 @@ function unwrap(message: JsonRpcMessage): unknown {
   return message.result;
 }
 
+function isResponse(message: JsonRpcMessage): boolean {
+  return message.method === undefined && (Object.hasOwn(message, "result") || Object.hasOwn(message, "error"));
+}
+
 function parseMessage(text: string): JsonRpcMessage | JsonRpcMessage[] | null {
   try {
     const parsed: unknown = JSON.parse(text);
@@ -117,6 +121,8 @@ async function readSse(
   signal: AbortSignal,
   onEvent: (event: SseEvent) => "stop" | undefined,
   maxBytes = MAX_REMOTE_MCP_BYTES,
+  /** One POST's reply: a stateless server may hang up right after its last event, leaving off the closing blank line. */
+  lastEventAtEnd = false,
 ): Promise<void> {
   const reader = response.body?.getReader();
   if (!reader) throw new McpHttpError("protocol", "empty event stream");
@@ -129,7 +135,11 @@ async function readSse(
   try {
     for (;;) {
       const { value, done } = await reader.read();
-      if (done) return;
+      if (done) {
+        const last = lastEventAtEnd ? parseSseBlock(buffer + decoder.decode()) : null;
+        if (last) onEvent(last);
+        return;
+      }
       bytes += value.byteLength;
       if (bytes > maxBytes) throw new McpHttpError("protocol", "event stream too large");
       const chunk = decoder.decode(value, { stream: true });
@@ -144,13 +154,14 @@ async function readSse(
         buffer = buffer.slice(separator + 2);
         const event = parseSseBlock(block);
         if (event && onEvent(event) === "stop") {
-          await reader.cancel().catch(() => {});
           return;
         }
       }
     }
   } finally {
     signal.removeEventListener("abort", onAbort);
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }
 
@@ -160,15 +171,17 @@ async function readBounded(response: Response, maxBytes = MAX_REMOTE_MCP_BYTES):
   const decoder = new TextDecoder();
   let text = "";
   let bytes = 0;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) return text + decoder.decode();
-    bytes += value.byteLength;
-    if (bytes > maxBytes) {
-      await reader.cancel().catch(() => {});
-      throw new McpHttpError("protocol", "response too large");
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return text + decoder.decode();
+      bytes += value.byteLength;
+      if (bytes > maxBytes) throw new McpHttpError("protocol", "response too large");
+      text += decoder.decode(value, { stream: true });
     }
-    text += decoder.decode(value, { stream: true });
+  } finally {
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }
 
@@ -297,7 +310,7 @@ export class RemoteMcpClient {
     if (type.startsWith("application/json")) {
       const parsed = parseMessage(await readBounded(response, this.maxBytes));
       this.deliverNotifications(parsed);
-      const message = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).find((entry) => entry.id === id);
+      const message = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).find((entry) => entry.id === id && isResponse(entry));
       if (!message) throw new McpHttpError("protocol", "response did not answer the request");
       return unwrap(message);
     }
@@ -307,11 +320,11 @@ export class RemoteMcpClient {
         if (event.event !== "message") return undefined;
         const parsed = parseMessage(event.data);
         this.deliverNotifications(parsed);
-        const message = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).find((entry) => entry.id === id);
+        const message = (Array.isArray(parsed) ? parsed : parsed ? [parsed] : []).find((entry) => entry.id === id && isResponse(entry));
         if (!message) return undefined;
         found = message;
         return "stop";
-      }, this.maxBytes);
+      }, this.maxBytes, true);
       if (signal.aborted) throw new McpHttpError("network", "aborted");
       if (!found) throw new McpHttpError("protocol", "event stream ended without the response");
       return unwrap(found);
@@ -335,8 +348,12 @@ export class RemoteMcpClient {
       const headers = this.headers();
       headers.set("accept", "text/event-stream");
       // The caller's signal covers only the opening: later requests are answered on this stream.
-      const opening = AbortSignal.any([signal, this.sseAbort.signal]);
-      this.fetchImpl(this.target.url, { method: "GET", headers, signal: opening })
+      const opening = new AbortController();
+      const abortOpening = () => opening.abort(signal.reason);
+      signal.addEventListener("abort", abortOpening, { once: true });
+      if (signal.aborted) abortOpening();
+      const streamSignal = AbortSignal.any([opening.signal, this.sseAbort.signal]);
+      this.fetchImpl(this.target.url, { method: "GET", headers, signal: streamSignal })
         .then(async (response) => {
           if (!response.ok) {
             drain(response);
@@ -348,6 +365,7 @@ export class RemoteMcpClient {
                 settled = true;
                 try {
                   resolveEndpoint(new URL(event.data, this.target.url).toString());
+                  signal.removeEventListener("abort", abortOpening);
                 } catch {
                   rejectEndpoint(new McpHttpError("protocol", "invalid endpoint event"));
                 }
@@ -358,6 +376,7 @@ export class RemoteMcpClient {
             const parsed = parseMessage(event.data);
             this.deliverNotifications(parsed);
             for (const message of Array.isArray(parsed) ? parsed : parsed ? [parsed] : []) {
+              if (!isResponse(message)) continue;
               const entry = typeof message.id === "number" ? this.pending.get(message.id) : undefined;
               if (!entry) continue;
               this.pending.delete(message.id as number);
@@ -373,7 +392,8 @@ export class RemoteMcpClient {
         })
         .catch((error: unknown) => {
           fail(error instanceof McpHttpError ? error : new McpHttpError("network", "event stream failed"));
-        });
+        })
+        .finally(() => signal.removeEventListener("abort", abortOpening));
     });
     return this.sseEndpoint;
   }

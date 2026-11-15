@@ -111,7 +111,7 @@ describe("saveBotAttachment", () => {
   });
 
   it("names what is supported when the type is not", async () => {
-    for (const name of ["page.html", "logo.svg", "run.exe", "bundle.zip", "noextension"]) {
+    for (const name of ["page.html", "logo.svg", "run.exe", "bundle.cab", "data.tar.zst", "noextension"]) {
       writeFileSync(join(WORK, name), "x");
       await expect(saveBotAttachment({ path: name, roots: [WORK] }), name).rejects.toMatchObject({
         status: 415,
@@ -124,6 +124,46 @@ describe("saveBotAttachment", () => {
     await expect(saveBotAttachment({ path: "nope.pdf", roots: [WORK] })).rejects.toMatchObject({ status: 404 });
     await expect(saveBotAttachment({ path: "  ", roots: [WORK] })).rejects.toMatchObject({ status: 400 });
     expect(existsSync(ATTACHMENTS_DIR)).toBe(true);
+  });
+});
+
+describe("saveBotAttachment for an archive", () => {
+  // Typed by the name's last extension, like a person's upload: build.tar.gz is a .gz.
+  const archives: Array<[string, string, string]> = [
+    ["project.zip", "application/zip", ".zip"],
+    ["photos.rar", "application/vnd.rar", ".rar"],
+    ["dump.7z", "application/x-7z-compressed", ".7z"],
+    ["site.tar", "application/x-tar", ".tar"],
+    ["log.gz", "application/gzip", ".gz"],
+    ["src.tgz", "application/x-compressed-tar", ".tgz"],
+    ["data.bz2", "application/x-bzip2", ".bz2"],
+    ["db.xz", "application/x-xz", ".xz"],
+    ["build.tar.gz", "application/gzip", ".gz"],
+    ["BUNDLE.ZIP", "application/zip", ".zip"],
+    ["Release.TAR.GZ", "application/gzip", ".gz"],
+  ];
+
+  it.each(archives)("attaches %s as a plain file, stored as sent", async (name, mime, extension) => {
+    const bytes = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from(`not unpacked: ${name}`)]);
+    writeFileSync(join(WORK, name), bytes);
+    const saved = await saveBotAttachment({ path: name, roots: [WORK] });
+    expect(saved.attachment).toMatchObject({ kind: "file", mime });
+    if (saved.attachment.kind === "file") expect(saved.attachment.name.toLowerCase()).toBe(name.toLowerCase());
+    expect(saved.attachment.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
+    expect(saved.attachment.path.endsWith(extension)).toBe(true);
+    expect(readFileSync(saved.attachment.path)).toEqual(bytes);
+    expect(saved.bytes).toBe(bytes.byteLength);
+  });
+
+  it("keeps the file size limit and the folder rules", async () => {
+    const big = join(WORK, "huge.zip");
+    writeFileSync(big, "PK");
+    truncateSync(big, FILE_MAX_BYTES + 1);
+    await expect(saveBotAttachment({ path: "huge.zip", roots: [WORK] })).rejects.toMatchObject({ status: 413, code: "file_too_large" });
+    rmSync(big);
+    writeFileSync(join(DATA_ROOT, "outside.zip"), "PK");
+    await expect(saveBotAttachment({ path: join(DATA_ROOT, "outside.zip"), roots: [WORK] })).rejects.toMatchObject({ status: 403 });
+    await expect(saveBotAttachment({ path: "../outside.zip", roots: [WORK] })).rejects.toMatchObject({ status: 403 });
   });
 });
 
@@ -198,8 +238,8 @@ describe("saveBotAttachment for a file a turn saved outside its folders", () => 
     const since = Date.now();
     const turn = { roots: [WORK], savedThisTurn: { since, refuse } };
     await expect(saveBotAttachment({ path: DESIGNS, ...turn })).rejects.toMatchObject({ status: 400 });
-    writeFileSync(join(DESIGNS, "bundle.zip"), "PK");
-    await expect(saveBotAttachment({ path: join(DESIGNS, "bundle.zip"), ...turn })).rejects.toMatchObject({ status: 415 });
+    writeFileSync(join(DESIGNS, "bundle.cab"), "MSCF");
+    await expect(saveBotAttachment({ path: join(DESIGNS, "bundle.cab"), ...turn })).rejects.toMatchObject({ status: 415 });
     const big = join(DESIGNS, "big.mp4");
     writeFileSync(big, "x");
     truncateSync(big, FILE_MAX_BYTES + 1);
@@ -297,6 +337,7 @@ describe("deliveredCopy", () => {
   const bot = (id: string, parentId: string | null, extra: Partial<Message> = {}): Message =>
     ({ id, at: 1, parentId, role: "bot", kind: "text", text: "", ...extra }) as Message;
   const photo = { kind: "image" as const, path: "/store/copy.png", mime: "image/png", name: "sideboard.png" };
+  const renamed = { kind: "file" as const, path: "/store/copy.md", mime: "text/markdown; charset=utf-8", name: "团队技能包-README.md", source: "D:\\AI\\openmausbot-skills\\README.md" };
   const ask = { id: "ask", at: 1, parentId: null, role: "user", kind: "text", text: "find a sideboard" } as Message;
 
   it("finds the picture the reply's turn delivered under the name its inline image uses", () => {
@@ -324,5 +365,39 @@ describe("deliveredCopy", () => {
     const twice = bot("twice", "second", by("me"));
     expect(deliveredCopy([ask, first, second, twice], twice, "sideboard.png")).toBeNull();
     expect(deliveredCopy([ask, first, twice], { ...twice, parentId: "first" }, "sideboard.png")).toEqual(photo);
+  });
+
+  it("finds a renamed delivery by its source path", () => {
+    const attached = bot("attached", "ask", { attachments: [renamed] });
+    const reply = bot("reply", "attached", { text: "[README](D:/AI/openmausbot-skills/README.md)" });
+    expect(deliveredCopy([ask, attached, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toEqual(renamed);
+  });
+
+  it("finds the same source spelled as a file:// URL or with an encoded space", () => {
+    const spaced = { ...renamed, source: "D:\\AI\\openmausbot-skills\\my file.pdf", name: "团队技能包.pdf" };
+    const attached = bot("attached", "ask", { attachments: [spaced] });
+    const reply = bot("reply", "attached", { text: "[pdf](file:///D:/AI/openmausbot-skills/my%20file.pdf)" });
+    expect(deliveredCopy([ask, attached, reply], reply, "my file.pdf", "file:///D:/AI/openmausbot-skills/my%20file.pdf")).toEqual(spaced);
+  });
+
+  it("still finds a delivery by display name when the record has no source", () => {
+    const attached = bot("attached", "ask", { attachments: [photo] });
+    const reply = bot("reply", "attached", { text: "![Sideboard](/tmp/sideboard.png)" });
+    expect(deliveredCopy([ask, attached, reply], reply, "sideboard.png", "/tmp/sideboard.png")).toEqual(photo);
+  });
+
+  it("refuses when two deliveries share the clicked source", () => {
+    const by = (botId: string) => ({ from: { botId, name: botId, color: "blue" } }) as Partial<Message>;
+    const first = bot("first", "ask", { ...by("me"), attachments: [renamed] });
+    const second = bot("second", "first", { ...by("me"), attachments: [{ ...renamed, path: "/store/copy-2.md" }] });
+    const reply = bot("reply", "second", by("me"));
+    expect(deliveredCopy([ask, first, second, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toBeNull();
+  });
+
+  it("ignores a different bot's delivery even when its source matches", () => {
+    const by = (botId: string) => ({ from: { botId, name: botId, color: "blue" } }) as Partial<Message>;
+    const peer = bot("peer", "ask", { ...by("other"), attachments: [renamed] });
+    const reply = bot("reply", "peer", by("me"));
+    expect(deliveredCopy([ask, peer, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toBeNull();
   });
 });

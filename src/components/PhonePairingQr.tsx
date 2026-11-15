@@ -4,7 +4,6 @@ import { QRCodeSVG } from "qrcode.react";
 
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
-import { ANDROID_APK_URL, IOS_APP_STORE_URL } from "@/lib/app-links";
 import { productName } from "@/lib/brand";
 import type { PhoneSetupController } from "./PhoneSetupFlow";
 
@@ -26,7 +25,6 @@ function RouteRow({ on, label, value }: { on: boolean; label: string; value: str
  * and has no countdown, no code and no cancel. */
 export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signedIn: boolean }) {
   const [copied, setCopied] = useState(false);
-  const [storeOpen, setStoreOpen] = useState(false);
   const state = c.state;
   const renewing = Boolean(state?.pairing);
   useEffect(() => {
@@ -50,7 +48,8 @@ export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signe
       <div className="rounded-2xl bg-white p-3.5 transition-opacity duration-150" aria-label={t("phone.code.qrAria")}>
         <QRCodeSVG key={state.pairing?.token} value={c.pairingLink} size={320} level="L" marginSize={1} bgColor="#ffffff" fgColor="#111111" />
       </div>
-      <p className="mt-4 text-[13px] text-ink-secondary">{t("phone.code.e2e.scan", { app: productName() })}</p>
+      <p className="mt-4 text-[13px] text-ink-secondary">{t("phone.code.installAndScan", { app: productName() })}</p>
+      <p className="mt-1 text-[12px] text-ink-tertiary">{t("phone.code.notCamera", { app: productName() })}</p>
       <div className="mt-5 w-full px-2">
         <RouteRow on={Boolean(lan)} label={t("phone.code.e2e.wifi")} value={lan ?? ""} />
         <RouteRow on={Boolean(state.tailnetName)} label={t("phone.code.e2e.tailscale")} value={state.tailnetName ?? t("phone.code.e2e.tailscaleOff")} />
@@ -69,24 +68,8 @@ export function PhonePairingQr({ c, signedIn }: { c: PhoneSetupController; signe
         <Lock size={12} className="mt-0.5 shrink-0" />
         {t("phone.code.e2e.encrypted")}
       </p>
-      <div className="relative mt-5 flex w-full items-center justify-between px-2">
+      <div className="mt-5 flex w-full px-2">
         <button onClick={copy} className="text-[12px] text-ink-secondary hover:text-ink">{t("phone.code.e2e.copyLink")}</button>
-        <button onClick={() => setStoreOpen((open) => !open)} aria-expanded={storeOpen} className="text-[12px] text-ink-secondary hover:text-ink">
-          {t("phone.code.e2e.getApp")}
-        </button>
-        {storeOpen && (
-          <div className="absolute bottom-8 right-0 z-10 rounded-xl border border-hairline/40 bg-card p-4 shadow-lg">
-            <div className="flex gap-4">
-              {[["App Store", IOS_APP_STORE_URL], ["Android", ANDROID_APK_URL]].map(([label, url]) => (
-                <div key={label} className="flex flex-col items-center gap-2">
-                  <div className="rounded-lg bg-white p-2"><QRCodeSVG value={url} size={128} level="M" bgColor="#ffffff" fgColor="#111111" /></div>
-                  <span className="text-[12px] text-ink">{label}</span>
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 text-center text-[12px] text-ink-secondary">{t("phone.code.e2e.getAppDetail")}</p>
-          </div>
-        )}
       </div>
       {copied && (
         <div role="status" className="mt-3 rounded-lg bg-inset px-3 py-1.5 text-[12px] text-ink">{t("phone.code.e2e.copied")}</div>

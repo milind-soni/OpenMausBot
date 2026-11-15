@@ -3,11 +3,11 @@
 //   openmausbot setup [--data-dir ~/.openmausbot]
 //   openmausbot start [serve options]
 //   openmausbot serve [--port 8799] [--data-dir ~/.openmausbot] [--label "cab mini"]
-//                     [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--no-pair]
+//                     [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--relay] [--no-pair]
 //   openmausbot pair  [--label "My MacBook"] [--client] [--public-url https://host]
 //   openmausbot sessions [revoke <id>]
 //   openmausbot status
-//   openmausbot login [--email you@example.com]
+//   openmausbot login [--email you@example.com] [--relay]
 //   openmausbot logout
 //   openmausbot run | send | wait | doctor | team apply | export | …
 //
@@ -25,6 +25,7 @@ import { parseAllowList } from "./account-signin.ts";
 import { appendAdminAction, flushAdminActivity, sharedSignIn } from "./admin-activity.ts";
 import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
+import { reportableServerVersion, serverVersion } from "./environment.ts";
 import { resolveLoopbackTrust } from "./request-auth.ts";
 import { restartPolicy } from "./restart.ts";
 import { writeFileAtomic } from "./atomic.ts";
@@ -34,17 +35,17 @@ import { runSentinelCli } from "./sentinel/cli.ts";
 import { runFleetCommand, type FleetInput } from "./fleet-cli.ts";
 import { startFleetAgent } from "./fleet-agent.ts";
 import { fleetLayout } from "./fleet.ts";
-import { clearLeftoverTailscaleServe, explainTailscaleFailure, tailscaleServe, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
+import { clearLeftoverTailscaleServe, explainTailscaleFailure, tailnetListenFallback, tailscaleServe, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
 import { HEADLESS_VERB_NAMES, usage } from "./cli-usage.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
-import { browserSignInLines, formatSessions, pairingBlock } from "./cli-pairing.ts";
+import { browserSignInLines, desktopOwnedRefusal, formatSessions, pairingBlock, RELAY_NOT_WITH_TUNNEL, relayPairingBlock, showRelayPairing } from "./cli-pairing.ts";
 import { cliCommand, cliPrefix } from "./cli-invocation.ts";
 import { checkReach, envPublicUrl, lanProblem, localLinkBase, noRouteLines, publicUrlProblem, reachLines, waitForReach, type Route } from "./cli-reach.ts";
 import { lanUrl } from "./lan-address.ts";
 import { isLoopbackHost } from "../electron/server-address.mjs";
 import { parseDuration } from "./headless/args.ts";
-import type { AppConfig } from "./config.ts";
+import { signInFromEnv, type AppConfig } from "./config.ts";
 import {
   cleanupTunnelOrigin,
   createTunnelAccount,
@@ -77,6 +78,7 @@ export interface CliOptions {
   domain?: string;
   tailscale: boolean;
   tunnel: boolean;
+  relay?: boolean;
   /** `serve --lan`: every private address of this machine, plain http, each connection held to private ends. */
   lan?: boolean;
   client: boolean;
@@ -159,7 +161,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
         if (typeof domain !== "string") return domain;
         options.domain = domain;
       }
-      else if (arg === "--tunnel") options.tunnel = true;
+      else if (arg === "--tunnel" || arg === "--relay") options[arg === "--tunnel" ? "tunnel" : "relay"] = true;
       else if (arg === "--client" || (options.command === "pair" && arg === "--chat-only")) options.client = true;
       // Which phone will scan; only Android needs a different QR. `pair --phone` alone is a chat-only code for any phone.
       else if (arg === "--phone") {
@@ -209,11 +211,11 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65_535) return { error: "--port must be 1-65535" };
   const publicUrlRefusal = options.publicUrl ? publicUrlProblem(options.publicUrl) : null;
   if (publicUrlRefusal) return { error: publicUrlRefusal };
-  if (options.tailscale && options.tunnel) return { error: "choose one of --tailscale (your tailnet) and --tunnel (a public address)" };
+  if (options.tunnel && (options.tailscale || options.relay)) return { error: options.relay ? "choose one of --relay (phones through MausBot Relay) and --tunnel (a public address)" : "choose one of --tailscale (your tailnet) and --tunnel (a public address)" };
   if (options.command === "access" && !options.accessAction) return { error: "access needs one of: list, add EMAIL [--chat-only], remove EMAIL" };
   if (options.command === "service" && !options.serviceAction) return { error: "service needs one of: install [the same options as serve], uninstall" };
   if (options.domain && (options.tailscale || options.tunnel || options.publicUrl)) return { error: "--domain already gives the server its address; drop --tailscale, --tunnel and --public-url" };
-  if (options.local && (options.tailscale || options.tunnel || options.publicUrl || options.lan)) return { error: "--local cannot be combined with a remote-access option" };
+  if (options.local && (options.tailscale || options.tunnel || options.publicUrl || options.lan || options.relay)) return { error: "--local cannot be combined with a remote-access option" };
   if (options.command === "browser" && !options.browserAction) return { error: "browser needs an action: install or status" };
   if (options.command === "fleet") {
     if (!options.fleetAction) return { error: "fleet needs one of: init --domain HOST [--operator USER], create NAME --admin EMAIL, list, users NAME add|remove EMAIL, suspend NAME, resume NAME, delete NAME --yes, upgrade, agent" };
@@ -243,16 +245,6 @@ export function defaultIo(): CliIo {
       }
     },
   };
-}
-
-export function serverVersion(here = HERE): string {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(resolve(here, "..", "package.json"), "utf8"));
-    const version = typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, "version") : undefined;
-    return typeof version === "string" && version ? version : "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -318,7 +310,7 @@ export async function verifyPhoneEndpoint(port: number, origin: string): Promise
 
 export function applyStartupPreferences(options: CliOptions, saved: AppConfig["cliStartup"]): CliOptions {
   if (options.local) return { ...options, tunnel: false, tailscale: false, publicUrl: undefined, phone: undefined };
-  if (!saved || options.tunnel || options.tailscale || options.publicUrl) return options;
+  if (!saved || options.tunnel || options.tailscale || options.publicUrl) return options; if (options.relay && saved.access === "tunnel") throw new Error(RELAY_NOT_WITH_TUNNEL);
   if (saved.access === "public-url" && (!saved.publicUrl || !normalizePhoneOrigin(saved.publicUrl))) {
     throw new Error(`The saved phone address is not a valid HTTPS origin. Run ${cliCommand("setup")} to correct it, or ${cliCommand("--local")} to start only on this computer.`);
   }
@@ -342,6 +334,7 @@ function startupPreferences(options: CliOptions): NonNullable<AppConfig["cliStar
 }
 
 async function showPhonePairing(options: CliOptions, origin: string | undefined, log: (line: string) => void): Promise<boolean> {
+  if (options.relay) return showRelayPairing({ tty: process.stdout.isTTY === true, status: async () => (await api(options.port, "/api/auth/pairing")).body?.relay, mint: () => mintPairing(options.port, { client: true, label: options.label ?? (options.phone === "android" ? "Android" : "iPhone / iPad"), phone: options.phone ?? "ios" }), log, prefix: cliPrefix() });
   const ready = !!origin && await verifyPhoneEndpoint(options.port, origin);
   if (!ready) {
     log("Phone access is not reachable yet. OpenMausBot is ready on this computer; no phone pairing code was created.");
@@ -358,16 +351,14 @@ async function mintPairing(port: number, options: { label?: string; client?: boo
   const chatOnly = Boolean(options.client || options.phone);
   const request = { ...(options.label ? { label: options.label } : {}), ...(chatOnly ? { scopes: ["client"] } : {}), ...(options.ttlMs ? { ttlMs: options.ttlMs } : {}) };
   const { status, body } = await api(port, "/api/auth/pairing", { method: "POST", body: JSON.stringify(request) });
-  if (refusedAsService(status, body)) throw new Error(SERVICE_TRUST_HELP);
-  if (status !== 200) throw new Error(`server refused to mint a pairing code: ${typeof body?.error === "string" ? body.error : status}`);
+  const refusal = refusedAsService(status, body) ? SERVICE_TRUST_HELP : desktopOwnedRefusal(status, body);
+  if (refusal || status !== 200) throw new Error(refusal ?? `server refused to mint a pairing code: ${typeof body?.error === "string" ? body.error : status}`);
   const reachable = options.publicUrl && !isLoopbackHost(new URL(options.publicUrl).hostname) ? options.publicUrl : null;
   const link = reachable ? `${reachable}/pair#code=${body.code}` : typeof body.url === "string" && !isLoopbackHost(new URL(body.url).hostname) ? body.url : null;
-  const invite = (reachable && typeof body.credential === "string"
-    ? phonePairingLink({ address: reachable, token: body.credential, name: typeof body.serverName === "string" ? body.serverName : undefined })
-    : null) ?? (typeof body.inviteUrl === "string" ? body.inviteUrl : null);
+  const invite = (reachable && typeof body.credential === "string" ? phonePairingLink({ address: reachable, token: body.credential, name: typeof body.serverName === "string" ? body.serverName : undefined }) : null) ?? (typeof body.inviteUrl === "string" ? body.inviteUrl : null);
   const local = localLinkBase(options.publicUrl ?? null, port);
   if (options.guided) return browserSignInLines(`${local.base}/pair#code=${body.code}`, body.code, body.expiresAt);
-  return pairingBlock({ code: body.code, expiresAt: body.expiresAt, chatOnly, link, localLink: `${local.base}/pair#code=${body.code}`, localPlace: local.place, inviteUrl: invite, phone: options.phone, prefix: cliPrefix() });
+  return relayPairingBlock(body, chatOnly, cliPrefix()) ?? pairingBlock({ code: body.code, expiresAt: body.expiresAt, chatOnly, link, localLink: `${local.base}/pair#code=${body.code}`, localPlace: local.place, inviteUrl: invite, phone: options.phone, prefix: cliPrefix() });
 }
 
 /** Never asks anything: the running server's own address (its routes) goes in the link. */
@@ -438,13 +429,13 @@ export async function runStatus(options: CliOptions, io: CliIo = defaultIo()): P
     const sessions = await api(options.port, "/api/auth/sessions").catch(() => null);
     if (Array.isArray(sessions?.body?.sessions)) io.log(`Paired   ${sessions.body.sessions.length} device${sessions.body.sessions.length === 1 ? "" : "s"}   ${cliCommand("devices")}`);
   }
-  const account = options.json ? null : describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() }).credentials.read());
+  const account = options.json ? null : describeTunnelAccount(createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion() }).credentials.read());
   if (!options.json && fleetCredential()) io.log(`MausBot web address: managed by the fleet (${FLEET_CREDENTIAL_ENV} is set)`);
   else if (account?.address) io.log(`MausBot web address: ${account.address} (signed in as ${account.email ?? "?"}; serve it with ${cliCommand("serve --tunnel")})`);
   return body ? 0 : 1;
 }
 
-/** Edits the sign-in allow-list in config.json, server live or stopped (read per request); OMB_SIGNIN_EMAILS wins when set. */
+/** Edits the sign-in allow-list in config.json, server live or stopped (read per request); OMB_SIGNIN_EMAILS wins when it names someone. */
 export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
   const file = join(options.dataDir, "config.json");
   let raw: Record<string, unknown> = {};
@@ -462,7 +453,7 @@ export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): P
   const list = (value: unknown) => parseAllowList(Array.isArray(value) ? value.map(String).join(",") : "");
   const admins = list(Reflect.get(current, "admins"));
   const members = list(Reflect.get(current, "members"));
-  const overridden = process.env.OMB_SIGNIN_EMAILS !== undefined || process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined;
+  const overridden = Object.keys(signInFromEnv()).length > 0; // a variable that names nobody leaves the list to this file
   const write = async (next: { admins: string[]; members: string[] }) => {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
     writeFileAtomic(file, `${JSON.stringify({ ...raw, signIn: next }, null, 2)}\n`, { mode: 0o600 });
@@ -510,7 +501,7 @@ export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): P
 }
 
 export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
-  const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
+  const account = createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion(), relayOnly: options.relay === true });
   if (fleetCredential()) io.log(`note: ${FLEET_CREDENTIAL_ENV} is set, so serve --tunnel will use that credential rather than this account`);
   if (account.credentials.status === "unavailable") {
     io.error(`${account.credentials.file} exists but could not be read; fix or remove it, then try again`);
@@ -542,18 +533,18 @@ export async function runLogin(options: CliOptions, io: CliIo = defaultIo()): Pr
     return 1;
   }
   const signedIn = describeTunnelAccount(account.credentials.read());
-  if (!signedIn.address) {
+  if (!signedIn.address && !(options.relay && signedIn.installationId)) {
     io.error(`signed in, but no public address was issued${state.message ? `: ${state.message}` : ""}`);
     return 1;
   }
   io.log(`Signed in as ${signedIn.email ?? email}.`);
-  io.log(`This machine's public address: ${signedIn.address}`);
-  io.log(`Serve there with:  ${cliCommand("serve --tunnel")}`);
+  io.log(signedIn.address ? `This machine's public address: ${signedIn.address}` : "No public address reserved: phones reach this machine through MausBot Relay.");
+  io.log(`Serve there with:  ${cliCommand(signedIn.address ? "serve --tunnel" : "serve --relay")}`);
   return 0;
 }
 
 export async function runLogout(options: CliOptions, io: CliIo = defaultIo()): Promise<number> {
-  const account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion() });
+  const account = createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion() });
   const before = describeTunnelAccount(account.credentials.read());
   if (!before.email) {
     io.log("this machine is not signed in");
@@ -644,12 +635,12 @@ async function planTunnel(options: CliOptions, log: (line: string) => void, reco
   if (credential) {
     log(`tunnel: using the installation credential from ${FLEET_CREDENTIAL_ENV}`);
     try {
-      access = await fleetAccess({ credential, version: serverVersion() });
+      access = await fleetAccess({ credential, version: reportableServerVersion() });
     } catch (error) {
       return { error: `--tunnel: ${message(error)}` };
     }
   } else {
-    account = createTunnelAccount({ dataDir: options.dataDir, version: serverVersion(), recovery, log: (line) => log(`tunnel: ${line}`) });
+    account = createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion(), recovery, log: (line) => log(`tunnel: ${line}`) });
     if (account.credentials.status === "unavailable") return fail(`${account.credentials.file} exists but could not be read; fix or remove it`);
     if (!describeTunnelAccount(account.credentials.read()).email) {
       return fail(`no account on this machine yet: run ${cliCommand("login")} first, then ${cliCommand("serve --tunnel")}`);
@@ -721,7 +712,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     ...process.env,
     OMB_DATA_DIR: options.dataDir,
     OMB_PORT: String(options.port),
-    OMB_WEBHOOK_PORT: process.env.OMB_WEBHOOK_PORT || String(options.port + 1),
+    OMB_WEBHOOK_PORT: process.env.OMB_WEBHOOK_PORT || String(options.port + 1), ...(options.relay ? { OMB_PHONE_RELAY: "1" } : {}),
   };
   if (options.local) delete env.OMB_PUBLIC_URL;
   // The per-launch secret goes over stdin, not the environment that every engine the server starts inherits.
@@ -732,7 +723,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   if (entry.staticDir) env.OMB_STATIC_DIR = entry.staticDir;
   if (entry.skillsDir && !process.env.OMB_SKILLS_DIR) env.OMB_SKILLS_DIR = entry.skillsDir;
   if (options.label && !process.env.OMB_ENVIRONMENT_LABEL) env.OMB_ENVIRONMENT_LABEL = options.label;
-  if (plan) env.OMB_TUNNEL_SOCKET = plan.origin.socketPath;
+  if (plan) Object.assign(env, { OMB_TUNNEL_SOCKET: plan.origin.socketPath, OMB_SERVES_TUNNEL: "1" });
   const lanRefusal = options.lan ? lanProblem() : null;
   if (lanRefusal) log(lanRefusal);
   if (options.lan && !lanRefusal) env.OMB_LAN = "1";
@@ -755,11 +746,11 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     }
     if (tailscale) {
       const served = await tailscaleServe(tailscale, options.port, { dataDir: options.dataDir, otherServer: answersAsMausBot });
-      if (!("failure" in served)) tailscaleShare = served;
-      if (startupCancelled) throw new SetupCancelled();
-      if ("failure" in served) throw new Error(`--tailscale: ${explainTailscaleFailure(served.failure)}`);
-      publicUrl = served.origin;
-      log(`tailscale: serving https://${tailscale.dnsName} → http://127.0.0.1:${options.port} (only your tailnet can reach it)`);
+      const listening = "failure" in served ? tailnetListenFallback(served.failure, tailscale, options.port) : null;
+      tailscaleShare = "failure" in served ? listening && { origin: listening.origin, stop: async () => {} } : served;
+      if (startupCancelled || !tailscaleShare) throw startupCancelled ? new SetupCancelled() : new Error(`--tailscale: ${explainTailscaleFailure("failure" in served ? served.failure : "unknown")}`);
+      Object.assign(env, listening?.env); publicUrl = tailscaleShare.origin;
+      log(listening?.line ?? `tailscale: serving https://${tailscale.dnsName} → http://127.0.0.1:${options.port} (only your tailnet can reach it)`);
     }
     if (startupCancelled) throw new SetupCancelled();
     if (publicUrl) env.OMB_PUBLIC_URL = publicUrl;
@@ -874,7 +865,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     const reach = route && origin && route !== "lan" ? await waitForReach(options.port, origin, route === "public-url" ? 3_000 : 15_000) : undefined;
     if (route && origin) for (const line of reachLines(route, origin, options.port, prefix, reach)) log(line);
     const interactive = process.stdout.isTTY === true;
-    if (options.pair && options.phone) {
+    if (options.pair && (options.phone || options.relay)) {
       log("");
       if (!stopping && exited === null) await showPhonePairing(options, publicUrl, log).catch((error: unknown) => log(`no pairing code: ${message(error)}`));
     } else if (options.pair && (options.guided || ((route || serviceTrust) && interactive))) {
@@ -957,7 +948,7 @@ export async function runOnboardingCommand(
     if (interactive && options.pair && !options.local && (options.command === "setup" || !saved)) {
       io.log("\nOne optional step: connect your phone. You can skip this and start chatting here.");
       const result = await (flow.phoneSetup ?? runPhoneSetup)(launch, prompts, {
-        accountReady: (value) => !!describeTunnelAccount(createTunnelAccount({ dataDir: value.dataDir, version: serverVersion() }).credentials.read()).email,
+        accountReady: (value) => !!describeTunnelAccount(createTunnelAccount({ dataDir: value.dataDir, version: reportableServerVersion() }).credentials.read()).email,
         login: (value, ui) => runLogin(value, {
           log: ui.log, error: ui.log,
           ask: (question) => /code/i.test(question) ? ui.secret(question) : ui.ask(question),
@@ -1010,7 +1001,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     case "service":
       return runServiceCommand({
         action: options.serviceAction ?? "install", dataDir: options.dataDir, port: options.port, domain: options.domain, tunnel: options.tunnel,
-        tailscale: options.tailscale, publicUrl: options.publicUrl, lan: options.lan, label: options.label, sentinel: options.sentinel, script: process.argv[1] ?? "", node: process.execPath,
+        tailscale: options.tailscale, publicUrl: options.publicUrl, lan: options.lan, relay: options.relay, label: options.label, sentinel: options.sentinel, script: process.argv[1] ?? "", node: process.execPath,
       }, { log: (line) => console.log(line), error: (line) => console.error(line) });
     case "fleet":
       if (options.fleetAction === "agent") {

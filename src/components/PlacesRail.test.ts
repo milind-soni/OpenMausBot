@@ -285,6 +285,29 @@ it("Connect to a server says plainly that another computer's desktop app can't b
   expect(form.querySelector("[data-connect-problem]")?.textContent).toContain("That 6-digit code pairs a phone with a desktop app");
 });
 
+it("an address typed key by key stays in its box; a pasted one moves on to the code", async () => {
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  await click(document.querySelector('[data-place-add-choice="server"]'));
+  const form = document.querySelector('[data-place-add="own-server"]')!;
+  const address = form.querySelector("[data-own-server-link]") as HTMLInputElement;
+  const afterTimers = () => act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+  for (const key of "maus.local") {
+    const focused = document.activeElement as HTMLInputElement;
+    await type(focused, focused.value + key);
+    await afterTimers();
+  }
+  expect([address.value, (form.querySelector("[data-own-server-code]") as HTMLInputElement).value]).toEqual(["maus.local", ""]);
+  expect(document.activeElement).toBe(address);
+  await type(address, "");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(address, "192.168.1.20:8799");
+    address.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
+  });
+  await afterTimers();
+  expect(document.activeElement).toBe(form.querySelector("[data-own-server-code]"));
+});
+
 it("Connect to a server takes an address and a code typed apart: a code pasted alone moves to its field, and main names the server it found", async () => {
   const probe = vi.fn(async (address: string): Promise<unknown> => (address.includes("192.168.1.20")
     ? { outcome: "found", origin: "http://192.168.1.20:8799", label: "kitchen-box", version: "0.1.147", transport: "private-http", code: null, credential: null }
@@ -688,19 +711,19 @@ it("＋ stands for Add another account alone, when nothing else can be added", a
   expect(host.querySelector("[data-rail-add]")).toBeNull();
 });
 
-it("once My Cloud is home, This Mac (This PC elsewhere) is a laptop circle that says what it is, and a click opens it through main by its profile id", async () => {
+it("once My Cloud is home, This computer is a laptop circle that says what it is, and a click opens it through main by its profile id", async () => {
   const mac = place("profile:default", "This computer", { kind: "computer", profile: "default" });
   rail = { places: [mac, ...PLACES], add: { cloud: true, link: true, address: false } };
   Object.assign(window, { ogb: { workspaces, cloudAdd, platform: "darwin" } });
   await mount(createElement(PlacesRail));
   const tile = host.querySelector('[data-rail-place="profile:default"]');
-  expect(tile?.getAttribute("aria-label")).toBe("This Mac: a separate place on this computer, with its own bots. The bots on My Cloud stay there.");
+  expect(tile?.getAttribute("aria-label")).toBe("This computer: a separate place on this computer, with its own bots. The bots on My Cloud stay there.");
   expect(tile?.getAttribute("data-rail-kind")).toBe("computer");
   await click(tile);
   expect(workspaces.open.mock.calls).toEqual([["profile:default"]]);
   Object.assign(window, { ogb: { workspaces, cloudAdd, platform: "win32" } });
-  expect(placeLabel(mac)).toBe("This PC: a separate place on this computer, with its own bots. The bots on My Cloud stay there.");
-  expect(matchingPlaces([mac, ...PLACES], "pc").map((entry) => entry.id)).toEqual(["profile:default"]);
+  expect(placeLabel(mac)).toBe("This computer: a separate place on this computer, with its own bots. The bots on My Cloud stay there.");
+  expect(matchingPlaces([mac, ...PLACES], "computer").map((entry) => entry.id)).toEqual(["profile:default"]);
   expect(placeLabel(place("local", "This computer", { kind: "computer" })), "before the move it is This computer, as ever").toBe("This computer");
 });
 
@@ -720,7 +743,7 @@ it("a small cloud sits at the corner of every Cloud's tile, its own, a team's an
   expect(host.querySelector('[data-rail-place="profile:work"] [data-rail-local]'), "a named workspace: a laptop at its corner").toBeTruthy();
   expect(host.querySelector('[data-rail-place="profile:work"]')?.textContent, "its initials, as a place with a name").toBe("W");
   expect(host.querySelector('[data-rail-place="profile:work"]')?.getAttribute("aria-label")).toBe("Work: a separate place on this computer, with its own bots");
-  expect(host.querySelector('[data-rail-place="profile:default"] [data-rail-local]'), "This Mac is the laptop itself").toBeNull();
+  expect(host.querySelector('[data-rail-place="profile:default"] [data-rail-local]'), "This computer is the laptop itself").toBeNull();
   expect(host.querySelector('[data-rail-place="vps2"] [data-rail-server]'), "a server of the person's own keeps its server mark").toBeTruthy();
   const badge = host.querySelector('[data-rail-place="home"] [data-rail-cloud]')!;
   expect(badge.getAttribute("class")).toContain("border-(--rail-surface)");
@@ -759,7 +782,7 @@ it("＋ offers a new workspace on this computer first, to Cloud owners too: a na
   form = document.querySelector('[data-place-add="local"]')!;
   await type(form.querySelector("[data-local-name]"), "   ");
   expect(form.querySelector<HTMLButtonElement>("[data-local-create]")!.disabled, "no name: nothing to create").toBe(true);
-  await type(form.querySelector("[data-local-name]"), " this mac ");
+  await type(form.querySelector("[data-local-name]"), " this computer ");
   await submit(form);
   expect(form.querySelector("[data-local-problem]")?.textContent, "a name a place here has, said at once").toBe("Another place here has that name. Choose another.");
   expect(create).not.toHaveBeenCalled();
@@ -833,9 +856,9 @@ it("a workspace's menu: Rename (Enter saves, Escape leaves it), its colour, and 
   expect(edit.mock.calls.at(-1)).toEqual(["profile:work", { color: "violet" }]);
   menu = await menuOf("profile:default");
   await click(menu.querySelector('[data-rail-local-color] [data-swatch="slate"]'));
-  expect(edit.mock.calls.length, "None is This Mac's colour already: nothing to save").toBe(3);
+  expect(edit.mock.calls.length, "None is This computer's colour already: nothing to save").toBe(3);
   await click(menu.querySelector("[data-rail-remove-ask]"));
-  expect(menu.querySelector("[role='alertdialog'] p")?.textContent).toBe("Remove “This Mac”? Its bots, chats and files on this computer are deleted. Its folder goes to the Trash first.");
+  expect(menu.querySelector("[role='alertdialog'] p")?.textContent).toBe("Remove “This computer”? Its bots, chats and files on this computer are deleted. Its folder goes to the Trash first.");
   await click(menu.querySelector("[data-rail-remove-cancel]"));
   expect(remove, "Cancel: nothing removed").not.toHaveBeenCalled();
   expect(menu.querySelector("[data-rail-remove-ask]"), "and the menu as it was").toBeTruthy();

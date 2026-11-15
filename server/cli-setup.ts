@@ -195,7 +195,8 @@ async function connectNative(
   } else {
     io.log("Existing sign-in found — you do not need to sign in again.");
   }
-  if (state.snapshot.update) io.log(`${state.snapshot.update.title}: ${state.snapshot.update.command}`);
+  const update = state.snapshot.update;
+  if (update) io.log(`${update.title}: ${update.command ?? update.message}`);
   io.log("Sign-in confirmed. Model access is checked by the provider when you send your first message.");
   return state.models;
 }

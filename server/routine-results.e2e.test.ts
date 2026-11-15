@@ -65,7 +65,7 @@ it("reports every run into the bot's main thread while fresh executions, approva
     expect(savedBot.threadId).toBe(originalThread);
     expect(savedBot.tasks.filter((task: any) => !task.routineRunId)).toHaveLength(1);
     expect(savedBot.tasks.some((task: any) => task.title.endsWith("· Results"))).toBe(false);
-    expect(savedBot.tasks.find((task: any) => task.threadId === destination).unread).toBe(true);
+    expect(savedBot.tasks.find((task: any) => task.threadId === destination).unread, "plain reports need nothing from the person").toBe(false);
     for (const run of completed) expect(savedBot.tasks.find((task: any) => task.threadId === run.threadId))
       .toMatchObject({ routineRunId: run.id, unread: false, autoApprove: false, approvalMode: "ask" });
 

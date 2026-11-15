@@ -11,14 +11,14 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { describe, expect, it } from "vitest";
 
 import de from "./de.json";
 import en from "./en.json";
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const SCANNED = ["server", "shared"];
+const SCANNED = ["server", "shared", "packages/phone-protocol/src"];
 const SKIPPED_DIRS = new Set(["node_modules", "testing", "dist", "resources"]);
 const isSource = (name: string) => name.endsWith(".ts") && !/\.test\.|\.d\.ts$/.test(name);
 
@@ -41,6 +41,8 @@ interface Source {
   sf: ts.SourceFile;
   decls: Map<string, ts.FunctionDeclaration | ts.VariableDeclaration>;
   imports: Map<string, { file: string; name: string }>;
+  /** The files of its `export * from "./x.ts"` lines. */
+  reexports: string[];
   calls?: Map<string, ts.CallExpression[]>;
 }
 
@@ -77,7 +79,9 @@ export function findServerLines(paths: readonly string[], read: (path: string) =
       const file = resolve(dirname(path), specifier);
       for (const element of bindings.elements) imports.set(element.name.text, { file, name: (element.propertyName ?? element.name).text });
     }
-    const source = { sf, decls, imports };
+    const reexports = sf.statements.flatMap((statement) => ts.isExportDeclaration(statement) && !statement.exportClause && statement.moduleSpecifier
+      && ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text.startsWith(".") ? [resolve(dirname(path), statement.moduleSpecifier.text)] : []);
+    const source = { sf, decls, imports, reexports };
     sources.set(path, source);
     return source;
   }
@@ -156,9 +160,19 @@ export function findServerLines(paths: readonly string[], read: (path: string) =
     const local = declarationOf(source, node, name);
     if (local) return { source, decl: local };
     const imported = source.imports.get(name);
-    const target = imported ? load(imported.file) : null;
-    const decl = imported && target ? target.decls.get(imported.name) : undefined;
-    return target && decl ? { source: target, decl } : null;
+    return imported ? exportedFrom(imported.file, imported.name, 0) : null;
+  }
+
+  function exportedFrom(file: string, name: string, depth: number): { source: Source; decl: ts.FunctionDeclaration | ts.VariableDeclaration } | null {
+    const target = depth > 4 ? null : load(file);
+    if (!target) return null;
+    const decl = target.decls.get(name);
+    if (decl) return { source: target, decl };
+    for (const next of target.reexports) {
+      const found = exportedFrom(next, name, depth + 1);
+      if (found) return found;
+    }
+    return null;
   }
 
   const functionOf = (decl: ts.FunctionDeclaration | ts.VariableDeclaration): FunctionLike | null =>
@@ -492,7 +506,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/index.ts", "context compacted — re-sent the last  …  digest …"],
     ["server/index.ts", "generated image could not be attached —  …"],
     ["server/index.ts", "invalid image"],
-    ["shared/first-reply-rescue.ts", "notice:  …  hasn't heard back from  …  yet."],
+    ["packages/phone-protocol/src/first-reply-rescue.ts", "notice:  …  hasn't heard back from  …  yet."],
   ],
   "moves to the Cloud": [
   ],

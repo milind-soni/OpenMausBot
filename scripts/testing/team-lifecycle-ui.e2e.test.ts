@@ -8,7 +8,7 @@ import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
 import { request } from "../mcp-server.ts";
 import { mountPreview, type MountedPreview } from "./preview-fixture.ts";
-import { OPEN_SIDEBAR_TOOLS, UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { ENABLE_ADVANCED_UI, OPEN_SIDEBAR_TOOLS, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env });
@@ -37,6 +37,7 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     fixtureHandle = info!.ui;
     fixtureLog = info!.logPath;
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", info.ui, ...args]) as Promise<Record<string, any>>;
+    await ui("eval", "--js", ENABLE_ADVANCED_UI);
     const target = async (name: string, roles: string[]) => {
       let matches: Array<[string, { name: string; role: string }]> = [];
       await expect.poll(async () => {

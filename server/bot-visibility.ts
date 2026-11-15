@@ -8,6 +8,7 @@ import { z } from "zod";
 import { accessFromVisibility, entryMatches, higherLevel, sharedLevel, type BotAccess, type BotAccessLevel } from "../shared/bot-access.ts";
 import { botOwner, type OwnedBot } from "../shared/bot-owner.ts";
 import type { DeviceView } from "../shared/device-view.ts";
+import { defaultBotPerson } from "../shared/default-bot.ts";
 import type { BotVisibility } from "../shared/wire.ts";
 import { audienceIncludes, type Audience } from "./audience.ts";
 import { SHARED_CHAT_TITLE } from "../shared/wire.ts";
@@ -22,6 +23,8 @@ export interface ThreadAudiences {
   ownTask?<T extends { threadId: string; unread?: boolean; lastReadMessageId?: string }>(task: T): T;
   /** The person whose private chat a routine lives in (routine-home.ts), else null. */
   routineHome?(routine: RoutineRef): string | null;
+  /** The two people a conversation shared with one person is read by (host/conversation-shares.ts), else null. */
+  readers?(threadId: string): readonly string[] | null;
 }
 
 export type RoutineRef = { botId?: unknown; groupId?: unknown; name?: unknown; sourceThreadId?: unknown; resultsThreadId?: unknown };
@@ -229,13 +232,15 @@ export class VisibleSet {
   }
 
   bot(id: string): boolean {
-    if (this.everything || this.viewer.kind === "all") return true;
+    if (this.everything) return true;
+    if (this.viewer.kind === "all") return this.audienceSeesBot(id);
     return this.reaches(id) || (this.audienceSeesBot(id) && this.memberOfListedRoom(id));
   }
 
   /** Seen as itself, with its own chats: not only as a member of a room the device's view lists. */
   reaches(id: string): boolean {
-    if (this.everything || this.viewer.kind === "all") return true;
+    if (this.everything) return true;
+    if (this.viewer.kind === "all") return this.audienceSeesBot(id);
     return this.audienceSeesBot(id) && this.inView(id);
   }
 
@@ -244,23 +249,31 @@ export class VisibleSet {
     return Boolean(this.view?.groups.length);
   }
 
+  private audienceSeesBot(id: string): boolean {
+    let seen = this.botMemo.get(id);
+    if (seen === undefined) {
+      const bot = this.bots.get(id);
+      seen = bot && this.someoneElsesOwn(bot) ? false : this.viewer.kind === "all" || Boolean(bot && viewerSees(this.viewer, bot.visibility));
+      this.botMemo.set(id, seen);
+    }
+    return seen;
+  }
+
+  /** Security invariant: on a Team Cloud a person's own MausBot exists for that person alone. No other member and no
+   * admin, the Owner included, sees it, whatever its stored sharing says; only a session-less local service does. */
+  private someoneElsesOwn(bot: VisibilityBot): boolean {
+    const person = this.audiences ? defaultBotPerson(bot) : "";
+    return Boolean(person) && this.viewer.email !== undefined && person !== this.viewer.email.trim().toLowerCase();
+  }
+
   group(id: string): boolean {
-    if (this.everything || this.viewer.kind === "all") return true;
+    if (this.everything) return true;
+    if (this.viewer.kind === "all") return !this.groups.get(id)?.memberIds.some((member) => !this.bot(member));
     const group = this.groups.get(id);
     if (!group) return false;
     if (this.view?.groups.includes(id)) return this.audienceSeesGroup(group);
     const members = group.memberIds.filter((member) => this.bots.has(member));
     return members.length > 0 && members.every((member) => this.reaches(member)) && viewerSees(this.viewer, group.audienceFloor);
-  }
-
-  private audienceSeesBot(id: string): boolean {
-    let seen = this.botMemo.get(id);
-    if (seen === undefined) {
-      const bot = this.bots.get(id);
-      seen = Boolean(bot && viewerSees(this.viewer, bot.visibility));
-      this.botMemo.set(id, seen);
-    }
-    return seen;
   }
 
   private audienceSeesGroup(group: VisibilityGroup): boolean {
@@ -311,7 +324,10 @@ export class VisibleSet {
 
   private audienceShows(threadId: string): boolean {
     const audience = this.audiences?.of(threadId);
-    return audience === undefined || audienceIncludes(audience, { admin: this.viewer.kind === "all", person: this.audiences!.person, seesRoom: (groupId) => this.group(groupId) });
+    if (audience === undefined) return true;
+    const person = this.audiences!.person;
+    return audienceIncludes(audience, { admin: this.viewer.kind === "all", person, seesRoom: (groupId) => this.group(groupId) })
+      || (person !== null && this.audiences!.readers?.(threadId)?.includes(person) === true);
   }
 
   private indexedOwner(threadId: string): ThreadOwner | undefined {
@@ -372,11 +388,11 @@ export type PathSubject =
 
 export function pathSubject(path: string): PathSubject | null {
   let m = /^\/api\/bots\/([\w-]+)(?:\/|$)/.exec(path);
-  if (m) return { kind: "bot", id: m[1]! };
+  if (m && m[1] !== "order") return { kind: "bot", id: m[1]! };
   m = /^\/api\/threads\/([\w-]+)(?:\/|$)/.exec(path);
   if (m) return { kind: "thread", id: m[1]! };
   m = /^\/api\/groups\/([\w-]+)(?:\/|$)/.exec(path);
-  if (m) return { kind: "group", id: m[1]! };
+  if (m && m[1] !== "order") return { kind: "group", id: m[1]! };
   m = /^\/api\/routines\/([\w-]+)(?:\/|$)/.exec(path);
   if (m && m[1] !== "wake") return { kind: "routine", id: m[1]! };
   m = /^\/api\/routine-runs\/([\w-]+)\//.exec(path);
@@ -570,6 +586,10 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
     case "bots.order": {
       const botIds = Array.isArray(payload.botIds) ? payload.botIds.filter((id): id is string => typeof id === "string") : [];
       return { ...payload, botIds: botIds.filter((id) => visible.bot(id)) };
+    }
+    case "groups.order": {
+      const groupIds = Array.isArray(payload.groupIds) ? payload.groupIds.filter((id): id is string => typeof id === "string") : [];
+      return { ...payload, groupIds: groupIds.filter((id) => visible.group(id)) };
     }
     case "message":
     case "message.patch":

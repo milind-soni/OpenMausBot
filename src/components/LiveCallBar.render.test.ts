@@ -161,6 +161,19 @@ describe("LiveCallSettings", () => {
     expect(none).not.toContain("Remove key");
   });
 
+  it("offers Gemini's own voices for Gemini calls, not GPT-Live's", () => {
+    const withLive = (live: LiveSettings) => {
+      const value = { state: { ...initialState, config: { live } as AppState["config"] }, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+      return renderToStaticMarkup(createElement(BotEditorStore, { value, children: createElement(LiveCallSettings, { onClose: vi.fn() }) }));
+    };
+    const base = { configured: true, provider: "gemini" as const, keySource: "gemini" as const, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    const plain = withLive(base);
+    expect(plain).toMatch(/<option value="Puck" selected="">Puck — upbeat \(default\)<\/option>/);
+    expect(plain).toContain("Charon — informative");
+    expect(plain).not.toContain("Marin (default)");
+    expect(withLive({ ...base, geminiVoice: "Kore" })).toMatch(/<option value="Kore" selected="">/);
+  });
+
   it("says the key stays on the Cloud when the chat is on the person's Cloud", () => {
     const markup = renderOnCloud(createElement(LiveCallSettings, { onClose: vi.fn() }));
     expect(markup).toContain(CLOUD_DISCLOSURE);

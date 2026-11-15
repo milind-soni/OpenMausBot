@@ -1,8 +1,8 @@
 import { useCallback, useId, useState } from "react";
 
-import { LIVE_VOICE_OPTIONS } from "../../shared/live-call";
+import { GEMINI_LIVE_VOICE_OPTIONS, geminiLiveVoice, LIVE_VOICE_OPTIONS } from "../../shared/live-call";
 import { t } from "@/lib/i18n";
-import { liveDisclosure } from "@/lib/call-mode";
+import { liveDisclosure, liveKeyCopy } from "@/lib/call-mode";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import type { LiveSettings } from "../../shared/wire";
 import { LiveKeySetup } from "./LiveKeySetup";
@@ -17,6 +17,8 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
   const live: LiveSettings = state.config?.live ?? { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
   const [saving, setSaving] = useState(false);
   const [changingKey, setChangingKey] = useState(false);
+  const [keySaving, setKeySaving] = useState(false);
+  const [providerSaving, setProviderSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const typedHintId = useId();
   // Stable, so this callback ref runs once when the popover mounts, not on every save.
@@ -24,10 +26,17 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
     dialog?.querySelector<HTMLElement>("select, input, button")?.focus();
   }, []);
   const azure = live.provider === "azure";
-  const voice = live.voice || "marin";
-  const known = LIVE_VOICE_OPTIONS.some((option) => option.id === voice);
+  const fish = live.provider === "fish";
+  const gemini = live.provider === "gemini";
+  const elevenlabs = live.provider === "elevenlabs";
+  const copy = liveKeyCopy(live.provider);
+  const hasKey = live.keySource === (fish ? "fishAudio" : gemini ? "gemini" : elevenlabs ? "elevenlabs" : "live");
+  // Gemini has its own voices, kept apart from the GPT-Live one.
+  const voiceOptions = gemini ? GEMINI_LIVE_VOICE_OPTIONS : LIVE_VOICE_OPTIONS;
+  const voice = gemini ? geminiLiveVoice(live.geminiVoice) : live.voice || "marin";
+  const known = voiceOptions.some((option) => option.id === voice);
 
-  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "readTypedReplies" | "idleMinutes">>) => {
+  const save = async (patch: Partial<Pick<LiveSettings, "voice" | "geminiVoice" | "readTypedReplies" | "idleMinutes">>) => {
     setSaving(true);
     setError(null);
     try {
@@ -68,20 +77,23 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         onClose();
       }}
     >
-      <LiveProviderSettings />
+      <LiveProviderSettings locked={keySaving} onSaving={setProviderSaving} />
+      {/* Fish Audio and ElevenLabs calls speak in their agent's own voice. */}
+      {!fish && !elevenlabs && <>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.voice")}</span>
         <Select
           size="sm"
           value={voice}
           disabled={saving}
-          onChange={(event) => void save({ voice: event.target.value })}
+          onChange={(event) => void save(gemini ? { geminiVoice: event.target.value } : { voice: event.target.value })}
         >
           {!known && <option value={voice}>{voice}</option>}
-          {LIVE_VOICE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          {voiceOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
         </Select>
       </label>
       <div className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.voiceNext")}</div>
+      </>}
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.readTyped")}</span>
         <input
@@ -107,7 +119,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         </Select>
       </label>
       <div className="flex items-center justify-between gap-2 border-t border-hairline/60 pt-2">
-        <span className="text-ink-secondary">{t(azure ? "call.live.azureKey" : "call.live.key")}</span>
+        <span className="text-ink-secondary">{t(copy.key)}</span>
         <span className="flex gap-2">
           <button type="button" className="text-accent hover:underline" onClick={() => setChangingKey((open) => !open)}>
             {t("call.live.keyChange")}
@@ -119,12 +131,13 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           )}
         </span>
       </div>
-      {live.keySource !== "live" && azure && <div className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.azureNeedsKey")}</div>}
-      {live.keySource !== "live" && !azure && (
+      {!hasKey && (azure || fish || gemini || elevenlabs) && <div className="-mt-2 text-[12px] text-ink-tertiary">{t(copy.missing)}</div>}
+      {live.keySource !== "live" && !azure && !fish && !gemini && !elevenlabs && (
         <div className="-mt-2 text-[12px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")} <KeysLink id="openai" purpose="liveCalls" /></div>
       )}
-      {changingKey && <LiveKeySetup compact onSaved={() => setChangingKey(false)} />}
-      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure })} {t(azure ? "call.live.azureCost" : "call.live.cost")}</div>
+      {/* Keyed by provider: a key typed for one provider is never saved for another. */}
+      {changingKey && <LiveKeySetup key={state.config?.live?.provider ?? "openai"} compact locked={providerSaving} onSaving={setKeySaving} onSaved={() => setChangingKey(false)} />}
+      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true, azure, fish, gemini, elevenlabs })} {t(copy.cost)}</div>
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );

@@ -1,6 +1,8 @@
 // ~/.openmausbot/config.json, with env vars overriding its credentials.
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { dataHome } from "./data-dir.ts";
+import { signInFromEnv } from "./sign-in-env.ts";
+export { signInFromEnv };
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
@@ -26,10 +28,10 @@ import { settledFileCache, settledFileStamp } from "./settled-file.ts";
 import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer } from "./mcp-registry.ts"; import { postizKeyHeaders } from "./postiz/connection.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
-import { liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts";
+import { fishKeyFromLiveKey, liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts";
-import { MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MAX_LOCAL_VM_MAX_INSTANCES, MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES, MIN_LOCAL_VM_MAX_INSTANCES } from "./local-vm-settings.ts";
+import { localVmConfigSchema } from "./local-vm-settings.ts";
 export * from "./local-vm-settings.ts";
 
 const optionalText = z.string().optional();
@@ -87,23 +89,6 @@ const mcpConfigSchema = z.object({
     .max(MAX_MCP_CALL_TIMEOUT_MINUTES)
     .optional(),
 }).strict();
-/** Bot desktop isolation, default "shared"; `maxInstances` caps per-bot desktops or pool seats. Switching modes cold-starts every desktop. */
-const localVmConfigSchema = z.object({
-  mode: z.enum(["shared", "per-bot", "pool"]).optional(),
-  maxInstances: z
-    .number()
-    .int()
-    .min(MIN_LOCAL_VM_MAX_INSTANCES)
-    .max(MAX_LOCAL_VM_MAX_INSTANCES)
-    .optional(),
-  idleTimeoutMinutes: z
-    .number()
-    .int()
-    .min(MIN_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
-    .max(MAX_LOCAL_VM_IDLE_TIMEOUT_MINUTES)
-    .optional(),
-  preserveInstalledApps: z.boolean().optional(),
-});
 /** A named browser session; its id names a durable Electron partition. */
 const browserProfileSchema = z.object({
   // Lowercase only: Chromium partition directories collide on case-insensitive filesystems.
@@ -259,7 +244,7 @@ const featureConfigSchema = z.object({
   /** Room jobs to several members run side by side, each in a thread of its own. Off unless true. */
   parallelRoomJobs: z.boolean().optional(),
   acpPlanLines: z.boolean().optional(), // An ACP agent's plan as activity lines. Off unless true.
-}).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional() }); // agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false
+}).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional(), usbPhoneTakeover: z.boolean().optional(), cloudComputerAutoReplace: z.boolean().optional() }); // cloudComputerAutoReplace: delete and replace a dead cloud computer by itself, off unless true (OMB_CLOUD_COMPUTER_AUTO_REPLACE wins); agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false; usbPhoneTakeover: watch and take over the bots' USB phone, off unless true
 const onboardingConfigSchema = z.object({
   completedAt: z.string().trim().max(40).optional(),
   version: z.number().int().min(0).max(1000).optional(),
@@ -417,7 +402,7 @@ const appConfigSchema = z.object({
     /** Local hour (0-23) after which the nightly tidy-up runs. */
     tidyHour: z.number().int().min(0).max(23).optional(),
   }).strict().optional(),
-  threads: threadsConfigSchema.optional(),
+  threads: threadsConfigSchema.optional(), /** Burst mode on an open-source install; a Cloud's plan sets it instead. `maxParallel`: burst threads running at once (default 10). */ burst: z.object({ maxParallel: z.number().int().min(1).max(100).optional() }).strict().optional(),
   /** Minimum days of decision-log month files kept; OMB_DECISION_RETENTION_DAYS wins. */
   decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
   loopGuard: loopGuardConfigSchema.optional(),
@@ -442,7 +427,7 @@ const storedAppConfigSchema = appConfigSchema.extend(helperStoredShape).extend({
   }).optional(),
 });
 const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers: true, cliStartup: true, customDomain: true })
-  .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional() });
+  .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional() }); export const CONFIG_PATCH_FIELDS = appConfigPatchSchema.shape;
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig extends HelperConfig {
@@ -494,11 +479,11 @@ export interface AppConfig extends HelperConfig {
   profile?: { name?: string; email?: string; aboutMe?: string; avatarUrl?: string }; everyBotRules?: string;
   rooms?: { turnTimeoutMinutes: number };
   mcp?: { callTimeoutMinutes?: number };
-  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
+  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number }; burst?: { maxParallel?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
-  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean };
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean };
+  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; memoryGb?: number; cpus?: number };
+  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean; usbPhoneTakeover?: boolean; cloudComputerAutoReplace?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
   browserEngine?: BrowserEngineConfig;
@@ -681,7 +666,6 @@ export function claudeUserMcpEnabled(cfg: Pick<AppConfig, "features">): boolean 
   return cfg.features?.claudeUserMcp === true;
 }
 
-
 export function engineLaunches(configs: InstanceConfigMap, env: Record<string, string | undefined> = process.env): Record<string, unknown> {
   return Object.fromEntries(Object.entries(configs).map(([id, entry]) =>
     [id, { ...entry, fallbackEnv: Object.fromEntries(fallbackEnv(entry).map((name) => [name, env[name]])) }]));
@@ -776,19 +760,15 @@ export function loadConfig(): AppConfig {
   if (process.env.OMB_FISH_AUDIO_API_KEY !== undefined) cfg.tts.fishKey = process.env.OMB_FISH_AUDIO_API_KEY;
   if (process.env.OMB_GEMINI_API_KEY !== undefined) cfg.tts.geminiKey = process.env.OMB_GEMINI_API_KEY;
   cfg.decider = { ...cfg.decider };
-  if (process.env.OMB_JEV_API_KEY !== undefined) cfg.decider.key = process.env.OMB_JEV_API_KEY;
+  if (process.env.OMB_JEV_API_KEY !== undefined) cfg.decider.key = process.env.OMB_JEV_API_KEY; if (process.env.OMB_CUSTOM_DECIDER_KEY !== undefined) cfg.decider.customKey = process.env.OMB_CUSTOM_DECIDER_KEY;
   if (process.env.OMB_OPENROUTER_DECIDER_KEY !== undefined) cfg.decider.openrouterKey = process.env.OMB_OPENROUTER_DECIDER_KEY; if (process.env.OMB_WORKERS_AI_TOKEN !== undefined) cfg.decider.workersAiToken = process.env.OMB_WORKERS_AI_TOKEN;
-  cfg.live = liveConfigWithEnv(cfg.live);
+  cfg.live = liveConfigWithEnv(cfg.live); fishKeyFromLiveKey(cfg);
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
   if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
   if (process.env.OMB_GEMINI_IMAGE_KEY !== undefined) cfg.imageGen.geminiKey = process.env.OMB_GEMINI_IMAGE_KEY;
-  const splitEmails = (value: string) => value.split(/[,\s]+/).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
-  if (process.env.OMB_SIGNIN_EMAILS !== undefined || process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) {
-    cfg.signIn = { ...cfg.signIn };
-    if (process.env.OMB_SIGNIN_EMAILS !== undefined) cfg.signIn.admins = splitEmails(process.env.OMB_SIGNIN_EMAILS);
-    if (process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) cfg.signIn.members = splitEmails(process.env.OMB_SIGNIN_MEMBER_EMAILS);
-  }
+  const signInEnv = signInFromEnv();
+  if (signInEnv.admins || signInEnv.members) cfg.signIn = { ...cfg.signIn, ...signInEnv };
   return cfg;
 }
 
@@ -824,7 +804,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
     [patch.tts?.geminiKey, "OMB_GEMINI_API_KEY"],
-    [patch.decider?.key, "OMB_JEV_API_KEY"],
+    [patch.decider?.key, "OMB_JEV_API_KEY"], [patch.decider?.customKey, "OMB_CUSTOM_DECIDER_KEY"],
     [patch.decider?.openrouterKey, "OMB_OPENROUTER_DECIDER_KEY"], [patch.decider?.workersAiToken, "OMB_WORKERS_AI_TOKEN"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],

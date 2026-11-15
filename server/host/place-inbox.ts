@@ -37,6 +37,10 @@ const lineSchema = z.object({
   /** The guest whose conversation this is: it is theirs, not the owner's. */
   guest: id.optional(),
   text: z.string().max(NOTICE_TEXT_MAX), at: z.number(), seen: z.boolean().optional(), done: z.boolean().optional(),
+  /** The conversation this result is news for: its next unread result replaces this line, so one job keeps one row. */
+  job: id.optional(),
+  /** A message posted in a room: only a reply to it (or Done) answers it, not the person's other talk there. */
+  untilReply: z.boolean().optional(),
 });
 const fileSchema = z.object({ version: z.literal(1), lines: z.array(lineSchema).max(MAX_LINES), seenAsks: z.array(id).max(MAX_SEEN_ASKS) });
 type Line = z.infer<typeof lineSchema>;
@@ -108,13 +112,14 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
 
   const titleOf = (botId: string, threadId: string): string => store.groupByThread(threadId)?.name ?? store.taskByThread(botId, threadId)?.title ?? store.bot(botId)?.name ?? "";
 
-  /** The person wrote in the conversation after a bot's message reached them: that is their answer. */
+  /** The person wrote in the conversation after a bot's message reached them: that is their answer. In a room they keep
+   * talking to the others, so there only a reply to that very line answers it (or Done in the Inbox). */
   function answeredThere(line: Line): boolean {
     if (line.kind !== "message") return false;
     const said = store.messagesFor(line.threadId);
     for (let index = said.length - 1; index >= 0 && said[index]!.at >= line.at; index--) {
       const one = said[index]!;
-      if (one.role === "user" && !one.peerAsk && !one.relayed && one.via !== "api") return true;
+      if (one.role === "user" && !one.peerAsk && !one.relayed && one.via !== "api" && (!line.untilReply || one.replyToId === line.id)) return true;
     }
     return false;
   }
@@ -180,6 +185,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
   }
 
   function addLine(line: Line): Line {
+    if (line.job) lines = lines.filter((one) => one.job !== line.job || one.seen || one.done);
     lines.push(line);
     save();
     return line;
@@ -201,29 +207,44 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     const wire: InboxItem = { kind: "message", from: { name: bot.name, botId: bot.id }, replies: true };
     const posted = store.appendMessage(threadId, { role: "bot", kind: "text", text, inbox: wire, ...(group ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}) });
     addLine({ id: posted.id, botId: bot.id, threadId, ...(group ? { groupId: group.id } : {}), kind: "message", from: bot.name.slice(0, 200), ...(handed ? { workingFor: handed } : {}),
-      ...(guest ? { guest } : {}), text: clip(text, NOTICE_TEXT_MAX), at: now() });
+      ...(guest ? { guest } : {}), ...(group ? { untilReply: true } : {}), text: clip(text, NOTICE_TEXT_MAX), at: now() });
     if (group) store.patchGroup(group.id, { unread: true });
     else store.patchTask(bot.id, threadId, { unread: true });
     if (!guest && bot.notifications !== false) {
       deps.send({ kind: "mention", botId: bot.id, botName: bot.name, threadId, title: handed ? serverLine(conversationLanguage(threadId), "server.notify.workingFor", { who: bot.name, other: handed.name }) : serverLine(conversationLanguage(threadId), "server.notify.message", { who: bot.name }), body: oneLine(text, 200),
         ...(group ? { groupId: group.id } : {}), ...(bot.avatarUrl ? { avatarUrl: bot.avatarUrl } : {}) });
     }
-    return { status: 200, text: "It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it." };
+    return { status: 200, text: group
+      ? "It is posted in this room and in their Inbox, and they were notified; it stays open there until they reply to it or mark it done. Their answer comes back here, and you carry on from it."
+      : "It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it." };
   }
 
-  /** A routine's report or a failure of work nobody is watching gets a line; the notification about it goes out as it is. */
-  function route(notification: Notification, how: { routine?: boolean } = {}): Notification {
+  /** A routine's report, the answer that sums up work handed out, or a failure of work nobody is watching gets a line; the
+   * notification about it goes out as it is. */
+  function route(notification: Notification, how: { routine?: boolean; summary?: boolean } = {}): Notification {
     const { kind, botId, threadId } = notification;
-    const result = kind === "done" && how.routine === true;
+    const result = (kind === "done" && (how.routine === true || how.summary === true)) || (kind === "delegation-settled" && how.summary === true);
     const notice = ASK_NOTIFICATIONS.has(kind) && kind !== "approval" && kind !== "question" && (how.routine === true || deps.handedBy(threadId) !== null);
     const bot = result || notice ? store.bot(botId) : undefined;
     if (bot) {
       const handed = workingFor(threadId);
       const guest = deps.guestOf(threadId);
       addLine({ id: crypto.randomUUID(), botId: bot.id, threadId, ...(notification.groupId ? { groupId: notification.groupId } : {}), kind: result ? "result" : "notice", from: bot.name.slice(0, 200),
-        ...(handed ? { workingFor: handed } : {}), ...(guest ? { guest } : {}), text: clip(notification.body || notification.title, NOTICE_TEXT_MAX), at: now() });
+        ...(handed ? { workingFor: handed } : {}), ...(guest ? { guest } : {}), text: clip(notification.body || notification.title, NOTICE_TEXT_MAX), at: now(), ...(how.summary ? { job: threadId } : {}) });
     }
     return notification;
+  }
+
+  /** Work handed on finished: one line, so the result is here even if the conversation that asked never reports back. It
+   * sends nothing, and that conversation's next result or its summary replaces it. */
+  function handedResult(work: { botId: string; threadId: string; groupId?: string; text: string }, requester: { botId: string; threadId: string }): void {
+    const bot = store.bot(work.botId);
+    const text = work.text.trim();
+    if (!bot || bot.notifications === false || !text) return;
+    const asked = store.bot(requester.botId);
+    const guest = deps.guestOf(requester.threadId);
+    addLine({ id: crypto.randomUUID(), botId: bot.id, threadId: work.threadId, ...(work.groupId ? { groupId: work.groupId } : {}), kind: "result", from: bot.name.slice(0, 200),
+      ...(asked ? { workingFor: { botId: asked.id, name: asked.name } } : {}), ...(guest ? { guest } : {}), text: clip(text, NOTICE_TEXT_MAX), at: now(), job: requester.threadId });
   }
 
   const unsubscribe = store.onChange((change: StoreChange) => {
@@ -237,6 +258,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     view,
     message,
     route,
+    handedResult,
     /** What waits on this viewer: every open ask, and news they have not read. */
     count(auth: RequestAuth): number {
       return view(auth).rows.filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length;
@@ -250,6 +272,14 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
       if (!askRows(auth).some((row) => row.id === lineId)) return false;
       if (!seenAsks.has(lineId)) { seenAsks.add(lineId); save(); }
       return true;
+    },
+    /** Every line and open ask this viewer lists is read; an ask is only marked read, never answered. */
+    markAllRead(auth: RequestAuth): number {
+      let changed = 0;
+      for (const line of lines) if (!line.seen && lineFor(auth, line)) { line.seen = true; changed++; }
+      for (const row of askRows(auth)) if (!seenAsks.has(row.id)) { seenAsks.add(row.id); changed++; }
+      if (changed) save();
+      return changed;
     },
     markDone(auth: RequestAuth, lineId: string): "done" | "unknown" | "an ask" {
       const line = lines.find((one) => one.id === lineId && lineFor(auth, one));

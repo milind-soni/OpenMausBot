@@ -61,8 +61,12 @@ it("closes only the pairing dialog on Escape, so Settings stays open", () => {
   expect(onClose).toHaveBeenCalledOnce();
 });
 
+// The close ✕ is its own stop; these tests follow Tab between the code and Done.
+const hideClose = () => { pair().querySelector<HTMLElement>('[aria-label="Close"]')!.getClientRects = () => [] as unknown as DOMRectList; };
+
 it("keeps Tab inside the pairing dialog", () => {
-  const done = pair().querySelector("button")!;
+  hideClose();
+  const done = [...pair().querySelectorAll("button")].at(-1)!;
   done.getClientRects = () => [{}] as unknown as DOMRectList;
   pair().querySelector("summary")!.getClientRects = () => [] as unknown as DOMRectList;
   expect(press("Tab").defaultPrevented).toBe(true);
@@ -78,6 +82,7 @@ it("moves focus into the pairing dialog when it opens and gives it back when it 
 });
 
 it("lets Tab reach the code details toggle", () => {
+  hideClose();
   const summary = pair().querySelector("summary")!;
   const done = [...pair().querySelectorAll("button")].at(-1)!;
   for (const control of [summary, done]) control.getClientRects = () => [{}] as unknown as DOMRectList;

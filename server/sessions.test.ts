@@ -176,7 +176,7 @@ describe("pairing codes", () => {
     const again = registry.exchange({ code, label: "x", source: "a" });
     expect(again.ok).toBe(false);
     if (!again.ok) expect(again.error).toMatch(/wrong or has expired/);
-    expect(again).toMatchObject({ status: 401, errorKey: "serverError.pair.codeWrong" });
+    expect(again).toMatchObject({ status: 401, code: "pairing_code_wrong", errorKey: "serverError.pair.codeWrong" });
     const { code: stale } = registry.openPairing();
     clock += PAIRING_CODE_TTL_MS + 1;
     expect(registry.exchange({ code: stale, label: "x", source: "b" }).ok).toBe(false);
@@ -212,7 +212,7 @@ describe("pairing codes", () => {
     if (!locked.ok) {
       expect(locked.status).toBe(429);
       expect(locked.error).toMatch(/^Too many wrong codes\. Try again at \d{2}:\d{2} UTC\.$/);
-      expect(locked).toMatchObject({ errorKey: "serverError.pair.tooMany", errorParams: { seconds: 300, until: clock + 300_000 } });
+      expect(locked).toMatchObject({ code: "pairing_too_many", errorKey: "serverError.pair.tooMany", errorParams: { seconds: 300, until: clock + 300_000 } });
     }
     expect(registry.exchange({ code, label: "", source: "friend" }).ok).toBe(true);
     clock += PAIRING_LOCKOUT.lockMs + 1;
@@ -255,10 +255,10 @@ describe("pairing codes", () => {
   });
 
   it("explains a code of the wrong kind and does not count it as a guess", () => {
-    for (const [input, key] of [["1234 5678", "serverError.pair.emailCode"], ["123456", "serverError.pair.oldCode"], [`omb_sess_${"a".repeat(43)}`, "serverError.pair.scriptKey"]] as const) {
+    for (const [input, key, code] of [["1234 5678", "serverError.pair.emailCode", "pairing_email_code"], ["123456", "serverError.pair.oldCode", "pairing_old_code"], [`omb_sess_${"a".repeat(43)}`, "serverError.pair.scriptKey", "pairing_script_key"]] as const) {
       for (let i = 0; i < PAIRING_LOCKOUT.failures + 1; i++) {
         const refused = registry.exchange({ code: input, label: "", source: "mixed-up" });
-        expect(refused).toMatchObject({ ok: false, status: 400, errorKey: key });
+        expect(refused).toMatchObject({ ok: false, status: 400, code, errorKey: key });
       }
     }
     expect(registry.failureSources()).not.toContain("mixed-up");
@@ -716,7 +716,7 @@ describe("admin scope only (an OMB Cloud home is personal: server/cloud-owner.ts
     const owner = registry.exchange({ code: registry.openPairing().credential, label: "Mac", source: "a" });
     registry.requireAdmin(userError("serverError.cloud.personal"));
     expect(() => registry.openPairing({ scopes: ["client"] })).toThrow(PERSONAL);
-    expect(registry.exchange({ code: openWindow.credential, label: "Guest", source: "b" })).toEqual({ ok: false, status: 403, error: PERSONAL, errorKey: "serverError.cloud.personal" });
+    expect(registry.exchange({ code: openWindow.credential, label: "Guest", source: "b" })).toEqual({ ok: false, status: 403, code: "cloud_personal", error: PERSONAL, errorKey: "serverError.cloud.personal" });
     expect(() => registry.issue({ label: "Friend", scopes: ["client"], email: "friend@example.test" })).toThrow(PERSONAL);
     expect(() => registry.issuePortal({ email: "friend@example.test", grant: "g".repeat(43), scopes: ["client"] })).toThrow(PERSONAL);
     if (!stored.ok || !owner.ok) throw new Error("unreachable");

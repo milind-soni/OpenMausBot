@@ -34,6 +34,9 @@ export function httpErrorDetail(body: string, limit = 500): string {
 
 export class UnsupportedChatToolsError extends Error {}
 
+/** The provider closed the stream with neither finish_reason nor [DONE]; resending repeats nothing. */
+export class StreamTruncatedError extends ChatProtocolError {}
+
 export function rejectsToolsParameter(status: number, body: string): boolean {
   if (status !== 400 && status !== 422) return false;
   let envelope: Record<string, unknown> | undefined;

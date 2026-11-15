@@ -11,7 +11,7 @@ import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
 import { journalMemoryWrite } from "../memory-journal.ts";
 import { resolveBotCreationDefaults } from "../new-bot-defaults.ts";
 import { PRESET_UNAVAILABLE_MESSAGE, applyPresetToBot, presetOffered, type OrgInstallStatus, type PresetStore } from "../presets.ts";
-import { adminOnlyBotSetting, clientBotPatchViolation, type RequestAuth } from "../request-auth.ts";
+import { adminOnlyBotSetting, memberBotCreateViolation, type RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { installOrgSkill, installSkill, parseSkillMd, setSkillEnabled } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
@@ -96,18 +96,19 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           return json(res, 403, { error: `forbidden: a paired device may say who a new bot is and how it looks, not "${field}"; set that on the host computer` });
         }
       }
+      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
+        if (!deps.team || auth.session.membershipAuthority !== "team" || !auth.session.email) return json(res, 403, { error: "forbidden: this session lacks the admin scope" });
+        const field = memberBotCreateViolation(body);
+        if (field) return json(res, 403, { error: `forbidden: "${field}" is an admin's to set` });
+        // The saved New bot defaults are an admin's choices, some of them an admin's alone to make.
+        body = { ...body, useDefaults: false };
+      }
       const kept = keptBotIds(body, store);
       if ("error" in kept) return json(res, kept.error.includes("already") ? 409 : 400, { error: kept.error });
       const { id: _id, threadId: _threadId, ...rest } = body;
       body = rest;
       const template = resolveBotCreationDefaults(cfg.newBotDefaults, body);
       const settings = template.profile;
-      if (auth.kind === "session" && !auth.scopes.includes("admin")) {
-        const field = clientBotPatchViolation(settings);
-        if (field || body.preset !== undefined || template.skills.length || template.routines.length || Object.keys(template.memory).length) {
-          return json(res, 403, { error: "Creating a bot with these defaults needs the admin scope" });
-        }
-      }
       if (body.preset !== undefined && (typeof body.preset !== "string" || !/^[\w-]{1,64}$/.test(body.preset))) {
         return json(res, 400, { error: "preset must be a preset id from New bot" });
       }

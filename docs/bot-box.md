@@ -69,6 +69,8 @@ checks it guards.
 
 ## What it does not do yet
 
+- **Local VM (Docker) computer use.** The computer MCP talks to the Local VM over the host's Docker socket. The box does not expose that socket (mounting it would be root-equivalent on the host), so with the bot box on a Local VM turn fails early with a clear message instead of "MCP server exited". Use this computer, a Cloud computer, or turn the box off for Local VM work.
+
 - The engines' subscription logins (`~/.claude`, `~/.codex`) are in the box, because the engine needs them. API keys
   stay in the environment until the credential broker (T0b) replaces them with per-turn tokens.
 - The box runs as the server's own user inside a user namespace; a separate Linux user per bot needs a privileged
@@ -99,7 +101,10 @@ ends. A server that answers directly but not through the broker fails the test w
 server", never "Connected", and says the fault is ours. A tool call a URL server refuses with HTTP 401 is answered by the
 broker as a failed tool result that names the server and what to do (`server/bot-box/broker-mcp-refusal.ts`): passed through,
 the 401 starts the engine's own sign-in, which cannot work because the broker drops any `Authorization` the engine sends, and
-Claude Code then says only "Error dialing <address>", since the address holds a token. Connected apps (Composio) were already behind the harness
+Claude Code then says only "Error dialing <address>", since the address holds a token. When nobody signed in and the server
+is one a connected app covers (Gmail or Google Calendar, known by its address or name, `server/mcp-server-app.ts`), and the
+turn can use that app, the answer offers the app's connect card first, or says to use the app when it is already connected.
+Connected apps (Composio) were already behind the harness
 (`/api/internal/connectors/*` with a per-turn bearer) and stay there.
 
 A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Greenference, ModelGo, Cerebras, MiniMax, Kimi, Cursor, Factory,

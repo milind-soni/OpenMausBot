@@ -9,6 +9,8 @@ import { api, currentTaskBot, openBotThread, useStore, visibleMessages, type Bot
 import { lastLine } from "../sidebar-preview";
 import { isArchived, orderedThreadList, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow } from "../SidebarThreadRow";
 import { filterTasks } from "../TaskPicker";
+import { useConversationSide } from "../TeamSideSwitch";
+import { tasksOfSide } from "@/state/team-side";
 import { CardLabel, panelActionCls } from "./rows";
 
 export const CONVERSATIONS_SHOWN = 3;
@@ -67,7 +69,9 @@ export function BotConversations({ bot }: { bot: Bot }) {
     return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
   }, [bot.id, dispatch, generatedTitles]);
 
-  const threads = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
+  const side = useConversationSide(bot);
+  const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }];
+  const threads = (side ? tasksOfSide({ ...bot, tasks }, side) : tasks)
     .filter((task) => !task.routineRunId)
     .map((task) => {
       const thread = currentTaskBot(bot, task.threadId);
@@ -135,7 +139,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
         </button>
       )}>{t("botPanel.conversations.title")}</CardLabel>
       <div className={cn("flex items-center gap-2", listed && "mb-2")}>
-        {bot.yourAccess !== "view" && (
+        {bot.yourAccess !== "view" && side !== "team" && (
           <button
             type="button"
             data-conversations-new

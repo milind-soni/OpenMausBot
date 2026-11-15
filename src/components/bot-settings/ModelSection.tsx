@@ -7,6 +7,7 @@ import { ProposalStatus } from "./ProposalStatus";
 import { ThreadModelsLine } from "../ThreadModelsLine";
 import { t } from "@/lib/i18n";
 import { Select } from "../Select";
+import { backupNote } from "@/lib/engine-rail";
 
 export function ModelSection({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
@@ -79,7 +80,7 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
     (bot.modelSelection.instanceId === instanceId && bot.modelSelection.model === model)
     || chain.some((entry, at) => at !== except && entry.instanceId === instanceId && entry.model === model);
   const offeredBy = (instance: InstanceInfo | undefined) =>
-    instance?.models.options.filter((model) => !model.orgBlocked && (instance.snapshot.authenticated !== false || model.custom)) ?? [];
+    instance?.models.options.filter((model) => !model.orgBlocked && !model.needsCliUpdate && (instance.snapshot.authenticated !== false || model.custom)) ?? [];
   // The default too must be one the account offers now: not blocked, and signed in unless it is a custom model.
   const defaultOffered = (instance: InstanceInfo) => {
     const listed = instance.models.options.find((model) => model.id === instance.models.default);
@@ -90,6 +91,11 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
   const available = state.instances.filter((instance) =>
     instance.snapshot.state === "available" && Boolean(instance.models.default.trim()) && freeModel(instance) !== undefined);
   const nameOf = (instanceId: string) => state.instances.find((instance) => instance.instanceId === instanceId)?.displayName ?? instanceId;
+  const main = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
+  const backupLabel = (instance: InstanceInfo) => {
+    const note = backupNote(main, instance);
+    return note ? `${instance.displayName} · ${note}` : instance.displayName;
+  };
   const modelsOf = (entry: NonNullable<Bot["fallback"]>[number], index: number) => {
     const offered = offeredBy(state.instances.find((candidate) => candidate.instanceId === entry.instanceId))
       .filter((model) => !taken(entry.instanceId, model.id, index));
@@ -143,8 +149,7 @@ export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback
             <option value="">{available.length === 0 ? t("model.fallback.none") : t("model.fallback.addOption")}</option>
             {available.map((instance) => (
               <option key={instance.instanceId} value={instance.instanceId}>
-                {instance.instanceId === bot.modelSelection.instanceId
-                  ? `${instance.displayName} · ${t("botPanel.backups.sameAccount")}` : instance.displayName}
+                {backupLabel(instance)}
               </option>
             ))}
           </Select>

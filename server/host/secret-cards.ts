@@ -37,7 +37,7 @@ import {
   type PhoneSecretSubmissionRegistry,
 } from "../phone-secret.ts";
 import type { BotLogins } from "../bot-logins.ts";
-import type { VaultStore } from "../vault-store.ts";
+import type { VaultReader, VaultStore } from "../vault-store.ts";
 import { loginUsableBy } from "../../shared/logins.ts";
 import { vaultNameKey, type VaultChoice } from "../../shared/vault.ts";
 import { fittingChoices } from "../vault/choices.ts";
@@ -62,6 +62,9 @@ export interface SecretCardsDeps {
   botLogins: Pick<BotLogins, "credentialConfig" | "linkedSecret"> & Partial<Pick<BotLogins, "linkedSecrets">>;
   /** Where a custom card's value is saved, and found again the next time the same bot asks for it by name. */
   vaultStore: Pick<VaultStore, "saveSecret" | "usableSecret" | "markUsed" | "listSecrets" | "secret" | "updateSecret" | "grantMcpKeys">;
+  /** Whose saved secrets a turn in this conversation reaches: the team's, and on a Team Cloud the person's own whose
+   * private chat it is, who also owns what is typed into its card. */
+  vaultReader(threadId: string): VaultReader;
   phoneSecrets: Pick<PhoneSecretBridge, "provide" | "open">;
   phoneSecretSubmissions: PhoneSecretSubmissionRegistry;
   connectorThread(botId: string, threadId: string): { bot: BotRecord; group: GroupRecord | undefined } | null;
@@ -225,7 +228,8 @@ export function createSecretCards(deps: SecretCardsDeps) {
 
   /** Saves a custom card's value to the Vault for the asking bot, then hands it over. */
   function storeCustomSecret(message: Message, botId: string, threadId: string, value: string): void {
-    const saved = vaultStore.saveSecret({ name: message.secret!.label, value, source: "card", bots: [botId], refOnly: message.secret!.delivery !== "file" });
+    const person = deps.vaultReader(threadId).person;
+    const saved = vaultStore.saveSecret({ name: message.secret!.label, value, source: "card", bots: [botId], refOnly: message.secret!.delivery !== "file", ...(person ? { person } : {}) });
     handOver(message, botId, threadId, value, saved.id);
   }
 
@@ -285,7 +289,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
     const card = message.secret!;
     const asked = vaultNameKey(card.label);
     const fresh = (name: string, usable: boolean) => !(usable && vaultNameKey(name) === asked);
-    const saved = vaultStore.listSecrets().filter((one) => !(card.delivery === "file" && one.refOnly) && fresh(one.name, loginUsableBy(one, botId)))
+    const saved = vaultStore.listSecrets(deps.vaultReader(threadId)).filter((one) => !(card.delivery === "file" && one.refOnly) && fresh(one.name, loginUsableBy(one, botId)))
       .map((one) => ({ id: one.id, name: one.name, use: async () => {
         // Picking it is the person letting this bot use it.
         if (one.bots !== "all" && !one.bots.includes(botId)) vaultStore.updateSecret(one.id, { bots: [...one.bots, botId] });
@@ -379,7 +383,10 @@ export function createSecretCards(deps: SecretCardsDeps) {
     const redeemed = vault.redeem(body, { botId, threadId }, (path) =>
       (path.length === 2 && (path[0] === "env" || path[0] === "headers")) || (path.length === 2 && path[0] === "oauth" && path[1] === "clientSecret"),
     "mcp_server's env, headers and oauth.clientSecret");
-    return !redeemed.ok ? redeemed : { ...redeemed, commit: () => { redeemed.commit(); vaultStore.grantMcpKeys(server, redeemed.pointers); } };
+    if (!redeemed.ok) return redeemed;
+    const own = redeemed.pointers.map((id) => vaultStore.secret(id)).find((item) => item?.person);
+    if (own) return { ok: false as const, error: `${own.name} is the person's own, and an MCP server here serves the whole team, so it cannot hold it. Ask a workspace admin to save the key for the team in Settings → Vault, then ask for it again.` };
+    return { ...redeemed, commit: () => { redeemed.commit(); vaultStore.grantMcpKeys(server, redeemed.pointers); } };
   }
 
   function phoneSecretSubmissionKey(threadId: string, messageId: string, requestKey: string): string {
@@ -634,7 +641,8 @@ export function createSecretCards(deps: SecretCardsDeps) {
     const asked = customRequest(body);
     if ("error" in asked) return { status: 400, body: asked };
     const vm = asked.delivery === "file" ? deps.turnVm(threadId) : undefined;
-    const saved = asked.replace ? null : vaultStore.usableSecret(asked.label, from.id, asked.delivery);
+    const reader = deps.vaultReader(threadId);
+    const saved = asked.replace ? null : vaultStore.usableSecret(asked.label, from.id, asked.delivery, reader);
     let item: { id: string; name: string; value: string } | null = saved;
     if (!asked.replace && !item) {
       try {
@@ -678,7 +686,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
       store.patchMessage(threadId, prior.id, { secret: { ...prior.secret, superseded: true } });
       deps.followCard(threadId, prior.id, message.id);
     }
-    const savedAs = asked.delivery === "file" && !asked.replace && vaultStore.usableSecret(asked.label, from.id, "ref") ? { savedAs: "ref" } : {};
+    const savedAs = asked.delivery === "file" && !asked.replace && vaultStore.usableSecret(asked.label, from.id, "ref", reader) ? { savedAs: "ref" } : {};
     return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...savedAs } };
   }
 

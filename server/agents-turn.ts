@@ -15,8 +15,9 @@ export interface AgentsConversation {
   teamComputer: boolean;
   /** Only bots or automation drive it (`botDrivenConversation`): no turn in it is a person's own message to pick a computer for. */
   botDriven?: boolean;
-  /** `x`: a research credential is held (a treg key or a plan's); `research`: research works for it too. */
-  host: { skillAuthoring: boolean; sharedComputers: boolean; cloudHome: boolean; team: boolean; voiceNotes: boolean; x: boolean; research: boolean; imageGeneration: boolean; meetings?: boolean };
+  /** `x`: a research credential is held (a treg key or a plan's); `research`: research works for it too; `appHosting`:
+   * the plan's included app hosting reaches this server. */
+  host: { skillAuthoring: boolean; sharedComputers: boolean; cloudHome: boolean; team: boolean; voiceNotes: boolean; x: boolean; research: boolean; imageGeneration: boolean; meetings?: boolean; appHosting?: boolean };
 }
 
 /** What one turn may do. Its bearer carries this to the harness, which checks it on every call. */
@@ -39,7 +40,6 @@ export function agentsServerEnv(conversation: AgentsConversation, turn: AgentsTu
     OMB_BOT_ID: bot.id,
     OMB_THREAD_ID: conversation.threadId,
     OMB_COMMS_TOKEN: bearer(turn),
-    OMB_TURN_DEPTH: String(turn.depth),
     OMB_SKILL_AUTHORING_ENABLED: flag(host.skillAuthoring),
     OMB_MEMORY_ENABLED: flag(bot.memoryEnabled !== false),
     OMB_SHARED_COMPUTERS_ENABLED: flag(host.sharedComputers),
@@ -50,6 +50,7 @@ export function agentsServerEnv(conversation: AgentsConversation, turn: AgentsTu
     ...roleToolEnv(bot),
     OMB_IMAGE_GENERATION: flag(host.imageGeneration),
     OMB_MEETINGS: flag(host.meetings === true && !conversation.room),
+    OMB_APP_HOSTING: flag(host.appHosting === true),
     OMB_COMPUTER_SELECTION: flag(!conversation.room && bot.computer !== "off" && !conversation.teamComputer && !conversation.botDriven),
   };
 }
