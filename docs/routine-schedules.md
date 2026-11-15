@@ -90,10 +90,77 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   for the same cron routine does not accumulate overlapping copies (a run is
   waiting while teammates still owe it results on the job runtime,
   docs/runtime-contract.md §9).
+- Every occurrence that does not run leaves a **Missed** row with its reason in
+  the routine's log. Occurrences skipped behind the same earlier run share one
+  row, which counts them ("Skipped 12 scheduled runs because the previous run
+  of this routine is still running") and keeps the first and the last time, so
+  a schedule every minute behind a long run adds one row. Such a row is shown
+  as already seen and is never the routine's "latest run", a failure in a row,
+  or one of its "N of M runs OK": it asks nothing of you. A run that has waited
+  on you for 30 minutes when an occurrence is skipped behind it is the
+  exception: you are told once, and that row shows under To review.
+- Failures never turn a routine off. When a routine's cloud desktop does not
+  start three runs in a row, the routine stays on and its scheduled runs are
+  spaced out instead: the next one starts no sooner than an hour after the
+  third failure, and four hours after each later one, because every such run
+  spends the bot's AI for minutes before it fails. You are told once, the list
+  says "Its cloud desktop did not start N runs in a row", and the occurrences
+  held back share one Missed row. While it is spaced, the routine's next due
+  time (what wakes a sleeping Cloud, keeps a desktop awake, and holds back a
+  restart) is the first occurrence after the spacing, not one it will skip.
+  The first run whose cloud desktop starts, **Run now**, or any change to the
+  routine ends the spacing.
+- A routine that an earlier version turned off after three such failures is
+  turned back on, once per installation, at the first start of a version with
+  this rule, when it can be told apart from one you turned off: it is off
+  without a hold, its three newest results are that failure, the third ended
+  within the last 30 days, and the routine has not been changed since that
+  moment. Its bot says so in one quiet line in its own chat ("Turned back on:
+  …"), with nothing to answer. One you edited after it was turned off, one
+  that a workspace restore brought back (a restore leaves every routine off
+  and counts as a change), one switched off longer ago, or one whose failed
+  runs are no longer in the log, stays off: turn it on in the list. A copy
+  frozen by a move to another home turns nothing back on until the freeze
+  lifts.
+- A run stops when it reaches its limit, ends as failed with the limit named
+  ("Stopped: this run ran longer than the 3-hour limit"), and the schedule
+  carries on. A routine may set its own limit, 5 minutes to 24 hours: that one
+  counts the time since the run started, less the time its approvals and
+  questions were open. Without one, the default applies to every run, whether
+  the schedule, an event or **Run now** started it: 3 hours of work for a
+  bot's run, 12 hours for a room goal's run (which stays running across every
+  member's turn). Work is the time the run spent running since its current
+  start: the time it is queued (behind a busy bot, for its one retry, for a
+  usage limit's reset) and the time it waits (on your approval or answer, on a
+  conversation left with you, on work it handed to teammates) is not in it.
+  It is added up a minute at a time while the app runs, so the hours a
+  computer slept, or a clock that was changed, are not in it either.
+- A scheduled run queued behind its busy bot for an hour ends as Missed ("Did
+  not run: the bot was busy for more than 60 minutes"), and the next
+  occurrence starts as usual. Only the time it was seen waiting counts, not
+  the time the computer slept or the app was closed, and the count starts
+  again if the run starts and is queued once more. A run an event or **Run
+  now** started has no next occurrence and waits as long as it takes; so does
+  a run waiting behind its own routine's earlier run (overlap **queue**).
+- Stopping a run's turn is given 10 seconds. If the AI has not confirmed the
+  stop by then, the scheduler goes on with the other routines, but starts no
+  new run of that routine until the stop is confirmed or 5 minutes have
+  passed, so two runs of one routine never work side by side. The stop is sent
+  again each minute, and the stopped run's row says so; a stop that was never
+  confirmed stays written on it.
+- `routines.json` is written through a temporary file and a rename. If it
+  cannot be read, nothing in it is overwritten: no routine runs, changes are
+  refused, the Automations list says so, a copy of the file is kept beside it
+  (`routines.json.unreadable-…`, one per content, five at most), and the file is
+  read again every minute. Once it can be read, the desktop app and a
+  self-hosted server load it and do again what start does with routines
+  (phone adoption, run-on-startup, the quiet lines above); a Cloud home
+  restarts itself instead, because who owns its routines is settled only at
+  start.
 - A run that asks you for an approval or an answer waits for you. Its card and
   the Routines log say what it waits for ("Waiting for your approval to use
   COMPOSIO_SEARCH_TOOLS"), the approval notification names the routine, and the
-  time it waits does not count toward its optional run limit, which bounds
+  time it waits does not count toward its run limit, which bounds
   active work only. If the engine's own wait for an approval runs out with
   nobody's answer, the run stops with "Stopped: nobody answered the approval to
   use …" and the routine-failed notification. A run still waiting when its

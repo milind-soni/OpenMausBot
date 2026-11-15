@@ -215,6 +215,19 @@ describe("the brief", () => {
     expect(actions.filter(([, type]) => type === "open_thread")).toHaveLength(3);
   });
 
+  it("takes a routine's real run for its latest, not a row that only counts occurrences skipped behind it", async () => {
+    const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
+    const base = { routineId: "tidy", routineName: "Tidy my inbox", target: "bot" as const, botId: s.chief.id, runOn: "maus" as const, manual: false };
+    const done: RoutineRun = { ...base, id: "done", scheduledFor: s.now(), status: "completed", createdAt: s.now(), finishedAt: s.now() + 1_000, output: "Filed twelve emails." };
+    const counted: RoutineRun = { ...base, id: "counted", scheduledFor: s.now() + 500, status: "missed", createdAt: s.now() + 500, finishedAt: s.now() + 2_000, seenAt: s.now() + 500,
+      error: "Skipped because the previous run of this routine is still running", skipped: { count: 1, firstAt: s.now() + 500, lastAt: s.now() + 500, behind: "done" } };
+    s.runs.push(done, counted);
+    await s.brief.active("desktop", "UTC");
+    expect(s.shown()).toContain("Filed twelve emails.");
+    expect(s.shown()).not.toContain("Skipped because");
+    expect(s.shown()).not.toContain("missed");
+  });
+
   it("a watch run's answer becomes rows and a prep card, and tells the person once", async () => {
     const s = setup();
     await s.brief.active("desktop", "UTC");

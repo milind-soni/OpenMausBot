@@ -210,13 +210,17 @@ describe("the ledger", () => {
     expect(w.health.report(null).turns).toEqual({ started15m: 0, failed15m: 0, started24h: 0, failed24h: 0 });
   });
 
-  it("follows each routine's last outcome and its failures in a row", () => {
-    const w = world();
-    const run = (id: string, status: "completed" | "failed" | "missed" | "running") => w.health.noteRoutineRun({ id, routineId: "routine-1", status, finishedAt: w.now() });
-    run("r1", "failed"); run("r1", "failed"); run("r2", "running"); run("r2", "missed");
-    expect(w.health.report(null).routines).toEqual([{ routineId: "routine-1", status: "missed", at: START, consecutiveFailures: 2 }]);
-    run("r3", "completed");
-    expect(w.health.report(null).routines).toEqual([{ routineId: "routine-1", status: "completed", at: START, consecutiveFailures: 0 }]);
+  it("reports each routine's last outcome and failures in a row as the saved run rows give them, so a restart hides none", () => {
+    const rows = [{ routineId: "routine-1", status: "missed" as const, at: START, consecutiveFailures: 2 }, { routineId: "not an id!", status: "failed" as const, at: START, consecutiveFailures: 9 }];
+    const caps: number[] = [];
+    const deps = { routines: (cap: number) => { caps.push(cap); return rows; }, schedule: () => ({ unreadable: true, slowStops: 2 }) };
+    for (const w of [world(deps), world(deps)]) {
+      const report = w.health.report(null);
+      expect(report.routines).toEqual([rows[0]]);
+      expect(report.schedule).toEqual({ unreadable: true, slowStops: 2 });
+    }
+    expect(caps).toEqual([100, 100]);
+    expect(world().health.report(null)).toMatchObject({ routines: [], schedule: null });
   });
 });
 
@@ -267,8 +271,7 @@ describe("the report", () => {
   it("stays under 64 KB, and the cursor picks up what did not fit", () => {
     let clock = START;
     const routines = Array.from({ length: 100 }, (_, i) => `r${String(i).padStart(63, "0")}`);
-    const w = world({ now: () => clock });
-    for (const routineId of routines) w.health.noteRoutineRun({ id: routineId, routineId, status: "failed" });
+    const w = world({ now: () => clock, routines: () => routines.map((routineId) => ({ routineId, status: "failed" as const, at: START, consecutiveFailures: 1 })) });
     const ledger = w.health.ledger;
     for (let i = 0; i < HEALTH_BUCKET_CAP; i++) {
       const thread = `t${String(i).padStart(63, "0")}`;

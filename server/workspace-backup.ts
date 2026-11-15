@@ -763,6 +763,8 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
     if (!record(value)) throw new Error("Invalid routine definitions in workspace backup.");
     if (Array.isArray(value.routines)) for (const routine of value.routines) if (record(routine)) {
       routine.enabled = false;
+      // A restore is a change to the routine: nothing may read its old stamp as the moment something else switched it off.
+      routine.updatedAt = Math.max(Date.now(), (typeof routine.updatedAt === "number" ? routine.updatedAt : 0) + 1);
       if (typeof routine.prompt === "string") routine.prompt = paths.text(routine.prompt);
     }
     if (Array.isArray(value.runs)) for (const run of value.runs) {

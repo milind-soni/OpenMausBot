@@ -107,7 +107,8 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
               <LimitWarnings botFilter={showFilter ? botFilter : "all"} />
-              {all.length === 0 && state.routinesLoadState !== "loading" && state.hydrated ? (
+              {state.config?.routinesUnreadable && <div role="alert" className="mb-4 rounded-lg bg-danger/10 p-3 text-[12px] leading-relaxed text-danger" data-routines-unreadable="">{t("routines.unreadable")}</div>}
+              {all.length === 0 && !state.config?.routinesUnreadable && state.routinesLoadState !== "loading" && state.hydrated ? (
                 <section aria-label={t("automations.empty.title")} className="px-6 py-16 text-center">
                   <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-accent/10 text-accent"><Zap size={22} /></div>
                   <h2 className="text-[17px] font-semibold text-ink">{t("automations.empty.title")}</h2>
@@ -134,6 +135,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
                             <span aria-hidden="true" className="size-2 shrink-0 self-center rounded-full bg-danger" />
                             <span>{problemLine.when} {problemLine.mark} {problemLine.text}</span>
                           </button>}
+                          {!!automation.noStartStreak && <div className="mt-1 text-[13px] text-warning" data-automation-no-start="">{t("routines.noStartStreak", { count: automation.noStartStreak })}</div>}
                           {actions.error && actions.errorFor?.endsWith(`:${automation.id}`) && <p role="alert" className="mt-1 text-[12px] text-danger">{actions.error}</p>}
                         </div>
                         {status.state !== "done" && <Switch checked={automation.enabled} disabled={actions.busy === `toggle:${automation.id}`} aria-label={t("automations.toggle", { name: automation.name })} onClick={() => void actions.toggle(automation)} className="relative z-10 mt-0.5 shrink-0" />}

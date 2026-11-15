@@ -5,7 +5,6 @@ import { accessSync, constants, readFileSync, statfsSync } from "node:fs";
 import { availableParallelism, freemem, loadavg, totalmem } from "node:os";
 import { failedTurnCause } from "../shared/failed-turn.ts";
 import { PLACE_STATES } from "../shared/place-view.ts";
-import type { RoutineRunStatus } from "../shared/routines.ts";
 import { trialCreditKind } from "../shared/trial-credit.ts";
 import type { BoxReport } from "./bot-box/box.ts";
 import type { RoomReport } from "./engine-memory.ts";
@@ -14,6 +13,7 @@ import type { ValueReport } from "./host/value-ledger.ts";
 import type { ProviderSnapshot, RuntimeEvent } from "./contracts.ts";
 import { createCloudSpeed, type CloudSpeed } from "./cloud-speed.ts";
 import { classifyError } from "./drivers/retry.ts";
+import type { RoutineHealth } from "./routine-health.ts";
 import type { Message, StoreChange } from "./store.ts";
 
 /** The report's largest JSON body; incidents past it wait for the next poll. */
@@ -59,7 +59,7 @@ export interface HealthIncident {
   kind: HealthIncidentKind; code: string; engine: string | null;
   count: number; firstAt: number; lastAt: number; botId: string | null; threadId: string | null; seq: number;
 }
-export interface RoutineHealth { routineId: string; status: RoutineRunStatus; at: number; consecutiveFailures: number }
+export type { RoutineHealth };
 export interface TurnRates { started15m: number; failed15m: number; started24h: number; failed24h: number }
 interface Pending { at: number; botId: string | null; engine: string | null; fallback: string }
 
@@ -87,7 +87,7 @@ const remember = <K, V>(map: Map<K, V>, key: K, value: V, cap: number) => {
 
 /**
  * Failed turns since boot, bucketed by kind, code and engine. Fed by one tap on the store (every failed-turn row, the one
- * place they are written) and the runtime bus (turn starts, stop reasons, engine kinds); routines by their runs.
+ * place they are written) and the runtime bus (turn starts, stop reasons, engine kinds).
  */
 export function createCloudHealthLedger(options: { botOf?: (threadId: string) => string | null; now?: () => number } = {}) {
   const now = options.now ?? Date.now;
@@ -98,7 +98,6 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
   const lastRowAt = new Map<string, number>();
   const engines = new Map<string, string>();
   const minutes = new Map<number, { started: number; failed: number }>();
-  const routines = new Map<string, RoutineHealth & { runId: string }>();
 
   const tally = (at: number, field: "started" | "failed") => {
     const minute = Math.floor(at / MINUTE);
@@ -168,17 +167,6 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
         record("turn", event.stopReason, engines.get(event.threadId) ?? match(KIND, event.provider), at, options.botOf?.(event.threadId) ?? null, event.threadId);
       }
     },
-    noteRoutineRun(run: { id: string; routineId: string; status: RoutineRunStatus; finishedAt?: number }) {
-      if (!["completed", "failed", "missed", "cancelled"].includes(run.status)) return;
-      const routineId = match(ID, run.routineId);
-      if (!routineId) return;
-      const previous = routines.get(routineId);
-      if (previous?.runId === run.id && previous.status === run.status) return;
-      const failed = run.status === "failed" || run.status === "missed";
-      const sameRun = previous?.runId === run.id && (previous.status === "failed" || previous.status === "missed");
-      const consecutiveFailures = failed ? (previous?.consecutiveFailures ?? 0) + (sameRun ? 0 : 1) : run.status === "completed" ? 0 : previous?.consecutiveFailures ?? 0;
-      remember(routines, routineId, { routineId, runId: run.id, status: run.status, at: run.finishedAt ?? now(), consecutiveFailures }, ROUTINE_CAP);
-    },
     /** Buckets changed after `after` (a cursor from an earlier read of this boot; anything else reads from the start), oldest change first. */
     read(after: string | null | undefined) {
       settleStale();
@@ -192,7 +180,7 @@ export function createCloudHealthLedger(options: { botOf?: (threadId: string) =>
         turns.started24h += slot.started; turns.failed24h += slot.failed;
         if (minute > current - WINDOW_15M) { turns.started15m += slot.started; turns.failed15m += slot.failed; }
       }
-      return { since, seq, incidents, turns, routines: [...routines.values()].map(({ runId: _runId, ...routine }) => routine) };
+      return { since, seq, incidents, turns };
     },
     cursor: (at: number) => `${bootedAt}.${at}`,
   };
@@ -254,6 +242,10 @@ export interface CloudHealthDeps {
   firstHour?: () => { firstHour?: FirstHourReport; value?: ValueReport };
   /** The last day's memory pressure (engine-memory.ts), where this home watches it. */
   room?: () => RoomReport;
+  /** Each routine's newest ended run and its failures in a row, from the saved run rows (routine-health.ts), at most `cap`. */
+  routines?: (cap: number) => RoutineHealth[];
+  /** Whether routines.json cannot be read, and how often stopping a turn outlasted the scheduler's wait since boot. */
+  schedule?: () => { unreadable: boolean; slowStops: number };
   /** CPU steal and pressure, boot and wake times, and how long messages wait for their engine. */
   speed?: CloudSpeed;
   now?: () => number;
@@ -295,13 +287,13 @@ export function createCloudHealth(deps: CloudHealthDeps) {
   return {
     ledger,
     speed,
-    noteRoutineRun: ledger.noteRoutineRun,
     report(after: string | null | undefined) {
       const read = ledger.read(after);
       const memory = memoryBytes(), browser = deps.browser(), first = deps.firstHour?.();
       const base = {
         v: 1 as const, version, image, bootedAt: ledger.bootedAt, at: now(),
-        turns: read.turns, routines: read.routines, engines: engines(), connectors: connectorState(),
+        turns: read.turns, routines: (deps.routines?.(ROUTINE_CAP) ?? []).filter((routine) => match(ID, routine.routineId)), schedule: deps.schedule?.() ?? null,
+        engines: engines(), connectors: connectorState(),
         browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
         box: boxSummary(deps.box?.()),
         firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(),
