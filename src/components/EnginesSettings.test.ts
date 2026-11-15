@@ -196,7 +196,7 @@ describe("Settings → Engines → setup cards", () => {
     const account = (instanceId: string, authenticated: boolean, signOut: boolean): InstanceInfo => ({
       instanceId, driverKind: "antigravityAgent", displayName: "Google account", cliDefault: "agy_acp_server",
       snapshot: { state: "available", authenticated }, models: { default: "gemini", options: [] },
-      authentication: { method: "browser", signOut },
+      authentication: { method: "callback-url", signOut },
     });
     fixture.instances = [account("antigravity", true, true)];
     expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Sign out<");

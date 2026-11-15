@@ -13,6 +13,7 @@ const antigravity: InstanceInfo = {
   models: { default: "gemini", options: [] },
   snapshot: { state: "available", authenticated: false, version: "1.1.1" },
   install: { managed: { label: "Install official Antigravity", downloadBytes: 1024 } },
+  authentication: { method: "callback-url", signOut: true },
 };
 
 let host: HTMLDivElement;
@@ -54,4 +55,12 @@ it("opens it on a desktop paired to another computer's server", async () => {
 
 it("keeps it folded on the person's own computer, where the redirect lands by itself", async () => {
   expect((await startSignIn(false, { remoteClient: { active: false } })).open).toBe(false);
+});
+
+it("names Google on the sign-in card, never another provider", () => {
+  vi.stubGlobal("ogb", { platform: "linux", remoteClient: { active: false } });
+  const store = { state: { config: {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
+  flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance: antigravity }) })));
+  expect(host.textContent).toContain("Sign in with Google");
+  expect(host.textContent).not.toContain("Mistral");
 });
