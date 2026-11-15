@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { appRunWindow, NEWEST_RUNS_PER_AUTOMATION, routineRunsFor } from "./routine-run-window.ts";
-import type { RoutineRun } from "./routines.ts";
+import type { Occurrence } from "./routine-ledger.ts";
+import { appRunWindow, NEWEST_RUNS_PER_AUTOMATION, routineHistoryFor, routineRunsFor } from "./routine-run-window.ts";
+import type { Routine, RoutineRun } from "./routines.ts";
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 10, 1);
@@ -56,5 +57,15 @@ describe("the app's run window", () => {
     expect(ids(routineRunsFor(listRuns, new URLSearchParams({ from: String(NOW - 40 * DAY), to: String(NOW - 20 * DAY) })))).toEqual(["b"]);
     expect(ids(routineRunsFor(listRuns, new URLSearchParams({ thread: "t1" })))).toEqual(["a"]);
     expect(ids(routineRunsFor(listRuns, new URLSearchParams({ since: String(NOW - 7 * DAY) })))).toEqual(["a", "b"]);
+  });
+
+  it("adds one routine's occurrences when asked for its history, without the lease or what the asker may not see", () => {
+    const record: Occurrence = { routineId: "r", dueAt: NOW, state: "running", attempts: 1, startedAt: NOW, lastStartAt: NOW, madeAt: NOW, runIds: ["a"], lease: { machine: "host", boot: "boot", until: NOW + 1 } };
+    const manager = { listRoutines: () => [{ id: "r" }, { id: "hidden" }] as Routine[], occurrences: (id: string) => id === "r" ? [record] : [{ ...record, routineId: id }] };
+    const visible = (routine: Routine) => routine.id !== "hidden";
+    expect(routineHistoryFor(manager, new URLSearchParams({ history: "r" }), visible)).toEqual({ occurrences: [{ dueAt: NOW, state: "running", attempts: 1, startedAt: NOW, madeAt: NOW, runIds: ["a"] }] });
+    expect(routineHistoryFor(manager, new URLSearchParams({ history: "hidden" }), visible)).toEqual({});
+    expect(routineHistoryFor(manager, new URLSearchParams({ history: "gone" }), visible)).toEqual({});
+    expect(routineHistoryFor(manager, new URLSearchParams(), visible)).toEqual({});
   });
 });

@@ -29,16 +29,18 @@ export function blockingRun(runs: readonly RoutineRun[], routineId: string): { r
   return { run, why: run.status === "queued" ? "routines.server.part.notStarted" : "routines.server.part.stillRunning" };
 }
 
-/** Counts the occurrence at `scheduledFor` on its cause's row, which `make` adds the first time. `tell` is true once per
+/** Counts the occurrence at `scheduledFor` on its cause's row, which `make` adds the first time, and with it the
+ * `earlier` occurrences that came due before it while nothing could look (routine-catch-up.ts). `tell` is true once per
  * waiting run, for the first occurrence skipped after it had waited a notice window: the owner is told then, and the row
  * shows as not yet seen. Any other skip is on a row already seen: a run that is still working when the next one comes
  * due, or a spacing the owner was told about when it began, asks nothing more of them. */
-export function recordSkip(runs: readonly RoutineRun[], make: () => RoutineRun, cause: { behind: string; why: SkipWhy; waitingSince?: number }, scheduledFor: number, now: number): { row: RoutineRun; added: boolean; tell: boolean } {
+export function recordSkip(runs: readonly RoutineRun[], make: () => RoutineRun, cause: { behind: string; why: SkipWhy; waitingSince?: number }, scheduledFor: number, now: number,
+  earlier?: { count: number; scheduledFor: number }): { row: RoutineRun; added: boolean; tell: boolean } {
   const found = runs.findLast((run) => run.status === "missed" && run.skipped?.behind === cause.behind);
-  const row = found ?? make();
+  const row = found ?? make(), count = 1 + (earlier?.count ?? 0);
   const skipped: RoutineSkips = found?.skipped
-    ? { ...found.skipped, count: found.skipped.count + 1, lastAt: Math.max(found.skipped.lastAt, scheduledFor) }
-    : { count: 1, firstAt: scheduledFor, lastAt: scheduledFor, behind: cause.behind };
+    ? { ...found.skipped, count: found.skipped.count + count, lastAt: Math.max(found.skipped.lastAt, scheduledFor) }
+    : { count, firstAt: earlier?.scheduledFor ?? scheduledFor, lastAt: scheduledFor, behind: cause.behind };
   const tell = !skipped.told && cause.waitingSince !== undefined && scheduledFor >= cause.waitingSince + ROUTINE_DEFERRAL_NOTICE_MS;
   if (tell) skipped.told = true;
   const line = skipped.count === 1 ? codedLine("error", "routines.server.skippedOne", { why: cause.why }) : codedLine("error", "routines.server.skippedMany", { count: skipped.count, why: cause.why });
