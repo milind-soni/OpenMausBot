@@ -72,7 +72,7 @@ describe("claudeContextUsage", () => {
     expect(written).toEqual([{ type: "control_request", request_id: "context-usage-1", request: { subtype: "get_context_usage", detail: "summary" } }]);
     expect(answered({ subtype: "success", response: answer })).toBe(true);
     await expect(reading).resolves.toEqual(breakdown);
-    expect(answered({ subtype: "success", response: answer })).toBe(false);
+    expect(answered({ subtype: "success", response: answer })).toBe(true);
   });
 
   it("leaves every frame that is not its own answer to the driver", () => {
@@ -103,7 +103,8 @@ describe("claudeContextUsage", () => {
     const abandoned = waiting.context.read(stop.signal);
     stop.abort();
     await expect(abandoned).resolves.toBeNull();
-    expect(waiting.answered({ subtype: "success", response: answer })).toBe(false);
+    // The late answer is still its own to swallow, so the driver never logs it.
+    expect(waiting.answered({ subtype: "success", response: answer })).toBe(true);
     await expect(waiting.context.read(stop.signal)).resolves.toBeNull();
     expect(waiting.written).toHaveLength(1);
   });

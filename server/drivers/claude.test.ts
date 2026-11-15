@@ -33,6 +33,7 @@ import {
 import { spawnContractDiff } from "./claude-spawn-contract.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
 import { claudeLimitMessage } from "./claude-limits.ts";
+import { flushNativeLog } from "./native.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { BASH_MAX_TIMEOUT_MS } from "../system-prompt.ts";
@@ -1201,6 +1202,24 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
     expect(recorder.events.filter((e) => e.type === "request.opened").map((e) => e.requestId)).toEqual(["elicitation:elicit-1"]);
     expect(recorder.events.find((e) => e.type === "request.resolved" && e.requestId === "elicitation:elicit-1")).toMatchObject({ behavior: "deny", source: "system" });
+  });
+
+  it("keeps a context read out of the conversation's native log, an answer that arrives after the caller gave up included", async () => {
+    const usage = { categories: [{ id: "messages", name: "Messages", tokens: 4100, kind: "used" }], totalTokens: 4100, maxTokens: 200000 };
+    await create(undefined, { FAKE_CLAUDE_CONTEXT_USAGE: JSON.stringify(usage), FAKE_CLAUDE_CONTEXT_USAGE_LATE: "1" });
+    const threadId = "t-context-log";
+    await instance.adapter.sendTurn({ threadId, text: "hello" });
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
+    const stop = new AbortController();
+    const abandoned = instance.adapter.contextBreakdown!(threadId, { signal: stop.signal });
+    stop.abort();
+    await expect(abandoned).resolves.toBeNull();
+    // The CLI answers the abandoned read first, then these two.
+    for (let read = 0; read < 2; read++) await expect(instance.adapter.contextBreakdown!(threadId)).resolves.toMatchObject({ tokens: 4100, window: 200000 });
+    flushNativeLog(threadId);
+    const nativeLog = readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8");
+    expect(nativeLog).toContain('"type":"result"');
+    expect(nativeLog).not.toMatch(/control_re(quest|sponse)|context-usage|get_context_usage/);
   });
 
   it("sends attached images as native blocks before text without logging their bytes", async () => {

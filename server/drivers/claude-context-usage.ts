@@ -45,11 +45,12 @@ export function claudeContextUsage(write: (frame: unknown) => Promise<boolean>) 
     resolve?.(breakdown);
   };
   return {
-    /** Consumes the answer to one of its own requests; false for every other frame. */
+    /** Consumes every answer to its own requests, one nobody waits for any more included, so the driver neither reads
+     * nor logs it: a context read leaves nothing on disk. False for every other frame. */
     frame(o: any): boolean {
       const id = o?.type === "control_response" ? o.response?.request_id : undefined;
-      if (typeof id !== "string" || !pending.has(id)) return false;
-      settle(id, o.response.subtype === "success" ? claudeContextBreakdown(o.response.response) : null);
+      if (typeof id !== "string" || !id.startsWith(ID_PREFIX)) return false;
+      if (pending.has(id)) settle(id, o.response.subtype === "success" ? claudeContextBreakdown(o.response.response) : null);
       return true;
     },
     /** null when the CLI has no answer: it does not know the request, it exited, or `signal` gave up waiting. */

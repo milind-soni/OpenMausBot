@@ -896,8 +896,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     };
     /** Forgets a CLI that died mid-turn and removes its files, so the retry starts a clean session. */
     const discardSession = (threadId: string, session: Session) => {
-      session.elicit.close();
-      session.context.close();
+      session.elicit.close(); session.context.close();
       if (session.mcpConfigPath) {
         try {
           rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
@@ -1446,10 +1445,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         } catch {
           return;
         }
+        if (session.context.frame(o)) return;
         authRecovery.frame(threadId, o, session.costTotal);
         // A replayed stdin message carries its images again: keep their bytes out of the log.
         appendNative(threadId, { dir: "in", source: "claude.sdk.message", msg: o?.type === "user" && o.isReplay === true && o.message ? diagnosticClaudeUserMessage(o) : o });
-        if (session.elicit.frame(o) || session.context.frame(o)) return;
+        if (session.elicit.frame(o)) return;
         if (session.turn?.continuationSilence && !(o.type === "system" && o.subtype === "init") && !(o.type === "user" && o.isReplay === true)) {
           clearTimeout(session.turn.continuationSilence);
           session.turn.continuationSilence = null;
