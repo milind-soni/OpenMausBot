@@ -18,6 +18,10 @@ export const handoffOfRoot = (rootId: string): string => rootId.slice(LINK_PREFI
 export const SYNC_PATH = "/api/bot-link/sync";
 export const PAIR_PATH = "/api/bot-link/pair";
 export const STATE_PATH = "/api/bot-link";
+/** One file of a hand-off or of its result, as bytes: the computer puts the ones it sends and gets the ones it is sent. */
+export const FILE_PATH = "/api/bot-link/file";
+/** As many as one assignment may carry in all (server/host/handoff-files.ts). */
+export const FILES_MAX = 20;
 /** How long the Cloud holds a sync open when it has nothing to send. */
 export const HOLD_MS = 25_000;
 /** A computer that has not asked for this long is offline. */
@@ -42,6 +46,12 @@ export const linkedBotSchema = z.object({
 }).strict();
 export type LinkedBot = z.infer<typeof linkedBotSchema>;
 
+export const fileMeta = z.object({ name: z.string().min(1).max(255), mime: z.string().max(200), kind: z.enum(["image", "file"]), bytes: z.number().int().nonnegative() }).strict();
+export type FileMeta = z.infer<typeof fileMeta>;
+const files = z.array(fileMeta).max(FILES_MAX).optional();
+export const fileWay = z.enum(["sent", "returned"]);
+export type FileWay = z.infer<typeof fileWay>;
+
 const handoff = z.object({
   t: z.literal("handoff"), id, to: id,
   from: z.object({ botId: id, name, threadId: id }).strict(),
@@ -52,13 +62,15 @@ const handoff = z.object({
   origin: z.object({ kind: z.enum(["person", "routine", "outside"]), quote: z.string().max(2_000).optional() }).strict(),
   person: z.string().max(120).optional(),
   doneWhen: z.string().max(2_000).optional(),
+  /** The files that travel with it: their bytes cross apart, by FILE_PATH, before the working side starts. */
+  files,
 }).strict();
 export type HandoffFrame = z.infer<typeof handoff>;
 
 export const frameSchema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("hello"), place: placeSchema, bots: z.array(linkedBotSchema).max(500) }).strict(),
   handoff,
-  z.object({ t: z.literal("result"), id, ok: z.boolean(), text: z.string().max(RESULT_MAX), outcome: z.string().max(40).optional() }).strict(),
+  z.object({ t: z.literal("result"), id, ok: z.boolean(), text: z.string().max(RESULT_MAX), outcome: z.string().max(40).optional(), files }).strict(),
   z.object({ t: z.literal("done"), id }).strict(),
   z.object({ t: z.literal("cancel"), id }).strict(),
   z.object({ t: z.literal("bye") }).strict(),

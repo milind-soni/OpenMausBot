@@ -1,18 +1,20 @@
 // Two places, each with a real coordinator over its own data folder, joined by the real routes and the real dialer over
 // HTTP on this machine: "the computer" asks, "the Cloud" answers. Only the engines are fake.
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createCoordinator, type CoordinateBotsCall, type Coordinator, type CoordinatorHost, type HandoffView, type HostTurnResult } from "../coordinator.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SessionRecord } from "../sessions.ts";
+import type { PassedFile } from "../host/handoff-files.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { createDialer } from "./dial.ts";
-import { createBotLink, type BotLink } from "./link.ts";
+import { createBotLink, SPOOL_KEEP_MS, type BotLink } from "./link.ts";
 import { createBotLinkRoutes as routesOf, linkSessionRefusal } from "../routes/bot-link.ts";
 import { EXCHANGE_BYTES, LINK_EXPIRES_MS, PAIR_PATH, STATE_PATH, SYNC_PATH, linkedId, peerKey, type Frame } from "./protocol.ts";
 
@@ -42,6 +44,17 @@ function place(label: string, bots: Bot[]) {
   const results: Array<{ thread: string; name: string; status: string; result: string }> = [];
   const requests: string[] = [];
   const issued = new Map<string, string>();
+  /** The attachment store and the hand-off file ledger, as handoff-files.ts keeps them. */
+  const attachments = join(dir, "attachments");
+  mkdirSync(attachments);
+  const ledger = new Map<string, { from: { botId: string; name: string }; files: PassedFile[] }>();
+  const keep = (name: string, data: Buffer): PassedFile => {
+    const path = join(attachments, `${createHash("sha256").update(data).digest("hex").slice(0, 24)}${extname(name)}`);
+    writeFileSync(path, data);
+    return { kind: "file", path, name, mime: "text/plain", bytes: data.length };
+  };
+  /** Requests this place's server answers with a failure, once each. */
+  const failing: Array<{ match: RegExp; status: number }> = [];
   let run: Run = async (node) => ({ ok: true, text: `${node.botId} did: ${node.text}` });
   let coordinator!: Coordinator, link!: BotLink, dialer!: ReturnType<typeof createDialer>, ticker: NodeJS.Timeout | undefined, http: Server | undefined;
   let opened = 0, port = 0, generation = 0, skew = 0, minted = 0;
@@ -57,6 +70,11 @@ function place(label: string, bots: Bot[]) {
       kick: () => { queueMicrotask(() => { try { coordinator.tick(); } catch { /* closed */ } }); },
       revoke: (sessionId) => { for (const [token, id] of issued) if (id === sessionId) issued.delete(token); },
       now: () => Date.now() + skew,
+      files: {
+        carried: (id, way) => ledger.get(`${id}:${way}`)?.files ?? [],
+        crossed: (id, way, from, files) => { if (!ledger.has(`${id}:${way}`)) ledger.set(`${id}:${way}`, { from, files: [...files] }); },
+        store: async (files) => files.map((file) => { if (file.name.endsWith(".exe")) throw new Error(`${file.name} is not a supported attachment type`); return keep(file.name, readFileSync(file.path)); }),
+      },
     });
     const inner: CoordinatorHost = {
       validate: () => undefined, busy: () => false, report: () => {}, changed: () => {}, park: () => {},
@@ -91,7 +109,9 @@ function place(label: string, bots: Bot[]) {
     const readBody = async (req: IncomingMessage) => { const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(chunk as Buffer); return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}; };
     http = createServer((req, res) => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
-      requests.push(`${req.method} ${url.pathname}`);
+      requests.push(`${req.method} ${url.pathname}${url.searchParams.has("probe") ? "?probe" : ""}`);
+      const fails = failing.findIndex((one) => one.match.test(requests.at(-1)!));
+      if (fails >= 0) { const status = failing.splice(fails, 1)[0]!.status; req.resume(); json(res, status, { error: "try again" }); return; }
       void routes({ req, res, url, path: url.pathname, method: req.method ?? "GET", auth: auth(req), json: json as never, readBody: readBody as never })
         .catch((error) => { if (!res.headersSent) json(res, 500, { error: String(error) }); });
     });
@@ -124,7 +144,14 @@ function place(label: string, bots: Bot[]) {
   }
 
   const api = {
-    dir, bots, runs, sent, results, requests, boot, listen, unplug, shutdown, handOff,
+    dir, bots, runs, sent, results, requests, boot, listen, unplug, shutdown, handOff, keep, ledger,
+    failOnce: (match: RegExp, status = 500) => { failing.push({ match, status }); },
+    /** What an assignment here carries one way: who it is from and each file's name and words. */
+    carries: (id: string, way: "sent" | "returned") => { const batch = ledger.get(`${id}:${way}`); return batch ? { from: batch.from.name, files: batch.files.map((file) => [file.name, readFileSync(file.path, "utf8")]) } : undefined; },
+    /** The bot working on `id` attaches a file: it goes back with its result. */
+    attach: (id: string, name: string, words: string) => { const batch = ledger.get(`${id}:returned`) ?? { from: { botId: "x", name: "x" }, files: [] }; batch.files.push(keep(name, Buffer.from(words))); ledger.set(`${id}:returned`, batch); },
+    /** The files still waiting in this place's spool folder. */
+    spooled: () => { const root = join(dir, "bot-link-files"); return existsSync(root) ? readdirSync(root, { recursive: true }).map(String).filter((entry) => /[\\/](?:sent|returned)[\\/]/.test(entry)) : []; },
     get link() { return link; }, get dialer() { return dialer; }, get coordinator() { return coordinator; }, get port() { return port; },
     engine(next: Run) { run = next; },
     /** Time passes for this place's link. */
@@ -524,6 +551,123 @@ describe("the link between a computer and its Cloud", () => {
     computer.dialer.start();
     await until(() => stopped, "the Cloud's turn is stopped");
     expect(cloud.runs).toHaveLength(1);
+  });
+
+  it("files go with a hand-off and come back with its result, from the computer to the Cloud", async () => {
+    const { computer, cloud } = await two();
+    cloud.engine(async (node) => { cloud.attach(node.id, "totals.csv", "orders,42"); return { ok: true, text: "Counted: see totals.csv" }; });
+    const { receipts } = await computer.handOff("local-writer", call(["Analyst"], "Count the orders in this export", { files: [computer.keep("orders.csv", Buffer.from("id\n1\n2")), computer.keep("notes.txt", Buffer.from("skip refunds"))] }));
+    await until(() => computer.results.length === 1, "the result is back");
+    const worked = cloud.coordinator.all().find((node) => node.botId === "cloud-analyst")!;
+    expect(cloud.carries(worked.id, "sent")).toEqual({ from: "Writer", files: [["orders.csv", "id\n1\n2"], ["notes.txt", "skip refunds"]] });
+    expect(computer.carries(receipts[0]!.requestId!, "returned")).toEqual({ from: "Analyst", files: [["totals.csv", "orders,42"]] });
+    expect(computer.results[0]!.result).toBe("Counted: see totals.csv");
+    expect(cloud.spooled()).toEqual([]);
+    expect(computer.spooled()).toEqual([]);
+  });
+
+  it("files go with a hand-off and come back with its result, from the Cloud to the computer", async () => {
+    const { computer, cloud } = await two();
+    computer.engine(async (node) => { computer.attach(node.id, "draft.md", "# Summary"); return { ok: true, text: "Drafted." }; });
+    const { receipts } = await cloud.handOff("cloud-analyst", call(["Writer"], "Write this up", { files: [cloud.keep("figures.csv", Buffer.from("a,b\n1,2"))] }));
+    await until(() => cloud.results.length === 1, "the result is back");
+    const worked = computer.coordinator.all().find((node) => node.botId === "local-writer")!;
+    expect(computer.carries(worked.id, "sent")).toEqual({ from: "Analyst", files: [["figures.csv", "a,b\n1,2"]] });
+    expect(cloud.carries(receipts[0]!.requestId!, "returned")).toEqual({ from: "Writer", files: [["draft.md", "# Summary"]] });
+    expect(cloud.spooled()).toEqual([]);
+    expect(computer.spooled()).toEqual([]);
+  });
+
+  it("files wait for a computer that is off, and a file the working side will not take ends the hand-off with the reason", async () => {
+    const { computer, cloud } = await two();
+    await computer.dialer.stop();
+    await until(() => !cloud.link.online(), "the Cloud sees the computer gone");
+    const { receipts } = await cloud.handOff("cloud-analyst", call(["Writer"], "Write this up", { files: [cloud.keep("figures.csv", Buffer.from("a,b"))] }));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    computer.dialer.start();
+    await until(() => cloud.results.length === 1, "the result is back");
+    expect(computer.carries(computer.coordinator.all().find((node) => node.botId === "local-writer")!.id, "sent")?.files).toEqual([["figures.csv", "a,b"]]);
+    expect(cloud.results[0]).toMatchObject({ status: "completed" });
+    expect(receipts[0]!.outcome).toBe("queued");
+
+    await computer.handOff("local-writer", call(["Analyst"], "Run this", { files: [computer.keep("tool.exe", Buffer.from("MZ"))] }));
+    await until(() => computer.results.length === 1, "the refusal is back");
+    expect(computer.results[0]).toMatchObject({ status: "failed" });
+    expect(computer.results[0]!.result).toContain("tool.exe is not a supported attachment type");
+    expect(cloud.runs.filter((run) => run.botId === "cloud-analyst" && !run.resumed)).toEqual([]);
+    expect(cloud.spooled()).toEqual([]);
+    expect((await cloud.fetch("GET", "/api/bot-link/file?id=nope&way=sent&index=0&name=x.txt", undefined, "owner")).status).toBe(403);
+  });
+
+  it("a new session does not send again the files the Cloud already holds, and nothing is left in its spool", async () => {
+    const { computer, cloud } = await two();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    cloud.engine(async (node) => { await gate; return { ok: true, text: `${node.botId} did: ${node.text}` }; });
+    await computer.handOff("local-writer", call(["Analyst"], "Count the orders", { files: [computer.keep("orders.csv", Buffer.from("id\n1\n2"))] }));
+    await until(() => cloud.runs.length === 1, "the work starts");
+    const puts = () => cloud.requests.filter((request) => request === "PUT /api/bot-link/file").length;
+    expect(puts()).toBe(1);
+    expect(cloud.spooled()).toEqual([]);
+    const at = cloud.port;
+    for (let round = 0; round < 3; round += 1) {
+      await cloud.unplug();
+      await until(() => !computer.link.online(), "the link drops");
+      await cloud.listen(at);
+      await until(() => computer.link.online(), "the link is back");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    expect(puts()).toBe(1);
+    expect(cloud.requests.filter((request) => request === "GET /api/bot-link/file?probe").length).toBeGreaterThanOrEqual(3);
+    expect(cloud.spooled()).toEqual([]);
+    release();
+    await until(() => computer.results.length === 1, "the result is back");
+    expect(cloud.runs.filter((run) => run.botId === "cloud-analyst")).toHaveLength(1);
+  });
+
+  it("a file that could not cross is tried again on a timer, on a link that never drops", async () => {
+    const { computer, cloud } = await two();
+    cloud.failOnce(/^GET \/api\/bot-link\/file$/);
+    await cloud.handOff("cloud-analyst", call(["Writer"], "Write this up", { files: [cloud.keep("figures.csv", Buffer.from("a,b\n1,2"))] }));
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect(computer.runs).toEqual([]);
+    expect(computer.link.online()).toBe(true);
+    await until(() => cloud.results.length === 1, "the result is back after the retry", 12_000);
+    expect(cloud.results[0]).toMatchObject({ status: "completed" });
+    expect(cloud.requests.filter((request) => request === "GET /api/bot-link/file")).toHaveLength(2);
+
+    cloud.failOnce(/^PUT \/api\/bot-link\/file$/);
+    await computer.handOff("local-writer", call(["Analyst"], "Count the orders", { files: [computer.keep("orders.csv", Buffer.from("id\n1"))] }));
+    await until(() => computer.results.length === 1, "the upload was tried again", 12_000);
+    expect(computer.results[0]).toMatchObject({ status: "completed" });
+  }, 40_000);
+
+  it("a file that turns out larger than it was said to be is not kept, and the hand-off ends with the reason", async () => {
+    const { computer, cloud } = await two();
+    await computer.dialer.stop();
+    await until(() => !cloud.link.online(), "the Cloud sees the computer gone");
+    const file = cloud.keep("figures.csv", Buffer.from("a,b"));
+    await cloud.handOff("cloud-analyst", call(["Writer"], "Write this up", { files: [file] }));
+    writeFileSync(file.path, "a,b and a great deal more than was said");
+    computer.dialer.start();
+    await until(() => cloud.results.length === 1, "the refusal is back");
+    expect(cloud.results[0]).toMatchObject({ status: "failed" });
+    expect(cloud.results[0]!.result).toContain("larger than it was said to be");
+    expect(computer.runs).toEqual([]);
+    expect(computer.spooled()).toEqual([]);
+  });
+
+  it("bytes left in the spool by hand-offs that never came are swept: the old ones, and the oldest when there is too much", async () => {
+    const { cloud } = await two();
+    const root = join(cloud.dir, "bot-link-files");
+    const leave = (name: string, ageMs: number) => { const dir = join(root, name, "sent"); mkdirSync(dir, { recursive: true }); const file = join(dir, "0-x.txt"); writeFileSync(file, "left"); const at = new Date(Date.now() - ageMs); utimesSync(file, at, at); };
+    leave("stale", SPOOL_KEEP_MS + 60_000);
+    leave("fresh", 60_000);
+    cloud.link.tidy();
+    expect(readdirSync(root)).toEqual(["fresh"]);
+    cloud.later(SPOOL_KEEP_MS);
+    cloud.link.tidy();
+    expect(readdirSync(root)).toEqual([]);
   });
 
   it("the link's sign-in reaches the link's own routes and nothing else", () => {
