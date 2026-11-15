@@ -698,6 +698,12 @@ export class SessionRegistry {
     return this.sessions.some((s) => s.id === sessionId && !this.personal(s.scopes));
   }
 
+  /** A live session by id: what a paired phone with no stream open may still be shown (server/phone-push.ts). */
+  record(sessionId: string): SessionRecord | null {
+    this.prune();
+    return this.sessions.find((s) => s.id === sessionId && s.expiresAt > this.now() && !this.personal(s.scopes)) ?? null;
+  }
+
   list(): PublicSession[] {
     this.prune();
     return this.sessions.map(publicSession);
