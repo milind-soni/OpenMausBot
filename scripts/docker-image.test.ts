@@ -349,7 +349,8 @@ describe("container images", () => {
       expect(volumes.edge.driver_opts.type, file).toBe("tmpfs");
       const { OMB_TUNNEL_SOCKET: api, OMB_WEBHOOK_SOCKET: hooks } = services.omb.environment;
       expect([api, hooks], file).toEqual(["/run/openmausbot/http.sock", "/run/openmausbot/hooks.sock"]);
-      const proxied = [...readFileSync(new URL(caddyfile, import.meta.url), "utf8").matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]);
+      // The local Caddyfile proxies the API twice: once for the trusted TLS terminator, once for everyone else.
+      const proxied = [...new Set([...readFileSync(new URL(caddyfile, import.meta.url), "utf8").matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]))];
       expect(proxied, caddyfile).toEqual([`unix/${hooks}`, `unix/${api}`]);
     }
   });

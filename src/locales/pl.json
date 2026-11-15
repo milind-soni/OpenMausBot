@@ -522,6 +522,7 @@
   "homeLine.profile": "{name} zaczyna od zera, osobno od My Cloud. Dotychczasowe boty z tego komputera są w My Cloud; aby przywrócić starszą kopię, zaimportuj jej kopię zapasową w Ustawienia → Kopie zapasowe.",
   "homeLine.local": "{name} zaczyna od zera: osobne miejsce na tym komputerze, z własnymi botami, czatami i plikami.",
   "native.places.profileFailed": "Nie udało się otworzyć miejsca tego komputera. Spróbuj ponownie za chwilę.",
+  "chat.notice.devinAccountRefused": "Devin odrzucił to żądanie dla zalogowanego konta. Sprawdź plan i środki w Devin, a potem spróbuj ponownie.",
   "rail.settingUp": "{name}: konfigurowanie",
   "rail.waiting": "{name}: czeka na płatność",
   "rail.attention": "{name}: potrzebuje ciebie",
