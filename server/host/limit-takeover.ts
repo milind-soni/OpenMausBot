@@ -83,7 +83,7 @@ interface SavedHolds { models?: Record<string, ModelHold>; signedOut?: Record<st
 export function signedOutStop(stopReason: string | null | undefined, said: string | undefined): boolean {
   return stopReason === "auth_required" && !(said && (engineFailureKind(said) === "credits" || classifyError({ text: said }).reason === "quota"));
 }
-export function takeoverRefusal(stopReason: string | null | undefined, said: string | undefined, limit: LimitScope | undefined): TakeoverScope | undefined {
+export function takeoverRefusal(stopReason: string | null | undefined, said: string | undefined, limit: TakeoverScope | undefined): TakeoverScope | undefined {
   if (signedOutStop(stopReason, said)) return "signed-out";
   // A tool call's failure names the tool, never the engine's own limit, whatever its words.
   return limit ?? (stopReason !== "tool_error" && classifyError({ text: said ?? "" }).reason === "quota" ? "engine" : undefined);
