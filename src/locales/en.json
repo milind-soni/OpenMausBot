@@ -3666,6 +3666,8 @@
   "engineSetup.finishedSignIn": "I finished signing in",
   "engineSetup.otherComputer": "Signing in from another computer?",
   "engineSetup.otherComputerHint": "After Google redirects to a page that cannot load, paste that page’s complete URL here.",
+  "engineSetup.cloudPasteSummary": "Google’s page didn’t load? Paste its address here",
+  "engineSetup.cloudPasteHint": "After you sign in, Google opens a page that won’t load. Copy its address and paste it below.",
   "engineSetup.otherComputerUrl": "Page address from the other computer",
   "engineSetup.sending": "Sending…",
   "engineSetup.sendRedirect": "Send redirect",

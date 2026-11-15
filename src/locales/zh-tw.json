@@ -3425,6 +3425,8 @@
   "engineSetup.finishedSignIn": "我已完成登入",
   "engineSetup.otherComputer": "從其他電腦登入嗎？",
   "engineSetup.otherComputerHint": "當 Google 導向到無法載入的頁面後，請將該頁面的完整網址貼到這裡。",
+  "engineSetup.cloudPasteSummary": "Google 的頁面無法載入？請將它的網址貼到這裡",
+  "engineSetup.cloudPasteHint": "登入後，Google 會開啟一個無法載入的頁面。請複製它的網址，貼到下方。",
   "engineSetup.otherComputerUrl": "來自另一台電腦的頁面網址",
   "engineSetup.sending": "傳送中…",
   "engineSetup.sendRedirect": "傳送導向網址",

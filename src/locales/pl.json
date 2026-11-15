@@ -2873,6 +2873,8 @@
   "engineSetup.finishedSignIn": "Zakończono logowanie",
   "engineSetup.otherComputer": "Logujesz się z innego komputera?",
   "engineSetup.otherComputerHint": "Gdy Google przekieruje cię na stronę, która się nie ładuje, wklej tutaj pełny adres URL tej strony.",
+  "engineSetup.cloudPasteSummary": "Strona Google się nie wczytała? Wklej tutaj jej adres",
+  "engineSetup.cloudPasteHint": "Po zalogowaniu Google otworzy stronę, która się nie wczyta. Skopiuj jej adres i wklej go poniżej.",
   "engineSetup.sending": "Wysyłanie…",
   "engineSetup.sendRedirect": "Wyślij przekierowanie",
   "engineSetup.googleNoLink": "Logowanie przez Google nie zwróciło linku.",

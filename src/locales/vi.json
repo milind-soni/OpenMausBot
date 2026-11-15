@@ -2354,6 +2354,8 @@
   "engineSetup.finishedSignIn": "Tôi đã đăng nhập xong",
   "engineSetup.otherComputer": "Đăng nhập từ một máy tính khác?",
   "engineSetup.otherComputerHint": "Sau khi Google chuyển hướng đến trang không thể tải, hãy dán URL đầy đủ của trang đó vào đây.",
+  "engineSetup.cloudPasteSummary": "Trang của Google không tải được? Dán địa chỉ của trang đó vào đây",
+  "engineSetup.cloudPasteHint": "Sau khi bạn đăng nhập, Google mở một trang không tải được. Hãy sao chép địa chỉ của trang đó và dán vào bên dưới.",
   "engineSetup.sending": "Đang gửi…",
   "engineSetup.sendRedirect": "Gửi chuyển hướng",
   "engineSetup.googleNoLink": "Đăng nhập bằng Google không trả về liên kết.",

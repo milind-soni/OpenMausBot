@@ -2901,6 +2901,8 @@
   "engineSetup.finishedSignIn": "Я завершил вход",
   "engineSetup.otherComputer": "Входите с другого компьютера?",
   "engineSetup.otherComputerHint": "После того как Google перенаправит на страницу, которая не загружается, вставьте её полный URL здесь.",
+  "engineSetup.cloudPasteSummary": "Страница Google не загрузилась? Вставьте её адрес сюда",
+  "engineSetup.cloudPasteHint": "После входа Google откроет страницу, которая не загружается. Скопируйте её адрес и вставьте ниже.",
   "engineSetup.sending": "Отправка…",
   "engineSetup.sendRedirect": "Отправить перенаправление",
   "engineSetup.googleNoLink": "Вход через Google не вернул ссылку.",
