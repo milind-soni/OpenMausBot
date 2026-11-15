@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { LOOK_HISTORY_LIMIT } from "../../shared/theme.ts";
 import { isRefusal, createThemeStore } from "./store.ts";
 
 const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
@@ -76,5 +77,65 @@ describe("theme store", () => {
     store.setActive("owner", "neon");
     store.remove("owner", "neon");
     expect(store.list("owner")).toEqual({ active: null, themes: [] });
+  });
+
+  it("records each look change with what was worn before and after, and a theme's file as it was", () => {
+    const { store } = fixture();
+    store.change("owner", { saves: [{ id: "neon", file: { name: "Neon", accent: "#ff2bd6" } }], wear: "neon" });
+    store.addAsset("owner", "neon", "stars.png", PNG);
+    store.change("owner", { saves: [{ id: "neon", file: { name: "Neon", accent: "#00ff88" } }] });
+    store.change("owner", { wear: null, skin: "midnight" });
+    store.change("owner", { wear: null, skin: "midnight" });
+    expect(store.history("owner").map(({ index, kind, name }) => ({ index, kind, name }))).toEqual([
+      { index: 1, kind: "skin", name: "midnight" },
+      { index: 2, kind: "edited", name: "Neon" },
+      { index: 3, kind: "made", name: "Neon" },
+    ]);
+    const [skin, edited, made] = store.history("owner");
+    expect(skin!.look).toEqual({ id: null, skin: "midnight" });
+    expect(edited!.file?.accent).toBe("#00ff88");
+    expect(made!.file?.accent).toBe("#ff2bd6");
+  });
+
+  it("keeps the last 30 changes and refuses to go back further", () => {
+    const { store } = fixture();
+    for (let n = 1; n <= LOOK_HISTORY_LIMIT + 5; n++) store.change("owner", { saves: [{ id: "neon", file: { name: "Neon", canvas: `#0000${n.toString(16).padStart(2, "0")}` } }] });
+    const items = store.history("owner");
+    expect(items).toHaveLength(LOOK_HISTORY_LIMIT);
+    expect(items.at(-1)!.seq).toBe(6);
+    expect(store.restore("owner", 4)).toMatchObject({ refusal: expect.stringContaining("last 30") });
+    expect(isRefusal(store.restore("owner", 5))).toBe(false);
+    expect(store.read("owner", "neon")?.canvas).toBe("#000005");
+  });
+
+  it("goes back to the theme file and the worn theme at an earlier change, and a new store on the same folder still can", () => {
+    const { store, dataDir } = fixture();
+    store.save("owner", "calm", { name: "Calm" });
+    store.change("owner", { wear: "calm" });
+    store.change("owner", { saves: [{ id: "neon", file: { name: "Neon", accent: "#ff2bd6" } }], wear: "neon" });
+    store.change("owner", { saves: [{ id: "neon", file: { name: "Neon", accent: "#00ff88" } }] });
+    const again = createThemeStore({ dataDir });
+    const [, made, wore] = again.history("owner");
+    expect(again.restore("owner", made!.seq)).toEqual({});
+    expect(again.read("owner", "neon")?.accent).toBe("#ff2bd6");
+    expect(again.active("owner")).toBe("neon");
+    expect(again.restore("owner", wore!.seq)).toEqual({});
+    expect(again.active("owner")).toBe("calm");
+    expect(again.read("owner", "neon")?.accent).toBe("#ff2bd6");
+    expect(again.history("owner").slice(0, 2).map((item) => item.kind)).toEqual(["undid", "undid"]);
+    expect(again.restore("owner", again.history("owner")[0]!.seq)).toMatchObject({ refusal: "That is how it looks now." });
+  });
+
+  it("names the files an earlier look had that are gone now", () => {
+    const { store } = fixture();
+    store.save("owner", "neon", { name: "Neon" });
+    store.addAsset("owner", "neon", "stars.png", PNG);
+    store.change("owner", { saves: [{ id: "neon", file: { name: "Neon", canvas: "#000000" } }], wear: "neon" });
+    expect(store.missingAssets("owner", 0)).toEqual([]);
+    store.remove("owner", "neon");
+    expect(store.history("owner")[0]).toMatchObject({ kind: "deleted", name: "Neon" });
+    expect(store.missingAssets("owner", 1)).toEqual(["stars.png"]);
+    expect(store.restore("owner", 1)).toEqual({});
+    expect(store.list("owner")).toEqual({ active: "neon", themes: [{ id: "neon", name: "Neon", hasCss: false, assets: [] }] });
   });
 });

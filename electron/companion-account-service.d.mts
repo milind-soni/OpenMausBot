@@ -42,6 +42,8 @@ export interface CompanionAccountState {
   /** The secure address was ended for old phone apps: a phone that has not used the encrypted connection must be
    * updated and paired again. */
   tunnelRetired?: true;
+  /** What failed, as one fixed word for the renderer's diagnosis: never a message or a control-plane code. */
+  problem?: "unconfigured" | "unreachable" | "sign_in" | "busy" | "limit" | "update" | "address" | "failed";
 }
 
 export interface CompanionAccountService {
