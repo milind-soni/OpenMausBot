@@ -7,6 +7,7 @@ import {
   bearerToken,
   cleanDeviceName,
   DeviceRegistry,
+  MAX_DEVICES,
   MAX_PAIRING_ATTEMPTS,
   PAIRING_TTL_MS,
   UNCONFIRMED_DEVICE_MS,
@@ -468,5 +469,122 @@ describe("browser control capability", () => {
 
     expect(new DeviceRegistry().list()[0].browserControlAccess).toBe(true);
     expect(registry.setBrowserControlAccess("nobody", true)).toBe(false);
+  });
+});
+
+describe("re-pairing with the token a phone already holds", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  const repair = (registry: DeviceRegistry, replacesToken?: unknown, name = "iPhone") => {
+    const { token: credential } = registry.openPairing();
+    const result = registry.redeem(credential, name, undefined, replacesToken);
+    if ("error" in result) throw new Error(`pairing failed: ${result.error}`);
+    return result;
+  };
+  const savedIds = () => (JSON.parse(readFileSync(join(DATA_DIR, "devices.json"), "utf8")).devices as Array<{ id: string }>).map((d) => d.id);
+
+  it("replaces that device in the same save: the count stays and the old token stops working", () => {
+    const registry = new DeviceRegistry();
+    const replaced: string[] = [];
+    registry.onReplaced((id) => replaced.push(id));
+    const other = pair(registry, "iPad");
+    const first = pair(registry);
+    const second = repair(registry, first.token);
+
+    expect(registry.count()).toBe(2);
+    expect(registry.authenticate(first.token)).toBeNull();
+    expect(registry.authenticate(second.token)?.id).toBe(second.device.id);
+    expect(registry.authenticate(other.token)?.id).toBe(other.device.id);
+    expect(second.device.id).not.toBe(first.device.id);
+    expect(savedIds()).toEqual([other.device.id, second.device.id]);
+    expect(replaced).toEqual([first.device.id]);
+  });
+
+  it("starts the new device with a fresh pairing's grants, keeping only a route restriction", () => {
+    const registry = new DeviceRegistry();
+    const first = pair(registry);
+    registry.setCloudDesktopAccess(first.device.id, true);
+    registry.setBrowserControlAccess(first.device.id, true);
+    registry.setRoutes(first.device.id, "local");
+    registry.markE2E(first.device.id);
+
+    const { device } = repair(registry, first.token);
+    expect(device).toMatchObject({ cloudDesktopAccess: false, browserControlAccess: false, routes: "local" });
+    expect(device).not.toHaveProperty("e2eAt");
+  });
+
+  it("ignores an unknown or malformed token, with the same reply as a pairing without one", () => {
+    const registry = new DeviceRegistry();
+    const kept = pair(registry);
+    const replaced: string[] = [];
+    registry.onReplaced((id) => replaced.push(id));
+    const plain = repair(registry);
+    for (const unknown of [`omb_${"A".repeat(43)}`, "", 42, { token: kept.token }, null]) {
+      const result = repair(registry, unknown);
+      expect(Object.keys(result).sort()).toEqual(Object.keys(plain).sort());
+      expect(Object.keys(result.device).sort()).toEqual(Object.keys(plain.device).sort());
+    }
+    expect(registry.count()).toBe(7);
+    expect(registry.authenticate(kept.token)?.id).toBe(kept.device.id);
+    expect(replaced).toEqual([]);
+  });
+
+  it("does nothing without a valid pairing credential: the device stays and the attempt is spent", () => {
+    const registry = new DeviceRegistry();
+    const first = pair(registry);
+    registry.openPairing();
+    expect(registry.redeem("omb_pair_wrong", "Thief", undefined, first.token)).toMatchObject({ code: "pairing_code_wrong" });
+    expect(registry.pairing()?.attemptsLeft).toBe(MAX_PAIRING_ATTEMPTS - 1);
+    expect(registry.authenticate(first.token)?.id).toBe(first.device.id);
+    registry.closePairing();
+    expect(registry.redeem("123456", "Thief", undefined, first.token)).toMatchObject({ code: "pairing_not_open" });
+    expect(registry.count()).toBe(1);
+  });
+
+  it("never reaches the device cap however often the same phone re-pairs", () => {
+    const registry = new DeviceRegistry();
+    for (let i = 0; i < MAX_DEVICES - 1; i++) pair(registry, `Phone ${i}`);
+    let current = pair(registry, "Re-pairing phone");
+    for (let i = 0; i < 25; i++) current = repair(registry, current.token, "Re-pairing phone");
+    expect(registry.count()).toBe(MAX_DEVICES);
+    expect(registry.authenticate(current.token)?.id).toBe(current.device.id);
+  });
+
+  it("still refuses a new phone at the cap with a code the phone can show", () => {
+    const registry = new DeviceRegistry();
+    for (let i = 0; i < MAX_DEVICES; i++) pair(registry, `Phone ${i}`);
+    const { token: credential } = registry.openPairing();
+    expect(registry.redeem(credential, "One too many")).toEqual({
+      error: "too many paired devices — remove an old phone on your computer first",
+      code: "pairing_device_limit",
+    });
+    expect(registry.redeem(credential, "One too many", undefined, `omb_${"B".repeat(43)}`)).toMatchObject({ code: "pairing_device_limit" });
+    expect(registry.count()).toBe(MAX_DEVICES);
+  });
+
+  it("replays a lost reply without replacing again", () => {
+    const registry = new DeviceRegistry();
+    const first = pair(registry);
+    const { token: credential } = registry.openPairing();
+    const requestId = "4c825d5b-cf40-4db7-aac5-2455f805a8ec";
+    const once = registry.redeem(credential, "iPhone", requestId, first.token);
+    const again = registry.redeem(credential, "iPhone", requestId, first.token);
+    expect(again).toEqual(once);
+    expect(registry.count()).toBe(1);
+  });
+
+  it("keeps the old device when the save fails", () => {
+    const registry = new DeviceRegistry();
+    const first = pair(registry);
+    const writable = registry as unknown as { persist: () => void };
+    writable.persist = () => {
+      throw new Error("ENOSPC: no space left on device");
+    };
+    const { token: credential } = registry.openPairing();
+    expect(registry.redeem(credential, "iPhone", undefined, first.token)).toMatchObject({ code: "pairing_failed" });
+    expect(registry.count()).toBe(1);
+    expect(registry.authenticate(first.token)?.id).toBe(first.device.id);
   });
 });

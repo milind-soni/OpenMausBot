@@ -61,7 +61,7 @@ export type PairingErrorCode =
   | "pairing_script_key"
   /** Through the encrypted relay only the QR code's credential pairs, never a typed code. */
   | "pairing_qr_only"
-  /** A computer already has as many paired devices as it allows. */
+  /** A computer already has as many paired devices as it allows: the person removes an old phone on that computer. */
   | "pairing_device_limit"
   /** A personal Cloud pairs only its owner's devices. */
   | "cloud_personal"

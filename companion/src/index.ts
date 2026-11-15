@@ -154,7 +154,7 @@ const proxy = createProxyHandler({
     mutationToken: parentPort ? () => mutationToken : undefined,
     // Also stamps lastSeenAt.
     authenticate: (token) => devices.authenticate(token),
-    redeem: (code, deviceName, pairRequestId) => devices.redeem(code, deviceName, pairRequestId),
+    redeem: (code, deviceName, pairRequestId, replacesToken) => devices.redeem(code, deviceName, pairRequestId, replacesToken),
     serverName: machineName,
     version: process.env.OMB_APP_VERSION,
     hosts: () => hostCandidates(),
@@ -234,6 +234,25 @@ devices.onDropped((deviceId) => {
   console.log("companion: dropped a paired device its phone never used");
 });
 
+function disconnectDevice(deviceId: string): void {
+  connectedDevices.disconnect(deviceId);
+  proxy.disconnectDevice(deviceId);
+}
+
+// The harness hears a phone as this computer, so only the sidecar can tell
+// it the phone lost access and end the Live call that phone holds.
+function deviceRevoked(deviceId: string): void {
+  e2e.closeDevice(deviceId);
+  if (parentPort && !mutationToken) return;
+  void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
+}
+
+// After the pairing reply is written: until then the session carrying it may still belong to the replaced device.
+devices.onReplaced((deviceId) => setImmediate(() => {
+  disconnectDevice(deviceId);
+  deviceRevoked(deviceId);
+}));
+
 const control = createControlServer({
   devices,
   controlToken: () => controlToken,
@@ -245,17 +264,8 @@ const control = createControlServer({
   },
   discovery: () => ({ advertising: mdns.advertising, name: service().name }),
   connectedDeviceIds: connectedDevices.ids,
-  disconnectDevice: (deviceId) => {
-    connectedDevices.disconnect(deviceId);
-    proxy.disconnectDevice(deviceId);
-  },
-  // The harness hears a phone as this computer, so only the sidecar can tell
-  // it the phone lost access and end the Live call that phone holds.
-  revoked: (deviceId) => {
-    e2e.closeDevice(deviceId);
-    if (parentPort && !mutationToken) return;
-    void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
-  },
+  disconnectDevice,
+  revoked: deviceRevoked,
   setDirectRoutes: (body) => {
     const next = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
     if (!next || typeof next.wifi !== "boolean" || typeof next.tailscale !== "boolean") return false;
