@@ -409,7 +409,7 @@ export class McpOAuthManager {
     for (const pending of this.starting.values()) pending.cancelled = true;
     for (const flow of this.flows.values()) this.finish(flow, "cancelled", "Sign-in cancelled.");
     this.flows.clear();
-    for (const opening of [...this.listeners.values()]) {
+    for (const opening of this.listeners.values()) {
       void opening.then((listener) => {
         listener.server.close();
         listener.server.closeIdleConnections();
