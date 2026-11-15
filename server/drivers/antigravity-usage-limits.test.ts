@@ -1,3 +1,7 @@
+// Adapted from pingdotgg/t3code@b732621b51, MIT License, Copyright (c) 2026
+// T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified:
+//   - apps/server/src/provider/antigravityUsageLimits.test.ts (the quota
+//     fixtures and the cases of the limits reader).
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,6 +46,8 @@ interface FixtureOptions {
   summaryStatus?: number;
   summaryStatusByHost?: Record<string, number>;
   tokenStatus?: number;
+  /** Requests whose address holds one of these never answer, and ignore their signal. */
+  hangs?: string[];
   missingToken?: boolean;
   now?: number;
   /** The clock after the token refresh answers. */
@@ -64,6 +70,7 @@ function fixture(options: FixtureOptions = {}) {
     expect(init.redirect).toBe("manual");
     expect(init.method).toBe("POST");
     requests.push({ url, body: init.body ?? "" });
+    if (options.hangs?.some((part) => url.includes(part))) return new Promise(() => {});
     if (url.endsWith("/token")) {
       expect(new URLSearchParams(init.body).get("grant_type")).toBe("refresh_token");
       if (options.refreshedAt !== undefined) clock = options.refreshedAt;
@@ -78,7 +85,7 @@ function fixture(options: FixtureOptions = {}) {
       : respond(options.models ?? { models: {} });
   };
   const deps = { fetch, now: () => clock };
-  return { deps, requests, writeToken, tokenPath, windows: () => readAntigravityUsageWindows(tokenPath, deps) };
+  return { deps, requests, writeToken, tokenPath, windows: () => readAntigravityUsageWindows(tokenPath, deps), advance: (ms: number) => { clock += ms; } };
 }
 
 const at = (iso: string) => Date.parse(iso);
@@ -325,6 +332,7 @@ describe("the Antigravity row of the usage report", () => {
 
   it.each([
     ["Google refuses the stored sign-in", { tokenStatus: 401 }, 1],
+    ["Google cannot be reached for the refresh", { tokenStatus: 503 }, 1],
     ["Google refuses both quota calls", { summaryStatus: 403, models: "nothing" }, 5],
     ["Google reports nothing usable", { summary: { buckets: [] } }, 5],
     ["nobody is signed in", { missingToken: true }, 0],
@@ -334,6 +342,34 @@ describe("the Antigravity row of the usage report", () => {
     expect(await antigravityPlanUsage("instance", deps, tokenPath)).toBeNull();
     expect(requests).toHaveLength(calls);
     for (const spy of [warn, error, log]) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["the refresh", ["/token"]],
+    ["both quota hosts", ["cloudcode-pa.googleapis.com"]],
+    ["one quota host", ["daily-cloudcode-pa.googleapis.com"]],
+  ])("gives up on the whole read after one deadline when %s never answers", async (_name, hangs) => {
+    const { deps, tokenPath } = fixture({ hangs });
+    const started = Date.now();
+    const usage = await antigravityPlanUsage("instance", { ...deps, timeoutMs: 300 }, tokenPath);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    if (hangs[0] === "daily-cloudcode-pa.googleapis.com") expect(usage).not.toBeNull();
+    else expect(usage).toBeNull();
+  });
+
+  it("does not ask Google again for a sign-in it refused until a quarter of an hour has passed or the sign-in changed", async () => {
+    const { deps, requests, tokenPath, writeToken, advance } = fixture({ tokenStatus: 401 });
+    for (let read = 0; read < 3; read += 1) expect(await antigravityPlanUsage("instance", deps, tokenPath)).toBeNull();
+    expect(requests).toHaveLength(1);
+    advance(15 * 60_000 - 1);
+    await antigravityPlanUsage("instance", deps, tokenPath);
+    expect(requests).toHaveLength(1);
+    advance(1);
+    await antigravityPlanUsage("instance", deps, tokenPath);
+    expect(requests).toHaveLength(2);
+    writeToken("refresh-b");
+    await antigravityPlanUsage("instance", deps, tokenPath);
+    expect(requests).toHaveLength(3);
   });
 
   it("is no row, and makes no request, once the switch is off", async () => {

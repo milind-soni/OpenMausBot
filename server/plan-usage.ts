@@ -294,7 +294,7 @@ export async function fetchPlanUsage(accounts: PlanAccount[], deps: PlanUsageDep
   return { fetchedAt: new Date(now).toISOString(), providers };
 }
 
-let cachedReport: { at: number; key: string; report: PlanUsageReport } | null = null;
+let cachedReport: { at: number; key: string; accounts: Set<string>; report: PlanUsageReport } | null = null;
 
 export function clearPlanUsageCache(): void {
   cachedReport = null;
@@ -311,8 +311,9 @@ export async function loadPlanUsage(input: {
 }): Promise<PlanUsageReport> {
   const now = input.now ?? Date.now();
   const key = planUsageCacheKey(input.accounts);
-  if (!input.refresh && cachedReport && cachedReport.key === key && now - cachedReport.at < PLAN_USAGE_CACHE_MS) {
-    return cachedReport.report;
+  if (!input.refresh && cachedReport && now - cachedReport.at < PLAN_USAGE_CACHE_MS) { // a read of more accounts serves a caller that asks for some of them (the limit clock)
+    if (cachedReport.key === key) return cachedReport.report;
+    if (input.accounts.every((account) => cachedReport!.accounts.has(planUsageCacheKey([account])))) return { ...cachedReport.report, providers: cachedReport.report.providers.filter((row) => input.accounts.some((account) => account.id === row.id)) };
   }
   const report = await fetchPlanUsage(input.accounts, {
     fetch: input.fetch ?? ((url, init) => globalThis.fetch(url, init)),
@@ -320,7 +321,7 @@ export async function loadPlanUsage(input: {
     now: () => now,
     timeoutMs: input.timeoutMs,
   });
-  cachedReport = { at: now, key, report };
+  cachedReport = { at: now, key, accounts: new Set(input.accounts.map((account) => planUsageCacheKey([account]))), report };
   return report;
 }
 

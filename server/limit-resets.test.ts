@@ -235,6 +235,18 @@ describe("LimitResetClock", () => {
     await instance.refresh(true);
     expect(load).toHaveBeenCalledTimes(1);
   });
+
+  it("does not ask for the usage of an engine whose usage holds nothing here", async () => {
+    const load = vi.fn(async (_asked: Array<{ id: string }>) => report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR])));
+    const antigravity = { id: "antigravity", name: "Antigravity", driver: "antigravity" as const, environment: {} };
+    let current = [...accounts, antigravity];
+    const instance = new LimitResetClock({ accounts: () => current, now: () => NOW, loadUsage: load });
+    await instance.refresh(true);
+    expect(load.mock.calls.map(([asked]) => asked.map((account) => account.id))).toEqual([["claude"]]);
+    current = [antigravity];
+    await instance.refresh(true);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("codexLimitResetsAt", () => {

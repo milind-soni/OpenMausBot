@@ -31,7 +31,10 @@ const SUMMARY_WINDOW_MINS = new Map([
   ["5h", 5 * 60],
   ["weekly", 7 * 24 * 60],
 ]);
-const REQUEST_TIMEOUT_MS = 8_000;
+// The whole read, as long as any other engine's usage may take.
+const READ_DEADLINE_MS = 8_000;
+const REFUSED_REFRESH_HOLD_MS = 15 * 60_000;
+const FAILED_REFRESH_HOLD_MS = 60_000;
 const TOKEN_FILE_MAX_BYTES = 1024 * 1024;
 
 interface Quota {
@@ -237,6 +240,7 @@ const cachedAccess = new Map<string, { fingerprint: string; accessToken: string;
 
 export function clearAntigravityUsageAccess(): void {
   cachedAccess.clear();
+  refreshHolds.clear();
 }
 
 export interface AntigravityUsageDeps {
@@ -245,27 +249,56 @@ export interface AntigravityUsageDeps {
   timeoutMs?: number;
 }
 
-async function postJson(deps: AntigravityUsageDeps, url: string, headers: Record<string, string>, body: string): Promise<unknown> {
-  const response = await deps.fetch(url, { method: "POST", headers, body, redirect: "manual", signal: AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS) });
-  if (!response.ok) throw new Error("refused");
-  return JSON.parse(await response.text());
+/** `work`, or a rejection once `signal` aborts: a request that ignores its signal does not hold the others' answers. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new Error("deadline"));
+  return new Promise<T>((done, fail) => {
+    const stop = () => fail(new Error("deadline"));
+    signal.addEventListener("abort", stop, { once: true });
+    work.then(done, fail).finally(() => signal.removeEventListener("abort", stop));
+  });
 }
 
-/** The windows Google reports for the sign-in stored at `tokenPath`; empty when it reports none. Throws on any failure. */
-export async function readAntigravityUsageWindows(tokenPath: string, deps: AntigravityUsageDeps): Promise<AntigravityUsageWindow[]> {
-  const stored = await storedSignIn(tokenPath);
-  if (!stored) return [];
+async function postJson(deps: AntigravityUsageDeps, signal: AbortSignal, url: string, headers: Record<string, string>, body: string): Promise<unknown> {
+  return untilAborted((async () => {
+    const response = await deps.fetch(url, { method: "POST", headers, body, redirect: "manual", signal });
+    if (!response.ok) throw new Error("refused");
+    return JSON.parse(await response.text());
+  })(), signal);
+}
+
+/** Sign-ins Google would not refresh, or that could not be refreshed, and when to ask again: a refused one is not
+ * posted again with every report. A sign-in that changed is asked at once. */
+const refreshHolds = new Map<string, { fingerprint: string; until: number }>();
+
+/** The windows Google reports for the sign-in stored at `tokenPath`; empty when it reports none. Throws on any failure.
+ * Every request shares `signal`, the one deadline of the whole read. */
+export async function readAntigravityUsageWindows(tokenPath: string, deps: AntigravityUsageDeps, signal: AbortSignal = AbortSignal.timeout(deps.timeoutMs ?? READ_DEADLINE_MS)): Promise<AntigravityUsageWindow[]> {
+  const stored = await storedSignIn(tokenPath).catch(() => null);
+  if (!stored) {
+    cachedAccess.delete(tokenPath);
+    return [];
+  }
   const now = deps.now ?? Date.now;
   const { signIn, fingerprint } = stored;
   let cached = cachedAccess.get(tokenPath);
   if (cached?.fingerprint !== fingerprint || cached.expiresAt <= now() + 60_000) {
     cachedAccess.delete(tokenPath);
+    const held = refreshHolds.get(tokenPath);
+    if (held?.fingerprint === fingerprint && now() < held.until) throw new Error("held");
     const started = now();
-    const access = await refreshAntigravityAccess(signIn, AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS), async (url, init) => {
+    let refused = false;
+    const access = await untilAborted(refreshAntigravityAccess(signIn, signal, async (url, init) => {
       const response = await deps.fetch(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: String(init.body), redirect: "manual", signal: init.signal });
+      refused = !response.ok;
       return { ok: response.ok, json: async () => JSON.parse(await response.text()) };
-    }, "manual");
-    if (!access || access.expiresInSeconds === null) throw new Error("refused");
+    }, "manual"), signal).catch(() => undefined);
+    if (!access || access.expiresInSeconds === null) {
+      if (refreshHolds.size >= 128) refreshHolds.delete(refreshHolds.keys().next().value!);
+      refreshHolds.set(tokenPath, { fingerprint, until: now() + (refused ? REFUSED_REFRESH_HOLD_MS : FAILED_REFRESH_HOLD_MS) });
+      throw new Error("refused");
+    }
+    refreshHolds.delete(tokenPath);
     cached = { fingerprint, accessToken: access.accessToken, expiresAt: started + access.expiresInSeconds * 1000 };
     if (cachedAccess.size >= 128) cachedAccess.delete(cachedAccess.keys().next().value!);
     cachedAccess.set(tokenPath, cached);
@@ -279,7 +312,7 @@ export async function readAntigravityUsageWindows(tokenPath: string, deps: Antig
       // Capture each request after auth, so refresh latency does not widen the tolerance.
       const requestedAt = now();
       try {
-        return parse(await postJson(deps, `${endpoint}/v1internal:${operation}`, headers, body), requestedAt);
+        return parse(await postJson(deps, signal, `${endpoint}/v1internal:${operation}`, headers, body), requestedAt);
       } catch {
         return [];
       }
@@ -302,10 +335,10 @@ export async function antigravityPlanUsage(
 ): Promise<PlanWindows | null> {
   if (!enabled) return null;
   try {
-    const windows = await readAntigravityUsageWindows(tokenPath, deps);
+    // One deadline for the refresh, the summary and the fallback together.
+    const windows = await readAntigravityUsageWindows(tokenPath, deps, AbortSignal.timeout(deps.timeoutMs ?? READ_DEADLINE_MS));
     return windows.length ? antigravityPlanWindows(windows) : null;
   } catch {
-    cachedAccess.delete(tokenPath);
     return null;
   }
 }
