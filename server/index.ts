@@ -432,7 +432,7 @@ import { CLOUD_COMPUTER_DID_NOT_START, CLOUD_COMPUTER_START_BUDGET_MS, CLOUD_COM
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
 import { createLoopGuard, loopGuardSettings } from "./host/loop-guard.ts"; import { createPersonFirst } from "./host/person-first.ts"; import { createRunOwners, runActorOf } from "./host/run-owner.ts";
-import { claudeUserSkillsEnabled, settingsTurnFields } from "./turn-settings.ts";
+import { claudeUserSkillsEnabled } from "./turn-settings.ts";
 import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts";
@@ -1681,9 +1681,11 @@ function beginInternalCapabilityGeneration(threadId: string, generation = random
 }
 
 // The bearer is part of the engine's launch contract, so it stays stable per bot, thread and grants; the record behind it is per turn and honoured only during one.
+// Security invariant: a turn's depth, the hand-off it runs for and whether it may author skills are read from that record on every call, never
+// from the engine, so a person's message and a teammate's report keep one bearer.
 const sessionCredentials = new Map<string, Map<string, { grants: string; token: string }>>();
 
-function sessionGrants({ generation: _turn, ...grants }: Omit<InternalCapability, "orphanExpiresAt">): string {
+function sessionGrants({ generation: _turn, depth: _depth, roomHandoffId: _handoff, skillAuthoring: _skills, ...grants }: Omit<InternalCapability, "orphanExpiresAt">): string {
   const thread = botForThread(grants.botId, grants.threadId);
   return JSON.stringify({ ...grants, approval: thread ? approvalModeFor(thread) : null });
 }
@@ -8454,7 +8456,7 @@ async function beginTurn(
         mentionTurn: tagged.length > 0,
         integrations,
         ...(integrations.browser && browserIsThePlace(turnSurfacePlan(bot, undefined, threadId, true)) ? { preloadBrowserTools: true } : {}),
-        ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
+        ...skillsHost.turnSettings(bot, threadId, instance, managedPolicy.restrictsMcp()),
         cwd, ...(worksInWorkspace || guestConfined || cloudGuestOpened(threadId) ? {} : { toolResultFolder: messageFileRootsForThread(bot.id, threadId).find((root) => root !== ATTACHMENTS_DIR) }),
         botSettingsFile: botSettingsFile(bot),
       }, (input) => quickFallback.sendTurn(instance, input, route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined))), () => companyShutdown || !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
@@ -10313,7 +10315,7 @@ async function runClaimedGroupMemberTurn(
         cwd, ...(worksInWorkspace || roomGuestConfined || cloudGuestOpened(threadId) ? {} : { toolResultFolder: messageFileRootsForThread(readyBot.id, threadId).find((root) => root !== ATTACHMENTS_DIR) }),
         integrations,
         ...(integrations.browser && browserIsThePlace(roomPlan) ? { preloadBrowserTools: true } : {}),
-        ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
+        ...skillsHost.turnSettings(readyBot, threadId, instance, managedPolicy.restrictsMcp()),
         botSettingsFile: botSettingsFile(readyBot),
         ...(instance.instanceId === readyBot.modelSelection.instanceId
           ? memberTurnSelection(readyBot.modelSelection)
@@ -12430,7 +12432,7 @@ function liveCallTitle(botId: string, threadId: string, excerpt: string): Promis
   const gate = threadTitleGate(bot);
   return gate.ok ? generateThreadTitle(gate.instance, excerpt, "call") : null;
 }
-const liveWiring = liveSessionWiring({ bot: liveBotFor, history: liveHistoryFor, cloudHome: Boolean(CLOUD_HOME), othersOnLoopback: adminActivityRecording, saveFishAgent: (agent) => { saveConfig({ live: agent }); Object.assign(cfg, loadConfig()); } });
+const liveWiring = liveSessionWiring({ bot: liveBotFor, history: liveHistoryFor, cloudHome: Boolean(CLOUD_HOME), othersOnLoopback: adminActivityRecording, saveAgent: (agent) => { saveConfig({ live: agent }); Object.assign(cfg, loadConfig()); } });
 const liveCalls = new LiveCallController({
   store,
   send: async ({ auth, botId, threadId, text, callId }) => {
@@ -13998,12 +14000,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const fromThreadId = internalCapability.threadId;
         const owner = connectorThread(from.id, fromThreadId);
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" }); if (outsideWorkStaysHere(fromThreadId)) return json(res, 403, { error: "This work came in from outside, so it can't open a new thread. Finish it here." });
-        if (
-          body.depth !== undefined &&
-          (!Number.isInteger(body.depth) || body.depth < 0 || body.depth !== internalCapability.depth)
-        ) {
-          return json(res, 403, { error: "the recursion depth does not match this turn" });
-        }
         const title = String(body.title ?? "").trim();
         const message = String(body.message ?? "").trim();
         if (!title || !message) return json(res, 400, { error: "title and message are required" });

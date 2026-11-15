@@ -16,7 +16,7 @@ import {
   AGENT_MAX_SKILLS,
   canonicalJson,
   PACKAGE_FORMAT,
-  PACKAGE_VERSION,
+  PACKAGE_V2_VERSION,
   parsePackageDocument,
   SEED_FILE_MAX_BYTES,
   SEED_MAX_BYTES,
@@ -101,7 +101,7 @@ function resolveRow(row: StoredPreset, content: InstallContent | undefined): Res
   try {
     document = parsePackageDocument({
       format: PACKAGE_FORMAT,
-      version: PACKAGE_VERSION,
+      version: PACKAGE_V2_VERSION,
       package: {
         id: row.packageId,
         release: row.release,

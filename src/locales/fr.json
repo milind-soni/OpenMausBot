@@ -1791,7 +1791,7 @@
   "routines.editor.goalWhere": "Où il s'exécute",
   "routines.editor.goalOneOnOne": "Seulement le bot, dans sa propre discussion",
   "routines.editor.goalOneOnOneHelp": "Le bot travaille sur l'objectif dans sa propre discussion jusqu'à ce qu'il soit atteint.",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Téléphone",
   "computer.tab.browser": "Navigateur",
   "computer.tabsAria": "Vue du panneau du bot",
   "computer.simple.needsSetup": "Le bureau de {name} a d'abord besoin d'une étape de configuration.",
@@ -3803,5 +3803,6 @@
   "computer.recovery.restart": "Redémarrer l'ordinateur",
   "computer.recovery.restartTitle": "Arrête puis relance cet ordinateur cloud. Les programmes ouverts sont fermés ; ses fichiers restent.",
   "computer.recovery.replace": "Remplacer l'ordinateur",
-  "computer.recovery.replaceTitle": "Supprime cet ordinateur cloud et en donne un nouveau au bot. Les fichiers qui ne sont que dessus sont perdus."
+  "computer.recovery.replaceTitle": "Supprime cet ordinateur cloud et en donne un nouveau au bot. Les fichiers qui ne sont que dessus sont perdus.",
+  "composer.command.burstDesc": "Lancer plusieurs parties d'un travail en même temps, puis fusionner les résultats"
 }

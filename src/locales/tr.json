@@ -1228,7 +1228,7 @@
   "teamShare.skip.skill_changed": "incelendikten sonra değiştirildi",
   "teamShare.skip.skill_conflict": "iki bot bu ada sahip farklı becerilere sahip",
   "teamShare.skip.bot_skill_limit": "bir bot en fazla 30 beceri paylaşabilir (açık olan beceriler önce gelir)",
-  "teamShare.skip.team_skill_limit": "bir departman en fazla 60 beceri paylaşabilir",
+  "teamShare.skip.team_skill_limit": "bir departman en fazla 120 beceri paylaşabilir",
   "teamShare.field.soul": "kalıcı talimatlar",
   "teamShare.field.notes": "başlangıç notları",
   "teamShare.field.brief": "paylaşılan talimatlar",
@@ -3622,7 +3622,7 @@
   "routines.editor.goalWhere": "Nerede çalışır",
   "routines.editor.goalOneOnOne": "Yalnızca bot, kendi sohbetinde",
   "routines.editor.goalOneOnOneHelp": "Bot, hedef tamamlanana kadar kendi sohbetinde hedef üzerinde çalışır.",
-  "computer.tab.android": "Android",
+  "computer.tab.android": "Telefon",
   "computer.browserSwitch.title": "{name} botunun tarayıcı kullanmasına izin ver",
   "computer.tab.browser": "Tarayıcı",
   "computer.tab.data": "Veri",
@@ -6005,5 +6005,6 @@
   "computer.recovery.restart": "Bilgisayarı yeniden başlat",
   "computer.recovery.restartTitle": "Bu bulut bilgisayarı durdurup yeniden başlatır. Açık programlar kapanır; dosyaları kalır.",
   "computer.recovery.replace": "Bilgisayarı değiştir",
-  "computer.recovery.replaceTitle": "Bu bulut bilgisayarı siler ve bota yenisini verir. Yalnızca üzerinde olan dosyalar kaybolur."
+  "computer.recovery.replaceTitle": "Bu bulut bilgisayarı siler ve bota yenisini verir. Yalnızca üzerinde olan dosyalar kaybolur.",
+  "composer.command.burstDesc": "Bir işin birçok parçasını aynı anda çalıştırın, sonra sonuçları birleştirin"
 }
