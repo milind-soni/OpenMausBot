@@ -4,7 +4,7 @@
 // ids, times, counts and fixed words only: nothing of a routine's name, prompt or output. A second small file, the mark,
 // keeps the sequence number and time of this folder's last change, so a ledger brought back from a backup is recognised and a
 // lost ledger never starts its sequence again from zero.
-import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
@@ -183,13 +183,15 @@ export class RoutineLedger {
     if (counted) this.writeMark();
   }
 
-  /** Whether the file can be appended to now. */
+  /** Whether the file can be opened for appending now. Windows opens a folder of that name without complaint, so what was opened is looked at too. */
   writable(): boolean {
+    let fd: number | undefined;
     try {
       mkdirSync(dirname(this.file), { recursive: true });
-      appendFileSync(this.file, "", { mode: 0o600 });
-      return true;
+      fd = openSync(this.file, "a", 0o600);
+      return fstatSync(fd).isFile();
     } catch { return false; }
+    finally { if (fd !== undefined) try { closeSync(fd); } catch { /* nothing was written through it */ } }
   }
 
   /** Reads the file again when something else has written to it since this process last did. True when it had. A

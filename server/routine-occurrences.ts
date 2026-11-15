@@ -181,6 +181,8 @@ export class Occurrences {
     };
     if (!starting) return write;
     write();
+    // The start goes ahead whether or not it was recorded; unrecorded, the report says so until the ledger takes a write.
+    if (this.failing && !this.degraded) { this.degraded = true; console.error(`routines: the run ledger ${this.ledger.file} cannot be written; scheduled runs start without it until it can`); }
     return () => {};
   }
 
