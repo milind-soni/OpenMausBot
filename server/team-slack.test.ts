@@ -105,6 +105,16 @@ describe("the record of Slack messages", () => {
     expect(again.forgetPerson("p_zyxwvutsrqponmlkjihgfe")).toEqual([LATER]);
     expect(JSON.parse(readFileSync(join(dataDir, TEAM_SLACK_FILE), "utf8")).messages.map((one: { id: string }) => one.id)).toEqual([ID]);
   });
+  it("past its cap drops what is over before a run it still tracks", () => {
+    const kept = createTeamSlackMessages({ dataDir: dir(), now: () => 1_000, max: 2 });
+    const [first, second, third] = [ID, LATER, "8b2e3c4d-5e6f-4a7b-8c9d-2e3f4a5b6c7d"];
+    kept.put(record({ id: first }));
+    kept.put(record({ id: second, state: "completed", told: "completed" }));
+    kept.put(record({ id: third }));
+    expect(kept.all().map((one) => one.id)).toEqual([first, third]);
+    kept.put(record({ id: second }));
+    expect(kept.all().map((one) => one.id)).toEqual([third, second]);
+  });
   it("drops what is over after a week and anything after a month", () => {
     const dataDir = dir(), day = 24 * 3_600_000;
     let now = 0;

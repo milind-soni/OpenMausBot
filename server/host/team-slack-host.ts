@@ -138,6 +138,8 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
   const accepted = (record: TeamSlackRecord): TeamSlackAccepted => ({ accepted: true, conversationId: record.threadId, bot: { id: record.botId, name: record.botName }, openUrl: openUrl(record) });
 
   const sending = new Set<string>(), unsettledSince = new Map<string, number>(), retries = new Map<string, { tries: number; since: number }>();
+  /** Each settled run's final reply, in memory until the Admin has it: the conversation may move on before a retry. */
+  const replies = new Map<string, string>();
   const open = () => messages.all().filter((record) => !teamSlackOver(record));
 
   const phaseOf = (record: TeamSlackRecord): Phase => {
@@ -156,23 +158,24 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
         const record = messages.get(id);
         if (!record || teamSlackOver(record) || record.told === teamSlackKey(record)) return;
         const key = teamSlackKey(record), final = TEAM_SLACK_FINAL.has(record.state);
-        const phase = record.state === "completed" ? phaseOf(record) : null;
+        const phase = record.state === "completed" && !replies.has(id) ? phaseOf(record) : null;
+        const text = replies.get(id) ?? (phase && phase !== "unsettled" ? phase.text : undefined);
         const body: TeamSlackReport = {
           id, status: record.state, conversationId: record.threadId, bot: { id: record.botId, name: record.botName }, openUrl: openUrl(record),
           ...(record.state === "waiting" ? { waiting: record.waiting ?? "question" } : {}),
           ...(record.state === "failed" ? { error: "failed" as const } : {}),
-          ...(phase && phase !== "unsettled" && phase.text ? { text: phase.text.slice(0, TEAM_SLACK_ANSWER_MAX) } : {}),
+          ...(record.state === "completed" && text ? { text: text.slice(0, TEAM_SLACK_ANSWER_MAX) } : {}),
         };
         const outcome = await report(body);
         const current = messages.get(id);
         if (!current) return;
-        if (outcome === "over") { messages.patch(id, { closed: true }); return; }
-        if (outcome === "told") { retries.delete(id); messages.patch(id, { told: key }); continue; }
+        if (outcome === "over") { replies.delete(id); messages.patch(id, { closed: true }); return; }
+        if (outcome === "told") { retries.delete(id); if (final) replies.delete(id); messages.patch(id, { told: key }); continue; }
         if (teamSlackKey(current) !== key) continue;
         // A report the Admin won't take as it is, or a `running` nobody answered, is not said again; the next state is.
-        if (outcome === "refused" || (!final && current.state === "running")) { if (final) messages.patch(id, { closed: true }); return; }
+        if (outcome === "refused" || (!final && current.state === "running")) { if (final) { replies.delete(id); messages.patch(id, { closed: true }); } return; }
         const tried = retries.get(id) ?? { tries: 0, since: now() };
-        if (now() - tried.since > RETRY_FOR_MS) { retries.delete(id); messages.patch(id, { closed: true }); return; }
+        if (now() - tried.since > RETRY_FOR_MS) { retries.delete(id); replies.delete(id); messages.patch(id, { closed: true }); return; }
         retries.set(id, { tries: tried.tries + 1, since: tried.since });
         later(() => void flush(id), RETRY_MS[Math.min(tried.tries, RETRY_MS.length - 1)]!);
         return;
@@ -194,6 +197,7 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
     }
     unsettledSince.delete(id);
     if (phase.state === record.state && phase.waiting === record.waiting) return;
+    if (phase.state === "completed" && phase.text) replies.set(id, phase.text);
     messages.patch(id, { state: phase.state, waiting: phase.waiting });
     void flush(id);
   }
@@ -287,7 +291,7 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
     return { status: 202, body: { ...accepted(record) } };
   }
 
-  const taking = new Map<string, Promise<TeamSlackAnswer>>();
+  const taking = new Map<string, { person: string; answer: Promise<TeamSlackAnswer> }>();
 
   return {
     /** The bots this member can chat with. */
@@ -299,13 +303,14 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
     message(auth: RequestAuth, input: TeamSlackMessage): Promise<TeamSlackAnswer> {
       const who = member(auth);
       if (!who) return Promise.resolve(refusal(404, "not_a_member", "Not found."));
+      const notYours = refusal(403, "not_yours", "That message is someone else's.");
       const known = messages.get(input.id);
-      if (known) return Promise.resolve(known.person === who.person ? { status: 202, body: { ...accepted(known) } } : refusal(403, "not_yours", "That message is someone else's."));
+      if (known) return Promise.resolve(known.person === who.person ? { status: 202, body: { ...accepted(known) } } : notYours);
       const running = taking.get(input.id);
-      if (running) return running;
-      const work = take(auth, who.person, input).finally(() => taking.delete(input.id));
-      taking.set(input.id, work);
-      return work;
+      if (running) return running.person === who.person ? running.answer : Promise.resolve(notYours);
+      const answer = take(auth, who.person, input).finally(() => taking.delete(input.id));
+      taking.set(input.id, { person: who.person, answer });
+      return answer;
     },
     /** Stop, pressed in Slack by this member: theirs to stop by the app's own rule, or refused. */
     async stop(auth: RequestAuth, id: string): Promise<TeamSlackAnswer> {
@@ -336,7 +341,7 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
     },
     /** A member left the team: what this kept of their Slack messages goes; their direct-message conversations go with their private chats. */
     memberLeft(person: string): void {
-      for (const id of messages.forgetPerson(person)) { unsettledSince.delete(id); retries.delete(id); }
+      for (const id of messages.forgetPerson(person)) { unsettledSince.delete(id); retries.delete(id); replies.delete(id); }
     },
   };
 }

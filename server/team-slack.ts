@@ -75,8 +75,8 @@ export const teamSlackKey = (record: Pick<TeamSlackRecord, "state" | "waiting">)
 export const teamSlackOver = (record: TeamSlackRecord): boolean => record.closed === true || (TEAM_SLACK_FINAL.has(record.state) && record.told === record.state);
 
 /** The messages taken from Slack: ids and state, never their words. */
-export function createTeamSlackMessages(options: { dataDir: string; now?: () => number }) {
-  const file = join(options.dataDir, TEAM_SLACK_FILE), now = options.now ?? Date.now;
+export function createTeamSlackMessages(options: { dataDir: string; now?: () => number; max?: number }) {
+  const file = join(options.dataDir, TEAM_SLACK_FILE), now = options.now ?? Date.now, max = options.max ?? MAX_MESSAGES;
   const records = new Map<string, TeamSlackRecord>();
   try {
     const parsed = fileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
@@ -88,7 +88,9 @@ export function createTeamSlackMessages(options: { dataDir: string; now?: () => 
   const save = () => {
     const at = now();
     for (const [id, record] of records) if (at - record.at > KEEP_ANY_MS || (teamSlackOver(record) && at - record.at > KEEP_FINISHED_MS)) records.delete(id);
-    while (records.size > MAX_MESSAGES) records.delete(records.keys().next().value!);
+    // Past the cap, what is over goes first: a run still tracked keeps its report and its Stop.
+    for (const [id, record] of records) { if (records.size <= max) break; if (teamSlackOver(record)) records.delete(id); }
+    while (records.size > max) records.delete(records.keys().next().value!);
     try { writeFileAtomic(file, `${JSON.stringify({ version: 1, messages: [...records.values()] })}\n`, { mode: 0o600 }); }
     catch (error) { console.warn(`team slack: could not save the record of Slack messages (${error instanceof Error ? error.name : "error"})`); }
   };
