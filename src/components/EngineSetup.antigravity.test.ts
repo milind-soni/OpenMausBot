@@ -55,3 +55,20 @@ it("opens it on a desktop paired to another computer's server", async () => {
 it("keeps it folded on the person's own computer, where the redirect lands by itself", async () => {
   expect((await startSignIn(false, { remoteClient: { active: false } })).open).toBe(false);
 });
+
+// A Cloud's person saw Google's last page fail on 127.0.0.1 and read it as a broken sign-in: on a Cloud the card says up front
+// that this page won't load and that its address goes in the box, which it names for that.
+const cloudHint = "After you sign in, Google opens a page that won’t load. Copy its address and paste it below.";
+
+it("tells a Cloud's person, before they sign in, that Google's last page won't load and its address goes below", async () => {
+  const details = await startSignIn(true, { remoteClient: { active: false } });
+  expect(details.querySelector("summary")?.textContent).toBe("Google’s page didn’t load? Paste its address here");
+  const hint = [...host.querySelectorAll("p")].find((p) => p.textContent === cloudHint)!;
+  expect(hint.nextElementSibling?.textContent).toContain("Open Google sign-in again");
+});
+
+it.each([false, true])("keeps the other-computer wording off a Cloud (paired to another computer: %s)", async (remote) => {
+  const details = await startSignIn(false, { remoteClient: { active: remote } });
+  expect(details.querySelector("summary")?.textContent).toBe("Signing in from another computer?");
+  expect(host.textContent).not.toContain(cloudHint);
+});

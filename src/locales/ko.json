@@ -3101,6 +3101,8 @@
   "engineSetup.finishedSignIn": "로그인을 마쳤어요",
   "engineSetup.otherComputer": "다른 컴퓨터에서 로그인하나요?",
   "engineSetup.otherComputerHint": "Google이 열리지 않는 페이지로 이동시키면, 그 페이지의 전체 URL을 여기에 붙여 넣으세요.",
+  "engineSetup.cloudPasteSummary": "Google 페이지가 열리지 않나요? 그 주소를 여기에 붙여 넣으세요",
+  "engineSetup.cloudPasteHint": "로그인하면 Google이 열리지 않는 페이지를 엽니다. 그 주소를 복사해 아래에 붙여 넣으세요.",
   "engineSetup.sending": "보내는 중…",
   "engineSetup.sendRedirect": "리디렉션 보내기",
   "engineSetup.googleNoLink": "Google 로그인에서 링크를 받지 못했어요.",

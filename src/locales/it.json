@@ -2805,6 +2805,8 @@
   "engineSetup.finishedSignIn": "Ho finito l'accesso",
   "engineSetup.otherComputer": "Stai accedendo da un altro computer?",
   "engineSetup.otherComputerHint": "Dopo che Google ti reindirizza a una pagina che non si carica, incolla qui l'URL completo di quella pagina.",
+  "engineSetup.cloudPasteSummary": "La pagina di Google non si carica? Incolla qui il suo indirizzo",
+  "engineSetup.cloudPasteHint": "Dopo l'accesso, Google apre una pagina che non si carica. Copia il suo indirizzo e incollalo qui sotto.",
   "engineSetup.sending": "Invio…",
   "engineSetup.sendRedirect": "Invia reindirizzamento",
   "engineSetup.googleNoLink": "L'accesso con Google non ha restituito un link.",

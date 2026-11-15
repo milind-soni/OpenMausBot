@@ -2682,6 +2682,8 @@
   "engineSetup.finishedSignIn": "Ya terminé de iniciar sesión",
   "engineSetup.otherComputer": "¿Inicias sesión desde otro equipo?",
   "engineSetup.otherComputerHint": "Cuando Google te redirija a una página que no carga, pega aquí su URL completa.",
+  "engineSetup.cloudPasteSummary": "¿No cargó la página de Google? Pega su dirección aquí",
+  "engineSetup.cloudPasteHint": "Después de iniciar sesión, Google abre una página que no carga. Copia su dirección y pégala abajo.",
   "engineSetup.sending": "Enviando…",
   "engineSetup.sendRedirect": "Enviar la redirección",
   "engineSetup.googleNoLink": "El acceso con Google no devolvió un enlace.",

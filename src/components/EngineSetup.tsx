@@ -356,8 +356,10 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
     );
   }
 
+  const cloudHome = state.config?.cloudHome === true;
   return (
     <div className="mt-3 space-y-2">
+      {cloudHome && <p className="text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.cloudPasteHint")}</p>}
       <button
         type="button"
         disabled={busy !== null}
@@ -377,8 +379,8 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
           <button type="button" onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink hover:bg-raised-hover">
             {busy === "check" ? t("common.checking") : t("engineSetup.finishedSignIn")}
           </button>
-          <details open={redirectPasteOpen(state.config?.cloudHome === true)} className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
-            <summary className="cursor-pointer select-none">{t("engineSetup.otherComputer")}</summary>
+          <details open={redirectPasteOpen(cloudHome)} className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
+            <summary className="cursor-pointer select-none">{t(cloudHome ? "engineSetup.cloudPasteSummary" : "engineSetup.otherComputer")}</summary>
             <p className="mt-2 leading-relaxed">{t("engineSetup.otherComputerHint")}</p>
             <input
               value={callbackUrl}

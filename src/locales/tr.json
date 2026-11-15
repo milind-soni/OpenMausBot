@@ -2354,6 +2354,8 @@
   "engineSetup.finishedSignIn": "Giriş yapmayı tamamladım",
   "engineSetup.otherComputer": "Başka bir bilgisayardan mı giriş yapıyorsunuz?",
   "engineSetup.otherComputerHint": "Google yüklenemeyen bir sayfaya yönlendirdikten sonra, o sayfanın tam URL'sini buraya yapıştırın.",
+  "engineSetup.cloudPasteSummary": "Google'ın sayfası yüklenmedi mi? Adresini buraya yapıştırın",
+  "engineSetup.cloudPasteHint": "Giriş yaptıktan sonra Google yüklenmeyen bir sayfa açar. Adresini kopyalayıp aşağıya yapıştırın.",
   "engineSetup.sending": "Gönderiliyor…",
   "engineSetup.sendRedirect": "Yönlendirmeyi gönder",
   "engineSetup.googleNoLink": "Google girişi bir bağlantı döndürmedi.",

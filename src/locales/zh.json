@@ -3464,6 +3464,8 @@
   "engineSetup.finishedSignIn": "我已完成登录",
   "engineSetup.otherComputer": "在另一台电脑上登录？",
   "engineSetup.otherComputerHint": "当 Google 跳转到一个无法加载的页面时，把该页面的完整地址粘贴到这里。",
+  "engineSetup.cloudPasteSummary": "Google 的页面打不开？把它的地址粘贴到这里",
+  "engineSetup.cloudPasteHint": "登录后，Google 会打开一个无法加载的页面。复制它的地址，粘贴到下面。",
   "engineSetup.otherComputerUrl": "另一台电脑上的页面地址",
   "engineSetup.sending": "正在发送…",
   "engineSetup.sendRedirect": "发送跳转地址",
