@@ -766,7 +766,7 @@ export function StreamSurface(props: {
       {hostSetup ? (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-card p-4 text-center">
           <p role="alert" className="max-w-sm text-[13px] text-ink-secondary">{previewStreamHostSetupMessage(hostSetup)}</p>
-          {hostSetup.need === "libraries" ? (
+          {hostSetup.need !== "sandbox" ? (
             <code className="max-w-md select-all break-all rounded-lg bg-inset px-3 py-2 text-left text-[12px] text-ink">{hostSetup.command}</code>
           ) : (
             <a href={PREVIEW_STREAM_SANDBOX_STEPS_URL} target="_blank" rel="noopener noreferrer" className="text-[12px] text-ink underline">Browser sandbox setup steps</a>

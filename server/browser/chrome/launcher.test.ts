@@ -6,6 +6,8 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import type { ChromeIdentity } from "./identity.ts";
 import { chromeForTestingExecutable, chromeForTestingPin, type installChromeForTesting } from "./install.ts";
+import { BrowserHostError, hostSetupOf } from "./host-setup.ts";
+import { ChromeLaunchError } from "./launch.ts";
 import { ChromeLauncher, runsLauncher } from "./launcher.ts";
 import { chromeHost } from "./resolve.ts";
 import type { IdentitySidecars } from "./sidecar.ts";
@@ -214,6 +216,20 @@ describe("the Chrome launcher", () => {
     expect(chrome.env()).toEqual({});
     expect(chrome.describe()).toContain("Chrome could not be started");
     expect(existsSync(chrome.path)).toBe(false);
+  });
+
+  it("keeps what the host needs behind the error a viewer gets, when Chrome cannot start there", async () => {
+    const named = mkdtempSync(join(tmpdir(), "omb-named-"));
+    folders.push(named);
+    writeFileSync(join(named, "chrome"), "#!/bin/sh\n", { mode: 0o755 });
+    const host = new BrowserHostError("container");
+    const chrome = launcher(mac({ env: { OMB_CHROME_PATH: join(named, "chrome") } }), {
+      calibrate: async () => { throw new ChromeLaunchError(host.message, "Running as root without --no-sandbox is not supported.", host); },
+    });
+    const failure = await chrome.binary().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("OMB_BROWSER_SANDBOX=0");
+    expect(hostSetupOf(failure)).toBe(host);
   });
 
   it("keeps a working launcher when reading a newer binary fails, rather than switch browsers mid-session", async () => {
