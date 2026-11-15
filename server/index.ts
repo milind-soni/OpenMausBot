@@ -1376,7 +1376,7 @@ const attributeUsage = createUsageAttribution({ section: (botId) => store.bot(bo
   }
 }
 
-const providerAuthSessions = new ProviderAuthSessions({ signedIn: (instanceId) => limitTakeover.signedIn(instanceId) }); const mcpServersHost = createMcpServersHost({ dataDir: DATA_DIR, cfg: () => cfg, persist: persistMcpServers, bots: () => store.bots, policy: (servers) => managedPolicy.filterMcp(servers), tell: (text, about) => notify(buildNoticeNotification(about, store.bot(about.id)?.threadId ?? "", text)), startsServers: (botId) => { const bot = store.bot(botId); return Boolean(bot && registry.get(bot.modelSelection.instanceId)?.adapter.capabilities.customMcp === true); }, boxed: () => botBox.enabled(), keys: mcpKeys });
+const providerAuthSessions = new ProviderAuthSessions({ signedIn: (instanceId) => limitTakeover.signedIn(instanceId) }); const mcpServersHost = createMcpServersHost({ dataDir: DATA_DIR, cfg: () => cfg, persist: persistMcpServers, bots: () => store.bots, policy: (servers) => managedPolicy.filterMcp(servers), tell: (text, about) => notify(buildNoticeNotification(about, store.bot(about.id)?.threadId ?? "", text)), startsServers: (botId) => { const bot = store.bot(botId); return Boolean(bot && registry.get(bot.modelSelection.instanceId)?.adapter.capabilities.customMcp === true); }, boxed: () => botBox.enabled(), keys: mcpKeys, forgetSignIn: (name) => mcpOAuth.forget(name) });
 const mcpOAuth = new McpOAuthManager({
   file: join(DATA_DIR, "mcp-oauth.json"),
   isOwnerLive: (owner) => owner === "loopback" || sessions.isLive(owner) || isCardOwnerLive(store, owner),

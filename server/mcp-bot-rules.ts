@@ -13,9 +13,9 @@ const SECRET_FLAG_ARG = /^--(?:token|password|passwd|api-key|apikey|secret|acces
 
 export function mcpOwner(name: string, server: StoredMcpServer, botId: string, personal: readonly string[]): McpOwner {
   if (personal.includes(name)) return "person";
-  if (!isRemoteMcpServer(server) && server.bot && server.bot !== botId) return "theirs";
+  if (server.bot && server.bot !== botId) return "theirs";
   if (server.runsOn) return "elsewhere";
-  if (!isRemoteMcpServer(server) && server.bot) return "own";
+  if (server.bot) return "own";
   return "shared";
 }
 
