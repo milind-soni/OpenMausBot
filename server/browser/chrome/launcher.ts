@@ -116,6 +116,12 @@ export class ChromeLauncher implements BrowserLaunch {
     return resolveChromePlan(this.host, this.options.engine ? this.options.engine() : this.managedEngine(), { downloading });
   }
 
+  /** agent-browser runs its own headless shell, which many sites refuse, only because no Google Chrome is installed here. */
+  runsShellForWantOfChrome(): boolean {
+    const plan = this.plan();
+    return plan.kind === "legacy" && plan.noChrome === true;
+  }
+
   /** Keep the shared agent-browser launcher and sidecar in the application's current language. */
   setLanguageProvider(language: (() => string | undefined) | undefined): void {
     this.language = language ?? this.options.language;
