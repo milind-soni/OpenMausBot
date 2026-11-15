@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { LocaleKey } from "@/locales";
-import type { LiveProvider } from "../../shared/wire";
+import type { LiveProvider, LiveSettings } from "../../shared/wire";
 import { desktopCapabilitiesNow } from "./desktop";
 import { t } from "./i18n";
 
@@ -39,6 +39,13 @@ export function liveKeyCopy(provider: LiveProvider | undefined) {
     return { title: "call.live.elevenLabsKeyTitle", explain: "call.live.elevenLabsKeyExplain", field: "call.live.elevenLabsKeyField", key: "call.live.elevenLabsKey", missing: "call.live.elevenLabsNeedsKey", needs: "call.live.needsElevenLabs", cost: "call.live.elevenLabsCost" } as const;
   }
   return { title: "call.live.keyTitle", explain: "call.live.keyExplain", field: "call.live.keyField", key: "call.live.key", missing: "call.live.needsKey", needs: "call.live.needsKey", cost: "call.live.cost" } as const;
+}
+
+/** The identity of a Live key form: its provider and, for Azure or a custom endpoint, the address the key is bound to. A new address starts a new form, so a key typed for one address is never saved for another. */
+export function liveKeyFormKey(live: Partial<Pick<LiveSettings, "provider" | "azureEndpoint" | "customEndpoint">> | undefined): string {
+  const provider = live?.provider ?? "openai";
+  const endpoint = provider === "custom" ? live?.customEndpoint : provider === "azure" ? live?.azureEndpoint : undefined;
+  return endpoint ? `${provider}|${endpoint}` : provider;
 }
 
 export function callModeHint(mode: CallMode, where: { cloudHome?: boolean } = {}): string {
