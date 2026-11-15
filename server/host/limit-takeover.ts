@@ -51,7 +51,7 @@ export interface LimitTakeoverDeps {
   configs(): InstanceConfigMap;
   context: DefaultSelectionContext;
   /** Until when this engine refuses work, or null. */
-  blockedUntil(instanceId: string): number | null;
+  blockedUntil(instanceId: string, model?: string): number | null;
   /** When this engine's limit resets, when that is known. */
   resetAt?(instanceId: string): number | null;
   /** The backups the person chose for this bot, or for every bot. */
@@ -162,7 +162,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
 
   const usable = (engines: TakeoverEngine[], current: TakeoverEngine, selection: ModelSelection, scope: TakeoverScope, approval?: ApprovalMode): boolean => {
     const engine = engines.find((candidate) => candidate.instanceId === selection.instanceId);
-    if (!engine || !readyToRun(engine, deps.context) || deps.blockedUntil(engine.instanceId) !== null || modelHeld(selection) !== null) return false;
+    if (!engine || !readyToRun(engine, deps.context) || deps.blockedUntil(engine.instanceId, selection.model) !== null || modelHeld(selection) !== null) return false;
     if (engine.instanceId !== current.instanceId) {
       if (signedOutHeld(engine.instanceId)) return false;
       // Another sign-in to the same plan never carries a limit (that rotates accounts); it may stand in for one signed out.
@@ -253,7 +253,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
      * with no refused turn first. Null when nothing holds it, or when nothing could carry on and the AI is tried as
      * usual. `recovering`: Automatic recovery has backups of its own for a limit. */
     heldAtStart(bot: ThreadBot, selection: ModelSelection, recovering = false): { scope: TakeoverScope; resetsAt?: number } | null {
-      const engineUntil = deps.blockedUntil(selection.instanceId);
+      const engineUntil = deps.blockedUntil(selection.instanceId, selection.model);
       const model = engineUntil === null ? modelHeld(selection) : null;
       const scope: TakeoverScope | null = engineUntil !== null ? "engine" : model ? model.scope : signedOutHeld(selection.instanceId) ? "signed-out" : null;
       if (!scope) return null;

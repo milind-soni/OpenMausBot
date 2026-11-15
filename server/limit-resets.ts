@@ -8,6 +8,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { LIMIT_POLL_MS, limitReadDue } from "./limit-poll.ts";
 import { claudeHasExtraUsageRoom, loadPlanUsage, type PlanAccount, type PlanProviderRow, type PlanUsageReport, type PlanWindow } from "./plan-usage.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
+import { OPENCODE_GO_MODEL_PREFIX, typedOpenCodeModel } from "../shared/opencode-model-id.ts";
 
 export { LIMIT_POLL_MS };
 /** A refusal's reset is kept a little past its time, so a run due right then still finds it. */
@@ -137,12 +138,14 @@ export class LimitResetClock {
     return usage?.blocked && usage.resetsAt !== null && usage.resetsAt > refused ? usage.resetsAt : refused;
   }
 
-  /** Until when this engine refuses work, as far as is known; null when it should be working. */
-  blockedUntil(engine: string): number | null {
+  /** Until when this engine refuses work, as far as is known; null when it should be working. With `model`, for that
+   * model: OpenCode's usage meter is the Go subscription's, so at its limit Zen's free models still run. */
+  blockedUntil(engine: string, model?: string): number | null {
     const now = this.now();
     const refused = this.refusal(engine);
     const usage = this.reading(engine);
-    const until = Math.max(refused ?? 0, usage?.blocked && usage.resetsAt !== null ? usage.resetsAt : 0);
+    const meterHolds = usage?.driver !== "opencode" || !model || (typedOpenCodeModel(model) ?? model).startsWith(OPENCODE_GO_MODEL_PREFIX);
+    const until = Math.max(refused ?? 0, meterHolds && usage?.blocked && usage.resetsAt !== null ? usage.resetsAt : 0);
     return until > now ? until : null;
   }
 
