@@ -11,7 +11,6 @@ export interface ReplayEntry {
   id: string;
   role: "user" | "assistant";
   text: string;
-  /** On the entry standing for an earlier compaction summary: the summary's raw text, before it is JSON-quoted into `text`. */
   priorSummary?: string;
 }
 

@@ -20,7 +20,6 @@ export function deterministicSummary(history: readonly ReplayEntry[], maxBytes =
   for (let i = history.length - 1; i >= 0; i--) {
     const entry = history[i]!;
     if (!entry.text.trim()) continue;
-    // Already escaped once: stringifying it again would double the escapes every round.
     const prior = entry.priorSummary?.replace(EXCERPT_SUMMARY_HEADER, (m, at) => at === 0 ? "" : m).trim() || undefined;
     const text = prior ?? `${entry.role === "user" ? "User message" : "Assistant/record"}: ${JSON.stringify(entry.text)}`;
     const line = boundedContextText(text, Math.min(prior ? MAX_SUMMARY_BYTES : 1_600, available));
