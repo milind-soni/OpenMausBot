@@ -67,20 +67,41 @@ describe("the host's guard rails", () => {
     expect(JSON.parse(readFileSync(join(dir, PERF_FILE), "utf8")).ring).toMatchObject([{ turnId: "tu_1", threadId: "th_1" }]);
   });
 
-  it("a recorder that throws costs a log line, never its caller: no event, report or export fails", () => {
+  it("a recorder that throws costs a log line, never its caller: no event, report or export fails, on every platform", () => {
     const dir = mkdtempSync(join(tmpdir(), "perf-host-"));
     dirs.push(dir);
     const lines: string[] = [];
     const listeners: Array<(event: RuntimeEvent) => void> = [];
-    const broken = { report: () => { throw new RangeError("x"); }, start() {}, stop() {}, sampleNow: async () => {} } as unknown as ReturnType<typeof createProcessSampler>;
-    const host = createPerfHost({ dataDir: dir, timer: false, sampler: broken, wholeMachine: false, log: (line) => lines.push(line),
+    // The view builder itself fails: a limits report whose engines cannot be read, which every view reads on every platform.
+    const unreadable = { checkedAt: 0, get engines(): EngineLimitsReport["engines"] { throw new RangeError("x"); } };
+    const sampler = createProcessSampler({ list: () => null, intervalMs: 60_000, scope: "tree" });
+    const host = createPerfHost({ dataDir: dir, timer: false, sampler, wholeMachine: false, log: (line) => lines.push(line), limits: () => unreadable,
       bus: { subscribe: (listener) => { listeners.push(listener); return () => {}; } }, store: { onChange: () => () => {}, botByThread: () => { throw new Error("store"); } } });
     expect(() => listeners[0]!({ eventId: "e", provider: "codex", threadId: "th_1", createdAt: "", turnId: "tu_1", type: "turn.started" } as RuntimeEvent)).not.toThrow();
     expect(host.health()).toBeNull();
     expect(host.lines({ threadIds: [], botIds: [] })).toEqual(PERF_UNAVAILABLE);
     expect(host.text()).toBe(PERF_UNAVAILABLE.join("\n"));
+    expect(host.health()).toBeNull();
     expect(lines).toEqual(["[perf] the performance recorder failed (event): Error", "[perf] the performance recorder failed (health): RangeError",
       "[perf] the performance recorder failed (lines): RangeError", "[perf] the performance recorder failed (text): RangeError"]);
+  });
+
+  it("a sampler that throws leaves out the health read where it runs, and is a clean no-op on Windows", () => {
+    const dir = mkdtempSync(join(tmpdir(), "perf-host-"));
+    dirs.push(dir);
+    const lines: string[] = [];
+    const broken = { report: () => { throw new RangeError("x"); }, start() {}, stop() {}, sampleNow: async () => {} } as unknown as ReturnType<typeof createProcessSampler>;
+    const host = createPerfHost({ dataDir: dir, timer: false, sampler: broken, wholeMachine: false, log: (line) => lines.push(line),
+      bus: { subscribe: () => () => {} }, store: { onChange: () => () => {}, botByThread: () => null } });
+    if (process.platform === "win32") {
+      expect(host.health()).toMatchObject({ v: 1, process: null });
+      expect(host.text()).toContain("Processes: not sampled yet");
+      expect(lines).toEqual([]);
+    } else {
+      expect(host.health()).toBeNull();
+      expect(host.text()).toBe(PERF_UNAVAILABLE.join("\n"));
+      expect(lines).toEqual(["[perf] the performance recorder failed (health): RangeError", "[perf] the performance recorder failed (text): RangeError"]);
+    }
   });
 });
 
