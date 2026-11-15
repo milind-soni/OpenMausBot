@@ -46,14 +46,20 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
   };
 
   // Moves the saved agent the harness set up to the app's language; if Fish refuses, the call goes ahead in the old one.
-  const speakLanguage = async (key: string, endpoint: LiveEndpoint, language: string): Promise<void> => {
-    if (operatorAgent() || (input.fishAgentLanguage?.() ?? "en") === language) return;
-    try {
-      await setFishAgentLanguage(key, endpoint, endpoint.model, language, fetchImpl);
-    } catch {
-      return;
-    }
-    input.saveAgent({ fishAgentId: endpoint.model, fishAgentFor: fishKeyPrint(key), fishAgentLanguage: language });
+  // One change at a time, even past a cancelled call start, so a slower earlier start never saves over a later one.
+  let languageChange: Promise<void> = Promise.resolve();
+  const speakLanguage = (key: string, endpoint: LiveEndpoint, language: string): Promise<void> => {
+    const change = languageChange.then(async () => {
+      if (operatorAgent() || (input.fishAgentLanguage?.() ?? "en") === language) return;
+      try {
+        await setFishAgentLanguage(key, endpoint, endpoint.model, language, fetchImpl);
+      } catch {
+        return;
+      }
+      input.saveAgent({ fishAgentId: endpoint.model, fishAgentFor: fishKeyPrint(key), fishAgentLanguage: language });
+    });
+    languageChange = change.catch(() => undefined);
+    return change;
   };
 
   const startFish = async (key: string, endpoint: LiveEndpoint, botId: string, threadId: string) => {

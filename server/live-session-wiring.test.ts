@@ -85,6 +85,29 @@ describe("a Fish Audio call's session", () => {
     expect(moved.saveAgent).not.toHaveBeenCalled();
   });
 
+  it("changes the agent's language one call start at a time, so the app's latest language is the one left saved", async () => {
+    let releaseFirst!: () => void;
+    const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const fish = fakeFish();
+    let patches = 0;
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (init!.method === "PATCH" && patches++ === 0) await firstHeld;
+      return fish(url, init);
+    });
+    const speech: { language?: string; fishAgentLanguage?: string } = { language: "de", fishAgentLanguage: "en" };
+    const w = wiring(fetchImpl as unknown as typeof fetch, {}, speech);
+    w.saveAgent.mockImplementation((agent: { fishAgentLanguage: string }) => { speech.fishAgentLanguage = agent.fishAgentLanguage; });
+    const endpoint = fishLiveEndpoint("agent_saved", {});
+    const first = w.calls.createSession({ ...start, endpoint });
+    speech.language = "fr";
+    const second = w.calls.createSession({ ...start, endpoint });
+    releaseFirst();
+    await Promise.all([first, second]);
+    const languages = fish.mock.calls.filter(([, init]) => init!.method === "PATCH").map(([, init]) => JSON.parse(String(init!.body)).voice.speaking_language);
+    expect(languages).toEqual(["de", "fr"]);
+    expect(speech.fishAgentLanguage).toBe("fr");
+  });
+
   it("still starts the call when Fish won't change the agent's language", async () => {
     const fetchImpl = fakeFish({ refuseConfig: true });
     const w = wiring(fetchImpl, {}, { language: "vi" });
