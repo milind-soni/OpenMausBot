@@ -1213,6 +1213,9 @@ describe("ACP turns (fake CLI)", () => {
       { type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`, headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }] },
       { name: "notes", command: process.execPath, args: ["/tmp/notes-mcp.js"], env: [] },
     ]);
+    // The agent reaches this server's loopback URL around any proxy it was given.
+    const { env } = JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> };
+    for (const name of ["NO_PROXY", "no_proxy"]) expect(env[name]!.split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
   });
 
   it.each([false, true])("mounts Data through the existing stdio transport unless excluded (excluded=%s)", async (excluded) => {
