@@ -22,7 +22,7 @@ const hash = (s: string) => {
   return (h >>> 0).toString(36);
 };
 
-function CodeBlock({ code, lang, streaming }: { code: string; lang: string; streaming: boolean }) {
+export function CodeBlock({ code, lang, streaming }: { code: string; lang: string; streaming: boolean }) {
   const [html, setHtml] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 

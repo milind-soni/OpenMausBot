@@ -71,6 +71,7 @@ function fileKindIcon(kind: PreviewFileKind) {
     case "image":
       return <FileImage className="h-3.5 w-3.5 text-accent" />;
     case "markdown":
+    case "text":
     case "pdf":
       return <FileText className="h-3.5 w-3.5 text-ink-secondary" />;
     default:

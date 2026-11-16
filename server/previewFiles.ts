@@ -5,12 +5,13 @@ import {
   readFileSync,
   realpathSync,
   statSync,
+  writeFileSync,
   watch,
   type FSWatcher,
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 
-export type PreviewFileKind = "html" | "pdf" | "markdown" | "image" | "resource";
+export type PreviewFileKind = "html" | "pdf" | "markdown" | "text" | "image" | "resource";
 
 export interface PreviewFileDescriptor {
   path: string;
@@ -42,6 +43,7 @@ const EXTENSION_MAP: Record<string, { kind: PreviewFileKind; mimeType: string }>
   ".pdf": { kind: "pdf", mimeType: "application/pdf" },
   ".md": { kind: "markdown", mimeType: "text/markdown; charset=utf-8" },
   ".markdown": { kind: "markdown", mimeType: "text/markdown; charset=utf-8" },
+  ".txt": { kind: "text", mimeType: "text/plain; charset=utf-8" },
   ".png": { kind: "image", mimeType: "image/png" },
   ".jpg": { kind: "image", mimeType: "image/jpeg" },
   ".jpeg": { kind: "image", mimeType: "image/jpeg" },
@@ -114,6 +116,7 @@ export interface ResolvedPreviewFile {
   kind: PreviewFileKind;
   mimeType: string;
   size: number;
+  mtimeMs: number;
 }
 
 /**
@@ -225,11 +228,33 @@ export function resolvePreviewFile(
     kind: realType.kind,
     mimeType: realType.mimeType,
     size: stats.size,
+    mtimeMs: stats.mtimeMs,
   };
 }
 
 export function readPreviewFileContent(resolved: ResolvedPreviewFile): Buffer {
   return readFileSync(resolved.realFilePath);
+}
+
+/** Text documents (Markdown, plain text) are the only editable preview files. */
+export function isEditablePreviewKind(kind: PreviewFileKind): boolean {
+  return kind === "markdown" || kind === "text";
+}
+
+/**
+ * Saves an edited text document in place. `baseMtimeMs` is the modification time the editor
+ * loaded; if the file changed since (an agent or another app wrote it), the save is refused
+ * with 409 so neither version is silently lost.
+ */
+export function writePreviewTextFile(resolved: ResolvedPreviewFile, content: string, baseMtimeMs: number | null): number {
+  if (!isEditablePreviewKind(resolved.kind)) {
+    throw new PreviewFileError(415, "Only Markdown and text files can be edited");
+  }
+  if (baseMtimeMs !== null && Math.abs(statSync(resolved.realFilePath).mtimeMs - baseMtimeMs) > 1) {
+    throw new PreviewFileError(409, "The file changed on disk since it was opened");
+  }
+  writeFileSync(resolved.realFilePath, content, "utf8");
+  return statSync(resolved.realFilePath).mtimeMs;
 }
 
 /**

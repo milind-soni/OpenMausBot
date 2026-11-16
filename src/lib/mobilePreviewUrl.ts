@@ -1,4 +1,4 @@
-export type PreviewFileKind = "html" | "pdf" | "markdown" | "image";
+export type PreviewFileKind = "html" | "pdf" | "markdown" | "text" | "image";
 
 export interface PreviewUrlSource {
   kind: "url";
@@ -59,6 +59,7 @@ const FILE_EXT_MAP: Record<string, PreviewFileKind> = {
   ".pdf": "pdf",
   ".md": "markdown",
   ".markdown": "markdown",
+  ".txt": "text",
   ".png": "image",
   ".jpg": "image",
   ".jpeg": "image",

@@ -32,8 +32,10 @@ import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContex
 import {
   listProjectPreviewFiles,
   PreviewWatchManager,
+  isEditablePreviewKind,
   readPreviewFileContent,
   resolvePreviewFile,
+  writePreviewTextFile,
   type RegisteredProjectLike,
 } from "./previewFiles.ts";
 import { isJsonContentType, isLoopbackHostname, isPreviewAssetRead, rejectUntrustedRequest } from "./request-guard.ts";
@@ -1921,8 +1923,19 @@ const server = createServer(async (req, res) => {
         "x-content-type-options": "nosniff",
         "referrer-policy": "no-referrer",
         "content-security-policy": previewFileCsp(resolved.mimeType),
+        ...(isEditablePreviewKind(resolved.kind) ? { "x-file-mtime": String(resolved.mtimeMs) } : {}),
       });
       return res.end(data);
+    }
+    if (method === "PUT" && path === "/api/preview/file") {
+      const body = await readBody(req);
+      if (typeof body.projectId !== "string" || typeof body.path !== "string" || typeof body.content !== "string") {
+        return json(res, 400, { error: "projectId, path and content must be strings" });
+      }
+      const baseMtimeMs = typeof body.baseMtimeMs === "number" && Number.isFinite(body.baseMtimeMs) ? body.baseMtimeMs : null;
+      const resolved = resolvePreviewFile(await allRegisteredProjects(), body.projectId, body.path);
+      const mtimeMs = writePreviewTextFile(resolved, body.content, baseMtimeMs);
+      return json(res, 200, { ok: true, mtimeMs });
     }
     if (method === "POST" && path === "/api/preview/watch") {
       const body = await readBody(req);

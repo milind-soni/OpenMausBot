@@ -18,7 +18,7 @@ import {
   ShieldAlert,
   Sparkles,
 } from "lucide-react";
-import { ChatMarkdown } from "@/components/ChatMarkdown";
+import { DocumentView } from "@/components/DocumentView";
 import {
   buildProjectFilePreviewUrl,
   describePreviewSource,
@@ -102,6 +102,8 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
   const [slowWarning, setSlowWarning] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [markdownContent, setMarkdownContent] = useState("");
+  const [documentMtime, setDocumentMtime] = useState<number | null>(null);
+  const loadedDocumentKey = useRef("");
 
   const webviewRef = useRef<HTMLElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -235,7 +237,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
       }
 
       let dataUrl: string;
-      if (source?.kind === "file" && source.fileType === "markdown" && markdownScrollRef.current) {
+      if (source?.kind === "file" && (source.fileType === "markdown" || source.fileType === "text") && markdownScrollRef.current) {
         dataUrl = await captureMarkdown(markdownScrollRef.current, meta.width, meta.height, mode === "full");
       } else if (source?.kind === "file" && (source.fileType === "markdown" || source.fileType === "image")) {
         return (await captureProjectFileSizes(source, [meta], mode === "full"))[0];
@@ -296,6 +298,20 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     pageScrollSync.current?.apply(ratio);
   }, [externalScrollRatioY, live, syncEnabled, source, reloadNonce]);
 
+  const fileSourceKey = source?.kind === "file" ? `${source.projectId}\u0000${source.filePath}` : "";
+  const saveDocument = useCallback(async (content: string, baseMtimeMs: number | null): Promise<number> => {
+    const [projectId, path] = fileSourceKey.split("\u0000");
+    const res = await fetch("/api/preview/file", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId, path, content, baseMtimeMs }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(body.error || `Couldn't save the file (${res.status}).`), { status: res.status });
+    return body.mtimeMs;
+  }, [fileSourceKey]);
+  const reloadDocument = useCallback(() => setReloadNonce((n) => n + 1), []);
+
   // Manage loading states & Markdown fetching
   useEffect(() => {
     clearTimers();
@@ -315,9 +331,11 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
       return;
     }
 
-    if (source.kind === "file" && source.fileType === "markdown") {
+    if (source.kind === "file" && (source.fileType === "markdown" || source.fileType === "text")) {
       let cancelled = false;
-      updateStatus("loading");
+      const documentKey = `${source.projectId}/${source.filePath}`;
+      // Re-reads after a save or an external change keep the editor on screen.
+      if (loadedDocumentKey.current !== documentKey) updateStatus("loading");
       setErrorMessage("");
       const url = buildProjectFilePreviewUrl(source.projectId, source.filePath, reloadNonce || 1);
       fetch(url)
@@ -326,16 +344,20 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
             const body = await res.json().catch(() => ({}));
             throw new Error(body.error || `Failed to load file (${res.status})`);
           }
-          return res.text();
+          const mtime = Number(res.headers.get("x-file-mtime"));
+          return { text: await res.text(), mtime: Number.isFinite(mtime) && mtime > 0 ? mtime : null };
         })
-        .then((text) => {
+        .then(({ text, mtime }) => {
           if (cancelled) return;
+          loadedDocumentKey.current = documentKey;
           setMarkdownContent(text);
+          setDocumentMtime(mtime);
           updateStatus("loaded");
         })
         .catch((err) => {
           if (cancelled) return;
-          setErrorMessage(err instanceof Error ? err.message : "Couldn't read Markdown file.");
+          loadedDocumentKey.current = "";
+          setErrorMessage(err instanceof Error ? err.message : "Couldn't read the file.");
           updateStatus("error");
         });
       return () => {
@@ -366,7 +388,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
   useEffect(() => {
     const el = webviewRef.current as any;
     if (!isElectron || !el || !source || !live) return;
-    if (source.kind === "file" && (source.fileType === "markdown" || source.fileType === "image")) {
+    if (source.kind === "file" && (source.fileType === "markdown" || source.fileType === "text" || source.fileType === "image")) {
       return;
     }
 
@@ -667,13 +689,17 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
               </span>
             </div>
           </div>
-        ) : source.kind === "file" && source.fileType === "markdown" ? (
-          <div
+        ) : source.kind === "file" && (source.fileType === "markdown" || source.fileType === "text") ? (
+          <DocumentView
+            key={fileSourceKey}
             ref={markdownScrollRef}
-            className="h-full w-full overflow-y-auto bg-panel p-6 text-left text-ink select-text"
-          >
-            <ChatMarkdown text={markdownContent} />
-          </div>
+            kind={source.fileType}
+            fileName={source.filePath}
+            content={markdownContent}
+            mtimeMs={documentMtime}
+            onSave={saveDocument}
+            onReload={reloadDocument}
+          />
         ) : source.kind === "file" && source.fileType === "image" ? (
           <div className="flex h-full w-full items-center justify-center bg-inset p-4">
             <img
