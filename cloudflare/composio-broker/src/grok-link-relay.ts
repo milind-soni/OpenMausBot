@@ -3,10 +3,10 @@ import { JSON_HEADERS, json } from "./common";
 
 export interface RelaySocket { send(text: string): void; close(code: number, reason: string): void }
 export interface RelayStore { read(): Promise<LinkManifest | null>; write(manifest: LinkManifest): Promise<void>; clear(): Promise<void> }
-export interface RelayLimits { pickupMs: number; answerMs: number; inFlight: number }
+export interface RelayLimits { helloMs: number; pickupMs: number; answerMs: number; inFlight: number }
 
 type RpcId = string | number;
-interface Pending { socket: RelaySocket; requestId: RpcId; got(): void; settle(response: Response): void }
+interface Pending { socket: RelaySocket; got(): void; settle(response: Response): void; offline(): void }
 
 const rpcResult = (id: RpcId, result: unknown) => json({ jsonrpc: "2.0", id, result });
 const rpcError = (id: RpcId | null, code: number, message: string, status = 200) => json({ jsonrpc: "2.0", id, error: { code, message } }, status);
@@ -17,12 +17,13 @@ export class LinkRelay {
   private manifest: LinkManifest | null | undefined;
   private current: RelaySocket | null = null;
   private readonly pending = new Map<string, Pending>();
+  private readonly awaitingHello: Array<() => void> = [];
 
   constructor(
     private readonly store: RelayStore,
     /** The open sockets, oldest first: what is left of them after the object slept. */
     private readonly sockets: () => RelaySocket[],
-    private readonly limits: RelayLimits = { pickupMs: 5_000, answerMs: 40_000, inFlight: GROK_LINK_IN_FLIGHT },
+    private readonly limits: RelayLimits = { helloMs: 2_000, pickupMs: 5_000, answerMs: 40_000, inFlight: GROK_LINK_IN_FLIGHT },
   ) {}
 
   /** The newest socket wins; older ones are closed as replaced. */
@@ -41,6 +42,7 @@ export class LinkRelay {
     }
     if (frame.t === "hello") {
       this.manifest = frame.manifest;
+      for (const heard of this.awaitingHello.splice(0)) heard();
       return this.store.write(frame.manifest);
     }
     const call = this.pending.get(frame.id);
@@ -53,10 +55,7 @@ export class LinkRelay {
   /** The socket is gone: every call sent on it gets the offline answer now. */
   closed(socket: RelaySocket): void {
     if (this.current === socket) this.current = null;
-    const offline = this.manifest?.offline;
-    for (const call of this.pending.values()) {
-      if (call.socket === socket) call.settle(offline ? rpcResult(call.requestId, offline) : json({ error: "service unavailable" }, 503));
-    }
+    for (const call of this.pending.values()) if (call.socket === socket) call.offline();
   }
 
   /** The answer to one POST body from Grok Bot. */
@@ -73,8 +72,7 @@ export class LinkRelay {
     if (message.id === undefined) return new Response(null, { status: 202, headers: { "cache-control": "no-store" } });
     if (typeof message.id !== "string" && typeof message.id !== "number") return rpcError(null, -32600, "Send one JSON-RPC 2.0 request", 400);
     const id = message.id;
-    this.manifest ??= await this.store.read();
-    const manifest = this.manifest;
+    const manifest = await this.knownManifest();
     if (!manifest) return json({ error: "service unavailable" }, 503, { "retry-after": "5" });
     switch (message.method) {
       case "initialize": {
@@ -94,6 +92,18 @@ export class LinkRelay {
     await this.store.clear();
   }
 
+  private async knownManifest(): Promise<LinkManifest | null> {
+    this.manifest ??= await this.store.read();
+    if (!this.manifest && this.sockets().length) {
+      // A new link's first call can overtake its socket's hello: they travel on different connections.
+      await new Promise<void>((heard) => {
+        this.awaitingHello.push(heard);
+        setTimeout(heard, this.limits.helloMs);
+      });
+    }
+    return this.manifest ?? null;
+  }
+
   private relay(requestId: RpcId, body: string, manifest: LinkManifest): Promise<Response> {
     const socket = this.current ?? this.sockets().at(-1) ?? null;
     if (!socket) return Promise.resolve(rpcResult(requestId, manifest.offline));
@@ -111,7 +121,7 @@ export class LinkRelay {
         this.pending.delete(callId);
         resolve(response);
       };
-      this.pending.set(callId, { socket, requestId, got: () => clearTimeout(pickup), settle });
+      this.pending.set(callId, { socket, got: () => clearTimeout(pickup), settle, offline: () => settle(rpcResult(requestId, manifest.offline)) });
       try {
         socket.send(`{"t":"call","id":"${callId}","message":${body}}`);
       } catch {

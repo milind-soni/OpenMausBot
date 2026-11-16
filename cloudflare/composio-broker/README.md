@@ -192,7 +192,9 @@ object stores the manifest, which holds no personal data, and answers
 `initialize`, `ping` and `tools/list` from it whether or not the desktop is
 attached. A `tools/call` goes to the desktop: no receipt within 5 seconds
 closes the socket and answers "isn't open", no answer within 40 seconds answers
-"didn't answer in time", and a link runs at most 8 calls at once.
+"didn't answer in time", and a link runs at most 8 calls at once. A call that
+overtakes a new link's first hello waits up to 2 seconds for it; with no
+manifest the address answers 503.
 
 D1 keeps `key_hash` (SHA-256 of the address key, also the object's name),
 `created_at` and `attached_at`: never the secret, the key or an installation.

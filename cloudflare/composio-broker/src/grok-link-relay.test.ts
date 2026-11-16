@@ -14,7 +14,7 @@ const MANIFEST: LinkManifest = {
 const rpc = (method: string, params?: unknown, id: number | null = 1) => JSON.stringify({ jsonrpc: "2.0", ...(id === null ? {} : { id }), method, ...(params ? { params } : {}) });
 const toolCall = (id = 1) => rpc("tools/call", { name: "move_status", arguments: {} }, id);
 
-function fixture(limits = { pickupMs: 5_000, answerMs: 40_000, inFlight: 8 }) {
+function fixture(limits = { helloMs: 2_000, pickupMs: 5_000, answerMs: 40_000, inFlight: 8 }) {
   let stored: LinkManifest | null = null;
   const store: RelayStore = { read: async () => stored, write: async (manifest) => { stored = manifest; }, clear: async () => { stored = null; } };
   const open: Array<RelaySocket & { sent: Array<{ t: string; id: string; message: unknown }>; closedWith?: number }> = [];
@@ -47,11 +47,17 @@ beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("one Grok Bot link's relay", () => {
-  it("answers nothing but 503 until a desktop has said hello", async () => {
+  it("answers nothing but 503 until a desktop has said hello, and waits two seconds for one that just attached", async () => {
     const { relay, socket } = fixture();
     expect((await read(relay().call(rpc("initialize")))).status).toBe(503);
-    socket();
-    expect((await read(relay().call(toolCall()))).status).toBe(503);
+    const attached = socket();
+    const silent = read(relay().call(toolCall()));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect((await silent).status).toBe(503);
+    const overtook = read(relay().call(rpc("tools/list")));
+    await vi.advanceTimersByTimeAsync(100);
+    await relay().received(attached, JSON.stringify({ t: "hello", manifest: MANIFEST }));
+    expect((await overtook).body).toEqual({ jsonrpc: "2.0", id: 1, result: MANIFEST.tools });
   });
 
   it("shakes hands and lists the tools from the desktop's manifest, with or without the desktop", async () => {
