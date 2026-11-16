@@ -2680,6 +2680,7 @@
   "chat.unpinHint": "Unpin this message",
   "chat.unpin": "Unpin",
   "chat.pinnedJump": "Jump to the pinned message",
+  "chat.pinnedMessages": "Pinned messages",
   "chat.you": "You",
   "chat.peer.asked": "asked via ask_bot",
   "chat.peer.handedTask": "handed on a task",

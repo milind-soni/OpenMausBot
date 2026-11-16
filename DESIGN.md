@@ -42,6 +42,9 @@ where they belong instead of adding new places.
 
 - **No new header buttons.** The chat header shows the bot, its model and its
   screen. Anything else goes in the bot panel, a menu or the command palette.
+  A button that exists only while the conversation has what it shows (its
+  pinned message) is fine: it opens a menu and is gone when there is nothing
+  to show.
 - **No count badges and no "needs you" summaries** above the sidebar list or
   in the header. A status mark on the row it belongs to is fine.
 - **Settings for one bot live in its bot panel.** App-wide settings live in
