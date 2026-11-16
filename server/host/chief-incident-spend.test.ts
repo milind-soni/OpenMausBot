@@ -147,13 +147,13 @@ describe("a routine every 5 minutes whose tool server is dead, for a day", () =>
 });
 
 describe("a routine every 5 minutes on a server whose engines cannot start, for a day", () => {
-  // A refused spawn reaches no AI: each run waits on its own thread for room, so only its threads are counted.
-  it("starts 7 runs and 2 Chief turns", async () => {
+  // 9 runs, each started once more 30 s later while it waits for room (#6179); nothing reaches the AI until one starts.
+  it("tries 18 starts in 9 runs and starts 2 Chief turns", async () => {
     const w = world(1, spawnRefused, true);
     await w.passTo(START + 24 * HOUR);
-    const runs = new Set(w.routineTurns).size;
-    console.log(`requests in 24 hours: ${runs} routine runs (${w.routineTurns.length} starts tried) + ${w.chiefTurns.length} Chief turns`);
-    expect(runs).toBe(7);
+    console.log(`requests in 24 hours: ${w.routineTurns.length} routine starts tried + ${w.chiefTurns.length} Chief turns`);
+    expect(w.routineTurns).toHaveLength(18);
+    expect(new Set(w.routineTurns).size).toBe(9);
     expect(w.chiefTurns).toHaveLength(2);
   });
 });
