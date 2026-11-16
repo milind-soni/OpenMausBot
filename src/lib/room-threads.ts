@@ -52,13 +52,13 @@ export function busyPlaceOf(groups: Pick<Group, "id" | "name">[], bots: Pick<Bot
 
 export function roomQueueLabel(entry: RoomQueueEntry, nameOf: (botId: string) => string | undefined,
   placeOf?: (entry: RoomQueueEntry) => string | undefined): string {
+  const name = entry.waitingForBotId ? nameOf(entry.waitingForBotId) : undefined;
   if (entry.busyIn) {
     const place = placeOf?.(entry);
-    return place
-      ? t("room.queue.busyIn", { place, position: entry.position, of: entry.of })
-      : t("room.queue.busyElsewhere", { position: entry.position, of: entry.of });
+    const slot = { position: entry.position, of: entry.of };
+    if (name) return place ? t("room.queue.busyInAfter", { place, name, ...slot }) : t("room.queue.busyElsewhereAfter", { name, ...slot });
+    return place ? t("room.queue.busyIn", { place, ...slot }) : t("room.queue.busyElsewhere", slot);
   }
-  const name = entry.waitingForBotId ? nameOf(entry.waitingForBotId) : undefined;
   return name
     ? t("room.queue.waitingFor", { name, position: entry.position, of: entry.of })
     : t("room.queue.waiting", { position: entry.position, of: entry.of });

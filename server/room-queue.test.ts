@@ -50,11 +50,17 @@ describe("room queue", () => {
 
 describe("a member busy outside the room", () => {
   it("tells the requester it is busy elsewhere and starts here when that finishes", () => {
-    const [entry] = roomQueue([job("e1", "queued")], new Map([["room", "lead"]]));
+    const [entry] = roomQueue([job("e1", "queued")]);
     expect(queuedJobDetail({ ...entry!, busyIn: { groupId: "room-1", threadId: "t1" } }, nameOf))
       .toBe("queued 1 of 1 in this room: Editor 1 is busy in another room now, so it starts here when that finishes");
     expect(queuedJobDetail({ ...entry!, busyIn: { threadId: "own" } }, nameOf))
       .toBe("queued 1 of 1 in this room: Editor 1 is busy in another thread of its own now, so it starts here when that finishes");
+  });
+
+  it("still names who it waits for in this room when it is also busy elsewhere", () => {
+    const [entry] = roomQueue([job("e1", "queued")], new Map([["room", "scout"]]));
+    expect(queuedJobDetail({ ...entry!, busyIn: { groupId: "room-1", threadId: "t1" } }, nameOf))
+      .toBe("queued 1 of 1 in this room: Editor 1 is busy in another room now, so it starts here when that finishes and after Scout");
   });
 });
 

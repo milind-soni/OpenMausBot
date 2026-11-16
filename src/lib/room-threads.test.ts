@@ -74,12 +74,21 @@ describe("room queue labels", () => {
 
   it("says where a waiting member is busy, by a name this viewer can see, and that it starts when that finishes", () => {
     const placeOf = busyPlaceOf([{ id: "room-1", name: "Group 1" }], [{ id: "coder", tasks: [{ threadId: "own", title: "Fix login", createdAt: 1 }] }]);
-    const inRoom = { botId: "coder", threadId: "open", state: "queued" as const, position: 1, of: 2, waitingForBotId: "scout", busyIn: { groupId: "room-1", threadId: "g1" } };
+    const inRoom = { botId: "coder", threadId: "open", state: "queued" as const, position: 1, of: 2, busyIn: { groupId: "room-1", threadId: "g1" } };
     expect(roomQueueLabel(inRoom, () => "Scout", placeOf)).toBe("Busy in Group 1 · queued (1 of 2), starts when it finishes");
     expect(roomQueueLabel({ ...inRoom, busyIn: { threadId: "own" } }, () => "Scout", placeOf)).toBe("Busy in Fix login · queued (1 of 2), starts when it finishes");
     // A room or thread this viewer can't see is not named.
     expect(roomQueueLabel({ ...inRoom, busyIn: { groupId: "private-room", threadId: "p" } }, () => "Scout", placeOf))
       .toBe("Busy in another conversation · queued (1 of 2), starts when it finishes");
     expect(roomQueueLabel(inRoom, () => "Scout")).toBe("Busy in another conversation · queued (1 of 2), starts when it finishes");
+  });
+
+  it("keeps who a busy-elsewhere member also waits for in this room", () => {
+    const placeOf = busyPlaceOf([{ id: "room-1", name: "Group 1" }], []);
+    const entry = { botId: "coder", threadId: "open", state: "queued" as const, position: 2, of: 2, waitingForBotId: "scout", busyIn: { groupId: "room-1", threadId: "g1" } };
+    expect(roomQueueLabel(entry, () => "Scout", placeOf)).toBe("Busy in Group 1 · queued after Scout (2 of 2), starts when both finish");
+    expect(roomQueueLabel(entry, () => "Scout")).toBe("Busy in another conversation · queued after Scout (2 of 2), starts when both finish");
+    // A waited-for member this viewer can't name falls back to the plain busy line.
+    expect(roomQueueLabel(entry, () => undefined, placeOf)).toBe("Busy in Group 1 · queued (2 of 2), starts when it finishes");
   });
 });
