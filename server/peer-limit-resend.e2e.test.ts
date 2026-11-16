@@ -19,7 +19,7 @@ async function finishedHandoff(dataDir: string, botId: string) {
 const jsonLines = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
-/** A Chief on one Claude sign-in hands work to a specialist on another ("helper"), with Codex as the other AI. */
+/** A Chief on one Claude sign-in hands work to a specialist on another ("helper"), with Codex as the specialist's chosen backup. */
 async function withHandoffFixture(helperPlan: Record<string, unknown>, check: (fixture: {
   api: (method: string, path: string, body?: unknown) => Promise<any>;
   control: (...args: string[]) => Promise<any>;
@@ -73,6 +73,9 @@ async function withHandoffFixture(helperPlan: Record<string, unknown>, check: (f
     await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true });
     const own = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === specialist.id).modelSelection;
     await api("PATCH", `/api/bots/${specialist.id}/tasks/${specialist.activeTaskId}`, { modelSelection: { ...own, instanceId: "helper" }, updateBotDefault: true });
+    // Codex is the backup the person chose for the specialist; a limited AI hands its turns only to such a backup.
+    const { instances } = await api("GET", "/api/instances") as { instances: any[] };
+    await api("PATCH", `/api/bots/${specialist.id}`, { fallback: [{ instanceId: "codex", model: instances.find((instance) => instance.instanceId === "codex").models.default }] });
     const brief = "CHECK_THE_FIXTURE_REPORT_5Q";
     writeFileSync(planPath, JSON.stringify({
       [chief.id]: { turns: [
