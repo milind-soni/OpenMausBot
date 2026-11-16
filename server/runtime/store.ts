@@ -54,6 +54,7 @@ const assignmentSchema = z.object({
   outcome: z.enum(["done", "needs_input", "cap_continued", "stalled", "interrupted", "budget", "provider_error", "denied",
     "expired", "stopped", "refused", "duplicate"]).optional(),
   outcomeDetail: z.string().optional(),
+  fault: z.enum(["process_start", "out_of_room", "disk_full", "tool_server", "signed_out"]).optional(),
   level: z.enum(APPROVAL_MODES),
   levelSource: z.enum(["own", "chief", "engine_cap"]),
   executions: z.number().int().nonnegative(),
@@ -73,7 +74,7 @@ const assignmentSchema = z.object({
   decide: z.object({ default: z.string().optional() }).optional(),
   answer: z.string().optional(),
   answeredBy: z.discriminatedUnion("kind", [z.object({ kind: z.literal("bot"), botId: z.string().min(1) }), z.object({ kind: z.literal("default") })]).optional(),
-  budgets: z.object({ since: z.number(), requests: z.number(), executions: z.number(), wakes: z.number() }).optional(),
+  budgets: z.object({ since: z.number(), requests: z.number(), executions: z.number(), wakes: z.number(), total: z.number().optional(), failed: z.number().optional() }).optional(),
   // The schema strips any field it does not name: every optional Assignment field must be listed here.
   cards: z.array(z.string()).optional(),
   continuation: z.object({ note: z.string(), handoffPath: z.string().optional(), count: z.number().int().nonnegative() }).optional(),

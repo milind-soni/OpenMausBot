@@ -11,6 +11,9 @@ export const CHAT_NOTICE = {
   "chat.notice.cutOffByRestart": "{name} was cut off by a restart; resuming",
   "chat.notice.stalled": "no activity for {minutes} minutes — the turn was stopped",
   "chat.notice.stalledCommand": "the command `{command}` ran for {minutes} minutes without finishing and looks stuck — the turn was stopped",
+  "chat.notice.unattendedTooLong": "this turn had nobody waiting on it and worked for {minutes} minutes, its limit — the turn was stopped",
+  "chat.notice.unattendedRequests": "this turn had nobody waiting on it and made {count} requests to its AI, its limit — the turn was stopped",
+  "chat.notice.unattendedDenied": "this turn had nobody waiting on it and {count} of its permission requests were denied or went unanswered — the turn was stopped",
   "chat.notice.engineExited": "the process running this turn's AI ended — the turn was stopped",
   "chat.notice.followupInterrupted":
     "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.",
