@@ -971,7 +971,10 @@ export class ViewerHub {
         if (message.ignoreCache === true) await tab.page.session.send("Page.reload", { ignoreCache: true });
         else await tab.page.reload({ readiness: "none" });
         return;
-      case "ombElementInspect": return inspectBrowserElement({ push: message => viewer.push(message as Parameters<Viewer["push"]>[0]) }, tab, message);
+      case "ombElementInspect": {
+        const inspect = () => inspectBrowserElement({ push: message => viewer.push(message as Parameters<Viewer["push"]>[0]) }, tab, message);
+        return message.capture === true ? this.paused(tab, inspect) : inspect();
+      }
       case "probe": {
         const x = num(message.x);
         const y = num(message.y);
