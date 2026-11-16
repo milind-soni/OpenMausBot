@@ -15,8 +15,9 @@ pnpm exec vitest run server/wait-probes.test.ts server/waits.test.ts server/wait
 The fake engine calls `wait_until` on every turn it runs, including the follow-up.
 A follow-up proved by its live turn generation, originating wait run and fired notice
 can create its next wait in the same bot's direct chat. Continuation authorization is
-checked again after the initial probe and immediately before persistence. The multi-stage
-e2e test exercises two completions and registration of the next stage. Scheduled routines and unrelated outside events
+checked again after the initial probe, before returning immediate follow-up instructions
+or persisting a wait. The multi-stage e2e test exercises two completions and
+registration of the next stage. Scheduled routines and unrelated outside events
 retain their existing refusal. A condition already true returns immediately and
 directs the bot to carry out its follow-up in that turn.
 
@@ -66,9 +67,9 @@ internet, and what a real model does with the follow-up (the fake engine replies
 ## Last exercised
 
 2026-11-16, macOS arm64, Node 26.5.0. Twelve targeted Vitest files passed with
-500 tests, including successive build, test and package waits in one direct chat,
-originating-run and live-generation authorization, and rejection before persistence
-when continuation authorization changes during a URL probe.
+505 tests, including successive build, test and package waits in one direct chat,
+originating-run and live-generation authorization, and rejection when continuation
+authorization changes during a URL probe with either a matching or pending condition.
 The packaged server passed its smoke checks and all four wait and handed-wait
 e2e tests against disposable fixture data. The route tests also cover immediate
 follow-up when the requested condition already holds.

@@ -91,8 +91,12 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
 }
 
 describe("WaitManager", () => {
-  it.each(["ended", "new generation", "different run"])("refuses to persist a continuation that changed during a URL probe: %s", async (change) => {
+  it.each([
+    ["ended", ""], ["new generation", ""], ["different run", ""],
+    ["ended", "done"], ["new generation", "done"], ["different run", "done"],
+  ])("refuses a revoked continuation after a URL probe (%s, page %j)", async (change, text) => {
     const h = harness();
+    h.page = { ok: true, text };
     const route = createWaitRoutes({ waits: h.manager });
     const json = vi.fn();
     const turn = { active: true, generation: "generation-1", runId: "run-1" };
@@ -115,6 +119,23 @@ describe("WaitManager", () => {
       await pending;
     }
     expect(json).toHaveBeenCalledWith(expect.anything(), 403, { error: WAIT_MESSAGES.notPerson });
+    expect(h.manager.list("bot-1")).toEqual([]);
+    expect(existsSync(h.file)).toBe(false);
+    expect(h.showCard).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("returns an immediate follow-up for an authorized request (continuation %s)", async (continuation) => {
+    const h = harness();
+    h.page = { ok: true, text: "done" };
+    const route = createWaitRoutes({ waits: h.manager });
+    const json = vi.fn();
+    await route({
+      method: "POST", path: "/api/internal/waits", res: {} as never, json,
+      botId: "bot-1", threadId: "t-1",
+      readBody: async () => ({ label: "the build", kind: "url_contains", url: "https://example.test/build", text: "done", follow_up: "Run tests." }),
+      sourceRefusal: () => null, continuationAllowed: () => continuation, hostRefusal: () => null, guest: () => false, peer: () => null,
+    });
+    expect(json).toHaveBeenCalledWith(expect.anything(), 200, { text: expect.stringContaining("Carry out follow_up now in this turn: Run tests.") });
     expect(h.manager.list("bot-1")).toEqual([]);
     expect(existsSync(h.file)).toBe(false);
     expect(h.showCard).not.toHaveBeenCalled();

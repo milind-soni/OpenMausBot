@@ -92,6 +92,8 @@ it("continues successive waits in the same authorized chat after each completion
     expect(await busy()).toBe(true);
     const followUp = await turnToken();
     expect(await api("GET", "/api/internal/waits", undefined, 200, followUp)).toEqual({ text: WAIT_MESSAGES.none });
+    expect((await api("POST", "/api/internal/waits", { label: "the completed build", kind: "file_exists", path: build, follow_up: "Read the build report." }, 200, followUp)).text)
+      .toContain("Carry out follow_up now in this turn: Read the build report.");
     const next = { label: "the tests", kind: "file_exists", path: tests, follow_up: "Wait for the package." };
     expect((await api("POST", "/api/internal/waits", next, 201, followUp)).text).toContain("Waiting for the tests");
     expect(await api("POST", "/api/internal/waits/cancel", { id: "any" }, 403, followUp)).toEqual({ error: WAIT_MESSAGES.notPerson });
