@@ -133,7 +133,7 @@ export interface Assignment {
   question?: string;
   /** While parked: when the person was reminded of it, so a restart never reminds them twice. */
   remindedAt?: number;
-  /** While parked under Full access ("Just do it"): the question is its requester's to answer, never the person's.
+  /** While parked under Full access: the question is its requester's to answer, never the person's.
    * Still unanswered when the requester's turn that carries it ends, the assignee goes on with `default`, or with its
    * own pick when it named none. */
   decide?: { default?: string };
