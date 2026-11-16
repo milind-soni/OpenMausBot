@@ -2228,9 +2228,10 @@
           "card": {
             "type": "string",
             "enum": [
-              "other-computers"
+              "other-computers",
+              "ai-sign-in"
             ],
-            "description": "show_card: other-computers when the person asks how to connect or open this computer from another computer."
+            "description": "show_card: other-computers when the person asks how to connect or open this computer from another computer; ai-sign-in when the person wants to sign in to an AI account (Claude, ChatGPT or Codex, Antigravity), or one is signed out."
           },
           "theme": {
             "type": "string",

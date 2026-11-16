@@ -274,7 +274,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     synonyms: ["engine", "engines", "ai engine", "add engine", "remove engine", "provider", "providers", "ollama", "lm studio", "lmstudio", "bedrock", "endpoint", "local model"],
     value: engineChange,
     allowed: '{"kind":"ollama" or "lmstudio","url"} for a local server; {"kind":"openai-compat","name","url","keyFrom":"<a keys.* id, e.g. openrouterApiKey>","models"?:[...]}; '
-      + '{"kind":"bedrock","name","awsProfile","awsRegion","model"}. Sign-in accounts (Claude, ChatGPT, Antigravity) are added and signed in by the user in Settings → AI',
+      + '{"kind":"bedrock","name","awsProfile","awsRegion","model"}. Sign-in accounts (Claude, ChatGPT, Antigravity) are signed in by the user: show_card ai-sign-in puts that sign-in in the chat',
     current: (): EngineKeep => ({ kind: "keep", instanceIds: deps.engines().map((engine) => engine.instanceId) }), read: listEngines,
     describe: (change: EngineChange) => {
       if (change.kind === "remove") return { refusal: personOnly("Removing an AI engine", "providers") };
