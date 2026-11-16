@@ -29,7 +29,7 @@ import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
 import { TEAM_PERSONAL_HINTS } from "../../shared/cloud-hints.ts";
-import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
+import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderBorrowedKey, type Decider } from "../decider/index.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
@@ -186,7 +186,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (patch.decider) {
-        const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderSharedKeyUsable(cfg) });
+        const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderBorrowedKey(cfg) });
         if (!planned.ok) return json(res, 400, refusalBody(planned));
         patch.decider = planned.patch;
       }

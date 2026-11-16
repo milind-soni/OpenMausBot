@@ -1,5 +1,6 @@
-/** workersai: Cloudflare's Clef on Workers AI, Jev-compatible. custom: a gateway the person points at. */
-export type DeciderProvider = "jev" | "workersai" | "openrouter" | "custom";
+/** workersai: Cloudflare's Clef on Workers AI, Jev-compatible. custom: a gateway the person points at. gemini: Google's
+ * Decisions API with the Gemini key saved for speech or images. */
+export type DeciderProvider = "jev" | "workersai" | "openrouter" | "custom" | "gemini";
 
 /** chat: a chat model asked for strict JSON; decisions: OpenRouter's Decisions API (output modality `decisions`). */
 export type OpenRouterApi = "chat" | "decisions";
