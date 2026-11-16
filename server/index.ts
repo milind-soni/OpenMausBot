@@ -7207,7 +7207,7 @@ class DirectSendRefused extends Error {
   }
 }
 
-function directSendRefusal(botId: string, threadId: string): DirectSendRefused | null {
+function directSendRefusal(botId: string, threadId: string): DirectSendRefused | null { const standIn = store.standIns.get(botId); if (standIn) return new DirectSendRefused(409, { error: botMoveRefusal(standIn)!, code: "moved" });
   try {
     assertWithinBudget(cfg, DATA_DIR);
   } catch (error) {

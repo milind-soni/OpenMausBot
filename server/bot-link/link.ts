@@ -102,7 +102,8 @@ const endedSchema = z.array(z.object({ origin: z.string(), token: z.string(), at
 /** A link that was turned off while its Cloud could not be told: the Cloud is told when it can next be reached. */
 export type EndedLink = z.infer<typeof endedSchema>[number];
 
-interface LocalBot { id: string; name: string; color?: string; hidden?: boolean; title?: string; description?: string; movedTo?: unknown }
+interface LocalBot { id: string; name: string; color?: string; hidden?: boolean; title?: string; description?: string; movedTo?: unknown;
+  mascotBody?: string | null; mascotFaceColor?: string | null; chiefOfStaff?: boolean; threadId?: string }
 
 export interface BotLinkDeps {
   dataDir: string;
@@ -133,6 +134,8 @@ export interface BotLinkDeps {
   resultRow(parent: HandoffView, child: HandoffView, name: string): void;
   /** The coordinator should look again: a place came back, or went. */
   kick(): void;
+  /** The other places' bots changed: one came, went or changed, or a place was linked or unlinked. */
+  directoryChanged?(): void;
   /** On the Cloud: ends the session a computer's link used. */
   revoke?(sessionId: string): void;
   now?: () => number;
@@ -189,6 +192,8 @@ export function createBotLink(deps: BotLinkDeps) {
   const directory = (): LinkedBot[] => deps.bots().filter((bot) => !bot.hidden && !bot.movedTo).map((bot) => ({
     id: bot.id, name: bot.name, ...(bot.title ? { title: bot.title.slice(0, 200) } : {}), ...(bot.description ? { description: bot.description.slice(0, 400) } : {}),
     ...(deps.model?.(bot) ? { model: deps.model(bot)!.slice(0, 200) } : {}), level: deps.level(bot),
+    ...(bot.color ? { color: bot.color.slice(0, 64) } : {}), ...(bot.mascotBody ? { mascotBody: bot.mascotBody.slice(0, 64) } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor.slice(0, 64) } : {}),
+    ...(bot.chiefOfStaff ? { chief: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}),
   })).slice(0, 500);
 
   function send(peer: string, frame: Frame): void {
@@ -458,7 +463,7 @@ export function createBotLink(deps: BotLinkDeps) {
         const known = state.peers[peer]!;
         // A computer is the place it paired as: its name may change, its identity may not.
         if (frame.place.id !== known.place.id) { log("bot link: a hello from another place than the one paired was dropped"); return; }
-        if (JSON.stringify([frame.place, frame.bots]) !== JSON.stringify([known.place, known.bots])) { known.place = frame.place; known.bots = frame.bots; save(); deps.kick(); }
+        if (JSON.stringify([frame.place, frame.bots]) !== JSON.stringify([known.place, known.bots])) { known.place = frame.place; known.bots = frame.bots; save(); deps.kick(); deps.directoryChanged?.(); }
         return;
       }
       case "handoff": return accept(peer, frame);
@@ -554,6 +559,7 @@ export function createBotLink(deps: BotLinkDeps) {
     failPending(peer, reason);
     if (Object.keys(state.peers).length === 0) { off(true); return; }
     save();
+    deps.directoryChanged?.();
     for (const listener of outboundListeners) listener(peer);
     deps.kick();
   }
@@ -583,6 +589,7 @@ export function createBotLink(deps: BotLinkDeps) {
     failPending(null, "The link between this place and the person's other place was turned off before the work came back.");
     for (const peer of peers) for (const listener of outboundListeners) listener(peer);
     deps.kick();
+    deps.directoryChanged?.();
   }
 
   function receipt(remote: Remote, outcome: PeerDeliveryReceipt["outcome"], detail: string, more: Partial<PeerDeliveryReceipt> = {}): PeerDeliveryReceipt {
@@ -722,6 +729,8 @@ export function createBotLink(deps: BotLinkDeps) {
       peers: Object.entries(state.peers).map(([peer, known]) => ({ ...known.place, online: isOnline(peer), bots: known.bots.length })),
       bots: Object.values(state.peers).reduce((sum, known) => sum + known.bots.length, 0), waiting: pending.size }
       : (() => { const ended = [...new Set(readEnded().map((one) => one.origin))]; return { on: false as const, ...(ended.length ? { ended } : {}) }; })()),
+    /** Every bot of every linked place, with its address here. */
+    linked: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), peer, place: known.place, online: isOnline(peer), bot }))),
     /** Other places' bots as list_bots names them. */
     agents: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), name: bot.name, section: "", model: bot.model ?? "", busy: false,
       status: isOnline(peer) ? "linked" : "offline", statusText: isOnline(peer) ? `on ${known.place.name}` : `on ${known.place.name}, offline now: work for it waits until it is back`,
@@ -735,6 +744,7 @@ export function createBotLink(deps: BotLinkDeps) {
         peers: { [key]: { place: input.peer, bots: kept?.peers[key]?.bots ?? [], seenAt: now() } }, threads: kept?.threads ?? {}, work: kept?.work ?? {} };
       save();
       deps.kick();
+      deps.directoryChanged?.();
     },
     /** On the Cloud: one computer is paired. The session its link used before is returned, for the caller to end; other
      * computers' links are left as they are. Null when no more computers fit. */
@@ -747,6 +757,7 @@ export function createBotLink(deps: BotLinkDeps) {
       state.peers[key] = { place: input.computer, bots: known?.place.id === input.computer.id ? known.bots : [], sessionId: input.sessionId, seenAt: now() };
       save();
       deps.kick();
+      deps.directoryChanged?.();
       return { peer: key, ...(known?.sessionId ? { replaced: known.sessionId } : {}) };
     },
     /** On the Cloud: one computer's link ends (all of them when none is named). */

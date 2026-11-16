@@ -156,7 +156,7 @@ export function titleFromLlm(raw: string): string | null {
 export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   tasks?: TaskRecord[];
   avatarUrl?: string;
-  resumeCursors: Record<string, unknown>; mainThreadChoice?: string; // mainThreadChoice ("Set as main thread") is host-only; clients get mainThreadId.
+  resumeCursors: Record<string, unknown>; /** Set on a stand-in: the place this bot lives in, and its id there. */ home?: { place: string; placeName: string; botId: string }; mainThreadChoice?: string; // mainThreadChoice ("Set as main thread") is host-only; clients get mainThreadId.
   /** Elevation journal: Full/Custom runs as Ask until Electron confirms the prepared reply; a marker surviving a restart is revoked on load. */
   approvalGrant?: {
     requestId: string;
@@ -173,7 +173,7 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   assignedSkills?: string[];
 }
 
-export type BotWirePrivateKeys = "resumeCursors" | "mainThreadChoice" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills";
+export type BotWirePrivateKeys = "resumeCursors" | "home" | "mainThreadChoice" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills";
 export type BotWireProjection = Pick<BotRecord, Exclude<keyof BotRecord, BotWirePrivateKeys>>;
 export type BotWireProjectionIsExact = AssertExact<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection> & AssertSameKeys<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection>;
 export const botWireProjectionIsExact: BotWireProjectionIsExact = true;
@@ -273,7 +273,7 @@ function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }
 }
 
 export class Store {
-  bots: BotRecord[] = [];
+  bots: BotRecord[] = []; /** Bots that live in another of the person's places (server/bot-link/), by their address here: found by id, never listed, counted, saved, moved or backed up. */ standIns = new Map<string, BotRecord>();
   groups: GroupRecord[] = []; /** Told before a delete of these conversations is tried; "thread.deleted" follows only for those that went. Must not throw. */ threadsGoing: (threadIds: readonly string[]) => void = () => {};
   private threads = new ThreadCache(() => this.busyThreadIds());
   private defaultSelection: () => ModelSelection;
@@ -1279,7 +1279,7 @@ export class Store {
   }
 
   bot(id: string) {
-    return this.bots.find((b) => b.id === id) ?? null;
+    return this.bots.find((b) => b.id === id) ?? this.standIns.get(id) ?? null;
   }
 
   botByThread(threadId: string) {

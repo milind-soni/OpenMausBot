@@ -62,6 +62,21 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     expect(backedUp).not.toMatch(/Wait for bot turns/);
     await expect.poll(async () => (await computer.api("GET", "/api/bot-link")).online, { timeout: 15_000 }).toBe(true);
 
+    // The server's bot is a record on the computer, found by its address there and nowhere else: not listed, not saved,
+    // and it takes no turn on the computer.
+    const rows = (await computer.api("GET", "/api/bot-link/bots")).bots as any[];
+    const standIn = rows.find((row) => row.name === "Atlas");
+    expect(standIn).toMatchObject({ botId: atlas.id, home: { name: "My server", online: true }, threadId: expect.any(String) });
+    expect(standIn.id).toMatch(/^link-[0-9a-f]{8}-/);
+    expect(JSON.stringify(await computer.api("GET", `/api/bots/${standIn.id}`))).toContain("\"Atlas\"");
+    expect((await computer.api("GET", "/api/bots?messages=0")).bots.some((bot: any) => bot.id === standIn.id)).toBe(false);
+    expect(readFileSync(join(computer.dataDir, "bots.json"), "utf8")).not.toContain(standIn.id);
+    const direct = await fetch(`${computer.url}/api/bots/${standIn.id}/messages`, { method: "POST", headers: { "content-type": "application/json", origin: computer.url }, body: JSON.stringify({ text: "Are you here?" }) });
+    const refused = JSON.stringify(await direct.json());
+    expect(direct.status, refused).toBeGreaterThanOrEqual(400);
+    expect(refused).toContain("lives on My server");
+    await home.api("GET", "/api/bot-link/bots", undefined, { token: owner, status: 403 });
+
     // The computer's bot hands work to the server's bot by name, and is resumed with its result.
     home.plan(atlas.id, { reply: "Atlas counted 42 orders." });
     computer.plan(writer.id,
@@ -129,6 +144,8 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     // Off on the computer: the server is told, and neither keeps the link.
     expect(await computer.api("PUT", "/api/bot-link", { on: false })).toEqual({ on: false });
     await expect.poll(() => existsSync(join(home.dataDir, "bot-link.json")), { timeout: 10_000 }).toBe(false);
+    await computer.api("GET", `/api/bots/${standIn.id}`, undefined, { status: 404 });
+    expect((await computer.api("GET", "/api/bot-link/bots")).bots).toEqual([]);
     await home.api("POST", "/api/bot-link/sync", { ack: 0, frames: [], wait: 0 }, { token: paired.token, status: 401 });
   } finally {
     await Promise.all(fixtures.map((fixture) => fixture.close()));

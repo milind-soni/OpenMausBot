@@ -57,7 +57,7 @@ function place(label: string, bots: Bot[]) {
   const failing: Array<{ match: RegExp; status: number }> = [];
   let run: Run = async (node) => ({ ok: true, text: `${node.botId} did: ${node.text}` });
   let coordinator!: Coordinator, link!: BotLink, dialer!: ReturnType<typeof createDialer>, ticker: NodeJS.Timeout | undefined, http: Server | undefined;
-  let opened = 0, port = 0, generation = 0, skew = 0, minted = 0;
+  let opened = 0, port = 0, generation = 0, skew = 0, minted = 0, directoryChanges = 0;
   const sockets = new Set<import("node:net").Socket>();
 
   function boot(options: { limits?: { queueMs?: number; stallMs?: number } } = {}) {
@@ -70,6 +70,7 @@ function place(label: string, bots: Bot[]) {
       kick: () => { queueMicrotask(() => { try { coordinator.tick(); } catch { /* closed */ } }); },
       revoke: (sessionId) => { for (const [token, id] of issued) if (id === sessionId) issued.delete(token); },
       now: () => Date.now() + skew,
+      directoryChanged: () => { directoryChanges += 1; },
       files: {
         carried: (id, way) => ledger.get(`${id}:${way}`)?.files ?? [],
         crossed: (id, way, from, files) => { if (!ledger.has(`${id}:${way}`)) ledger.set(`${id}:${way}`, { from, files: [...files] }); },
@@ -158,6 +159,7 @@ function place(label: string, bots: Bot[]) {
     /** Time passes for this place's link. */
     later(ms: number) { skew += ms; },
     sessions: () => [...issued.values()],
+    directoryChanges: () => directoryChanges,
     async fetch(method: string, path: string, body?: unknown, bearer?: string) {
       const response = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -690,6 +692,22 @@ describe("the link between a computer and its Cloud", () => {
     expect(String(left.answer.body.error)).toContain("a room you are a member of");
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(cloud.runs.filter((run) => run.botId === "cloud-analyst")).toHaveLength(1);
+  });
+
+  it("each place keeps the other's bots with their address, place and look, and hears when they change or the link ends", async () => {
+    const { computer, cloud } = await two();
+    expect(computer.link.linked().map((one) => [one.id, one.place.name, one.online, one.bot.name])).toEqual([[onCloud("shared"), "My Cloud", true, "Atlas"], [onCloud("cloud-analyst"), "My Cloud", true, "Analyst"]]);
+    expect(cloud.link.linked().map((one) => one.id)).toEqual([onComputer("shared"), onComputer("local-writer")]);
+    const before = cloud.directoryChanges();
+    computer.bots.push({ id: "new", name: "Newcomer" });
+    computer.link.botsChanged();
+    await until(() => cloud.link.linked().some((one) => one.bot.name === "Newcomer"), "the Cloud hears of the new bot");
+    expect(cloud.directoryChanges()).toBeGreaterThan(before);
+    const heard = computer.directoryChanges();
+    await computer.fetch("PUT", STATE_PATH, { on: false });
+    expect(computer.link.linked()).toEqual([]);
+    expect(computer.directoryChanges()).toBeGreaterThan(heard);
+    await until(() => cloud.link.linked().length === 0, "the Cloud drops the computer's bots");
   });
 
   it("the link's sign-in reaches the link's own routes and nothing else", () => {

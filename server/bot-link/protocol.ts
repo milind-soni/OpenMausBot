@@ -18,6 +18,8 @@ export const handoffOfRoot = (rootId: string): string => rootId.slice(LINK_PREFI
 export const SYNC_PATH = "/api/bot-link/sync";
 export const PAIR_PATH = "/api/bot-link/pair";
 export const STATE_PATH = "/api/bot-link";
+/** The other places' bots, for the app on this computer to list beside this place's own. */
+export const BOTS_PATH = "/api/bot-link/bots";
 /** One file of a hand-off or of its result, as bytes: the computer puts the ones it sends and gets the ones it is sent. */
 export const FILE_PATH = "/api/bot-link/file";
 /** As many as one assignment may carry in all (server/host/handoff-files.ts). */
@@ -43,7 +45,9 @@ export type Place = z.infer<typeof placeSchema>;
 const level = z.enum(["ask", "edits", "auto", "full", "custom"]);
 export const linkedBotSchema = z.object({
   id, name, title: z.string().max(200).optional(), description: z.string().max(400).optional(), model: z.string().max(200).optional(), level: level.optional(),
-}).strict();
+  /** How it looks and where its own chat is, so the other place can draw it as it is drawn at home. */
+  color: z.string().max(64).optional(), mascotBody: z.string().max(64).optional(), mascotFaceColor: z.string().max(64).optional(), chief: z.boolean().optional(), threadId: id.optional(),
+});
 export type LinkedBot = z.infer<typeof linkedBotSchema>;
 
 export const fileMeta = z.object({ name: z.string().min(1).max(255), mime: z.string().max(200), kind: z.enum(["image", "file"]), bytes: z.number().int().nonnegative() }).strict();
