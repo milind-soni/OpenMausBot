@@ -110,13 +110,17 @@ export function readPageSelection(data: unknown): AppSelection | null | undefine
   return finite(left) && finite(bottom) ? { text, left, bottom } : undefined;
 }
 
+const APP_SIZE_METHOD = "ui/notifications/size-changed";
+
 /** The page helper's word on whether the page opens with a heading, null while it is still drawing itself; undefined
- * for any other message. */
+ * for any other message. Its first answer may come on the page's size report. */
 export function readPageHeading(data: unknown): boolean | null | undefined {
   if (!data || typeof data !== "object") return undefined;
   const message = data as { jsonrpc?: unknown; method?: unknown; id?: unknown; params?: { heading?: unknown } };
-  if (message.jsonrpc !== "2.0" || message.method !== APP_HEADING_METHOD || message.id !== undefined) return undefined;
+  if (message.jsonrpc !== "2.0" || message.id !== undefined) return undefined;
   const heading = message.params?.heading;
+  if (message.method === APP_SIZE_METHOD) return typeof heading === "boolean" ? heading : undefined;
+  if (message.method !== APP_HEADING_METHOD) return undefined;
   return typeof heading === "boolean" || heading === null ? heading : undefined;
 }
 
@@ -217,6 +221,8 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
   const onMessage = (event: MessageEvent) => {
     const heading = event.source === iframe.contentWindow ? readPageHeading(event.data) : undefined;
     if (heading !== undefined) {
+      // The size first, in the same turn, so the card is laid out once.
+      if ((event.data as { method?: unknown }).method === APP_SIZE_METHOD) bridge.handleMessage({ source: event.source, data: event.data });
       if (leaving || heading === said) return;
       said = heading;
       options.onHeading?.(heading);

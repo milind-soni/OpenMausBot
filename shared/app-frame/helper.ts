@@ -180,7 +180,7 @@ const helperSource = (room: boolean) => `(function () {
     filling = start > 0 && flow < SHORT_FLOW && drawsToWindow();
     return filling ? start : flow;
   };
-  var watchSize = function () {
+  var watchSize = function (heading) {
     var last = -1;
     var queued = false;
     var later = typeof requestAnimationFrame === "function" ? requestAnimationFrame : function (fn) { return setTimeout(fn, 16); };
@@ -190,7 +190,10 @@ const helperSource = (room: boolean) => `(function () {
       later(function () {
         queued = false;
         var height = heightToReport();
-        if (height !== last) { last = height; notify("ui/notifications/size-changed", { height: height }); }
+        if (height === last) return;
+        last = height;
+        var opens = heading();
+        notify("ui/notifications/size-changed", opens === undefined ? { height: height } : { height: height, heading: opens });
       });
     };
     if (typeof ResizeObserver === "function") {
@@ -237,6 +240,13 @@ const helperSource = (room: boolean) => `(function () {
     document.addEventListener("animationend", look, true);
     document.addEventListener("transitionend", look, true);
     look();
+    return function () {
+      if (last !== undefined || waiting !== null) return undefined;
+      var found = opensWithHeading(window, document);
+      if (found === null) return undefined;
+      last = found === true;
+      return last;
+    };
   };
   // What the person selects, and where it ends, so the host can offer to cite it as chat does. Not in a room.
   var watchSelection = function () {
@@ -270,9 +280,11 @@ const helperSource = (room: boolean) => `(function () {
   }).then(function (result) {
     apply(result && result.hostContext);
     notify("ui/notifications/initialized");
-    // Before the size, so the host hears both in one go and lays the card out once.
-    watchHeading();
-    watchSize();
+    // The size report looks first and takes the page's first answer on its heading along, so the host lays the card
+    // out once: two messages could land either side of a frame.
+    var opening;
+    watchSize(function () { return opening ? opening() : undefined; });
+    opening = watchHeading();
     watchSelection();
   });
   var checked = function (result) {

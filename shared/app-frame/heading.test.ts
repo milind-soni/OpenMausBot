@@ -59,10 +59,15 @@ describe("the page helper's heading report", () => {
   function boot(body: string) {
     const page = open(body);
     const reports: (boolean | null)[] = [];
+    const sizes: unknown[] = [];
     const listeners = new Set<(event: { source: unknown; data: unknown }) => void>();
     const parent = {
       postMessage(data: { id?: string; method?: string; params?: { heading?: boolean | null } }) {
         if (data.method === APP_HEADING_METHOD) reports.push(data.params!.heading!);
+        if (data.method === "ui/notifications/size-changed") {
+          sizes.push(data.params);
+          if (data.params!.heading !== undefined) reports.push(data.params!.heading);
+        }
         if (data.method === "ui/initialize") setTimeout(() => { for (const listener of listeners) listener({ source: parent, data: { jsonrpc: "2.0", id: data.id, result: {} } }); }, 0);
       },
     };
@@ -74,7 +79,7 @@ describe("the page helper's heading report", () => {
     Object.defineProperty(page.document, "readyState", { configurable: true, get: () => "complete" });
     new Function("window", "document", "MutationObserver", "ResizeObserver", "requestAnimationFrame", APP_HELPER_SOURCE)(
       frame, page.document, page.MutationObserver, undefined, (callback: () => void) => setTimeout(callback, 0));
-    return { page, frame, reports };
+    return { page, frame, reports, sizes };
   }
 
   it("says once whether the page opens with a heading", async () => {
@@ -82,6 +87,13 @@ describe("the page helper's heading report", () => {
     await expect.poll(() => titled.reports).toEqual([true]);
     const plain = boot("<p>body</p>");
     await expect.poll(() => plain.reports).toEqual([false]);
+  });
+
+  it("sends its first answer on the size report, so the host hears both at once", async () => {
+    const titled = boot("<h1>Pricing</h1><p>body</p>");
+    await expect.poll(() => titled.sizes).toEqual([{ height: expect.any(Number), heading: true }]);
+    const drawn = boot("<div id=\"root\"></div>");
+    await expect.poll(() => drawn.sizes).toEqual([{ height: expect.any(Number) }]);
   });
 
   it("waits for a page that draws itself from a script, and reports the heading the script inserts", async () => {
