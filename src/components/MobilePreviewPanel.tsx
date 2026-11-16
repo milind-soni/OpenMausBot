@@ -766,7 +766,7 @@ export function MobilePreviewPanel({
       {/* Viewport stage */}
       <div
         ref={stageRef}
-        className="relative flex flex-1 items-start justify-center overflow-auto bg-inset/50 p-4"
+        className={cn("relative flex flex-1 items-start justify-center overflow-auto", isDeviceSource ? "bg-inset/50 p-4" : "bg-panel p-0")}
       >
         {(sizeMenuOpen || moreMenuOpen || historyOpen || screenshotMenuOpen) && (
           <div
