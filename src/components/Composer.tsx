@@ -511,7 +511,7 @@ export function Composer({
   const mayAct = useMayAct(), mayStop = !sharedChat || mayAct(profile?.tasks?.find((task) => task.threadId === threadId)?.askedBy);
   const stoppable = (busy || Boolean(!group && bot?.waitingForTeammates)) && mayStop;
   const stopInSlot = simpleDock && stoppable && !locked && !hasContent && !calling;
-  const callShown = !simpleDock || !hasContent || stoppable || calling;
+  const callShown = !simpleDock || !hasContent || busy || Boolean(!group && bot?.waitingForTeammates) || calling;
   const slot = slotColors(bot?.color, Boolean(group));
   // A one-to-one bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. Rooms keep their own queue.
   const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && !group && Boolean(bot), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
