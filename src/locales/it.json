@@ -6953,6 +6953,7 @@
   "settings.threadDisplay.short": "Mostra gli elenchi dei thread nella barra laterale. Nasconderli mantiene la cronologia.",
   "settings.pinnedCircles.short": "Mostra i bot fissati come avatar grandi in cima alla barra laterale.",
   "settings.toolCalls.short": "Mostra ogni strumento che un bot usa nella chat. Gli errori si vedono sempre.",
+  "webPanels.bar.label": "Pagine personalizzate",
   "webPanels.settings.short": "Tieni alcune pagine web, come una dashboard locale, a un clic nella barra laterale.",
   "webPanels.settings.addPage": "Aggiungi pagina",
   "webPanels.settings.empty": "Ancora nessuna pagina fissata.",

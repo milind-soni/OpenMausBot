@@ -6755,6 +6755,7 @@
   "sidebar.nav.triggers": "Gatilhos",
   "sidebar.nav.apps": "Apps",
   "sidebar.nav.files": "Arquivos",
+  "webPanels.bar.label": "Páginas personalizadas",
   "webPanels.settings.title": "Painéis fixados",
   "webPanels.settings.subtitle": "Deixe algumas páginas da internet, como um painel local, a um clique na barra lateral (Modo avançado).",
   "webPanels.settings.name": "Nome",

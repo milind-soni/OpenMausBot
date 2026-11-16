@@ -6330,6 +6330,7 @@
   "settings.threadDisplay.short": "Muestra las listas de hilos en la barra lateral. Ocultarlas conserva tu historial.",
   "settings.pinnedCircles.short": "Muestra los bots fijados como avatares grandes arriba en la barra lateral.",
   "settings.toolCalls.short": "Muestra cada herramienta que usa un bot en el chat. Los errores siempre se ven.",
+  "webPanels.bar.label": "Páginas personalizadas",
   "webPanels.settings.short": "Ten algunas páginas web, como un panel local, a un clic en la barra lateral.",
   "webPanels.settings.addPage": "Añadir página",
   "webPanels.settings.empty": "Aún no hay páginas fijadas.",

@@ -7096,6 +7096,7 @@
   "sidebar.nav.triggers": "Triggers",
   "sidebar.nav.apps": "Apps",
   "sidebar.nav.files": "Files",
+  "webPanels.bar.label": "Custom pages",
   "webPanels.settings.title": "Pinned panels",
   "webPanels.settings.subtitle": "Keep a few web pages, like a local dashboard, one click away in the sidebar (Advanced mode).",
   "webPanels.settings.name": "Name",
