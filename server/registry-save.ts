@@ -45,6 +45,11 @@ function restore(target: object, saved: object): void {
 
 const PERMISSION_FIELDS = ["approvalMode", "autoApprove", "alwaysAllow"] as const;
 
+/** What a turn writes about itself as it runs. A crash may lose the last moment of these (server/save-batch.ts). */
+const TURN_BOOKKEEPING_FIELDS: ReadonlySet<string> = new Set(["unread", "lastReadMessageId", "resumeCursors", "lastInstanceId", "lastContextModel", "usage"]);
+
+export const onlyTurnBookkeeping = (patch: TaskPatch): boolean => Object.keys(patch).every((key) => TURN_BOOKKEEPING_FIELDS.has(key));
+
 export const touchesPermissions = (patch: TaskPatch): boolean => PERMISSION_FIELDS.some((key) => Object.hasOwn(patch, key));
 
 /** A revocation stays live when its save fails; a widening never does. */

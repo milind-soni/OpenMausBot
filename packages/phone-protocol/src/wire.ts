@@ -961,7 +961,7 @@ export type ServerFrame =
   | { kind: "message"; threadId: string; message: WireMessage }
   | { kind: "message.patch"; threadId: string; message: WireMessage }
   | { kind: "thread"; threadId: string; activeLeafId: string }
-  | { kind: "bot"; bot: WireBot }
+  | { kind: "bot"; bot: WireBot; /** Only on a stream opened with `?frames=thread`: `bot.tasks` holds just the changed threads; keep the rest. */ tasksPartial?: true }
   | { kind: "group"; group: WireGroup }
   | { kind: "notify"; notification: NotificationLogEntry }
   | { kind: "notifications.read"; threadId: string; ids: string[] }
