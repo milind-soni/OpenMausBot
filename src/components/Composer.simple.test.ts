@@ -196,13 +196,13 @@ describe("the Simple composer in a bot chat", () => {
     expectBotButton(sendButton(), "yellow");
   });
 
-  it("turns its round button into Stop while the bot works, and keeps a quiet Stop beside Send while you type", () => {
+  it("keeps Call beside Stop while the bot works, including while typing", () => {
     const busy = { ...bot, busy: true };
     render({ bot: busy });
     const slot = container.querySelector<HTMLButtonElement>('[data-composer-stop="slot"]')!;
     expect(slot.getAttribute("aria-label")).toBe("Stop this turn");
     expectBotButton(slot, "purple");
-    expect(fixture.call).toBeNull();
+    expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
     click(slot);
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "interrupt", botId: "atlas", threadId: "atlas-thread" });
 
@@ -210,6 +210,7 @@ describe("the Simple composer in a bot chat", () => {
     render({ bot: busy });
     expect(container.querySelector('[data-composer-stop="beside"]')).not.toBeNull();
     expect(container.querySelector('[data-composer-stop="slot"]')).toBeNull();
+    expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
   });
 
   it("shows the approval level as a chip only while this conversation overrides the bot, in the panel's words", () => {
