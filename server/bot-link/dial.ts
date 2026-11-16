@@ -11,7 +11,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import type { BotLink, EndedLink, FileTransfer } from "./link.ts";
-import { FILE_PATH, HOLD_MS, SYNC_PATH, syncAnswer, type FileWay, type Frame } from "./protocol.ts";
+import { FILE_PATH, HOLD_MS, LEVEL_HEADER, PROTOCOL_LEVEL, SYNC_PATH, levelOf, syncAnswer, type FileWay, type Frame } from "./protocol.ts";
 
 const FIRST_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 60_000;
@@ -27,9 +27,11 @@ export interface DialerOptions {
   log?(line: string): void;
   holdMs?: number;
   firstRetryMs?: number;
+  /** What this computer says its version reads; a test stands in for an older app with it. */
+  level?: number;
 }
 
-export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, holdMs = HOLD_MS, firstRetryMs = FIRST_RETRY_MS }: DialerOptions) {
+export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, holdMs = HOLD_MS, firstRetryMs = FIRST_RETRY_MS, level = PROTOCOL_LEVEL }: DialerOptions) {
   let running = false, stopped = true, asleep = false, needsPairing = false;
   let session = "", ack = 0, fresh = true, retryMs = firstRetryMs;
   let held: AbortController | null = null;
@@ -95,7 +97,7 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
     try {
       response = await fetchImpl(`${target.origin}${SYNC_PATH}`, {
         method: "POST", redirect: "error", cache: "no-store", signal: controller.signal,
-        headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${target.token}`, origin: target.origin,
+        headers: { "content-type": "application/json", accept: "application/json", authorization: `Bearer ${target.token}`, origin: target.origin, [LEVEL_HEADER]: String(level),
           ...(carriesWork(sending) ? {} : { [BACKGROUND_HEADER]: "1" }) },
         body: JSON.stringify({ fresh, ack, frames: sending.map((entry) => entry.frame), wait }),
       });
@@ -130,6 +132,7 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
     }
     fresh = false; retryMs = firstRetryMs;
     link.setOnline(peer, true);
+    link.setLevel(peer, levelOf(response.headers.get(LEVEL_HEADER)));
     const news = answer.data.frames.filter((entry) => entry.seq > ack);
     link.receive(peer, news.map((entry) => entry.frame));
     ack = Math.max(ack, ...news.map((entry) => entry.seq));

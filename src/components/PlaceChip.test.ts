@@ -103,7 +103,7 @@ describe("the menu's first row", () => {
   it("stays Auto, unchecked, when the conversation is pinned elsewhere", () => {
     const { html, rows: menu } = rows({ bot: { ...bot, computer: undefined }, task: { surface: "vm" } });
     expect(menu[0]).toEqual({ checked: false, text: "Auto Picks the right place for each task" });
-    expect(menu.find((row) => row.checked)?.text).toBe("Private desktop Isolated local desktop");
+    expect(menu.find((row) => row.checked)?.text).toBe("Private desktop Sandboxed, can't see your files");
     expect(html).toContain('aria-label="Where this conversation works: Private desktop"');
   });
 

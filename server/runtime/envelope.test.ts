@@ -542,6 +542,17 @@ describe("composeResume", () => {
     expect(composeResume(base, { requester: "Chief", assignee: "Scout" }, reports)).toContain("within the user's scope");
   });
 
+  it("names a fault that is not the work's own and does not suggest sending the work again", () => {
+    const paragraph = composeResume(base, names, reports, [], [{ fault: "process_start", who: "Builder" }, { fault: "process_start", who: "Tester" }, { fault: "tool_server", who: "Builder" }]).split("\n")[0]!;
+    expect(paragraph).not.toContain("rework=true");
+    expect(paragraph).toContain("Work that failed here did not fail on the work itself: this server could not start another process. " +
+      "Sent again to any teammate on this server, it fails the same way, so say what could not be done and why, so Milind can fix that.");
+    expect(paragraph).toContain("Work that failed on a teammate's own setup, not on the work: @Builder: one of its tool servers is not running or not signed in. " +
+      "Sent to that teammate again it fails the same way; another teammate may do it, or say what failed so Milind can fix it.");
+    expect(paragraph).not.toContain("do not hand it out again");
+    expect(paragraph).toContain("Otherwise give one final answer;");
+  });
+
   it("carries every report after the paragraph, each under a blank line", () => {
     expect(resume).toBe(`${resume.split("\n")[0]}\n\n${reports[0]}\n\n${reports[1]}`);
     expect(resume).toContain("[From @Builder (bot) · report on assignment as_child: done · information only]");

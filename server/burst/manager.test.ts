@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BurstCardData } from "../../shared/burst.ts";
 import { burstLimits, BURST_PLAN_LIMITS, type BurstLimits } from "./limits.ts";
-import { childOpening, createBurstManager, mergePrompt, type BurstManagerDeps, type BurstTurnOutcome } from "./manager.ts";
+import { BURST_PART_MAX_RESTARTS, childOpening, createBurstManager, cutOffTooOften, mergePrompt, type BurstManagerDeps, type BurstTurnOutcome } from "./manager.ts";
 import { openBurstStore, type BurstChild, type BurstRecord, type BurstStore } from "./store.ts";
 
 type Started = { burst: BurstRecord; child: BurstChild & { threadId: string }; text: string; done: (outcome: BurstTurnOutcome) => void };
@@ -345,6 +345,28 @@ describe("after a restart", () => {
     restarted.recover();
     expect(started.map((run) => run.child.threadId)).toEqual(["thread-1", "thread-2"]);
     restarted.close();
+  });
+
+  it("in a crash loop, starts a part or its merge at most OMB_BURST_PART_MAX_RESTARTS more times, then fails the part with one line and posts what is left", () => {
+    const one = fresh({ limits: { parallel: 2, maxTasks: 50, smallPlan: false } });
+    const { manager, started, store } = one;
+    const { burstId } = one.propose(items(2));
+    manager.run(burstId);
+    const merges: string[] = [];
+    for (let restart = 0; restart < 10; restart++) {
+      const restarted = createBurstManager({ store, limits: () => ({ parallel: 2, maxTasks: 50, smallPlan: false }), hasRoom: () => true,
+        openThread: () => "thread-new", startChild: async (burst, child, text, done) => { started.push({ burst, child, text, done }); }, stopChild: () => {},
+        startMerge: async (_burst, text) => { merges.push(text()); return true; }, draw: () => undefined, postParts: () => "", deliver: () => {}, log: () => {}, now: () => 1_700_000_000_000 });
+      restarted.recover();
+      restarted.close();
+    }
+    console.log(`part starts over 10 restarts of a crash loop: ${started.length}, merge starts: ${merges.length}`);
+    expect(started).toHaveLength(2 + 2 * BURST_PART_MAX_RESTARTS);
+    expect(store.childrenIn(burstId, "failed").map((child) => child.error)).toEqual([cutOffTooOften(BURST_PART_MAX_RESTARTS), cutOffTooOften(BURST_PART_MAX_RESTARTS)]);
+    expect(cutOffTooOften(2)).toBe("Not started again: OpenMausBot restarted while this part ran 3 times.");
+    // The merge turn is cut off by the restarts that follow it as well: the parts are posted as they came instead.
+    expect(merges).toHaveLength(1 + BURST_PART_MAX_RESTARTS);
+    expect(store.get(burstId)!.phase).toBe("done");
   });
 });
 

@@ -5,7 +5,8 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { Store } from "./store.ts";
-import { THREAD_IDLE_MS } from "./thread-cache.ts";
+import { approxBytes, ThreadCache, THREAD_IDLE_MS } from "./thread-cache.ts";
+import type { Message } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -98,5 +99,61 @@ describe("Store message cache", () => {
       new Store(selection).messagesFor(bot.threadId).map((message) => message.text),
     );
     expect(store.activeLeaf(bot.threadId)).toBe(added.id);
+  });
+});
+
+describe("ThreadCache byte cap", () => {
+  const text = (id: string, size: number): Message => ({ id, at: 1, role: "bot", kind: "text", text: "x".repeat(size) }) as Message;
+  const rows = (id: string, size: number) => ({ messages: [text(`${id}-1`, size)], activeLeafId: null });
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(1_000_000); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("gives back the least recently used transcripts past the cap, never a busy one, the one just read, or one read moments ago", () => {
+    const busy = new Set<string>();
+    const cache = new ThreadCache(() => busy, 30_000);
+    for (const id of ["a", "b", "c"]) cache.load(id, rows(id, 9_000));
+    vi.setSystemTime(1_000_000 + 10_000);
+    busy.add("a");
+    cache.get("b");
+    cache.load("d", rows("d", 9_000));
+    // a is busy, b was just read again, so c (least recently used of the rest) goes.
+    expect(["a", "b", "c", "d"].filter((id) => cache.get(id))).toEqual(["a", "b", "d"]);
+    expect(cache.approxBytes).toBeLessThanOrEqual(30_000);
+
+    vi.setSystemTime(1_000_000 + 20_000);
+    cache.load("huge", rows("huge", 100_000));
+    expect(cache.get("huge")).toBeDefined();
+    expect(cache.get("a")).toBeDefined();
+    expect(cache.size).toBe(2);
+  });
+
+  it("counts what a transcript gains and loses, and what a delete gives back", () => {
+    const cache = new ThreadCache(() => new Set(), 1_000_000);
+    cache.load("a", rows("a", 1_000));
+    const before = cache.approxBytes;
+    const added = text("a-2", 5_000);
+    cache.grew("a", added);
+    expect(cache.approxBytes).toBe(before + approxBytes(added));
+    cache.grew("a", text("a-2", 2_000), added);
+    expect(cache.approxBytes).toBe(before + approxBytes(text("a-2", 2_000)));
+    cache.grew("nobody", added);
+    cache.delete("a");
+    expect(cache.approxBytes).toBe(0);
+  });
+});
+
+describe("the transcript cache's count of a thread with live screens", () => {
+  beforeEach(() => { rmSync(DATA_DIR, { recursive: true, force: true }); });
+  afterEach(() => { closeMessageDb(); });
+
+  it("gives back what pruned screen frames held, so many frames do not fill the cap", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const cache = (store as unknown as { threads: ThreadCache }).threads;
+    const frame = "x".repeat(200_000);
+    for (let i = 0; i < 50; i++) store.appendMessage(bot.threadId, { role: "bot", kind: "screen", png: frame } as never);
+    const kept = store.messagesFor(bot.threadId).filter((message) => message.kind === "screen" && message.png).length;
+    expect(kept).toBe(4);
+    expect(cache.approxBytes).toBeLessThan(5 * 200_000 + 100_000);
   });
 });

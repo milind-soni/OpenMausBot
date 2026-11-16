@@ -231,7 +231,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const lines = [body.timedOut ? "The command was stopped: it ran past its time limit." : `exit code ${exitCode}`];
     if (stdout) lines.push("--- stdout ---", stdout.replace(/\s+$/, ""));
     if (stderr) lines.push("--- stderr ---", stderr.replace(/\s+$/, ""));
-    if (!stdout && !stderr && !body.timedOut) lines.push("(no output)");
+    if (!stdout && !stderr && !body.timedOut) lines.push("(no output)"); if (typeof body.note === "string" && body.note) lines.push("--- note ---", body.note);
     return { text: lines.join("\n"), ...(exitCode !== 0 || body.timedOut ? { isError: true } : {}) };
   }
   if (name === "attach_file") {

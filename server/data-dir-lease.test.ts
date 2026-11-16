@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { acquireDataDirLease } from "./data-dir-lease.ts";
+import { acquireDataDirLease, releaseOnceAtExit } from "./data-dir-lease.ts";
 
 const MODULE_URL = pathToFileURL(join(process.cwd(), "server", "data-dir-lease.ts")).href;
 const dirs: string[] = [];
@@ -63,7 +63,7 @@ describe("OpenMausBot data-directory lease", () => {
     // across a restart cannot be mistaken for a live owner, and ns/start which
     // pid namespace and process, so a container's reused pid cannot either.
     // Each is null where the platform does not expose it.
-    const { boot, ns, start, ...rest } = stored;
+    const { boot, ns, start, machine, ...rest } = stored;
     expect(rest).toEqual({
       version: 1,
       pid: process.pid,
@@ -74,8 +74,10 @@ describe("OpenMausBot data-directory lease", () => {
     });
     expect(boot === null || (typeof boot === "string" && boot.length > 0)).toBe(true);
     expect(process.platform === "linux" ? /^[1-9]\d*$/.test(ns) && Number.isSafeInteger(start) : ns === null && start === null).toBe(true);
+    // machine: a hashed id that survives a restart and a hostname change, null where unreadable.
+    expect(machine === null || /^[0-9a-f]{32}$/.test(machine)).toBe(true);
     expect(Object.keys(stored).sort()).toEqual(
-      ["boot", "createdAt", "host", "ns", "pid", "start", "token", "uptime", "version"],
+      ["boot", "createdAt", "host", "machine", "ns", "pid", "start", "token", "uptime", "version"],
     );
     expect(() => acquireDataDirLease(dir)).toThrow(/already using this data directory/i);
 
@@ -158,5 +160,21 @@ describe("OpenMausBot data-directory lease", () => {
 
     expect(() => acquireDataDirLease(dir)).toThrow(/lease is invalid.*refusing to start/i);
     expect(readFileSync(path, "utf8")).toBe("not-json\n");
+  });
+
+  it("releases once at exit, and a failed release is logged, never thrown", () => {
+    let calls = 0;
+    const release = releaseOnceAtExit({ release: () => { calls += 1; throw new Error("gone"); } });
+    const logged: unknown[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => { logged.push(args[0]); };
+    try {
+      expect(() => release()).not.toThrow();
+      release();
+    } finally {
+      console.error = original;
+    }
+    expect(calls).toBe(1);
+    expect(logged).toEqual(["[data-directory] lease release failed: gone"]);
   });
 });

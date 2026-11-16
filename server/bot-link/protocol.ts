@@ -18,6 +18,8 @@ export const handoffOfRoot = (rootId: string): string => rootId.slice(LINK_PREFI
 export const SYNC_PATH = "/api/bot-link/sync";
 export const PAIR_PATH = "/api/bot-link/pair";
 export const STATE_PATH = "/api/bot-link";
+/** The other places' bots, for the app on this computer to list beside this place's own. */
+export const BOTS_PATH = "/api/bot-link/bots";
 /** One file of a hand-off or of its result, as bytes: the computer puts the ones it sends and gets the ones it is sent. */
 export const FILE_PATH = "/api/bot-link/file";
 /** As many as one assignment may carry in all (server/host/handoff-files.ts). */
@@ -36,14 +38,25 @@ export const BRIEF_MAX = 12_000;
 const RESULT_MAX = 200_000;
 
 const id = z.string().min(1).max(200);
+/** A bot's own id, in the characters every place gives its bots. A stand-in's address is made from it, and nothing with
+ * a path separator, a dot or a space can ever be one: a hello that carries such an id is dropped whole. */
+const botId = z.string().regex(/^[\w-]{1,128}$/u);
+/** What each side can read, said in a header on every exchange (older versions ignore a header they do not know). A side
+ * sends the other only what its level reads. 1: the first version, whose hello takes a bot's id, name, title,
+ * description, model and level and nothing else. 2: a bot's look, Chief mark and own thread too. */
+export const LEVEL_HEADER = "x-omb-bot-link";
+export const PROTOCOL_LEVEL = 2;
+export const levelOf = (header: string | string[] | null | undefined): number => { const said = Number(Array.isArray(header) ? header[0] : header); return Number.isInteger(said) && said >= 1 ? Math.min(said, PROTOCOL_LEVEL) : 1; };
 const name = z.string().trim().min(1).max(120);
 export const placeSchema = z.object({ id, name }).strict();
 export type Place = z.infer<typeof placeSchema>;
 
 const level = z.enum(["ask", "edits", "auto", "full", "custom"]);
 export const linkedBotSchema = z.object({
-  id, name, title: z.string().max(200).optional(), description: z.string().max(400).optional(), model: z.string().max(200).optional(), level: level.optional(),
-}).strict();
+  id: botId, name, title: z.string().max(200).optional(), description: z.string().max(400).optional(), model: z.string().max(200).optional(), level: level.optional(),
+  /** How it looks and where its own chat is, so the other place can draw it as it is drawn at home. */
+  color: z.string().max(64).optional(), mascotBody: z.string().max(64).optional(), mascotFaceColor: z.string().max(64).optional(), chief: z.boolean().optional(), threadId: botId.optional(),
+});
 export type LinkedBot = z.infer<typeof linkedBotSchema>;
 
 export const fileMeta = z.object({ name: z.string().min(1).max(255), mime: z.string().max(200), kind: z.enum(["image", "file"]), bytes: z.number().int().nonnegative() }).strict();

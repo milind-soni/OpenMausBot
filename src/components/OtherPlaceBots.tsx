@@ -48,7 +48,7 @@ function OtherPlaceBotRow({ row, dim, iconOnly, simple }: { row: PlaceBotRow; di
   const line = row.waiting ? t("sidebar.preview.waiting") : row.working ? t("sidebar.preview.working") : row.title ?? "";
   const label = [row.name, homeLabel(row.home), line, row.unread ? t("task.unread") : ""].filter(Boolean).join(" · ");
   return (
-    <button type="button" data-placed-bot={placedKey(row.home, row.id)} data-bot-home={row.home} title={iconOnly ? label : undefined} aria-label={label}
+    <button type="button" data-placed-bot={placedKey(row.home, row.id)} data-bot-home={row.home} data-bot-address={row.address} title={iconOnly ? label : undefined} aria-label={label}
       onClick={() => openOtherPlaceBot(row.id)}
       className={cn("flex w-full items-center rounded-xl text-left transition-colors duration-150 hover:bg-raised/50", SIMPLE_ROW_FOCUS,
         iconOnly ? "justify-center px-1 py-1.5" : simple ? "gap-2 rounded-[8px] px-2 py-2" : "gap-3 py-2 pl-2.5 pr-3", dim && "opacity-60")}>
