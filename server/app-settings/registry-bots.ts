@@ -72,7 +72,7 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
 
   return [
     perBot({
-      id: "bots.approvalModes", label: "Approval mode", help: "What one bot may do without asking you, on every one of its conversations.", where: "a bot's Settings",
+      id: "bots.approvalModes", label: "Approval mode", help: "What one bot may do without asking you, on every one of its conversations.", where: "bot-settings",
       synonyms: ["permissions", "full access", "approve", "ask", "approval", "autonomy", "approve for me", "auto-accept edits"],
       value: forBot({ mode: z.enum(["ask", "edits", "auto", "full"]) }),
       allowed: '{"botId","mode"} with mode ask (Ask for approval), edits (Auto-accept edits), auto (Approve for me) or full (Full access). Custom is chosen only in the desktop app',
@@ -87,17 +87,17 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
       patch: (_one, { mode }) => ({ approvalMode: mode, applyToAllThreads: true }),
     }),
     perBot({
-      id: "bots.name", label: "Bot name", help: "A bot's name, as the sidebar and chats show it.", where: "a bot's Settings", synonyms: ["rename", "name", "call", "bot name"],
+      id: "bots.name", label: "Bot name", help: "A bot's name, as the sidebar and chats show it.", where: "bot-settings", synonyms: ["rename", "name", "call", "bot name"],
       value: forBot({ name: z.string().trim().min(1).max(BOT_PROFILE_LIMITS.name) }), allowed: '{"botId","name"}', read: everyBot((one) => one.name),
       effect: (one, { name }) => ({ change: `Rename ${one.name} to "${name}"` }), was: (one, { botId }) => ({ botId, name: one.name }), patch: (_one, { name }) => ({ name }),
     }),
     perBot({
-      id: "bots.color", label: "Bot colour", help: "A bot's colour in the sidebar and its chat.", where: "a bot's Settings", synonyms: ["color", "colour", "tint", "bot color"],
+      id: "bots.color", label: "Bot colour", help: "A bot's colour in the sidebar and its chat.", where: "bot-settings", synonyms: ["color", "colour", "tint", "bot color"],
       value: forBot({ color: z.enum(MAUS_COLOR_NAMES) }), allowed: `{"botId","color"} with color one of ${MAUS_COLOR_NAMES.join(", ")}`, read: everyBot((one) => one.color),
       effect: (one, { color }) => ({ change: `Make ${one.name} ${color}` }), was: (one, { botId }) => ({ botId, color: one.color }), patch: (_one, { color }) => ({ color }),
     }),
     perBot({
-      id: "bots.model", label: "Bot model", help: "The engine and model one bot runs on, for its conversations. Ids come from list_models.", where: "a bot's Settings",
+      id: "bots.model", label: "Bot model", help: "The engine and model one bot runs on, for its conversations. Ids come from list_models.", where: "bot-settings",
       synonyms: ["model", "engine", "switch model", "change model", "effort", "reasoning"],
       value: forBot({ instanceId: z.string().min(1).max(120), model: z.string().min(1).max(200), effort: z.enum(EFFORT_LEVELS).optional() }),
       allowed: '{"botId","instanceId","model","effort"?} from list_models', read: everyBot((one) => `${one.modelSelection.instanceId} / ${one.modelSelection.model}`),
@@ -110,7 +110,7 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
       patch: (_one, { instanceId, model, effort }) => ({ modelSelection: { instanceId, model, ...(effort ? { effort } : {}) }, requireAvailableModel: true }),
     }),
     perBot({
-      id: "bots.archived", label: "Archived bots", help: "Archive a bot to take it out of the sidebar, keeping its chats; false brings it back.", where: "the sidebar",
+      id: "bots.archived", label: "Archived bots", help: "Archive a bot to take it out of the sidebar, keeping its chats; false brings it back.", where: "sidebar",
       synonyms: ["archive", "unarchive", "restore bot", "hide bot", "show bot", "hidden"],
       value: forBot({ archived: z.boolean() }), allowed: '{"botId","archived":true|false}', read: () => deps.bots().filter((one) => one.hidden).map((one) => one.name).join(", "),
       effect: (one, { archived }) => one.defaultBot && archived ? { refusal: `${one.name} is this place's own bot and is never archived. To take it out of the sidebar use sidebar.showHelper.` }
@@ -119,14 +119,14 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
       patch: (one, { archived }) => ({ hidden: archived, ...(archived && one.chiefOfStaff ? { chiefOfStaff: false } : {}) }),
     }),
     writable({
-      id: "sidebar.showHelper", label: "Show MausBot in the sidebar", help: "Whether this place's own bot, MausBot, has a row in the sidebar; it keeps working either way.", where: "Settings → Overview",
+      id: "sidebar.showHelper", label: "Show MausBot in the sidebar", help: "Whether this place's own bot, MausBot, has a row in the sidebar; it keeps working either way.", where: "show-helper",
       synonyms: ["helper", "starter", "default bot", "mausbot", "show helper"], value: z.boolean(), allowed: "true or false",
       current: () => { const helper = deps.bots().find((one) => one.defaultBot); return helper ? !helper.sidebarHidden : undefined; },
       describe: (show: boolean) => (deps.bots().some((one) => one.defaultBot) ? { change: show ? "Show MausBot in the sidebar" : "Take MausBot out of the sidebar; it keeps working" } : { refusal: "This place has no MausBot of its own." }),
       write: (show: boolean) => { const helper = deps.bots().find((one) => one.defaultBot); return helper ? deps.patchBot(helper.id, { sidebarHidden: !show }) : Promise.resolve("This place has no MausBot of its own."); },
     }),
     perBot({
-      id: "bots.tools", label: "Bot tool groups", where: "a bot's Settings",
+      id: "bots.tools", label: "Bot tool groups", where: "bot-settings",
       help: `Turn groups of one bot's built-in tools off to make every request smaller, or back on: ${TOOL_GROUPS.map((group) => `${group} (${TOOL_GROUP_LABELS[group]})`).join(", ")}. Memory, X research, the browser and connected apps have their own settings.`,
       synonyms: ["tools", "tool groups", "turn off tools", "meetings", "data", "pages", "publish", "images", "email", "tokens", "smaller requests"],
       value: forBot({ turnOff: toolGroups, turnOn: toolGroups })
@@ -139,7 +139,7 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
       patch: (one, { turnOff = [], turnOn = [] }) => ({ toolsOff: TOOL_GROUPS.filter((group) => turnOff.includes(group) || (offNow(one).includes(group) && !turnOn.includes(group))) }),
     }),
     perBot({
-      id: "bots.settings", label: "Other bot settings", help: `More of one bot's own settings: ${Object.values(OTHER).map((field) => field.label).join(", ")}.`, where: "a bot's Settings",
+      id: "bots.settings", label: "Other bot settings", help: `More of one bot's own settings: ${Object.values(OTHER).map((field) => field.label).join(", ")}.`, where: "bot-settings",
       synonyms: ["voice", "voice notes", "memory", "notifications", "browser", "instructions", "soul", "title", "description", "reply style", "computer", "desktop", "composio", "x research", "keep warm"],
       value: forBot(Object.fromEntries(Object.entries(OTHER).map(([field, spec]) => [field, spec.value.optional()])) as { [F in OtherField]: z.ZodOptional<(typeof OTHER)[F]["value"]> })
         .refine((value) => Object.keys(value).length > 1, "name at least one setting besides botId"),

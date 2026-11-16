@@ -27,7 +27,7 @@ describe("boatErrorMessage", () => {
 
   it("tells you to re-paste your own key on an auth failure", () => {
     expect(boatErrorMessage(401, "boat create", { message: "unauthorized" }))
-      .toBe("boat.dev rejected your Boat API key — paste a current one in Settings → API keys");
+      .toBe("boat.dev rejected your Boat API key — paste a current one in Settings → AI → Other services");
   });
 
   it("never asks for a token the person never pasted when Cloud Pro's included one is refused", () => {

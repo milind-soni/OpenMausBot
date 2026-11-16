@@ -618,9 +618,9 @@ export function describeOpenCodeAccountError(
   switch (code) {
     case "invalid_credentials":
       return zen || go || !provider
-        ? "OpenCode rejected its key, or has none for this model. Add or replace the OpenCode key in Settings → API keys."
+        ? "OpenCode rejected its key, or has none for this model. Add or replace the OpenCode key in Settings → AI → Providers."
         : where.cloudHome
-          ? `OpenCode's ${name} key for this model is missing or was rejected. Save it under Keys for other OpenCode providers in Settings → API keys.`
+          ? `OpenCode's ${name} key for this model is missing or was rejected. Save it under Keys for other OpenCode providers in Settings → AI.`
           : `OpenCode's ${name} key for this model is missing or was rejected. Fix it with \`opencode auth login\`, or choose another model.`;
     case "insufficient_funds":
       return zen || !provider
@@ -667,7 +667,7 @@ const support = (
     models: NO_MODELS,
     defaultCli: "opencode",
     nativeSource: "opencode.acp",
-    loginNote: "OpenCode has no usable models. Add an OpenCode key in Settings → API keys.",
+    loginNote: "OpenCode has no usable models. Add an OpenCode key in Settings → AI → Providers.",
     install: {
       command: {
         darwin: "npm install -g @opencode/cli",

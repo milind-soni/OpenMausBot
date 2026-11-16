@@ -57,7 +57,7 @@ export const MetaDriver: ProviderDriver<MetaConfig> = {
   install: {
     docsUrl: "https://dev.meta.ai/docs/authentication",
     settings: "connections",
-    signInCommand: "Save a Meta Model API key in Settings → API keys, or set META_API_KEY on the server.",
+    signInCommand: "Save a Meta Model API key in Settings → AI → Providers, or set META_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
@@ -107,8 +107,8 @@ export const MetaDriver: ProviderDriver<MetaConfig> = {
         ...(stream ? { stream_options: { include_usage: true } } : {}),
       }),
       httpErrorLabel: "Meta",
-      missingKeyError: "Save a Meta Model API key in Settings → API keys, or set META_API_KEY.",
-      unavailableReason: "No Meta Model API key — open Settings → API keys.",
+      missingKeyError: "Save a Meta Model API key in Settings → AI → Providers, or set META_API_KEY.",
+      unavailableReason: "No Meta Model API key — open Settings → AI → Providers.",
       // Muse reasons privately and streams nothing until it answers.
       timeoutMs: 600_000, billing: "metered", includeUsageInCompleted: true,
       nativeLog: {
