@@ -9,7 +9,7 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import { request } from "../scripts/mcp-server.ts";
 
 const MEETINGS = ["join_meeting", "meeting_status", "post_in_meeting_chat", "leave_meeting", "post_meeting_notes"];
-const PAGES = ["show_html", "publish_page", "unpublish_page"];
+const PAGES = ["show_html", "publish_page", "unpublish_page", "share"];
 
 it("lists a bot none of the groups its person turned off, from its next turn, and leaves other bots alone", async () => {
   const stub = createServer((_req, res) => { res.writeHead(404, { "content-type": "application/json" }); res.end("{}"); });
