@@ -112,6 +112,20 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     expect((await home.cli("wait", "--bot", atlas.id, "--task", atlas.activeTaskId, "--timeout", "30")).status).toBe("settled");
     expect((await home.messages(atlas.activeTaskId)).filter((message) => message.kind === "text").at(-1)).toMatchObject({ role: "bot", text: "Writer drafted it." });
 
+    // From a room: the other place's bot is in no room here, so it gets the work directly and its result comes back to the room.
+    const editor = (await computer.cli("new-bot", "--name", "Editor")).bot;
+    const room = (await computer.cli("new-channel", "--name", "Newsroom", "--members", `${writer.id},${editor.id}`)).channel;
+    home.plan(atlas.id, { reply: "Atlas checked: 3 returns." });
+    computer.plan(writer.id,
+      { steps: [{ tool: "coordinate_bots", arguments: { bot_ids: ["Atlas"], request_key: "returns", message: "Count this week's returns." } }], reply: "Asked Atlas about returns." },
+      { reply: "Atlas counts 3 returns." });
+    await computer.cli("send-channel", "--channel", room.id, "--text", "@Writer ask Atlas how many returns we had.");
+    await expect.poll(async () => (await computer.messages(room.activeTaskId)).some((message) => message.roomRequest?.phase === "result" && /3 returns/.test(message.tool?.output ?? "")), { timeout: 40_000 }).toBe(true);
+    expect(await computer.cli("wait", "--channel", room.id, "--timeout", "30")).toMatchObject({ status: "settled" });
+    const said = await computer.messages(room.activeTaskId);
+    expect(said.some((message) => message.kind === "text" && message.text === "Atlas counts 3 returns.")).toBe(true);
+    expect(said.find((message) => message.roomRequest?.phase === "result").tool.name).toContain("Atlas (My server)");
+
     // Off on the computer: the server is told, and neither keeps the link.
     expect(await computer.api("PUT", "/api/bot-link", { on: false })).toEqual({ on: false });
     await expect.poll(() => existsSync(join(home.dataDir, "bot-link.json")), { timeout: 10_000 }).toBe(false);

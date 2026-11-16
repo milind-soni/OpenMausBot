@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { activePath, applyChatMerge, mergeStagedChats, mergeThread, planChatMerge, type ChatsSide, type ChatStore, type ThreadRows } from "./cloud-chat-merge.ts";
 import { DATA_DIR } from "./config.ts";
 import { Store, type Message, type TaskRecord } from "./store.ts";
+import { writeRegistry } from "./testing/registry.ts";
 
 const line = (id: string, at: number, parentId: string | null, role: "user" | "bot" = "user", extra: Partial<Message> = {}): Message =>
   ({ id, at, parentId, role, kind: "text", text: `${id} says hi`, ...extra });
@@ -136,8 +137,8 @@ describe("applied to a live store", () => {
   /** This computer's copy as a backup stages it: rosters, its message database and its uploads. */
   function staged(bots: unknown[], groups: unknown[], threads: Record<string, Message[]>, files: Record<string, string> = {}) {
     const data = mkdtempSync(join(tmpdir(), "omb-staged-chats-"));
-    writeFileSync(join(data, "bots.json"), JSON.stringify(bots));
-    writeFileSync(join(data, "groups.json"), JSON.stringify(groups));
+    writeRegistry(data, { bots });
+    writeRegistry(data, { rooms: groups });
     const db = new DatabaseSync(join(data, "messages.db"));
     db.exec("CREATE TABLE messages (thread_id TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, role TEXT NOT NULL, kind TEXT NOT NULL, text TEXT, json TEXT NOT NULL, PRIMARY KEY (thread_id, id)); CREATE TABLE thread_state (thread_id TEXT PRIMARY KEY, active_leaf_id TEXT);");
     const insert = db.prepare("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)");
