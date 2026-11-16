@@ -12,16 +12,18 @@
 // Security: the link joins only servers the same person signs in to as owner (server/routes/bot-link.ts), and work that
 // crosses it counts as the person's own, as it does between two bots of one place. Open risk: whoever controls one side
 // can have the other side's bots act at their own approval levels; turning the link off on the computer ends that.
-import { readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { z } from "zod";
 
 import { writeFileAtomic } from "../atomic.ts";
 import type { CoordinateBotsCall, Coordinator, CoordinatorHost, HandoffView, HostTurnResult } from "../coordinator.ts";
+import type { PassedFile } from "../host/handoff-files.ts";
 import type { PeerDeliveryReceipt } from "../peer-delivery.ts";
 import type { Level } from "../runtime/types.ts";
-import { BRIEF_MAX, EXCHANGE_BYTES, LINK_EXPIRES_MS, PEERS_MAX, frameSchema, handoffOfRoot, isLinkedId, linkRoot, linkedBotSchema, linkedId, parseLinked, peerKey, placeSchema,
-  type Frame, type HandoffFrame, type LinkedBot, type Numbered, type Place, type ResultFrame } from "./protocol.ts";
+import { BRIEF_MAX, EXCHANGE_BYTES, FILES_MAX, LINK_EXPIRES_MS, PEERS_MAX, frameSchema, handoffOfRoot, isLinkedId, linkRoot, linkedBotSchema, linkedId, parseLinked, peerKey, placeSchema,
+  type FileMeta, type FileWay, type Frame, type HandoffFrame, type LinkedBot, type Numbered, type Place, type ResultFrame } from "./protocol.ts";
 
 const FILE = "bot-link.json";
 const ENDED_FILE = "bot-link-ended.json";
@@ -38,6 +40,29 @@ const ALIVE_EVERY_MS = 60_000;
 /** How often a place's last contact is written down. */
 const SEEN_WRITE_MS = 60 * 60_000;
 const STOPPED = "Coordinated work was stopped";
+const SPOOL = "bot-link-files";
+/** Bytes that crossed and were never stored (their hand-off was dropped, a side restarted) are removed after this long,
+ * and the oldest go first when all of them together pass the size. */
+export const SPOOL_KEEP_MS = DAY_MS;
+export const SPOOL_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+/** A file the other side refuses is not offered for ever. */
+const FILE_TRIES = 3;
+/** A file that could not cross yet is tried again after this long, doubling up to five minutes. */
+const FILE_RETRY_MS = 5_000;
+const FILE_RETRY_MAX_MS = 5 * 60_000;
+
+/** How a computer moves a file's bytes: it puts the ones it sends and gets the ones it is sent. `holds`: the Cloud already
+ * has this file, so it is not sent again. `gone` on an error: the Cloud said it will not take it or has no such file, so
+ * asking again would not help. */
+export interface FileTransfer {
+  holds(id: string, way: FileWay, index: number, file: PassedFile): Promise<boolean>;
+  push(id: string, way: FileWay, index: number, file: PassedFile): Promise<void>;
+  pull(id: string, way: FileWay, index: number, meta: FileMeta, to: string): Promise<void>;
+}
+const gone = (message: string) => Object.assign(new Error(message), { gone: true });
+const isGone = (error: unknown) => Boolean((error as { gone?: unknown } | null)?.gone);
+const said = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const metaOf = (files: readonly PassedFile[]): FileMeta[] => files.slice(0, FILES_MAX).map(({ name, mime, kind, bytes }) => ({ name: name.slice(0, 255), mime: mime.slice(0, 200), kind, bytes }));
 const GONE = "The result is no longer kept.";
 
 const workSchema = z.object({
@@ -94,6 +119,15 @@ export interface BotLinkDeps {
   personName(threadId: string): string | undefined;
   /** "Sent to …" in the requester's conversation. */
   sentRow(input: { sender: LocalBot; threadId: string; recipient: { id: string; name: string }; workThreadId: string; nodeId: string; reason?: string; doneWhen?: string }): void;
+  /** The files that travel with hand-offs (server/host/handoff-files.ts). Absent: files do not cross. */
+  files?: {
+    /** What this assignment carries one way, in the attachment store. */
+    carried(assignmentId: string, way: FileWay): readonly PassedFile[];
+    /** Bytes that crossed, at these paths, into the attachment store under attach_file's own type and size rules. */
+    store(files: ReadonlyArray<{ path: string; name: string }>): Promise<PassedFile[]>;
+    /** Keeps them on the assignment, so they reach the receiving conversation's inbox as any passed file does. */
+    crossed(assignmentId: string, way: FileWay, from: { botId: string; name: string }, files: readonly PassedFile[]): void;
+  };
   /** The teammate's result in the requester's conversation. */
   resultRow(parent: HandoffView, child: HandoffView, name: string): void;
   /** The coordinator should look again: a place came back, or went. */
@@ -133,12 +167,17 @@ export function createBotLink(deps: BotLinkDeps) {
   const outboundListeners = new Set<(peer: string) => void>();
   const wantedListeners = new Set<() => void>();
   /** Hand-offs this side sent whose result has not come back. */
-  type Pending = { peer: string; frame: HandoffFrame; settle(result: HostTurnResult): void; threadId: string; cancelled: boolean };
+  type Pending = { peer: string; frame: HandoffFrame; files: readonly PassedFile[]; settle(result: HostTurnResult): void; threadId: string; cancelled: boolean; busy?: boolean; tries: number };
   const pending = new Map<string, Pending>();
   /** Hand-offs whose result came: the rest that end here (cut by restarts, refused, stopped) are stopped where they run. */
   const resulted = new Set<string>();
   let alive: NodeJS.Timeout | undefined;
   let toldBots = "";
+  /** Hand-offs whose files are being taken in, and results whose files are being sent: one at a time each. */
+  const accepting = new Set<string>(), resultsGoing = new Set<string>();
+  /** What waits to be tried again because a file could not cross yet, by what it is for. */
+  const retries = new Map<string, { timer: NodeJS.Timeout; delay: number }>();
+  let transfer: FileTransfer | null = null;
 
   const save = () => { if (state) writeFileAtomic(file, JSON.stringify(state), { mode: 0o600 }); };
   const linkOf = (peer: string): Live => { let one = live.get(peer); if (!one) { one = { online: false, seq: 0, outbox: [] }; live.set(peer, one); } return one; };
@@ -156,6 +195,75 @@ export function createBotLink(deps: BotLinkDeps) {
     for (const listener of outboundListeners) listener(peer);
   }
   const hello = (peer: string) => { if (state) { const bots = directory(); toldBots = JSON.stringify(bots); send(peer, { t: "hello", place: state.self, bots }); } };
+
+  const spoolRoot = join(deps.dataDir, SPOOL);
+  const spoolOf = (peer: string, id: string) => join(spoolRoot, createHash("sha256").update(`${peer}\0${id}`).digest("hex").slice(0, 32));
+  /** Where one crossing file's bytes wait before they are stored: named for its type, never by a path the other side chose. */
+  const spoolFile = (peer: string, id: string, way: FileWay, index: number, name: string) =>
+    join(spoolOf(peer, id), way, `${index}-${basename(name.replace(/\\/gu, "/")).replace(/[^\w.-]+/gu, "_").slice(-120) || "file"}`);
+  const unspool = (peer: string, id: string) => { rmSync(spoolOf(peer, id), { recursive: true, force: true }); };
+
+  /** Tries `again` later, after a wait that doubles; `settled` forgets it. */
+  function retryLater(key: string, again: () => void): void {
+    const delay = Math.min((retries.get(key)?.delay ?? FILE_RETRY_MS / 2) * 2, FILE_RETRY_MAX_MS);
+    clearTimeout(retries.get(key)?.timer);
+    const timer = setTimeout(() => { if (retries.get(key)?.timer === timer && state) again(); }, delay);
+    timer.unref?.();
+    retries.set(key, { timer, delay });
+  }
+  const settled = (key: string) => { clearTimeout(retries.get(key)?.timer); retries.delete(key); };
+
+  /** A computer puts the files a frame names before it sends the frame, each only if the Cloud does not hold it already;
+   * the Cloud sends the frame and the computer gets them. */
+  async function carry(id: string, way: FileWay, files: readonly PassedFile[]): Promise<void> {
+    if (!files.length || state?.role !== "dialer") return;
+    if (!transfer) throw new Error("not connected");
+    for (const [index, file] of files.slice(0, FILES_MAX).entries()) if (!await transfer.holds(id, way, index, file)) await transfer.push(id, way, index, file);
+  }
+
+  /** The files a frame names, in the attachment store: got from the Cloud, or already put here by the computer. */
+  async function fetched(peer: string, id: string, way: FileWay, metas: readonly FileMeta[] | undefined): Promise<PassedFile[]> {
+    if (!metas?.length || !deps.files) return [];
+    const waiting = metas.map((meta, index) => ({ path: spoolFile(peer, id, way, index, meta.name), name: meta.name, meta }));
+    if (state?.role === "dialer") {
+      if (!transfer) throw new Error("not connected");
+      mkdirSync(join(spoolOf(peer, id), way), { recursive: true, mode: 0o700 });
+      for (const [index, file] of waiting.entries()) {
+        let have = -1;
+        try { have = statSync(file.path).size; } catch { /* not got yet */ }
+        if (have !== file.meta.bytes) await transfer.pull(id, way, index, file.meta, file.path);
+      }
+    } else if (waiting.some((file) => !existsSync(file.path))) throw gone("its files did not arrive");
+    let stored: PassedFile[];
+    try {
+      stored = await deps.files.store(waiting);
+    } catch (error) {
+      unspool(peer, id);
+      throw gone(said(error));
+    }
+    unspool(peer, id);
+    return stored;
+  }
+
+  /** Bytes left behind by hand-offs that never came to be stored: the old go, and the oldest go while there are too many. */
+  function sweep(): void {
+    let entries: Array<{ path: string; at: number; bytes: number }>;
+    try {
+      entries = readdirSync(spoolRoot).map((name) => {
+        const path = join(spoolRoot, name);
+        let at = 0, bytes = 0;
+        const walk = (dir: string) => { for (const entry of readdirSync(dir, { withFileTypes: true })) { const full = join(dir, entry.name); if (entry.isDirectory()) walk(full); else { const stat = statSync(full); bytes += stat.size; at = Math.max(at, stat.mtimeMs); } } };
+        try { walk(path); if (at === 0) at = statSync(path).mtimeMs; } catch { /* going */ }
+        return { path, at, bytes };
+      });
+    } catch { return; }
+    let total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
+    for (const entry of entries.sort((a, b) => a.at - b.at)) {
+      if (now() - entry.at <= SPOOL_KEEP_MS && total <= SPOOL_MAX_BYTES) continue;
+      rmSync(entry.path, { recursive: true, force: true });
+      total -= entry.bytes;
+    }
+  }
 
   function setOnline(peer: string, next: boolean): void {
     const peerState = state?.peers[peer];
@@ -210,8 +318,10 @@ export function createBotLink(deps: BotLinkDeps) {
       ...(parent && deps.personName(parent.threadId) ? { person: deps.personName(parent.threadId)!.slice(0, 120) } : {}),
       ...(record?.doneWhen ? { doneWhen: record.doneWhen.slice(0, 2_000) } : {}),
     };
+    const files = deps.files?.carried(node.id, "sent") ?? [];
+    if (files.length) frame.files = metaOf(files);
     return new Promise<HostTurnResult>((settle) => {
-      const entry: Pending = { peer: address.peer, frame, settle, threadId: node.threadId, cancelled: false };
+      const entry: Pending = { peer: address.peer, frame, files, settle, threadId: node.threadId, cancelled: false, tries: 0 };
       const abort = () => {
         if (entry.cancelled) return;
         entry.cancelled = true;
@@ -225,8 +335,24 @@ export function createBotLink(deps: BotLinkDeps) {
       dispatch(entry);
     });
   }
+  /** Sends a hand-off, its files first where a computer sends them. Files that could not go yet are tried again on a
+   * timer and with the next session; ones the Cloud refuses three times end the hand-off with the reason. */
   function dispatch(entry: Pending): void {
-    if (!entry.cancelled) send(entry.peer, entry.frame);
+    const id = entry.frame.id, mine = () => !entry.cancelled && pending.get(id) === entry;
+    if (!mine()) return;
+    if (!entry.files.length || state?.role !== "dialer") { send(entry.peer, entry.frame); return; }
+    if (entry.busy) return;
+    entry.busy = true;
+    carry(id, "sent", entry.files).then(() => { settled(`out:${id}`); if (mine()) send(entry.peer, entry.frame); }, (error) => {
+      log(`bot link: the files of ${id} did not go (${said(error)})`);
+      if (!mine()) return;
+      if (!isGone(error) || (entry.tries += 1) < FILE_TRIES) { retryLater(`out:${id}`, () => dispatch(entry)); return; }
+      settled(`out:${id}`);
+      pending.delete(id);
+      resulted.add(id);
+      keepAlive();
+      entry.settle({ ok: false, text: `Its files could not be sent to ${placeName(entry.peer)} (${said(error)}), so the work was not started there.` });
+    }).finally(() => { entry.busy = false; });
   }
 
   /** A kept result as the frame its requester gets: the words come from the runtime's own row of the work. */
@@ -235,9 +361,23 @@ export function createBotLink(deps: BotLinkDeps) {
     const text = work.done.text ?? (work.child ? deps.coordinator().status(work.child)?.assignment.result : undefined) ?? (work.done.ok ? GONE : "");
     return { t: "result", id, ok: work.done.ok, text: text.slice(0, 200_000), ...(work.done.outcome ? { outcome: work.done.outcome } : {}) };
   }
+  /** The files a finished assignment here returns to its requester. */
+  const returned = (work: Work): readonly PassedFile[] => (work.done?.ok && work.child && work.ackedAt === undefined ? deps.files?.carried(work.child, "returned") ?? [] : []);
+  /** Sends a kept result, the files it returns first where a computer sends them. */
   function dispatchResult(id: string): void {
     const work = state?.work[id], frame = work ? resultFrame(id, work) : null;
-    if (work && frame) send(work.peer, frame);
+    if (!work || !frame) return;
+    const files = returned(work);
+    if (!files.length) { send(work.peer, frame); return; }
+    const withFiles: ResultFrame = { ...frame, files: metaOf(files) };
+    if (state?.role !== "dialer") { send(work.peer, withFiles); return; }
+    if (resultsGoing.has(id)) return;
+    resultsGoing.add(id);
+    carry(id, "returned", files).then(() => { settled(`back:${id}`); send(work.peer, withFiles); }, (error) => {
+      log(`bot link: the files of ${id}'s result did not go (${said(error)})`);
+      if (isGone(error)) { settled(`back:${id}`); send(work.peer, { ...frame, text: `${frame.text}\n\n(The files it attached could not be sent across.)` }); }
+      else retryLater(`back:${id}`, () => dispatchResult(id));
+    }).finally(() => { resultsGoing.delete(id); });
   }
 
   /** The work ended here. `text` only when no assignment of this place holds the words. */
@@ -256,10 +396,20 @@ export function createBotLink(deps: BotLinkDeps) {
     if (!state) return;
     const known = state.work[frame.id];
     if (known) { if (known.peer === peer && known.done) dispatchResult(frame.id); return; }
-    start(peer, frame);
+    if (!frame.files?.length || !deps.files) { start(peer, frame, []); return; }
+    if (accepting.has(frame.id)) return;
+    accepting.add(frame.id);
+    fetched(peer, frame.id, "sent", frame.files).then((files) => { settled(`in:${frame.id}`); start(peer, frame, files); }, (error) => {
+      if (!state?.peers[peer] || state.work[frame.id]) return;
+      // Not got yet: tried again on a timer, and when the requester sends the hand-off again with the next session.
+      if (!isGone(error)) { log(`bot link: the files of ${frame.id} are not here yet (${said(error)})`); retryLater(`in:${frame.id}`, () => accept(peer, frame)); return; }
+      settled(`in:${frame.id}`);
+      state.work[frame.id] = { peer, root: linkRoot(frame.id), from: frame.from.name, at: now() };
+      recordResult(frame.id, { ok: false, text: `The files sent with this could not be taken in (${said(error)}), so the work was not started.`, outcome: "refused" });
+    }).finally(() => { accepting.delete(frame.id); });
   }
 
-  function start(peer: string, frame: HandoffFrame): void {
+  function start(peer: string, frame: HandoffFrame, files: readonly PassedFile[]): void {
     if (!state || state.work[frame.id]) return;
     const root = linkRoot(frame.id);
     const address = { botId: linkedId(peer, frame.from.botId), threadId: root };
@@ -285,6 +435,7 @@ export function createBotLink(deps: BotLinkDeps) {
       state.threads[key] = { threadId, at: now() };
       const { node } = coordinator.enqueue(address, root, undefined, { botId: bot.id, threadId }, frame.text, {
         mode: frame.mode, reply: frame.mode === "notify" ? "none" : "poll", thread: "standing", ...(frame.doneWhen ? { doneWhen: frame.doneWhen } : {}) });
+      if (files.length) deps.files?.crossed(node.id, "sent", { botId: address.botId, name: frame.from.name }, files);
       work.child = node.id;
       state.work[frame.id] = work;
       save();
@@ -311,12 +462,27 @@ export function createBotLink(deps: BotLinkDeps) {
       case "result": {
         const entry = pending.get(frame.id);
         if (entry && entry.peer !== peer) return;
-        send(peer, { t: "done", id: frame.id });
-        if (!entry) return;
-        pending.delete(frame.id);
-        resulted.add(frame.id);
-        keepAlive();
-        if (!entry.cancelled) entry.settle({ ok: frame.ok, text: frame.text || (frame.ok ? "" : "The work failed there without saying why.") });
+        const finish = (note = "") => {
+          settled(`got:${frame.id}`);
+          send(peer, { t: "done", id: frame.id });
+          unspool(peer, frame.id);
+          if (!entry || pending.get(frame.id) !== entry) return;
+          pending.delete(frame.id);
+          resulted.add(frame.id);
+          keepAlive();
+          if (!entry.cancelled) entry.settle({ ok: frame.ok, text: `${frame.text || (frame.ok ? "" : "The work failed there without saying why.")}${note}` });
+        };
+        if (!entry || entry.cancelled || !frame.files?.length || !deps.files) return finish();
+        if (entry.busy) return;
+        entry.busy = true;
+        // The result is acknowledged only once its files are here, so the working side keeps them until then.
+        fetched(peer, frame.id, "returned", frame.files).then((files) => {
+          deps.files!.crossed(frame.id, "returned", { botId: linkedId(peer, entry.frame.to), name: state?.peers[peer]?.bots.find((bot) => bot.id === entry.frame.to)?.name ?? "Teammate" }, files);
+          finish();
+        }, (error) => {
+          if (isGone(error)) finish(`\n\n(The files it attached could not be brought across: ${said(error)}.)`);
+          else { log(`bot link: the files of ${frame.id}'s result are not here yet (${said(error)})`); retryLater(`got:${frame.id}`, () => take(peer, frame)); }
+        }).finally(() => { entry.busy = false; });
         return;
       }
       case "done": {
@@ -369,6 +535,7 @@ export function createBotLink(deps: BotLinkDeps) {
       if (peer !== null && entry.peer !== peer) continue;
       pending.delete(id);
       resulted.add(id);
+      unspool(entry.peer, id);
       if (!entry.cancelled) entry.settle({ ok: false, text: reason });
     }
     keepAlive();
@@ -407,6 +574,9 @@ export function createBotLink(deps: BotLinkDeps) {
     if (was.role === "acceptor") for (const known of Object.values(was.peers)) if (known.sessionId) deps.revoke?.(known.sessionId);
     const peers = [...live.keys()];
     live.clear();
+    for (const retry of retries.values()) clearTimeout(retry.timer);
+    retries.clear();
+    rmSync(spoolRoot, { recursive: true, force: true });
     failPending(null, "The link between this place and the person's other place was turned off before the work came back.");
     for (const peer of peers) for (const listener of outboundListeners) listener(peer);
     deps.kick();
@@ -437,7 +607,8 @@ export function createBotLink(deps: BotLinkDeps) {
         const { node, duplicate } = coordinator.enqueue(context.address, context.generation, context.parentId, { botId: linked, threadId }, call.message, {
           mode, reply: call.reply === "none" ? "none" : "resume", thread: call.thread === "new" ? "new" : "standing", rework: call.rework, ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}) });
         const returns = mode === "notify" ? "nothing comes back from it" : "its result will resume you";
-        const files = call.files?.length ? " Its files were not sent: files do not cross to the other place yet, so put what it needs in the message." : "";
+        if (!duplicate && call.files?.length) deps.files?.crossed(node.id, "sent", { botId: context.sender.id, name: context.sender.name }, call.files);
+        const files = call.files?.length && !deps.files ? " Its files were not sent: files do not cross to the other place here, so put what it needs in the message." : "";
         const online = isOnline(remote.peer);
         receipts.push(receipt(remote, duplicate && node.status !== "queued" ? "injected" : "queued",
           duplicate ? `already sent to ${remote.bot.name} on ${place}: it is ${node.status === "queued" ? "queued" : "under way"} and ${returns}`
@@ -593,10 +764,33 @@ export function createBotLink(deps: BotLinkDeps) {
       for (const [id, work] of Object.entries(state.work)) if (work.peer === peer && work.done && work.ackedAt === undefined) dispatchResult(id);
     },
     /** Housekeeping, at start and once a day: old records go, and on the Cloud a computer long gone is unlinked. */
-    tidy(): void { prune(); expire(); },
+    tidy(): void { prune(); expire(); sweep(); },
     /** This place's bots changed: connected places hear the new list. */
     botsChanged(): void { if (state && JSON.stringify(directory()) !== toldBots) for (const [peer, one] of live) if (one.online) hello(peer); },
     setOnline,
+    /** A computer's way to move a file's bytes, while it has one. */
+    setTransfer(next: FileTransfer | null): void { transfer = next; },
+    /** On the Cloud: whether a file a computer is about to put is one it need not send: the Cloud has its bytes, or the
+     * hand-off or result it belongs to is already known, finished or given up. */
+    holds(peer: string, id: string, way: FileWay, index: number, name: string, bytes: number): boolean {
+      if (!state?.peers[peer] || !deps.files) return true;
+      if (way === "sent" ? Boolean(state.work[id]) : pending.get(id)?.peer !== peer) { unspool(peer, id); return true; }
+      try { return statSync(spoolFile(peer, id, way, index, name)).size === bytes; } catch { return false; }
+    },
+    /** On the Cloud: where the bytes of a file a computer puts go. Null when they are not wanted. */
+    incoming(peer: string, id: string, way: FileWay, index: number, name: string): string | null {
+      if (!state?.peers[peer] || !deps.files || index < 0 || index >= FILES_MAX) return null;
+      if (way === "sent" ? Boolean(state.work[id]) : pending.get(id)?.peer !== peer) return null;
+      mkdirSync(join(spoolOf(peer, id), way), { recursive: true, mode: 0o700 });
+      return spoolFile(peer, id, way, index, name);
+    },
+    /** On the Cloud: a file a computer gets: one a hand-off out to that computer carries, or one a result for it returns. */
+    outgoingFile(peer: string, id: string, way: FileWay, index: number): PassedFile | undefined {
+      if (!state?.peers[peer] || !deps.files) return undefined;
+      if (way === "sent") { const entry = pending.get(id); return entry?.peer === peer ? entry.files[index] : undefined; }
+      const work = state.work[id];
+      return work?.peer === peer ? returned(work)[index] : undefined;
+    },
     /** Frames from a place, each checked; one that does not parse is dropped. */
     receive(peer: string, frames: readonly unknown[]): void {
       for (const raw of frames) {
@@ -625,6 +819,6 @@ export function createBotLink(deps: BotLinkDeps) {
     onWanted(listener: () => void): () => void { wantedListeners.add(listener); return () => wantedListeners.delete(listener); },
     sleeps: () => state?.sleeps === true,
     setSleeps(sleeps: boolean): void { if (state && state.role === "dialer" && (state.sleeps === true) !== sleeps) { state.sleeps = sleeps; save(); } },
-    close(): void { if (alive) clearInterval(alive); alive = undefined; outboundListeners.clear(); wantedListeners.clear(); },
+    close(): void { if (alive) clearInterval(alive); alive = undefined; for (const retry of retries.values()) clearTimeout(retry.timer); retries.clear(); outboundListeners.clear(); wantedListeners.clear(); },
   };
 }

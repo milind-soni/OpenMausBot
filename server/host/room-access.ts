@@ -44,6 +44,8 @@ export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy,
     return undefined;
   }
   function roomHandoffProblem(node: Pick<HandoffView, "groupId" | "threadId" | "botId"> & Partial<Pick<HandoffView, "kind" | "id" | "origin">>, parent?: Pick<HandoffView, "groupId" | "threadId" | "botId">): string | undefined {
+    // A bot of the person's other place is no record here: whether it can be reached is the link's to say.
+    if (isLinkedId(node.botId)) return undefined;
     const group = node.groupId ? store.group(node.groupId) : undefined;
     const bot = store.bot(node.botId);
     if (!bot || bot.hidden) return "The addressed agent no longer exists";

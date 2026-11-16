@@ -1,6 +1,8 @@
 // index.ts's wiring of the link between a person's computer and their Cloud (server/bot-link/link.ts): the link over this
 // server's store and coordinator, the computer's end that asks the Cloud, and the routes. With the link off (no
 // bot-link.json in the data folder) `start` asks nobody and every hook here answers as if the link did not exist.
+import { dirname } from "node:path";
+
 import { createDialer } from "../bot-link/dial.ts";
 import { createBotLink } from "../bot-link/link.ts";
 import type { Coordinator, HandoffView } from "../coordinator.ts";
@@ -9,6 +11,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { createBotLinkRoutes, linkSessionUser } from "../routes/bot-link.ts";
 import type { Level } from "../runtime/types.ts";
 import type { BotRecord, Store } from "../store.ts";
+import type { HandoffFiles, PassedFile } from "./handoff-files.ts";
 import { sentRow, teammateResultRow } from "./handoff-sent.ts";
 
 export interface BotLinkHostDeps {
@@ -25,6 +28,9 @@ export interface BotLinkHostDeps {
   local(auth: RequestAuth): boolean;
   owner(auth: RequestAuth): boolean;
   power(): { sleeping(): boolean; sleepSignal(): AbortSignal } | null | undefined;
+  files: Pick<HandoffFiles, "carried" | "crossed" | "sentWith" | "returnedWith">;
+  /** One crossed file into the attachment store, named by its bytes, under attach_file's own type and size rules. */
+  storeFile(path: string, name: string, root: string): Promise<{ attachment: { kind: string; path: string; mime: string; name?: string }; bytes: number }>;
   log(line: string): void;
 }
 
@@ -39,22 +45,39 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     openThread: (bot, title, opener) => store.createTask(bot.id, title, false, undefined, { ...opener, at: Date.now(), kind: "work" })?.threadId,
     hasThread: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
     personName: deps.personName,
-    sentRow: ({ sender, threadId, recipient, workThreadId, reason, doneWhen }) => {
+    files: {
+      carried: deps.files.carried, crossed: deps.files.crossed,
+      store: async (files) => {
+        const stored: PassedFile[] = [];
+        for (const file of files) {
+          const { attachment, bytes } = await deps.storeFile(file.path, file.name, dirname(file.path));
+          if (attachment.kind === "image" || attachment.kind === "file") stored.push({ kind: attachment.kind, path: attachment.path, name: attachment.name || file.name, mime: attachment.mime, bytes });
+        }
+        return stored;
+      },
+    },
+    sentRow: ({ sender, threadId, recipient, workThreadId, nodeId, reason, doneWhen }) => {
       store.appendMessage(threadId, sentRow({ sender: { id: sender.id, name: sender.name, color: sender.color ?? "blue" }, recipient: { ...recipient, color: "blue" }, threadId: workThreadId, via: "direct", language: deps.language(threadId),
-        ...(reason ? { reason } : {}), ...(doneWhen ? { doneWhen: redactSecretsInText(doneWhen) } : {}) }));
+        ...(reason ? { reason } : {}), ...(doneWhen ? { doneWhen: redactSecretsInText(doneWhen) } : {}), ...deps.files.sentWith(nodeId) }));
     },
     resultRow: (parent: HandoffView, child: HandoffView, name: string) => {
       if (!store.taskByThread(parent.botId, parent.threadId)) return;
       const done = child.status === "completed";
-      store.appendMessage(parent.threadId, { role: "bot", kind: "activity", roomRequest: { id: child.id, phase: "result" },
+      store.appendMessage(parent.threadId, { role: "bot", kind: "activity", roomRequest: { id: child.id, phase: "result" }, ...deps.files.returnedWith(child, parent),
         tool: { name: teammateResultRow(deps.language(parent.threadId), child, name, undefined, undefined), ok: done,
           ...(done && child.result.trim() ? { output: redactSecretsInText(child.result.trim()).slice(0, 2_000) } : {}) } });
       if (!parent.parentId && parent.reply !== "poll") store.patchTask(parent.botId, parent.threadId, { unread: true });
     },
   });
   const dialer = createDialer({ link, log: deps.log });
-  let stopWatching: (() => void) | undefined;
-  const watch = () => { stopWatching ??= store.onChange((change) => { if (change.type.startsWith("bot.")) link.botsChanged(); }); };
+  let stopWatching: (() => void) | undefined, upkeep: NodeJS.Timeout | undefined;
+  /** While the link is on: bot changes reach the other places, and old records and stray file bytes are cleared hourly. */
+  const watch = () => {
+    stopWatching ??= store.onChange((change) => { if (change.type.startsWith("bot.")) link.botsChanged(); });
+    if (upkeep) return;
+    upkeep = setInterval(() => link.tidy(), 60 * 60_000);
+    upkeep.unref?.();
+  };
   const routes = createBotLinkRoutes({ link, dialer, turnedOn: watch, environmentId: deps.environmentId, local: deps.local, owner: deps.owner, power: deps.power,
     // A personal Cloud issues no session without its owner's scopes, so the link's carries them; `linkSessionRefusal`
     // (wired where requests are admitted) keeps it to the link's own routes.
@@ -63,7 +86,6 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
       return { token: issued.token, sessionId: issued.session.id };
     },
     revoke: (sessionId) => { deps.sessions.revoke(sessionId); } });
-  let daily: NodeJS.Timeout | undefined;
   return {
     link, routes,
     /** Once the server is up. Off: nothing. On, on the computer: it starts asking the Cloud. */
@@ -71,10 +93,8 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
       if (!link.on()) return;
       watch();
       link.tidy();
-      daily = setInterval(() => link.tidy(), 24 * 60 * 60_000);
-      daily.unref?.();
       if (link.role() === "dialer") dialer.start({ gentle: true });
     },
-    close(): void { if (daily) clearInterval(daily); stopWatching?.(); dialer.close(); link.close(); },
+    close(): void { if (upkeep) clearInterval(upkeep); stopWatching?.(); dialer.close(); link.close(); },
   };
 }

@@ -6,14 +6,20 @@
 // the other has not acknowledged. The Cloud's answer that it sleeps stops the asking until this computer has work for it
 // or the app says the Cloud is awake (`start`), since any request would start a sleeping Cloud; the app looks every
 // minute and never asks the Cloud itself to find out.
-import type { BotLink, EndedLink } from "./link.ts";
-import { HOLD_MS, SYNC_PATH, syncAnswer, type Frame } from "./protocol.ts";
+import { createWriteStream, openAsBlob, rmSync } from "node:fs";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+
+import type { BotLink, EndedLink, FileTransfer } from "./link.ts";
+import { FILE_PATH, HOLD_MS, SYNC_PATH, syncAnswer, type FileWay, type Frame } from "./protocol.ts";
 
 const FIRST_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 60_000;
 /** What the Cloud marks a held answer with while it goes to sleep (server/cloud-power.ts). */
 const POWER_HEADER = "x-omb-cloud-power";
 const BACKGROUND_HEADER = "x-omb-background";
+/** One file may take this long to cross. */
+const FILE_MS = 10 * 60_000;
 
 export interface DialerOptions {
   link: BotLink;
@@ -35,6 +41,45 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
   });
   const carriesWork = (frames: readonly { frame: Frame }[]) => frames.some(({ frame }) => frame.t === "handoff" || frame.t === "result" || frame.t === "cancel");
 
+  /** A file's bytes, over requests of this computer's: put before the frame that names it, got after one that does. An
+   * answer in the 400s says the Cloud will not take or does not have it (`gone`); anything else is tried again. */
+  const fileUrl = (origin: string, id: string, way: FileWay, index: number, name: string, more: Record<string, string> = {}) => `${origin}${FILE_PATH}?${new URLSearchParams({ id, way, index: String(index), name, ...more })}`;
+  const refusedFile = async (response: Response) => {
+    const told = await response.json().then((answer) => { const error = (answer as { error?: unknown } | null)?.error; return typeof error === "string" ? error : ""; }, () => "");
+    return Object.assign(new Error(told || `the Cloud answered ${response.status}`), { gone: response.status >= 400 && response.status < 500 && ![401, 403, 408, 429].includes(response.status) });
+  };
+  const cloud = () => { const target = link.dial(); if (!target) throw new Error("not linked"); return { ...target, headers: { authorization: `Bearer ${target.token}`, origin: target.origin } }; };
+  const transfer: FileTransfer = {
+    async holds(id, way, index, file) {
+      const target = cloud();
+      const response = await fetchImpl(fileUrl(target.origin, id, way, index, file.name, { probe: "1", bytes: String(file.bytes) }), { redirect: "error", signal: AbortSignal.timeout(30_000), headers: target.headers });
+      if (!response.ok) throw await refusedFile(response);
+      return (await response.json() as { have?: unknown }).have === true;
+    },
+    async push(id, way, index, file) {
+      const target = cloud();
+      const response = await fetchImpl(fileUrl(target.origin, id, way, index, file.name), { method: "PUT", redirect: "error", signal: AbortSignal.timeout(FILE_MS),
+        headers: { ...target.headers, "content-type": "application/octet-stream" }, body: await openAsBlob(file.path) });
+      if (!response.ok) throw await refusedFile(response);
+      await response.body?.cancel();
+    },
+    async pull(id, way, index, meta, to) {
+      const target = cloud();
+      const response = await fetchImpl(fileUrl(target.origin, id, way, index, meta.name), { redirect: "error", signal: AbortSignal.timeout(FILE_MS), headers: target.headers });
+      if (!response.ok || !response.body) throw await refusedFile(response);
+      // No more than the frame said: a file that turns out larger is not kept.
+      let taken = 0, over = false;
+      const capped = new Transform({ transform(chunk: Buffer, _encoding, done) { taken += chunk.length; over = taken > meta.bytes; done(over ? new Error("too large") : null, chunk); } });
+      try {
+        await pipeline(Readable.fromWeb(response.body as import("node:stream/web").ReadableStream), capped, createWriteStream(to, { mode: 0o600 }));
+      } catch (error) {
+        rmSync(to, { force: true });
+        throw over ? Object.assign(new Error(`${meta.name} is larger than it was said to be`), { gone: true }) : error;
+      }
+      if (taken !== meta.bytes) { rmSync(to, { force: true }); throw new Error(`${meta.name} did not arrive whole`); }
+    },
+  };
+  link.setTransfer(transfer);
   const stopListening = link.onOutgoing(() => { held?.abort(); });
   const stopWanted = link.onWanted(() => { if (stopped) return; asleep = false; retryMs = firstRetryMs; wakeUp?.(); });
 
@@ -147,6 +192,6 @@ export function createDialer({ link, fetch: fetchImpl = fetch, log = () => {}, h
       if (told.length) link.forgetEnded(told);
     },
     state: () => ({ running: !stopped, asleep, needsPairing }),
-    close(): void { stopped = true; held?.abort(); wakeUp?.(); stopListening(); stopWanted(); },
+    close(): void { stopped = true; held?.abort(); wakeUp?.(); stopListening(); stopWanted(); link.setTransfer(null); },
   };
 }
