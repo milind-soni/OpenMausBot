@@ -47,6 +47,22 @@ describe("SidebarSectionHeader", () => {
     expect(html.indexOf("</button>")).toBeLessThan(html.indexOf('aria-label="Delete Work department"'));
   });
 
+  it("offers Share beside Delete in Advanced, and calls it on click", () => {
+    const onShare = vi.fn();
+    const element = SidebarSectionHeader({ name: "Work", collapsed: false, onToggle: () => {}, onShare, onDelete: () => {}, reorderable: true, dragging: false });
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('aria-label="Share Work"');
+    expect(html.indexOf('aria-label="Share Work"')).toBeLessThan(html.indexOf('aria-label="Delete Work department"'));
+    const find = (node: ReactNode): ReactElement<{ "aria-label"?: string; onClick?: () => void }> | undefined => {
+      if (!isValidElement<{ "aria-label"?: string; children?: ReactNode }>(node)) return undefined;
+      if (node.props["aria-label"] === "Share Work") return node as ReactElement<{ onClick?: () => void }>;
+      for (const child of Children.toArray(node.props.children)) { const found = find(child); if (found) return found; }
+      return undefined;
+    };
+    find(element)!.props.onClick!();
+    expect(onShare).toHaveBeenCalledOnce();
+  });
+
   it("renders collapsed attention signals in the heading", () => {
     const html = renderToStaticMarkup(
       createElement(SidebarSectionHeader, {
