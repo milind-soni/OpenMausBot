@@ -22,6 +22,8 @@ delete process.env.HERMES_HOME;
 delete process.env.CODEX_HOME;
 // No server in a test downloads the project's announcement cards; its tests hand the store a fake fetch.
 process.env.OMB_DISABLE_ANNOUNCEMENTS = "1";
+// Engines get OpenMausBot's own MCP servers as stdio proxies, as on macOS and Windows; a test of the URL form sets it.
+process.env.OMB_OWN_MCP_HTTP ??= "0";
 // Named explicitly although homedir() already covers it: the device tests delete this directory wholesale.
 process.env.OMB_COMPANION_DIR = join(home, ".openmausbot-companion");
 

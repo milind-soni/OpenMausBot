@@ -73,7 +73,7 @@ import { startupFailureRecoverable } from "./startup-recovery.ts";
 import { engineFailure, engineFailureKind } from "../engine-errors.ts";
 import { acpRuntimeFailure, acpStopFailure } from "./failure-words.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
+import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpOwnMcpOverHttp, noteAcpMcpHttp } from "../own-mcp-http.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
 import { learnedToolCountLimit, mcpToolBudget, retryUnderToolLimit } from "../../tool-count-limit.ts"; import { instanceEnvNames } from "../../bot-box/env.ts";
 
 /** Failures fixed on the provider account, not by retrying; the reporting process stays pooled. */
@@ -992,7 +992,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         const resolvedModel = support.resolveTurnModel?.(turn.model, env, catalog.models);
         const toolLimitKey = JSON.stringify([instanceId, resolvedModel ?? null]);
-        const mcpServers = acpMcpServers(turn, { http: support.ownMcpOverHttp === true, engine: support.driverKind,
+        const mcpServers = acpMcpServers(turn, { http: support.ownMcpOverHttp === true || acpOwnMcpOverHttp(instanceId, support.mcpServersFromLaunch === true), engine: support.driverKind,
           toolBudget: mcpToolBudget(learnedToolCountLimit(toolLimitKey), support.engineTools ?? 32) });
         support.applyTurnEnv?.(env, {
           model: resolvedModel, requestedModel: turn.model, fullAuto: turnConfig.fullAuto === true, botId: turn.botId, cwd, toolScope: turn.toolScope,
@@ -1179,7 +1179,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     },
                   },
                   INIT_TIMEOUT,
-                ));
+                )); noteAcpMcpHttp(instanceId, session.initResult);
               }
               if (!skipSubscriptionAuthForLocalInject(turn.model) && !session.authenticated) {
                 const methods: Array<{ id?: string }> = Array.isArray(session.initResult?.authMethods)

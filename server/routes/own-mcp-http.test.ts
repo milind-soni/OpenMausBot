@@ -85,6 +85,14 @@ describe("OpenMausBot's own MCP servers over HTTP", () => {
     ]);
   });
 
+  it("keeps Claude's deferred catalog: the setting rides the agents server's settings header", async () => {
+    const tools = async (settings: Record<string, string>) =>
+      ((await (await post("agents", { jsonrpc: "2.0", id: 1, method: "tools/list" }, agentsHeaders(settings))).json()) as { result: { tools: Array<{ name: string; _meta?: Record<string, unknown> }> } }).result.tools;
+    const deferred = (list: Array<{ _meta?: Record<string, unknown> }>) => list.filter((tool) => tool._meta?.["anthropic/alwaysLoad"] === false).length;
+    expect(deferred(await tools({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2" }))).toBe(0);
+    expect(deferred(await tools({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2", OMB_AGENTS_DEFER_TOOLS: "1" }))).toBeGreaterThan(0);
+  });
+
   it("lists no more of a server's tools than the turn's tool limit allows", async () => {
     const limited = await (await post("browser", { jsonrpc: "2.0", id: 5, method: "tools/list" },
       { authorization: "Bearer turn-capability", [TOOL_LIMIT_HEADER]: "0" })).json();
