@@ -181,7 +181,13 @@ export interface Coordinator {
    * with reply none outside rooms. */
   answersTo(id: string): { botId: string; threadId: string } | undefined;
   has(id: string): boolean;
+  /** Every row of the last thirty days, parsed: for tests and one-off tools, never for a path a turn takes. */
   all(): HandoffView[];
+  /** The newest of the roots `ids` whose turn happens in this thread; reads those rows by id. */
+  newestRoot(threadId: string, ids: Iterable<string>): HandoffView | undefined;
+  /** Assignments whose turn happens in this thread, oldest first: `open` keeps the unfinished ones, `since` those not
+   * finished before that time. Reads only that thread's rows. */
+  inThread(threadId: string, filter?: { open?: boolean; since?: number }): HandoffView[];
   active(): HandoffView[];
   children(id: string): HandoffView[];
   /** A generation with no root is refused; throws an Error whose message is the typed refusal shown to the model. */
