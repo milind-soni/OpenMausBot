@@ -8,7 +8,8 @@ import { buildSettingsPlaces, settingsPlacesFile } from "./settings-places";
 
 describe("the places bots cite", () => {
   it("are written out as Settings' own index reads in English (node --experimental-strip-types scripts/gen-settings-places.ts)", () => {
-    expect(readFileSync(new URL("../../../shared/settings-places.ts", import.meta.url), "utf8")).toBe(settingsPlacesFile(en));
+    // A Windows checkout may hold the file with CRLF line ends.
+    expect(readFileSync(new URL("../../../shared/settings-places.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n")).toBe(settingsPlacesFile(en));
   });
 
   it("hold every page and every row search can open, each once", () => {
