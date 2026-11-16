@@ -119,7 +119,7 @@ export function SidebarBotThreadsPeek({ bot, onScreen = false, dispatch }: { bot
     close();
   });
 
-  const actions = threadRowActions(bot.id, dispatch, false);
+  const actions = threadRowActions(bot.id, dispatch);
   const confirm = <ConfirmDialog open={deleting !== undefined} title={t("task.deleteConfirm")} body={t("task.deleteBody", { title: deleting?.title ?? "" })} confirmLabel={t("task.deleteAria")}
     onCancel={() => setDeletingId(null)} onConfirm={() => { if (deleting && !isWorking(deleting)) actions.onDelete(deleting); setDeletingId(null); }} returnFocusRef={anchor} />;
   const slot = cn(SLOT, open && "pointer-events-auto opacity-100");
