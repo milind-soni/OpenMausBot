@@ -5,8 +5,8 @@ import type { IncomingHttpHeaders } from "node:http";
 
 import { fetchPublicPage, type PageFetchOptions } from "./wait-probes.ts";
 
-/** `unknown` whenever this can't be sure. */
-export type Framing = "allowed" | "blocked" | "unknown";
+/** `login`: the page answered 401, so a frame would only show a sign-in. `unknown` whenever this can't be sure. */
+export type Framing = "allowed" | "blocked" | "login" | "unknown";
 
 const SCHEME_SOURCE = /^[a-z][a-z0-9+.-]*:$/;
 const HOST_SOURCE = /^(?:([a-z][a-z0-9+.-]*):\/\/)?(\*|(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*)(?::(\d+|\*))?(\/[^?#]*)?$/;
@@ -92,8 +92,10 @@ export function framingOf(headers: IncomingHttpHeaders, pageUrl: string, appOrig
 }
 
 /** Never from this computer or a private network. This request carries none of the person's cookies, so a redirect or
- * an error answer may be a sign-in page their browser never gets: those say unknown. */
+ * an error answer may be a sign-in page their browser never gets: those say unknown. A 401 asks every visitor without
+ * a session, a frame included (Netlify's team login and password protection answer 401, 2026-11). */
 export async function checkFraming(url: string, appOrigin: string, options: PageFetchOptions = {}): Promise<Framing> {
   const page = await fetchPublicPage(url, { maxBytes: 1, maxRedirects: 0, timeoutMs: 8_000, ...options });
-  return page.ok ? framingOf(page.headers, page.url.href, appOrigin) : "unknown";
+  if (!page.ok) return page.status === 401 ? "login" : "unknown";
+  return framingOf(page.headers, page.url.href, appOrigin);
 }

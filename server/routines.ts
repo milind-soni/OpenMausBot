@@ -114,6 +114,8 @@ export interface RoutineRun extends RoutineLineCodes, RoutineOwnerMark {
   status: RoutineRunStatus;
   manual: boolean;
   deferredAt?: number;
+  /** Set when the run waited once because the server had no room to start its engine (routine-recovery.ts). */
+  roomWaited?: true;
   deferredNoticeAt?: number;
   /** How long a scheduled run has been seen queued behind its bot's other work, added up pass by pass (routine-bounds.ts `busyWait`). */
   busyMs?: number;

@@ -236,7 +236,7 @@ export class AcpBrowserAuth {
     if (this.stopping) await this.takeStopping();
     const env = this.options.environment();
     if (this.spec.signedInByApiKey?.(env)) {
-      throw new Error(`${this.spec.product} is signed in by an API key here, which signing out cannot remove. Remove the key under Settings → Connections to disconnect it.`);
+      throw new Error(`${this.spec.product} is signed in by an API key here, which signing out cannot remove. Remove the key under Settings → AI to disconnect it.`);
     }
     await this.spec.removeCredentials(env);
     // Checked again, as device-auth.ts does: a success the engine contradicts is not reported as one.

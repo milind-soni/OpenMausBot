@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstat, mkdir, readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ValidateFunction } from "ajv";
-import { DATA_DIR, stripControlPlaneEnv } from "../config.ts";
+import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { cloudRole } from "../bot-box/detect.ts";
 import { redactSecretsInText } from "../redact.ts";
@@ -441,7 +441,7 @@ export function loopbackNavigationHint(tool: string, args: unknown, text: string
   if (env.OMB_DESKTOP_PARENT === "1" || cloudHomeConfigured(env)) return "";
   if (!/^agent_browser_(?:open|navigate)$/u.test(tool) || !object(args) || typeof args.url !== "string") return "";
   if (!ROUTE_LOOPBACK.test(args.url.trim()) || !/(?:ERR_[A-Z_]+|failed)/u.test(text)) return "";
-  return " That address is the loopback of the machine running this browser, not your own computer: open the site by the LAN address it answers on (for example http://192.168.1.20:8188), which must be reachable from the server, and allow it under Settings → Browser → Open sites on this server.";
+  return " That address is the loopback of the machine running this browser, not your own computer: open the site by the LAN address it answers on (for example http://192.168.1.20:8188), which must be reachable from the server, and allow it under Settings → Desktops & browser → Built-in browser.";
 }
 
 /** agent-browser's read hides `url`: a call whose only misfit is a string url gets the way to read an address instead of the bare schema misfit. */
@@ -872,7 +872,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   };
 }
 
-/** A chat runtime has no file tools of its own, so on this desktop's own computer its bridge answers them (host-files.ts). */
+/** A chat runtime has no file tools of its own, so on this desktop's own computer its bridge answers them (host-file-tools.ts). */
 export function withHostFileTools(integrations: SendTurnInput["integrations"]): SendTurnInput["integrations"] {
-  return integrations?.localComputer ? { ...integrations, localComputer: withHostFiles(integrations.localComputer, [DATA_DIR]) } : integrations;
+  return integrations?.localComputer ? { ...integrations, localComputer: withHostFiles(integrations.localComputer) } : integrations;
 }

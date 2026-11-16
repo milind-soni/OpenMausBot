@@ -3,7 +3,6 @@ import { homedir } from "node:os";
 import { runMcpBridge } from "./mcp-bridge.ts";
 import { augmentedPath } from "./env-path.ts";
 import { HOST_FILE_TOOLS, hostFileRelay } from "./host-file-tools.ts";
-import { hostFilesSetting, hostFolders } from "./host-files.ts";
 import { localComputerCallQuery, localComputerRelay, localComputerResultLine } from "./local-computer-guidance.ts";
 import { journalUrl } from "./saved-steps/journal-tap.ts";
 import { COMPUTER_HELPER_STOPPED } from "../shared/your-computer.ts";
@@ -36,8 +35,7 @@ try {
 }
 
 const screenRelay = localComputerRelay(platform ?? process.platform);
-const files = hostFilesSetting(hostFiles, platform);
-const fileRelay = files && hostFileRelay(() => hostFolders({ platform: files.platform, home: homedir(), env: process.env, appData: files.appData }));
+const fileRelay = hostFiles === "1" ? hostFileRelay(homedir()) : null;
 
 runMcpBridge({
   command: command!,

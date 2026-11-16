@@ -212,6 +212,6 @@ describe("LentChromeDoors", () => {
     const notLent = lentChromeGuidance("not-lent", null);
     expect(notLent, "the app lends its Chrome by itself, and an older one needs updating").toContain("open OpenMausBot on their Mac or PC, which lends its Chrome by itself (updating OpenMausBot there if it is an older version)");
     expect(notLent, "no switch to send the person to").not.toMatch(/turn on|Settings → MausBot Cloud/u);
-    expect(notLent, "or the way back to the built-in browser").toContain("switch this profile to Built-in under Settings → Browser profiles");
+    expect(notLent, "or the way back to the built-in browser").toContain("switch this profile to Built-in under Settings → Desktops & browser");
   });
 });

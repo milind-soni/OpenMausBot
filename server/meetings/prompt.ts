@@ -7,5 +7,5 @@ export const MEETINGS_NEED_CLOUD_COMPUTER = "Meeting notes run on a cloud comput
 /** The system prompt part for a bot with the agents tools on a server with no cloud computer; nothing otherwise. */
 export function meetingsUnavailablePrompt({ agentsTools, cloudComputer }: { agentsTools: boolean; cloudComputer: boolean }): string {
   if (!agentsTools || cloudComputer) return "";
-  return ` You can't join online meetings to take notes here, so you have no meeting tools. When the person asks you to join a meeting or sends a meeting link, tell them in one line: ${MEETINGS_NEED_CLOUD_COMPUTER}`;
+  return ` You have no meeting tools here, so you can't join meetings to take notes. When the person asks you to join one or sends a meeting link, tell them in one line: ${MEETINGS_NEED_CLOUD_COMPUTER}`;
 }

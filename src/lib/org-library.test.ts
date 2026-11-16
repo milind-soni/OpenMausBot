@@ -15,7 +15,7 @@ import {
   type OrgLibraryPackage,
 } from "./org-library";
 import { OrgLibraryTab } from "@/components/TeamLibraryPanelOrg";
-import { TeamImportDetails } from "@/components/TeamLibraryPanel";
+import { TemplateDetailsBody } from "@/components/TemplateCard";
 import { parsePackageDocument } from "../../shared/package-format";
 
 const fixture = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "shared", "package-fixtures", name), "utf8"));
@@ -95,20 +95,15 @@ describe("the shelf card", () => {
 });
 
 describe("the preview and the provenance line", () => {
-  it("previews an organization team with its skills switched on, and a skills-only package without a team", () => {
-    const team = parsePackageDocument({ ...fixture("full-team.v2.json") });
-    const preview = orgPackagePreview(team);
-    expect(preview).toMatchObject({ kind: "package", version: 2, name: "Sales desk", members: expect.arrayContaining([{ name: "Scout", title: "Prospect researcher" }]) });
-    const shown = text(renderToStaticMarkup(createElement(TeamImportDetails, { pending: preview, importedNames: preview.members.map((member) => member.name), org: true })));
-    expect(shown).toContain("Included skills (switched on)");
-    expect(shown).toContain("Skills arrive switched on and routines paused");
-    expect(shown).not.toContain("added switched off");
+  it("previews an organization team with its bots, skills and paused routines, and a skills-only package without bots", () => {
+    const preview = orgPackagePreview(parsePackageDocument({ ...fixture("full-team.v2.json") }));
+    expect(preview).toMatchObject({ scope: "department", name: "Sales desk", bots: expect.arrayContaining([expect.objectContaining({ name: "Scout", title: "Prospect researcher" })]) });
+    const shown = text(renderToStaticMarkup(createElement(TemplateDetailsBody, { details: preview })));
+    expect(shown).toContain("Scout");
+    expect(shown).toContain("Routines arrive paused");
 
     const library = orgPackagePreview(parsePackageDocument(fixture("library-only.v2.json")));
-    expect(library).toMatchObject({ name: "Sales skills", members: [], offeredSkills: ["objection-handling", "follow-up"], presets: ["Support agent"] });
-    const libraryShown = text(renderToStaticMarkup(createElement(TeamImportDetails, { pending: library, importedNames: [], org: true })));
-    expect(libraryShown).toContain("Nothing is added to your bots yet");
-    expect(libraryShown).not.toContain("Team members");
+    expect(library).toMatchObject({ name: "Sales skills", bots: [], skills: [expect.objectContaining({ name: "objection-handling" }), expect.objectContaining({ name: "follow-up" })] });
   });
 
   it("says where a bot came from, and when its release was withdrawn", () => {
