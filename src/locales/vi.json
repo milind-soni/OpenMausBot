@@ -2357,6 +2357,8 @@
   "engineSetup.sending": "Đang gửi…",
   "engineSetup.sendRedirect": "Gửi chuyển hướng",
   "engineSetup.googleNoLink": "Đăng nhập bằng Google không trả về liên kết.",
+  "engineSetup.googleExpired": "Phiên đăng nhập Google đã hết hạn. Hãy bắt đầu lại.",
+  "engineSetup.googleFailed": "Đăng nhập Google chưa hoàn tất. Hãy bắt đầu lại.",
   "engineSetup.signInTitle": "Đăng nhập vào {name}",
   "engineSetup.installTitle": "Cài đặt {name}",
   "engineSetup.managedSignIn": "Mỗi thiết lập Antigravity có tài khoản Google riêng. Trình duyệt của bạn sẽ hoàn tất đăng nhập bảo mật.",

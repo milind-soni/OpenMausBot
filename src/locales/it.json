@@ -2812,6 +2812,8 @@
   "engineSetup.sending": "Invio…",
   "engineSetup.sendRedirect": "Invia reindirizzamento",
   "engineSetup.googleNoLink": "L'accesso con Google non ha restituito un link.",
+  "engineSetup.googleExpired": "L'accesso con Google è scaduto. Ricomincia.",
+  "engineSetup.googleFailed": "L'accesso con Google non è stato completato. Ricomincia.",
   "engineSetup.signInTitle": "Accedi a {name}",
   "engineSetup.installTitle": "Installa {name}",
   "engineSetup.managedSignIn": "Ogni configurazione di Antigravity ha il suo account Google. Il browser completa l'accesso sicuro.",

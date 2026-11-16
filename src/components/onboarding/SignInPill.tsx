@@ -28,7 +28,9 @@ type Slot =
  * else through the Connect an AI dialog. */
 export function pillWay(instance: InstanceInfo | undefined): "install" | "sign-in" | "dialog" {
   if (!instance || !plainSignIn(instance)) return "dialog";
-  return needsSignIn(instance) ? "sign-in" : "install";
+  if (!needsSignIn(instance)) return "install";
+  // A sign-in that may need its redirect pasted back has no room in the pill.
+  return instance.authentication?.method === "callback-url" ? "dialog" : "sign-in";
 }
 
 /** One AI connected from the first screen's pill: installed (when the app installs it), signed in on the provider's

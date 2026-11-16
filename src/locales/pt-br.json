@@ -3498,6 +3498,8 @@
   "engineSetup.sending": "Enviando…",
   "engineSetup.sendRedirect": "Enviar link",
   "engineSetup.googleNoLink": "O login do Google não devolveu um link.",
+  "engineSetup.googleExpired": "O login com o Google expirou. Comece de novo.",
+  "engineSetup.googleFailed": "O login com o Google não foi concluído. Comece de novo.",
   "engineSetup.signInTitle": "Entrar em {name}",
   "engineSetup.installTitle": "Instalar {name}",
   "engineSetup.managedSignIn": "Cada configuração do Antigravity tem a própria conta Google. Seu navegador conclui o login seguro.",
@@ -10947,5 +10949,6 @@
   "devices.computers.detail": "Abra os bots deste computador em outro computador conectado à mesma conta do Tailscale. Precisa do Tailscale nos dois.",
   "devices.computers.typeCode": "No outro computador, abra Conectar a um servidor no {app} e cole o link que você copiar aqui. Ou digite lá este endereço e este código.",
   "devices.computers.address": "Endereço",
-  "devices.computers.pairLine": "Cria um link que seu outro computador abre. Funciona uma vez."
+  "devices.computers.pairLine": "Cria um link que seu outro computador abre. Funciona uma vez.",
+  "chat.settingsCard.elsewhere": "Isso é definido no próprio computador: abra o MausBot lá, depois Configurações → Celular e dispositivos → Seus outros computadores."
 }

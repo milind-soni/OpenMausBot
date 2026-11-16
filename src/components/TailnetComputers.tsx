@@ -1,8 +1,9 @@
 import { t } from "@/lib/i18n";
 import { productName } from "../lib/brand";
 import type { TailnetShareState } from "../lib/companion-types";
-import type { CompanionState, PhoneSetupController } from "./PhoneSetupFlow";
-import type { TailscalePairingStatus } from "./PhoneDevicesSection";
+import { usePhoneSetupController, type CompanionState, type PhoneSetupController } from "./PhoneSetupFlow";
+import { deriveTailscalePairingStatus, type TailscalePairingStatus } from "./PhoneDevicesSection";
+import { useStore } from "@/state/store";
 import { ServerPairingCard } from "./ServerPairingCard";
 import { SettingRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
 
@@ -43,4 +44,13 @@ export function TailnetComputers({ c, state, blocked, simple, status }: { c: Pho
       {address && <ServerPairingCard simple={simple} reveal={false} forComputer address={address} />}
     </>
   );
+}
+
+/** The same row wherever it is shown outside its Settings page: its own link to the app, the organization's policy and Tailscale's state. */
+export function OtherComputersSetting({ simple = true }: { simple?: boolean }) {
+  const c = usePhoneSetupController(useStore().state.config?.profile?.email);
+  const policy = useStore().state.config?.managedPolicy;
+  if (!c.state) return null;
+  const blocked = policy?.remoteAccess === false ? t("policy.managedBy", { organization: policy.organizationName }) : null;
+  return <TailnetComputers c={c} state={c.state} blocked={blocked} simple={simple} status={deriveTailscalePairingStatus(c.state)} />;
 }

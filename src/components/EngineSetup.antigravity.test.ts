@@ -35,27 +35,59 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function startSignIn(cloudHome: boolean, ogb: object): Promise<HTMLDetailsElement> {
-  vi.stubGlobal("ogb", { platform: "linux", openExternal: vi.fn(async () => {}), ...ogb });
-  const store = { state: { config: cloudHome ? { cloudHome: true } : {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
-  flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance: antigravity }) })));
-  const button = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("Sign in with Google"))!;
-  button.click();
-  await vi.waitFor(() => expect(host.querySelector("details")).not.toBeNull());
-  return host.querySelector("details")!;
+function auth(body: object) {
+  return new Response(JSON.stringify({ auth: body }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
-it("opens the paste-the-redirect step on a Cloud, where Google's 127.0.0.1 redirect can't reach the server", async () => {
-  expect((await startSignIn(true, { remoteClient: { active: false } })).open).toBe(true);
+async function startSignIn(status: object, ogb: object = { remoteClient: { active: false } }) {
+  const openExternal = vi.fn(async () => {});
+  vi.stubGlobal("ogb", { platform: "linux", openExternal, ...ogb });
+  const fetched = vi.fn(async (input: RequestInfo | URL) => String(input).includes("/auth/status")
+    ? auth(status)
+    : auth({ phase: "waiting", flowId: "flow-1", authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth?state=s" }));
+  vi.stubGlobal("fetch", fetched);
+  const store = { state: { config: {} }, dispatch: vi.fn(), refreshInstances: vi.fn(async () => {}), refreshModels: vi.fn(async () => {}) } as unknown as ReturnType<typeof useStore>;
+  flushSync(() => root.render(createElement(BotEditorStore, { value: store, children: createElement(EngineSetup, { instance: antigravity }) })));
+  const button = () => [...host.querySelectorAll("button")].find((b) => /Sign in with Google|Open Google sign-in again/.test(b.textContent ?? ""))!;
+  button().click();
+  await vi.waitFor(() => expect(host.querySelector("[data-redirect-paste]")).not.toBeNull());
+  return { store, fetched, openExternal, button };
+}
+
+it("shows the paste-the-redirect field the whole time the card waits, on the person's own computer too", async () => {
+  await startSignIn({ phase: "waiting", flowId: "flow-1" });
+  const field = host.querySelector<HTMLInputElement>("[data-redirect-paste] input")!;
+  expect(field.getAttribute("aria-label")).toBeTruthy();
+  expect(host.querySelector("details")).toBeNull();
+  await new Promise((resolve) => setTimeout(resolve, 2_300));
+  expect(host.querySelector("[data-redirect-paste] input")).not.toBeNull();
+}, 15_000);
+
+it("opens the same Google link again instead of starting another sign-in", async () => {
+  const { fetched, openExternal, button } = await startSignIn({ phase: "waiting", flowId: "flow-1" });
+  await vi.waitFor(() => expect(button().textContent).toContain("Open Google sign-in again"));
+  button().click();
+  await vi.waitFor(() => expect(openExternal).toHaveBeenCalledTimes(2));
+  expect(fetched.mock.calls.filter(([input]) => String(input).includes("/auth/start"))).toHaveLength(1);
 });
 
-it("opens it on a desktop paired to another computer's server", async () => {
-  expect((await startSignIn(false, { remoteClient: { active: true } })).open).toBe(true);
-});
+it("says the sign-in expired and offers to start again, once the server reports it", async () => {
+  const { button } = await startSignIn({ phase: "expired", flowId: "flow-1", message: "Google sign-in expired. Start sign-in again." });
+  await vi.waitFor(() => expect(host.textContent).toContain("Google sign-in expired. Start again."), { timeout: 6_000 });
+  expect(host.querySelector("[data-redirect-paste]")).toBeNull();
+  expect(button().textContent).toContain("Sign in with Google");
+}, 15_000);
 
-it("keeps it folded on the person's own computer, where the redirect lands by itself", async () => {
-  expect((await startSignIn(false, { remoteClient: { active: false } })).open).toBe(false);
-});
+it("shows the server's fixed reason when the sign-in fails", async () => {
+  await startSignIn({ phase: "failed", flowId: "flow-1", message: "Google sign-in was not approved. Start sign-in again." });
+  await vi.waitFor(() => expect(host.textContent).toContain("Google sign-in was not approved. Start sign-in again."), { timeout: 6_000 });
+}, 15_000);
+
+it("reads the engines and their models when the sign-in finishes by itself", async () => {
+  const { store } = await startSignIn({ phase: "succeeded", flowId: "flow-1" });
+  await vi.waitFor(() => expect(store.refreshModels).toHaveBeenCalledWith("antigravity"), { timeout: 6_000 });
+  await vi.waitFor(() => expect(host.querySelector("[data-redirect-paste]")).toBeNull());
+}, 15_000);
 
 it("names Google on the sign-in card, never another provider", () => {
   vi.stubGlobal("ogb", { platform: "linux", remoteClient: { active: false } });

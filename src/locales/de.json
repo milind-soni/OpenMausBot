@@ -1355,6 +1355,8 @@
   "engineSetup.sending": "Wird gesendet…",
   "engineSetup.sendRedirect": "Weiterleitung senden",
   "engineSetup.googleNoLink": "Die Google-Anmeldung hat keinen Link zurückgegeben.",
+  "engineSetup.googleExpired": "Die Google-Anmeldung ist abgelaufen. Starte sie erneut.",
+  "engineSetup.googleFailed": "Die Google-Anmeldung wurde nicht abgeschlossen. Starte sie erneut.",
   "engineSetup.signInTitle": "Bei {name} anmelden",
   "engineSetup.installTitle": "{name} installieren",
   "engineSetup.managedSignIn": "Jede Antigravity-Einrichtung hat ein eigenes Google-Konto. Dein Browser schließt die sichere Anmeldung ab.",

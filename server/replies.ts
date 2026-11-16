@@ -1,7 +1,7 @@
 import { reactionAnswer } from "../shared/reactions.ts";
 import type { WidgetAction } from "../shared/widget.ts";
 import { contextText } from "./delta-context.ts";
-import { CARD_RECORDS_SOURCE, cardRecords, SETUP_RECORDS_SOURCE } from "./records-block.ts";
+import { CARD_RECORDS_SOURCE, cardRecords, SETTINGS_CARD_RECORDS_SOURCE, SETUP_RECORDS_SOURCE } from "./records-block.ts";
 import type { Message } from "./store.ts";
 
 const MAX_REPLY_EXCERPT = 900;
@@ -31,10 +31,11 @@ export function speakerOf(name: PersonName, line: Pick<Message, "sender">): stri
   return typeof name === "string" ? line.sender?.name ?? name : name(line);
 }
 
-/** A card the app posted, not the bot: a server-built widget, or the add-a-key suggestion (a plain text row). */
-const appCard = (message: Pick<Message, "serverCard" | "setupSuggestion">): boolean => message.serverCard === true || message.setupSuggestion !== undefined;
+/** A card the app posted, not the bot: a server-built widget, or the add-a-key suggestion or a settings control (plain text rows). */
+const appCard = (message: Pick<Message, "serverCard" | "setupSuggestion" | "settingsCard">): boolean => message.serverCard === true || message.setupSuggestion !== undefined || message.settingsCard !== undefined;
 /** An app card's records block: the add-a-key suggestion is the app's own fixed text, not built from mail, calendar or bots. */
-const appCardRecords = (card: Pick<Message, "setupSuggestion">, text: string): string => cardRecords(text, card.setupSuggestion ? SETUP_RECORDS_SOURCE : CARD_RECORDS_SOURCE);
+const appCardRecords = (card: Pick<Message, "setupSuggestion" | "settingsCard">, text: string): string =>
+  cardRecords(text, card.settingsCard ? SETTINGS_CARD_RECORDS_SOURCE : card.setupSuggestion ? SETUP_RECORDS_SOURCE : CARD_RECORDS_SOURCE);
 
 export function replySpeaker(message: Message, userName: PersonName = "User"): string {
   return message.role === "user" ? personOf(userName, message) : (message.from?.name ?? "Assistant");

@@ -3108,6 +3108,8 @@
   "engineSetup.sending": "보내는 중…",
   "engineSetup.sendRedirect": "리디렉션 보내기",
   "engineSetup.googleNoLink": "Google 로그인에서 링크를 받지 못했어요.",
+  "engineSetup.googleExpired": "Google 로그인이 만료되었습니다. 다시 시작하세요.",
+  "engineSetup.googleFailed": "Google 로그인이 완료되지 않았습니다. 다시 시작하세요.",
   "engineSetup.signInTitle": "{name}에 로그인",
   "engineSetup.installTitle": "{name} 설치",
   "engineSetup.managedSignIn": "Antigravity 설정마다 자체 Google 계정이 있어요. 브라우저에서 안전한 로그인을 마쳐요.",
