@@ -506,14 +506,14 @@ import {
   presetFromDefaults,
 } from "./presets.ts";
 import { OrgLibrary } from "./org-library.ts";
-import { shouldMountLocalComputer } from "./local-routing.ts";
+import { newBotWorksOn, shouldMountLocalComputer } from "./local-routing.ts";
 import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container-computer.ts";
 import { startStoppedPodmanMachine } from "./podman-machine.ts";
 import { keepTransient, lazyClaimFailedText, lazyClaimRetryText, settledWithin, startAutoVmClaim, withinBudget, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 import { CONTROL_ACT_WITHIN_MS, CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_WAIT_MS, CONTROL_WAITED, controlRefusal, type ControlState } from "./control-client.ts";
 import { computerFreeAfterText, computerParkedText, computerPersonAwayText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
 import { modelContextWindow } from "./model-context-window.ts";
-import { browserIsThePlace, chosenPin, cloudPlaceRefusal, computerSkippedNote, computerToolsRefusal, handoffUsesOwnCloud, isHandedWork, openBrowserBeside, ownCloudStateWithin, parseSurface, pinSource, PlaceUnavailableError, placeUnavailable, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt, type ComputerWant, type PlaceSource, type Surface } from "./surface.ts";
+import { browserIsThePlace, chosenPin, cloudPlaceRefusal, computerSkippedNote, computerToolsRefusal, handoffUsesOwnCloud, isHandedWork, failedOnHostPath, openBrowserBeside, ownCloudStateWithin, parseSurface, pinSource, PlaceUnavailableError, placeUnavailable, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt, thisComputerSwitch, whereWorksControl, type ComputerWant, type PlaceSource, type Surface } from "./surface.ts";
 import { cloudRefusal, type PlaceRow } from "../shared/place-view.ts";
 import { cloudFailureOf, cloudLimitFields, cloudLimitText } from "./boat-limit.ts";
 import {
@@ -6052,7 +6052,7 @@ async function selectableComputers(bot: BotRecord) {
     let canCreate = false;
     let reason = CLOUD_HOME && surface === "cloud"
       ? "The cloud desktop is not set up or running. Open the Screen panel to set it up."
-      : "This computer is not configured or running. Open the Screen panel to set it up.";
+      : surface === "local" ? `This computer is not available to ${bot.name} yet. Ask the person to ${whereWorksControl(bot.name)}.` : "This computer is not configured or running. Open the Screen panel to set it up.";
     try {
       if (off) reason = "Computer access is Off in this bot's settings.";
       else if (toolsLeaveOut && surface !== "browser") reason = toolsLeaveOut;
@@ -8035,7 +8035,7 @@ async function beginTurn(
         }
         if (!localVm.ready || !localVm.runtime) {
           dropLease();
-          throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (App Settings → Computers)`);
+          throw new Error(`${localVm.problem ?? "the Local VM is not ready"} (Settings → Desktops & browser)`);
         }
         // Re-validate after the readiness walk, so a turn never attaches MCP to a desktop another turn now owns.
         const owner = localVmLeaseFor(localVmTarget).current(localVmOwnerBusy);
@@ -8378,7 +8378,7 @@ async function beginTurn(
         { id: "shell", label: "Long-running commands", text: worksInWorkspace ? longCommandsPrompt(computerPromptKind) : "" },
         { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
         { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
-        { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note + vpsUnavailableNote + vmUpdateNote + (computerSkipped && plan.computer !== "off" ? computerSkippedNote(redactSecretsInText(computerSkipped)) : "") + (computerSelectionTurns.get(threadId)?.handoff && !integrations.browser ? HANDOFF_BROWSER_NOTE : ""), canSelect: computerSelectionTurns.has(threadId) && !computerSelectionTurns.get(threadId)?.handoff, cloudHome: Boolean(CLOUD_HOME), botOpened: plan.botOpened, ownComputer: CLOUD_HOME && integrations.agents && lendingEnabled() ? sharedComputers.known(CLOUD_HOME_LENDER) : undefined }) },
+        { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note + vpsUnavailableNote + vmUpdateNote + (computerSkipped && plan.computer !== "off" ? computerSkippedNote(redactSecretsInText(computerSkipped)) : "") + (computerSelectionTurns.get(threadId)?.handoff && !integrations.browser ? HANDOFF_BROWSER_NOTE : ""), canSelect: computerSelectionTurns.has(threadId) && !computerSelectionTurns.get(threadId)?.handoff, cloudHome: Boolean(CLOUD_HOME), botOpened: plan.botOpened, ownComputer: CLOUD_HOME && integrations.agents && lendingEnabled() ? sharedComputers.known(CLOUD_HOME_LENDER) : undefined, thisComputer: !CLOUD_HOME && bot.computer !== "off" && !inheritedTeamComputer(bot) && shouldMountLocalComputer({ requested: "local", providerSupportsLocal: instance.adapter.capabilities.localComputerMcp === true }) ? { bot: bot.name, botId: bot.id, platform: process.platform } : undefined }) },
         { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled(), syncedFolders(DATA_DIR), sharedComputers.known(CLOUD_HOME_LENDER), CLOUD_PERSONAL) + firstHourHooks.prompt(bot.id, threadId) : "" }, phoneLinkPart(),
         { id: "composio", label: "Connected apps", text: integrations.composio ? composioSystemPrompt(liveBot?.connectorTools ?? bot.connectorTools) + describeConnectorScopes((liveBot ?? bot).connectorScopes) : "" },
         { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {}), mcpServersHost.off(bot)) }, { id: "to-connect", label: "Connections to make", text: cloudConnections.prompt(liveBot ?? bot, lentMcp.lines(liveBot ?? bot, { botId: bot.id, threadId, generation: dispatchClaimId })) + teamConnections.prompt(threadId, dispatchClaimId, integrations) },
@@ -11515,6 +11515,8 @@ function recordTurnPlace(botId: string, threadId: string, place: Surface | null)
   if (place) turnPlaces.set(threadId, { botId, place });
   else turnPlaces.delete(threadId);
 }
+/** The switch to This computer as this turn can make it: select_computer on a person's own request, else the person's choice. */
+function thisComputerSwitchFor(capability: InternalCapability, bot: BotRecord, place?: Surface): string { const turn = turnPlaces.get(capability.threadId), select = computerSelectionTurns.get(capability.threadId); return thisComputerSwitch({ place: place ?? (turn?.botId === bot.id ? turn.place : null), bot: bot.name, botId: bot.id, canSelect: Boolean(select && select.generation === capability.generation && !select.handoff && bot.computer !== "off") }); }
 
 function signInPlace(bot: BotRecord, threadId: string): Surface | null {
   const turn = turnPlaces.get(threadId);
@@ -12117,7 +12119,7 @@ ROUTES.push(createThreadRoutes({
 })); offerAttachmentClear(!CLOUD_TEAM);
 ROUTES.push(createBotCreateRoutes({
   store, cfg, presetStore, orgInstallStatuses,
-  hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED,
+  hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED, newBotComputer: (selection) => newBotWorksOn({ desktopApp: DESKTOP_MANAGED && !CLOUD_HOME && !HOSTED_WORKSPACE, platform: process.platform, providerSupportsLocal: registry.get(selection.instanceId)?.adapter.capabilities.localComputerMcp === true }),
   maxWorkspaceBots: MAX_WORKSPACE_BOTS, paused: (botId) => starterAwake.isPaused(botId), cloudOwnerKey: CLOUD_OWNER_KEY,
   hostedModels, cloudRoutineAuthors,
   routines: () => routines,
@@ -12373,7 +12375,7 @@ const instanceRoutes = createInstanceRoutes({
   providerConfigBusy: { get: () => providerConfigBusy, set: (busy) => { providerConfigBusy = busy; } },
   providerInstancesChanging, describeInstances, persistProviderInstance, configStatus, broadcast, testCliBinary,
   cliProbeEnvironment, threadBusy, botForThread, activeGroupTurnForBot, checkInstance: testedAi.check,
-}); ROUTES.push(createCustomDomainRoutes({ desktopManaged: DESKTOP_MANAGED, status: customDomainStatus, verify: (domain) => customDomainVerifier.verify(domain), save: (origin) => { saveConfig({ customDomain: origin }); cfg.customDomain = origin; }, sessionEnded: (auth) => auth.kind === "session" && !sessions.isLive(auth.session.id) })); const windowPrefs = createWindowPrefs({ broadcast, ownerOrAdmin, windowOpen: () => [...sseClients].some((client) => client.admin && client.appWindow) }); const themeStore = createThemeStore({ dataDir: DATA_DIR }); const themeChanged = (person: string, skin?: string) => broadcast({ kind: "theme", ...(skin ? { skin } : {}) }, CLOUD_TEAM ? { person } : { adminOnly: true }); ROUTES.push(createThemeRoutes({ store: themeStore, changed: themeChanged, person: (auth) => (CLOUD_TEAM ? (auth.kind === "session" ? personKey(auth.session) : null) : ownerOrAdmin(auth) ? "owner" : null) })); const themeTool = createThemeTool({ store: themeStore, changed: themeChanged, person: (turn) => (CLOUD_TEAM ? actingPeople.requester(turn.threadId, turn.generation) : phones.turnOwner(turn) ? "owner" : null), sources: (turn) => ({ roots: messageFileRootsForThread(turn.botId, turn.threadId).filter((root) => root !== ATTACHMENTS_DIR), attachments: store.messagesFor(turn.threadId).flatMap((message) => (message.attachments ?? []).flatMap((file) => (file.kind === "audio" ? [] : [file.path]))) }) }); const appSettings = createAppSettings({ themes: themeTool, cards: { here: () => DESKTOP_MANAGED, on: () => (tailnetShare.origin() !== null ? true : null) }, store, dataDir: DATA_DIR, entries: routeBackedRegistry({ cfg: () => cfg, store, routes: { config: configRoutes, botOrder: botOrderRoutes, botPatch: botPatchRoutes, sections: sidebarRoutes, instances: instanceRoutes, starterAwake: starterAwakeRoutes, skills: skillsRoutes }, providers: registry, credentials: () => botLogins.credentialConfig(cfg), window: windowPrefs, paused: () => starterAwake.paused() }), turnOwner: (turn) => phones.turnOwner(turn), guestDriven: cloudGuestDriven, requestCredential: (bot, threadId, body) => secretCards.requestCredential(bot, threadId, body), connectorThread, language: threadLanguage, pictures: createPictureFiles({ attachmentsDir: ATTACHMENTS_DIR, ownFolders: (turn) => messageFileRootsForThread(turn.botId, turn.threadId).filter((root) => root !== ATTACHMENTS_DIR), inConversation: (turn, name) => threadsReferencing(name).includes(turn.threadId), save: (bytes, mime) => saveImage(bytes, mime).path, remove: deleteAttachment }) }); ROUTES.push(instanceRoutes, windowPrefs.routes);
+}); ROUTES.push(createCustomDomainRoutes({ desktopManaged: DESKTOP_MANAGED, status: customDomainStatus, verify: (domain) => customDomainVerifier.verify(domain), save: (origin) => { saveConfig({ customDomain: origin }); cfg.customDomain = origin; }, sessionEnded: (auth) => auth.kind === "session" && !sessions.isLive(auth.session.id) })); const windowPrefs = createWindowPrefs({ broadcast, ownerOrAdmin, windowOpen: () => [...sseClients].some((client) => client.admin && client.appWindow) }); const themeStore = createThemeStore({ dataDir: DATA_DIR }); const themeChanged = (person: string, skin?: string) => broadcast({ kind: "theme", ...(skin ? { skin } : {}) }, CLOUD_TEAM ? { person } : { adminOnly: true }); ROUTES.push(createThemeRoutes({ store: themeStore, changed: themeChanged, person: (auth) => (CLOUD_TEAM ? (auth.kind === "session" ? personKey(auth.session) : null) : ownerOrAdmin(auth) ? "owner" : null) })); const themeTool = createThemeTool({ store: themeStore, changed: themeChanged, person: (turn) => (CLOUD_TEAM ? actingPeople.requester(turn.threadId, turn.generation) : phones.turnOwner(turn) ? "owner" : null), sources: (turn) => ({ roots: messageFileRootsForThread(turn.botId, turn.threadId).filter((root) => root !== ATTACHMENTS_DIR), attachments: store.messagesFor(turn.threadId).flatMap((message) => (message.attachments ?? []).flatMap((file) => (file.kind === "audio" ? [] : [file.path]))) }) }); const appSettings = createAppSettings({ themes: themeTool, cards: { here: () => DESKTOP_MANAGED, on: () => (tailnetShare.origin() !== null ? true : null) }, store, dataDir: DATA_DIR, entries: routeBackedRegistry({ cfg: () => cfg, store, routes: { config: configRoutes, botOrder: botOrderRoutes, botPatch: botPatchRoutes, sections: sidebarRoutes, instances: instanceRoutes, starterAwake: starterAwakeRoutes, skills: skillsRoutes }, providers: registry, credentials: () => botLogins.credentialConfig(cfg), window: windowPrefs, paused: () => starterAwake.paused() }), turnOwner: (turn) => phones.turnOwner(turn), guestDriven: cloudGuestDriven, automated: (turn) => { const request = directRequestOwners.get(turn.threadId); return Boolean(request?.automation) && (request!.generation === turn.generation || request!.generations.has(turn.generation)); }, requestCredential: (bot, threadId, body) => secretCards.requestCredential(bot, threadId, body), connectorThread, language: threadLanguage, pictures: createPictureFiles({ attachmentsDir: ATTACHMENTS_DIR, ownFolders: (turn) => messageFileRootsForThread(turn.botId, turn.threadId).filter((root) => root !== ATTACHMENTS_DIR), inConversation: (turn, name) => threadsReferencing(name).includes(turn.threadId), save: (bytes, mime) => saveImage(bytes, mime).path, remove: deleteAttachment }) }); ROUTES.push(instanceRoutes, windowPrefs.routes);
 ROUTES.push(createMcpServerRoutes({
   cfg, bot: (id) => store.bot(id), sessions, mcpOAuth, teamConnections,
   cloudHome: CLOUD_HOME,
@@ -13142,7 +13144,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const principal = sharedComputerPrincipal(internalCapability); await sharedComputers.settledAfterWake(principal, () => internalCapabilityIsActive(internalCapability));
         // `say` too: the bot says why instead of asking the person to open OpenMausBot, which can't help while the computer is lent already.
         const why = CLOUD_HOME && !principal && (CLOUD_TEAM || sharedComputers.status(CLOUD_HOME_LENDER).length > 0) ? cloudLendingRefusalNotice(internalCapability) : null;
-        return json(res, 200, { computers: sharedComputers.list(principal), ...sharedComputers.away(principal), ...sharedComputers.screenNotLent(principal), ...(why ? { unavailable: cloudLendingRefusalForBot(internalCapability), say: why } : {}) });
+        return json(res, 200, { computers: sharedComputers.list(principal), ...sharedComputers.away(principal), ...sharedComputers.screenNotLent(principal), ...(why ? { unavailable: cloudLendingRefusalForBot(internalCapability), say: why } : {}), ...(!CLOUD_HOME && turnPlaces.get(internalCapability.threadId)?.place !== "local" ? { thisComputer: `This computer itself is never in this list and needs no sharing. ${thisComputerSwitchFor(internalCapability, internalSender)}` } : {}) });
       }
       if (method === "POST" && path === "/api/internal/shared-computers" && botLending()) {
         const parsed = sharedComputerOperation.safeParse(await readInternalBody());
@@ -13150,7 +13152,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!parsed.success) return json(res, 400, { error: "Invalid shared computer operation" });
         // The bot's own "no computer" setting holds on a lent screen too.
         if (["computer_tools", "computer_call"].includes(parsed.data.action) && store.bot(internalCapability.botId)?.computer === "off") {
-          return json(res, 403, { error: "This bot has no computer. Change its Computer setting to use a shared computer's apps and screen." });
+          return json(res, 403, { error: "This bot has no computer: its Works on is Off. Change Works on in Bot's screen to use a shared computer's apps and screen." });
         }
         const principal = sharedComputerPrincipal(internalCapability);
         const why = (CLOUD_TEAM ? managedPolicy.computerRefusal("thisComputer") : null) ?? (CLOUD_HOME && !principal ? cloudLendingRefusalForBot(internalCapability) : null);
@@ -13239,7 +13241,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             timeoutSeconds: typeof body.timeout_seconds === "number" ? body.timeout_seconds : undefined,
           });
           localVmIdleFor(vm).touch();
-          return json(res, 200, result);
+          return json(res, 200, !CLOUD_HOME && failedOnHostPath(body.command, result) ? { ...result, note: `That path is on this computer, and vm_exec runs only inside this bot's Private desktop. ${thisComputerSwitchFor(internalCapability, internalSender, "vm")}` } : result);
         } catch (error) {
           const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
           return json(res, status, { error: error instanceof Error ? error.message : "could not run the command" });

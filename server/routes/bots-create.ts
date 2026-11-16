@@ -32,6 +32,9 @@ export interface BotCreateRouteDeps {
   hostedWorkspace: boolean;
   hostedFullAccessRefusal: string;
   desktopManaged: boolean;
+  /** The place a new bot works on when neither its request nor the New bot defaults name one: on the desktop app,
+   * This computer, where it can use the person's own files and apps; undefined (Auto) everywhere else. */
+  newBotComputer?(selection: ModelSelection): "local" | undefined;
   maxWorkspaceBots: number;
   /** Whether this bot is paused: a Starter Cloud keeps only so many awake, and one made past them starts paused. */
   paused(botId: string): boolean;
@@ -206,7 +209,8 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           ...ordinary, name: bot.name, section, modelSelection: bot.modelSelection,
           mascotExpression: ordinary.mascotExpression ?? undefined,
           avatarUrl: ordinary.avatarUrl || undefined,
-          computer: ordinary.computer ?? undefined, cwd: checkedCwd.cwd ?? undefined,
+          // Auto with Approve for me stays Auto: This computer with it needs the warning only the bot's Settings shows.
+          computer: ordinary.computer ?? (ordinary.computer === undefined && ordinary.approvalMode !== "auto" ? deps.newBotComputer?.(selection) : undefined), cwd: checkedCwd.cwd ?? undefined,
           mcpServers: ordinary.mcpServers ?? undefined,
           browserProfile: ordinary.browserProfile || undefined,
           voiceNoteEveryReply: ordinary.voiceNoteEveryReply ?? undefined,

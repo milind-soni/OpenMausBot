@@ -93,10 +93,10 @@ describe("startAutoVmClaim", () => {
 
   it("keeps the rejection's message so the refusal can say why", async () => {
     const table: AutoVmClaimTable = new Map();
-    table.set("t1", slot(async () => { throw new Error("the Local VM is not ready (App Settings → Computers)"); }));
+    table.set("t1", slot(async () => { throw new Error("the Local VM is not ready (Settings → Desktops & browser)"); }));
     startAutoVmClaim(table, "t1", "gen-1");
     await table.get("t1")!.begin;
-    expect(table.get("t1")!.failure).toBe("the Local VM is not ready (App Settings → Computers)");
+    expect(table.get("t1")!.failure).toBe("the Local VM is not ready (Settings → Desktops & browser)");
     expect(table.get("t1")!.claimed).toBeUndefined();
   });
 
