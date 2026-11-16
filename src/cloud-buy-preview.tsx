@@ -49,7 +49,7 @@ const VIEWS: Record<string, CloudAddView> = {
   unreachable: { kind: "unreachable" },
 };
 const FREE: CloudAccountState = { status: "connected", account: { id: "a", email: "maya@studio.co" }, entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 1 } };
-const TEAM = { tier: "team", label: "Team", amount: 16900, trialDays: 3, allowances: allowances(4, 4, 100, 4, 300, 180_000, 14) };
+const TEAM = { tier: "team", label: "Team", amount: 4000, trialDays: 3, allowances: allowances(4, 4, 100, 4, 300, 180_000, 14) };
 const POPUPS: Record<string, { account: CloudAccountState; offer: CloudOffer }> = {
   "whats-new": { account: FREE, offer: { ...PLAIN, plans: [...PLAIN.plans, TEAM] } },
   "whats-new-plan": { account: { ...FREE, entitlement: { plan: "pro", tier: "pro", status: "active", expiresAt: NOW + 30 * DAY, version: 2 } }, offer: { ...PLAIN, plans: [...PLAIN.plans, TEAM] } },
