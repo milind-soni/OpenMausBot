@@ -232,7 +232,8 @@ describe("openai-compat Local VM tools", () => {
 
   // An API model on its Private desktop, asked for the person's OneDrive folder, sent them to a settings screen that does not exist.
   it("offers an API model on its Private desktop the switch to This computer for the person's own files", async () => {
-    vmState({ containers: [] });
+    // The command runs as written; only its failure carries the switch.
+    vmState({ containers: [], execResult: { exitCode: 1, stdout: "", stderr: "mkdir: cannot create directory: Permission denied", timedOut: false } });
     requests.length = 0;
     const hostPath = process.platform === "win32" ? "C:\\Users\\ana\\OneDrive\\Reports"
       : process.platform === "darwin" ? "/Users/ana/OneDrive/Reports" : "/home/ana/OneDrive/Reports";
@@ -252,10 +253,13 @@ describe("openai-compat Local VM tools", () => {
     expect(system).not.toContain("Settings → Computers");
     const answer = JSON.parse(text(requests[1]!.messages.find(message => message.role === "tool")?.content)) as { ok: boolean; result: string };
     expect(answer.ok).toBe(false);
-    const refused = answer.result;
-    expect(refused).toContain("That path is on this computer, and vm_exec runs only inside this bot's Private desktop. This bot works on its Private desktop, not on this computer. To use files on this computer, switch it to This computer: say so in one line, call select_computer with surface \"local\", then end your turn");
-    expect(refused).toContain(`{"botId":"${bot.id}","computer":"local"}`);
-    expect(refused).toContain("open Bot's screen in this chat and choose This computer under “Where Ada works”");
+    const result = answer.result;
+    expect(result).toContain("exit code 1");
+    expect(result).toContain("mkdir: cannot create directory");
+    expect(result).toContain("--- note ---\nThat path is on this computer, and vm_exec runs only inside this bot's Private desktop. This bot works on its Private desktop, not on this computer. To use files on this computer, switch it to This computer: say so in one line, call select_computer with surface \"local\", then end your turn");
+    expect(result).toContain(`When the person asks you to keep using this computer, also keep it there: app_settings set, id "bots.settings", value {"botId":"${bot.id}","computer":"local"}`);
+    expect(result).toContain("open Bot's screen in this chat and choose This computer under “Where Ada works”");
+    vmState({ containers: [] });
   }, 60_000);
 
   it("fails the turn when the Local VM lists no tools, instead of running without them", async () => {

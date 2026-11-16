@@ -213,15 +213,16 @@ const PLACE_NAMES: Record<Surface, string> = {
 
 /** What a bot says and does when work needs this computer's own files but the turn works elsewhere. `canSelect`: this
  * turn may call select_computer, the switch the person allows with one tap; otherwise only the person's own choice moves
- * it. `botId`: the bot's own id, so it can keep This computer as its Works on through app_settings once the person agrees. */
+ * it. `botId`: the bot's own id, so a person's own request can keep This computer as its Works on through app_settings;
+ * only such a turn hears it, since an allow-once tap or an automation is never a lasting choice. */
 export function thisComputerSwitch(input: { place: Surface | null; bot: string; canSelect: boolean; botId?: string }): string {
   const where = input.place && input.place !== "local"
     ? `This bot works on ${PLACE_NAMES[input.place]}, not on this computer.` : "This bot does not work on this computer this turn.";
   const how = input.canSelect
     ? `say so in one line, call select_computer with surface "local", then end your turn; the request continues on this computer by itself, and the person allows it with one tap unless they gave you Full access. If select_computer refuses, ask the person to ${whereWorksControl(input.bot)}`
     : `ask the person to ${whereWorksControl(input.bot)}`;
-  const keep = input.botId
-    ? ` When the person asks you to use their computer, or says yes to it, also keep ${input.bot} there: app_settings set, id "bots.settings", value {"botId":"${input.botId}","computer":"local"}; it applies at once with Undo.`
+  const keep = input.canSelect && input.botId
+    ? ` When the person asks you to keep using this computer, also keep it there: app_settings set, id "bots.settings", value {"botId":"${input.botId}","computer":"local"}; it applies at once with Undo.`
     : "";
   return `${where} To use files on this computer, switch it to This computer: ${how}.${keep} No other setting or menu does this, so never name one.`;
 }
@@ -230,12 +231,18 @@ export function thisComputerSwitch(input: { place: Surface | null; bot: string; 
 const HOST_PATHS: Partial<Record<NodeJS.Platform, { pattern: RegExp; example: string }>> = {
   win32: { pattern: /(?:^|[\s"'`=(,;|>])(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+\\|%(?:USERPROFILE|HOMEPATH|OneDrive\w*)%)/i, example: "C:\\Users\\…" },
   darwin: { pattern: /(?:^|[\s"'`=(,;|>])\/Users\/[^/\s"']/, example: "/Users/…" },
-  linux: { pattern: /(?:^|[\s"'`=(,;|>])\/home\/(?!cua(?:[/\s"']|$))[^/\s"']/, example: "/home/…" },
+  linux: { pattern: /(?:^|[\s"'`=(,;|>])\/home\/(?!cua(?![\w.-]))[\w.-]/, example: "/home/…" },
 };
 
 /** Whether a command names a path on this computer's own disk, which a Private desktop never has. */
 export function namesHostPath(command: unknown, platform: NodeJS.Platform = process.platform): boolean {
   return typeof command === "string" && Boolean(HOST_PATHS[platform]?.pattern.test(command));
+}
+
+/** A vm_exec command that failed and names such a path: only then does its result carry the switch to This computer.
+ * A command that merely mentions one (writing it into a file, a volume flag) runs as written. */
+export function failedOnHostPath(command: unknown, result: { exitCode?: unknown; timedOut?: unknown }, platform: NodeJS.Platform = process.platform): boolean {
+  return Number(result.exitCode ?? 0) !== 0 && result.timedOut !== true && namesHostPath(command, platform);
 }
 
 /** On a server where This computer can be picked: a host path or "my PC" is this computer, never the mounted place. */

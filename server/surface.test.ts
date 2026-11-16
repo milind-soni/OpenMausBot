@@ -8,6 +8,7 @@ import {
   computerSkippedNote,
   computerToolsRefusal,
   handoffUsesOwnCloud,
+  failedOnHostPath,
   isHandedWork,
   namesHostPath,
   openBrowserBeside,
@@ -520,10 +521,15 @@ describe("files on this computer while the bot works elsewhere", () => {
       + "No other setting or menu does this, so never name one.");
   });
 
-  it("lets the bot keep This computer as its Works on through the settings it changes from chat, once the person agrees", () => {
+  it("lets a person's own request keep This computer as the bot's Works on through the settings it changes from chat", () => {
     const text = thisComputerSwitch({ place: "vm", bot: "Ada", canSelect: true, botId: "bot-7" });
-    expect(text).toContain("When the person asks you to use their computer, or says yes to it, also keep Ada there: "
+    expect(text).toContain("When the person asks you to keep using this computer, also keep it there: "
       + "app_settings set, id \"bots.settings\", value {\"botId\":\"bot-7\",\"computer\":\"local\"}; it applies at once with Undo.");
+    // An allow-once tap is for one request; a turn that is not the person's own line never hears of a lasting move.
+    expect(text).not.toContain("says yes");
+    expect(thisComputerSwitch({ place: "vm", bot: "Ada", canSelect: false, botId: "bot-7" })).not.toContain("app_settings");
+    expect(surfacePrompt({ computer: "vm", browser: true }, { canSelect: false, thisComputer: { bot: "Ada", botId: "bot-7", platform: "win32" } }))
+      .not.toContain("app_settings");
   });
 
   it("gives a bot that cannot switch only the person's control, never a tool it lacks", () => {
@@ -567,7 +573,32 @@ describe("files on this computer while the bot works elsewhere", () => {
     expect(namesHostPath("cat '/Users/ana/Library/Mobile Documents/notes.txt'", "darwin")).toBe(true);
     expect(namesHostPath("ls /home/cua/Users/x", "darwin")).toBe(false);
     expect(namesHostPath("ls /home/ana/Documents", "linux")).toBe(true);
-    expect(namesHostPath("ls /home/cua/workspace && ls /home/cua", "linux")).toBe(false);
+    for (const command of ["ls /home/cua/workspace && ls /home/cua", "cd /home/cua&&ls", "cd /home/cua;ls", "(cd /home/cua)", "PATH=/home/cua:/usr/bin make", "ls /home/*"]) {
+      expect(namesHostPath(command, "linux"), command).toBe(false);
+    }
+    expect(namesHostPath("cat /home/cua.backup/x", "linux")).toBe(true);
     expect(namesHostPath(undefined, "win32")).toBe(false);
+  });
+});
+
+describe("a vm_exec command that names this computer's own paths", () => {
+  const failed = { exitCode: 1, timedOut: false };
+  const ran = { exitCode: 0, timedOut: false };
+
+  it("runs as written when it only mentions one, so writing or passing such a path along is never refused", () => {
+    for (const [command, platform] of [
+      ["echo 'C:\\Users\\x' > notes.txt", "win32"], ["docker -v d:/data:/data alpine true", "win32"], ["printf a:/b", "win32"],
+      ["cat <<'EOF' > readme.md\nCopy it to /Users/you/Desktop\nEOF", "darwin"],
+    ] as const) {
+      expect(failedOnHostPath(command, ran, platform), command).toBe(false);
+    }
+  });
+
+  it("carries the switch only when the command failed and named such a path", () => {
+    expect(failedOnHostPath("mkdir \"C:\\Users\\ana\\OneDrive\\Reports\"", failed, "win32")).toBe(true);
+    expect(failedOnHostPath("ls /Users/ana/Desktop", { exitCode: 2 }, "darwin")).toBe(true);
+    expect(failedOnHostPath("ls /Users/ana/Desktop", { exitCode: 124, timedOut: true }, "darwin")).toBe(false);
+    expect(failedOnHostPath("ls /nope", failed, "darwin")).toBe(false);
+    expect(failedOnHostPath("ls /Users/ana/Desktop", failed, "linux")).toBe(false);
   });
 });
