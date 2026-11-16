@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstat, mkdir, readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ValidateFunction } from "ajv";
-import { stripControlPlaneEnv } from "../config.ts";
+import { DATA_DIR, stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { cloudRole } from "../bot-box/detect.ts";
 import { redactSecretsInText } from "../redact.ts";
@@ -24,6 +24,7 @@ import { fitToolList, withoutDanglingReferences } from "../mcp-tool-schema.ts";
 import { listsComputerTool } from "../computer-tool-list.ts";
 import { HOST_COMPUTER_QUICK_MS, HOST_COMPUTER_READY, hostComputerDidNotStart, hostComputerFailure, hostComputerKey, hostComputerNotice, hostComputerStandIn, hostComputerStarted,
   hostComputerStartupMs, startHostComputer, watchHostComputerStart, type HostComputerStart } from "./chat-host-computer.ts";
+import { withHostFiles } from "../local-computer.ts";
 import { READ_OPEN_PAGE_ONLY, readsAroundBrowser } from "../browser-tool-shape.ts";
 import { capToolList, learnToolCountLimit, shareToolBudget, toolCountLimitFromError } from "../tool-count-limit.ts";
 import type { ToolSchemaProfile } from "../tool-schema-profile.ts";
@@ -869,4 +870,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       return "answer" in call ? answer(call.answer) : run(catalog.get(call.name)!, call.arguments, callSignal);
     },
   };
+}
+
+/** A chat runtime has no file tools of its own, so on this desktop's own computer its bridge answers them (host-files.ts). */
+export function withHostFileTools(integrations: SendTurnInput["integrations"]): SendTurnInput["integrations"] {
+  return integrations?.localComputer ? { ...integrations, localComputer: withHostFiles(integrations.localComputer, [DATA_DIR]) } : integrations;
 }

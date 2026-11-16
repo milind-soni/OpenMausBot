@@ -14,6 +14,7 @@ import { RelayTimeout, relay, relayCommand, relayInput } from "../browser-relay.
 import { browserSteps } from "../browser-steps.ts";
 import { BrowserLive } from "../browser-live.ts";
 import { browserEgress, type EgressSetup } from "../browser/egress/registry.ts";
+import { releaseEndedGates } from "../browser/egress/release-ended.ts";
 import {
   agentBrowserIntegration,
   BUILT_IN_BROWSER_SYSTEM_PROMPT,
@@ -45,6 +46,7 @@ import { passkeyAnnotation } from "../browser/passkey-notice.ts";
 import { LentChromeDoors, lentChromeGuidance, type ChromeLender } from "../browser/lent-chrome.ts";
 import type { ChromeRoute } from "../device-links.ts";
 import type { EngineBrowsers } from "../engine-memory.ts";
+import { processBudget } from "../process-room.ts";
 import { augmentedPath } from "../env-path.ts";
 import { harnessMcpTokenEnv } from "../harness-mcp-token.ts";
 import type { FillLoginDeps } from "../login-fill.ts";
@@ -77,7 +79,8 @@ export interface BrowserHostDeps {
   /** My Cloud's way to the person's own Chrome on the computer that lends it, and which computer that is. */
   lentChrome?: { route(): ChromeRoute | null; lender(): ChromeLender | null };
   /** The engine memory guard, told which browsers each thread's turn starts or holds. */
-  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void };
+  /** `selfHosted`: turns wait for room on this server, under its pids limit, and so do its bots' browsers. */
+  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void; selfHosted?(): boolean };
   /** Whose browser a conversation's turns use on a Team Cloud: the member's, the group chat's or the team's. Every
    * browser is the bot's own without it. */
   audienceOf?(threadId: string): Audience;
@@ -108,11 +111,15 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const store: Pick<Store, "bots" | "bot" | "botByThread"> = { get bots() { return deps.store().bots; }, bot: (id: string) => deps.store().bot(id),
     botByThread: (threadId: string) => deps.store().botByThread(threadId) };
 
+  // Where turns wait for room (a self-hosted server under its pids limit), a new browser also waits for room for its
+  // processes. `runs` is read only when a browser call asks, after usedBrowserSessions exists.
+  const processRoom = deps.engineMemory?.selfHosted?.() ? processBudget.browserRoom((session) => browserRunning(session, usedBrowserSessions.get(session))) : null;
   // Only a bot waiting for a slot closes a browser a running turn holds; the idle sweep below never does.
   const browserRoom = new BrowserRoom({
     max: deps.browsersAtOnce ?? (() => defaultBrowserRoomSize()),
     spare: (session) => spareForRoom(agentBrowserRuntime.spare(session), { holds: !turnResources.free(`browser:${session}`), idleMs: idleMs() }),
     close: (session) => agentBrowserRuntime.closeIfIdle(session, 1),
+    ...(processRoom ? { admit: (session: string) => processRoom.enter(session) } : {}),
   });
   const agentBrowserRuntime = new BrowserRuntime({
     closeBrowser: (session, spec) => closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })),
@@ -194,6 +201,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   // person's own, outside the egress gate too; on My Cloud a call that can't reach it now says why instead.
   const browserRuntime = new RuntimeRouter(agentBrowserRuntime, chromeEngine, {
     refusal: (_session, spec, params) => (attachesToChrome(spec.env) ? null : browserEgress.callRefusal(params)),
+    // The opt-in engine's browsers wait for the server's room here; agent-browser's wait in browserRoom above. The
+    // person's own Chrome runs outside this server, and a close frees room.
+    room: (session, spec, params) => (!processRoom || attachesToChrome(spec.env) || (params as { name?: unknown } | null)?.name === "agent_browser_close"
+      ? Promise.resolve(null) : processRoom.enter(session)),
     // After beforeDispatch's claim the holder is this call's own turn, so the verdict is the caller's, not the last
     // holder's. Only a caller who may use the computer learns whether it lends Chrome or is online.
     afterClaim: (session, spec) => {
@@ -248,13 +259,23 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     held: (session) => !turnResources.free(`browser:${session}`),
     closeIdle: (session) => browserRuntime.closeIfIdle(session, idleMs(), usedBrowserSessions.get(session)),
   });
+  // A browser that has ended keeps no loopback listener: its gate opens again with it, on the same port where it can, and
+  // the session's launch settings are worked out again then.
+  const releaseGates = () => releaseEndedGates({ sessions: () => browserEgress.sessions(), release: async (session) => { usedBrowserSessions.delete(session); await browserEgress.release(session); },
+    env: (session) => { const spec = usedBrowserSessions.get(session); return spec && !chromeTarget(session, spec) ? spec.env : null; },
+    running: (session) => browserRunning(session, usedBrowserSessions.get(session)),
+    inUse: (session) => !turnResources.free(`browser:${session}`) || agentBrowserRuntime.working(session) });
+  let gateTimer: ReturnType<typeof setInterval> | undefined;
   const browserSweep = {
     start() {
+      gateTimer = setInterval(() => void releaseGates().catch(() => undefined), 60_000);
+      gateTimer.unref?.();
       agentBrowserSweep.start();
       chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
       return browserSweep;
     },
     closeAll: () => {
+      clearInterval(gateTimer);
       doors?.close();
       doorUrls.clear();
       leftovers.clear();

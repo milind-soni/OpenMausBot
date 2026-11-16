@@ -56,6 +56,7 @@ const pending = new Map<string, Pending>();
 export function yourComputerCallFrom(query: URLSearchParams): YourComputerCall | undefined {
   const app = cleanAppName(query.get("app"));
   const site = cleanSiteName(query.get("site"));
+  if (query.get("files") === "1") return { files: true };
   return app || site ? { ...(app ? { app } : {}), ...(site ? { site } : {}) } : undefined;
 }
 
@@ -94,7 +95,7 @@ export function askToUseYourComputer(
         requestId,
         requestType: "permission",
         tool: YOUR_COMPUTER_TOOL,
-        yourComputer: call ? { ...(call.app ? { app: call.app } : {}), ...(call.site ? { site: call.site } : {}) } : {},
+        yourComputer: call?.files ? { files: true } : call ? { ...(call.app ? { app: call.app } : {}), ...(call.site ? { site: call.site } : {}) } : {},
       },
     });
     pending.set(requestId, {

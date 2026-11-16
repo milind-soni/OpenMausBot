@@ -701,7 +701,7 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   fixedOptions?: boolean;
   quotaSwitch?: QuotaSwitchCardData;
   /** Asks before a bot uses the person's own computer; what its first call names, for the question in their language. */
-  yourComputer?: { app?: string; site?: string };
+  yourComputer?: { app?: string; site?: string; files?: boolean };
 }
 
 /** Kept on the card so the offer survives a restart. `engines` follow the card's options; `messageId` is the

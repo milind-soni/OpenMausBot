@@ -38,7 +38,7 @@ import { loadInstalledPackage, matchingRequestReceipt, rememberRequest } from ".
 import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
 import { cancelUnfinishedRuns, interruptRunTurns } from "./routine-stops.ts";
 import { sanitizeInput } from "./routine-input.ts";
-import { applyCheckResult, clipRunOutput, codedLine, routineLine, runLineFields, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
+import { applyCheckResult, clipRunOutput, codedLine, routineLine, runLineFields, type RoutineLine, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
 import { resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
 
@@ -131,7 +131,7 @@ export interface RoutineRun extends RoutineLineCodes, RoutineOwnerMark {
   workedMs?: number;
   triggerSource?: RoutineRunTrigger;
   /** "app": a connected-app event started it; "wait": a wait's follow-up did (its triggerSource stays "webhook", an outside event). sameConversation: its trigger keeps one conversation (routine-same-conversation.ts). */
-  eventSource?: "app" | "wait"; sameConversation?: true;
+  eventSource?: "app" | "wait"; sameConversation?: true; /** A person's own "Run now" test of its webhook started it: a usage cap treats it as a run started by hand. */ byPerson?: true;
   webhookId?: string;
   deliveryId?: string;
   sourceThreadId?: string;
@@ -238,7 +238,7 @@ export interface RoutineManagerOptions {
   /** Every payload must be `{ kind, … }`: the server numbers and replays frames by it. */
   emit?: (payload: Record<string, unknown>) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
-  /** Why this bot takes no runs now, in the person's words (a Starter Cloud keeps only so many bots awake); null when it does. */ pausedText?: (botId: string) => string | null; /** The person paused this bot: its runs are let go quietly, not failed into To review. */ held?: (botId: string) => boolean;
+  /** Why this bot takes no runs now, in the person's words (a Starter Cloud keeps only so many bots awake); null when it does. */ pausedText?: (botId: string) => string | null; /** The person paused this bot: its runs are let go quietly, not failed into To review. */ held?: (botId: string) => boolean; /** A reached usage cap (host/usage-cap-gate.ts): `capSkip` for a scheduled occurrence, which is counted on one `missed` row per cap and period and never switches the routine off; `capText` for a run already queued. */ capSkip?: (botId: string, routineId: string) => { behind: string; resetsAt: number; words(count: number): RoutineLine } | null; capText?: (botId: string, trigger: RoutineRunTrigger) => string | null;
   goalState?: (groupId: string | undefined, coordinatorBotId: string) => "ready" | "busy" | "missing";
   createTask: (botId: string, title: string, run?: RoutineRun) => { threadId: string } | null;
   joinConversation?: (run: RoutineRun) => string | null;
@@ -770,7 +770,7 @@ export class RoutineManager {
 
   enqueueWebhook(input: {
     webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number;
-    eventSource?: "app" | "wait"; sameConversation?: boolean;
+    eventSource?: "app" | "wait"; sameConversation?: boolean; byPerson?: boolean;
     /** Where the run reports, instead of the event's own results chat. */
     resultsThreadId?: string;
   }): { id: string } {
@@ -784,7 +784,7 @@ export class RoutineManager {
       id: randomUUID(), routineId: input.webhookId, routineName: input.webhookName, prompt: input.prompt, target: "bot",
       botId: input.botId, runOn: input.runOn, scheduledFor: input.receivedAt, status: "queued", manual: false,
       triggerSource: "webhook", webhookId: input.webhookId, deliveryId: input.deliveryId, attachments: [], createdAt: this.now(),
-      resultsThreadId: input.resultsThreadId ?? this.options.eventResultsThread?.(input), ...(input.eventSource ? { eventSource: input.eventSource } : {}), ...(input.sameConversation ? { sameConversation: true } : {}),
+      resultsThreadId: input.resultsThreadId ?? this.options.eventResultsThread?.(input), ...(input.eventSource ? { eventSource: input.eventSource } : {}), ...(input.sameConversation ? { sameConversation: true } : {}), ...(input.byPerson ? { byPerson: true } : {}),
     };
     this.commitEvent(run, input.deliveryId, () => { this.runs.push(run); });
     return cloneRun(run);
@@ -1055,16 +1055,17 @@ export class RoutineManager {
             const once = runsOnce(routine.schedule), blocker = once ? undefined : blockingRun(this.runs, routine.id), spaced = once ? null : runSpacing(routine, this.runs);
             const scheduledQueued = this.runs.some(run => run.routineId === routine.id && run.status === "queued" &&
               (run.triggerSource ?? (run.manual ? "manual" : "schedule")) === "schedule");
-            const skipFor = blocker && !(routine.overlap === "queue" && !scheduledQueued) ? { behind: blocker.run.id, why: blocker.why, waitingSince: blocker.waitingSince }
-              : spaced && spaced.until > now ? { behind: spaced.behind, why: spaced.why } : undefined;
+            const capped = routine.target !== "room-goal" && this.options.pausedText?.(routine.botId) ? null : this.options.capSkip?.(routine.botId, routine.id);
+            const skipFor = capped ?? (blocker && !(routine.overlap === "queue" && !scheduledQueued) ? { behind: blocker.run.id, why: blocker.why, waitingSince: blocker.waitingSince }
+              : spaced && spaced.until > now ? { behind: spaced.behind, why: spaced.why } : undefined);
             if (!skipFor) {
               if (plan.older) countedSkips.push(Object.assign(this.newRun(routine, plan.older.scheduledFor, false, allocations), plan.older.fields));
               scheduledRuns.push(Object.assign(this.newRun(routine, scheduledFor, false, allocations), plan.fields, plan.late ? staggered(now, lateStarts++) : {}));
             } else {
               const skip = recordSkip(this.runs, () => this.newRun(routine, plan.through, false, allocations), skipFor, plan.through, now, plan.count > 1 ? { count: plan.count - 1, scheduledFor: plan.first } : undefined);
               (skip.tell ? scheduledRuns : countedSkips).push(skip.row);
-              routine.skippedRuns = Math.min(Number.MAX_SAFE_INTEGER, (routine.skippedRuns ?? 0) + plan.count);
-              routine.lastSkippedAt = plan.through;
+              if (!capped) { routine.skippedRuns = Math.min(Number.MAX_SAFE_INTEGER, (routine.skippedRuns ?? 0) + plan.count); routine.lastSkippedAt = plan.through; }
+              else if (once) { if (routine.schedule.type === "once") routine.schedule = { type: "once", at: capped.resetsAt }; routine.nextRunAt = capped.resetsAt; continue; } // a capped once-only run is not used up: it runs when the cap resets
             }
             this.advancePastOccurrence(routine, now, plan.through);
           }
@@ -1138,7 +1139,7 @@ export class RoutineManager {
         if (state === "missing") { this.failRun(run, this.missingTargetMessage(run.target)); continue; }
         const paused = run.target === "room-goal" ? null : this.options.pausedText?.(run.botId);
         if (!this.ledger.ready(run)) continue; if (this.ledger.startedElsewhere(run)) { const line = codedLine("error", "routines.server.duplicate"); Object.assign(run, line.codes); void this.cancelRun(run.id, line.text); continue; }
-        if (paused) { if (triggerSource !== "manual" && this.options.held?.(run.botId)) void this.cancelRun(run.id, paused); else this.failRun(run, paused); continue; } const gated = triggerSource === "manual" ? false : this.gate.hold(run); if (gated === true) { if (this.options.preparing && run.attention !== this.options.preparing) { run.attention = this.options.preparing; this.emitRun(run); } continue; } if (gated) { this.failRun(run, gated); continue; }
+        if (paused) { if (triggerSource !== "manual" && this.options.held?.(run.botId)) void this.cancelRun(run.id, paused); else this.failRun(run, paused); continue; } const startedBy = run.byPerson ? "manual" : triggerSource, capped = this.options.capText?.(run.botId, startedBy); if (capped) { if (startedBy === "manual") this.failRun(run, capped); else void this.cancelRun(run.id, capped); continue; } const gated = triggerSource === "manual" ? false : this.gate.hold(run); if (gated === true) { if (this.options.preparing && run.attention !== this.options.preparing) { run.attention = this.options.preparing; this.emitRun(run); } continue; } if (gated) { this.failRun(run, gated); continue; }
         const startedAt = this.now();
         const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         const title = `${run.routineName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`;

@@ -82,6 +82,7 @@ export class OwnListeners {
   }
 
   add(port: number): void { processPorts.add(port); }
+  delete(port: number): void { processPorts.delete(port); }
 }
 
 export interface EgressSetup {
@@ -106,10 +107,12 @@ export const awayNotice = (device: string) => `The person's ${device} is away, s
 /** What the bot reads once when those sites load from My Cloud's own connection because no computer shares one. */
 export const UNSHARED_NOTICE = `Sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection and may refuse it with an error page or "too many requests". If one does and the person needs it, tell them these sites open through their own computer's internet connection while OpenMausBot is open on it, signed in to MausBot Cloud.`;
 
-/** One gate per browser session for the life of the server, so a Chrome keeps the port it launched with. */
+/** One gate per running browser session, so a Chrome keeps the port it launched with; released once that browser has
+ * ended, and opened again on the same port where it is still free. */
 export class BrowserEgress {
   private setup: Required<Omit<EgressSetup, "device">> & Pick<EgressSetup, "device"> | null = null;
   private readonly gates = new Map<string, Promise<EgressGate>>();
+  private readonly ports = new Map<string, number>();
   private readonly blocked = new Map<string, Blocked[]>();
   /** Sessions told those sites load from My Cloud's own connection, until the computer is back. */
   private readonly toldAway = new Map<string, { kind: "away" | "unshared"; text: string }>();
@@ -171,11 +174,26 @@ export class BrowserEgress {
         resolve: this.setup.resolve,
         upstreamProxy: () => parseSocks5Proxy(this.setup?.config()?.proxy),
         upstream: (target) => !this.setup?.config()?.proxy && opensFromHome(target.host) ? this.through(session) : null,
+        port: this.ports.get(session),
       });
       this.gates.set(session, gate);
-      gate.then((opened) => this.setup?.listeners.add(opened.port), () => this.gates.delete(session));
+      gate.then((opened) => { this.ports.set(session, opened.port); this.setup?.listeners.add(opened.port); }, () => this.gates.delete(session));
     }
     return gate.then((opened) => opened.port);
+  }
+
+  /** The sessions with an open gate. */
+  sessions(): string[] { return [...this.gates.keys()]; }
+
+  /** Closes `session`'s listener: its browser has ended, so nothing connects through it until the next open. */
+  async release(session: string): Promise<void> {
+    const gate = this.gates.get(session);
+    if (!gate) return;
+    this.gates.delete(session);
+    const opened = await gate.catch(() => null);
+    if (!opened) return;
+    this.setup?.listeners.delete?.(opened.port);
+    await opened.close();
   }
 
   private note(session: string, target: GateTarget, reason: Refusal): void {
