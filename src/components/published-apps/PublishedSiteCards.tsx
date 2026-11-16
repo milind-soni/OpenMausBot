@@ -47,10 +47,10 @@ function useNewestFor(links: readonly SiteCardLink[], messageId: string, at: num
 /** One card under a bot's reply for each of the viewer's own published sites it links to (their Published apps list),
  * on the newest reply that links it: the site drawn small, its name and address, Open (the preview beside the chat,
  * full screen on a phone) and Open in browser. Any other site stays a plain link. Nothing while the reply streams, and
- * nothing on a published page's own card. */
+ * nothing on a published page's or a template's own card. */
 export function PublishedSiteCards({ message }: { message: Message }) {
   const apps = useKnownPublishedApps();
-  const done = message.role === "bot" && message.kind === "text" && !message.publishedPage && !isLiveReply(message);
+  const done = message.role === "bot" && message.kind === "text" && !message.publishedPage && !message.template && !isLiveReply(message);
   const text = done ? message.text ?? "" : "";
   const origin = typeof window === "undefined" ? undefined : window.location?.origin;
   const { cards, unknown } = useMemo(() => (text && origin ? publishedSiteLinks(text, origin, apps) : { cards: [], unknown: [] }), [text, origin, apps]);
