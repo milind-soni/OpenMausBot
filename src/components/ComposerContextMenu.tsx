@@ -84,6 +84,8 @@ function summaryNotCounted(messages: readonly Message[], busy: boolean): boolean
 }
 
 const lastBreakdown = new Map<string, { moment: string; breakdown: ContextBreakdown }>();
+const newestRequest = new Map<string, number>();
+let requests = 0;
 
 /** The engine's own count, asked for while the panel is open and again whenever a turn starts or ends. The last answer
  * shows until the new one lands; none is asked for or shown between a summary or fresh start and the end of the next turn. */
@@ -97,12 +99,18 @@ function useContextBreakdown(bot: Bot | undefined, open: boolean): ContextBreakd
   const moment = `${messages.filter((message) => message.kind === "compaction").length}:${withheld}`;
   const [answer, setAnswer] = useState<{ slot: string; moment: string; breakdown: ContextBreakdown | null } | null>(null);
   useEffect(() => {
-    if (withheld) lastBreakdown.delete(slot);
+    if (withheld) {
+      lastBreakdown.delete(slot);
+      newestRequest.delete(slot);
+    }
     if (!open || !id || !threadId || withheld) return;
     let current = true;
+    const request = ++requests;
+    newestRequest.set(slot, request);
     void api<{ breakdown: ContextBreakdown | null }>(`/api/bots/${id}/context`, { method: "POST", body: JSON.stringify({ threadId }) })
       .then((reply) => reply?.breakdown ?? null, () => null)
       .then((breakdown) => {
+        if (newestRequest.get(slot) !== request) return;
         if (breakdown) lastBreakdown.set(slot, { moment, breakdown }); else lastBreakdown.delete(slot);
         if (current) setAnswer({ slot, moment, breakdown });
       });

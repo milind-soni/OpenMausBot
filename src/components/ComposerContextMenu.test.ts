@@ -212,6 +212,29 @@ describe("the composer's context button", () => {
     expect(store.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "error" }));
   });
 
+  it("keeps the newest count when an older request answers last, also for a panel mounted afterwards", async () => {
+    const bot = chat({ tokens: 12, window: 200_000 }, { id: "b5" });
+    const waiting: Array<(response: Response) => void> = [];
+    fetched.mockImplementation(() => new Promise<Response>((resolve) => waiting.push(resolve)));
+    const answer = (tokens: number) => new Response(JSON.stringify({ threadId: "t1", breakdown: { tokens, window: 200_000, categories: [{ id: "messages", kind: "used", tokens }] } }), { status: 200, headers: { "content-type": "application/json" } });
+    await render({ bot });
+    await press(trigger());
+    await render({ bot: { ...bot, busy: true } as Bot });
+    expect(waiting).toHaveLength(2);
+    await act(async () => { waiting[1](answer(18_000)); });
+    expect(words()).toContain("18k of 200k tokens");
+    await act(async () => { waiting[0](answer(6_000)); });
+    expect(words()).toContain("18k of 200k tokens");
+
+    act(() => root.unmount());
+    root = createRoot(host);
+    await render({ bot: { ...bot, busy: true } as Bot });
+    await press(trigger());
+    expect(waiting).toHaveLength(3);
+    expect(words()).toContain("9% used");
+    expect(words()).toContain("18k of 200k tokens");
+  });
+
   it("shows each measured bot of a room with its own compact, and no start fresh", async () => {
     const members = [{ id: "s", name: "Scout" }, { id: "p", name: "Pixel" }, { id: "q", name: "Quill" }] as Bot[];
     const group = { id: "g1", memberContext: { s: { tokens: 170_000, window: 200_000 }, q: { tokens: 60_000, window: 200_000, compactRequested: true } } } as unknown as Group;
