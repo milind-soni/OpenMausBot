@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ChevronDown, KeyRound, Loader2, LockKeyhole, ShieldCheck, Trash2 } from "lucide-react";
 
-import { loginHeldBackFor, type LoginBots, type LoginSummary, type OnePasswordItemRef, type OnePasswordStatus, type OnePasswordVault } from "../../shared/logins";
+import { loginHeldBackFor, normalizeLoginHost, type LoginBots, type LoginSummary, type OnePasswordItemRef, type OnePasswordStatus, type OnePasswordVault } from "../../shared/logins";
 import type { LinkedSecret, VaultSecret } from "../../shared/vault";
 import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
@@ -62,6 +62,7 @@ export function VaultSettings() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editBots, setEditBots] = useState<LoginBots>("all");
   const [editExact, setEditExact] = useState(false);
+  const [editSite, setEditSite] = useState("");
   const [removeTotp, setRemoveTotp] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,7 +94,7 @@ export function VaultSettings() {
     setAdding(null);
     setDeleting(null);
     setRemoveTotp(false);
-    if (login) { setEditBots(login.bots); setEditExact(login.exactHost); }
+    if (login) { setEditBots(login.bots); setEditExact(login.exactHost); setEditSite(login.hosts[0] ?? login.site); }
     setEditing(id);
   };
   const startAdding = (kind: Adding) => {
@@ -169,10 +170,11 @@ export function VaultSettings() {
       {editing === login.id && login.onePassword && itemEditor(login.onePassword, login.bots)}
       {editing === login.id && !login.onePassword && (
         <div className="ms-6 rounded-lg bg-inset/60 p-3">
-          <LoginForm username={false} replacing submitLabel={t("settings.logins.saveChange")} autoFocus
+          <LoginForm site={{ value: editSite, onChange: setEditSite }} username={false} replacing submitLabel={t("settings.logins.saveChange")} autoFocus
             onCancel={() => setEditing(null)}
             onSubmit={async (fields) => {
-              await changeLogin(login.id, { password: fields.password, totp: fields.totp, removeTotp, bots: editBots, ...(editExact === login.exactHost ? {} : { exactHost: editExact }) });
+              const host = normalizeLoginHost(editSite);
+              await changeLogin(login.id, { ...(host && login.hosts.includes(host) ? {} : { site: editSite }), password: fields.password, totp: fields.totp, removeTotp, bots: editBots, ...(editExact === login.exactHost ? {} : { exactHost: editExact }) });
               setEditing(null);
               await load();
             }}>

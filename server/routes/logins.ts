@@ -7,7 +7,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface LoginRouteDeps {
   list(): LoginSummary[];
   create(input: NewLogin): LoginSummary;
-  update(id: string, patch: LoginPatch): LoginSummary | null;
+  update(id: string, patch: LoginPatch): LoginSummary | null | "taken";
   remove(id: string): boolean;
   botExists(id: string): boolean;
   onePassword: {
@@ -46,6 +46,7 @@ export const LOGIN_ERRORS = {
   notServiceAccount: "That is not a 1Password service account token: those start with ops_. Make one in 1Password under Developer → Service accounts. A Connect token, an account password or a Secret Key does not work here.",
   exactHost: "exactHost must be true or false.",
   readOnly: "This login is in 1Password. Change or remove it there.",
+  taken: "A login with this username is already saved for that site. Change or delete that one instead.",
 } as const;
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -169,12 +170,16 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
     const bots = parseBots(body.bots, deps.botExists);
     if (!bots.ok) return json(res, 400, { error: bots.error });
     if (body.exactHost !== undefined && typeof body.exactHost !== "boolean") return json(res, 400, { error: LOGIN_ERRORS.exactHost });
+    const site = body.site === undefined ? undefined : normalizeLoginHost(body.site);
+    if (site === null) return json(res, 400, { error: LOGIN_ERRORS.site });
     const login = deps.update(id, {
+      ...(site === undefined ? {} : { site }),
       ...fields.value,
       ...(totp.value === undefined ? {} : { totp: totp.value }),
       ...(bots.value === undefined ? {} : { bots: bots.value }),
       ...(body.exactHost === undefined ? {} : { exactHost: body.exactHost }),
     });
+    if (login === "taken") return json(res, 409, { error: LOGIN_ERRORS.taken });
     return login ? json(res, 200, { login }) : json(res, 404, { error: "no such login" });
   };
 }

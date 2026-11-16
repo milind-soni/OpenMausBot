@@ -33,10 +33,11 @@ export async function addLogin(site: string, fields: LoginFieldsInput, bots: Log
   })).login;
 }
 
-export async function changeLogin(id: string, change: { password?: string; totp?: string; removeTotp?: boolean; bots?: LoginBots; exactHost?: boolean }): Promise<LoginSummary> {
+export async function changeLogin(id: string, change: { site?: string; password?: string; totp?: string; removeTotp?: boolean; bots?: LoginBots; exactHost?: boolean }): Promise<LoginSummary> {
   return (await api<{ login: LoginSummary }>(`/api/logins/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify({
+      ...(change.site === undefined ? {} : { site: change.site }),
       ...(change.password ? { password: change.password } : {}),
       ...(change.removeTotp ? { totp: null } : change.totp?.trim() ? { totp: change.totp } : {}),
       ...(change.bots ? { bots: change.bots } : {}),
