@@ -161,6 +161,6 @@ describe("fetchPageText", () => {
     expect(Date.now() - started).toBeLessThan(1000);
   });
   it("counts an answer that is not 2xx as a failed check", async () => {
-    expect(await fetchPageText(`http://status.test:${port}/404`, test)).toEqual({ ok: false, refused: false, error: "The page answered 404." });
+    expect(await fetchPageText(`http://status.test:${port}/404`, test)).toEqual({ ok: false, refused: false, error: "The page answered 404.", status: 404 });
   });
 });
