@@ -45,8 +45,8 @@ const folder = () => { const made = mkdtempSync(join(tmpdir(), "omb-bridge-switc
 afterAll(async () => { for (const made of folders) await removeTempDir(made); });
 /** A machine with no Claude settings anywhere. */
 const HOST: EngineHost = { home: folder(), managedPolicyFiles: [join(folder(), "managed-settings.json")] };
-/** An engine the bridge is applied on: a current Claude CLI in a folder with no settings of its own. */
-const CLAUDE: BridgeEngine = { driverKind: "claudeAgent", version: "2.1.232 (Claude Code)", cwd: folder() };
+/** An engine the bridge is applied on: a current Claude CLI in a folder with no settings of its own, tool search off. */
+const CLAUDE: BridgeEngine = { driverKind: "claudeAgent", version: "2.1.232 (Claude Code)", cwd: folder(), environment: { ENABLE_TOOL_SEARCH: "false" } };
 const agentsToolBridgeEnv = (...args: Parameters<typeof decide> extends [infer A, infer B, infer C, ...unknown[]] ? [A, B, C, NodeJS.ProcessEnv?, EngineHost?] : never) =>
   decide(args[0], args[1], args[2], args[3] ?? {}, args[4] ?? HOST);
 const agentsToolBridgeRefusal = (...args: Parameters<typeof refusal> extends [infer A, infer B, infer C, ...unknown[]] ? [A, B, C, NodeJS.ProcessEnv?, EngineHost?] : never) =>
@@ -159,12 +159,39 @@ describe("which engines a turn is bridged on", () => {
   });
 
   describe("Claude Code's exceptions", () => {
+    it("is not bridged while Claude Code's tool search defers the agents tools, whatever the switch says", () => {
+      const searching: BridgeEngine = { ...CLAUDE, environment: {} };
+      const deferred = "Claude Code defers the agents tools on this turn";
+      // tool search is on unless something turns it off, so the saved switch and the operator's override both give way
+      expect(agentsToolBridgeRefusal(ON, bot, searching, {})).toBe(deferred);
+      expect(agentsToolBridgeRefusal({}, bot, searching, { OMB_AGENTS_TOOL_BRIDGE: "1" })).toBe(deferred);
+      expect(agentsToolBridgeRefusal(ON, bot, { ...CLAUDE, environment: { ENABLE_TOOL_SEARCH: "auto" } }, {})).toBe(deferred);
+      // the server's environment counts as the driver reads it, under the instance's own
+      expect(agentsToolBridgeEnv(ON, bot, searching, { ENABLE_TOOL_SEARCH: "false" })).toEqual(on);
+      expect(agentsToolBridgeEnv(ON, bot, { ...CLAUDE, environment: { ENABLE_TOOL_SEARCH: "true" } }, { ENABLE_TOOL_SEARCH: "false" })).toEqual(off);
+      // and so do the launch folder's and the person's own Claude settings
+      const cwd = folder();
+      settings(join(cwd, ".claude", "settings.json"), { env: { ENABLE_TOOL_SEARCH: "false" } });
+      expect(agentsToolBridgeEnv(ON, bot, { ...searching, cwd }, {})).toEqual(on);
+      const home = folder();
+      settings(join(home, ".claude", "settings.json"), { env: { ENABLE_TOOL_SEARCH: "0" } });
+      expect(agentsToolBridgeEnv(ON, bot, searching, {}, { ...HOST, home })).toEqual(on);
+      const configDir = folder();
+      settings(join(configDir, "settings.json"), { env: { ENABLE_TOOL_SEARCH: "off" } });
+      expect(agentsToolBridgeEnv(ON, bot, { ...searching, config: { configDir } }, {})).toEqual(on);
+      // a model on this machine still gets the bridge by default: it reads the whole list on every turn
+      const local = { id: "bot-local", modelSelection: { model: "ollama::qwen3.5:4b" } };
+      expect(agentsToolBridgeRefusal({}, local, searching, {})).toBeNull();
+      // another engine is not Claude Code's tool search
+      expect(agentsToolBridgeEnv(ON, bot, { driverKind: "openai-compat" }, {})).toEqual(on);
+    });
+
     it("is not bridged when the bot inherits this machine's own Claude Code setup", () => {
       // settings the harness never sees may deny an agents tool by name
       expect(agentsToolBridgeEnv(ON, bot, CLAUDE, { OMB_CLAUDE_INHERIT_USER_CONFIG: "1" })).toEqual(off);
-      expect(agentsToolBridgeEnv(ON, bot, { ...CLAUDE, environment: { OMB_CLAUDE_INHERIT_USER_CONFIG: "1" } }, {})).toEqual(off);
+      expect(agentsToolBridgeEnv(ON, bot, { ...CLAUDE, environment: { ...CLAUDE.environment, OMB_CLAUDE_INHERIT_USER_CONFIG: "1" } }, {})).toEqual(off);
       // the instance's environment is laid over the server's, as the driver lays it
-      expect(agentsToolBridgeEnv(ON, bot, { ...CLAUDE, environment: { OMB_CLAUDE_INHERIT_USER_CONFIG: "0" } }, { OMB_CLAUDE_INHERIT_USER_CONFIG: "1" })).toEqual(on);
+      expect(agentsToolBridgeEnv(ON, bot, { ...CLAUDE, environment: { ...CLAUDE.environment, OMB_CLAUDE_INHERIT_USER_CONFIG: "0" } }, { OMB_CLAUDE_INHERIT_USER_CONFIG: "1" })).toEqual(on);
       // and the person's own Claude Code MCP servers are part of that setup
       expect(agentsToolBridgeEnv({ features: { agentsToolBridge: true, claudeUserMcp: true } }, bot, CLAUDE, {})).toEqual(off);
       expect(agentsToolBridgeEnv({ features: { agentsToolBridge: true, claudeUserMcp: false } }, bot, CLAUDE, {})).toEqual(on);
@@ -840,11 +867,15 @@ describe("the prompt of a bridged turn", () => {
     expect(AGENTS_TOOL_BRIDGE_PROMPT).not.toMatch(/\n/);
   });
 
-  it("sits in the stable half, so a warm engine is not relaunched by it turn after turn", () => {
+  it("rides the volatile half, so a bot's bridged and unbridged runs share one cached prefix", () => {
     const first = buildSystemPrompt("You are Kiwi.", "Be brief.", parts, bridged);
+    const unbridged = buildSystemPrompt("You are Kiwi.", "Be brief.", parts, { env: { OMB_AGENTS_TOOL_BRIDGE: "0" } });
     const later = buildSystemPrompt("You are Kiwi.", "Be brief.", parts.map((part) => part.id === "memory" ? { ...part, text: "\nMEMORY: the deploy script moved to tools/." } : part), bridged);
-    expect(first.stable).toContain(AGENTS_TOOL_BRIDGE_PROMPT);
-    expect(first.volatile).not.toContain(FIND_TOOL);
+    expect(first.volatile).toContain(AGENTS_TOOL_BRIDGE_PROMPT);
+    expect(first.stable).not.toContain(FIND_TOOL);
+    expect(first.stable).toBe(unbridged.stable);
+    // ahead of every other volatile section, as it sits right after the soul in the whole prompt
+    expect(first.volatile.startsWith(AGENTS_TOOL_BRIDGE_PROMPT)).toBe(true);
     expect(later.stable).toBe(first.stable);
     expect(later.volatile).not.toBe(first.volatile);
     // and it is the same text for every bot and every turn that has it

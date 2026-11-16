@@ -43,8 +43,11 @@ export function heavyPrompt(sections: readonly PromptSection[]): boolean {
 // at the computer, or not there) and what its words switched on.
 // Two per-turn sections stay stable on purpose: "setup" sits right after the standing instructions it overrides,
 // and "webhook" keeps its untrusted-data rule in the system prompt, out of reach of the payload it guards.
+// Two more ride the volatile half so a bot's stable half is the same bytes across its runs: the bridge rule (on for some
+// runs of a bot and not others) and an automation run's reply rule ("automation-reply"), which otherwise makes every
+// routine run write a new cached prefix.
 const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "long-waits", "recent", "availability", "active-routines",
-  "plan", "assignment", "routine-execution", "skill-instructions", "playbooks", "device-place", "files"]);
+  "plan", "assignment", "routine-execution", "automation-reply", "skill-instructions", "playbooks", "device-place", "files", "tool-bridge"]);
 /** In the stable half, so it is not sent again whenever availability changes, but no part of what a per-thread process is
  * keyed on: a warm process gets a changed roster as a note instead of a relaunch (SendTurnInput.systemRoster). */
 const ROSTER_SECTION = "roster";
