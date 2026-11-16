@@ -13,6 +13,11 @@ import { SettingRow, SettingsMark } from "./SettingsPrimitives";
 
 const LINE = "text-[13px] leading-relaxed text-ink-secondary";
 const POLL_MS = 3_000;
+const REACH: Record<NonNullable<GrokConnector["reach"]>, LocaleKey> = {
+  connected: "grokMove.connector.on",
+  connecting: "grokMove.connector.connecting",
+  elsewhere: "grokMove.connector.elsewhere",
+};
 const STATE: Record<GrokHandoff["state"], LocaleKey> = {
   working: "grokMove.connector.working",
   needs_you: "grokMove.connector.needsYou",
@@ -20,6 +25,9 @@ const STATE: Record<GrokHandoff["state"], LocaleKey> = {
   failed: "grokMove.connector.failed",
   stopped: "grokMove.connector.stopped",
 };
+
+/** Whether Grok Bot's calls reach this app through the link that is on. */
+export const grokReachLine = (reach: GrokConnector["reach"]): LocaleKey => REACH[reach ?? "connecting"];
 
 /** The link to paste into Grok Bot, its Copy button and where it goes: the same in the move and in Settings. */
 export function GrokLink({ url, where = "grokMove.connect.where" }: { url: string; where?: LocaleKey }) {
@@ -68,15 +76,19 @@ export function GrokConnectorPart() {
 
   return (
     <div data-import-section="grok-connector" className="flex flex-col">
-      <SettingRow title={t("grokMove.connector.title")} subtitle={t(url ? "grokMove.connector.on" : "grokMove.connector.off")}
+      <SettingRow title={t("grokMove.connector.title")} subtitle={t(url ? grokReachLine(connector.reach) : "grokMove.connector.off")}
         leading={<SettingsMark><GrokBotMark size={18} /></SettingsMark>}
-        message={failed ? <span role="alert" className="text-danger">{t("grokMove.connect.failed")}</span>
-          : connector.stopped && !url ? <span role="status" data-grok-move-stopped>{t("grokMove.connect.stopped")}</span> : undefined}>
+        message={failed ? <span role="alert" className="text-danger">{t("grokMove.connect.failed")}</span> : undefined}>
+        {connector.reach === "elsewhere" && (
+          <button type="button" data-grok-connector-here className="ui-button gap-1.5" disabled={busy} onClick={() => void turnOn()}>
+            {busy && <Loader2 size={14} className="animate-spin motion-reduce:animate-none" />}{t("grokMove.connector.useHere")}
+          </button>
+        )}
         {url ? (
           <button type="button" data-grok-connector-off className="ui-button" onClick={turnOff}>{t("grokMove.connector.turnOff")}</button>
         ) : (
-          <button type="button" data-grok-connector-on className="ui-button gap-1.5" disabled={busy || connector.opening} onClick={() => void turnOn()}>
-            {(busy || connector.opening) && <Loader2 size={14} className="animate-spin motion-reduce:animate-none" />}{t("grokMove.connect.start")}
+          <button type="button" data-grok-connector-on className="ui-button gap-1.5" disabled={busy} onClick={() => void turnOn()}>
+            {busy && <Loader2 size={14} className="animate-spin motion-reduce:animate-none" />}{t("grokMove.connect.start")}
           </button>
         )}
       </SettingRow>

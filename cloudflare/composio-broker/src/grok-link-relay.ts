@@ -54,7 +54,7 @@ export class LinkRelay {
   closed(socket: RelaySocket): void {
     if (this.current === socket) this.current = null;
     const offline = this.manifest?.offline;
-    for (const call of [...this.pending.values()]) {
+    for (const call of this.pending.values()) {
       if (call.socket === socket) call.settle(offline ? rpcResult(call.requestId, offline) : json({ error: "service unavailable" }, 503));
     }
   }

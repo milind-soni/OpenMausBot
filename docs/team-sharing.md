@@ -133,35 +133,42 @@ Bot's export through it, and the dialog lists the Bots as they arrive. They go
 through the same preview as a file, and nothing is imported until you choose
 Import.
 
-Grok Bot runs connectors from its own cloud computer, which cannot reach yours.
-So for as long as the link is open the app runs two things:
+Grok Bot runs connectors from its own cloud computer, which cannot reach yours,
+and it cannot change a connector's address once added. So the link's address is on
+MausBot's connected-apps service (`cloudflare/composio-broker`), and it never
+changes: you add it in Grok Bot once, and it keeps working across restarts,
+updates and networks.
 
-- A second listener on `127.0.0.1`, on a random port, that answers only
-  `POST /mcp/move/<key>` and serves an MCP server with four tools: `move_status`,
-  `send_export`, `hand_off_task` and `task_status`. The key is 32 random bytes. The app's own API is not on this
-  listener.
-- The `cloudflared` the app ships with, as a Cloudflare quick tunnel
-  (`https://<words>.trycloudflare.com`) to that listener. It needs no Cloudflare
-  account and reads no `cloudflared` configuration of yours.
+- The address is `https://<service>/mcp/move/<key>`. It serves an MCP server
+  with four tools: `move_status`, `send_export`, `hand_off_task` and
+  `task_status`.
+- While the link is on, the app keeps one outbound connection to the service.
+  The service passes each tool call down that connection, the app runs it and
+  answers, and the service passes the answer back to Grok Bot. Nothing listens on
+  your computer, and the app's own API is never exposed.
+- The work runs in the app. While MausBot is closed or the computer sleeps, Grok
+  Bot still sees the tools, and a call answers that MausBot isn't open. Open it
+  and the same link works again; nothing needs adding again.
 
 The link stays on until you turn it off (**Grok Bot connector → Turn off**, under
 Move from Grok Bot). Importing what arrived does not end it; the link only stops
-offering what you imported. While it is on, its key is kept in the data folder
+offering what you imported. While it is on, its secret is kept in the data folder
 (`grok-connector-key`, readable only by you), which backups and Cloud sends leave
-out. When the app starts again, after a restart or an update, the link comes back
-on by itself with the same key, but a quick tunnel's address is new each time, so
-the link Grok Bot has stops working. The app then shows **Your Grok Bot link
-changed** with the new link: in Grok Bot, remove the MausBot connector and add the
-new link (Grok Bot can't edit a connector's address). Copying the link, opening
-Settings from the notice or closing it ends the notice until the next change. If
-the link can't come back on, or `cloudflared` exits, the link stops and the app
-offers a new one, which also has to be added in Grok Bot again. Turning the link
-off forgets the key; turning it on again makes a new one. Requests pass through
-Cloudflare on their way to your computer. What arrives is held in the app's memory
-until you import it, turn the link off or the app quits; nothing is stored on a
-server of ours or anywhere else off your computer. Tasks handed off before a
-restart can no longer be read back with `task_status`; their conversations stay in
-MausBot.
+out. The key in the address is a one-way hash of that secret, so someone who has
+the address can call the tools but cannot take the link over. Turning the link off
+forgets the secret and the old address stops answering; turning it on again makes
+a new address, to add in Grok Bot again.
+
+What Grok Bot sends passes through the service on its way to your computer and is
+not stored there: the service keeps a hash of the link's key, when the app last
+connected, and the tool list and standing answers the app gave it. What arrives is
+held in the app's memory until you import it, turn the link off or the app quits.
+Tasks handed off before a restart can no longer be read back with `task_status`;
+their conversations stay in MausBot. A copied data folder holds the same secret:
+the copy of the app that connected last has the link, and the other one says so
+and offers **Use it here**. The link needs the connected-apps service, so it is
+offered in the built desktop app and not while `OMB_COMPOSIO_BROKER=off`; it needs
+no connected-apps account and works with your own Composio key.
 
 Whoever holds the link can send exports, read how many Bots have arrived and the
 names and one-line jobs of your bots, and hand your main bot a task and read that
@@ -181,7 +188,8 @@ you in MausBot. `task_status` tells Grok Bot whether the task is being worked on
 needs you, is done (with the main bot's last reply), failed or was stopped. The
 Grok Bot connector part in Settings lists the last five tasks; click one to open
 its conversation. `server/grok-move-mcp.ts` is the MCP
-server and `server/grok-move-tunnel.ts` the listener and tunnel.
+server, `server/grok-link.ts` the app's connection to the service and
+`cloudflare/composio-broker/src/grok-link.ts` the service's side.
 
 Everyone who can add a bot also sees a popup once, after the welcome on a new
 install and at the next launch otherwise: the two marks, **Let's start**, which

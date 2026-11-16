@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EMPTY_ONBOARDING, type OnboardingStatus } from "@/lib/onboarding";
 import { withTourReset } from "@/lib/guided-tour";
 import { DESKTOP_NOTICES } from "../../electron/desktop-prefs.mjs";
-import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, FOLLOWERS, GROK_LINK_NOTICE, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, localDay, markLaunchNotice, MODELGO_OFFER_NOTICE, MUST_ACT,
+import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, FOLLOWERS, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, localDay, markLaunchNotice, MODELGO_OFFER_NOTICE, MUST_ACT,
   nextNotice, noticeSeen, NOTICES, OLD_PRO_DISMISSALS, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE, type NoticeFacts,
   type NoticeId } from "./notices";
 
@@ -17,8 +17,8 @@ afterEach(() => vi.unstubAllGlobals());
 const record = (hintsSeen: string[] = []): OnboardingStatus => ({ ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen });
 const facts = (intro: boolean | null, trial: boolean | null, cloud: boolean | null, star: boolean | null, launch: boolean | null = false, popup: boolean | null = false,
   consent: boolean | null = false, simple: boolean | null = false, boat: boolean | null = false, two: boolean | null = false, grok: boolean | null = false, modelgo: boolean | null = false,
-  phone: boolean | null = false, announcement: boolean | null = false, link: boolean | null = false): NoticeFacts =>
-  ({ [GROK_LINK_NOTICE]: link, [GROK_MOVE_NOTICE]: grok, [PHONE_UPDATE_NOTICE]: phone, [SIMPLE_MODE_NOTICE]: simple, [WHATS_NEW_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [TWO_PLACES_NOTICE]: two, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud,
+  phone: boolean | null = false, announcement: boolean | null = false): NoticeFacts =>
+  ({ [GROK_MOVE_NOTICE]: grok, [PHONE_UPDATE_NOTICE]: phone, [SIMPLE_MODE_NOTICE]: simple, [WHATS_NEW_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [TWO_PLACES_NOTICE]: two, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud,
     [MODELGO_OFFER_NOTICE]: modelgo, [BOAT_OFFER_NOTICE]: boat, [ANNOUNCEMENT_NOTICE]: announcement, [STAR_NOTICE]: star });
 const none = () => false;
 const DAY = 86_400_000, NOON = new Date(2026, 9, 9, 12).getTime();
@@ -33,20 +33,11 @@ it("the Move from Grok Bot popup goes ahead of everything, and holds the queue w
   expect(GROK_MOVE_NOTICE).toBe("grok-move-2026-11");
 });
 
-it("the word that the Grok Bot link changed goes ahead of everything, may follow in a launch another notice took, and holds the queue until it is known", () => {
-  const all = (link: boolean | null) => facts(true, true, true, true, true, true, true, true, true, true, true, true, true, true, link);
-  expect(nextNotice(all(true), none)).toBe(GROK_LINK_NOTICE);
-  expect(nextNotice(all(null), none)).toBeNull();
-  expect(nextNotice(all(false), none)).toBe(GROK_MOVE_NOTICE);
-  expect(nextNotice(all(true), none, WHATS_NEW_NOTICE, true), "after the launch's notice closed").toBe(GROK_LINK_NOTICE);
-  expect(nextNotice(all(false), none, WHATS_NEW_NOTICE, true), "and nothing else then").toBe(UPDATES_CONSENT_NOTICE);
-});
-
 it("is one queue: the Simple mode popup first, then What's new, the product-updates question, the launch card, the card after the update, the trial's notice, the My Cloud card, Boat's credit offer, the star", () => {
   expect(nextNotice(facts(true, true, true, true, true, true, true, true), none)).toBe(SIMPLE_MODE_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, true, true, null), none), "nothing shows while the Simple mode popup waits").toBeNull();
   expect(nextNotice(facts(true, true, true, true, true, true, true, true), id => id === SIMPLE_MODE_NOTICE)).toBe(WHATS_NEW_NOTICE);
-  expect(NOTICES).toEqual([GROK_LINK_NOTICE, GROK_MOVE_NOTICE, PHONE_UPDATE_NOTICE, SIMPLE_MODE_NOTICE, WHATS_NEW_NOTICE, UPDATES_CONSENT_NOTICE, TWO_PLACES_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, MODELGO_OFFER_NOTICE, BOAT_OFFER_NOTICE, ANNOUNCEMENT_NOTICE, STAR_NOTICE]);
+  expect(NOTICES).toEqual([GROK_MOVE_NOTICE, PHONE_UPDATE_NOTICE, SIMPLE_MODE_NOTICE, WHATS_NEW_NOTICE, UPDATES_CONSENT_NOTICE, TWO_PLACES_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, MODELGO_OFFER_NOTICE, BOAT_OFFER_NOTICE, ANNOUNCEMENT_NOTICE, STAR_NOTICE]);
   expect(nextNotice(facts(true, true, true, true, true, false, false, false, false, true), none), "bots in two places come before any promotion").toBe(TWO_PLACES_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, false, true, false, false, true), none), "after the product-updates question").toBe(UPDATES_CONSENT_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, false, false, false, false, null), none), "nothing lower shows while main hasn't answered").toBeNull();
@@ -220,7 +211,7 @@ it("an Update MausBot on your phone dismissal is kept per phone, in short hints,
 });
 
 it("ModelGo's card follows the launch's notice in the same launch once it is closed, after the question, never ahead of a notice to act on", () => {
-  expect([...FOLLOWERS]).toEqual([GROK_LINK_NOTICE, UPDATES_CONSENT_NOTICE, MODELGO_OFFER_NOTICE, ANNOUNCEMENT_NOTICE]);
+  expect([...FOLLOWERS]).toEqual([UPDATES_CONSENT_NOTICE, MODELGO_OFFER_NOTICE, ANNOUNCEMENT_NOTICE]);
   expect([...MUST_ACT]).toEqual([GROK_MOVE_NOTICE, PHONE_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE]);
   const due = ({ popup = true, consent = false, trial = false, cloud = false, grok = false, intro = false, two = false }: Partial<Record<"popup" | "trial" | "cloud" | "grok" | "intro" | "two", boolean | null>> & { consent?: boolean | null }) =>
     facts(intro, trial, cloud, true, false, popup, consent, false, true, two, grok, true);

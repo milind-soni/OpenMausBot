@@ -15,9 +15,6 @@ export const PRODUCT_HUNT_NOTICE = "product-hunt-launch-2026-10";
 export const PRODUCT_HUNT_URL = "https://www.producthunt.com/products/mausbot";
 export const PRODUCT_HUNT_UNTIL = Date.UTC(2026, 10, 1);
 export const BOAT_OFFER_NOTICE = "boat-credit-2026-11";
-/** The Grok Bot connector came back on at a new address as the app started (GrokLinkNotice.tsx): until its link is copied or
- * the notice closed, first of all and in any launch, as Grok Bot can't reach this computer until the new link is added there. */
-export const GROK_LINK_NOTICE = "grok-link-changed";
 /** The Move from Grok Bot popup: each person sees it once, first of all, after their welcome. */
 export const GROK_MOVE_NOTICE = "grok-move-2026-11";
 /** The sponsor's card for ModelGo: each person sees it once, on every page but a branded build or a desktop whose organization
@@ -35,7 +32,6 @@ export const ANNOUNCEMENT_NOTICE = "announcement";
  * come after it there. The rest wait for later launches, in this order.
  */
 export const NOTICES = [
-  GROK_LINK_NOTICE,
   GROK_MOVE_NOTICE,
   PHONE_UPDATE_NOTICE,
   SIMPLE_MODE_NOTICE,
@@ -56,10 +52,9 @@ export type NoticeId = (typeof NOTICES)[number];
 
 export type NoticeFacts = Record<NoticeId, boolean | null>;
 
-/** What may still come in a launch another notice took: the word that the Grok Bot link changed, the product-updates
- * question, the sponsor's card and a card from the announcements file, which everyone is to see on the first launch they may
- * show in. Each in its place in NOTICES. */
-export const FOLLOWERS: readonly NoticeId[] = [GROK_LINK_NOTICE, UPDATES_CONSENT_NOTICE, MODELGO_OFFER_NOTICE, ANNOUNCEMENT_NOTICE];
+/** What may still come in a launch another notice took: the product-updates question, the sponsor's card and a card from the
+ * announcements file, which everyone is to see on the first launch they may show in. Each in its place in NOTICES. */
+export const FOLLOWERS: readonly NoticeId[] = [UPDATES_CONSENT_NOTICE, MODELGO_OFFER_NOTICE, ANNOUNCEMENT_NOTICE];
 /** The followers that are cards of their own: they never go ahead of a notice to act on, nor replace a card still up. */
 const FOLLOWING_CARDS: readonly NoticeId[] = [MODELGO_OFFER_NOTICE, ANNOUNCEMENT_NOTICE];
 /** Notices the person has to act on. The sponsor's card and an announcement card never go ahead of one, even one left for a

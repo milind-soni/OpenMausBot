@@ -10,7 +10,7 @@ import { t } from "@/lib/i18n";
 import { localSetupImport } from "@/lib/setup-import";
 import { api, useStore } from "@/state/store";
 import { GROK_EXPORT_MAX_CHARS, GROK_EXPORT_PROMPT, parseGrokExport, type GrokBot } from "../../shared/grok-import";
-import { GrokLink } from "./GrokConnector";
+import { GrokLink, grokReachLine } from "./GrokConnector";
 
 const PRIMARY = "ui-button ui-button-primary min-h-9 px-4 text-[14px]";
 const SECONDARY = "ui-button min-h-9 px-4 text-[14px]";
@@ -51,12 +51,12 @@ export function GrokMoveLines({ paused, files = null, apps, moved, unreadable, f
   return lines.length > 0 && <div className="flex flex-col gap-1">{lines.map((line) => <p key={line} className={LINE}>{line}</p>)}</div>;
 }
 
-const NO_CONNECTOR: Pick<GrokConnector, "available" | "connectorUrl" | "stopped"> = { available: false, stopped: false };
+const NO_CONNECTOR: Pick<GrokConnector, "available" | "connectorUrl" | "reach"> = { available: false };
 const POLL_MS = 3_000;
 
 /** The other way over: a link Grok Bot is given once, which the MausBot bot there sends every Bot through. */
-function ConnectGrokBot({ url, stopped, names, error, busy, onConnect, onUse }: {
-  url: string | undefined; stopped: boolean; names: readonly string[]; error: boolean; busy: boolean; onConnect: () => void; onUse: () => void;
+function ConnectGrokBot({ url, reach, names, error, busy, onConnect, onUse }: {
+  url: string | undefined; reach: GrokConnector["reach"]; names: readonly string[]; error: boolean; busy: boolean; onConnect: () => void; onUse: () => void;
 }) {
   const arrived = names.length > 0 && (
     <div data-grok-move-arrived role="status" className="mt-1 flex w-full items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent/[0.06] px-3 py-2">
@@ -71,6 +71,7 @@ function ConnectGrokBot({ url, stopped, names, error, busy, onConnect, onUse }: 
       {url ? (
         <>
           <GrokLink url={url} />
+          {reach !== "connected" && <p role="status" data-grok-move-reach={reach} className={LINE}>{t(grokReachLine(reach))}</p>}
           <p className={LINE}>{t("grokMove.connect.privacy")}</p>
           <button type="button" data-grok-move-template onClick={() => void openExternalLink(MAUSBOT_GROK_TEMPLATE_URL)} className={cn(SECONDARY, "mt-1 inline-flex items-center gap-2")}>
             <ExternalLink size={15} />{t("grokMove.connect.addBot")}
@@ -79,7 +80,6 @@ function ConnectGrokBot({ url, stopped, names, error, busy, onConnect, onUse }: 
         </>
       ) : (
         <>
-          {stopped && <p role="status" data-grok-move-stopped className={LINE}>{t("grokMove.connect.stopped")}</p>}
           {arrived}
           <button type="button" data-grok-move-connect-start disabled={busy} onClick={onConnect} className={cn(SECONDARY, "mt-1 inline-flex items-center gap-2")}>
             {busy && <Loader2 size={15} className="animate-spin" />}{t("grokMove.connect.start")}
@@ -175,8 +175,8 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
   const viaLinkThrough = useRef(0);
   const arrived = useMemo(() => foundExports(arrivedFiles).bots, [arrivedFiles]);
   const takeConnector = useCallback((next: GrokConnector) => {
-    setConnector({ available: next.available, stopped: next.stopped, ...(next.connectorUrl ? { connectorUrl: next.connectorUrl } : {}) });
-    if (!next.connectorUrl && !next.stopped) {
+    setConnector({ available: next.available, ...(next.connectorUrl ? { connectorUrl: next.connectorUrl, reach: next.reach } : {}) });
+    if (!next.connectorUrl) {
       lastSeq.current = 0;
       setArrivedFiles([]);
     } else if (next.seq > lastSeq.current) {
@@ -298,7 +298,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
             <BringBack local={local} look={look} found={found} reply={reply} error={error} onReply={setReply}
               onFile={(file) => readFile.current(file)} onFound={() => void show(() => found.bots)}
               connect={local && connector.available && (
-                <ConnectGrokBot url={connector.connectorUrl} stopped={connector.stopped} names={arrived.map((bot) => bot.name)} error={connectFailed} busy={connecting}
+                <ConnectGrokBot url={connector.connectorUrl} reach={connector.reach} names={arrived.map((bot) => bot.name)} error={connectFailed} busy={connecting}
                   onConnect={() => void connect()} onUse={() => void show(() => arrived, true)} />
               )} />
           )}

@@ -14,7 +14,7 @@ import { setLocale } from "@/lib/i18n";
 import { GrokConnectorPart } from "./GrokConnector";
 import { SettingsLook } from "./SettingsPrimitives";
 
-const LINK = "https://quiet-test-words.trycloudflare.com/mcp/move/abc";
+const LINK = "https://broker.test/mcp/move/abc";
 const HANDOFFS = [
   { title: "From Grok Bot: Book the dentist for Friday", state: "needs_you", botId: "chief", threadId: "t2", at: 2 },
   { title: "From Grok Bot: Summarise the launch notes", state: "done", botId: "chief", threadId: "t1", at: 1 },
@@ -23,7 +23,7 @@ const HANDOFFS = [
 let root: Root;
 let host: HTMLElement;
 let on: boolean;
-let stopped: boolean;
+let reach: string;
 let calls: string[];
 const tick = () => act(async () => { await new Promise((done) => setTimeout(done, 0)); });
 const shown = () => host.textContent ?? "";
@@ -37,7 +37,7 @@ beforeEach(() => {
   setLocale("en");
   vi.stubGlobal("ogb", { remoteClient: { active: false } });
   on = false;
-  stopped = false;
+  reach = "connected";
   calls = [];
   f.dispatch.mockReset();
   f.state = { config: {}, bots: [{ id: "chief", name: "MausBot", threadId: "t0", tasks: [{ threadId: "t1" }, { threadId: "t2" }] }], groups: [] };
@@ -46,7 +46,7 @@ beforeEach(() => {
     calls.push(`${init?.method ?? "GET"} ${path}`);
     if (init?.method === "POST") on = true;
     if (init?.method === "DELETE") on = false;
-    return { available: true, ...(on ? { connectorUrl: LINK } : stopped ? { stopped: true } : {}), arrived: [], handoffs: HANDOFFS };
+    return { available: true, ...(on ? { link: { url: LINK, reach } } : {}), arrived: [], handoffs: HANDOFFS };
   });
   host = document.createElement("div");
   document.body.append(host);
@@ -66,7 +66,7 @@ describe("Settings → Import: the Grok Bot connector", () => {
     expect(host.querySelector('input[aria-label="Link for Grok Bot"]')).toBeNull();
     await act(async () => button("Get the link")!.click());
     await tick();
-    expect(shown()).toContain("On. The link changes when MausBot restarts or updates, so add the new one in Grok Bot then.");
+    expect(shown()).toContain("On. The link never changes, so you add it in Grok Bot once.");
     expect(host.querySelector<HTMLInputElement>('input[aria-label="Link for Grok Bot"]')!.value).toBe(LINK);
     expect(button("Copy the link")).toBeDefined();
     expect(shown()).toContain("paste this as the Server URL");
@@ -91,17 +91,26 @@ describe("Settings → Import: the Grok Bot connector", () => {
     expect(f.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "switchTask", botId: "chief", threadId: "t1" }, { type: "revealThread", threadId: "t1" }]);
   });
 
-  it("says when the link stopped and offers a new one", async () => {
-    stopped = true;
+  it("says when Grok Bot can't reach the app, with the link still shown", async () => {
+    on = true;
+    reach = "connecting";
     await render();
-    expect(host.querySelector("[data-grok-move-stopped]")?.textContent).toBe("The link stopped working. Get a new one and paste it into Grok Bot in place of the old one.");
-    expect(button("Get the link")).toBeDefined();
+    expect(shown()).toContain("On, but MausBot can't get online right now, so Grok Bot can't reach it. It keeps trying, and the link stays the same.");
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Link for Grok Bot"]')!.value).toBe(LINK);
+    expect(button("Use it here")).toBeUndefined();
   });
 
-  it("waits while the link comes back on as the app starts", async () => {
-    f.api.mockImplementation(async () => ({ available: true, opening: true, arrived: [], handoffs: [] }));
+  it("offers to take the link back when another copy of the app took it", async () => {
+    on = true;
+    reach = "elsewhere";
     await render();
-    expect(button("Get the link")!.disabled).toBe(true);
+    expect(shown()).toContain("Another copy of MausBot is using this link, so what Grok Bot sends goes there.");
+    reach = "connected";
+    await act(async () => button("Use it here")!.click());
+    await tick();
+    expect(calls.at(-1)).toBe("POST /api/setup-import/grok/connector");
+    expect(button("Use it here")).toBeUndefined();
+    expect(button("Turn off")).toBeDefined();
   });
 
   it("says so when the link cannot be made", async () => {
@@ -115,7 +124,7 @@ describe("Settings → Import: the Grok Bot connector", () => {
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("Couldn't make the link. Check that you're online and try again.");
   });
 
-  it("shows nothing where no link can be made: no cloudflared, a browser or a Cloud", async () => {
+  it("shows nothing where no link can be made: no connected-apps service, a browser or a Cloud", async () => {
     f.api.mockImplementation(async () => ({ available: false, arrived: [], handoffs: [] }));
     await render();
     expect(host.innerHTML).toBe("");

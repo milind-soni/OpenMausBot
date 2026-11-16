@@ -32,16 +32,16 @@ export interface GrokHandoff {
   at: number;
 }
 
-/** The link Grok Bot sends Bots and tasks to, when this app can make one, what arrived through it and the last handoffs. */
+/** `elsewhere`: another copy of the app took the link, and this one stays away until asked to take it back. */
+export type GrokReach = "connecting" | "connected" | "elsewhere";
+
+/** The link Grok Bot sends Bots and tasks to, when this app can have one, what arrived through it and the last handoffs. */
 export interface GrokConnector {
   available: boolean;
+  /** While the connector is on: its link, the same for as long as it stays on. */
   connectorUrl?: string;
-  /** The link was made and no longer works; what arrived through it is still here. */
-  stopped: boolean;
-  /** A link is opening: asked for, or coming back on as the app starts. */
-  opening: boolean;
-  /** The link came back on with a new address as the app started; until the person copies it or closes the notice. */
-  changed: boolean;
+  /** While the connector is on: whether Grok Bot's calls reach this app now. */
+  reach?: GrokReach;
   arrived: GrokLook["files"];
   /** The last arrival's number: the next look asks for what came after it. */
   seq: number;
@@ -51,29 +51,24 @@ export interface GrokConnector {
 /** A look that asks for no arrivals. */
 export const NO_ARRIVALS = Number.MAX_SAFE_INTEGER;
 
-/** POST opens the link (or gives the one already open; a new one takes a few seconds) or, with `taken`, lets go of what
- * was imported up to that number; GET looks for what arrived after `after`; DELETE turns the link off. */
+const REACHES: readonly string[] = ["connecting", "connected", "elsewhere"] satisfies GrokReach[];
+
+/** POST turns the link on (or gives the one already on, or takes it back from another copy of the app) or, with `taken`,
+ * lets go of what was imported up to that number; GET looks for what arrived after `after`; DELETE turns the link off. */
 export async function grokConnector(method: "GET" | "POST" | "DELETE", after = 0, taken?: number): Promise<GrokConnector> {
-  const answer = await api<{ available?: boolean; connectorUrl?: string; stopped?: boolean; opening?: boolean; changed?: boolean; arrived?: Array<{ seq: number; at: number; text: string }>; handoffs?: GrokHandoff[] } | null>(
+  const answer = await api<{ available?: boolean; link?: { url?: unknown; reach?: unknown }; arrived?: Array<{ seq: number; at: number; text: string }>; handoffs?: GrokHandoff[] } | null>(
     `/api/setup-import/grok/connector${method === "GET" && after ? `?after=${after}` : ""}`,
     { method, timeoutMs: 60_000, ...(method === "POST" ? { body: JSON.stringify(taken === undefined ? {} : { taken }) } : {}) },
   );
   const arrived = Array.isArray(answer?.arrived) ? answer.arrived : [];
+  const link = answer?.link;
   return {
     available: answer?.available === true,
-    ...(typeof answer?.connectorUrl === "string" ? { connectorUrl: answer.connectorUrl } : {}),
-    stopped: answer?.stopped === true,
-    opening: answer?.opening === true,
-    changed: answer?.changed === true,
+    ...(typeof link?.url === "string" && typeof link.reach === "string" && REACHES.includes(link.reach) ? { connectorUrl: link.url, reach: link.reach as GrokReach } : {}),
     arrived: arrived.map((item) => ({ name: String(item.seq), modifiedAt: item.at, text: item.text })),
     seq: arrived.reduce((last, item) => Math.max(last, item.seq), taken ?? after),
     handoffs: Array.isArray(answer?.handoffs) ? answer.handoffs : [],
   };
-}
-
-/** The person copied the link that came back on, or closed the notice saying it changed. */
-export function grokLinkSeen(): Promise<unknown> {
-  return api("/api/setup-import/grok/connector", { method: "POST", body: JSON.stringify({ seen: true }) });
 }
 
 /** A refusal or an unreadable reply, in the person's words. */

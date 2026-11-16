@@ -38,7 +38,7 @@ vi.mock("@/components/EngineLibrary", () => ({ engineReady: (instance: { snapsho
   instance.snapshot.state === "available" && instance.snapshot.authenticated !== false }));
 import { AppNotices } from "./AppNotices";
 import { TwoPlacesCard } from "./TwoPlacesCard";
-import { BOAT_OFFER_NOTICE, CLOUD_INTRO, GROK_LINK_NOTICE, GROK_MOVE_NOTICE, launchNotice, localDay, MODELGO_OFFER_NOTICE, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { BOAT_OFFER_NOTICE, CLOUD_INTRO, GROK_MOVE_NOTICE, launchNotice, localDay, MODELGO_OFFER_NOTICE, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { BOAT_OFFER, boatClaimMailto } from "@/lib/boat-offer";
 import { track } from "@/lib/analytics";
 import { ADVANCED_MODE_KEY, setAdvancedMode } from "@/lib/interface-mode";
@@ -1807,79 +1807,5 @@ describe("Update MausBot on your phone", () => {
     expect(await settle()).toContain(TITLE);
     session.clear(); bridgesOn(); f.state.liveCall = { status: "active" };
     expect(await launch(), "a live call").toBe("");
-  });
-});
-
-describe("Your Grok Bot link changed", () => {
-  const TITLE = "Your Grok Bot link changed", LINK = "https://new-test-words.trycloudflare.com/mcp/move/abc";
-  let connector: Record<string, unknown>;
-  const seen = () => vi.mocked(api).mock.calls.filter(([path, init]) => path === "/api/setup-import/grok/connector" && (init as RequestInit | undefined)?.body === '{"seen":true}');
-  const looks = () => vi.mocked(api).mock.calls.filter(([path]) => String(path).startsWith("/api/setup-import/grok/connector?"));
-
-  beforeEach(() => {
-    returning(); storage.set(CLOUD_INTRO, "1");
-    connector = { available: true, connectorUrl: LINK, changed: true, arrived: [], handoffs: [] };
-    const others = vi.mocked(api).getMockImplementation()!;
-    vi.mocked(api).mockImplementation(async (path, init) => {
-      if (!String(path).startsWith("/api/setup-import/grok/connector")) return others(path, init);
-      if ((init as RequestInit | undefined)?.method === "POST") connector = { ...connector, changed: undefined };
-      return connector;
-    });
-  });
-
-  it("after the app started again with the connector on, says so first, with the new link, its Copy and Settings", async () => {
-    const html = await launch();
-    for (const text of [TITLE, "MausBot restarted, so the link Grok Bot uses changed. In Grok Bot, remove the MausBot connector and add this link.",
-      `value="${LINK}"`, "Copy the link", "Open Settings", 'aria-label="Close"']) expect(html).toContain(text);
-    expect(html).not.toContain(STAR);
-    expect(launchNotice()).toBe(GROK_LINK_NOTICE);
-  });
-
-  it("Copy ends it until the next change and says the link was copied", async () => {
-    vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn(async () => {}) } });
-    await launch();
-    press("Copy the link"); await flush();
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(LINK);
-    expect(seen()).toHaveLength(1);
-    const after = render();
-    expect(after).toContain("Link copied. Add it in Grok Bot."); expect(after).not.toContain(TITLE);
-    expect(await relaunch(), "the next launch, the link unchanged").not.toContain(TITLE);
-    connector = { ...connector, changed: true };
-    expect(await relaunch(), "the next change").toContain(TITLE);
-  });
-
-  it("Close ends it too, and Open Settings ends it and opens Settings → Import", async () => {
-    await launch();
-    press("Close"); await flush();
-    expect(seen()).toHaveLength(1); expect(render()).not.toContain(TITLE);
-    connector = { ...connector, changed: true };
-    await relaunch();
-    press("Open Settings"); await flush();
-    expect(seen()).toHaveLength(2); expect(render()).not.toContain(TITLE);
-    expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "import" });
-  });
-
-  it("follows the launch's notice once it is closed, as Grok Bot can't reach this computer until the new link is there", async () => {
-    connector = { ...connector, changed: undefined };
-    expect(await launch()).toContain(STAR);
-    press("Dismiss for good"); await flush();
-    connector = { ...connector, changed: true };
-    f.state.connected = false; await settle(); f.state.connected = true;
-    expect(await settle(), "the app started again while this window stayed open").toContain(TITLE);
-  });
-
-  it("never on turning the connector on, while it is off, or on a Cloud; and holds the queue while the link opens", async () => {
-    connector = { available: true, connectorUrl: LINK, arrived: [], handoffs: [] };
-    expect(await launch(), "a link the person just got").toContain(STAR);
-    connector = { available: true, arrived: [], handoffs: [] };
-    expect(await relaunch(), "off").toContain(STAR);
-    connector = { available: true, opening: true, arrived: [], handoffs: [] };
-    expect(await relaunch(), "nothing lower shows while the link opens").toBe("");
-    connector = { available: true, connectorUrl: LINK, changed: true, arrived: [], handoffs: [] };
-    expect(await settle()).toContain(TITLE);
-    vi.mocked(api).mockClear();
-    f.state.config.cloudHome = true;
-    expect(await relaunch(), "a Cloud").not.toContain(TITLE);
-    expect(looks(), "a Cloud never asks").toEqual([]);
   });
 });
