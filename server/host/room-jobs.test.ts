@@ -8,7 +8,7 @@ import { createRoomJobs } from "./room-jobs.ts";
 type Operation = { threadId: string; cancelled: boolean; botIds: Set<string>; line?: { current?: string; pending: string[] } };
 type Room = { id: string; name: string; threadId: string; busyBotId?: string | null };
 
-function setup(input: { rooms: Room[]; operations?: Record<string, Operation[]>; busyThreads?: Record<string, string[]>; running?: string[]; jobs: Partial<HandoffView>[] }) {
+function setup(input: { rooms: Room[]; operations?: Record<string, Operation[]>; busyThreads?: Record<string, string[]>; running?: string[]; speakers?: Record<string, string>; jobs: Partial<HandoffView>[] }) {
   const running = new Set([...(input.running ?? []), ...Object.keys(input.busyThreads ?? {})]);
   const store = {
     groups: input.rooms,
@@ -18,7 +18,7 @@ function setup(input: { rooms: Room[]; operations?: Record<string, Operation[]>;
   const active = input.jobs.map((job, index) => ({ id: `job-${index}`, parentId: "lead-turn", status: "queued", createdAt: index, ...job }) as HandoffView);
   return createRoomJobs({
     store, cfg: {} as AppConfig, coordinator: { active: () => active },
-    operations: (groupId) => input.operations?.[groupId] ?? [], speakerOf: () => undefined, laneRoomThread: () => undefined,
+    operations: (groupId) => input.operations?.[groupId] ?? [], speakerOf: (threadId) => input.speakers?.[threadId], laneRoomThread: () => undefined,
   });
 }
 
@@ -27,7 +27,7 @@ describe("a room's queue names where a waiting member is busy", () => {
   const handedIn2 = { botId: "coder", groupId: "room-2", threadId: "g2" };
 
   it("marks a member queued here while its turn runs in another room", () => {
-    const jobs = setup({ rooms, running: ["coder"], operations: { "room-1": [{ threadId: "g1", cancelled: false, botIds: new Set(["coder"]) }] }, jobs: [handedIn2] });
+    const jobs = setup({ rooms, running: ["coder"], speakers: { g1: "coder" }, operations: { "room-1": [{ threadId: "g1", cancelled: false, botIds: new Set(["coder"]) }] }, jobs: [handedIn2] });
     expect(jobs.roomLineOf(rooms[1] as never)).toEqual([
       { botId: "coder", threadId: "g2", state: "queued", position: 1, of: 1, assignmentId: "job-0", busyIn: { groupId: "room-1", threadId: "g1" } },
     ]);
@@ -51,5 +51,11 @@ describe("a room's queue names where a waiting member is busy", () => {
     const three = [...rooms, { id: "room-3", name: "Group 3", threadId: "g3", busyBotId: "coder" }];
     expect(setup({ rooms: three, running: ["coder"], operations: pendingInRoom1, jobs: [handedIn2] }).roomLineOf(three[1] as never)[0]?.busyIn)
       .toEqual({ groupId: "room-3", threadId: "g3" });
+  });
+
+  it("does not name a room whose turn for the member has not started yet", () => {
+    const queuedInRoom1 = { "room-1": [{ threadId: "g1", cancelled: false, botIds: new Set(["coder"]) }] };
+    expect(setup({ rooms, busyThreads: { coder: ["own-chat"] }, operations: queuedInRoom1, jobs: [handedIn2] }).roomLineOf(rooms[1] as never)[0]?.busyIn)
+      .toEqual({ threadId: "own-chat" });
   });
 });
