@@ -299,6 +299,9 @@ on. Simple is the default for new installs.
   Tokens, usage, inspectors, raw logs and developer tools belong in Advanced.
 - **Advanced adds; it doesn't rearrange.** The same thing sits in the same
   place in both modes. Advanced may show more rows or more detail.
+  One exception: where Advanced already shows something in place (a bot's
+  threads as a tree under its row), Simple may offer a shortcut to the same
+  thing there instead of a second copy of it.
 - **Switching modes never loses data.**
 
 ## 14. Accessibility
