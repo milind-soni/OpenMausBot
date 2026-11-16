@@ -119,6 +119,34 @@ the full server with a made-up key and its `fetch` stubbed.
 `server/hosted-access.test.ts` does it for a shared workspace, with no key saved,
 so a caller who gets through stops at the setup prompt.
 
+## A custom endpoint as the Live provider
+
+With `live.provider: "custom"` (`OMB_LIVE_PROVIDER=custom`) a call goes to a
+server the person names that speaks OpenAI's GPT-Live API, such as their own
+gateway: `POST {endpoint}/live/sessions` with `live.customModel`
+(`OMB_CUSTOM_LIVE_MODEL`, default `gpt-live-1`) as `session.model`, and the
+sideband attaches to `wss://{endpoint}/live/sessions/{id}/attach`. The request
+is OpenAI's own: the key goes as a bearer token and `session.client` is sent.
+`live.customEndpoint` (`OMB_CUSTOM_LIVE_ENDPOINT`) is read by
+`customLiveApiBase` in `server/live-call.ts`: `https` on any host, or `http`
+only on loopback (`127.0.0.1`, `localhost`, `[::1]`); no user name, password,
+query or fragment; a bare host or one ending in `/live/sessions` becomes
+`…/v1`. `PATCH /api/live/settings` refuses any other address, and the session
+request refuses a redirect.
+
+The key is only `live.key`, tied to `custom:<host>` the same way an Azure key is
+tied to its host; the OpenAI API key is never sent to a custom endpoint. Without
+the key, or with a missing or invalid endpoint, `POST /api/live/session` answers
+`409` with `needsKey` before anything leaves the harness.
+
+Nothing checks that a custom endpoint keeps to `LIVE_DATA_CHANNEL`, so its calls
+have Azure's limit: only an admin, or the owner of a single-owner server, may
+start one (`LIVE_CUSTOM_REFUSAL` in `server/live-access.ts`).
+
+```sh
+pnpm exec vitest run server/live-custom.test.ts server/live-call-controller.test.ts server/routes/live.test.ts
+```
+
 ## Fish Audio Live 3 as the Live provider
 
 With `live.provider: "fish"` (`OMB_LIVE_PROVIDER=fish`) a call uses the Fish

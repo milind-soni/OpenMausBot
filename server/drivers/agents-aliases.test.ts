@@ -36,7 +36,7 @@ async function run(name: string, args: Json) {
   const sent: Array<{ path: string; body?: unknown }> = [];
   const answer = { ok: true, status: 201, body: { messageId: "m1", resultId: "t-1", now: "2026-10-29T09:00:00Z", timeZone: "UTC", triggers: [], ok: true, file: "memory/log/2026-10-29.md", line: "- 09:00 · Deployed the site.", text: "Saved." } };
   const context: ToolCallContext = {
-    botId: "bot-alias", threadId: "thread-alias", depth: 0, externalRuntime: false, sharedComputers: true,
+    botId: "bot-alias", threadId: "thread-alias", externalRuntime: false, sharedComputers: true,
     client: {
       api: async (path, init) => { sent.push({ path, body: init?.body }); return answer.body; },
       apiResponse: async (path, init) => { sent.push({ path, body: init?.body }); return answer; },

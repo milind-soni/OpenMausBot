@@ -1,3 +1,4 @@
+import { isLinkedId } from "../bot-link/protocol.ts";
 import type { HandoffView, RoomAddress } from "../coordinator.ts";
 import { peerAllowed, reachRefusal, type LookedAfterBy } from "../peer-roster.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
@@ -43,6 +44,8 @@ export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy,
     return undefined;
   }
   function roomHandoffProblem(node: Pick<HandoffView, "groupId" | "threadId" | "botId"> & Partial<Pick<HandoffView, "kind" | "id" | "origin">>, parent?: Pick<HandoffView, "groupId" | "threadId" | "botId">): string | undefined {
+    // A bot of the person's other place is no record here: whether it can be reached is the link's to say.
+    if (isLinkedId(node.botId)) return undefined;
     const group = node.groupId ? store.group(node.groupId) : undefined;
     const bot = store.bot(node.botId);
     if (!bot || bot.hidden) return "The addressed agent no longer exists";
@@ -55,7 +58,8 @@ export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy,
     const laneThread = laneRoomThread(node);
     const laneRoom = laneThread ? store.groupByThread(laneThread) : undefined;
     if (laneRoom && !laneRoom.dm && !laneRoom.memberIds.includes(bot.id)) return LEFT_THE_ROOM;
-    if (parent) {
+    // Work the person's other place handed over the link has no sender here to check: the link itself admits it.
+    if (parent && !isLinkedId(parent.botId)) {
       const from = store.bot(parent.botId);
       const source = parent.groupId ? store.group(parent.groupId) : undefined;
       if (!from || from.hidden || (parent.groupId ? !source || !source.memberIds.includes(from.id) || !store.groupTaskByThread(source.id, parent.threadId) : !store.taskByThread(from.id, parent.threadId))) return "Source membership or task was removed";

@@ -94,3 +94,8 @@ export function outOfBounds(tool: string, schema: unknown, args: Json): string |
   const shown = problems.slice(0, PROBLEMS_SHOWN).join("; ");
   return `${tool} was not run: ${shown}${problems.length > PROBLEMS_SHOWN ? `; and ${problems.length - PROBLEMS_SHOWN} more` : ""}. Fix these and call it again.`;
 }
+
+/** The arguments `schema` takes at its top level, for a refusal that names a call's missing or wrong one. */
+export function argumentNames(schema: unknown): string {
+  return record(schema) && record(schema.properties) ? Object.keys(schema.properties).join(", ") : "";
+}

@@ -2,9 +2,6 @@
 // a chart card's picture. Tried as a Team Cloud member, whose session is the same client scope a `pair --phone` phone gets:
 // a bot they can't see answers exactly as a missing one, and nothing that runs, changes or exports data opens to them.
 import { randomBytes } from "node:crypto";
-import { symlinkSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
 import { launchCloudSendFixture } from "../scripts/testing/cloud-send-fixture.ts";
@@ -14,11 +11,11 @@ import { hostTimeout } from "./testing/host-timeout.ts";
 const NO_SUCH_BOT = { status: 404, body: { error: "no such bot" } };
 
 it("lets a member's phone read a visible bot's Data, and nothing of a bot they can't see", async () => {
-  const fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-${randomBytes(8).toString("hex")}`, team: { id: "team-phone-data", name: "Acme" } });
+  // DuckDB and the chart renderer join the fixture's native tree (a fake 1Password SDK) before the Team Cloud starts: its
+  // first config broadcast loads DuckDB, and a link made after that came too late.
+  const fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-${randomBytes(8).toString("hex")}`, team: { id: "team-phone-data", name: "Acme", native: ["@duckdb", "@resvg"] } });
   try {
     const team = fx.team!;
-    // The fixture's native tree holds a fake 1Password SDK only; DuckDB loads on first use, so it can join it now.
-    for (const scope of ["@duckdb", "@resvg"]) symlinkSync(fileURLToPath(new URL(`../node_modules/${scope}`, import.meta.url)), join(team.home, "native", "node_modules", scope), "junction");
     const owner = (await team.pair({ email: "olive@acme.test", role: "owner" })).token!;
     const member = (await team.pair({ email: "rui@acme.test", role: "member" })).token!;
     expect((await team.as(member, "GET", "/api/auth/session")).body.scopes).toEqual(["client"]);

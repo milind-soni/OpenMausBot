@@ -38,7 +38,7 @@ export type SettledTurn = Parameters<TurnStops["failureCause"]>[0];
 
 export interface QuotaSwitchDeps {
   store: Store;
-  coordinator: Pick<Coordinator, "all" | "node">;
+  coordinator: Pick<Coordinator, "newestRoot" | "inThread" | "node">;
   registry: { instances(): QuotaSwitchEngine[] };
   turnStops: Pick<TurnStops, "failureCause"> & Partial<Pick<TurnStops, "read">>;
   /** Which AIs carry on while one is limited or signed out, and the one notice for each stretch of either. */
@@ -70,6 +70,13 @@ export type QuotaAnswer = "answered" | "rejected" | "unavailable";
 export const NOT_NOW = "Not now";
 
 const ENDED: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
+
+/** Why a failed turn stopped, when it was its AI's usage limit or a sign-out. A tool call's failure names the tool,
+ * never the engine's own limit, whatever its words. */
+export function turnLimitScope(event: SettledTurn, flags: { limit?: TakeoverScope } | undefined, cause: string | undefined): TakeoverScope | undefined {
+  return signedOutStop(event.stopReason, cause) ? "signed-out"
+    : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
+}
 
 /** On unless OMB_QUOTA_SWITCH=0: a limited AI's work carries on with another AI by itself. Off, only the backups
  * Automatic recovery names take over, as before. */
@@ -144,9 +151,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
   };
 
   /** The newest root: a backup engine's retry or a change of computer begins another root for the same request. */
-  const rootOf = (threadId: string, request: QuotaRequest): string | undefined => coordinator.all()
-    .filter((node) => !node.parentId && node.threadId === threadId && request.generations.has(node.id))
-    .sort((a, b) => a.createdAt - b.createdAt).at(-1)?.id;
+  const rootOf = (threadId: string, request: QuotaRequest): string | undefined => coordinator.newestRoot(threadId, request.generations)?.id;
 
   /** Moves the thread to `selection` and sends the person's message that hit the limit (or met a signed-out AI) again
    * there; false when that AI cannot take it now. No await from the readiness check to the resend: the gate, the switch
@@ -201,10 +206,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       // Read before any await: the record is this turn's only now.
       const request = deps.request(threadId);
       const flags = deps.turnStops.read?.(threadId, event.turnId)?.flags;
-      const cause = deps.turnStops.failureCause(event);
-      // A tool call's failure names the tool, never the engine's own limit, whatever its words.
-      const scope: TakeoverScope | undefined = signedOutStop(event.stopReason, cause) ? "signed-out"
-        : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
+      const scope = turnLimitScope(event, flags, deps.turnStops.failureCause(event));
       if (!scope) return null;
       const thread = store.projectBotForTask(bot.id, threadId) ?? bot;
       const from = thread.modelSelection;
@@ -263,7 +265,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     const root = rootId ? coordinator.node(rootId) : undefined;
     if (root && !ENDED.has(root.status)) return root.cards?.length ? "card" : "runtime";
     if (deps.busy(botId, threadId)) return "busy";
-    const asked = coordinator.all().some((node) => node.parentId !== undefined && node.threadId === threadId
+    const asked = coordinator.inThread(threadId, { open: true }).some((node) => node.parentId !== undefined
       && node.status === "waiting" && node.question !== undefined && !node.cards?.length);
     return asked ? "question" : null;
   };

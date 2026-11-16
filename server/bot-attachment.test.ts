@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // attachments.ts reads DATA_DIR at import time.
 const DATA_ROOT = mkdtempSync(join(tmpdir(), "omb-bot-attachment-"));
 process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
-const { attachForTurn, deliveredCopy, guestWorkspaceToHost, saveBotAttachment } = await import("./bot-attachment.ts");
+const { attachForTurn, contentUploadId, deliveredCopy, guestWorkspaceToHost, saveBotAttachment } = await import("./bot-attachment.ts");
 const { ATTACHMENTS_DIR, FILE_MAX_BYTES, PREVIEW_MAX_BYTES } = await import("./attachments.ts");
 
 const WORK = join(DATA_ROOT, "work");
@@ -124,6 +124,58 @@ describe("saveBotAttachment", () => {
     await expect(saveBotAttachment({ path: "nope.pdf", roots: [WORK] })).rejects.toMatchObject({ status: 404 });
     await expect(saveBotAttachment({ path: "  ", roots: [WORK] })).rejects.toMatchObject({ status: 400 });
     expect(existsSync(ATTACHMENTS_DIR)).toBe(true);
+  });
+});
+
+describe("saveBotAttachment by content", () => {
+  it("keeps the same bytes once under a name made from them, whatever the file is called, and says when it was already there", async () => {
+    writeFileSync(join(WORK, "passed.csv"), "a,b\n1,2\n");
+    writeFileSync(join(WORK, "passed-again.csv"), "a,b\n1,2\n");
+    writeFileSync(join(WORK, "other.csv"), "a,b\n3,4\n");
+    writeFileSync(join(WORK, "passed.png"), PNG);
+    const first = await saveBotAttachment({ path: "passed.csv", roots: [WORK], byContent: true });
+    const again = await saveBotAttachment({ path: "passed-again.csv", roots: [WORK], byContent: true });
+    const other = await saveBotAttachment({ path: "other.csv", roots: [WORK], byContent: true });
+    expect(first.fresh).toBe(true);
+    expect(again).toMatchObject({ fresh: false, sha256: first.sha256, attachment: { path: first.attachment.path, name: "passed-again.csv" } });
+    expect(other.attachment.path).not.toBe(first.attachment.path);
+    expect(readFileSync(first.attachment.path, "utf8")).toBe("a,b\n1,2\n");
+    const picture = await saveBotAttachment({ path: "passed.png", roots: [WORK], byContent: true });
+    expect(await saveBotAttachment({ path: "passed.png", roots: [WORK], byContent: true })).toMatchObject({ fresh: false, attachment: { kind: "image", path: picture.attachment.path } });
+    const plain = await saveBotAttachment({ path: "passed.csv", roots: [WORK] });
+    expect(plain.attachment.path).not.toBe(first.attachment.path);
+    expect(plain).not.toHaveProperty("fresh");
+  });
+
+  it("keeps the same bytes under another file type as another stored file, instead of refusing them", async () => {
+    writeFileSync(join(WORK, "notes.md"), "# the same words\n");
+    writeFileSync(join(WORK, "notes.txt"), "# the same words\n");
+    const markdown = await saveBotAttachment({ path: "notes.md", roots: [WORK], byContent: true });
+    const text = await saveBotAttachment({ path: "notes.txt", roots: [WORK], byContent: true });
+    expect(text.sha256).toBe(markdown.sha256);
+    expect(text.fresh).toBe(true);
+    expect(text.attachment.path).not.toBe(markdown.attachment.path);
+    expect(markdown.attachment.path.endsWith(".md")).toBe(true);
+    expect(text.attachment.path.endsWith(".txt")).toBe(true);
+    expect((await saveBotAttachment({ path: "notes.md", roots: [WORK], byContent: true })).fresh).toBe(false);
+  });
+
+  it("names the stored file with this install's key, so the name cannot be worked out from the bytes", async () => {
+    writeFileSync(join(WORK, "known.csv"), "bytes someone else also holds\n");
+    const saved = await saveBotAttachment({ path: "known.csv", roots: [WORK], byContent: true });
+    const stored = saved.attachment.path.split(/[\\/]/).at(-1)!;
+    expect(stored).toBe(`${contentUploadId(saved.sha256!, ".csv")}.csv`);
+    expect(stored).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.csv$/);
+    expect(contentUploadId(saved.sha256!, ".csv", Buffer.alloc(32))).not.toBe(contentUploadId(saved.sha256!, ".csv"));
+    expect(stored).not.toContain(saved.sha256!.slice(0, 8));
+    expect(readFileSync(join(ATTACHMENTS_DIR, "..", "attachment-names.key")).byteLength).toBe(32);
+  });
+
+  it("lets exactly one of two saves of the same new bytes be the one that stored them", async () => {
+    writeFileSync(join(WORK, "twice.csv"), "saved twice at once\n");
+    const both = await Promise.all([1, 2, 3].map(() => saveBotAttachment({ path: "twice.csv", roots: [WORK], byContent: true })));
+    expect(both.map((saved) => saved.fresh).sort()).toEqual([false, false, true]);
+    expect(new Set(both.map((saved) => saved.attachment.path)).size).toBe(1);
   });
 });
 
@@ -337,6 +389,7 @@ describe("deliveredCopy", () => {
   const bot = (id: string, parentId: string | null, extra: Partial<Message> = {}): Message =>
     ({ id, at: 1, parentId, role: "bot", kind: "text", text: "", ...extra }) as Message;
   const photo = { kind: "image" as const, path: "/store/copy.png", mime: "image/png", name: "sideboard.png" };
+  const renamed = { kind: "file" as const, path: "/store/copy.md", mime: "text/markdown; charset=utf-8", name: "团队技能包-README.md", source: "D:\\AI\\openmausbot-skills\\README.md" };
   const ask = { id: "ask", at: 1, parentId: null, role: "user", kind: "text", text: "find a sideboard" } as Message;
 
   it("finds the picture the reply's turn delivered under the name its inline image uses", () => {
@@ -364,5 +417,39 @@ describe("deliveredCopy", () => {
     const twice = bot("twice", "second", by("me"));
     expect(deliveredCopy([ask, first, second, twice], twice, "sideboard.png")).toBeNull();
     expect(deliveredCopy([ask, first, twice], { ...twice, parentId: "first" }, "sideboard.png")).toEqual(photo);
+  });
+
+  it("finds a renamed delivery by its source path", () => {
+    const attached = bot("attached", "ask", { attachments: [renamed] });
+    const reply = bot("reply", "attached", { text: "[README](D:/AI/openmausbot-skills/README.md)" });
+    expect(deliveredCopy([ask, attached, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toEqual(renamed);
+  });
+
+  it("finds the same source spelled as a file:// URL or with an encoded space", () => {
+    const spaced = { ...renamed, source: "D:\\AI\\openmausbot-skills\\my file.pdf", name: "团队技能包.pdf" };
+    const attached = bot("attached", "ask", { attachments: [spaced] });
+    const reply = bot("reply", "attached", { text: "[pdf](file:///D:/AI/openmausbot-skills/my%20file.pdf)" });
+    expect(deliveredCopy([ask, attached, reply], reply, "my file.pdf", "file:///D:/AI/openmausbot-skills/my%20file.pdf")).toEqual(spaced);
+  });
+
+  it("still finds a delivery by display name when the record has no source", () => {
+    const attached = bot("attached", "ask", { attachments: [photo] });
+    const reply = bot("reply", "attached", { text: "![Sideboard](/tmp/sideboard.png)" });
+    expect(deliveredCopy([ask, attached, reply], reply, "sideboard.png", "/tmp/sideboard.png")).toEqual(photo);
+  });
+
+  it("refuses when two deliveries share the clicked source", () => {
+    const by = (botId: string) => ({ from: { botId, name: botId, color: "blue" } }) as Partial<Message>;
+    const first = bot("first", "ask", { ...by("me"), attachments: [renamed] });
+    const second = bot("second", "first", { ...by("me"), attachments: [{ ...renamed, path: "/store/copy-2.md" }] });
+    const reply = bot("reply", "second", by("me"));
+    expect(deliveredCopy([ask, first, second, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toBeNull();
+  });
+
+  it("ignores a different bot's delivery even when its source matches", () => {
+    const by = (botId: string) => ({ from: { botId, name: botId, color: "blue" } }) as Partial<Message>;
+    const peer = bot("peer", "ask", { ...by("other"), attachments: [renamed] });
+    const reply = bot("reply", "peer", by("me"));
+    expect(deliveredCopy([ask, peer, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toBeNull();
   });
 });

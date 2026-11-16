@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../../shared/redact.ts";
 
 import { checkInvariants } from "./invariants.ts";
-import { Runtime, type BeginRequest } from "./runtime.ts";
+import { PROGRESS_WRITE_MS, Runtime, type BeginRequest } from "./runtime.ts";
 import { openRuntimeStore, type RuntimeStore } from "./store.ts";
 import { CUT_TWICE, INTERRUPTED_OUTWARD, loopStop, nextGuard, outwardDetail } from "./tree.ts";
 import type { Assignment, Clock, EnqueueRequest, Limits, RunInput, RunResult, TurnRunner } from "./types.ts";
@@ -222,6 +222,31 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
+  it("work held for a place that was away is not expired by the look that finds the place back: its queue window starts then", () => {
+    const w = world(undefined, { queueMs: 1_000, stallMs: 1e9 });
+    let away = true;
+    w.runner.away = a => a.assignee.botId === "far" && away;
+    w.runner.canStartAnswer = "far is not ready";
+    const root = w.runtime.begin(beginReq());
+    const held = ok(w.runtime.enqueue(toBot("far", root.id)));
+    w.runtime.tick();
+    w.clock.advance(50_000);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    // The place comes back, and the next look comes later than the whole queue window.
+    w.clock.advance(5_000);
+    away = false;
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    w.clock.advance(999);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    // From then on it is ordinary queued work, and the queue window is its bound again.
+    w.clock.advance(2);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "never started" });
+  });
+
   it("expires a queue entry that never started and a question nobody answered, never as completed", async () => {
     const w = world(undefined, { queueMs: 1_000, inputWaitMs: 5_000 });
     const root = w.runtime.begin(beginReq());
@@ -342,6 +367,56 @@ describe("Runtime: one tree, one lane", () => {
     expect(w.store.get(b.id)).toMatchObject({ status: "failed", outcome: "stalled" });
     expect(w.store.events(root.id).some(e => e.kind === "stalled")).toBe(true);
     expect(w.runner.reports.map(r => r.a.id)).toEqual([a.id, b.id, root.id]);
+    invariants(w);
+  });
+
+  it("re-stamps a running node's lastActivityAt on real activity, on a coarse cadence and without event rows", () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const a = ok(w.runtime.enqueue(toBot("a", root.id)));
+    w.runtime.tick();
+    const dispatched = w.store.get(a.id)!.lastActivityAt;
+    const rootDispatched = w.store.get(root.id)!.lastActivityAt;
+    const eventsBefore = w.store.events(a.id).length;
+    // Inside the cadence the stall windows still move, but the row keeps its dispatch stamp.
+    w.clock.advance(PROGRESS_WRITE_MS - 1);
+    w.runtime.progress(a.id);
+    expect(w.store.get(a.id)!.lastActivityAt).toBe(dispatched);
+    // Past it, one progress call durably re-stamps the node and its root.
+    w.clock.advance(1);
+    w.runtime.progress(a.id);
+    const stamped = w.store.get(a.id)!.lastActivityAt;
+    expect(stamped).toBe(w.clock.t);
+    expect(stamped).toBeGreaterThan(rootDispatched);
+    expect(w.store.get(root.id)!.lastActivityAt).toBe(stamped);
+    // The next event inside the new window leaves the row alone, and none of this wrote event rows.
+    w.runtime.progress(a.id);
+    expect(w.store.get(a.id)!.lastActivityAt).toBe(stamped);
+    expect(w.store.events(a.id).length).toBe(eventsBefore);
+    invariants(w);
+  });
+
+  it("writes the root's activity stamp at most once per cadence, however many children report", () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const a = ok(w.runtime.enqueue(toBot("a", root.id)));
+    w.runtime.tick();
+    const b = ok(w.runtime.enqueue(toBot("b", root.id)));
+    w.runtime.tick();
+    // Both dispatched at T. a reports at T+10s: the node and the root are stamped.
+    w.clock.advance(PROGRESS_WRITE_MS);
+    w.runtime.progress(a.id);
+    const rootStamp = w.store.get(root.id)!.lastActivityAt;
+    expect(rootStamp).toBe(w.clock.t);
+    // b reports at T+11s: its own row is still due, but the root is not — it stays at T+10s.
+    w.clock.advance(1_000);
+    w.runtime.progress(b.id);
+    expect(w.store.get(b.id)!.lastActivityAt).toBe(w.clock.t);
+    expect(w.store.get(root.id)!.lastActivityAt).toBe(rootStamp);
+    // Once the root's window has passed, the next report moves it again.
+    w.clock.advance(PROGRESS_WRITE_MS);
+    w.runtime.progress(b.id);
+    expect(w.store.get(root.id)!.lastActivityAt).toBe(w.clock.t);
     invariants(w);
   });
 

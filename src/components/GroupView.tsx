@@ -38,7 +38,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "./MessageActions";
 import { ReactAction, ReactionChips, useCanReact } from "./Reactions";
 import { ClusterLabel } from "./RoomClusterLabel";
-import { roomPin, useBotMessageMenu, userMessageMenu } from "./message-menu";
+import { replyAndCopy, roomPin, useBotMessageMenu, userMessageMenu } from "./message-menu";
 import { forkMessageItem, ForkLinks } from "./ForkMessage";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
@@ -81,7 +81,7 @@ import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
 import { turnNowPhrases } from "@/lib/live-activity"; import { useTurnLive } from "@/state/turn-status"; import { isLiveReply, StreamingReplyContext, streamedReply, useLiveTranscript } from "@/state/live-reply";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
-import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
+import { useTranscriptViewport } from "@/hooks/use-transcript-viewport"; import { staysInView } from "../../shared/person-wait";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { unreadMessageIds } from "@/lib/unread-divider";
 import { NewMessagesDivider } from "./NewMessagesDivider";
@@ -107,13 +107,13 @@ export function RoomToolChip({ message, roomId, threadId, live = false }: { mess
   const { state, dispatch } = useStore();
   const tool = message.tool;
   if (!tool) return null;
-  if (message.threadRef) return <ThreadChip message={message} />; if (message.relay) return <TeammateChip message={message} />;
+  if (message.threadRef) return <ThreadChip message={message} threadId={threadId} />; if (message.relay) return <TeammateChip message={message} />;
   if (failedTurnCause(tool.name) !== null) {
     return <FailedTurnRow tool={tool} engine={botEngine(state.bots.find((b) => b.id === message.from?.botId), state.instances)} botId={message.from?.botId} messageAt={message.at} />;
   }
   const comm = message.comm;
   if (comm && comm.groupId !== roomId) {
-    return <HandoffChip message={message} bots={state.bots} title={t("room.openBot", { name: comm.withName })} onClick={() => openRoomThread(dispatch, comm, state.groups)} />;
+    return <HandoffChip message={message} bots={state.bots} threadId={threadId} title={t("room.openBot", { name: comm.withName })} onClick={() => openRoomThread(dispatch, comm, state.groups)} />;
   }
   if (!comm) return <ToolActivity tool={tool} live={live} source={threadId ? { threadId, messageId: message.id } : undefined} />;
   return (
@@ -158,7 +158,7 @@ function RoomTextMessage({
   const { state, dispatch } = useStore();
   const user = m.role === "user";
   const reactor = useReactor();
-  const speaker = otherSpeaker(m, state.config?.team && reactor !== "user" ? reactor : null);
+  const speaker = otherSpeaker(m, reactor !== "user" ? reactor : null);
   const rawText = user ? (m.text ?? "") : stripLeakedSystemHarnessMessages(m.text ?? "");
   const cited = user && m.text ? splitTranscriptCitations(m.text) : null;
   const attachments = user && m.text ? splitTranscriptAttachments(cited?.display ?? m.text) : null;
@@ -193,7 +193,7 @@ function RoomTextMessage({
   const blocks = useMemo(() => simple && !user && !viewRaw && botText.trim() ? splitReplyBlocks(botText) : null, [simple, user, viewRaw, botText]);
   const tabled = Boolean(blocks?.some((block) => block.kind === "table"));
   const botActions = !user && (
-    <MessageActions side="bot" forceOpen={viewRaw || speaking} menu={[...botMenu, ...forkAction]}>
+    <MessageActions side="bot" forceOpen={viewRaw || speaking} menu={[...botMenu, ...forkAction]} contextItems={replyAndCopy(() => onReply(m), botText)}>
       <ReplyAction onReply={() => onReply(m)} />
       {canReact && m.from && <ReactAction threadId={group.threadId} message={m} />}
       {botText && <CopyButton text={botText} className={messageActionClass} />}
@@ -202,17 +202,17 @@ function RoomTextMessage({
     </MessageActions>
   );
   return (
-    <div {...{ [MESSAGE_ROW]: "" }} className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
-      {speaker && <div className="mb-0.5 px-1 text-[12px] font-medium text-ink-secondary">{speaker}</div>}
+    <div {...{ [MESSAGE_ROW]: "" }} data-look={user ? "message-user" : "message-bot"} className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
+      {speaker && <div className="mb-0.5 px-1 text-right text-[13px] [overflow-wrap:anywhere] font-semibold text-ink-secondary">{speaker}</div>}
       <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>
         {user && (
-          <MessageActions side="user" menu={[...userMessageMenu({ messageId: m.id, pin }), ...forkAction]}>
+          <MessageActions side="user" menu={[...userMessageMenu({ messageId: m.id, pin }), ...forkAction]} contextItems={replyAndCopy(() => onReply(m), display)}>
             <ReplyAction onReply={() => onReply(m)} />
             {Boolean(display.trim()) && <CopyButton text={display} className={messageActionClass} />}
           </MessageActions>
         )}
         <div
-          data-chat-bubble={simple ? "simple" : ""}
+          data-chat-bubble={simple ? "simple" : ""} data-look={user ? "user-bubble" : "bot-bubble"}
           className={cn(
             tabled ? "w-full" : "w-fit",
             simple ? cn(!tabled && SIMPLE_BUBBLE_MAX, SIMPLE_BUBBLE_TEXT) : "max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl text-[15px] leading-relaxed",
@@ -986,7 +986,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
     messages: group.messages,
     pinOn: [group.busyBotId, group.working, composerDock.pad],
     transcriptShown: !setupPending,
-    hasMore: group.hasMore,
+    hasMore: group.hasMore, rests: staysInView,
   });
   const unreadDivider = useUnreadDivider({ threadId: group.threadId, messages: group.messages, following });
 
@@ -994,7 +994,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
   useEffect(() => setMembersOpen(false), [group.id]);
 
   return (
-    <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
+    <main data-look="chat" className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <GroupCallOverlay group={group} members={members} />
       {membersOpen && !remoteClient && !group.dm && (
         <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />
@@ -1158,7 +1158,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
                   trackPointer={false}
                 />
               }
-              visible={presenceVisible}
+              visible={presenceVisible} threadId={group.threadId}
               phrases={activity?.phrases}
               phase={activity?.phase}
               size={activity?.size} hover={activity?.hover} quiet={live.status && "quiet" in live.status ? live.status.quiet : undefined}

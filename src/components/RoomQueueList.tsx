@@ -25,7 +25,7 @@ export function roomMemberQueueTitle(group: Group, members: Bot[], bot: Bot): st
 }
 
 const ROUTED_BY = {
-  jev: "room.routedBy", openrouter: "room.routedBy.openrouter", workersai: "room.routedBy.workersai", custom: "room.routedBy.custom",
+  jev: "room.routedBy", openrouter: "room.routedBy.openrouter", workersai: "room.routedBy.workersai", custom: "room.routedBy.custom", gemini: "room.routedBy.gemini",
 } as const;
 
 export function RoutedByLine({ routedBy }: { routedBy: NonNullable<Message["routedBy"]> }) {

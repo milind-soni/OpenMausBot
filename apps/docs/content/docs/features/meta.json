@@ -1,5 +1,5 @@
 {
   "title": "Features",
   "icon": "Sparkles",
-  "pages": ["index", "bots-and-tasks", "chat-and-teams", "approvals-and-inspector", "attachments-and-search", "automation", "publish-to-netlify", "voice-and-memory", "skills"]
+  "pages": ["index", "bots-and-tasks", "chat-and-teams", "themes", "approvals-and-inspector", "attachments-and-search", "automation", "publish-to-netlify", "voice-and-memory", "skills"]
 }

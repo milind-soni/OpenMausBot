@@ -1344,15 +1344,32 @@ describe("learned skill references", () => {
     return staged;
   };
 
+  it("accepts a SKILL.md up to 64KB and refuses one past it, while each reference stays at 32KB", () => {
+    const sized = (name: string, bytes: number) => {
+      const head = SKILL(name);
+      return head + "x".repeat(bytes - Buffer.byteLength(head, "utf8"));
+    };
+    const accepted = stageSkillWrite(bot, { action: "create", files: [{ path: "SKILL.md", content: sized("large-skill", 60 * 1024) }] });
+    expect("error" in accepted ? accepted.error : null).toBeNull();
+    expect(stageSkillWrite(bot, { action: "create", files: [{ path: "SKILL.md", content: sized("at-the-cap", 64 * 1024) }] }))
+      .not.toHaveProperty("error");
+    expect(stageSkillWrite(bot, { action: "create", files: [{ path: "SKILL.md", content: sized("too-large", 65 * 1024) }] }))
+      .toMatchObject({ error: expect.stringContaining("at most 64KB; this SKILL.md is 65.0KB") });
+    expect(stageSkillWrite(bot, {
+      action: "create",
+      files: [{ path: "SKILL.md", content: SKILL("with-big-ref") }, ref("big", "x".repeat(40 * 1024))],
+    })).toMatchObject({ error: expect.stringContaining("references/big.md must be at most 32KB; it is 40.0KB") });
+  });
+
   it("explains an oversized SKILL.md with both sizes and where the detail goes", () => {
     learn("create", []);
-    const big = SKILL("file-expense") + "- another rule\n".repeat(2_500);
+    const big = SKILL("file-expense") + "- another rule\n".repeat(5_000);
     const result = stageSkillWrite(bot, {
       action: "update",
       targetName: "file-expense",
       files: [{ path: "SKILL.md", content: big }],
     });
-    expect("error" in result && result.error).toMatch(/at most 32KB; this SKILL\.md is \d+\.\dKB, the current version is 0\.\dKB\./);
+    expect("error" in result && result.error).toMatch(/at most 64KB; this SKILL\.md is \d+\.\dKB, the current version is 0\.\dKB\./);
     expect("error" in result && result.error).toContain("references/<topic>.md");
     expect("error" in result && result.error).toContain("link each one from SKILL.md");
 

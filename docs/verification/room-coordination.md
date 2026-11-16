@@ -157,8 +157,24 @@ thread.
 
 The chat shows an avatar and “Sent to Eli · Delivery”; clicking opens the
 receiving conversation. Same-room receipts have no unnecessary navigation.
-Receipts remain visible when tool calls are hidden. Files are not copied between
-computers: briefs must include accessible absolute paths or the required content.
+Receipts remain visible when tool calls are hidden. A bare path in a brief only
+works when the recipient can already read it; to give a teammate a file the
+sender names it in `coordinate_bots` `files` (at most 5 paths and 100 MB a
+message, each within `attach_file`'s rules). Each file is stored once in the
+attachment store, under a name keyed to this install so it cannot be worked out
+from the file, shown as a chip on the hand-off line, and copied into the
+receiving conversation's own folder under `inbox/<sender>/<assignment>/` (and
+into the receiver's own Local VM workspace when it has one) before its turn
+starts; the turn's text lists the copies under a note that says they are data
+from another bot, as `inbox/...` paths where the receiver works in that folder.
+Files the teammate attaches with `attach_file` while it works come back the
+same way with its result, under `inbox/<teammate>/<assignment>-returned/`,
+unless the result itself is withheld. A bot may attach or pass on a file from
+its own inbox; that read follows no link. One assignment carries at most 20
+files and 200 MB in all, one bot passes or returns at most 100 files and 500 MB
+a day, and `files` does not travel with `answers`. Inbox copies are removed
+when their record ages out (30 days) and when the conversation or the bot is
+deleted; the rest of a conversation's folder stays, as before.
 Returned reports stay available to subsequent model turns behind the compact
 receipt, subject to the bounded retention and a fresh reach check (archived
 bots, audiences).

@@ -109,7 +109,8 @@ export interface Assignment {
   restart?: "rerun" | "cut" | "teammates";
   createdAt: number;
   startedAt?: number;
-  /** Last durable progress: a dispatch, a settlement, a child's settlement. */
+  /** Last durable progress: a dispatch, a settlement, a child's settlement — and, while a turn
+   * runs, activity the host reports through progress(), written on a coarse cadence. */
   lastActivityAt: number;
   finishedAt?: number;
   /** What the assignee last said or how it ended (at most 12 000 characters). */
@@ -324,6 +325,9 @@ export interface TurnRunner {
   /** What the cut turn of this node already did outward, as short labels. Read at open() only: a
    * turn that acted outward is not run again. Absent or empty: the turn reruns once. */
   outward?(a: Assignment): string[];
+  /** The assignee lives in a place that cannot be reached now (a computer that is off or asleep). Queued work for it is
+   * held by no window: neither the queue bound nor the tree's stall window runs while this is true. */
+  away?(a: Assignment): boolean;
 }
 
 export interface Clock {

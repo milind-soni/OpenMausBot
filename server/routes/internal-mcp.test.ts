@@ -988,6 +988,13 @@ describe("internal mcp_server route, below Full access", () => {
     expect(personal.signIns).toEqual([{ name: "linear", url: linear.url }]);
   });
 
+  it("sign_in to another bot's own web connection is refused and posts no card", async () => {
+    const { post, signIns, lines } = fixture({ servers: { linear: { ...linear, bot: "scout" } } });
+    expect(await post({ action: "sign_in", name: "linear" })).toEqual({ status: 403, body: { error: "That server belongs to another bot." } });
+    expect(signIns).toEqual([]);
+    expect(lines).toEqual([]);
+  });
+
   it("sign_in on a server that is off posts no card and tells the bot to call enable", async () => {
     const off = { linear: { ...linear, enabled: false } };
     const full = fixture({ servers: off });

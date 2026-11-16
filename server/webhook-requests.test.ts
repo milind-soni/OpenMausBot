@@ -50,6 +50,19 @@ function harness() {
 const create = { action: "create", webhook: { name: "Interested replies", instructions: "Draft a follow-up for the lead in the payload." } };
 
 describe("WebhookRequestService", () => {
+  it("refuses replacing redacted instructions atomically but allows a rename", () => {
+    const { service, webhooks, store } = harness();
+    const prompt = "Review the queue.\n".repeat(180) + "Use token=fixture-secret-value.";
+    const saved = webhooks.create({ name: "Private instructions", prompt, botId: "bot-a", runOn: "cloud", enabled: false }).webhook;
+    const submit = (changes: unknown) => service.submit({ botId: "bot-a", threadId: "thread-a", operation: { action: "update", webhookId: saved.id, changes } });
+    const before = structuredClone(webhooks.list());
+    expect(() => submit({ name: "Must not apply", instructions: "Only the visible text." })).toThrow(expect.objectContaining({ status: 409 }));
+    expect(webhooks.list()).toEqual(before);
+    expect(store.messagesFor("thread-a")).toHaveLength(0);
+    submit({ name: "Safe rename" });
+    expect(webhooks.list()[0]).toMatchObject({ name: "Safe rename", prompt, runOn: saved.runOn });
+  });
+
   it("creates a bot's webhook at once, with a receipt card that never carries its secret, and keeps its address", () => {
     const { service, webhooks, store, dir } = harness();
     const applied = service.submit({ botId: "bot-a", threadId: "thread-a", operation: create });

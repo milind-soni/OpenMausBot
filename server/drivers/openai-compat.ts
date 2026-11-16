@@ -129,6 +129,14 @@ function isOpenRouterUrl(url: string): boolean {
   }
 }
 
+const isClaudeModel = (model: string) => /^anthropic\//iu.test(model);
+
+/** OpenRouter caches a Claude prompt only when asked; `session_id` keeps one thread on the provider that holds its cache.
+ * https://openrouter.ai/docs/features/prompt-caching */
+function openRouterPromptCache(threadId: string | undefined): Record<string, unknown> {
+  return { cache_control: { type: "ephemeral" }, ...(threadId ? { session_id: threadId } : {}) };
+}
+
 function loopbackLmStudioV1Url(baseUrl: string): string | null {
   try {
     const url = new URL(baseUrl);
@@ -384,7 +392,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         },
       } : {}),
       modelVariants: ollamaCandidate || config.catalog === "openai" || openRouter,
-      requestBody: (model, messages, stream, variant) => ({
+      requestBody: (model, messages, stream, variant, threadId) => ({
         model,
         messages,
         stream,
@@ -394,6 +402,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         ...(config.provider && isOpenRouterUrl(config.url)
           ? { provider: { order: [config.provider], allow_fallbacks: false } }
           : {}),
+        ...(isOpenRouterUrl(config.url) && isClaudeModel(model) ? openRouterPromptCache(threadId) : {}),
       }),
       httpErrorLabel: "upstream",
       missingKeyError: missingKey,

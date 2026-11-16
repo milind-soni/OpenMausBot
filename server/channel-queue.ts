@@ -190,7 +190,9 @@ export function drainChannelMessages(
       queues.delete(threadId);
       continue;
     }
-    const group = headChannelGroup(entry.items);
+    // A drained turn shares one routing target; an explicit steer keeps each line's reply context.
+    const group = drainCoalesceHead(entry.items, (item) => JSON.stringify([coalesceIdentity(item), item.replyToId ?? null]),
+      (item) => item.queuedAt, DRAIN_COALESCE_MAX_ITEMS);
     const ids = group.map((item) => item.id);
     settleChatFollowups(ids, "dispatching");
     entry.items.splice(0, group.length);
@@ -209,13 +211,11 @@ export function headChannelGroup(items: readonly ChannelQueueItem[]): ChannelQue
   return drainCoalesceHead(items, coalesceIdentity, (item) => item.queuedAt, DRAIN_COALESCE_MAX_ITEMS);
 }
 
-/** An API send has no person behind it and never merges, nor does a goal; unattributed local sends are one identity. */
 function coalesceIdentity(item: ChannelQueueItem): string {
   if (item.via === "api") return `api:${item.id}`;
   if (item.mode !== "chat") return `mode:${item.mode}:${item.id}`;
   if (item.pointed) return `pointed:${item.id}`;
-  if (item.sender) return `person:${item.sender.id ?? item.sender.name}`;
-  return "person:local";
+  return item.sender ? `person:${item.sender.id ?? item.sender.name}` : "person:local";
 }
 
 export function queuedChannelSends(threadId: string): number {

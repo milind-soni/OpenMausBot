@@ -23,7 +23,7 @@ function folder(): string {
   folders.push(made);
   return made;
 }
-const manager = (file: string) => new WebhookManager({ file, botState: () => "ready", enqueue: () => ({ id: "run-1" }), roomMember: () => ({ ok: true }),
+const manager = (file: string) => new WebhookManager({ file, botState: (botId) => botId.startsWith("bot-") ? "ready" : "missing", enqueue: () => ({ id: "run-1" }), roomMember: () => ({ ok: true }),
   roomPost: async (trigger) => ({ posted: true, attachments: 0, threadId: `${trigger.groupId}-thread` }) });
 
 async function serve(seen: (botId: string) => boolean = () => true, file = join(folder(), "webhooks.json"), seesRoom: (groupId: string) => boolean = () => true) {
@@ -31,7 +31,9 @@ async function serve(seen: (botId: string) => boolean = () => true, file = join(
   const routes = [createWebhookRoutes({ webhooks, ingress: () => ({ available: true, baseUrl: "http://127.0.0.1:8800" }), visible: () => ({ everything: false, bot: seen, group: seesRoom }) })];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth: { kind: "loopback", scopes: ["admin", "client"] }, json, readBody });
+    // As the server answers a refusal the manager throws: its status and message.
+    const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth: { kind: "loopback", scopes: ["admin", "client"] }, json, readBody })
+      .catch((error: { status?: number; message?: string }) => { json(res, error.status ?? 500, { error: error.message }); return true; });
     if (!handled) json(res, 404, { from: "inline routes" });
   });
   servers.push(server);
@@ -64,6 +66,16 @@ describe("a webhook's address for the person", () => {
     const theirs = hidden.webhooks.create({ name: "Hidden", prompt: "", botId: "bot-hidden" });
     expect(await hidden.call("GET", `/api/webhooks/${theirs.webhook.id}/address`)).toEqual({ status: 404, body: { error: "no such webhook" } });
     expect((await hidden.call("GET", "/api/webhooks")).body.webhooks).toEqual([]);
+    for (const [method, suffix] of [["POST", "/test"], ["POST", "/rotate"], ["PATCH", ""], ["DELETE", ""]] as const) {
+      expect(await hidden.call(method, `/api/webhooks/${theirs.webhook.id}${suffix}`, method === "PATCH" ? { name: "Mine" } : {})).toEqual({ status: 404, body: { error: "no such webhook" } });
+    }
+    expect(hidden.webhooks.list()).toEqual([expect.objectContaining({ id: theirs.webhook.id, name: "Hidden" })]);
+    expect(hidden.webhooks.authorize(theirs.webhook.endpointId, theirs.secret)).toBe(true);
+    // Into a bot this viewer cannot see: answered as for a bot that does not exist, and nothing is made.
+    expect(await hidden.call("POST", "/api/webhooks", { name: "Into theirs", prompt: "", botId: "bot-hidden" })).toEqual(await hidden.call("POST", "/api/webhooks", { name: "Into theirs", prompt: "", botId: "gone-1" }));
+    expect(await hidden.call("POST", "/api/webhooks", { name: "Into theirs", prompt: "", botId: "bot-hidden" })).toEqual({ status: 400, body: { error: "That MAUS no longer exists" } });
+    expect(hidden.webhooks.list().map((hook) => hook.botId)).toEqual(["bot-hidden"]);
+    expect((await hidden.call("POST", "/api/webhooks", { name: "Mine", prompt: "", botId: "bot-a" })).status).toBe(201);
 
     const file = join(folder(), "webhooks.json");
     const old = manager(file).create({ name: "Old", prompt: "", botId: "bot-a" });

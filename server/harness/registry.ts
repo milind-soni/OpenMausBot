@@ -561,7 +561,7 @@ export class ProviderRegistry {
                   ? "paste-code" as const // a link to open, then a code pasted back (Claude)
                   : inst.getAuthentication
                     ? "device-code" as const // a code to enter at the provider's page (Codex)
-                    : "browser" as const), // a link and a callback URL (managed engines)
+                    : "callback-url" as const), // a link and a callback URL (managed engines)
                 signOut: inst.signOut !== undefined,
               }
             : undefined,

@@ -84,18 +84,32 @@ A failed decision falls back as described in "It fails open".
     ordered `questions` list (`predicate`, `choice` with `choices`, `score`
     with `levels`) to `{base URL}/decisions`, with `stream: false`, and reads
     `answers` by position.
+  - **OpenAI-compatible chat** posts a chat completion to
+    `{base URL}/chat/completions` with `temperature: 0` and a strict JSON
+    schema (`response_format` `json_schema`), the same request an OpenRouter
+    chat model gets minus OpenRouter's own `provider` option, and reads the
+    answers from the reply's message. Any server that honours JSON schema works,
+    for example Gemini's OpenAI-compatible endpoint
+    (`https://generativelanguage.googleapis.com/v1beta/openai`, model
+    `gemini-2.5-flash`) or a local one. Chat models are not calibrated like
+    decision models, so their probabilities are rougher: use **Test** first.
 
   Answers go through the same checks as every other provider's. A custom
   endpoint decides only: it does not read mail or a bot's `extract` calls,
   which keep the reading providers below. **Test** shows how long it took,
   like OpenRouter's.
 
-The model list holds decisions models only: a curated set, in the order of
-OpenRouter's decisions ranking, that shows only what OpenRouter's public
-catalog (`/models?output_modalities=decisions`) still lists, then the rest of
-that catalog. Chat models are not offered, though one saved by hand with
-`openrouterApi: "chat"` still works. If OpenRouter's catalog cannot be
-loaded, Settings shows the curated list and says so. A model saved by id (`decider.openrouterModel`) is
+The model list holds decisions models first: a curated set, in the order of
+OpenRouter's decisions ranking (Google's Gemini Decision 1 included), that
+shows only what OpenRouter's public catalog
+(`/models?output_modalities=decisions`) still lists, then the rest of that
+catalog. Last, under **Gemini chat models (not calibrated)**, come the Gemini
+Flash chat models that catalog's text list (`/models?output_modalities=text`)
+says take a strict JSON schema; picking one saves `openrouterApi: "chat"`, so
+its probabilities are its own estimate (and extraction uses it too, as with
+any chat model). Use **Test** to check it answers in time. Other chat models are not offered, though
+one saved by hand with `openrouterApi: "chat"` still works. If OpenRouter's
+catalog cannot be loaded, Settings shows the curated list and says so. A model saved by id (`decider.openrouterModel`) is
 used even if the list does not carry it. **Test** shows how long the model took;
 above 1.5 seconds, rooms would fall back to the lead, so pick a faster one.
 
@@ -320,9 +334,10 @@ API is alpha at OpenRouter and may change. The model list comes from
 `GET /api/decider/models`, which needs no key and spends nothing.
 
 `customBaseUrl` follows the same https-or-loopback rule, and a custom key is
-used only with one. `customApi` is `"systemone"` (the default) or
-`"decisions"`; requests go to `{customBaseUrl}/systemone` or
-`{customBaseUrl}/decisions` with `customModel` as the model.
+used only with one. `customApi` is `"systemone"` (the default),
+`"decisions"` or `"chat"`; requests go to `{customBaseUrl}/systemone`,
+`{customBaseUrl}/decisions` or `{customBaseUrl}/chat/completions` with
+`customModel` as the model.
 
 `workersAiAccountId` is 32 hexadecimal characters. `workersAiBaseUrl` has no
 Settings UI and follows the same https-or-loopback rule. It is the REST root

@@ -199,7 +199,11 @@ export async function discoverMcpAuth(
   const optionalEndpoint = (value: unknown) => typeof value === "string" && isAllowedDiscoveryUrl(value, trustedOrigin) ? value : undefined;
   const registrationEndpoint = optionalEndpoint(metadata.registration_endpoint);
   const revocationEndpoint = optionalEndpoint(metadata.revocation_endpoint);
-  const scopes = stringList(resource?.scopes_supported);
+  const resourceScopes = stringList(resource?.scopes_supported);
+  const authorizationScopes = stringList(metadata.scopes_supported);
+  const scopes = resourceScopes?.length && authorizationScopes?.includes("offline_access") && !resourceScopes.includes("offline_access")
+    ? [...resourceScopes, "offline_access"]
+    : resourceScopes;
   const tokenEndpointAuthMethods = stringList(metadata.token_endpoint_auth_methods_supported);
   target.hash = "";
   return {

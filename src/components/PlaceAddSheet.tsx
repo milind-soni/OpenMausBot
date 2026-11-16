@@ -11,6 +11,7 @@ import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { CLOUD_LIST_NAME_LIMIT, CLOUD_SWATCH_ORDER, SWATCH_COLOR, swatchFill } from "@/lib/cloud-extra";
 import { useCopyFeedback } from "@/lib/copy-text";
+import { productName } from "@/lib/brand";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { computerName, createLocal, placeInitials, suggestedLocalName } from "@/lib/places";
@@ -74,7 +75,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     }, 400);
     return () => { current = false; window.clearTimeout(timer); };
   }, [address, code, canProbe, workspaces]);
-  const typeAddress = (value: string) => {
+  const typeAddress = (value: string, pasted: boolean) => {
     setFailure(null);
     const read = parseServerInput(value);
     if (!read.ok && read.problem === "codeOnly" && read.code) {
@@ -84,7 +85,7 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
       return;
     }
     setAddress(value);
-    if (read.ok && read.code === null && read.credential === null) window.setTimeout(() => codeField.current?.focus(), 0);
+    if (pasted && read.ok && read.code === null && read.credential === null) window.setTimeout(() => codeField.current?.focus(), 0);
   };
   const found = probe?.outcome === "found" ? probe : null;
   const submit = async (event: FormEvent) => {
@@ -111,10 +112,11 @@ export function OwnServerLink({ onBack, onConnected, connect = null, start = nul
     {onBack && <div><BackLink label={t("rail.back")} onClick={onBack} /></div>}
     <Heading title={connect ? t("rail.connectTitle", { name: connect.name }) : start?.title ?? t("connect.title")} sub={t(connect ? "connect.signedInLede" : "connect.lede")} />
     <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("connect.address")}
-      <input data-autofocus={start?.locked ? undefined : true} data-own-server-link value={address} disabled={busy} readOnly={start?.locked === true} onChange={(event) => { if (!start?.locked) typeAddress(event.target.value); }}
+      <input data-autofocus={start?.locked ? undefined : true} data-own-server-link value={address} disabled={busy} readOnly={start?.locked === true} onChange={(event) => { if (!start?.locked) typeAddress(event.target.value, (event.nativeEvent as InputEvent).inputType === "insertFromPaste"); }}
         placeholder={t("connect.addressPlaceholder")} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} aria-invalid={Boolean(shownProblem) || undefined}
         className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink outline-none focus:border-accent/50" />
     </label>
+    {!connect && !start && <p data-connect-other-computer className="text-[12px] leading-4 text-ink-secondary">{t("connect.otherComputer", { app: productName() })}</p>}
     {codeOnlyHint && <p data-connect-hint className="text-[13px] text-ink-secondary">{t("connect.addAddress", { example: EXAMPLE_ADDRESS })}</p>}
     {found && <p data-connect-found className="text-[13px] text-ink-secondary">
       ✓ {found.version ? t("connect.found", { name: found.label, version: found.version }) : found.label} · {t(TRANSPORT_KEY[found.transport])}

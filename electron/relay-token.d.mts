@@ -9,9 +9,15 @@ export interface RelayGrant {
 
 export declare function validRelayGrant(payload: unknown): RelayGrant | null;
 
+export interface RelayTokenStatus {
+  state: "off" | "fetching" | "ready" | "failed" | "waiting";
+  code: "unavailable" | "sign_in" | "busy" | "unreachable" | "failed" | null;
+}
+
 export interface RelayTokenService {
   readonly grant: RelayGrant | null;
   readonly running: boolean;
+  readonly status: RelayTokenStatus;
   start(): void;
   stop(): void;
   refreshNow(): Promise<void>;
@@ -25,4 +31,6 @@ export declare function createRelayTokenService(options: {
   now?: () => number;
   random?: () => number;
   log?: (line: string) => void;
+  /** A signed-out or refused (401) answer waits for `refreshNow` instead of asking again every 30 minutes. */
+  wakeAfterSignInFailure?: boolean;
 }): RelayTokenService;

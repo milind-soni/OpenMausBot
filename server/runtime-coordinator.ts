@@ -221,6 +221,22 @@ export class RuntimeCoordinator implements Coordinator {
     return rows.map(row => view(row, row.parentId ? byId.get(row.parentId) : undefined));
   }
 
+  newestRoot(threadId: string, ids: Iterable<string>): HandoffView | undefined {
+    this.ready();
+    let newest: Assignment | undefined;
+    for (const id of ids) {
+      const a = this.store.get(id);
+      if (a && !a.parentId && a.assignee.destination.threadId === threadId && (!newest || a.createdAt >= newest.createdAt)) newest = a;
+    }
+    return newest && view(newest);
+  }
+
+  inThread(threadId: string, filter: { open?: boolean; since?: number } = {}): HandoffView[] {
+    this.ready();
+    return this.store.all({ assigneeThreadId: threadId, ...(filter.open ? { nonTerminal: true } : {}), ...(filter.since !== undefined ? { openSince: filter.since } : {}) })
+      .map(a => this.project(a));
+  }
+
   active(): HandoffView[] {
     this.ready();
     return this.live().map(row => this.project(row));
@@ -601,6 +617,7 @@ export class RuntimeCoordinator implements Coordinator {
       },
       names: (a, parent) => host.names(view(a, parent), parent && this.project(parent)),
       outward: a => host.outward ? host.outward(this.project(a)) : [],
+      away: a => host.away ? host.away(this.project(a)) : false,
     };
   }
 

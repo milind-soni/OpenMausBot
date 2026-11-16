@@ -4,6 +4,7 @@
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot } from "../boat-create-idempotency.ts";
 import { BOAT_DELETING, BOAT_DELETION_FINISHED, hasPendingBoatDeletionForBot } from "../boat-delete-journal.ts";
+import { boatReadiness, type BoatReadiness } from "../boat-ready.ts";
 import { backgroundCommandRunning } from "../cloud-computer-background.ts";
 import { ComputerIdleTimer } from "../computer-idle.ts";
 import type { AppConfig } from "../config.ts";
@@ -21,6 +22,10 @@ const MAX_LISTING_RETRY_MS = 60 * 60_000;
 export const CLOUD_COMPUTER_START_BUDGET_MS = Math.max(1_000, Number(process.env.OMB_CLOUD_COMPUTER_START_BUDGET_MS) || 150_000);
 export const CLOUD_COMPUTER_STARTING = "The cloud computer is still starting. This call was not performed. Take a fresh screenshot in a moment.";
 export const CLOUD_COMPUTER_DID_NOT_START = "the cloud computer didn't start in time";
+/** The provider says ready and the computer is silent. Worded apart from a start that failed, and passing: three runs in
+ * a row that fail on a start turn their routine off, and a computer that is only slow to answer must not count as one. */
+export const CLOUD_COMPUTER_NOT_ANSWERING_YET = "the cloud computer is awake but is not answering yet";
+export const CLOUD_COMPUTER_DISK_NOT_BACK_YET = "the cloud computer is awake but still restoring its disk";
 const REMOVAL_POLL_MS = 3_000;
 
 type ScheduledRoutine = Pick<Routine, "botId" | "runOn" | "enabled" | "nextRunAt">;
@@ -38,6 +43,7 @@ export interface CloudComputerPowerDeps {
   routineComputer(routine: ScheduledRoutine): string | null;
   broadcast(payload: Record<string, unknown>): void;
   log(line: string): void;
+  readiness?: Pick<BoatReadiness, "awaitAnswer">;
 }
 
 export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
@@ -46,6 +52,9 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
   const turnOwners = new Map<string, { generation: string; owner: string }>();
   /** A start can outlive the turn that asked for it; stopping a computer mid-create would make provisionBoat delete it. */
   const starting = new Map<string, number>();
+  const readiness = deps.readiness ?? boatReadiness;
+  /** Computers this process created or woke and has not yet heard answer. */
+  const unheard = new Set<string>();
   let listingRetry: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
 
@@ -136,12 +145,14 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
       await provisionOnceRemoved(bot, deadline);
       b = await boat.findBoat(cfg, bot.id);
       lifecycle = lifecycleOf();
+      if (typeof b?.id === "string") unheard.add(b.id);
     }
     // An archived Boat answers every action with an error until it resumes: wake it once here.
     if (lifecycle === "wake") {
       broadcast({ kind: "computer", botId: bot.id, state: "waking", place: "cloud" });
       b = (await boat.readyBoat(cfg, bot.id, Math.max(1_000, deadline - Date.now()))) ?? b;
       lifecycle = lifecycleOf();
+      if (typeof b?.id === "string") unheard.add(b.id);
     }
     return b && lifecycle === "attach" ? b : null;
   }
@@ -176,8 +187,22 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     }
   }
 
+  /** After a start, before the turn's first call is sent: the computer has to answer a command, not only be reported
+   * ready. One that answered moments ago is not asked again. The failure is passing, so the turn's next call tries again. */
+  async function answering(boxId: string, opts: { woke?: boolean; onRestoring?: () => void } = {}): Promise<void> {
+    const answer = await readiness.awaitAnswer(cfg, boxId, {
+      woke: opts.woke === true || unheard.has(boxId),
+      onPhase: (phase) => { if (phase === "restoring") opts.onRestoring?.(); },
+    });
+    if (!answer.ok) {
+      throw Object.assign(new Error(answer.phase === "restoring" ? CLOUD_COMPUTER_DISK_NOT_BACK_YET : CLOUD_COMPUTER_NOT_ANSWERING_YET), { status: 503, transient: true });
+    }
+    unheard.delete(boxId);
+  }
+
   return {
     start,
+    answering,
     attached,
     released,
     used,

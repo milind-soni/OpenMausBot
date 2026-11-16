@@ -29,7 +29,7 @@ const STALL_PERCENT = 20;
 const MINUTE_MS = 60_000, DAY_MINUTES = 24 * 60;
 /** Engines that run each thread's turns in processes of their own. */
 export const ENGINE_PROCESS_KINDS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "opencodeGo", "grokAgent", "geminiAgent", "kimiAgent",
-  "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "commandCodeAgent", "kiroAgent", "customAcp", "piAgent", "ompAgent", "antigravityAgent"]);
+  "droidAgent", "cursorAgent", "qwenAgent", "hermesAgent", "clineAgent", "copilotAgent", "commandCodeAgent", "kiroAgent", "devinAgent", "customAcp", "piAgent", "ompAgent", "mistralVibeAgent", "antigravityAgent"]);
 
 /** Chat-runtime engines (openai-chat.ts) have no process of their own, but each turn starts its MCP servers, each a Node process. */
 export const CHAT_RUNTIME_KINDS: ReadonlySet<string> = new Set(["openai-compat", "cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral", "modelgo"]);
@@ -265,6 +265,9 @@ export class EngineMemory {
     child.once("exit", (_code, signal) => this.exited(pid, engine, signal));
     this.arm();
   }
+
+  /** The engine processes tracked now, with the threads each runs: for the performance sampler's buckets. */
+  enginePids(): Array<{ pid: number; threads: string[] }> { return [...this.engines].map(([pid, engine]) => ({ pid, threads: [...engine.threads] })); }
 
   /** A thread's session now runs in this already tracked engine process. */
   attach(child: ChildProcess, threadId: string): void {

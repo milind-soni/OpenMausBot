@@ -13,6 +13,7 @@ import {
 } from "../../AppSettingsRows";
 import { ChromeRailRow } from "../../ChromeRailToggle";
 import { ConnectedWorkspacesSettings } from "../../ConnectedWorkspacesSettings";
+import { CustomThemesSettings } from "../../CustomThemesSettings";
 import { DiagnosticsRow } from "../../DiagnosticsRow";
 import { NotificationRows } from "../../NotificationSettingsRows";
 import { OpenAtLoginRow } from "../../OpenAtLoginRow";
@@ -163,6 +164,7 @@ export function AppearancePage() {
         {!ctx.client && <SettingsLinkRow title={t("placeLook.sidebarColor")} value={place.name} badge={<PlaceBadge place={place} size={14} />} onClick={() => go("overview", "sidebar")} data={{ "data-settings-door": "sidebar-color" }} />}
       </SettingsRows>
     </SettingsGroup>
+    <CustomThemesSettings />
     <SettingsGroup label={t("settings.appearance.chat")} block="chat">
       <SettingsRows>
         {!ctx.client && <ToolCallsRow />}

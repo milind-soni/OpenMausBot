@@ -256,7 +256,7 @@ export function CodeBlock({ code, lang, initialWrap = false, open = false }: Cod
 
   if (simple) {
     return (
-      <div ref={frame} dir="ltr" className="chat-code-block group/code relative my-2.5 overflow-hidden rounded-xl bg-ink/[0.04]">
+      <div ref={frame} dir="ltr" data-look="code-block" className="chat-code-block group/code relative my-2.5 overflow-hidden rounded-xl bg-ink/[0.04]">
         {!open && <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copyTitle")} items={[
           { key: "wrap", label: t("code.wrapLines"), icon: <WrapText size={14} aria-hidden="true" />, active: wrapLines, onSelect: () => setWrapLines((wrap) => !wrap) },
           { key: "save", label: t("code.saveAsFile"), icon: <Download size={14} aria-hidden="true" />, onSelect: download },
@@ -268,7 +268,7 @@ export function CodeBlock({ code, lang, initialWrap = false, open = false }: Cod
   }
 
   return (
-    <div ref={frame} dir="ltr" className="chat-code-block my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
+    <div ref={frame} dir="ltr" data-look="code-block" className="chat-code-block my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span title={displayLanguage} className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">

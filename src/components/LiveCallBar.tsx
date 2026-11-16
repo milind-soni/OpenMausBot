@@ -219,6 +219,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
       {settingsOpen && (
         <div className="absolute bottom-full right-0 z-40 mb-2">
           <LiveCallSettings
+            bot={bot}
             onClose={() => {
               setSettingsOpen(false);
               gearRef.current?.focus();

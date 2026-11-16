@@ -171,7 +171,7 @@ npx openmausbot pair
 | "Can't reach 192.168.1.20:8799. Check the server is running and reachable from this computer." | Nothing answers there. | Start it with a way in (`serve --lan` for this network), and check a firewall allows the port. |
 | "maus.example.com doesn't exist yet." / "…certificate isn't valid yet." | DNS or the certificate isn't ready. | Wait for the DNS record, or give a new server a minute. |
 | "That address answers, but it isn't a MausBot server." | Something else answers there, often a proxy pointing at the wrong port. | Point it at `http://127.0.0.1:8799`. |
-| "That's a sign-in code from an email…" / "That's a code from an older MausBot…" / "That's a script key…" | The wrong kind of code. | On the server, run `openmausbot pair` for a 12-character pairing code. |
+| "That's a sign-in code from an email…" / "That code is for the phone app…" / "That's a script key…" | The wrong kind of code. | On the server, run `openmausbot pair` for a 12-character pairing code. |
 | "Too many wrong codes. Try again at 11:19." | Five wrong codes in five minutes from one address. | Wait until then, or make a new code. |
 | `Reach    ✗ https://… doesn't reach this server (connection refused).` | Your tunnel or proxy doesn't reach port 8799. | Point it at `http://127.0.0.1:8799`, then run `openmausbot status`. |
 | `Reach    ✗ https://… answers as a different server.` | The address leads to another MausBot server. | Point the tunnel at this machine's port. |
@@ -1488,6 +1488,49 @@ It stops a member's turn that shows no progress for that long. While one of the
 turn's tools runs, the turn may show nothing for up to 60 minutes (the longest
 an MCP call can be set to take) or the room's limit if that is longer. These two
 settings do not change it.
+
+## Keeping unattended bots from spending on failures
+
+Work that nobody is watching (a routine, an event, work one bot hands to
+another) backs off when it keeps failing, and has an upper bound when it keeps
+going. Nothing here turns a routine off or asks you anything. Each limit that
+stops something leaves one line saying so, on the routine's run row or in the
+thread. A failure that is this server's own (it could not start another
+process, its disk is full, a tool server is down, an AI is signed out) is told
+apart from the AI's errors, because starting the same work again cannot fix it.
+
+### Routines and incidents
+
+A routine stays on however often it fails.
+
+### Hand-offs and unattended turns
+
+A turn with a person waiting in the chat keeps the limits described under
+"A turn that goes silent".
+
+### Pausing every bot
+
+A paused bot's routines skip quietly and leave a row saying so.
+
+**Pause every bot** (any bot's menu in the sidebar, under More) pauses all of
+them at once, the bots made later included. It is the same pause as
+**Pause bot** ([Pausing a bot, a department or every bot](pausing-bots.md)): work in
+progress stops as Stop does, and until **Resume every bot** each routine or
+webhook run that comes due is let go with one line in its run log, "Every bot
+is paused, so <bot> takes no new work. Resume every bot from any bot's menu in
+the sidebar." A message to a bot is refused with the same line. Resuming leaves
+a bot or department that was paused by itself paused.
+
+From a terminal on the server, to stop spending at once (an admin route like
+any other: see "Loopback trust: owner or service"):
+
+```sh
+curl -X POST http://127.0.0.1:8799/api/paused \
+  -H 'content-type: application/json' -d '{"kind":"all","paused":true}'
+```
+
+It has no setting: the pause is kept in `paused-bots.json` in the data
+directory and lasts across restarts until it is resumed.
 
 ## Updating
 

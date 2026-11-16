@@ -43,6 +43,23 @@ describe("usage limits a bot reads", () => {
     });
   });
 
+  it("names Antigravity's leading windows as Gemini's, and says its limits could not be checked when it has no row", () => {
+    const antigravity = instance("antigravity", "antigravityAgent", "Antigravity");
+    const [account] = read({
+      instances: [antigravity],
+      report: report(row("antigravity", { driver: "antigravity", plan: null,
+        models: [{ name: "Claude & GPT (shared)", windows: [{ label: "5-hour", usedPercent: 56, remainingPercent: 44, resetsAt: AT }] }] })),
+    });
+    expect(account).toMatchObject({ status: "ok", windows: [
+      { name: "Gemini 5-hour", usedPercent: 40.3 }, { name: "Gemini weekly", usedPercent: 70 }, { name: "Claude & GPT (shared) 5-hour", usedPercent: 56 },
+    ] });
+    expect(read({ instances: [antigravity] })).toEqual([
+      { account: "Antigravity", engine: "antigravityAgent", status: "unknown", checkedAt: AT, windows: [], why: "Usage could not be checked just now. Try again later." },
+    ]);
+    expect(read({ instances: [antigravity], status: () => ({ ...ready, authenticated: false }) })).toEqual([]);
+    expect(read({ instances: [instance("claude")], report: report(row("claude")) })[0]!.windows[0]!.name).toBe("5-hour");
+  });
+
   it("tells unknown from unsupported", () => {
     const accounts = read({
       instances: [instance("signed-out", "claudeAgent", "Signed out"), instance("quiet", "codex", "Quiet"), instance("cursor", "cursorAgent", "Cursor"), instance("key", "claudeAgent", "Key")],

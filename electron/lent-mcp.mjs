@@ -13,6 +13,17 @@ import { DESKTOP_PORTS } from "./desktop-ports.mjs";
 import { commandPath } from "./shell-path.mjs";
 
 export const LENT_MCP_ACTIONS = new Set(["mcp_tools", "mcp_call"]);
+/** Where a tools/call's `_meta` says which bot and conversation made it, as the Cloud says: a hint for the MCP server,
+ * never proof of identity (`verified: false`). */
+export const CALLER_META = "openmausbot/caller";
+const callerMeta = caller => caller ? { _meta: { [CALLER_META]: { botId: caller.botId, threadId: caller.threadId, verified: false } } } : {};
+const callerId = value => typeof value === "string" && value.length > 0 && value.length <= 128;
+/** A job's MCP server, only on an MCP action, and its caller, only on a tool call: passed on as a hint, never trusted. */
+export function validLentMcpJob({ action, server, caller }) {
+  const validCaller = caller === undefined || (action === "mcp_call" && Boolean(caller) && typeof caller === "object" &&
+    !Array.isArray(caller) && Object.keys(caller).length === 2 && callerId(caller.botId) && callerId(caller.threadId));
+  return (LENT_MCP_ACTIONS.has(action) ? validLentMcpServer(server) : server === undefined) && validCaller;
+}
 const NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,255}$/;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,256}$/;
@@ -300,7 +311,8 @@ export function createLentMcp({ environment = async () => ({ ...inheritedEnviron
         });
       }
       if (typeof operation.tool_name !== "string" || !operation.tool_name) throw failure("Name the tool to call");
-      return use(server, signal, client => client.request("tools/call", { name: operation.tool_name, arguments: operation.arguments ?? {} }, signal, CALL_MS));
+      const meta = callerMeta(operation.caller);
+      return use(server, signal, client => client.request("tools/call", { name: operation.tool_name, arguments: operation.arguments ?? {}, ...meta }, signal, CALL_MS));
     },
     /** Resolves once every server it started has exited, or after five seconds. */
     close: () => Promise.all([...running.keys()].map(stop)).then(() => {}),
