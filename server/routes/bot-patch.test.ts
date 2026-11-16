@@ -413,6 +413,22 @@ describe("PATCH /api/bots/:id connectorScopes", () => {
     expect(narrowed.status).toBe(200);
     expect(store.bot(bot.id)?.connectorScopes).toEqual(firstOnly);
   });
+
+  it("refuses a local-API widening when another bot starts working while the computer change is stopping this one", async () => {
+    let otherBotId = "";
+    const { store, bot, patch } = fixture({
+      interruptAllDirectThreads: async () => { store.patchBot(otherBotId, { busy: true }); },
+      routines: () => ({ activeBotRunForBot: () => null }),
+    } as unknown as Partial<BotPatchRouteDeps>);
+    otherBotId = store.createBot({ name: "Other worker" }).id;
+    const firstOnly: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["first"] } };
+    store.patchBot(bot.id, { computer: "local", connectorScopes: firstOnly });
+
+    const widened = await patch(bot.id, { computer: "off", connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["first", "second"] } } });
+
+    expect(widened.status).toBe(409);
+    expect(store.bot(bot.id)?.connectorScopes).toEqual(firstOnly);
+  });
 });
 
 describe("PATCH /api/bots/:id mainThreadChoice", () => {
