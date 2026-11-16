@@ -37,6 +37,11 @@ export function unattendedLimits(env: NodeJS.ProcessEnv = process.env): Unattend
   };
 }
 
+/** A turn a person's own message started, or a continuation of one (a memory retry, a card's answer): attended, whatever
+ * routine run or wait is also open in that chat. */
+export const personDriven = (request: { personLine?: true; origin?: { kind: string } } | undefined): boolean =>
+  request?.personLine === true || request?.origin?.kind === "user";
+
 export interface UnattendedTurnDeps extends Omit<LoopGuardDeps, "settings"> {
   /** The loop guard's settings for a turn: an unattended one has it on, with a stop. */
   settings(unattended: boolean): LoopGuardSettings;
@@ -57,16 +62,20 @@ export interface UnattendedTurns extends LoopGuard {
 interface Counted {
   turnId: string | undefined;
   workedMs: number;
-  /** Model calls the engine reported with an id of their own, and those it reported without one. */
+  /** Model calls the engine reported with an id of their own (several usage reports for one id are one call), and those
+   * it reported without one: some engines (Codex, ACP's usage_update, Muse Code, the chat-completions drivers) report
+   * usage several times for one call, so reports without an id count one call per step, a step ending where a tool
+   * starts. */
   calls: Set<string>;
   unnamedCalls: number;
+  inStep: boolean;
   /** Tool calls started: the count for an engine that reports no usage per call. */
   tools: number;
   denials: number;
   stopped: boolean;
 }
 
-const fresh = (turnId: string | undefined): Counted => ({ turnId, workedMs: 0, calls: new Set(), unnamedCalls: 0, tools: 0, denials: 0, stopped: false });
+const fresh = (turnId: string | undefined): Counted => ({ turnId, workedMs: 0, calls: new Set(), unnamedCalls: 0, inStep: false, tools: 0, denials: 0, stopped: false });
 
 type Stop = { key: ChatNoticeKey; params: ServerTextParams };
 
@@ -127,9 +136,9 @@ export function createUnattendedTurns(deps: UnattendedTurnDeps): UnattendedTurns
     let turn = turns.get(threadId);
     if (!turn || (event.turnId !== undefined && turn.turnId !== undefined && turn.turnId !== event.turnId)) turns.set(threadId, (turn = fresh(event.turnId)));
     if (event.type === "thread.token-usage.updated") {
-      if (event.itemId === undefined) turn.unnamedCalls += 1;
-      else turn.calls.add(event.itemId);
-    } else if (event.type === "item.started" && event.itemType === "tool") turn.tools += 1;
+      if (event.itemId !== undefined) turn.calls.add(event.itemId);
+      else if (!turn.inStep) { turn.unnamedCalls += 1; turn.inStep = true; }
+    } else if (event.type === "item.started" && event.itemType === "tool") { turn.tools += 1; turn.inStep = false; }
     else if (event.type === "request.resolved" && event.behavior === "deny" && event.source !== "system" && event.source !== "user") turn.denials += 1;
     else return;
     check(threadId, turn);

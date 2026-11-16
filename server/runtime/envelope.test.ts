@@ -543,10 +543,13 @@ describe("composeResume", () => {
   });
 
   it("names a fault that is not the work's own and does not suggest sending the work again", () => {
-    const paragraph = composeResume(base, names, reports, [], ["process_start", "process_start", "tool_server"]).split("\n")[0]!;
+    const paragraph = composeResume(base, names, reports, [], [{ fault: "process_start", who: "Builder" }, { fault: "process_start", who: "Tester" }, { fault: "tool_server", who: "Builder" }]).split("\n")[0]!;
     expect(paragraph).not.toContain("rework=true");
-    expect(paragraph).toContain("Work that failed here did not fail on the work itself: this server could not start another process; one of its tool servers is not running or not signed in. " +
-      "The same work sent again fails the same way, so do not hand it out again, with rework or otherwise; say what could not be done and why, so Milind can fix that.");
+    expect(paragraph).toContain("Work that failed here did not fail on the work itself: this server could not start another process. " +
+      "Sent again to any teammate on this server, it fails the same way, so say what could not be done and why, so Milind can fix that.");
+    expect(paragraph).toContain("Work that failed on a teammate's own setup, not on the work: @Builder: one of its tool servers is not running or not signed in. " +
+      "Sent to that teammate again it fails the same way; another teammate may do it, or say what failed so Milind can fix it.");
+    expect(paragraph).not.toContain("do not hand it out again");
     expect(paragraph).toContain("Otherwise give one final answer;");
   });
 

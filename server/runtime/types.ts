@@ -1,5 +1,6 @@
 // The job runtime's public types: one record for every hand-off between bots, one lifecycle, one wake lane.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
+import type { HostFault } from "../host-fault.ts";
 
 /** Where the work ultimately started. Immutable down the whole tree. */
 export type OriginKind = "person" | "routine" | "outside";
@@ -98,6 +99,9 @@ export interface Assignment {
   status: Status;
   outcome?: Outcome;
   outcomeDetail?: string;
+  /** A failed turn's cause outside the work itself, read from the system's own failure words (never the bot's reply),
+   * when sending the same work again would meet it again. */
+  fault?: HostFault;
   level: Level;
   levelSource: LevelSource;
   /** Turns started for it, including resumes and reruns. */
@@ -260,7 +264,8 @@ export interface RunInput {
 export type RunResult =
   /** statusOnly: nothing in `text` for the requester to do (status-reply.ts). */
   | { kind: "completed"; text: string; evidence?: TurnEvidence; statusOnly?: boolean }
-  | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence }
+  /** failure: the system's own words for why the turn failed and the engine's stop reason, apart from anything the bot said. */
+  | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence; failure?: { text: string; stopReason?: string | null } }
   | { kind: "needs_input"; question: string; cards?: string[]; decide?: { default?: string }; evidence?: TurnEvidence }
   /** The turn stopped short (a step cap, a seat it could not get) and the
    * same node continues in place with its next execution. */

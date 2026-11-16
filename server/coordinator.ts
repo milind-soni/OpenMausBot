@@ -101,6 +101,8 @@ export interface HostTurnResult {
   /** The host's stall watchdog stopped the turn, including a room turn a stall ended during setup, before it had an
    * outcome: it failed as `stalled`, not as a provider error. */
   stalled?: boolean;
+  /** A failed turn's cause in the system's own words and the engine's stop reason, apart from anything the bot said. */
+  failure?: { text: string; stopReason?: string | null };
 }
 
 export interface HandoffOpener {

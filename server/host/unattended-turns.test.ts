@@ -4,7 +4,7 @@ import { failedTurnCause } from "../../shared/failed-turn.ts";
 import { parseConfigPatch } from "../config.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import { loopGuardSettings } from "./loop-guard.ts";
-import { createUnattendedTurns, unattendedLimits, UNATTENDED_DEFAULTS, type UnattendedLimits } from "./unattended-turns.ts";
+import { createUnattendedTurns, personDriven, unattendedLimits, UNATTENDED_DEFAULTS, type UnattendedLimits } from "./unattended-turns.ts";
 
 const T = "thread-1";
 const SAME = "fatal: not a git repository";
@@ -93,6 +93,19 @@ describe("a turn nobody is watching", () => {
     expect(tools.interrupts).toHaveLength(1);
   });
 
+  it("counts usage reports without an id as one call per step between tool calls, as Codex, ACP and the chat-completions drivers send several per call", () => {
+    const r = rig({ limits: { maxRequests: 3 } });
+    const call = (step: number) => {
+      for (let i = 0; i < 10; i++) r.emit({ ...r.base(), type: "thread.token-usage.updated", input: 10, output: i });
+      r.emit({ ...r.base(), type: "item.started", itemType: "tool", itemId: `t${step}`, title: `step ${step}` });
+    };
+    call(0);
+    call(1);
+    expect(r.interrupts).toEqual([]);
+    call(2);
+    expect(r.interrupts).toHaveLength(1);
+  });
+
   it("is stopped after working for its time limit; time spent waiting is not work", () => {
     const r = rig({ limits: { maxMs: 60 * 60_000 } });
     r.request("ls", true);
@@ -157,5 +170,14 @@ describe("the limits' settings", () => {
     expect(parseConfigPatch({ loopGuard: { unattendedStopAt: 12 } })).toEqual({ loopGuard: { unattendedStopAt: 12 } });
     expect(parseConfigPatch({ loopGuard: { unattended: false } })).toEqual({ loopGuard: { unattended: false } });
     expect(() => parseConfigPatch({ loopGuard: { unattendedStopAt: 1 } })).toThrow();
+  });
+});
+
+describe("a turn a person's own message started", () => {
+  it("is attended, and so is a continuation of it; a routine's or a webhook's is not", () => {
+    expect(personDriven({ origin: { kind: "user" } })).toBe(true);
+    expect(personDriven({ personLine: true, origin: { kind: "outside" } })).toBe(true);
+    expect(personDriven({ origin: { kind: "outside" } })).toBe(false);
+    expect(personDriven(undefined)).toBe(false);
   });
 });

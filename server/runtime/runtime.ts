@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { redactSecretsInText } from "../../shared/redact.ts";
 
+import { hostFaultOf, retryCannotFix } from "../host-fault.ts";
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
@@ -61,6 +62,10 @@ const defaultClock: Clock = { now: () => Date.now(), monotonic: () => performanc
 interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean; carried: ReadonlySet<string> }
 
 type TerminalStatus = "completed" | "failed" | "cancelled";
+
+/** Work nobody is waiting on (a routine's, a webhook's): the caps that only failures in a row or a total can end apply to
+ * it alone. A person's request always gets its requester's turn to react. */
+const unattendedRoot = (root: Assignment | undefined): boolean => root !== undefined && root.origin.kind !== "person";
 
 export class Runtime {
   readonly limits: Limits;
@@ -225,7 +230,7 @@ export class Runtime {
       if (existing && !(req.rework && isTerminal(existing))) return { ok: true, assignment: existing, duplicate: true };
       if (parent.depth + 1 > this.limits.depth) return refuse(`Assignment depth limit reached (${this.limits.depth})`);
       sameCall = req.fanOut !== undefined && siblings.some(c => c.fanOut === req.fanOut);
-      if (!sameCall && root?.budgets && (root.budgets.total ?? 0) >= this.limits.totalExecutions) {
+      if (!sameCall && unattendedRoot(root) && root?.budgets && (root.budgets.total ?? 0) >= this.limits.totalExecutions) {
         this.store.update(root, { kind: "budget", at: now, detail: `turns: ${root.budgets.total} in all` });
         return refuse(`Request budget exhausted: ${this.limits.totalExecutions} turns in all`, "budget");
       }
@@ -386,7 +391,8 @@ export class Runtime {
       if (rerun && this.clock.monotonic() < this.nextRerunAt) { this.held(n.id, RERUN_HELD); busyThreads.add(thread); continue; }
       const resumed = n.status === "resume";
       const root = n.parentId ? this.store.get(n.rootId) : n;
-      if (root?.budgets && (root.budgets.total ?? 0) + 1 > this.limits.totalExecutions) {
+      // The root's own resume is let through: it wraps up what came back, and can start nothing more.
+      if (unattendedRoot(root) && !(resumed && root?.id === n.id) && root?.budgets && (root.budgets.total ?? 0) + 1 > this.limits.totalExecutions) {
         this.cancelTree(root, `${this.limits.totalExecutions} turns in all, the most one request may take`, "failed", "budget");
         continue;
       }
@@ -487,7 +493,7 @@ export class Runtime {
       result => this.turnEnded(n.id, live, result),
       error => {
         this.log(`run(${n.id}) threw: ${String(error)}`);
-        this.turnEnded(n.id, live, { kind: "failed", outcome: "provider_error", text: clip(String(error), 1000) });
+        this.turnEnded(n.id, live, { kind: "failed", outcome: "provider_error", text: clip(String(error), 1000), failure: { text: clip(String(error), 1000) } });
       },
     ).finally(() => { if (this.turns.get(n.id) === live) this.turns.delete(n.id); });
     return true;
@@ -566,7 +572,8 @@ export class Runtime {
     const outstanding = unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
     if (outstanding) {
       n.status = "waiting"; n.lastActivityAt = now;
-      if (root) root.lastActivityAt = now;
+      if (root && unattendedRoot(root)) root.lastActivityAt = now;
+      else if (root) this.renew(root, now);
       this.store.transaction(() => {
         this.store.update(n, { kind: "waiting", at: now, detail: result.kind === "failed" ? `waiting: turn ${result.outcome}` : "waiting" });
         if (root && root.id !== n.id) this.store.update(root);
@@ -575,6 +582,8 @@ export class Runtime {
       return;
     }
     const ownTurn = !n.parentId;
+    const fault = result.kind === "failed" && result.failure ? hostFaultOf(result.failure.text, result.failure.stopReason) : null;
+    if (fault && retryCannotFix(fault)) n.fault = fault;
     if (result.kind === "completed") this.settle(n, "completed", "done", undefined, ownTurn);
     else this.settle(n, "failed", result.outcome, undefined, ownTurn);
   }
@@ -748,7 +757,7 @@ export class Runtime {
     this.store.transaction(() => {
       this.store.update(n, { kind, at: now, detail: `${status}: ${outcome}${detail ? ` — ${clip(detail, DETAIL_MAX)}` : ""}` });
       if (root && root.id !== n.id && !isTerminal(root)) {
-        if (status === "completed") this.renew(root, now);
+        if (status === "completed" || !unattendedRoot(root)) this.renew(root, now);
         else {
           root.lastActivityAt = now;
           if (status === "failed" && outcome !== "budget" && outcome !== "stopped" && detail !== STOPPED_WITH_REQUEST && root.budgets) root.budgets.failed = (root.budgets.failed ?? 0) + 1;

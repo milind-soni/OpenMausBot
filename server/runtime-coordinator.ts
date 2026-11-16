@@ -2,7 +2,6 @@ import { join } from "node:path";
 
 import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffLimit, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
-import { hostFaultOf } from "./host-fault.ts";
 import { composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
 import { handoffLimits } from "./runtime/handoff-limits.ts";
 import { Runtime } from "./runtime/runtime.ts";
@@ -650,7 +649,7 @@ export class RuntimeCoordinator implements Coordinator {
       ? composeResume(a, this.host.names(node, parent && this.project(parent)),
         settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node))),
         asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node))),
-        settled.flatMap(child => { const fault = child.status === "failed" ? hostFaultOf(`${child.outcomeDetail ?? ""}\n${child.result}`) : null; return fault ? [fault] : []; }))
+        settled.flatMap(child => child.status === "failed" && child.fault ? [{ fault: child.fault, who: this.host.names(view(child, a), node).assignee }] : []))
       : root
         ? composeRootTurn(a, { turn: input.turn === "resume" ? "first" : input.turn, restartNote: "", ...(input.answer !== undefined ? { answer: input.answer } : {}),
           ...(input.continuation ? { continuation: input.continuation } : {}) })
@@ -664,7 +663,7 @@ export class RuntimeCoordinator implements Coordinator {
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
     if (!root && a.origin.kind === "person" && result.approvalAsk && !result.stalled && question === undefined) return { kind: "needs_input", question: result.approvalAsk, ...evidence(result) };
-    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
+    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...(result.failure ? { failure: result.failure } : {}), ...evidence(result) };
     if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
     const named = withDefault(question);
     const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
