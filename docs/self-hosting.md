@@ -1489,6 +1489,29 @@ turn's tools runs, the turn may show nothing for up to 60 minutes (the longest
 an MCP call can be set to take) or the room's limit if that is longer. These two
 settings do not change it.
 
+## Keeping unattended bots from spending on failures
+
+Work that nobody is watching (a routine, an event, work one bot hands to
+another) backs off when it keeps failing, and has an upper bound when it keeps
+going. Nothing here turns a routine off or asks you anything. Each limit that
+stops something leaves one line saying so, on the routine's run row or in the
+thread. A failure that is this server's own (it could not start another
+process, its disk is full, a tool server is down, an AI is signed out) is told
+apart from the AI's errors, because starting the same work again cannot fix it.
+
+### Routines and incidents
+
+A routine stays on however often it fails.
+
+### Hand-offs and unattended turns
+
+A turn with a person waiting in the chat keeps the limits described under
+"A turn that goes silent".
+
+### Pausing every bot
+
+A paused bot's routines skip quietly and leave a row saying so.
+
 ## Updating
 
 Self-hosted servers follow the **stable** channel: a released version that our
