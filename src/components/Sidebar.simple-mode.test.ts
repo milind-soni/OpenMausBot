@@ -164,7 +164,7 @@ describe("bot-first sidebar", () => {
     expect(line.slice(0, line.indexOf("data-provider-mark"))).not.toContain("title=");
     expect(String(findElement(tree, "data-sidebar-bot-row", bot.id)!.props.className)).not.toContain("group-hover:pr-9");
     expect(markup).not.toContain("group-hover:pe-7");
-    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*right-\[3px\] top-1\.5 size-6 translate-y-0\b/);
+    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*end-\[3px\] top-1\.5 size-6 translate-y-0\b/);
   });
 
   it("fades the collapsed rail's engine badge in both modes", () => {
