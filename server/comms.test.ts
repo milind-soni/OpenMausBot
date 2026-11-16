@@ -738,6 +738,12 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
         expect(woke).not.toContain("User: (Routine");
         expect(woke).not.toContain("Assistant: delegated:");
       } finally {
+        writeFileSync(gateFile, "go");
+        await waitUntil(async () => {
+          const current = (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: any) => bot.id === helper.id);
+          return !current?.busy;
+        }, 10_000, "gated helper did not settle during cleanup").catch(() => {});
+        rmSync(gateFile, { force: true });
         await api("PATCH", "/api/config", { context: { maxMessages: 10_000 }, everyBotRules: "" });
       }
     },

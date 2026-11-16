@@ -1260,6 +1260,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }
               sessionAllows.delete(threadId);
               if (cursor) {
+                if (!turn.recoveryText?.trim()) throw new Error(`${support.displayName} session could not be resumed and the turn carries no recovery text to rebuild from`);
                 const recovery = recoveryPromptFor({
                   recoveryText: turn.recoveryText,
                   currentText: turn.text,
