@@ -119,6 +119,17 @@ OpenMausBot uses your project's own auth config for an app automatically, in pla
 
 On a MausBot Cloud plan, connected apps run through OpenMausBot's managed connection service rather than your own Composio project, so you cannot add permissions yourself; ask OpenMausBot support instead.
 
+## Files a tool takes
+
+Composio runs app tools on its own servers, so a tool that takes a file (Google Drive's `GOOGLEDRIVE_UPLOAD_FILE` with `file_to_upload`, a Gmail attachment) reads it from Composio's file storage by `s3key`, never from this computer. A bot gives such a field the full path of a file in its working folder, its Local VM folder or the conversation's attachments (`C:\Users\…\report.pdf`, `/Users/…/report.pdf`, or that path as the `s3key` of a `{ name, mimetype, s3key }` object). Before the call goes out, the harness (`server/connector-files.ts`) reads the file through the same resolver chat file links use, asks for an upload link (`POST /v1/files/upload` on the managed service, Composio's `POST /files/upload/request` with your own project key), puts the bytes there and sends the call with `{ name, mimetype, s3key }`.
+
+- A path outside those folders, a missing file or one over 100 MB is refused with the reason and nothing reaches the app.
+- A failed upload is refused with what failed; nothing is written to the app.
+- When Composio still cannot fetch a call's file (`Failed to download file with s3key …`), the bot is told to give a local path instead of an invented key.
+- At most 10 files per call. Plain text needs no file: `GOOGLEDRIVE_CREATE_FILE_FROM_TEXT` takes the text itself.
+
+The managed service needs the updated broker as well as the updated app for this.
+
 ## Apps with no Composio-managed sign-in
 
 Some apps, such as Xero and Buffer, have no sign-in that Composio provides: they connect only through an auth config holding your own OAuth app. Without one, Composio answers "Composio does not manage auth for toolkit … and no auth config without required fields is available".

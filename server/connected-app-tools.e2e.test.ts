@@ -132,3 +132,51 @@ it("a bot with HighLevel read only runs HighLevel's reads, which name the resour
     rmSync(scratch, { recursive: true, force: true });
   }
 }, 120_000);
+
+it("a bot's Google Drive upload of a file in its working folder reaches Composio as an uploaded file, and one outside it is refused", async () => {
+  const apps = await startFakeConnectedApps();
+  apps.connected = { googledrive: true };
+  const scratch = mkdtempSync(join(tmpdir(), "omb-app-tools-"));
+  const gate = join(scratch, "finish");
+  const fixture = await launchVerificationServer({
+    ...process.env, OMB_COMPOSIO_BROKER_URL: apps.url, OMB_COMPOSIO_BROKER_TOKEN: apps.token, FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate,
+  });
+  const api = apiOn(fixture.info.url);
+  try {
+    const bot = (await api("POST", "/api/bots", { name: "Drive" }, 201)).bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { composio: true, connectorTools: { googledrive: { tools: "*" } } });
+    await api("POST", `/api/bots/${bot.id}/messages`, { threadId: bot.threadId, text: "Put the report in my Drive", sendId: "drive-upload-e2e-0001" }, 202);
+    let dump: any;
+    await expect.poll(() => {
+      try { dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")); } catch { return false; }
+      return Boolean(dump.mcpConfig?.mcpServers?.composio);
+    }, { timeout: 20_000 }).toBe(true);
+    const report = join(fixture.info.dataDir, "workspaces", bot.id, "report.pdf");
+    writeFileSync(report, "%PDF-1.4 the report");
+    const upload = (file: string) => ask(dump.mcpConfig.mcpServers.composio, {
+      name: "COMPOSIO_MULTI_EXECUTE_TOOL", arguments: { tools: [{ tool_slug: "GOOGLEDRIVE_UPLOAD_FILE", arguments: { file_to_upload: file } }] },
+    });
+
+    const { answer } = await upload(report);
+    expect(answer.result.isError, JSON.stringify(answer)).not.toBe(true);
+    expect(apps.uploads).toHaveLength(1);
+    expect(apps.uploads[0]!.request).toMatchObject({ toolkit_slug: "googledrive", tool_slug: "GOOGLEDRIVE_UPLOAD_FILE", filename: "report.pdf", mimetype: "application/pdf" });
+    expect(apps.uploads[0]!.bytes?.toString()).toBe("%PDF-1.4 the report");
+    expect(apps.calls.at(-1)).toMatchObject({ tool: "GOOGLEDRIVE_UPLOAD_FILE", arguments: { file_to_upload: { name: "report.pdf", mimetype: "application/pdf", s3key: "fake-files/1" } } });
+
+    const outside = join(scratch, "elsewhere.pdf");
+    writeFileSync(outside, "not the bot's");
+    const before = apps.calls.length;
+    const refused = (await upload(outside)).answer;
+    expect(refused.result.isError).toBe(true);
+    expect(refused.result.content[0].text).toContain("outside your working folder");
+    expect(refused.result.content[0].text).toContain("Nothing was written to Google Drive");
+    expect(apps.calls.length, "the call never reached Composio").toBe(before);
+    expect(apps.uploads).toHaveLength(1);
+    writeFileSync(gate, "");
+  } finally {
+    await fixture.close();
+    await apps.close();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}, 120_000);

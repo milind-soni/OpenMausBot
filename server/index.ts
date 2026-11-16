@@ -652,6 +652,7 @@ import { createCardRequester, linePersonKey } from "./host/thread-person.ts"; im
 import { createThreadRoutes } from "./routes/threads.ts";
 import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
+import { connectorFileDeps, stageConnectorFiles, withMissingFileHint } from "./connector-files.ts";
 import { createConnectorCards } from "./host/connector-cards.ts";
 import { createLoginMailCodes } from "./host/login-mail-codes.ts";
 import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
@@ -14412,6 +14413,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           })
           : { ok: true, approved: false };
         if (!held.ok) return refuseOutbound(held.text);
+        // A file the call names on this computer goes to Composio's storage first: Composio runs the tool and never reads this disk.
+        const staged = await stageConnectorFiles(body, connectorFileDeps({ roots: messageFileRootsForThread(currentSender.id, internalCapability.threadId), vm: localVmThreadTargets.get(internalCapability.threadId), guestRoot: VM_WORKSPACE_GUEST, via: teamConnections.via(actor.access), serviceSlugs, appFor: (tool) => describeTool(tool).app })); if ("refusal" in staged) return refuseOutbound(staged.refusal);
         const outboundApproved = held.approved;
         if (outboundApproved) requireActiveInternalCapability();
         let dispatchRefusal: string | undefined;
@@ -14422,7 +14425,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         let upstream: Awaited<ReturnType<typeof composio.relayMcp>>;
         try { upstream = await composio.relayMcp(
           teamConnections.via(actor.access)[0],
-          body,
+          staged.frame as typeof body,
           Array.isArray(req.headers["mcp-session-id"])
             ? req.headers["mcp-session-id"][0]
             : req.headers["mcp-session-id"],
@@ -14462,7 +14465,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         };
         if (upstream.transportSessionId) headers["mcp-session-id"] = upstream.transportSessionId; if (connectorCalls.length) connectionHealth.appCall({ ...(internalCapability.connectorsFor ? { person: internalCapability.connectorsFor } : {}), slugs: connectorCalls.map((one) => one.slug), status: upstream.status, bytes: upstream.bytes, contentType: upstream.contentType });
         res.writeHead(upstream.status, headers);
-        return res.end(Buffer.from(withScopeHint(proactive.fence.confines(internalCapability.threadId) ? recordsAnswer(upstream.bytes, upstream.contentType) : upstream.bytes, upstream.contentType, connectorCalls.map((call) => call.slug))));
+        return res.end(Buffer.from(withMissingFileHint(withScopeHint(proactive.fence.confines(internalCapability.threadId) ? recordsAnswer(upstream.bytes, upstream.contentType) : upstream.bytes, upstream.contentType, connectorCalls.map((call) => call.slug)), upstream.contentType, connectorCalls.map((call) => call.slug))));
       }
       if (path === "/api/internal/computer-control") {
         const botId = url.searchParams.get("botId") ?? "";
