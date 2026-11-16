@@ -1512,6 +1512,26 @@ A turn with a person waiting in the chat keeps the limits described under
 
 A paused bot's routines skip quietly and leave a row saying so.
 
+**Pause every bot** (any bot's menu in the sidebar, under More) pauses all of
+them at once, the bots made later included. It is the same pause as
+**Pause bot** ([Pausing a bot, a department or every bot](pausing-bots.md)): work in
+progress stops as Stop does, and until **Resume every bot** each routine or
+webhook run that comes due is let go with one line in its run log, "Every bot
+is paused, so <bot> takes no new work. Resume every bot from any bot's menu in
+the sidebar." A message to a bot is refused with the same line. Resuming leaves
+a bot or department that was paused by itself paused.
+
+From a terminal on the server, to stop spending at once (an admin route like
+any other: see "Loopback trust: owner or service"):
+
+```sh
+curl -X POST http://127.0.0.1:8799/api/paused \
+  -H 'content-type: application/json' -d '{"kind":"all","paused":true}'
+```
+
+It has no setting: the pause is kept in `paused-bots.json` in the data
+directory and lasts across restarts until it is resumed.
+
 ## Updating
 
 Self-hosted servers follow the **stable** channel: a released version that our
