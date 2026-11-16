@@ -100,10 +100,18 @@ export function SidebarBotThreadsPeek({ bot, onScreen = false, dispatch }: { bot
   }, [has, threads.length]);
   // Rows are taller on a touch screen, so the sheet's own height decides how far up it has to sit.
   useLayoutEffect(() => {
-    const height = sheet.current?.offsetHeight;
-    if (!place || !height) return;
-    const top = Math.max(EDGE, Math.min(place.top, window.innerHeight - height - EDGE));
-    if (top !== place.top) setPlace({ ...place, top });
+    const menu = sheet.current;
+    if (!place || !menu) return;
+    const fit = () => {
+      const height = menu.offsetHeight;
+      if (!height) return;
+      const top = Math.max(EDGE, Math.min(place.top, window.innerHeight - height - EDGE));
+      if (top !== place.top) setPlace({ ...place, top });
+    };
+    fit();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    observer?.observe(menu);
+    return () => observer?.disconnect();
   }, [place, threads.length]);
   useEffect(() => {
     if (!open) return;

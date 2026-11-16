@@ -167,6 +167,33 @@ describe("the hover sheet of a bot's other conversations", () => {
     expect(sheet()!.style.top).toBe(`${window.innerHeight - 185 - 8}px`);
   });
 
+  it("moves up when it grows taller while open, and stops watching its height once closed", async () => {
+    const watchers: { resized: () => void; target?: Element; live: boolean }[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      private entry: (typeof watchers)[number];
+      constructor(resized: () => void) { this.entry = { resized, live: true }; watchers.push(this.entry); }
+      observe(target: Element) { this.entry.target = target; }
+      disconnect() { this.entry.live = false; }
+    });
+    await mount([task("a"), task("b"), task("c")]);
+    row.getBoundingClientRect = () => ({ left: 8, right: 300, top: window.innerHeight - 20 }) as DOMRect;
+    const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(180);
+    await open();
+    expect(sheet()!.style.top).toBe(`${window.innerHeight - 180 - 8}px`);
+
+    height.mockReturnValue(225);
+    const watching = watchers.filter((entry) => entry.live);
+    expect(watching.map((entry) => entry.target)).toEqual([sheet()]);
+    await act(async () => { watching[0].resized(); });
+    expect(sheet()!.style.top).toBe(`${window.innerHeight - 225 - 8}px`);
+
+    await open();
+    height.mockRestore();
+    vi.unstubAllGlobals();
+    expect(chevron().getAttribute("aria-expanded")).toBe("false");
+    expect(watchers.filter((entry) => entry.live)).toEqual([]);
+  });
+
   it("offers neither action for a conversation that is working", async () => {
     await mount([task("a", { busy: true })]);
     await open();
