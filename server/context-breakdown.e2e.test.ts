@@ -19,7 +19,10 @@ const answer = {
 async function setup(extraEnv: NodeJS.ProcessEnv) {
   const fixture = await launchVerificationServer({ ...process.env, ...extraEnv }, undefined, undefined, undefined, undefined, undefined, ["codex"]);
   const control = async (...args: string[]) => runControlOmb([...args, "--url", fixture.info.url]) as Promise<any>;
-  const bot = (await control("new-bot", "--name", "Context probe")).bot;
+  const bot = (await control("new-bot", "--name", "Context probe").catch(async (error) => {
+    await fixture.close();
+    throw error;
+  })).bot;
   const thread: string = bot.activeTaskId;
   const post = (action: string) => request(`/api/bots/${bot.id}/${action}`, { method: "POST", body: JSON.stringify({ threadId: thread }) }, fixture.info.url);
   const context = () => post("context") as Promise<{ threadId: string; breakdown: ContextBreakdown | null }>;
