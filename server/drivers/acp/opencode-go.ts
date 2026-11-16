@@ -13,6 +13,7 @@ import { OPENCODE_STANDALONE } from "./opencode-release.ts";
 import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
 import { offeredModels } from "./config-options.ts";
 import { declareTypedOpenCodeModel } from "./opencode-typed-model.ts";
+import { OPENCODE_GO_MODEL_PREFIX } from "../../../shared/opencode-model-id.ts";
 import {
   declareLiveOpenCodeModels,
   keepOpenCodeModelsFresh,
@@ -761,18 +762,14 @@ const ACCOUNT_ERROR_TEXT: ReadonlyArray<readonly [RegExp, AccountErrorCode]> = [
  * refusal holds that login's free models and leaves the account available. */
 const FREE_MODEL_LIMIT = /\bfree(?:UsageLimitError|\s+usage\s+limit)\b/iu;
 
-/** OpenCode Go's subscription models: its weekly or monthly allowance holds them all, never Zen's free models on the same
- * login, which have an allowance of their own. */
-const GO_PROVIDER = "opencode-go/";
-
 /** How far a usage limit OpenCode reported reaches: one provider's shared free allowance (with the free models that
  * allowance holds), the Go subscription's models, or the whole account. */
 export function openCodeLimitFacts(text: string, model?: string, catalog?: ModelCatalog): { limit: "engine" | "model"; limitModels?: string[] } {
   if (!FREE_MODEL_LIMIT.test(text)) {
-    if (!model?.startsWith(GO_PROVIDER)) return { limit: "engine" };
+    if (!model?.startsWith(OPENCODE_GO_MODEL_PREFIX)) return { limit: "engine" };
     const listed = [...lastSuccessfulCatalog.values(), ...(catalog ? [catalog] : [])].flatMap((known) => known.options.map((option) => option.id));
     const paid = (catalog && catalogPrices.get(catalog)?.paid) ?? [];
-    return { limit: "model", limitModels: [...new Set([model, ...paid, ...listed].filter((id) => id.startsWith(GO_PROVIDER)))] };
+    return { limit: "model", limitModels: [...new Set([model, ...paid, ...listed].filter((id) => id.startsWith(OPENCODE_GO_MODEL_PREFIX)))] };
   }
   const provider = model?.includes("/") ? model.slice(0, model.indexOf("/")) : "";
   const offered = new Set(catalog?.options.map((option) => option.id));

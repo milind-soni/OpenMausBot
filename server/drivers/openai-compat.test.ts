@@ -667,6 +667,42 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("asks OpenRouter to cache the prompt of a Claude model, keyed to the thread, and leaves every other model as it was", async () => {
+    const sent: any[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sent.push(JSON.parse(String(init?.body)));
+        return new Response('data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+      }),
+    );
+    const turn = async (url: string, model: string) => {
+      const inst = await OpenAICompatDriver.create({
+        instanceId: "test-cache", displayName: "Cache", enabled: true,
+        config: { url, apiKeyEnv: "TEST_KEY", model }, environment: { TEST_KEY: "secret" },
+      });
+      const recorder = recordEvents(inst.adapter);
+      await inst.adapter.sendTurn({ threadId: "thread-c", text: "prompt", model });
+      await recorder.until((e) => e.type === "turn.completed");
+      recorder.stop();
+      await inst.dispose();
+      return sent.at(-1);
+    };
+
+    const claude = await turn("https://openrouter.ai/api/v1", "anthropic/claude-sonnet-4.5");
+    expect(claude.cache_control).toEqual({ type: "ephemeral" });
+    expect(claude.session_id).toBe("thread-c");
+
+    for (const body of [
+      await turn("https://openrouter.ai/api/v1", "deepseek/deepseek-v4-flash-0731"),
+      await turn("https://api.example.com/v1", "anthropic/claude-sonnet-4.5"),
+    ]) {
+      expect(body).not.toHaveProperty("cache_control");
+      expect(body).not.toHaveProperty("session_id");
+    }
+  });
+
   it("U24 retest: requests stream_options.include_usage on a streamed turn, like minimax.ts does", async () => {
     let sentBody: any = null;
     vi.stubGlobal(

@@ -186,6 +186,7 @@ export const USER_ERROR = {
   "serverError.postiz.addressAsText": "Send the Postiz address as text.",
   "serverError.secret.localService": "A local service cannot enter a secret. Enter it in OpenMausBot.",
   "serverError.secret.cloudOwnerOnly": "Only the owner of this Cloud can enter this secret.",
+  "serverError.card.cloudOwnerOnly": "Only the owner of this Cloud can answer this card. Chats started by other people always ask the owner first, whatever the bot's access level.",
   "serverError.secret.conversationOwnerOnly": "Only the person this conversation belongs to can enter this secret.",
   "serverError.secret.credentialSavingFromPhone": "this credential is currently being saved from a phone",
   "serverError.secret.credentialDismissed": "this credential request was dismissed",
@@ -200,6 +201,7 @@ export const USER_ERROR = {
   "serverError.attachment.alreadyInMessage": "This file is already in a message, so it stays.",
   "serverError.engine.signedOut": "{name} is signed out.",
   "serverError.bot.viewOnly": "You can view {bot}, not chat with it.",
+  "serverError.bot.alwaysAllowFull": "This bot already always-allows {max} tools. Remove one under Access in its settings, then try again.",
   "serverError.share.ownBot": "Chats with your own MausBot stay yours, so they can't be shared.",
   "serverError.share.alreadyTeam": "This conversation is already shared with the team.",
   "serverError.share.notYours": "Only the person this conversation belongs to can share it.",
@@ -244,6 +246,12 @@ export function userErrorFields(value: unknown): Pick<ServerErrorBody, "errorKey
   const params = errorParams && typeof errorParams === "object" && !Array.isArray(errorParams)
     ? redactParams(errorParams as ServerTextParams) : undefined;
   return { errorKey, ...(params ? { errorParams: params } : {}) };
+}
+
+/** A refusal another module words in English, with its language-pack key when it is one of these lines word for word. */
+export function refusalText(error: string): ServerErrorBody {
+  const key = (Object.keys(USER_ERROR) as UserErrorKey[]).find((candidate) => USER_ERROR[candidate] === error);
+  return key ? userError(key) : { error };
 }
 
 export function refusalBody(refusal: { error: string; errorKey?: string; errorParams?: ServerTextParams }): ServerErrorBody {

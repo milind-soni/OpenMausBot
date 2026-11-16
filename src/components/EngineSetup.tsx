@@ -272,7 +272,7 @@ export function EngineWarningNotice({
 }
 
 function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; signInOnly: boolean }) {
-  const { refreshInstances, refreshModels } = useStore();
+  const { state, refreshInstances, refreshModels } = useStore();
   const [busy, setBusy] = useState<"install" | "signin" | "complete" | "check" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flow, setFlow] = useState<{ flowId: string; authorizationUrl: string } | null>(null);
@@ -378,8 +378,10 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
     );
   }
 
+  const cloudHome = state.config?.cloudHome === true;
   return (
     <div className="mt-3 space-y-2">
+      {cloudHome && <p className="text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.cloudPasteHint")}</p>}
       <button
         type="button"
         disabled={busy !== null}
@@ -400,7 +402,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
             {busy === "check" ? t("common.checking") : t("engineSetup.finishedSignIn")}
           </button>
           <div data-redirect-paste className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
-            <p>{t("engineSetup.otherComputer")}</p>
+            <p>{t(cloudHome ? "engineSetup.cloudPasteSummary" : "engineSetup.otherComputer")}</p>
             <p className="mt-2 leading-relaxed">{t("engineSetup.otherComputerHint")}</p>
             <input
               value={callbackUrl}

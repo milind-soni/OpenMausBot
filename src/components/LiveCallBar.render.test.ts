@@ -174,6 +174,19 @@ describe("LiveCallSettings", () => {
     expect(withLive({ ...base, geminiVoice: "Kore" })).toMatch(/<option value="Kore" selected="">/);
   });
 
+  it("offers the bot on the call a voice of its own beside the default for every other bot", () => {
+    const withBot = (liveVoice?: string) => render(createElement(LiveCallSettings, { bot: { id: "atlas", name: "Atlas", liveVoice }, onClose: vi.fn() }));
+    const unset = withBot();
+    expect(unset).toContain("Voice for Atlas");
+    expect(unset).toContain("Default voice");
+    expect(unset).toMatch(/<option value="" selected="">Same as the default<\/option>/);
+    expect(withBot("cedar")).toMatch(/<option value="cedar" selected="">/);
+    expect(withBot("Kore")).toMatch(/<option value="" selected="">Same as the default<\/option>/);
+    const plain = render(createElement(LiveCallSettings, { onClose: vi.fn() }));
+    expect(plain).not.toContain("Voice for");
+    expect(plain).not.toContain("Default voice");
+  });
+
   it("says the key stays on the Cloud when the chat is on the person's Cloud", () => {
     const markup = renderOnCloud(createElement(LiveCallSettings, { onClose: vi.fn() }));
     expect(markup).toContain(CLOUD_DISCLOSURE);

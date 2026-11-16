@@ -130,6 +130,16 @@ export function geminiLiveVoice(voice: string | undefined): string {
   return GEMINI_LIVE_VOICE_OPTIONS.find((option) => option.id === voice?.trim())?.id ?? GEMINI_LIVE_DEFAULT_VOICE;
 }
 
+/** Whether `voice` is one of the voices a bot can have of its own for Live calls: a GPT-Live or a Gemini Live voice. */
+export function isBotLiveVoice(voice: unknown): boolean {
+  return [...LIVE_VOICE_OPTIONS, ...GEMINI_LIVE_VOICE_OPTIONS].some((option) => option.id === voice);
+}
+
+/** The voice a Live call with a bot speaks in: the bot's own voice when it is one of this provider's, else the app's. */
+export function botCallVoice(botVoice: string | undefined, appVoice: string | undefined, gemini: boolean): string | undefined {
+  return (gemini ? GEMINI_LIVE_VOICE_OPTIONS : LIVE_VOICE_OPTIONS).some((option) => option.id === botVoice) ? botVoice : appVoice;
+}
+
 /** A call's length as a clock: m:ss under an hour ("0:07", "1:42"),
  * h:mm:ss from an hour on ("1:02:05"). Whole seconds; a value that is not a
  * length reads as 0:00. */

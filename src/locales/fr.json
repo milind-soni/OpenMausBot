@@ -1256,6 +1256,8 @@
   "engineSetup.finishedSignIn": "J'ai terminé la connexion",
   "engineSetup.otherComputer": "Vous vous connectez depuis un autre ordinateur ?",
   "engineSetup.otherComputerHint": "Quand Google redirige vers une page qui ne charge pas, collez ici son URL complète.",
+  "engineSetup.cloudPasteSummary": "La page de Google ne charge pas ? Collez son adresse ici",
+  "engineSetup.cloudPasteHint": "Après la connexion, Google ouvre une page qui ne charge pas. Copiez son adresse et collez-la ci-dessous.",
   "engineSetup.sending": "Envoi…",
   "engineSetup.sendRedirect": "Envoyer la redirection",
   "engineSetup.googleNoLink": "La connexion Google n'a pas renvoyé de lien.",
