@@ -4,7 +4,8 @@
 // that link directly and never pass through this Worker.
 import { z } from "zod";
 
-import { composioRequest, json, readJsonBody, upstreamError } from "./common";
+import { composioUploadLink } from "../../../shared/composio-storage";
+import { actingUser, composioRequest, json, listConnectedAccounts, readJsonBody, upstreamError, type InstallationRow } from "./common";
 
 const uploadRequestSchema = z.object({
   toolkit_slug: z.string().regex(/^[a-z0-9_][a-z0-9_-]{0,80}$/),
@@ -22,24 +23,23 @@ const uploadResponseSchema = z.object({
   newPresignedUrl: z.string().optional(),
 });
 
-/** POST /v1/files/upload: Composio's upload link and key for one file a tool call will name. */
-export async function requestFileUpload(request: Request, env: Env) {
+/** POST /v1/files/upload: Composio's upload link and key for one file a tool call will name. Only for a toolkit the
+ *  installation has a working connection to: nothing else could use the file. */
+export async function requestFileUpload(request: Request, installation: InstallationRow, env: Env) {
   const parsed = uploadRequestSchema.safeParse(await readJsonBody(request, 4096));
   if (!parsed.success) return json({ error: "invalid file upload request" }, 400);
+  const accounts = await listConnectedAccounts(env, actingUser(installation), [parsed.data.toolkit_slug]).catch(() => null);
+  if (!accounts) return json({ error: "Connected apps could not be checked. Try again." }, 502);
+  if (!accounts.some((account) => /^active$/i.test(account.status ?? "") && account.toolkit?.slug?.toLowerCase() === parsed.data.toolkit_slug)) {
+    return json({ error: `${parsed.data.toolkit_slug} is not connected` }, 409);
+  }
   const response = await composioRequest(env, "/files/upload/request", {
     method: "POST",
     body: JSON.stringify(parsed.data),
   });
   if (!response.ok) return json({ error: await upstreamError(response, `File upload request failed (${response.status})`) }, 502);
   const body = uploadResponseSchema.safeParse(await response.json().catch(() => null));
-  const link = body.success ? body.data.new_presigned_url ?? body.data.newPresignedUrl : undefined;
-  if (!body.success || !link) return json({ error: "Composio returned no upload link" }, 502);
-  let url: URL;
-  try {
-    url = new URL(link);
-  } catch {
-    return json({ error: "Composio returned an unusable upload link" }, 502);
-  }
-  if (url.protocol !== "https:") return json({ error: "Composio returned an unusable upload link" }, 502);
+  const url = body.success ? composioUploadLink(body.data.new_presigned_url ?? body.data.newPresignedUrl) : null;
+  if (!body.success || !url) return json({ error: "Composio returned no upload link on its storage" }, 502);
   return json({ key: body.data.key, url: url.toString() });
 }

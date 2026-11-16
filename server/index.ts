@@ -652,7 +652,7 @@ import { createCardRequester, linePersonKey } from "./host/thread-person.ts"; im
 import { createThreadRoutes } from "./routes/threads.ts";
 import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
-import { connectorFileDeps, stageConnectorFiles, withMissingFileHint } from "./connector-files.ts";
+import { connectorFileDeps, connectorFileScope, prepareConnectorFiles, withMissingFileHint } from "./connector-files.ts";
 import { createConnectorCards } from "./host/connector-cards.ts";
 import { createLoginMailCodes } from "./host/login-mail-codes.ts";
 import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
@@ -14405,16 +14405,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const opaque = connectorCalls.some(call => call.slug === "COMPOSIO_PROXY_EXECUTE");
         if (opaque && currentSender.connectorTools !== undefined && !sandbox.open(currentSender)) return refuseOutbound(sandbox.refusal);
+        // Files the call names on this computer are read now and listed on its card; they go to Composio's storage (Composio runs the tool, never reading this disk) only after the last check below.
+        const files = await prepareConnectorFiles(body, connectorFileDeps({ scope: connectorFileScope({ roots: messageFileRootsForThread(currentSender.id, internalCapability.threadId), attachmentStore: ATTACHMENTS_DIR, messages: store.messagesFor(internalCapability.threadId), appData: [DATA_DIR, process.env.OMB_USER_DATA], vm: localVmThreadTargets.get(internalCapability.threadId), guestRoot: VM_WORKSPACE_GUEST }), via: teamConnections.via(actor.access), serviceSlugs, appFor: (tool) => describeTool(tool).app })); if ("refusal" in files) return refuseOutbound(files.refusal);
         const fullAccess = outboundTool !== null && sendsFreely();
         const held: OutboundHoldAnswer = outboundTool
           ? await outboundHold.hold({
-            bot: currentSender, threadId: internalCapability.threadId, tool: outboundTool, calls: outboundCalls, opaque, fullAccess,
+            bot: currentSender, threadId: internalCapability.threadId, tool: outboundTool, calls: files.cardCalls(outboundCalls), opaque, fullAccess,
             active: () => internalCapabilityIsActive(internalCapability),
           })
           : { ok: true, approved: false };
         if (!held.ok) return refuseOutbound(held.text);
-        // A file the call names on this computer goes to Composio's storage first: Composio runs the tool and never reads this disk.
-        const staged = await stageConnectorFiles(body, connectorFileDeps({ roots: messageFileRootsForThread(currentSender.id, internalCapability.threadId), vm: localVmThreadTargets.get(internalCapability.threadId), guestRoot: VM_WORKSPACE_GUEST, via: teamConnections.via(actor.access), serviceSlugs, appFor: (tool) => describeTool(tool).app })); if ("refusal" in staged) return refuseOutbound(staged.refusal);
         const outboundApproved = held.approved;
         if (outboundApproved) requireActiveInternalCapability();
         let dispatchRefusal: string | undefined;
@@ -14425,11 +14425,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         let upstream: Awaited<ReturnType<typeof composio.relayMcp>>;
         try { upstream = await composio.relayMcp(
           teamConnections.via(actor.access)[0],
-          staged.frame as typeof body,
+          body,
           Array.isArray(req.headers["mcp-session-id"])
             ? req.headers["mcp-session-id"][0]
             : req.headers["mcp-session-id"],
-          () => {
+          async () => {
             requireActiveInternalCapability();
             const fresh = store.bot(internalCapability.botId);
             if (!fresh || fresh.composio === false || !composio.configured(cfg) || managedPolicy.appsCallRefusal(connectorCalls, serviceSlugs)) refuseDispatch("Connected apps were disabled while this call waited.");
@@ -14453,7 +14453,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 refuseDispatch(error instanceof Error ? error.message : String(error));
               }
             }
-            for (const key of nextDrafts) reservedDrafts.add(key);
+            const sent = files.upload ? await files.upload().catch((error: unknown) => refuseDispatch(error instanceof Error ? error.message : String(error))) : undefined; requireActiveInternalCapability(); for (const key of nextDrafts) reservedDrafts.add(key); return sent as typeof body | undefined;
           }, undefined, teamConnections.via(actor.access)[1],
         ); } catch (error) {
           if (dispatchRefusal) return refuseOutbound(dispatchRefusal);

@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { expect, it } from "vitest";
 
@@ -133,7 +133,7 @@ it("a bot with HighLevel read only runs HighLevel's reads, which name the resour
   }
 }, 120_000);
 
-it("a bot's Google Drive upload of a file in its working folder reaches Composio as an uploaded file, and one outside it is refused", async () => {
+it("a bot's Google Drive upload of a file in its working folder reaches Composio as an uploaded file; another path goes as it is and a hidden file is refused", async () => {
   const apps = await startFakeConnectedApps();
   apps.connected = { googledrive: true };
   const scratch = mkdtempSync(join(tmpdir(), "omb-app-tools-"));
@@ -164,12 +164,22 @@ it("a bot's Google Drive upload of a file in its working folder reaches Composio
     expect(apps.uploads[0]!.bytes?.toString()).toBe("%PDF-1.4 the report");
     expect(apps.calls.at(-1)).toMatchObject({ tool: "GOOGLEDRIVE_UPLOAD_FILE", arguments: { file_to_upload: { name: "report.pdf", mimetype: "application/pdf", s3key: "fake-files/1" } } });
 
+    // A path that is not one of the bot's files goes to the app as it is: only Composio can say what it means there.
     const outside = join(scratch, "elsewhere.pdf");
     writeFileSync(outside, "not the bot's");
+    const passed = (await upload(outside)).answer;
+    expect(passed.result.isError).not.toBe(true);
+    expect(apps.calls.at(-1)).toMatchObject({ tool: "GOOGLEDRIVE_UPLOAD_FILE", arguments: { file_to_upload: outside } });
+    expect(apps.uploads).toHaveLength(1);
+
+    // A hidden folder, even inside the bot's own folder, never goes out.
+    const hidden = join(fixture.info.dataDir, "workspaces", bot.id, ".secrets", "token.txt");
+    mkdirSync(dirname(hidden), { recursive: true });
+    writeFileSync(hidden, "secret");
     const before = apps.calls.length;
-    const refused = (await upload(outside)).answer;
+    const refused = (await upload(hidden)).answer;
     expect(refused.result.isError).toBe(true);
-    expect(refused.result.content[0].text).toContain("outside your working folder");
+    expect(refused.result.content[0].text).toContain("hidden folder or in the app's own data");
     expect(refused.result.content[0].text).toContain("Nothing was written to Google Drive");
     expect(apps.calls.length, "the call never reached Composio").toBe(before);
     expect(apps.uploads).toHaveLength(1);

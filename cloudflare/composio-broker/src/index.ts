@@ -736,7 +736,7 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   if (request.method === "POST" && url.pathname === "/v1/mcp") return proxyMcp(request, installation, env, ctx);
   if (request.method === "POST" && url.pathname === "/v1/files/upload") {
     await limitSessionRequests(installation, env);
-    return requestFileUpload(request, env);
+    return requestFileUpload(request, installation, env);
   }
   if (request.method === "GET" && url.pathname === "/v1/catalog") return catalog(env, url);
   if (request.method === "GET" && url.pathname === "/v1/connectors/connected") return connectedServices(installation, env, ctx);

@@ -8,6 +8,25 @@ import type { AppConfig } from "./config.ts";
 import { brokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
 import { apiBase, projectHeaders, responseError } from "./composio-project.ts";
 import { projectApiKey } from "./composio-session.ts";
+import { composioUploadLink } from "../shared/composio-storage.ts";
+
+/** A service run on this computer for development or tests hands out links on this computer too. */
+function loopback(link: string | undefined): boolean {
+  try {
+    const url = new URL(link ?? "");
+    return (url.protocol === "http:" || url.protocol === "https:") && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function sameOrigin(link: string | undefined, other: string | undefined): boolean {
+  try { return Boolean(link && other) && new URL(link!).origin === new URL(other!).origin; } catch { return false; }
+}
+
+function hostOf(link: string | undefined): string {
+  try { return new URL(link ?? "").host || "no host"; } catch { return "no link"; }
+}
 
 export interface FileUploadRequest {
   toolkit_slug: string;
@@ -34,10 +53,11 @@ export async function requestFileUpload(cfg: AppConfig, request: FileUploadReque
   const body: unknown = await response.json();
   const answer = apiKey ? projectAnswerSchema.parse(body) : serviceAnswerSchema.parse(body);
   const link = "url" in answer ? answer.url : answer.new_presigned_url ?? answer.newPresignedUrl;
-  let url: URL | undefined;
-  try { url = link ? new URL(link) : undefined; } catch {}
-  // HTTPS only, as for the service itself; plain HTTP only to this computer (a service run locally for development).
-  const loopback = url !== undefined && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
-  if (!url || !(url.protocol === "https:" || (url.protocol === "http:" && loopback))) throw new Error("Composio returned no usable upload link");
+  // Composio's storage; or, from a service on this computer, a link on this computer; or, with the project key, a link
+  // on the origin of an explicitly named Composio backend (OMB_COMPOSIO_API), as trustedSessionMcpUrl allows its Sessions.
+  const url = composioUploadLink(link)
+    ?? (broker && loopback(broker.url) && loopback(link) ? new URL(link!) : null)
+    ?? (apiKey && sameOrigin(link, process.env.OMB_COMPOSIO_API) && (link!.startsWith("https:") || loopback(link)) ? new URL(link!) : null);
+  if (!url) throw new Error(`Composio returned an upload link that is not on its storage (${hostOf(link)})`);
   return { key: answer.key, url: url.toString() };
 }
