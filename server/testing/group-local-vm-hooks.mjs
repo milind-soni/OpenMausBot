@@ -58,7 +58,7 @@ registerHooks({
       }
       export async function containerExec(target, command) {
         writeFileSync(file + '.exec', JSON.stringify({ target, command }));
-        return { exitCode: 0, stdout: 'fixture command completed', stderr: '', timedOut: false };
+        return read().execResult ?? { exitCode: 0, stdout: 'fixture command completed', stderr: '', timedOut: false };
       }
       export async function containerComputerExists(_runtime, target) {
         const state = read();

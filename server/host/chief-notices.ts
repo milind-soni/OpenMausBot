@@ -1,14 +1,16 @@
 import { failedTurnTool } from "../../shared/failed-turn.ts";
 import { admit } from "../admission.ts";
-import { memoryStopped } from "../engine-memory.ts";
+import { engineMemory, memoryStopped } from "../engine-memory.ts";
+import { outOfProcesses } from "../process-shortage.ts";
 import {
-  AUTO_RETRY_LEAD, chiefForBot, INCIDENTS_THREAD_TITLE, OLD_INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText, RETRY_BLOCKED, RETRY_LEAD,
+  AUTO_RETRY_LEAD, ChiefIncidentBudget, chiefForBot, INCIDENTS_THREAD_TITLE, OLD_INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText, RETRY_BLOCKED, RETRY_LEAD,
   type Incident, type IncidentKind, type IncidentRetry,
 } from "../incidents.ts";
 import { buildNotification, type Notification } from "../notify.ts";
 import { quoteInNote } from "../peer-provenance.ts";
 import { peerName } from "../peer-roster.ts";
 import { redactSecretsInText } from "../redact.ts";
+import { serverLine } from "../server-lines.ts";
 import { retriesTeammateThread, type RoutineFailureFacts } from "../routine-recovery.ts";
 import { queueSteeredMessage } from "../steer-queue.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
@@ -16,7 +18,7 @@ import type { BotRecord, Message, Store } from "../store.ts";
 type PeerAsk = NonNullable<Message["peerAsk"]>;
 
 export interface ChiefNoticeDeps {
-  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "groupByThread" | "createTask" | "appendMessage" | "messagesFor" | "activePath">;
+  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "groupByThread" | "createTask" | "appendMessage" | "messagesFor" | "activePath"> & Partial<Pick<Store, "patchMessage">>;
   assignerOf(threadId: string): unknown;
   notify(notification: Notification | null): void;
   threadBusy(botId: string, threadId: string): boolean;
@@ -32,6 +34,9 @@ export interface ChiefNoticeDeps {
   /** Starts this thread's request again where it stopped: a continuation of the request the harness recorded, never a line
    * of the person's. Absent: a run stopped for memory with no Chief to retry it is only reported. */
   continueRequest?(botId: string, threadId: string, text: string): Promise<unknown>;
+  /** A self-hosted server where turns wait for room: a run stopped for memory there is the server's shortage, as a start
+   * it had no room for is, and no Chief is asked about it. */
+  selfHosted?(): boolean;
   /** Runs a retry after a run stopped for memory, MEMORY_RETRY_MS later by default, so the machine settles first. */
   later?(run: () => void, ms: number): void;
   /** Security invariant: a read-and-draft run's prompt and reply carry mail and invite text, so its failures and
@@ -43,6 +48,9 @@ export interface ChiefNoticeDeps {
   confined?(threadId: string): boolean;
   /** The language a line about this conversation is written in for its person (server/server-lines.ts). */
   threadLanguage?(threadId: string): string | undefined;
+  /** The incident turns a Chief may start in an hour, across threads (OMB_CHIEF_INCIDENT_TURNS_PER_HOUR by default). */
+  chiefTurnsPerHour?(): number;
+  now?(): number;
   /** A Team Cloud: a notice reaches a Chief only when the conversation's asks are its person's (a member's private chat
    * is theirs alone), into a notices chat of that person's own. */
   routing?: {
@@ -55,12 +63,24 @@ export interface ChiefNoticeDeps {
 
 /** How long a run stopped for memory waits before it starts again; the memory gate then holds it until there is room. */
 export const MEMORY_RETRY_MS = 30_000;
+/** The chats a Chief's line for the problems it was not started for names; its count covers the rest. */
+export const FOLDED_LISTED = 5;
 export const MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run was stopped to free memory on this Cloud. "
+  + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
+
+export const SERVER_MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run was stopped to free memory on this server. "
+  + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
+
+/** A run the server had no room to start is the server's shortage: it starts again by itself, and no AI is asked about it. */
+export const ROOM_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run could not start because this server had no room for another program. "
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
 export function createChiefNotices(deps: ChiefNoticeDeps) {
   const { store } = deps;
   const incidentLedger = new IncidentLedger();
+  const chiefBudget = new ChiefIncidentBudget({ now: deps.now, limit: deps.chiefTurnsPerHour });
+  /** Each Chief's line that counts the problems it was not started for, while its hour's share is spent. */
+  const folded = new Map<string, { threadId: string; messageId: string; count: number; until: number; chats: Array<{ botId: string; threadId: string; title: string; name: string }> }>();
   const schedule = deps.schedule ?? ((run: () => void) => { setTimeout(run, 0).unref?.(); });
   const later = deps.later ?? ((run: () => void, ms: number) => { setTimeout(run, ms).unref?.(); });
   /** Each thread's last request a run stopped for memory was started again for: once a request. */
@@ -68,7 +88,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
 
   /** A run stopped for memory that no Chief retries starts once more by itself; the person hears only if that one fails too,
    * or can't start. Never a run whose thread someone wrote in since, or that is running or queued again. */
-  function retryForRoom(bot: BotRecord, threadId: string, report: (retry?: IncidentRetry) => void): boolean {
+  function retryForRoom(bot: BotRecord, threadId: string, report: (retry?: IncidentRetry) => void, text = MEMORY_RETRY_TEXT): boolean {
     const continueRequest = deps.continueRequest;
     if (!continueRequest) return false;
     const asked = store.activePath(threadId).findLast((line) => line.role === "user")?.id ?? "";
@@ -80,7 +100,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       if (!store.bot(bot.id) || !store.taskByThread(bot.id, threadId)) return;
       if (store.activePath(threadId).some((line) => line.role === "user" && line.at > failedAt)) return;
       if (deps.threadBusy(bot.id, threadId) || deps.threadQueued?.(bot.id, threadId)) return;
-      continueRequest(bot.id, threadId, MEMORY_RETRY_TEXT)
+      continueRequest(bot.id, threadId, text)
         .catch((error) => report({ notRetried: `its retry could not start (${error instanceof Error ? error.message : String(error)})` }));
     }, MEMORY_RETRY_MS);
     return true;
@@ -137,6 +157,21 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     }
   }
 
+  /** Past its hour's share a Chief is not started again: the problems are counted on one line in its notices chat, which
+   * lists the chats they came from (the first FOLDED_LISTED) and links the newest. */
+  function fold(chief: BotRecord, threadId: string, until: number, from: { botId: string; threadId: string; title: string; name: string }): void {
+    const open = folded.get(chief.id), now = deps.now?.() ?? Date.now();
+    const same = open && open.threadId === threadId && open.until > now ? open : null;
+    const count = (same?.count ?? 0) + 1;
+    const chats = same?.chats.some((chat) => chat.threadId === from.threadId) ? same.chats : [...(same?.chats ?? []), from];
+    const list = chats.slice(0, FOLDED_LISTED).map((chat) => chat.name).join("; ");
+    const name = serverLine(deps.threadLanguage?.(threadId), "server.incidents.folded", { count, chief: chief.name, list });
+    const threadRef = { botId: from.botId, threadId: from.threadId, title: from.title };
+    const line = same && store.patchMessage?.(threadId, same.messageId, { tool: { name, ok: false }, threadRef })
+      || store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name, ok: false }, threadRef });
+    folded.set(chief.id, { threadId, messageId: line.id, count, chats, until: Math.max(until, same?.until ?? 0) });
+  }
+
   function deliver(input: {
     chief: BotRecord | null; title: string; bot: BotRecord; threadId: string; chip: string; text: string; alreadyNotified: boolean;
   }): "chief" | "person" {
@@ -161,6 +196,13 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
         routing && person ? (created) => routing.open(created.threadId, person) : undefined);
     if (!notices || notices.threadId === threadId) return tellThePerson();
     if (routing && person && routing.startedBy(notices.threadId) === undefined) routing.open(notices.threadId, person);
+    const spent = chiefBudget.take(chief.id);
+    if (spent) {
+      const title = task?.title ?? (group ? group.name : `${bot.name}'s conversation`);
+      fold(chief, notices.threadId, spent.until, { botId: bot.id, threadId, title, name: `${bot.name} · ${title}` });
+      tellThePerson();
+      return "chief";
+    }
     store.appendMessage(notices.threadId, {
       role: "bot",
       kind: "activity",
@@ -188,7 +230,8 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
    * Never retried: a stall the turn watchdog stopped (kind "stalled"), a stop, a refusal or a cap (retriesTeammateThread,
    * from the failure's words and `facts`), a run that answered a retry, and a thread whose asks are not the Chief's person's. */
   /** `notified`: the person already heard of it another way (a usage limit's own notice), so only the Chief is told. */
-  function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string; facts?: RoutineFailureFacts; notified?: boolean }): void {
+  /** `failure`: the failure's own words when `detail` adds a name to them; only those are read for the kind of failure. */
+  function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string; failure?: string; facts?: RoutineFailureFacts; notified?: boolean }): void {
     const { bot, threadId } = input;
     if (deps.quietThread?.(bot.id, threadId)) return;
     const task = store.taskByThread(bot.id, threadId);
@@ -201,6 +244,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       title: task?.title ?? null,
       room: group?.name ?? null,
       detail: redactSecretsInText(input.detail),
+      failure: { text: input.failure ?? input.detail, stopReason: input.facts?.stopReason },
       ...incidentContext(deps.store.messagesFor(threadId)),
     };
     const count = incidentLedger.note(threadId);
@@ -212,6 +256,14 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       alreadyNotified: input.notified === true || input.kind === "could-not-start" || input.kind === "routine-failed",
     });
     const chiefRetries = Boolean(chief && !group && reachesChief(chief, bot, threadId));
+    // Before any Chief hears: a Chief's turn about it would be a paid one, started on the same full server.
+    const noRoom = outOfProcesses(input.detail), stoppedHere = !noRoom && memoryStopped(input.detail) && (deps.selfHosted ?? (() => engineMemory.selfHosted()))();
+    if (noRoom || stoppedHere) {
+      const person = (retry?: IncidentRetry): void => void deliver({ chief: null, title: INCIDENTS_THREAD_TITLE, bot, threadId, chip: incidentChip(incident, deps.threadLanguage?.(threadId)),
+        text: incidentText(incident, count, retry), alreadyNotified: input.notified === true || input.kind === "could-not-start" || input.kind === "routine-failed" });
+      if (group || input.kind === "routine-failed" || !retryForRoom(bot, threadId, person, noRoom ? ROOM_RETRY_TEXT : SERVER_MEMORY_RETRY_TEXT)) person();
+      return;
+    }
     if (input.kind === "failed" && !group && !chiefRetries && memoryStopped(input.detail) && retryForRoom(bot, threadId, report)) return;
     if (!chief || !chiefRetries) return report();
     const answered = store.activePath(threadId).findLast((line) => line.role === "user")?.text ?? "";

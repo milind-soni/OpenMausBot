@@ -52,7 +52,7 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
   install: {
     docsUrl: "https://console.mistral.ai/api-keys",
     settings: "connections",
-    signInCommand: "Save a Mistral API key in Settings → API keys, or set MISTRAL_API_KEY on the server.",
+    signInCommand: "Save a Mistral API key in Settings → AI → Providers, or set MISTRAL_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
@@ -107,8 +107,8 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
       computerUse: true, imageInput: (model) => imageModels.has(model),
       requestBody: (model, messages, stream) => ({ model, messages, stream }),
       httpErrorLabel: "Mistral",
-      missingKeyError: "Save a Mistral API key in Settings → API keys, or set MISTRAL_API_KEY.",
-      unavailableReason: "No Mistral API key — open Settings → API keys.",
+      missingKeyError: "Save a Mistral API key in Settings → AI → Providers, or set MISTRAL_API_KEY.",
+      unavailableReason: "No Mistral API key — open Settings → AI → Providers.",
       timeoutMs: 180_000, billing: "metered", includeUsageInCompleted: true,
       nativeLog: {
         source: "mistral.chat.completions",

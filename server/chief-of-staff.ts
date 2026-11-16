@@ -1,5 +1,5 @@
 import { botOwner, nameFromEmail } from "../shared/bot-owner.ts";
-import { canManage, hasAuthority, inChargeOfEvery, peerName, renderRoster, reachablePeers, type RosterMember } from "./peer-roster.ts"; import { chiefLevel } from "./chief-level.ts";
+import { canManage, hasAuthority, inChargeOfEvery, peerName, renderRoster, reachablePeers, type RosterMember, type TeamPrompt } from "./peer-roster.ts"; import { chiefLevel } from "./chief-level.ts";
 import type { TaskRecord } from "./store.ts";
 
 export type ChiefTeamMember = RosterMember;
@@ -27,13 +27,18 @@ const sectionKey = (section?: string): string => section?.trim() || "";
  * a fan-out of 13 bots about 13 model turns, most of them from bots the line did not concern. */
 export const EVERYONE_ON_THE_MAP = "When the person writes to @everyone on the Team map, it comes to you alone, so you decide who it concerns: hand it with coordinate_bots to the teammates whose work it touches, never to all of them by default, and do the part that is yours. If it concerns nobody else, answer it yourself.";
 
-export function chiefOfStaffSystemPrompt(
+export function chiefOfStaffSystemPrompt(...args: Parameters<typeof chiefOfStaffPrompt>): string {
+  const { rules, roster } = chiefOfStaffPrompt(...args);
+  return `${rules}\n${roster}`;
+}
+
+export function chiefOfStaffPrompt(
   chiefId: string,
   bots: ChiefTeamMember[],
   canDelegate: boolean,
   also?: (bot: ChiefTeamMember) => boolean,
   departments?: readonly string[],
-): string {
+): TeamPrompt {
   const chief = bots.find((bot) => bot.id === chiefId);
   const chiefSection = sectionKey(chief?.section);
   const sectionName = peerName(chiefSection) || "General";
@@ -63,7 +68,7 @@ export function chiefOfStaffSystemPrompt(
   const everywhere = Boolean(chief && departments && inChargeOfEvery(chief, departments));
   const responsibleFor = everywhere ? "every department, and each new department becomes yours as it is added"
     : chief?.managedSections?.length ? `these departments: ${chief.managedSections.map(s => peerName(s) || "General").join(", ")}` : "";
-  return [
+  const rules = [
     isChief
       ? person
         ? `You are ${person}'s assistant and Chief of Staff: their one point of contact. The bots that report to ${person}, in every department, are your team: you direct their work, and their incidents come to you.`
@@ -85,9 +90,12 @@ export function chiefOfStaffSystemPrompt(
     delegation,
     canDelegate ? "Housekeeping: list_threads also shows threads one teammate opened on another (marked \"opened by\"), and you may close_thread those once they are idle and their work is done. Threads the person started are theirs: never close them." : "",
     canDelegate ? "When the user asks you to assemble or configure a team, use list_team_setup for the exact authorized teams, bot IDs and model catalog, then propose_team_setup once with all named specialists and their profile/model changes. Include new teams explicitly; the plan covers their creation and your access. Existing thread models and other bots' execution permissions stay unchanged. Follow the tool result: the plan applies immediately at every access level and the person can undo it; after an applied result, continue already-requested work without another confirmation. Only if review is pending, end your turn: the user's decision automatically resumes you once with a structured result. Report failed or cancelled results honestly. Do not ask for another yes, poll, or repeat the proposal. After successful setup, use the available coordination tools for already requested work. For explicitly requested bot deletion, use propose_bot_deletion separately and follow its applied or pending result too." : "",
+  ].filter(Boolean).join("\n");
+  const listed = [
     person ? `Bots that report to ${person} (your team):` : everywhere ? "Your team, in every department:" : chief?.managedSections?.length ? "Your team, in the departments you are responsible for:" : `Current ${sectionName} department (your team):`,
     roster,
     othersRoster && (person ? "Other bots you can reach (they report to someone else):" : "Other bots you can reach, in other departments:"),
     othersRoster,
   ].filter(Boolean).join("\n");
+  return { rules, roster: listed };
 }

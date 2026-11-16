@@ -65,7 +65,7 @@ it("a key the provider rejects stops showing Ready until it changes or works aga
     // The renderer refetches /api/instances on a config event.
     await sse.until((frame) => frame.kind === "config" && frame.seq > seq);
     expect(await snapshot()).toEqual(expect.objectContaining({
-      state: "available", authenticated: false, reason: "The provider rejected this key. Change it in Settings → API keys.",
+      state: "available", authenticated: false, reason: "The provider rejected this key. Change it in Settings → AI.",
     }));
 
     await api("PUT", "/api/config", { openaiCompat: { key: BAD } });

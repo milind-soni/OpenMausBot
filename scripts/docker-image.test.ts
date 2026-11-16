@@ -153,12 +153,17 @@ describe("container images", () => {
     expect(last(server, "USER")).toBe("maus");
     expect(last(server, "VOLUME")).toBe('["/data"]');
     expect(last(server, "CMD")).toBe('["node", "dist-server/server-launcher.js"]');
+    // A container platform runs the image with no --init: the image is its own.
+    expect(last(server, "ENTRYPOINT")).toBe('["/usr/bin/tini", "-s", "--"]');
+    expect(chain("runtime").find(step => step.op === "RUN" && step.args.includes("apt-get install"))!.args).toMatch(/ tini /);
     expect(last(server, "HEALTHCHECK")).toContain("http://127.0.0.1:8799/api/health");
     const home = chain("cloud-home");
     expect(last(home, "USER")).toBe("root");
     expect(last(home, "VOLUME")).toBe('["/data"]');
     expect(last(home, "EXPOSE")).toBe("8080");
     expect(last(home, "CMD")).toBe('["node", "/app/dist-server/cloud-home-start.js"]');
+    // A host that starts a Cloud home with a plain `docker run` gives it no init either.
+    expect(last(home, "ENTRYPOINT")).toBe('["/usr/bin/tini", "-s", "--"]');
     expect(last(home, "HEALTHCHECK")).toContain("http://127.0.0.1:8080/api/health");
     expect(last(chain("runtime"), "ENV")).toMatch(/^AGENT_BROWSER_EXECUTABLE_PATH=\/opt\/openmausbot-browser\/chrome .*NODE_ENV=production$/);
   });

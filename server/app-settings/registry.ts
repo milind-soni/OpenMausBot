@@ -15,14 +15,15 @@ import type { RequestAuth } from "../request-auth.ts";
 import { callRoute, type RouteReply } from "../routes/call-route.ts";
 import type { RouteHandler } from "../routes/table.ts";
 import type { BotRecord, Store } from "../store.ts";
+import type { SettingsPlaceId } from "../../shared/settings-places.ts";
+import { placePath } from "./places.ts";
 import { botEntries } from "./registry-bots.ts";
 import { configEntries } from "./registry-config.ts";
 import { pictureEntries } from "./registry-pictures.ts";
 import { windowEntries } from "./registry-window.ts";
 
-/** Where the person changes it by hand, as the bot tells them. */
-export type Where = "Settings → Overview" | "Settings → Appearance" | "Settings → General" | "Settings → AI" | "Settings → AI → API keys" | "Settings → You and your bots"
-  | "Settings → Phone & devices" | "Settings → Vault" | "Settings → Data" | "Settings → Your account" | "Settings → Desktops & browser" | "the sidebar" | "a bot's Settings";
+/** Where the person changes it by hand: a real place in the app, which the bot names as placePath gives it. */
+export type Where = SettingsPlaceId;
 
 interface Base {
   id: string;
@@ -90,8 +91,7 @@ export const display = (value: unknown): string => (value === undefined || value
 const url = z.string().trim().max(2048).refine((text) => text === "" || /^https?:\/\/\S+$/.test(text), "an http(s) address, or empty to clear");
 
 const KEY_WHERE: Partial<Record<CredentialTargetId, Where>> = {
-  ttsKey: "Settings → General", geminiTtsKey: "Settings → General", fishAudioKey: "Settings → General",
-  onePasswordToken: "Settings → Vault", boxToken: "Settings → Desktops & browser", composioApiKey: "Settings → AI",
+  onePasswordToken: "vault",
 };
 
 export type WritableSpec = Omit<Base, "read"> & Omit<Writable, "tier" | "current" | "write" | "describe"> & {
@@ -101,7 +101,7 @@ export type WritableSpec = Omit<Base, "read"> & Omit<Writable, "tier" | "current
 export type WindowPref = (id: WindowPrefId, label: string, help: string, where: Where, synonyms: string[], allowed: string,
   line?: { says(value: never): string; refusal?(value: never): string | null }) => SettingEntry;
 /** One plain line for a change only the person makes, in Settings. */
-export const personOnly = (what: string, where: Where) => `${what} is changed only by the person, in ${where}. Tell them where in one line; do not try another way.`;
+export const personOnly = (what: string, where: Where) => `${what} is changed only by the person, in ${placePath(where)}. Tell them where in one line; do not try another way.`;
 
 /** Security: a key never passes through the bot. A value naming a key, token, secret or password field is refused at
  * the boundary; `except` lets through a field that only names a saved key. */
@@ -154,24 +154,24 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
   const groups = () => Object.fromEntries(deps.sections().map((section) => [section, deps.bots().filter((bot) => bot.section === section).map((bot) => bot.id)]));
 
   const safe: SettingEntry[] = [
-    windowPref("appearance.skin", "Skin", "The window's built-in look; \"system\" follows the computer's light or dark mode. A custom look (any colours, fonts, CSS, pictures) is a theme: use action theme.", "Settings → Appearance", ["theme", "dark mode", "light mode", "colors", "look"], enumOf(WINDOW_PREFS["appearance.skin"].options)),
-    windowPref("appearance.advanced", "Advanced mode", "Advanced shows every setting and tool; Simple keeps the everyday ones.", "Settings → Appearance", ["simple mode", "advanced mode", "interface mode"], "true or false"),
-    windowPref("appearance.font", "Font", "The app's typeface.", "Settings → Appearance", ["typeface", "typography"], enumOf(WINDOW_PREFS["appearance.font"].options)),
-    windowPref("appearance.chatWidth", "Chat width", "How wide the chat column is.", "Settings → Appearance", ["layout", "column", "wide"], enumOf(WINDOW_PREFS["appearance.chatWidth"].options)),
-    windowPref("general.sendKey", "Send key", "Which key sends a message in the composer.", "Settings → General", ["enter", "typing", "keyboard", "shortcut"], enumOf(WINDOW_PREFS["general.sendKey"].options)),
-    windowPref("general.notificationSounds", "Notification sounds", "Play a sound when a bot needs you or finishes.", "Settings → General", ["sound", "sounds", "mute", "alerts", "notifications"], "true or false"),
+    windowPref("appearance.skin", "Skin", "The window's built-in look; \"system\" follows the computer's light or dark mode. A custom look (any colours, fonts, CSS, pictures) is a theme: use action theme.", "theme", ["theme", "dark mode", "light mode", "colors", "look"], enumOf(WINDOW_PREFS["appearance.skin"].options)),
+    windowPref("appearance.advanced", "Advanced mode", "Advanced shows every setting and tool; Simple keeps the everyday ones.", "advanced-mode", ["simple mode", "advanced mode", "interface mode"], "true or false"),
+    windowPref("appearance.font", "Font", "The app's typeface.", "tool-calls", ["typeface", "typography"], enumOf(WINDOW_PREFS["appearance.font"].options)),
+    windowPref("appearance.chatWidth", "Chat width", "How wide the chat column is.", "tool-calls", ["layout", "column", "wide"], enumOf(WINDOW_PREFS["appearance.chatWidth"].options)),
+    windowPref("general.sendKey", "Send key", "Which key sends a message in the composer.", "send-key", ["enter", "typing", "keyboard", "shortcut"], enumOf(WINDOW_PREFS["general.sendKey"].options)),
+    windowPref("general.notificationSounds", "Notification sounds", "Play a sound when a bot needs you or finishes.", "notifications", ["sound", "sounds", "mute", "alerts", "notifications"], "true or false"),
     writable({
-      id: "general.language", label: "Language", help: "The app's language, as a tag such as en, de or pt-br; empty follows the computer.", where: "Settings → General",
+      id: "general.language", label: "Language", help: "The app's language, as a tag such as en, de or pt-br; empty follows the computer.", where: "language",
       synonyms: ["locale", "translation"], value: z.string().trim().max(16).regex(/^[a-z]{2,3}(-[a-z0-9]{2,8})*$|^$/i, "a language tag such as en or pt-br"), allowed: "a language tag such as en, de, ja, pt-br, zh-tw; empty to follow the computer",
       current: () => cfg().language ?? "", write: config((language: string) => ({ language })),
     }),
     writable({
-      id: "bots.order", label: "Bot order", help: "The order bots are listed in the sidebar and on phones. Send bot ids from list_bots; bots you leave out keep their places.", where: "the sidebar",
+      id: "bots.order", label: "Bot order", help: "The order bots are listed in the sidebar and on phones. Send bot ids from list_bots; bots you leave out keep their places.", where: "sidebar",
       synonyms: ["reorder", "sidebar order", "sort bots", "move bot", "arrange"], value: z.array(z.string().regex(/^[\w-]+$/)).min(1).max(100), allowed: "an array of bot ids in the wanted order",
       current: () => deps.bots().map((bot) => bot.id), read: () => names(deps.bots().map((bot) => bot.id)), write: (botIds: string[]) => deps.reorderBots(botIds),
     }),
     writable({
-      id: "bots.pinned", label: "Pinned bots", help: "Which bots are pinned to the top of the sidebar. Send every bot id that should be pinned, including ones already pinned; the rest are unpinned.", where: "the sidebar",
+      id: "bots.pinned", label: "Pinned bots", help: "Which bots are pinned to the top of the sidebar. Send every bot id that should be pinned, including ones already pinned; the rest are unpinned.", where: "sidebar",
       synonyms: ["pin", "pinned", "unpin", "favorite", "favourite", "top", "star"], value: z.array(z.string().regex(/^[\w-]+$/)).max(100), allowed: "an array of the bot ids to pin; an empty array unpins every bot",
       current: pinned, read: () => names(pinned()),
       write: async (botIds: string[]) => {
@@ -186,7 +186,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       },
     }),
     writable({
-      id: "bots.groups", label: "Sidebar groups", help: "Which bots sit in which sidebar group (department). Send an object of group name to bot ids; a bot in no listed group is ungrouped.", where: "the sidebar",
+      id: "bots.groups", label: "Sidebar groups", help: "Which bots sit in which sidebar group (department). Send an object of group name to bot ids; a bot in no listed group is ungrouped.", where: "sidebar",
       synonyms: ["group", "groups", "department", "departments", "section", "sections", "team", "folder"],
       value: z.record(z.string().trim().min(1).max(60), z.array(z.string().regex(/^[\w-]+$/)).max(100)), allowed: "an object: group name → array of bot ids",
       current: groups,
@@ -206,28 +206,28 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
       },
     }),
     writable({
-      id: "threads.maxConcurrentPerBot", label: "Threads per bot", help: "How many conversations one bot may work on at once.", where: "Settings → You and your bots",
+      id: "threads.maxConcurrentPerBot", label: "Threads per bot", help: "How many conversations one bot may work on at once.", where: "parallel",
       synonyms: ["concurrent", "parallel", "limit", "limits", "thread limit"], value: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS), allowed: `1 to ${MAX_CONCURRENT_BOT_THREADS}`,
       current: () => cfg().threads?.maxConcurrentPerBot ?? defaultBotThreads(), write: config((maxConcurrentPerBot: number) => ({ threads: { maxConcurrentPerBot } })),
     }),
     writable({
-      id: "threads.eventLogRetentionDays", label: "Thread log retention", help: "Days a closed conversation's event logs are kept; null keeps them forever.", where: "Settings → Data",
+      id: "threads.eventLogRetentionDays", label: "Thread log retention", help: "Days a closed conversation's event logs are kept; null keeps them forever.", where: "storage",
       synonyms: ["cleanup", "clean up", "retention", "logs", "delete old", "storage"], value: z.number().int().min(1).max(3650).nullable(), allowed: "1 to 3650 days, or null to keep forever",
       current: () => cfg().threads?.eventLogRetentionDays ?? null, read: () => display(cfg().threads?.eventLogRetentionDays ?? "forever"),
       write: config((eventLogRetentionDays: number | null) => ({ threads: { eventLogRetentionDays } })),
     }),
     writable({
-      id: "rooms.turnTimeoutMinutes", label: "Room turn timeout", help: "Minutes a bot's turn in a room may run before it is stopped.", where: "Settings → You and your bots",
+      id: "rooms.turnTimeoutMinutes", label: "Room turn timeout", help: "Minutes a bot's turn in a room may run before it is stopped.", where: "group-turns",
       synonyms: ["room", "channel", "timeout", "turn limit"], value: z.number().int().min(MIN_ROOM_TURN_TIMEOUT_MINUTES).max(MAX_ROOM_TURN_TIMEOUT_MINUTES), allowed: `${MIN_ROOM_TURN_TIMEOUT_MINUTES} to ${MAX_ROOM_TURN_TIMEOUT_MINUTES} minutes`,
       current: () => roomTurnTimeoutMinutes(cfg()), write: config((turnTimeoutMinutes: number) => ({ rooms: { turnTimeoutMinutes } })),
     }),
     writable({
-      id: "mcp.callTimeoutMinutes", label: "MCP call timeout", help: "Minutes one MCP tool call may run.", where: "Settings → AI",
+      id: "mcp.callTimeoutMinutes", label: "MCP call timeout", help: "Minutes one MCP tool call may run.", where: "limits",
       synonyms: ["mcp", "tool timeout", "call timeout"], value: z.number().int().min(MIN_MCP_CALL_TIMEOUT_MINUTES).max(MAX_MCP_CALL_TIMEOUT_MINUTES), allowed: `${MIN_MCP_CALL_TIMEOUT_MINUTES} to ${MAX_MCP_CALL_TIMEOUT_MINUTES} minutes`,
       current: () => mcpCallTimeoutMinutes(cfg()), write: config((callTimeoutMinutes: number) => ({ mcp: { callTimeoutMinutes } })),
     }),
     writable({
-      id: "bots.defaultModel", label: "Default model for new bots", help: "The engine and model a newly created bot starts on; existing bots keep theirs. Ids come from list_models.", where: "Settings → You and your bots",
+      id: "bots.defaultModel", label: "Default model for new bots", help: "The engine and model a newly created bot starts on; existing bots keep theirs. Ids come from list_models.", where: "new-bots",
       synonyms: ["default model", "new bots", "model", "engine"], value: z.object({ instanceId: z.string().min(1).max(80), model: z.string().min(1).max(200) }), allowed: "{ instanceId, model } from list_models",
       current: () => cfg().defaultModelSelection, read: () => { const selection = cfg().defaultModelSelection; return selection ? `${selection.instanceId} / ${selection.model}` : ""; },
       write: config((defaultModelSelection: { instanceId: string; model: string }) => ({ defaultModelSelection })),
@@ -235,7 +235,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
   ];
 
   const provider = (id: string, label: string, synonyms: string[], current: () => string | undefined, patch: (text: string) => Record<string, unknown>): SettingEntry => writable({
-    id, label, help: `${label}: the address MausBot sends requests to. Empty uses the provider's own.`, where: "Settings → AI", synonyms: [...synonyms, "url", "base url", "endpoint", "address", "proxy"],
+    id, label, help: `${label}: the address MausBot sends requests to. Empty uses the provider's own.`, where: "keys", synonyms: [...synonyms, "url", "base url", "endpoint", "address", "proxy"],
     value: url, allowed: "an http(s) address, or empty to clear", current: () => current() ?? "", write: config(patch),
   });
   const providers: SettingEntry[] = [
@@ -245,7 +245,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     provider("providers.meta.url", "Meta address", ["meta", "llama"], () => cfg().meta?.url, (text) => ({ meta: { ...cfg().meta, url: text } })),
     provider("providers.openaiCompat.url", "OpenAI-compatible address", ["openai compatible", "custom provider", "ollama", "lm studio", "openrouter"], () => cfg().openaiCompat?.url, (text) => ({ openaiCompat: { ...cfg().openaiCompat, url: text } })),
     writable({
-      id: "providers.openaiCompat.model", label: "OpenAI-compatible model", help: "The model name sent to the OpenAI-compatible provider.", where: "Settings → AI",
+      id: "providers.openaiCompat.model", label: "OpenAI-compatible model", help: "The model name sent to the OpenAI-compatible provider.", where: "keys",
       synonyms: ["openai compatible", "custom provider", "model name"], value: z.string().trim().max(200), allowed: "a model name, or empty to clear",
       current: () => cfg().openaiCompat?.model ?? "", write: config((model: string) => ({ openaiCompat: { ...cfg().openaiCompat, model } })),
     }),
@@ -256,7 +256,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     const target = CREDENTIAL_TARGETS[credentialId];
     return {
       id: `keys.${credentialId}`, label: target.label, help: target.description, synonyms: ["key", "api key", "token", "credential", target.label.split(" ")[0]!.toLowerCase()],
-      where: KEY_WHERE[credentialId] ?? ((PROVIDER_CREDENTIAL_TARGETS as readonly string[]).includes(credentialId) ? "Settings → AI → API keys" : "Settings → AI"),
+      where: KEY_WHERE[credentialId] ?? ((PROVIDER_CREDENTIAL_TARGETS as readonly string[]).includes(credentialId) ? "providers" : "keys"),
       tier: "secret", credentialId, read: () => (credentialIsConfigured(deps.credentials(), credentialId) ? "set" : ""),
     };
   });
@@ -270,14 +270,14 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     return `${instanceId}: ${name}${url ? ` at ${url}` : ""}${working ? "" : " (not working)"}${removableKind(instanceId, entry) ? "" : " (removed only in Settings)"}`;
   }).join("; ");
   const engines = writable({
-    id: "engines", label: "AI engines", help: "The AI engines bots run on. get lists each one's id; set adds one, with Undo. Removing one deletes its setup and key, so only the person does that, in Settings.", where: "Settings → AI",
+    id: "engines", label: "AI engines", help: "The AI engines bots run on. get lists each one's id; set adds one, with Undo. Removing one deletes its setup and key, so only the person does that, in Settings.", where: "providers",
     synonyms: ["engine", "engines", "ai engine", "add engine", "remove engine", "provider", "providers", "ollama", "lm studio", "lmstudio", "bedrock", "endpoint", "local model"],
     value: engineChange,
     allowed: '{"kind":"ollama" or "lmstudio","url"} for a local server; {"kind":"openai-compat","name","url","keyFrom":"<a keys.* id, e.g. openrouterApiKey>","models"?:[...]}; '
-      + '{"kind":"bedrock","name","awsProfile","awsRegion","model"}. Sign-in accounts (Claude, ChatGPT, Antigravity) are added and signed in by the user in Settings → AI',
+      + '{"kind":"bedrock","name","awsProfile","awsRegion","model"}. Sign-in accounts (Claude, ChatGPT, Antigravity) are signed in by the user: show_card ai-sign-in puts that sign-in in the chat',
     current: (): EngineKeep => ({ kind: "keep", instanceIds: deps.engines().map((engine) => engine.instanceId) }), read: listEngines,
     describe: (change: EngineChange) => {
-      if (change.kind === "remove") return { refusal: personOnly("Removing an AI engine", "Settings → AI") };
+      if (change.kind === "remove") return { refusal: personOnly("Removing an AI engine", "providers") };
       if (change.kind === "ollama" || change.kind === "lmstudio") {
         const duplicate = localServerAlreadyAdded(instances(), change.url);
         if (duplicate) return { refusal: duplicate };
@@ -298,7 +298,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
         }
         return null;
       }
-      if (change.kind === "remove") return personOnly("Removing an AI engine", "Settings → AI");
+      if (change.kind === "remove") return personOnly("Removing an AI engine", "providers");
       if (change.kind === "bedrock") return deps.addEngine("claude-bedrock", { displayName: change.name, awsProfile: change.awsProfile, awsRegion: change.awsRegion, model: change.model });
       if (change.kind === "openai-compat") {
         const key = savedKey(change.keyFrom);
@@ -311,25 +311,25 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
 
   const ownerOnly = (id: string, label: string, help: string, where: Where, synonyms: string[], read: () => string): SettingEntry => ({ id, label, help, where, synonyms, tier: "owner-only", read });
   const owner: SettingEntry[] = [
-    ownerOnly("cloud.account", "MausBot Cloud account", "The account this app is signed in with, and its plan.", "Settings → Your account", ["account", "sign in", "sign out", "plan", "billing", "subscription"], () => "managed in Settings"),
-    ownerOnly("vault.logins", "Vault and logins", "Saved website logins and secrets bots may use.", "Settings → Vault", ["vault", "password", "passwords", "login", "logins", "1password"], () => "managed in Settings"),
-    ownerOnly("data.backups", "Backups", "Making a backup (it takes a password), restoring or deleting one, and the daily company backup (it takes a typed confirmation).", "Settings → Data",
+    ownerOnly("cloud.account", "MausBot Cloud account", "The account this app is signed in with, and its plan.", "account", ["account", "sign in", "sign out", "plan", "billing", "subscription"], () => "managed in Settings"),
+    ownerOnly("vault.logins", "Vault and logins", "Saved website logins and secrets bots may use.", "vault", ["vault", "password", "passwords", "login", "logins", "1password"], () => "managed in Settings"),
+    ownerOnly("data.backups", "Backups", "Making a backup (it takes a password), restoring or deleting one, and the daily company backup (it takes a typed confirmation).", "backup-export",
       ["backup", "backups", "restore", "export", "import", "schedule"], () => "managed in Settings"),
-    ownerOnly("phone.pairing", "Paired devices", "Pairing a phone or computer with a code, removing one, and what each paired device may do.", "Settings → Phone & devices",
+    ownerOnly("phone.pairing", "Paired devices", "Pairing a phone or computer with a code, removing one, and what each paired device may do.", "pair",
       ["pair", "pairing", "qr", "code", "paired", "revoke", "remove device", "device access"], () => "managed in Settings"),
-    ownerOnly("computer.lending", "Lending this computer", "Which folders and apps this computer lends to a Cloud or server; each grant is picked and confirmed in the desktop app's own dialogs.", "Settings → Desktops & browser",
+    ownerOnly("computer.lending", "Lending this computer", "Which folders and apps this computer lends to a Cloud or server; each grant is picked and confirmed in the desktop app's own dialogs.", "your-computers",
       ["lend", "lending", "share computer", "share folders", "pause sharing"], () => "managed in Settings"),
-    ownerOnly("data.keepHere", "Keep bots on this computer", "Whether this computer's bots stay here or move to My Cloud; the desktop app takes it only from the person's own click.", "Settings → Data",
+    ownerOnly("data.keepHere", "Keep bots on this computer", "Whether this computer's bots stay here or move to My Cloud; the desktop app takes it only from the person's own click.", "move",
       ["keep here", "move to cloud", "move back", "bring back"], () => "managed in Settings"),
-    ownerOnly("appearance.sidebarPicture", "Sidebar picture", "The picture at the top of the sidebar; it is a file the person picks or removes.", "Settings → Overview",
+    ownerOnly("appearance.sidebarPicture", "Sidebar picture", "The picture at the top of the sidebar; it is a file the person picks or removes.", "sidebar-picture",
       ["wallpaper", "background", "banner", "sidebar image", "picture"], () => "managed in Settings"),
-    ownerOnly("account.organization", "Organization", "Joining or leaving a company's managed MausBot; it signs in through the company's portal.", "Settings → Your account",
+    ownerOnly("account.organization", "Organization", "Joining or leaving a company's managed MausBot; it signs in through the company's portal.", "organization",
       ["organization", "organisation", "company", "managed"], () => "managed in Settings"),
     ownerOnly("people.signIn", "Who may sign in", "On a self-hosted server, the emails or @domains that may sign in, as admins or members. A change could lock someone out, or hand every setting to someone new.",
-      "Settings → Your account", ["people", "members", "invite", "roles", "admins", "sign in access"], () => "managed in Settings"),
-    ownerOnly("remote.domain", "Custom domain", "The web address this self-hosted server answers on. Changing it can cut off the address the person is using right now.", "Settings → Overview",
+      "members", ["people", "members", "invite", "roles", "admins", "sign in access"], () => "managed in Settings"),
+    ownerOnly("remote.domain", "Custom domain", "The web address this self-hosted server answers on. Changing it can cut off the address the person is using right now.", "domain",
       ["domain", "custom domain", "dns", "public url"], () => cfg().customDomain ?? ""),
-    ownerOnly("remote.httpsAddress", "HTTPS address", "This computer's public HTTPS address for paired devices; turning it off can cut off the device the person is using now.", "Settings → Phone & devices",
+    ownerOnly("remote.httpsAddress", "HTTPS address", "This computer's public HTTPS address for paired devices; turning it off can cut off the device the person is using now.", "tailscale",
       ["https", "public address"], () => "managed in Settings"),
   ];
 

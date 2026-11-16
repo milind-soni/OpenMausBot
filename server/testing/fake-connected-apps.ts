@@ -22,6 +22,8 @@ export interface FakeConnectedApps {
   gmailError?: string;
   /** Every tool call that reached the service, with its arguments and the whole multi-execute item. */
   calls: Array<{ tool: string; arguments: unknown; item: Record<string, unknown> }>;
+  /** Each file a tool call was to read: the upload request, then the bytes put to its link. */
+  uploads: Array<{ request: unknown; key: string; bytes?: Buffer; contentType?: string }>;
   close(): Promise<void>;
 }
 
@@ -34,7 +36,7 @@ const field = (value: unknown, name: string): unknown => (value && typeof value 
 
 export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
   const fake: Omit<FakeConnectedApps, "url" | "token" | "close"> = {
-    connected: { gmail: true, googlecalendar: true }, address: "me@example.test", events: [], emails: [], calls: [], threads: {}, outlook: [],
+    connected: { gmail: true, googlecalendar: true }, address: "me@example.test", events: [], emails: [], calls: [], threads: {}, outlook: [], uploads: [],
     calendars: [{ id: "me@example.test", primary: true, accessRole: "owner", selected: true }],
   };
 
@@ -69,9 +71,21 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
   }
 
   const server = createServer(async (req, res) => {
-    let raw = "";
-    for await (const chunk of req) raw += chunk;
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const raw = Buffer.concat(chunks).toString("utf8");
     res.setHeader("content-type", "application/json");
+    // Composio's upload link, then the bytes put to it (cloudflare/composio-broker/src/files.ts).
+    if (req.method === "POST" && req.url === "/v1/files/upload") {
+      const key = `fake-files/${fake.uploads.length + 1}`;
+      fake.uploads.push({ request: JSON.parse(raw), key });
+      return res.end(JSON.stringify({ key, url: `http://127.0.0.1:${(server.address() as { port: number }).port}/upload/${fake.uploads.length}` }));
+    }
+    const put = req.method === "PUT" ? /^\/upload\/(\d+)$/.exec(req.url ?? "") : null;
+    if (put && fake.uploads[Number(put[1]) - 1]) {
+      Object.assign(fake.uploads[Number(put[1]) - 1]!, { bytes: Buffer.concat(chunks), contentType: req.headers["content-type"] });
+      return res.end("{}");
+    }
     if (req.method === "GET" && req.url === "/v1/connectors/connected") {
       return res.end(JSON.stringify({ services: Object.fromEntries(Object.entries(fake.connected).map(([slug, connected]) => [slug, { connected }])) }));
     }

@@ -11,6 +11,9 @@ export const CHAT_NOTICE = {
   "chat.notice.cutOffByRestart": "{name} was cut off by a restart; resuming",
   "chat.notice.stalled": "no activity for {minutes} minutes — the turn was stopped",
   "chat.notice.stalledCommand": "the command `{command}` ran for {minutes} minutes without finishing and looks stuck — the turn was stopped",
+  "chat.notice.unattendedTooLong": "this turn had nobody waiting on it and worked for {minutes} minutes, its limit — the turn was stopped",
+  "chat.notice.unattendedRequests": "this turn had nobody waiting on it and made {count} requests to its AI, its limit — the turn was stopped",
+  "chat.notice.unattendedDenied": "this turn had nobody waiting on it and {count} of its permission requests were denied or went unanswered — the turn was stopped",
   "chat.notice.engineExited": "the process running this turn's AI ended — the turn was stopped",
   "chat.notice.followupInterrupted":
     "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.",
@@ -25,6 +28,9 @@ export const CHAT_NOTICE = {
   "chat.notice.part.weeklyOpusLimit": "weekly Opus limit",
   "chat.notice.part.weeklySonnetLimit": "weekly Sonnet limit",
   "chat.notice.part.usageLimit": "usage limit",
+  "chat.notice.part.computerToolsTookTooLong": "they took too long to start",
+  "chat.notice.part.computerToolsHelperStopped": "their helper stopped",
+  "chat.notice.part.computerToolsHelperFailed": "their helper did not answer properly",
   "chat.notice.part.chooseModel": "choose another model for this bot",
   "chat.notice.part.switchAccount": "switch this bot to another AI or Claude account",
   "chat.notice.webhookHome":
@@ -137,6 +143,8 @@ export const CHAT_NOTICE = {
   "chat.notice.computerDesktopOnly": "Only the OpenMausBot app on this computer can let a bot use it. Open the app here, or let the bot work in its own browser or on a cloud desktop instead.",
   "chat.notice.computerPermissionsThenRestart": "OpenMausBot can't use this computer yet — make sure OpenMausBot has the permissions it asks for, then restart it",
   "chat.notice.computerNotReadyDetail": "OpenMausBot can't use this computer yet — {reason}",
+  "chat.notice.computerToolsDidNotStart": "The tools for this computer did not start this time ({why}). Send your message again in a moment.",
+  "chat.notice.computerToolsStillNotStarting": "The tools for this computer are still not starting.",
   "chat.notice.computerNotReadyMacPermission": "OpenMausBot can't use this computer yet — {reason}. Relaunch OpenMausBot after granting the missing macOS permission.",
   "chat.notice.computerSystemUnsupported": "bots can't use this computer on this system — choose another place for this bot to work",
   "chat.notice.computerAiUnsupported": "this bot's AI can't use this computer — pick another AI for this bot, or choose another place for it to work",
@@ -144,6 +152,7 @@ export const CHAT_NOTICE = {
   "chat.notice.memoryReclaimedTask": "Ran out of room, so I stopped this task to keep everything else running.",
   "chat.notice.memoryReclaimedBrowserDetail": "Ran out of room, so I closed the browser to keep everything else running. ({detail})",
   "chat.notice.memoryReclaimedTaskDetail": "Ran out of room, so I stopped this task to keep everything else running. ({detail})",
+  "chat.notice.outOfProcesses": "There is no room to start another program ({code}), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.",
 } as const;
 
 export type ChatNoticeKey = keyof typeof CHAT_NOTICE;

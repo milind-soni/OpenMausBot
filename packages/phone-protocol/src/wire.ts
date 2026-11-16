@@ -132,7 +132,7 @@ export interface WireTask extends InboxTask {
   projectId?: string;
   /** Detached routine execution, reachable through its visible results card. */ routineRunId?: string;
   /** Work from outside (a webhook, an app's event) reached this conversation: what it starts or runs stays confined, for good. */ outside?: true;
-  /** An outside caller opened this thread through the bot's API, so only it may continue it; such a thread is outside too. */ botApi?: true;
+  /** An outside caller opened this thread through the bot's API, so only it may continue it; such a thread is outside too. */ botApi?: true; /** Opened with a key its owner marked as acting for them: at the bot's own level, not outside, while that key still does (server/bot-api-host.ts). */ botApiAsOwner?: true;
   /** Set when a bot, not a person, opened this thread. */ openedBy?: TaskOpenedBy;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
@@ -509,7 +509,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   aside?: boolean;
   /** A user-role message that arrived through the server's HTTP API
    * ("api"), or a request a person spoke on a Live call ("call"). */
-  via?: "api" | "call";
+  via?: "api" | "call"; /** A `via: "api"` line sent with a Bot API key its owner marked as acting for them: their request, at the bot's level. */ apiAsOwner?: true;
   /** The Live call a "call" line was spoken on (LiveCallState.callId). Set
    * only on user messages with `via: "call"`; a turn's own messages point
    * at their request through `requestMessageId` instead. */
@@ -701,7 +701,7 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   fixedOptions?: boolean;
   quotaSwitch?: QuotaSwitchCardData;
   /** Asks before a bot uses the person's own computer; what its first call names, for the question in their language. */
-  yourComputer?: { app?: string; site?: string };
+  yourComputer?: { app?: string; site?: string; files?: boolean };
 }
 
 /** Kept on the card so the offer survives a restart. `engines` follow the card's options; `messageId` is the
@@ -836,7 +836,7 @@ export interface GroupTask {
 /** A room as a client may see it: the record plus the computed working flag. */
 export interface WireGroup {
   /** Computed from the usage ledger, not stored in groups.json. */
-  usage?: GroupThreadUsage | null; /** Transient: the department's Chief of Staff, when this room is without it. Null clears an earlier value. */ chiefAbsent?: { botId: string; name: string } | null;
+  usage?: GroupThreadUsage | null; /** Transient: the department's Chief of Staff, when this room is without it. Null clears an earlier value. */ chiefAbsent?: { botId: string; name: string } | null; /** The room's members that live in another of the person's places: who each is, where it lives, and whether it can be reached now ("off": the link is off or its place is unlinked; "missing": its place no longer has it). Only on a room that has one. */ farMembers?: Array<{ id: string; name: string; place: string; state: "ok" | "off" | "missing" }>;
   /** transient: each member's context in the active thread, from its last
    * turn there, and whether its next turn there was asked to start
    * compacted. */

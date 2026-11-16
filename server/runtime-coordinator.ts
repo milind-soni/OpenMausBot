@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffLimit, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import { composeEnvelope, composeQuestion, composeReport, composeResume, composeRootTurn, continuationLine, envelopeNote } from "./runtime/envelope.ts";
+import { handoffLimits } from "./runtime/handoff-limits.ts";
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
@@ -18,6 +19,8 @@ const ANCESTOR = "Cannot assign work back to an ancestor; results return automat
 const ALREADY_COMPLETED = "This agent already completed your assignment. Do not send acknowledgements or approvals as new work. Finish with your decision; results return automatically. Only use rework=true for concrete additional work.";
 const ROOM_ANCESTOR = "A room request cannot return to an ancestor room; results are returned automatically";
 const DEPTH = "Room handoff depth limit reached";
+const TOTAL_BUDGET = /^Request budget exhausted: \d+ turns in all/;
+const totalRefusal = (limit: number): string => `This request has started ${limit} turns in all, the most one request may take, so this one was not sent. Nobody can reset that, the person included, so don't ask them to, and don't send it another way. Finish with what you have and say what is left undone.`;
 const budgetRefusal = (limit: number): string => `This request reached its limit of ${limit} hand-offs since any work last came back, so this one was not sent. The limit belongs to the request: nobody can reset it, the person included, so don't ask them to, and don't send it another way. If work is still out, end your turn: each result that comes back renews the limit and resumes you. If nothing is out, finish with what you have and say what is left undone.`;
 const NO_TURN = "The requesting turn has no root (no turn)";
 /** A stop with no other cause is the person's own. */
@@ -167,7 +170,7 @@ export class RuntimeCoordinator implements Coordinator {
     this.store = options.wrote ? announcingWrites(store, options.wrote) : store;
     this.runtime = new Runtime(this.store, this.runner(), {
       clock: { now: () => this.now(), monotonic: () => performance.now() },
-      limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, inputWaitMs: PARKED_LIMIT_MS, inputRemindMs: PARKED_REMIND_MS, ...options.runtimeLimits },
+      limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, inputWaitMs: PARKED_LIMIT_MS, inputRemindMs: PARKED_REMIND_MS, ...handoffLimits(), ...options.runtimeLimits },
       ...(options.log ? { log: options.log } : {}),
     });
   }
@@ -270,7 +273,7 @@ export class RuntimeCoordinator implements Coordinator {
     const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode
       && (!own || c.assignee.destination.threadId === target.threadId));
     if (existing && !(rework && isTerminal(existing))) return { node: view(existing, parent), duplicate: true };
-    const limited = this.handoffLimit?.refusal(target.botId, () => this.live().filter(a => a.parentId !== undefined).length);
+    const limited = this.handoffLimit?.refusal(target.botId, () => this.live().filter(a => a.parentId !== undefined).length, parent.origin.kind === "person" ? "user" : "outside");
     if (limited) throw new Error(limited);
     if (mode === "work" && !rework && !own && siblings.some(c => c.mode === "work" && kindOf(c.assignee.destination.groupId, parent) === kind &&
       c.assignee.destination.groupId === target.groupId && c.assignee.botId === target.botId && c.status === "completed")) throw new Error(ALREADY_COMPLETED);
@@ -296,7 +299,7 @@ export class RuntimeCoordinator implements Coordinator {
       ...(fanOut ? { fanOut } : {}),
     });
     if (!result.ok) {
-      if (result.outcome === "budget") throw new Error(budgetRefusal(this.runtime.limits.requests));
+      if (result.outcome === "budget") throw new Error(TOTAL_BUDGET.test(result.reason) ? totalRefusal(this.runtime.limits.totalExecutions) : budgetRefusal(this.runtime.limits.requests));
       throw new Error(RUNTIME_DEPTH.test(result.reason) ? DEPTH : result.reason);
     }
     return { node: view(result.assignment, parent), duplicate: result.duplicate };
@@ -645,7 +648,8 @@ export class RuntimeCoordinator implements Coordinator {
     const body = resumed
       ? composeResume(a, this.host.names(node, parent && this.project(parent)),
         settled.map(child => composeReport(this.readable(child, a, node), this.host.names(view(child, a), node))),
-        asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node))))
+        asked.map(child => composeQuestion(this.readable(child, a, node), this.host.names(view(child, a), node))),
+        settled.flatMap(child => child.status === "failed" && child.fault ? [{ fault: child.fault, who: this.host.names(view(child, a), node).assignee }] : []))
       : root
         ? composeRootTurn(a, { turn: input.turn === "resume" ? "first" : input.turn, restartNote: "", ...(input.answer !== undefined ? { answer: input.answer } : {}),
           ...(input.continuation ? { continuation: input.continuation } : {}) })
@@ -659,7 +663,7 @@ export class RuntimeCoordinator implements Coordinator {
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
     if (!root && a.origin.kind === "person" && result.approvalAsk && !result.stalled && question === undefined) return { kind: "needs_input", question: result.approvalAsk, ...evidence(result) };
-    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
+    if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...(result.failure ? { failure: result.failure } : {}), ...evidence(result) };
     if (question === undefined) return { kind: "completed", text: result.text, ...(await this.statusOnly(a, parent, input.turn, result, signal) ? { statusOnly: true } : {}), ...evidence(result) };
     const named = withDefault(question);
     const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};

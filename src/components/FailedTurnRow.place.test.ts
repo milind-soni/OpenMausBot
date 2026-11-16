@@ -106,7 +106,7 @@ describe("the phone row", () => {
       [{ state: "cc-unavailable", params: { bot: "Scout" }, source: "routine" },
         "Cloud desktops can't start right now. It isn't anything you did. Change where this routine runs."],
       [{ state: "cc-at-once", params: { bot: "Bo", plan: "Personal", max: 1, holders: ["Ada"] }, source: "works-on" },
-        "Your Personal plan includes 1 cloud desktop, and Ada has it. Manage your cloud desktops in Settings → Bot desktops."],
+        "Your Personal plan includes 1 cloud desktop, and Ada has it. Manage your cloud desktops in Settings → Desktops & browser → Desktops."],
     ];
     for (const [place, words] of rows) {
       const tool = stored(place);
