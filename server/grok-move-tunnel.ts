@@ -2,11 +2,13 @@
 // one, so once the person asks for it this opens a second listener on loopback that serves the move MCP
 // (grok-move-mcp.ts) and nothing else, and a Cloudflare quick tunnel from the bundled cloudflared to that listener.
 // Security: the main API is never tunnelled. The public address answers only POST /mcp/move/<256-bit key>, and the
-// key lives in this process's memory and in the address shown to the app's own window. The link ends when the person
-// turns it off, when the app quits or when cloudflared exits; what arrived stays in memory until then.
+// key lives in this process's memory, in the address shown to the app's own window and, while the link is on, in
+// <data>/grok-connector-key (0600, never in a backup), so the link comes back on with it when the app starts again,
+// at a new address. The link ends when the person turns it off, when the app quits or when cloudflared exits; what
+// arrived stays in memory until then.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -17,9 +19,12 @@ import { minimalCloudflaredEnvironment } from "../electron/managed-companion-gua
 import { resolveCloudflaredBinary } from "../electron/managed-companion-tunnel.mjs";
 import { GROK_EXPORT_MAX_CHARS } from "../shared/grok-import.ts";
 import { createMoveLink, moveMcp, moveRpcError, type HandoffState, type MoveHost, type MoveLink, type MoveMcpAnswer } from "./grok-move-mcp.ts";
+import { writeFileAtomic } from "./atomic.ts";
 import { readBody } from "./harness/http.ts";
 
 export const MOVE_PATH_PREFIX = "/mcp/move/";
+/** In the data folder while the link is on: its key. */
+export const GROK_CONNECTOR_KEY_FILE = "grok-connector-key";
 /** A document at the importer's cap inside a JSON-RPC envelope. */
 const BODY_MAX = GROK_EXPORT_MAX_CHARS + 64 * 1024;
 const START_TIMEOUT_MS = 45_000;
@@ -28,8 +33,12 @@ export interface GrokConnector {
   /** False where there is no cloudflared to open a link with. */
   available: boolean;
   connectorUrl?: string;
-  /** The link was made and has stopped working: cloudflared exited. */
+  /** The link was made and has stopped working: cloudflared exited, or it could not come back on as the app started. */
   stopped?: true;
+  /** A link is opening: asked for, or coming back on as the app starts. */
+  opening?: true;
+  /** The link came back on as the app started, at a new address, and the person has not copied it or closed the notice. */
+  changed?: true;
   /** What arrived after the asked-for `seq`, oldest first, each as the text of one export. */
   arrived: Array<{ seq: number; at: number; text: string }>;
   /** The last few tasks Grok Bot handed off, newest first. */
@@ -47,6 +56,8 @@ export interface GrokMove {
   look(after: number): GrokConnector;
   /** The person imported everything up to `seq`: the link lets it go and stays open. */
   taken(seq: number): GrokConnector;
+  /** The person copied the link that came back on, or closed the notice saying so. */
+  seen(): GrokConnector;
   end(): GrokConnector;
 }
 
@@ -57,7 +68,7 @@ export function grokMoveCloudflared(env: NodeJS.ProcessEnv = process.env, fromSo
     : { isPackaged: true, resourcesPath: env.OMB_RESOURCES_PATH });
 }
 
-interface Link { connectorUrl: string; move: MoveLink; live: boolean; close(): void }
+interface Link { connectorUrl: string; key: string; move: MoveLink; live: boolean; close(): void }
 
 function send(res: ServerResponse, answer: MoveMcpAnswer, headers: Record<string, string> = {}) {
   const data = answer.body === undefined ? "" : JSON.stringify(answer.body);
@@ -95,6 +106,16 @@ export function moveListener(path: string, link: () => MoveLink | null, now: () 
   };
 }
 
+/** The key a link that was on when the app quit was made with, if it reads as one. */
+function keptKey(file: string): string | null {
+  try {
+    const key = readFileSync(file, "utf8").trim();
+    return /^[\w-]{43}$/.test(key) ? key : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Resolves with the public address once cloudflared has it and has a connection to Cloudflare's edge. */
 function tunnelAddress(child: ChildProcess, timeoutMs: number): Promise<string> {
   return new Promise((done, fail) => {
@@ -122,6 +143,8 @@ export function createGrokMove(options: {
   now?: () => number;
   startTimeoutMs?: number;
   host?: GrokMoveHost;
+  /** Where the key is kept while the link is on. A key kept there brings the link back on at once. */
+  keyFile?: string;
 } = {}): GrokMove {
   const now = options.now ?? Date.now;
   const binary = options.binary ?? grokMoveCloudflared;
@@ -130,17 +153,20 @@ export function createGrokMove(options: {
   /** Bumped by end(), so a link still opening when the person ends it is closed as soon as it opens. */
   let ended = 0;
   let seq = 0;
+  /** The link could not come back on as the app started. */
+  let lost = false;
+  let changed = false;
 
   const state = (after = 0): GrokConnector => ({
     available: Boolean(binary()),
-    ...(link?.live ? { connectorUrl: link.connectorUrl } : {}),
-    ...(link && !link.live ? { stopped: true as const } : {}),
+    ...(link?.live ? { connectorUrl: link.connectorUrl, ...(changed ? { changed: true as const } : {}) } : link || lost ? { stopped: true as const } : {}),
+    ...(starting ? { opening: true as const } : {}),
     arrived: (link?.move.inbox.arrivals ?? []).filter((arrival) => arrival.seq > after).map(({ seq, at, text }) => ({ seq, at, text })),
     handoffs: options.host?.recent() ?? [],
   });
 
-  async function open(binaryPath: string): Promise<Link> {
-    const path = `${MOVE_PATH_PREFIX}${randomBytes(32).toString("base64url")}`;
+  async function open(binaryPath: string, key: string): Promise<Link> {
+    const path = `${MOVE_PATH_PREFIX}${key}`;
     const move = createMoveLink(() => ++seq, options.host);
     let made: Link | null = null;
     let child: ChildProcess | undefined;
@@ -166,7 +192,7 @@ export function createGrokMove(options: {
         { stdio: ["ignore", "ignore", "pipe"], env: minimalCloudflaredEnvironment(), windowsHide: true },
       );
       const address = await tunnelAddress(child, options.startTimeoutMs ?? START_TIMEOUT_MS);
-      made = { connectorUrl: `${address}${path}`, move, live: true, close };
+      made = { connectorUrl: `${address}${path}`, key, move, live: true, close };
       child.once("exit", close);
       return made;
     } catch (error) {
@@ -175,16 +201,40 @@ export function createGrokMove(options: {
     }
   }
 
+  /** Opens a link with a new key, or `kept` as the app starts, or waits for the one opening, and keeps it unless the person
+   * turned the link off meanwhile. */
+  async function turnOn(binaryPath: string, kept?: string): Promise<void> {
+    const round = ended;
+    starting ??= open(binaryPath, kept ?? randomBytes(32).toString("base64url")).finally(() => { starting = null; });
+    const opened = await starting;
+    if (round !== ended) return opened.close();
+    if (link?.live) return;
+    link = opened;
+    lost = false;
+    changed = kept !== undefined;
+    if (!options.keyFile || kept) return;
+    try {
+      writeFileAtomic(options.keyFile, `${opened.key}\n`, { mode: 0o600 });
+    } catch (error) {
+      console.error(`Grok Bot connector: the link works until the app quits, but could not be kept on: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const kept = options.keyFile ? keptKey(options.keyFile) : null;
+  const keptBinary = kept ? binary() : null;
+  if (kept && keptBinary) {
+    void turnOn(keptBinary, kept).catch((error: Error) => {
+      if (!ended) lost = true;
+      console.error(`Grok Bot connector: ${error.message}`);
+    });
+  }
+
   return {
     async connect() {
       const binaryPath = binary();
       if (!binaryPath) return state();
       if (link?.live) return state();
-      const round = ended;
-      starting ??= open(binaryPath).finally(() => { starting = null; });
-      const opened = await starting;
-      if (round !== ended) opened.close();
-      else if (!link?.live) link = opened;
+      await turnOn(binaryPath);
       return state();
     },
     look: (after) => state(after),
@@ -192,10 +242,17 @@ export function createGrokMove(options: {
       link?.move.inbox.take(through);
       return state(through);
     },
+    seen() {
+      changed = false;
+      return state();
+    },
     end() {
       ended += 1;
       link?.close();
       link = null;
+      lost = false;
+      changed = false;
+      if (options.keyFile) rmSync(options.keyFile, { force: true });
       return state();
     },
   };

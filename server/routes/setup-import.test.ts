@@ -53,6 +53,7 @@ function fakeGrokMove(available = true) {
     connect: async () => { calls.push("connect"); open = available; return state(); },
     look: (after) => { calls.push(`look ${after}`); return state(open && after < 1 ? [{ seq: 1, at: 5, text: "{}" }] : []); },
     taken: (seq) => { calls.push(`taken ${seq}`); return state(); },
+    seen: () => { calls.push("seen"); return state(); },
     end: () => { calls.push("end"); open = false; return state(); },
   };
   return { move, calls };
@@ -120,8 +121,9 @@ describe("the setup import routes", () => {
     for (const after of ["x", "-1", "1.5"]) expect((await local.call("GET", `${connector}?after=${after}`)).status, after).toBe(400);
     expect(await (await local.call("POST", connector, { body: { taken: 1 } })).json()).toMatchObject({ connectorUrl: made.connectorUrl, arrived: [] });
     for (const taken of ["1", -1, 1.5, null]) expect((await local.call("POST", connector, { body: { taken } })).status, String(taken)).toBe(400);
+    expect(await (await local.call("POST", connector, { body: { seen: true } })).json()).toMatchObject({ connectorUrl: made.connectorUrl });
     expect(await (await local.call("DELETE", connector)).json()).toEqual({ available: true, arrived: [], handoffs: [] });
-    expect(calls).toEqual(["look 0", "connect", "look 0", "look 1", "taken 1", "end"]);
+    expect(calls).toEqual(["look 0", "connect", "look 0", "look 1", "taken 1", "seen", "end"]);
   });
 
   it("keeps the Grok Bot link to the owner's own loopback, and says plainly when no link can be made", async () => {

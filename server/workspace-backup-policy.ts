@@ -38,8 +38,9 @@ export function excludedWorkspaceAuthPath(path: string): boolean {
   if (inSecretFolder(path)) return true;
   if (/^command-allowlist\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   if (/^mcp-oauth\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
-  // Saved website logins and their key never leave the computer they were saved on, nor does the key sealing webhook secrets.
-  if (/^(?:logins\.json\.enc|member-secrets\.json\.enc|logins-key|webhook-key)(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
+  // Saved website logins and their key never leave the computer they were saved on, nor does the key sealing webhook secrets
+  // or the Grok Bot connector's key.
+  if (/^(?:logins\.json\.enc|member-secrets\.json\.enc|logins-key|webhook-key|grok-connector-key)(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   // A Cloud home's connected-apps installation: its connected accounts belong to it, so a copy would share them.
   if (/^connected-apps-installation\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   // A Team Cloud's kept rules: a restored Cloud asks the Admin for the ones in force now.

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,13 +8,14 @@ import { GROK_EXPORT_FORMAT, GROK_EXPORT_MAX_CHARS } from "../shared/grok-import
 import { createGrokMove, grokMoveCloudflared, type GrokMove, type GrokMoveHost } from "./grok-move-tunnel.ts";
 
 const ADDRESS = "https://quiet-test-words.trycloudflare.com";
+const OTHER = "https://other-test-words.trycloudflare.com";
 const moves: GrokMove[] = [];
 afterEach(() => {
   for (const move of moves.splice(0)) move.end();
 });
 
 /** A stand-in cloudflared: a real child process that prints what cloudflared prints and then stays up. */
-function harness(options: { says?: string; startTimeoutMs?: number; now?: () => number; host?: GrokMoveHost } = {}) {
+function harness(options: { says?: string; startTimeoutMs?: number; now?: () => number; host?: GrokMoveHost; keyFile?: string } = {}) {
   const children: ChildProcess[] = [];
   const started: string[][] = [];
   const says = options.says ?? `INF |  ${ADDRESS}  |\\nINF Registered tunnel connection connIndex=0`;
@@ -38,6 +39,7 @@ function harness(options: { says?: string; startTimeoutMs?: number; now?: () => 
   return { move, children, started, post };
 }
 const send = (name: string) => ({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "send_export", arguments: { document: { format: GROK_EXPORT_FORMAT, version: 1, bots: [{ name, memories: ["likes cheese"] }] } } } });
+const until = async (check: () => boolean) => { for (let tries = 0; tries < 300 && !check(); tries += 1) await new Promise((later) => setTimeout(later, 10)); };
 const gone = (child: ChildProcess) => new Promise<void>((done) => (child.exitCode !== null || child.signalCode !== null ? done() : child.once("exit", () => done())));
 
 describe("the Grok Bot link", () => {
@@ -143,6 +145,63 @@ describe("the Grok Bot link", () => {
     await new Promise((done) => setTimeout(done, 50));
     release();
     expect(await reading).toMatchObject({ result: { content: [{ text: expect.stringContaining("Result:\nwaited 20000") }] } });
+  });
+
+  it("stays on across a restart: the next start opens the link with the same key at a new address and says it changed", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "omb-grok-key-test-"));
+    const keyFile = join(folder, "grok-connector-key");
+    try {
+      const first = harness({ keyFile });
+      const made = await first.move.connect();
+      const key = new URL(made.connectorUrl!).pathname.split("/").at(-1);
+      expect(made.changed, "never on the first turn-on").toBeUndefined();
+      expect(readFileSync(keyFile, "utf8")).toBe(`${key}\n`);
+      if (process.platform !== "win32") expect(statSync(keyFile).mode & 0o777).toBe(0o600);
+      first.children[0]!.kill();
+
+      // The app starting again: a second link-maker reading the same data folder.
+      const again = harness({ keyFile, says: `INF |  ${OTHER}  |\\nINF Registered tunnel connection connIndex=0` });
+      expect(again.move.look(0)).toEqual({ available: true, opening: true, arrived: [], handoffs: [] });
+      await until(() => Boolean(again.move.look(0).connectorUrl));
+      const back = again.move.look(0);
+      expect(back).toMatchObject({ connectorUrl: `${OTHER}/mcp/move/${key}`, changed: true });
+      expect(back.opening).toBeUndefined();
+      expect(again.started).toHaveLength(1);
+      expect((await again.post(back.connectorUrl!, send("Tango"))).status).toBe(200);
+      expect(again.move.seen()).toEqual({ available: true, connectorUrl: back.connectorUrl, arrived: [{ seq: 1, at: expect.any(Number), text: expect.any(String) }], handoffs: [] });
+      expect(again.move.look(0).changed).toBeUndefined();
+
+      expect(again.move.end()).toEqual({ available: true, arrived: [], handoffs: [] });
+      expect(existsSync(keyFile), "Turn off forgets the key").toBe(false);
+      const off = harness({ keyFile });
+      expect(off.move.look(0)).toEqual({ available: true, arrived: [], handoffs: [] });
+      expect(off.started).toEqual([]);
+      const fresh = await off.move.connect();
+      expect(new URL(fresh.connectorUrl!).pathname, "turning it on again makes a new key").not.toBe(new URL(made.connectorUrl!).pathname);
+      expect(fresh.changed).toBeUndefined();
+      expect(readFileSync(keyFile, "utf8")).not.toContain(key);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("says the link stopped when it cannot come back on as the app starts, tries once, and keeps it on for the next start", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "omb-grok-key-test-"));
+    const keyFile = join(folder, "grok-connector-key");
+    try {
+      writeFileSync(keyFile, `${"k".repeat(43)}\n`);
+      const failing = harness({ keyFile, says: "INF Requesting new quick Tunnel", startTimeoutMs: 100 });
+      await until(() => failing.move.look(0).stopped === true);
+      expect(failing.move.look(0)).toEqual({ available: true, stopped: true, arrived: [], handoffs: [] });
+      expect(failing.started).toHaveLength(1);
+      expect(existsSync(keyFile)).toBe(true);
+      writeFileSync(keyFile, "not a key\n");
+      const unreadable = harness({ keyFile });
+      expect(unreadable.move.look(0)).toEqual({ available: true, arrived: [], handoffs: [] });
+      expect(unreadable.started).toEqual([]);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
   });
 
   it("makes no link without cloudflared, and fails plainly, with nothing left running, when the tunnel never opens", async () => {
