@@ -13,6 +13,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { cloudPairingSignature } from "./cloud-home.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0123456789ab.fly.dev";
@@ -225,13 +226,12 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const ownerKeyAtBoot = `p_${createHash("sha256").update("cloud-owner:3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93").digest("base64url").slice(0, 22)}`;
   writeFileSync(join(dataDir, "lending-routines.json"), JSON.stringify({ version: 1, routines: { [before.stale]: "0".repeat(64) }, writers: { [before.stale]: ownerKeyAtBoot, [before.fullApproved]: ownerKeyAtBoot } }));
   // A bot at Full access (set where only the desktop app can set it: its record).
-  const bots = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"));
-  const record = Array.isArray(bots) ? bots : bots.bots;
-  const full = record.find((bot: any) => bot.id === before.full.id);
+  const bots = readRegistry(dataDir).bots;
+  const full = bots.find((bot: any) => bot.id === before.full.id);
   full.approvalMode = "full";
   delete full.approvalGrant;
   for (const task of full.tasks ?? []) { task.approvalMode = "full"; delete task.approvalGrant; delete task.autoApprove; }
-  writeFileSync(join(dataDir, "bots.json"), JSON.stringify(bots));
+  writeRegistry(dataDir, { bots });
   // A v0.1.91 Cloud home recorded who allowed a card by their device's key (a
   // self-hosted server records no key): write it the way that release did.
   const db = new DatabaseSync(join(dataDir, "messages.db"));
