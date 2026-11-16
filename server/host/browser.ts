@@ -28,7 +28,7 @@ import {
   noteBrowserEngineUnavailable,
   setBrowserViewport,
 } from "../browser-engine.ts";
-import { BrowserRoom, defaultBrowserRoomSize } from "../browser-room.ts";
+import { BrowserRoom, defaultBrowserRoomSize, spareForRoom } from "../browser-room.ts";
 import { BrowserSweep, browserIdleMs, type BrowserCleanupWireRequest } from "../browser-lifecycle-cleanup.ts";
 import { AudienceBrowsers, audienceBrowserSuffix } from "../browser/audience.ts";
 import type { BrowserSitesTarget } from "../browser-sites.ts";
@@ -83,6 +83,8 @@ export interface BrowserHostDeps {
   audienceOf?(threadId: string): Audience;
   /** The box every Chrome of the bots' browsers runs in (a Team Cloud's), or none. */
   browserBox?(seccompFd: number, ro: readonly string[]): LauncherBox | null;
+  /** How many agent-browser browsers run at once; sized by this server's limits without it. */
+  browsersAtOnce?(): number;
 }
 
 /** The lent computer's connection for a browser's pages, under the rule for everything it lends: only while the last
@@ -106,15 +108,25 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const store: Pick<Store, "bots" | "bot" | "botByThread"> = { get bots() { return deps.store().bots; }, bot: (id: string) => deps.store().bot(id),
     botByThread: (threadId: string) => deps.store().botByThread(threadId) };
 
+  // Only a bot waiting for a slot closes a browser a running turn holds; the idle sweep below never does.
+  const browserRoom = new BrowserRoom({
+    max: deps.browsersAtOnce ?? (() => defaultBrowserRoomSize()),
+    spare: (session) => spareForRoom(agentBrowserRuntime.spare(session), { holds: !turnResources.free(`browser:${session}`), idleMs: idleMs() }),
+    close: (session) => agentBrowserRuntime.closeIfIdle(session, 1),
+  });
   const agentBrowserRuntime = new BrowserRuntime({
     closeBrowser: (session, spec) => closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })),
     applyViewport: (spec, size) => setBrowserViewport(spec.command, spec.env, size),
-    launch: chromeLauncher,
-    room: new BrowserRoom({
-      max: () => defaultBrowserRoomSize(),
-      spare: (session) => spareBrowserMs(session),
-      close: (session) => agentBrowserRuntime.closeIfIdle(session, 1),
-    }),
+    // A browser a person's view started counts toward the limit too. It is not refused, so a bot's next new one waits.
+    launch: {
+      ready: (spec) => chromeLauncher.ready(spec),
+      started: (session, spec) => {
+        if (!attachesToChrome(spec.env ?? {})) browserRoom.entered(session);
+        return chromeLauncher.started(session, spec);
+      },
+      stopped: (session) => chromeLauncher.stopped(session),
+    },
+    room: browserRoom,
     relayCommand: (spec, session, command, timeoutMs) => relayCommand(spec, session, command, timeoutMs).catch((error: unknown) => {
       throw error instanceof RelayTimeout ? new TransportError(error.message) : error;
     }),
@@ -129,15 +141,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   } });
   const host: HostKind = DESKTOP_MANAGED ? "desktop" : CLOUD_HOME || existsSync("/.dockerenv") ? "container" : "server";
   const idleMs = () => browserIdleMs(cfg, { cloudHome: Boolean(CLOUD_HOME) });
-  /** A running turn keeps the browser it used unless the browser has sat unused for the idle time and reopens with its
-   * sign-ins (open pages are lost either way; a temporary browser would lose its sign-ins too, so the turn keeps it). */
-  function turnKeeps(session: string, spare: { idleMs: number; savesSignIns: boolean } | null): boolean {
-    return !turnResources.free(`browser:${session}`) && !(spare !== null && spare.savesSignIns && spare.idleMs >= idleMs());
-  }
-  function spareBrowserMs(session: string): number | null {
-    const spare = agentBrowserRuntime.spare(session);
-    return spare === null || turnKeeps(session, spare) ? null : spare.idleMs;
-  }
   const chromeEngine = new ChromeEngine({
     dataDir: DATA_DIR,
     host,
@@ -242,7 +245,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     engine: () => { const engine = browserEngineStatus(); return engine.kind === "ready" ? engine.binaryPath : null; },
     owns: (session) => belongs(session) || (Boolean(CLOUD_HOME) && BOT_SESSION.test(session)),
     live: (session) => usedBrowserSessions.has(session) && belongs(session),
-    held: (session) => turnKeeps(session, agentBrowserRuntime.spare(session)),
+    held: (session) => !turnResources.free(`browser:${session}`),
     closeIdle: (session) => browserRuntime.closeIfIdle(session, idleMs(), usedBrowserSessions.get(session)),
   });
   const browserSweep = {
@@ -576,7 +579,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
 
   return {
-    browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions, browserIdleMs: idleMs,
+    browserRuntime, browserLive, browserRoom, usedBrowserSessions, browserSweep, temporaryBrowserSessions, browserIdleMs: idleMs,
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, lentChromeSummary, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,

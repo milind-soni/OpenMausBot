@@ -6,6 +6,7 @@ import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../shared/redact.ts";
 import { BROWSER_VIEWPORT } from "./browser-page-size.ts";
 import { BROWSER_CALL_DEFAULTS, BROWSER_HOVER_TOOL, BROWSER_RESTART_TOOL, BROWSER_UPLOAD_TOOL, BrowserRuntime, TransportError, browserRuntimeEnv, formatBrowserTiming, type BrowserSpawnSpec, type BrowserTiming } from "./browser-runtime.ts";
 import { launchSettingsKey } from "./browser-launch-key.ts";
+import { BrowserRoom } from "./browser-room.ts";
 import { HARNESS_CALL_BUDGET_MS, HARNESS_PROXY_TIMEOUT_MS } from "./harness-budget.ts";
 import { RelayPorts } from "./browser-relay.ts";
 import { BrowserSteps, type StepCall, type StepContext } from "./browser-steps.ts";
@@ -662,6 +663,23 @@ describe("server-owned browser MCP runtime", () => {
     expect(next.content[1].text).toContain("again");
     const after = await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "third" } }) as { content: Array<{ text: string }> };
     expect(after.content.map((part) => part.text).join("\n")).not.toMatch(/sat unused/);
+  });
+
+  it("keeps the reopened note for the call that reopens the browser, not one refused a slot", async () => {
+    const room = new BrowserRoom({ max: () => 1, spare: () => null, close: async () => false, waitMs: 30, pollMs: 10 });
+    const value = runtime({ closeBrowser: async () => true, room });
+    await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "first" } });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(await value.closeIfIdle("s", 20)).toBe(true);
+    // Another bot's browser took the one slot while this one was closed.
+    expect(await room.enter("other", Date.now() + 1_000)).toBeNull();
+    const refused = await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "again" } }) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(refused.isError).toBe(true);
+    expect(refused.content.map((part) => part.text)).toEqual([expect.stringMatching(/^1 browser is already open on this computer/)]);
+    room.left("other");
+    const reopened = await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "third" } }) as { content: Array<{ text: string }> };
+    expect(reopened.content[0].text).toMatch(/sat unused and was closed/);
+    expect(reopened.content[1].text).toContain("third");
   });
 
   it("tells a bot whose temporary browser closed while idle that its sign-ins went with it", async () => {

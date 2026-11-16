@@ -7,7 +7,7 @@ import { SECRET_ON_PAGE, SecretHolds, type SecretHold } from "./browser-secret-h
 import type { BrowserSteps, StepCall, StepContext } from "./browser-steps.ts";
 import { HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
 import { launchSettingsKey } from "./browser-launch-key.ts";
-import { SharedToolLists, type BrowserRoom } from "./browser-room.ts";
+import { refusedSlot, SharedToolLists, slotRefusal, type BrowserRoom } from "./browser-room.ts";
 
 export interface BrowserSpawnSpec {
   command: string;
@@ -466,7 +466,7 @@ export class BrowserRuntime {
     } finally { gate.calls--; gate.lastUsed = Date.now(); }
     if (method !== "tools/call") return result;
     if (result === null || result === undefined) return scrubBrowserResult({ isError: true, content: [{ type: "text", text: LANE_BUSY }] }, this.scrub);
-    if (!gate.reopened) return scrubBrowserResult(result, this.scrub);
+    if (!gate.reopened || refusedSlot(result)) return scrubBrowserResult(result, this.scrub);
     const note = gate.reopened === "restart" ? PERSON_RESTARTED : idleClosedNote(spec.env.AGENT_BROWSER_RESTORE_SAVE !== "never");
     gate.reopened = null;
     const content = (result as { content?: unknown } | null)?.content;
@@ -516,7 +516,7 @@ export class BrowserRuntime {
       const launchStarted = performance.now();
       let dispatched = false;
       const full = method === "tools/call" && toolName !== "agent_browser_close" && !attachesToChrome(spec.env) ? await this.room?.enter(session, deadline - this.options.followUpReserveMs) : null;
-      if (full) return { isError: true, content: [{ type: "text", text: full }] };
+      if (full) return slotRefusal(full);
       if (method === "tools/call") await this.launchReady(spec);
       const entry = this.connect(session, spec);
       await entry.client.ready;

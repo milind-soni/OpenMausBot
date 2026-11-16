@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { BrowserRoom, browserRoomSize, pidsLimit, SharedToolLists } from "./browser-room.ts";
+import { BrowserRoom, browserRoomSize, pidsLimit, SharedToolLists, spareForRoom } from "./browser-room.ts";
 
 const files = (map: Record<string, string>) => (path: string) => map[path] ?? null;
 
@@ -19,6 +19,16 @@ describe("the task limit a server runs under", () => {
     expect(pidsLimit(files({ "/proc/self/cgroup": "0::/\n", "/sys/fs/cgroup/pids.max": "max" }))).toBeNull();
     expect(pidsLimit(files({}))).toBeNull();
   });
+
+  it("on a hybrid host, reads v1's limit when the unified v2 hierarchy has none, and takes the tighter of both", () => {
+    const hybrid = "12:pids:/system.slice/omb.service\n4:memory:/system.slice/omb.service\n0::/system.slice/omb.service\n";
+    expect(pidsLimit(files({ "/proc/self/cgroup": hybrid, "/sys/fs/cgroup/pids/system.slice/omb.service/pids.max": "700\n" }))).toBe(700);
+    expect(pidsLimit(files({
+      "/proc/self/cgroup": hybrid,
+      "/sys/fs/cgroup/pids/system.slice/omb.service/pids.max": "700\n",
+      "/sys/fs/cgroup/unified/system.slice/pids.max": "300\n",
+    }))).toBe(300);
+  });
 });
 
 describe("how many browsers run at once", () => {
@@ -33,7 +43,18 @@ describe("how many browsers run at once", () => {
 
   it("takes OMB_BROWSER_MAX_RUNNING over all of that", () => {
     expect(browserRoomSize({ override: "9", pids: 1000, memoryBytes: GiB })).toBe(9);
-    expect(browserRoomSize({ override: "zero", pids: 1000, memoryBytes: 8 * GiB })).toBe(2);
+  });
+
+  it("refuses an OMB_BROWSER_MAX_RUNNING that is not 1 or more with a log line, 0 included, and sizes by the limits", () => {
+    for (const override of ["0", "zero", "-2", "1.5"]) {
+      const warn = vi.fn();
+      expect(browserRoomSize({ override, pids: 1000, memoryBytes: 8 * GiB }, warn)).toBe(2);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`OMB_BROWSER_MAX_RUNNING="${override}" is not a whole number of at least 1`));
+    }
+    const quiet = vi.fn();
+    expect(browserRoomSize({ override: undefined, pids: 1000, memoryBytes: 8 * GiB }, quiet)).toBe(2);
+    expect(browserRoomSize({ override: "", pids: 1000, memoryBytes: 8 * GiB }, quiet)).toBe(2);
+    expect(quiet).not.toHaveBeenCalled();
   });
 });
 
@@ -67,7 +88,7 @@ describe("a browser over the limit", () => {
     const waiting = value.enter("b", Date.now() + 1_000);
     setTimeout(() => value.left("a"), 50);
     expect(await waiting).toBeNull();
-    expect(await value.enter("c", Date.now() + 1_000)).toMatch(/1 browsers are already open on this computer, the most it runs at once/);
+    expect(await value.enter("c", Date.now() + 1_000)).toMatch(/^1 browser is already open on this computer, the most it runs at once/);
     expect(close).not.toHaveBeenCalled();
   });
 
@@ -77,6 +98,47 @@ describe("a browser over the limit", () => {
     expect(await value.enter("b", Date.now() + 100)).toMatch(/already open/);
     expect(close).toHaveBeenCalled();
     expect(value.open).toBe(1);
+  });
+
+  it("tries the next least recently used idle browser when one will not close", async () => {
+    const { value, close } = room({ max: 3, spare: { a: 60_000, b: 30_000, c: 5_000 }, close: async (session) => session === "b" });
+    for (const session of ["a", "b", "c"]) await value.enter(session, Date.now() + 1_000);
+    expect(await value.enter("d", Date.now() + 1_000)).toBeNull();
+    expect(close.mock.calls).toEqual([["a"], ["b"]]);
+    expect(value.open).toBe(3);
+  });
+
+  it("says so in the plural with more than one browser open", async () => {
+    const { value } = room({ max: 2 });
+    await value.enter("a", Date.now() + 1_000);
+    await value.enter("b", Date.now() + 1_000);
+    expect(await value.enter("c", Date.now() + 50)).toMatch(/^2 browsers are already open/);
+  });
+
+  it("counts a browser a person's view started, so a bot's new one waits for room", async () => {
+    const { value } = room({ max: 1 });
+    value.entered("viewed");
+    expect(await value.enter("b", Date.now() + 50)).toMatch(/already open/);
+    value.left("viewed");
+    expect(await value.enter("b", Date.now() + 1_000)).toBeNull();
+  });
+});
+
+describe("which browser a bot waiting for a slot may close", () => {
+  const idle = (idleMs: number, savesSignIns = true) => ({ idleMs, savesSignIns });
+  it("any no turn holds, however recently used", () => {
+    expect(spareForRoom(idle(1_000), { holds: false, idleMs: 180_000 })).toBe(1_000);
+    expect(spareForRoom(idle(1_000, false), { holds: false, idleMs: 180_000 })).toBe(1_000);
+  });
+
+  it("one a running turn holds only after the idle time, and only when it reopens with its sign-ins", () => {
+    expect(spareForRoom(idle(179_999), { holds: true, idleMs: 180_000 })).toBeNull();
+    expect(spareForRoom(idle(180_000), { holds: true, idleMs: 180_000 })).toBe(180_000);
+    expect(spareForRoom(idle(600_000, false), { holds: true, idleMs: 180_000 })).toBeNull();
+  });
+
+  it("none a call, a person or a view has", () => {
+    expect(spareForRoom(null, { holds: false, idleMs: 180_000 })).toBeNull();
   });
 });
 

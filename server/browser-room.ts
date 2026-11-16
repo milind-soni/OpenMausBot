@@ -14,27 +14,38 @@ const ROOM_WAIT_MS = 30_000;
 type Read = (path: string) => string | null;
 const readText: Read = (path) => { try { return readFileSync(path, "utf8"); } catch { return null; } };
 
-/** The tightest task limit over this process's own cgroup and its parents (a container's --pids-limit, a systemd
- * TasksMax): cgroup v2 `pids.max`, or v1's under the pids controller. Null with no limit, and off Linux. */
-export function pidsLimit(read: Read = readText): number | null {
-  const membership = read("/proc/self/cgroup");
-  if (membership === null) return null;
-  const v2 = /^0::(\/.*)$/m.exec(membership)?.[1];
-  const v1 = /^\d+:(?:[^:]*,)?pids(?:,[^:]*)?:(\/.*)$/m.exec(membership)?.[1];
-  const root = v2 !== undefined ? "/sys/fs/cgroup" : "/sys/fs/cgroup/pids";
+/** The tightest `pids.max` from `at` up to the hierarchy's root under `root`. */
+function tightest(read: Read, root: string, from: string): number | null {
   let limit: number | null = null;
-  for (let at = (v2 ?? v1 ?? "/").trim(); ; at = dirname(at)) {
+  for (let at = from.trim(); ; at = dirname(at)) {
     const value = Number(read(join(root, at, "pids.max"))?.trim());
     if (Number.isInteger(value) && value > 0) limit = Math.min(limit ?? value, value);
     if (at === "/" || at === ".") return limit;
   }
 }
 
-/** How many agent-browser browsers run at once: `OMB_BROWSER_MAX_RUNNING`, else what fits in the browsers' share of the
- * task limit and of the memory this server may use. */
-export function browserRoomSize(limits: { override?: string; pids: number | null; memoryBytes: number }): number {
-  const override = Number(limits.override);
-  if (Number.isInteger(override) && override > 0) return override;
+/** The tightest task limit over this process's own cgroup and its parents (a container's --pids-limit, a systemd
+ * TasksMax): cgroup v2 `pids.max` and v1's under the pids controller. A hybrid host lists both, and its limit is often
+ * only in v1's, so both are read. Null with no limit, and off Linux. */
+export function pidsLimit(read: Read = readText): number | null {
+  const membership = read("/proc/self/cgroup");
+  if (membership === null) return null;
+  const v2 = /^0::(\/.*)$/m.exec(membership)?.[1];
+  const v1 = /^\d+:(?:[^:]*,)?pids(?:,[^:]*)?:(\/.*)$/m.exec(membership)?.[1];
+  const limits = [
+    ...(v2 !== undefined ? [tightest(read, "/sys/fs/cgroup", v2), tightest(read, "/sys/fs/cgroup/unified", v2)] : []),
+    ...(v1 !== undefined ? [tightest(read, "/sys/fs/cgroup/pids", v1)] : []),
+  ].filter((limit): limit is number => limit !== null);
+  return limits.length > 0 ? Math.min(...limits) : null;
+}
+
+/** How many agent-browser browsers run at once: `OMB_BROWSER_MAX_RUNNING` (a whole number of at least 1), else what fits
+ * in the browsers' share of the task limit and of the memory this server may use. Any other value, 0 included, is not a
+ * way to turn browsers off (a bot's own browser switch is): it is refused with a log line and the computed size is used. */
+export function browserRoomSize(limits: { override?: string; pids: number | null; memoryBytes: number }, warn: (line: string) => void = () => undefined): number {
+  const override = limits.override?.trim() ? Number(limits.override) : undefined;
+  if (override !== undefined && Number.isInteger(override) && override > 0) return override;
+  if (override !== undefined) warn(`OMB_BROWSER_MAX_RUNNING=${JSON.stringify(limits.override)} is not a whole number of at least 1, so it is ignored; set it to 1 or more, or unset it to size the browsers by this server's limits`);
   const byMemory = Math.floor((limits.memoryBytes * BROWSER_SHARE) / BROWSER_BYTES);
   const byTasks = limits.pids === null ? MOST_BROWSERS : Math.floor((limits.pids * BROWSER_SHARE) / BROWSER_THREADS);
   return Math.max(1, Math.min(MOST_BROWSERS, byMemory, byTasks));
@@ -42,8 +53,18 @@ export function browserRoomSize(limits: { override?: string; pids: number | null
 
 let size: number | undefined;
 export function defaultBrowserRoomSize(env: NodeJS.ProcessEnv = process.env): number {
-  size ??= browserRoomSize({ override: env.OMB_BROWSER_MAX_RUNNING, pids: pidsLimit(), memoryBytes: boxMemory().bytes });
+  size ??= browserRoomSize({ override: env.OMB_BROWSER_MAX_RUNNING, pids: pidsLimit(), memoryBytes: boxMemory().bytes }, (line) => console.warn(`browser: ${line}`));
   return size;
+}
+
+/** What the room may close for a bot waiting on a slot (how long the browser sat unused), or null. A browser no turn holds
+ * may go. One a running turn holds goes only here, never in the regular idle sweep, and only once it sat unused for the
+ * idle time and reopens with its sign-ins: open pages are lost either way, and a temporary browser would lose its
+ * sign-ins too, so the turn keeps it. */
+export function spareForRoom(spare: { idleMs: number; savesSignIns: boolean } | null, turn: { holds: boolean; idleMs: number }): number | null {
+  if (spare === null) return null;
+  if (!turn.holds) return spare.idleMs;
+  return spare.savesSignIns && spare.idleMs >= turn.idleMs ? spare.idleMs : null;
 }
 
 export interface BrowserRoomOptions {
@@ -77,19 +98,42 @@ export class BrowserRoom {
         this.#open.add(session);
         return null;
       }
-      const spare = others.flatMap((other) => { const idle = this.#options.spare(other); return idle === null ? [] : [{ other, idle }]; })
-        .sort((a, b) => b.idle - a.idle)[0];
-      if (spare && await this.#options.close(spare.other).catch(() => false)) {
-        this.#open.delete(spare.other);
-        continue;
-      }
-      if (Date.now() >= until) return `${others.length} browsers are already open on this computer, the most it runs at once. Wait for another bot to finish with its browser, then try again.`;
+      if (await this.#closeOneSpare(others)) continue;
+      if (Date.now() >= until) return `${others.length === 1 ? "1 browser is" : `${others.length} browsers are`} already open on this computer, the most it runs at once. Wait for another bot to finish with its browser, then try again.`;
       await new Promise((resolve) => setTimeout(resolve, Math.min(this.#options.pollMs ?? 500, Math.max(1, until - Date.now()))));
     }
   }
 
+  /** Spare browsers, least recently used first, until one closes; one that will not close leaves the next to try. */
+  async #closeOneSpare(others: readonly string[]): Promise<boolean> {
+    const spare = others.flatMap((other) => { const idle = this.#options.spare(other); return idle === null ? [] : [{ other, idle }]; })
+      .sort((a, b) => b.idle - a.idle);
+    for (const { other } of spare) {
+      // Asked again just before closing: an earlier close's wait may have let a call or a person in.
+      if (!this.#open.has(other) || this.#options.spare(other) === null) continue;
+      if (await this.#options.close(other).catch(() => false)) {
+        this.#open.delete(other);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** A browser that runs whether or not a call started it, such as one a person's view opened. */
+  entered(session: string): void { this.#open.add(session); }
+
   left(session: string): void { this.#open.delete(session); }
 }
+
+const REFUSED = new WeakSet<object>();
+/** A call's answer when every browser allowed is open: it reached no browser. */
+export function slotRefusal(text: string): { isError: true; content: Array<{ type: "text"; text: string }> } {
+  const refusal = { isError: true as const, content: [{ type: "text" as const, text }] };
+  REFUSED.add(refusal);
+  return refusal;
+}
+/** A slot refusal opened nothing, so a note that this call reopened the browser waits for the call that does. */
+export function refusedSlot(result: unknown): boolean { return typeof result === "object" && result !== null && REFUSED.has(result); }
 
 type ListedSpec = { command: string; args: readonly string[] };
 const listKey = (spec: ListedSpec) => JSON.stringify([spec.command, ...spec.args]);

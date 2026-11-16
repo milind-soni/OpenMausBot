@@ -408,7 +408,7 @@ export class BrowserSweep {
     engine: () => string | null;
     owns: (session: string) => boolean;
     live: (session: string) => boolean;
-    /** A running turn must keep it: never closed while this answers true. */
+    /** A turn holds it until it finishes: never closed while one does. */
     held: (session: string) => boolean;
     closeIdle: (session: string) => Promise<boolean>;
     intervalMs?: number;
