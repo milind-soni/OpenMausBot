@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { hostname, uptime } from "node:os";
+import { homedir, hostname, uptime } from "node:os";
 import { dirname, join } from "node:path";
 
 const LEASE_NAME = "openmausbot-server.lease";
@@ -151,7 +151,8 @@ function commandOutput(file, args) {
 }
 
 function linuxInstallHasOwnMachineId() {
-  if (existsSync("/.dockerenv") || existsSync("/run/.containerenv")) return false;
+  // systemd writes /run/systemd/container inside LXC, nspawn and other containers it detects.
+  if (["/.dockerenv", "/run/.containerenv", "/run/systemd/container"].some((marker) => existsSync(marker))) return false;
   try {
     return readFileSync("/proc/1/comm", "utf8").trim() === "systemd";
   } catch {
@@ -194,51 +195,76 @@ function machineId() {
   return cachedMachineId;
 }
 
-/** True when `dir` sits on a volume macOS mounted as local: never a network share (smbfs, nfs, afpfs, webdav). */
-function onLocalMacVolume(dir) {
-  let path;
-  let mounts;
+/**
+ * From `df -P <path>` and `mount`: whether the volume holding the path is mounted local, never a network share (smbfs,
+ * nfs, afpfs, webdav). A mount point may itself hold " on " or " (", so df names it and only the line naming exactly
+ * that mount point counts. False on any doubt.
+ */
+export function macMountIsLocal(dfOutput, mountTable) {
+  const lines = String(dfOutput).trimEnd().split("\n");
+  if (lines.length !== 2) return false;
+  const point = /^.*?\s\d+\s+\d+\s+\d+\s+\d+%\s+(\/.*)$/.exec(lines[1])?.[1];
+  if (!point) return false;
+  const marker = ` on ${point} (`;
+  const matches = String(mountTable).split("\n").filter((line) => line.includes(marker) && line.endsWith(")"));
+  if (matches.length !== 1) return false;
+  const line = matches[0];
+  return line.slice(line.indexOf(marker) + marker.length, -1).split(", ").includes("local");
+}
+
+const MAC_SYNCED_FOLDERS = [["Library", "Mobile Documents"], ["Library", "CloudStorage"]];
+
+/** iCloud Drive and File Provider sync folders (Dropbox, OneDrive, Google Drive) are local disks other Macs write to. */
+export function inMacSyncedFolder(path, home) {
+  const lower = path.toLowerCase();
+  return MAC_SYNCED_FOLDERS.some((parts) => {
+    const root = join(home, ...parts).toLowerCase();
+    return lower === root || lower.startsWith(`${root}/`);
+  });
+}
+
+function onLocalUnsyncedMacVolume(dir) {
   try {
-    path = realpathSync(dir);
-    mounts = commandOutput("/sbin/mount", []);
+    const path = realpathSync(dir);
+    const home = homedir();
+    let realHome = home;
+    try {
+      realHome = realpathSync(home);
+    } catch {
+    }
+    if (inMacSyncedFolder(path, home) || inMacSyncedFolder(path, realHome)) return false;
+    return macMountIsLocal(commandOutput("/bin/df", ["-P", path]), commandOutput("/sbin/mount", []));
   } catch {
     return false;
   }
-  let best = null;
-  for (const line of mounts.split("\n")) {
-    const open = line.lastIndexOf(" (");
-    const on = line.lastIndexOf(" on ", open);
-    if (open < 0 || on < 0 || !line.endsWith(")")) continue;
-    const point = line.slice(on + 4, open);
-    const under = point === "/" || path === point || path.startsWith(`${point}/`);
-    if (!point.startsWith("/") || !under || (best && best.point.length >= point.length)) continue;
-    best = { point, options: line.slice(open + 2, -1).split(", ") };
-  }
-  return Boolean(best?.options.includes("local"));
 }
 
 /**
  * macOS gives the host a new name on another network, and before boot sessions and machine ids were recorded nothing
  * else identified the Mac; such a record is this Mac's when it was written in an earlier boot on a folder only this Mac
- * mounts. Known open risk: an older build still running on another Mac against this folder through a sync service.
+ * mounts and no sync service mirrors. Known open risk: an older build on another Mac reaching this folder some other way.
  */
 function olderBuildRecordFromEarlierMacBoot(record, dir) {
   if (process.platform !== "darwin" || dir === undefined || record.machine !== undefined) return false;
   const boot = bootSession();
   if (boot === null || typeof record.boot !== "string" || record.boot === boot) return false;
-  return onLocalMacVolume(dir);
+  return onLocalUnsyncedMacVolume(dir);
 }
 
 /**
- * Two records with machine ids name the same machine exactly when the ids match. Without one: the same host, or the
- * same boot session (random per boot), proves this machine, since macOS renames the host on another network. `dir`, the
- * folder the record sits in, admits an older build's record from an earlier boot of this Mac; without it that is never
- * presumed, as when clearing a single-machine volume.
+ * Another machine id is another machine. The same id is this machine under any hostname only on macOS, which renames the
+ * host on another network; Linux and Windows keep theirs, and a VM cloned from a template keeps the template's id. Then:
+ * the same host, or the same boot session (random per boot), proves this machine. `dir`, the folder the record sits in,
+ * admits an older build's record from an earlier boot of this Mac; without it that is never presumed, as when clearing a
+ * single-machine volume.
  */
 function sameMachine(record, dir) {
   if (fromAnotherPidNamespace(record)) return false;
   const machine = machineId();
-  if (machine !== null && typeof record.machine === "string") return record.machine === machine;
+  if (machine !== null && typeof record.machine === "string") {
+    if (record.machine !== machine) return false;
+    if (process.platform === "darwin") return true;
+  }
   if (record.host === hostname()) return true;
   const boot = bootSession();
   if (boot !== null && typeof record.boot === "string" && record.boot === boot) return true;

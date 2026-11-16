@@ -11,6 +11,8 @@ import {
   acquireDataDirLeaseForProcess,
   clearRecordsFromEarlierRunOfThisContainer,
   clearRecordsFromOtherMachines,
+  inMacSyncedFolder,
+  macMountIsLocal,
 } from "./data-dir-lease.mjs";
 
 const MODULE_URL = new URL("./data-dir-lease.mjs", import.meta.url).href;
@@ -544,18 +546,53 @@ test("a record names this machine by a hashed id where the platform has one", ()
   else assert.ok(record.machine === null || /^[0-9a-f]{32}$/.test(record.machine));
 });
 
-test("a lease this computer left before a restart under another hostname is recovered by its machine id", async (t) => {
+// Only macOS renames the host per network; elsewhere the same id under another hostname may be a VM cloned from a template.
+test("a lease with this machine id under another hostname from an earlier boot: recovered on macOS, refused elsewhere", async (t) => {
   const { dataDir } = temporaryDirectory();
   const current = recordWrittenByThisProcess(dataDir);
   if (current.machine === null) return t.skip("no machine id on this platform");
+  const leasePath = path.join(dataDir, LEASE_NAME);
   // A live pid too: a lease from an earlier boot of this machine is stale whatever now runs under its pid.
   for (const pid of [await exitedPid(), process.pid]) {
-    plantOwner(dataDir, { host: renamedHost(current), boot: current.boot === null ? null : randomUUID(), uptime: Math.floor(osUptime() * 1000) + 3_600_000, pid, token: randomUUID() });
+    const planted = `${JSON.stringify({ ...current, host: renamedHost(current), boot: current.boot === null ? null : randomUUID(), uptime: Math.floor(osUptime() * 1000) + 3_600_000, pid, token: randomUUID() })}\n`;
+    writeFileSync(leasePath, planted, { mode: 0o600 });
+    if (process.platform !== "darwin") {
+      assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+      assert.equal(readFileSync(leasePath, "utf8"), planted);
+      continue;
+    }
     const lease = acquireDataDirLease(dataDir);
-    const written = JSON.parse(readFileSync(path.join(dataDir, LEASE_NAME), "utf8"));
+    const written = JSON.parse(readFileSync(leasePath, "utf8"));
     assert.deepEqual({ host: written.host, machine: written.machine }, { host: hostname(), machine: current.machine });
     assert.equal(lease.release(), true);
   }
+});
+
+test("a Mac's volume is local only when the mount line naming df's mount point says so", () => {
+  const df = (filesystem, point) => `Filesystem 512-blocks Used Available Capacity  Mounted on\n${filesystem} 1942597960 1842607672 39598832 98%    ${point}\n`;
+  const table = [
+    "/dev/disk3s3s1 on / (apfs, sealed, local, read-only, journaled)",
+    "/dev/disk3s1 on /System/Volumes/Data (apfs, local, journaled, nobrowse, protect, root data)",
+    "//u@nas/Files on /Volumes/Files on NAS (smbfs, nodev, nosuid, mounted by u)",
+    "/dev/disk5s1 on /Volumes/Backup (local) (apfs, local, nodev, nosuid, journaled, noowners)",
+  ].join("\n");
+  assert.equal(macMountIsLocal(df("/dev/disk3s1", "/System/Volumes/Data"), table), true);
+  assert.equal(macMountIsLocal(df("//u@nas/Files", "/Volumes/Files on NAS"), table), false);
+  assert.equal(macMountIsLocal(df("/dev/disk5s1", "/Volumes/Backup (local)"), table), true);
+  // A mount point the table does not name, an unreadable df and an empty table are all doubts.
+  assert.equal(macMountIsLocal(df("/dev/disk9s1", "/Volumes/Gone"), table), false);
+  assert.equal(macMountIsLocal("df: /x: No such file or directory\n", table), false);
+  assert.equal(macMountIsLocal(df("/dev/disk3s1", "/System/Volumes/Data"), ""), false);
+});
+
+test("iCloud Drive and File Provider folders count as synced, whatever their case", () => {
+  const home = "/Users/someone";
+  assert.equal(inMacSyncedFolder("/Users/someone/Library/Mobile Documents/com~apple~CloudDocs/omb", home), true);
+  assert.equal(inMacSyncedFolder("/Users/someone/library/cloudstorage/Dropbox/omb", home), true);
+  assert.equal(inMacSyncedFolder("/Users/someone/Library/CloudStorage", home), true);
+  assert.equal(inMacSyncedFolder("/Users/someone/Library/CloudStorageOld/omb", home), false);
+  assert.equal(inMacSyncedFolder("/Users/someone/.openmausbot", home), false);
+  assert.equal(inMacSyncedFolder("/Users/other/Library/CloudStorage/Dropbox", home), false);
 });
 
 test("a live owner with this machine id under another hostname still blocks a second instance", (t) => {
@@ -564,7 +601,8 @@ test("a live owner with this machine id under another hostname still blocks a se
   if (current.machine === null) return t.skip("no machine id on this platform");
   plantOwner(dataDir, { host: renamedHost(current), pid: process.pid, token: randomUUID() });
 
-  assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
+  // Without a boot session (Windows) the other hostname is refused before the pid is even asked.
+  assert.throws(() => acquireDataDirLease(dataDir), current.boot === null ? /another machine/i : /already using this data directory/i);
 });
 
 test("a lease with another machine id fails closed even under this hostname", async (t) => {
