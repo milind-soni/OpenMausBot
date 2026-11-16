@@ -68,7 +68,8 @@ describe("which AI carries on while one is limited", () => {
     const clock = new LimitResetClock({ accounts: () => [{ id: "opencode", name: "OpenCode", driver: "opencode", environment: {} }], now: () => NOW });
     clock.noteUsage({ fetchedAt: new Date(NOW).toISOString(), providers: [{ id: "opencode", name: "OpenCode", driver: "opencode", ok: true, error: null,
       ...parseOpenCodeUsage({ usage: { rolling: { percent: 100, resetsAt: new Date(NOW + HOUR).toISOString() }, weekly: { percent: 50, resetsAt: new Date(NOW + 48 * HOUR).toISOString() } } }) }] });
-    const { instance } = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), resetAt: (id, model) => clock.resetAt(id, model) });
+    const { instance } = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), resetAt: (id, model) => clock.resetAt(id, model),
+      chosen: () => [on("claude", "claude-opus-5-5")] });
     expect(instance.heldAtStart(KAI, on("opencode", "opencode/big-pickle")), "a free model has its own allowance").toBeNull();
     expect(instance.heldAtStart(KAI, on("opencode", "opencode-go/kimi-k2"))).toEqual({ scope: "engine", resetsAt: NOW + HOUR });
     const chosen = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), chosen: () => [on("opencode", "opencode/big-pickle")] }).instance;
