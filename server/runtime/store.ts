@@ -130,6 +130,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS assignments_requester_thread ON assignments(requester_thread_id);
   CREATE INDEX IF NOT EXISTS assignments_requester_run ON assignments(requester_run_id);
   CREATE INDEX IF NOT EXISTS assignments_assignee ON assignments(assignee_bot_id, assignee_thread_id);
+  CREATE INDEX IF NOT EXISTS assignments_assignee_thread ON assignments(assignee_thread_id, created_at);
   -- The live rows in all()'s order. NOT IN cannot use assignments_status, so
   -- without this every nonTerminal read walks the ended rows too, and those
   -- only grow (#2765). Created on every open, so an existing file gets it too;
