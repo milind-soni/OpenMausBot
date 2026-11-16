@@ -141,6 +141,8 @@ describe("the saved logins store", () => {
     expect(store.remove(login.id)).toBe(true);
     expect(store.secretValues()).toEqual([]);
     expect(store.update("missing", { password: "x-x-x-x" })).toBeNull();
+    const wide = store.create({ ...loginPlace("example.com", ["example.com", "login.microsoftonline.com"]), username: "wide", password: "fake-wide-pass", source: "settings", bots: "all" });
+    expect(store.update(wide.id, { site: "login.microsoftonline.com", password: "fake-wide-two" })).toMatchObject({ site: "example.com", hosts: ["example.com", "login.microsoftonline.com"] });
   });
 
   it("keeps the 1Password token in the same sealed file, and which bots each vault is for across reconnects", () => {
