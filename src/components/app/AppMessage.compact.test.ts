@@ -164,6 +164,23 @@ describe("a bot's page as a compact card", () => {
     expect(card().querySelector("[data-page-title]")!.textContent).toBe("Pricing");
   });
 
+  it("starts the wait for an updated page only once that version has arrived", async () => {
+    await render(row(payload()));
+    await pageSays(true);
+    const answer = vi.mocked(fetch).getMockImplementation()!;
+    let arrive = () => {};
+    vi.mocked(fetch).mockImplementationOnce((...args) => new Promise((resolve) => { arrive = () => resolve(answer(...args)); }));
+    await render(row(payload({ rev: 1, doc: "d1", history: ["d0"] })));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_600)); });
+    expect(card().querySelector("[data-page-settling]")).not.toBeNull();
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+    await act(async () => { arrive(); });
+    await settle();
+    await pageSays(true);
+    expect(card().querySelector("[data-page-settling]")).toBeNull();
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+  });
+
   it("keeps waiting for a page that says it is still drawing itself", async () => {
     await render(row(payload()));
     await pageSays(null);

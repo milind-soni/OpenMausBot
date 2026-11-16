@@ -74,7 +74,7 @@ export const APP_OPENS_WITH_HEADING_SOURCE = `function (window, document) {
   };
   var holder = first(body);
   if (!holder) return null;
-  var heading = holder.closest("h1, h2, h3, [role=heading]");
+  var heading = holder.closest("h1, h2, h3, h4, h5, h6, [role=heading]");
   if (!heading) return false;
   return !laidOut || heading.getBoundingClientRect().top + (window.scrollY || 0) <= ${HEADING_TOP};
 }`;

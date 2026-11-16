@@ -252,17 +252,18 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const said = heading?.key === `${message.id}:${rev}` ? heading.opens : undefined;
   const opens = said ?? headings.get(`${message.id}:${rev}`);
   const undecided = compact && Boolean(current) && opens === undefined;
+  const timing = undecided && loaded?.key === wanted;
   const drawing = said === null;
   const frameKey = loaded?.key;
   useEffect(() => {
-    if (!undecided) return;
+    if (!timing) return;
     const key = `${message.id}:${rev}`;
     const timer = setTimeout(() => {
       rememberHeading(key, false);
       setHeading({ key, opens: false });
     }, drawing ? HEADING_DRAWING_MS : HEADING_WAIT_MS);
     return () => clearTimeout(timer);
-  }, [undecided, drawing, frameKey, message.id, rev]);
+  }, [timing, drawing, frameKey, message.id, rev]);
   // The title stays while the frame is away (the pool took its slot), so the card keeps its height.
   const titled = compact && opens === false;
   // The compact card clips the page at its natural size, so it reads as a preview of the real thing.

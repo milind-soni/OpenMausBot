@@ -22,6 +22,7 @@ describe("whether a page opens with a heading of its own", () => {
     expect(opensWithHeading(open("<h1>Pricing</h1><p>body</p>"))).toBe(true);
     expect(opensWithHeading(open("<main><section><h2>Not the page's title at all</h2></section></main>"))).toBe(true);
     expect(opensWithHeading(open("<div role=\"heading\" aria-level=\"1\">Pricing</div><p>body</p>"))).toBe(true);
+    for (const level of [4, 5, 6]) expect(opensWithHeading(open(`<h${level}>Summary</h${level}><p>body</p>`))).toBe(true);
   });
 
   it("is not so when the first text it shows is anything else", () => {
