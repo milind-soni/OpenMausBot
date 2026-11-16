@@ -52,6 +52,9 @@ function Meter({ reading, name, detailed }: { reading: ContextReading; name?: st
           <div className={cn("h-full rounded-full", TONE_FILL[reading.tone])} style={{ width: `${Math.min(100, reading.percent)}%` }} />
         </div>
       )}
+      {name && detailed && reading.percent !== undefined && (
+        <div className="min-w-0 truncate text-[12px] leading-4 tabular-nums text-ink-tertiary">{tokens}</div>
+      )}
     </div>
   );
 }

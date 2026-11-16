@@ -503,11 +503,12 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const bot = requestedTaskBot(m[1], body?.threadId);
       const notYours = cloudThreadRefusal(auth, bot.threadId);
       if (notYours) return json(res, 403, { error: notYours });
-      // The engine process answers for the conversation it last read, which the next turn may be about to replace.
-      const stale = engineSessionOutdated(store, bot.id, bot.threadId);
-      const breakdown = stale ? null : await registry.get(bot.modelSelection.instanceId)?.adapter
+      // The engine process answers for the conversation it last read, which the next turn may be about to replace:
+      // already when asked, or by a Start fresh, rewind or summary that lands while it counts.
+      const stale = () => engineSessionOutdated(store, bot.id, bot.threadId);
+      const breakdown = stale() ? null : await registry.get(bot.modelSelection.instanceId)?.adapter
         .contextBreakdown?.(bot.threadId, { signal: AbortSignal.timeout(CONTEXT_BREAKDOWN_WAIT_MS) }) ?? null;
-      return json(res, 200, { threadId: bot.threadId, breakdown });
+      return json(res, 200, { threadId: bot.threadId, breakdown: stale() ? null : breakdown });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages\/([\w-]+)\/edit$/);

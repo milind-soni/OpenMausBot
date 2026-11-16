@@ -304,6 +304,25 @@ describe("the composer's context button", () => {
     await render({ group: { id: "g1", memberContext: null } as unknown as Group, members });
     expect(words()).toContain("No reading yet");
   });
+
+  it("in Advanced mode adds each room bot's tokens under its share, and keeps them out of Simple mode", async () => {
+    const members = [{ id: "s", name: "Scout" }, { id: "q", name: "Quill" }] as Bot[];
+    const group = { id: "g1", memberContext: { s: { tokens: 170_000, window: 200_000 }, q: { tokens: 41_400, window: 200_000 } } } as unknown as Group;
+    const meters = () => [...panel()!.querySelectorAll("[data-context-member] [data-context-meter]")].map((meter) => [...meter.children].map((part) => part.textContent));
+    await render({ group, members });
+    await press(trigger());
+    expect(meters()).toEqual([["Scout85% used", ""], ["Quill21% used", ""]]);
+    await press(trigger());
+    advancedMode();
+    await render({ group, members });
+    await press(trigger());
+    expect(meters()).toEqual([["Scout85% used", "", "170k of 200k tokens"], ["Quill21% used", "", "41.4k of 200k tokens"]]);
+    expect(requests()).toEqual([]);
+    await press(trigger());
+    await render({ bot: chat({ tokens: 136_000, window: 200_000 }) });
+    await press(trigger());
+    expect([...panel()!.querySelector("[data-context-meter]")!.children].map((part) => part.textContent)).toEqual(["68% used136k of 200k tokens", ""]);
+  });
 });
 
 describe("context readings", () => {
