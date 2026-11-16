@@ -159,7 +159,7 @@ describe("the ring and its file", () => {
       w.emit({ type: "turn.completed", ok: true }, "thread_1", `t${index}`);
     }
     w.timings.flush();
-    expect(statSync(file).size).toBeLessThan(150_000);
+    expect(statSync(file).size).toBeLessThan(RING_CAP * 250);
     const saved = JSON.parse(readFileSync(file, "utf8"));
     saved.ring.push({ startedAt: 1, endedAt: 2, threadId: "../../etc/passwd", engine: "claude --api-key=sk-x", tools: [{ kind: "rm -rf /", n: 1 }] });
     writeFileSync(file, JSON.stringify(saved));

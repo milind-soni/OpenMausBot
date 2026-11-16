@@ -115,10 +115,10 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       current: () => cfg().features?.shareLearnedSkills ?? "off", patch: (shareLearnedSkills) => ({ features: { shareLearnedSkills } }),
     }),
     section({
-      id: "threads.eventLogMaxBytes", label: "Thread log size limit", help: "The most bytes each conversation's event log keeps; null keeps it all.", where: "Settings → Data",
+      id: "threads.eventLogMaxBytes", label: "Thread log size limit", help: "The most bytes each conversation's event log keeps; null keeps up to 256 MiB, the default ceiling.", where: "Settings → Data",
       synonyms: ["log size", "storage", "event log", "cleanup"], value: z.number().int().min(MIN_THREAD_EVENT_LOG_BYTES).max(MAX_THREAD_EVENT_LOG_BYTES).nullable(),
-      allowed: `${MIN_THREAD_EVENT_LOG_BYTES} to ${MAX_THREAD_EVENT_LOG_BYTES} bytes, or null for no limit`,
-      current: () => cfg().threads?.eventLogMaxBytes ?? null, read: () => display(cfg().threads?.eventLogMaxBytes ?? "no limit"), patch: (eventLogMaxBytes) => ({ threads: { eventLogMaxBytes } }),
+      allowed: `${MIN_THREAD_EVENT_LOG_BYTES} to ${MAX_THREAD_EVENT_LOG_BYTES} bytes, or null for the default ceiling (256 MiB)`,
+      current: () => cfg().threads?.eventLogMaxBytes ?? null, read: () => display(cfg().threads?.eventLogMaxBytes ?? "256 MiB (default ceiling)"), patch: (eventLogMaxBytes) => ({ threads: { eventLogMaxBytes } }),
     }),
     feature("appearance.toolCalls", "Show tool calls", "Show each tool a bot runs in the conversation.", "Settings → Appearance", ["tool calls", "tools", "show tools"], "showToolCalls", false,
       "Show each tool a bot runs in its conversation", "Hide tool runs from conversations"),

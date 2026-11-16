@@ -5,6 +5,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { z } from "zod";
 
 import { APPROVAL_MODES } from "../../shared/approval-mode.ts";
+import { timeBlocking } from "../perf/loop-stalls.ts";
 import { TERMINAL, type Assignment, type AssignmentEvent, type EventKind, type InboxItem, type Owner } from "./types.ts";
 
 const evidenceSchema = z.object({
@@ -323,7 +324,7 @@ export function openRuntimeStore(path: string): RuntimeStore {
       if (filter.roots) where.push("parent_id IS NULL");
       if (filter.openSince !== undefined) { where.push("(finished_at IS NULL OR finished_at >= ?)"); params.push(filter.openSince); }
       const sql = `SELECT id, json FROM assignments${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at, rowid`;
-      return (db.prepare(sql).all(...params) as Row[]).map(readAssignment);
+      return timeBlocking("runtimeReads", () => (db.prepare(sql).all(...params) as Row[]).map(readAssignment));
     },
     insert(a, event) {
       transaction(() => {
