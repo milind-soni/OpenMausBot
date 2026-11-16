@@ -77,6 +77,37 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     expect(refused).toContain("lives on My server");
     await home.api("GET", "/api/bot-link/bots", undefined, { token: owner, status: 403 });
 
+    // A stand-in is read-only on the computer. Every route that changes a bot is found in the server's own source and
+    // asked for the stand-in, with each changing method: each answers where the bot lives, and nothing on the computer changes.
+    expect(JSON.stringify(await computer.api("GET", `/api/bots/${standIn.id}`))).not.toContain("\"home\"");
+    const source = [join(import.meta.dirname, "index.ts"), ...readdirSync(join(import.meta.dirname, "routes")).filter((name) => name.endsWith(".ts") && !name.includes(".test.")).map((name) => join(import.meta.dirname, "routes", name))]
+      .map((file) => readFileSync(file, "utf8")).join("\n");
+    const botRoutes = new Set([""]);
+    for (const found of source.matchAll(/\\\/api\\\/bots\\\/\([^)]*\)((?:\\\/[a-z][\w-]*)*)/gu)) botRoutes.add(found[1]!.replaceAll("\\/", "/"));
+    for (const found of source.matchAll(/["`]\/api\/bots\/\$\{[^}]*\}((?:\/[a-z][\w-]*)*)/gu)) botRoutes.add(found[1]!);
+    expect(botRoutes.size, [...botRoutes].join(" ")).toBeGreaterThan(15);
+    const before = { bots: readFileSync(join(computer.dataDir, "bots.json"), "utf8"), groups: existsSync(join(computer.dataDir, "groups.json")) ? readFileSync(join(computer.dataDir, "groups.json"), "utf8") : "", list: JSON.stringify((await computer.api("GET", "/api/bots?messages=0")).bots.map((bot: any) => [bot.id, bot.chiefOfStaff ?? false, bot.tasks?.length ?? 0])) };
+    const asked = async (method: string, path: string, body: unknown) => {
+      const response = await fetch(`${computer.url}${path}`, { method, headers: { "content-type": "application/json", origin: computer.url }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
+      return { status: response.status, text: await response.text() };
+    };
+    for (const route of botRoutes) for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      const answer = await asked(method, `/api/bots/${standIn.id}${route}`, { chiefOfStaff: true, name: "Renamed", title: "New thread", text: "hello" });
+      expect([answer.status, answer.text], `${method} /api/bots/<stand-in>${route}`).toEqual([409, expect.stringContaining("lives on My server")]);
+    }
+    // Named in a body: not a room member, and no automation of its own, each with the same plain reason.
+    for (const [path, body] of [["/api/groups", { name: "Mixed", memberIds: [writer.id, standIn.id] }], ["/api/routines", { name: "Daily", prompt: "Count the orders.", botId: standIn.id, schedule: { kind: "daily", time: "09:00" } }]] as const) {
+      const answer = await asked("POST", path, body);
+      expect(answer.status, `${path}: ${answer.text}`).toBeGreaterThanOrEqual(400);
+      expect(answer.text, path).toContain("lives on My server");
+    }
+    expect((await asked("POST", "/api/webhooks", { name: "Orders", botId: standIn.id, prompt: "Read the order." })).status).toBeGreaterThanOrEqual(400);
+    expect((await computer.api("GET", "/api/routines")).routines.some((routine: any) => routine.botId === standIn.id)).toBe(false);
+    expect(readFileSync(join(computer.dataDir, "bots.json"), "utf8")).toBe(before.bots);
+    expect(existsSync(join(computer.dataDir, "groups.json")) ? readFileSync(join(computer.dataDir, "groups.json"), "utf8") : "").toBe(before.groups);
+    expect(JSON.stringify((await computer.api("GET", "/api/bots?messages=0")).bots.map((bot: any) => [bot.id, bot.chiefOfStaff ?? false, bot.tasks?.length ?? 0]))).toBe(before.list);
+    expect(JSON.stringify(await computer.api("GET", `/api/bots/${standIn.id}`))).toContain("\"Atlas\"");
+
     // The computer's bot hands work to the server's bot by name, and is resumed with its result.
     home.plan(atlas.id, { reply: "Atlas counted 42 orders." });
     computer.plan(writer.id,

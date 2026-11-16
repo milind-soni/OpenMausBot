@@ -36,7 +36,7 @@ const call = (botIds: string[], message: string, more: Partial<CoordinateBotsCal
   ({ botIds, message, rework: false, thread: "standing", reply: "resume", consult: false, ...more });
 
 /** One place. `boot()` again over the same folder is that place's server restarted. */
-function place(label: string, bots: Bot[]) {
+function place(label: string, bots: Bot[], version?: number) {
   const dir = mkdtempSync(join(tmpdir(), `bot-link-${label}-`));
   const threads = new Set<string>();
   const runs: Array<{ botId: string; threadId: string; text: string; resumed: boolean; requester: string; origin: unknown }> = [];
@@ -87,7 +87,7 @@ function place(label: string, bots: Bot[]) {
       },
     };
     coordinator = createCoordinator({ dataDir: dir, host: link.host(inner), log: () => {}, ...(options.limits ? { runtimeLimits: options.limits } : {}) });
-    dialer = createDialer({ link, holdMs: 400, firstRetryMs: 20 });
+    dialer = createDialer({ link, holdMs: 400, firstRetryMs: 20, ...(version ? { level: version } : {}) });
     ticker = setInterval(() => coordinator.tick(), 15);
     return api;
   }
@@ -101,7 +101,7 @@ function place(label: string, bots: Bot[]) {
 
   async function listen(at = 0): Promise<string> {
     const routes = routesOf({
-      link, dialer, environmentId: `${label}-environment`, seenMs: 900, power: () => null,
+      link, dialer, environmentId: `${label}-environment`, seenMs: 900, power: () => null, ...(version ? { level: version } : {}),
       local: (who) => who.kind === "loopback", owner: (who) => who.kind === "session" && who.session.id === "owner-session",
       issue: () => { const token = `link-token-${++minted}-0123456789`; issued.set(token, `link-session-${minted}`); return { token, sessionId: issued.get(token)! }; },
       revoke: (sessionId) => { for (const [token, id] of issued) if (id === sessionId) issued.delete(token); },
@@ -708,6 +708,42 @@ describe("the link between a computer and its Cloud", () => {
     expect(computer.link.linked()).toEqual([]);
     expect(computer.directoryChanges()).toBeGreaterThan(heard);
     await until(() => cloud.link.linked().length === 0, "the Cloud drops the computer's bots");
+  });
+
+  it("a place on the first version is sent only what that version reads, and a place on this one the bots' looks too", async () => {
+    const looks = (bots: Bot[]) => bots.map((bot) => ({ ...bot, color: "green", mascotBody: "classic", threadId: `${bot.id}-chat` }));
+    const meet = async (computerVersion?: number, cloudVersion?: number) => {
+      const computer = place("computer", looks([{ id: "shared", name: "Scout" }]), computerVersion).boot(), cloud = place("cloud", looks([{ id: "shared", name: "Atlas" }]), cloudVersion).boot();
+      places.push(computer, cloud);
+      const origin = await cloud.listen();
+      await computer.listen();
+      await pair(computer, cloud, origin);
+      return { computer, cloud };
+    };
+    const seen = (side: ReturnType<typeof place>) => side.link.linked().map((one) => Object.keys(one.bot).sort().join());
+    const older = await meet(undefined, 1);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(seen(older.cloud), "an older Cloud is sent no field it would refuse").toEqual(["id,level,name"]);
+    const olderApp = await meet(1, undefined);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(seen(olderApp.computer), "an older app is sent no field it would refuse").toEqual(["id,level,name"]);
+    const both = await meet();
+    await until(() => seen(both.cloud)[0] === "color,id,level,mascotBody,name,threadId" && seen(both.computer)[0] === "color,id,level,mascotBody,name,threadId", "both on this version: each learns the other's looks, the computer after its first answer");
+    // Work crosses a mixed pair as it always did.
+    const { receipts } = await older.computer.handOff("shared", call(["Atlas"], "Count the orders"));
+    await until(() => older.cloud.runs.some((run) => run.botId === "shared"), "the older Cloud's bot gets the work");
+    expect(receipts[0]?.outcome).toBe("queued");
+  });
+
+  it("a hello whose bot id could not be a bot's own id is dropped whole, and such a bot of this place is never told", async () => {
+    const { computer, cloud } = await two();
+    const known = cloud.link.linked().map((one) => one.id);
+    for (const id of ["../../etc", "a/b", "a\\b", "a b", ".", "x".repeat(129), ""]) cloud.link.receive(COMPUTER, [{ t: "hello", place: { id: "computer-environment", name: "Sam's Mac" }, bots: [{ id, name: "Evil" }, { id: "fine", name: "Fine" }] }]);
+    expect(cloud.link.linked().map((one) => one.id)).toEqual(known);
+    computer.bots.push({ id: "../up", name: "Odd" }, { id: "plain_id-2", name: "Plain" });
+    computer.link.botsChanged();
+    await until(() => cloud.link.linked().some((one) => one.bot.name === "Plain"), "the Cloud hears of the bot with an ordinary id");
+    expect(cloud.link.linked().some((one) => one.bot.name === "Odd")).toBe(false);
   });
 
   it("the link's sign-in reaches the link's own routes and nothing else", () => {

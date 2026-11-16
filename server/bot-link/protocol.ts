@@ -38,15 +38,24 @@ export const BRIEF_MAX = 12_000;
 const RESULT_MAX = 200_000;
 
 const id = z.string().min(1).max(200);
+/** A bot's own id, in the characters every place gives its bots. A stand-in's address is made from it, and nothing with
+ * a path separator, a dot or a space can ever be one: a hello that carries such an id is dropped whole. */
+const botId = z.string().regex(/^[\w-]{1,128}$/u);
+/** What each side can read, said in a header on every exchange (older versions ignore a header they do not know). A side
+ * sends the other only what its level reads. 1: the first version, whose hello takes a bot's id, name, title,
+ * description, model and level and nothing else. 2: a bot's look, Chief mark and own thread too. */
+export const LEVEL_HEADER = "x-omb-bot-link";
+export const PROTOCOL_LEVEL = 2;
+export const levelOf = (header: string | string[] | null | undefined): number => { const said = Number(Array.isArray(header) ? header[0] : header); return Number.isInteger(said) && said >= 1 ? Math.min(said, PROTOCOL_LEVEL) : 1; };
 const name = z.string().trim().min(1).max(120);
 export const placeSchema = z.object({ id, name }).strict();
 export type Place = z.infer<typeof placeSchema>;
 
 const level = z.enum(["ask", "edits", "auto", "full", "custom"]);
 export const linkedBotSchema = z.object({
-  id, name, title: z.string().max(200).optional(), description: z.string().max(400).optional(), model: z.string().max(200).optional(), level: level.optional(),
+  id: botId, name, title: z.string().max(200).optional(), description: z.string().max(400).optional(), model: z.string().max(200).optional(), level: level.optional(),
   /** How it looks and where its own chat is, so the other place can draw it as it is drawn at home. */
-  color: z.string().max(64).optional(), mascotBody: z.string().max(64).optional(), mascotFaceColor: z.string().max(64).optional(), chief: z.boolean().optional(), threadId: id.optional(),
+  color: z.string().max(64).optional(), mascotBody: z.string().max(64).optional(), mascotFaceColor: z.string().max(64).optional(), chief: z.boolean().optional(), threadId: botId.optional(),
 });
 export type LinkedBot = z.infer<typeof linkedBotSchema>;
 

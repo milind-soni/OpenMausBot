@@ -584,7 +584,7 @@ import { PhoneSecretBridge, PhoneSecretSubmissionRegistry } from "./phone-secret
 // Keep these two last, so loading the route table leaves module start-up order as is.
 import { gzipTunnelReplies, json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
 import { holdBodyDeadline } from "./body-deadline.ts";
-import { createNoAiNotice } from "./host/no-ai-notice.ts"; import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { createBotLinkHost } from "./host/bot-link-host.ts"; import { isBotLinkHeldPath, linkSessionRefusal } from "./routes/bot-link.ts"; import { createSecretCards } from "./host/secret-cards.ts"; import { createInternalCredentialRequestRoutes, createSecretCardRoutes } from "./routes/secret-cards.ts"; import { applyIncludedPagesMessage } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createInternalToolRoutes } from "./routes/internal-tools.ts"; import { createHelperSuggestionRoutes } from "./routes/helper-suggestion.ts"; import { createXConnectorRoutes } from "./routes/x-connector.ts"; import { createMoveFreeze, switchAutomationsOff } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts"; import { createMoveWaits } from "./move-waits.ts"; import { assertBotHere, botMoveRefusal, createBotMoves } from "./bot-moves.ts"; import { createBotMoveRoutes } from "./routes/bot-moves.ts"; import { createTeamMoveIn, moveInRefusal } from "./team-move-in.ts";
+import { createNoAiNotice } from "./host/no-ai-notice.ts"; import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { createBotLinkHost } from "./host/bot-link-host.ts"; import { standInAmong, standInWriteRefusal } from "./host/stand-in-guard.ts"; import { isBotLinkHeldPath, linkSessionRefusal } from "./routes/bot-link.ts"; import { createSecretCards } from "./host/secret-cards.ts"; import { createInternalCredentialRequestRoutes, createSecretCardRoutes } from "./routes/secret-cards.ts"; import { applyIncludedPagesMessage } from "./pages/access.ts"; import { createPublishedPages } from "./pages/service.ts"; import { createInternalToolRoutes } from "./routes/internal-tools.ts"; import { createHelperSuggestionRoutes } from "./routes/helper-suggestion.ts"; import { createXConnectorRoutes } from "./routes/x-connector.ts"; import { createMoveFreeze, switchAutomationsOff } from "./move-freeze.ts"; import { createMoveFreezeRoutes } from "./routes/move-freeze.ts"; import { createMoveWaits } from "./move-waits.ts"; import { assertBotHere, botMoveRefusal, createBotMoves } from "./bot-moves.ts"; import { createBotMoveRoutes } from "./routes/bot-moves.ts"; import { createTeamMoveIn, moveInRefusal } from "./team-move-in.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts"; import { createWorkspaceBannerRoutes, workspaceBannerStore, workspaceBannerSummary } from "./routes/workspace-banner.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
@@ -2242,7 +2242,7 @@ function canAdmitDirectTurn(botId: string, threadId: string): boolean {
 }
 
 function unattendedDispatchState(botId: string): "ready" | "busy" | "missing" {
-  const bot = store.bot(botId);
+  const found = store.bot(botId), bot = found?.home ? null : found; // A stand-in takes no automation here: its bot lives in another place.
   const decision = admit("unattended", {}, {
     botPresent: Boolean(bot),
     atCapacity: Boolean(bot) && botAtThreadCapacity(botId),
@@ -2780,7 +2780,7 @@ function checkedMemberIds(value: unknown): { ok: true; memberIds: string[] } | {
   if (invalidIndex !== -1) {
     return { ok: false, error: `unknown channel member: ${String(value[invalidIndex])}` };
   }
-  const memberIds = [...new Set(value as string[])];
+  const memberIds = [...new Set(value as string[])]; const elsewhere = standInAmong(store.standIns, memberIds); if (elsewhere) return { ok: false, error: elsewhere.error };
   if (!memberIds.length) return { ok: false, error: "a channel needs at least one bot" };
   if (memberIds.every((id) => store.bot(id)?.hidden)) {
     return {
@@ -2922,7 +2922,7 @@ const wireTask = (task: TaskRecord, botModel: ModelSelection, awaiting = threads
 
 /** Strips provider session ids (resumeCursors) here, not at call sites, so no broadcast or paired phone ever gets them. */
 const wireBot = (bot: BotRecord, onlyThreadId?: string): WireBot => {
-  const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, assignedSkills: _assignedSkills, mainThreadChoice: _mainThreadChoice, ...rest } = bot;
+  const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, assignedSkills: _assignedSkills, mainThreadChoice: _mainThreadChoice, home: _home, ...rest } = bot;
   // Clients see Ask while an elevated grant awaits the desktop's confirmation, never a grant that may still roll back.
   const visible = approvalGrant && !approvalGrant.threadOnly
     ? { ...rest, approvalMode: "ask" as const, autoApprove: false }
@@ -2942,7 +2942,7 @@ function toolScopeForTurn(botId: string) {
 }
 
 const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
-  const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, assignedSkills: _assignedSkills, mainThreadChoice: _mainThreadChoice, ...rest } = bot;
+  const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, assignedSkills: _assignedSkills, mainThreadChoice: _mainThreadChoice, home: _home, ...rest } = bot;
   const awaiting = threadsAwaitingTeammates();
   return { ...rest, approvalMode: approvalModeFor(rest), mainThreadId: botMainThread(bot.id), avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
 };
@@ -9017,7 +9017,7 @@ const memberOwnBot = createMemberOwnBot({ store: () => store, routines: () => ro
 async function deleteBotWithLifecycle(botId: string, revalidate: () => void = () => {}, setupRequest?: TeamSetupRequest) {
   const deletionResponse = (status: number, body: { error?: string; ok?: boolean; notice?: string }) => ({ status, body });
       revalidate();
-      const bot = store.bot(botId);
+      const bot = store.bot(botId); if (bot?.home) return deletionResponse(409, { error: botMoveRefusal(bot)! });
       if (!bot) return deletionResponse( 404, { error: "no such bot" }); if (bot.defaultBot) return deletionResponse(409, { error: defaultBotRefusal(bot.name) });
       const heldRefusal = sharedVm.deletionRefusal(bot.id); if (heldRefusal) return deletionResponse(409, { error: heldRefusal });
       if (computerProviderConfigTransitions.size > 0) {
@@ -12708,7 +12708,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // Route modules are tried here, behind the gate; do not add route `if`s below.
-    if (await dispatchRoutes(ROUTES, { req, res, url, path, method, auth, json, readBody })) return;
+    const standInRefused = standInWriteRefusal(store.standIns, method, url); if (standInRefused) { req.resume(); return json(res, 409, standInRefused); } if (await dispatchRoutes(ROUTES, { req, res, url, path, method, auth, json, readBody })) return;
 
     if (method === "GET" && path === "/api/auth/session") {
       return json(
@@ -14519,7 +14519,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       });
     }
     const routineBodyRefusal = (body: unknown, existing?: Routine): { status: number; error: string } | null => {
-      const hidden = hiddenRoutineTarget(body, visible), notYours = teamRoutines.bodyRefusal(auth, body);
+      const hidden = hiddenRoutineTarget(body, visible), notYours = teamRoutines.bodyRefusal(auth, body), elsewhere = standInAmong(store.standIns, [(body as { botId?: unknown } | null)?.botId]); if (elsewhere) return { status: 409, error: elsewhere.error };
       return hidden ? { status: 404, error: hidden } : notYours ?? routineModelRefusal(body, routineModelChecks, existing);
     };
     if (path === "/api/routines" && method === "POST") {
