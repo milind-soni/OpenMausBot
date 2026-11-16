@@ -502,8 +502,69 @@ Leave room for the commands bots run: budget about 80 per working bot.
 
 The limit column includes two open browsers, which is as many as a server in
 a container keeps open at once (`OMB_BROWSER_MAX_RUNNING` changes that). If
-your platform's limit is fixed and lower than the row you need, have fewer
-bots work at the same moment.
+your platform's limit is fixed and lower than the row you need, the server
+still works: fewer bots run at the same moment and the others wait.
+
+**Turns wait for room instead of failing.** In a container that was given a
+memory limit or a process limit, the server holds a turn back while its
+engine would not fit, and starts it by itself when there is room:
+
+- It reads the container's own limits (cgroup `memory.max` and `pids.max`,
+  v1 or v2) and what is used now, never the host machine's totals.
+- Before it makes a turn wait it closes an engine no turn is using. An idle
+  engine otherwise stays loaded for ten minutes for the conversation in
+  front of you and thirty seconds for work nobody is watching (a teammate's
+  task, a routine), and no more stay idle than fit beside the ones working.
+- A waiting turn says so in its chat ("Waiting for room on this server…"),
+  and again every ten minutes. A routine's run waits the same way; a routine
+  is never switched off for it.
+- If the system refuses to start a program anyway (`spawn EAGAIN`, `EMFILE`,
+  `ENOMEM`), or a new engine starts and then says nothing for 90 seconds, or
+  the kernel stops an engine for memory, that is the server's shortage, not
+  the AI's failure: nothing is sent to a backup AI and no Chief is asked
+  about it. The chat shows one line, the turn starts again by itself once,
+  half a minute later, behind the same wait, and only if that fails too are
+  you told.
+
+`OMB_TURNS_MAX_RUNNING` sets how many turns run at once on the whole server:
+
+| Value | What it does |
+| --- | --- |
+| unset | In a container with a memory or process limit: a number worked out from those limits (below). Anywhere else: no limit, as before. |
+| `auto` | The worked-out number on any self-hosted server, with or without a container limit. |
+| a number | That many turns at once. The live checks on memory and processes still apply. |
+| `off` or `0` | No waiting at all. |
+
+The worked-out number is the smaller of two: the memory limit less a tenth
+(at least 320 MB), divided by 700 MB for an engine; and the process limit
+less a tenth (at least 32) and 40 for the server, divided by 60. A 4 GB
+container runs 5 turns at once, an 8 GB one 10; a process limit of 512 allows
+7, 1,024 allows 14, 4,096 allows 60. The desktop app never uses this setting,
+and a MausBot Cloud keeps its own rules.
+
+On Kubernetes a pod's process limit (`podPidsLimit`) is set above the
+container, where the server cannot read it. The server then learns it from
+the first refused start and holds turns below that count for the next half
+hour; set `OMB_TURNS_MAX_RUNNING` to a number to avoid that first refusal.
+
+**Reading how close the server is.** At start the server logs one line with
+what it found, for example `processes: process 1 is an init; limits:
+processes and threads 512, memory 4096 MB, ulimit -u unlimited, /dev/shm 64
+MB`. It logs one more line the first time it passes 80% of its process limit,
+one the first time it passes 80% of its memory limit, and one the first time
+more than 20 exited processes are waiting to be collected (which means the
+container has no init). `GET
+/api/diagnostics/performance` and the performance part of a problem report
+carry a "Process room" block: what process 1 is, the limits, how many
+processes, threads, zombies and open files there are now and at their most
+since start (engines by kind, browser, tool servers, commands, other; sampled
+each minute, and the kernel's own exact high-water marks where cgroup v2
+keeps them), how
+many turns run and wait and the longest wait, and counts since start of
+turns that waited, starts the system refused by error code, engines that
+never came up, and processes that had to be force-stopped or outlived their
+turn. It holds numbers and fixed words only: no command line, path, bot name
+or message.
 
 **Bots' cloud computers do not count.** A bot's cloud computer runs at the
 provider that hosts it, not in this container, so its desktop and browser
