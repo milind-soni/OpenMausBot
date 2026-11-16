@@ -8,6 +8,10 @@ export interface FakeConnectedApps {
   url: string;
   token: string;
   connected: Record<string, boolean>;
+  /** The connected accounts the list names per app. */
+  accounts: Record<string, Array<{ id: string; status: string }>>;
+  /** While set, the connected list answers this many more times, then HTTP 503 until cleared. */
+  inventoryFailsAfter?: number;
   address: string;
   /** Google Calendar event resources of the primary calendar. */
   events: unknown[];
@@ -34,7 +38,7 @@ const field = (value: unknown, name: string): unknown => (value && typeof value 
 
 export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
   const fake: Omit<FakeConnectedApps, "url" | "token" | "close"> = {
-    connected: { gmail: true, googlecalendar: true }, address: "me@example.test", events: [], emails: [], calls: [], threads: {}, outlook: [],
+    connected: { gmail: true, googlecalendar: true }, accounts: {}, address: "me@example.test", events: [], emails: [], calls: [], threads: {}, outlook: [],
     calendars: [{ id: "me@example.test", primary: true, accessRole: "owner", selected: true }],
   };
 
@@ -73,7 +77,12 @@ export async function startFakeConnectedApps(): Promise<FakeConnectedApps> {
     for await (const chunk of req) raw += chunk;
     res.setHeader("content-type", "application/json");
     if (req.method === "GET" && req.url === "/v1/connectors/connected") {
-      return res.end(JSON.stringify({ services: Object.fromEntries(Object.entries(fake.connected).map(([slug, connected]) => [slug, { connected }])) }));
+      if (fake.inventoryFailsAfter !== undefined && fake.inventoryFailsAfter-- <= 0) {
+        res.statusCode = 503;
+        return res.end(JSON.stringify({ error: "fake connected apps: account inventory down" }));
+      }
+      return res.end(JSON.stringify({ services: Object.fromEntries(Object.entries(fake.connected).map(([slug, connected]) =>
+        [slug, { connected, ...(fake.accounts[slug] ? { accounts: fake.accounts[slug] } : {}) }])) }));
     }
     // A connection card's status check: the services it names.
     if (req.method === "GET" && req.url?.startsWith("/v1/connectors?")) {
