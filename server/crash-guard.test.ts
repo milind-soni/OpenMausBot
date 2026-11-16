@@ -1,17 +1,18 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { crashVerdict, currentTurn, FATAL_EXIT_DEADLINE_MS, installCrashGuard, runInTurn, STORM_LIMIT, STORM_WINDOW_MS } from "./crash-guard.ts";
+import { crashVerdict, currentTurn, FATAL_EXIT_DEADLINE_MS, installCrashGuard, runInTurn, STORM_LIMIT, STORM_WINDOW_MS, withTurnScope } from "./crash-guard.ts";
+import type { ProviderInstance } from "./contracts.ts";
 import { CRASH_EXIT_CODE } from "./restart.ts";
 
 const peerGone = (code: string) => Object.assign(new Error("socket hang up"), { code });
 
-function rig() {
+function rig(turnRunning = true) {
   const events = new EventEmitter();
   const calls = { failed: [] as string[], shutdown: [] as number[], exit: [] as number[], log: [] as string[] };
   let clock = 0;
   installCrashGuard({
-    failTurn: (turn) => { calls.failed.push(turn.threadId); return true; },
+    failTurn: (turn) => { calls.failed.push(turn.threadId); return turnRunning; },
     shutdown: (code) => calls.shutdown.push(code),
     exit: (code) => calls.exit.push(code),
     log: (line) => calls.log.push(line),
@@ -62,6 +63,28 @@ describe("installCrashGuard", () => {
     expect(calls.exit).toEqual([]);
     expect(calls.log[0]).toContain("uncaught exception in the turn of bot b thread t1: TypeError: cannot read properties of undefined ([redacted])");
     expect(calls.log[0]).not.toContain("sk-secret");
+  });
+
+  it("closes when the turn an error is filed under is no longer running: nothing was stopped, so nothing is known to be whole", async () => {
+    vi.useFakeTimers();
+    const { calls, raise } = rig(false);
+    await runInTurn({ botId: "b", threadId: "warm" }, async () => { raise("uncaughtException", new TypeError("late callback")); });
+    expect(calls.failed).toEqual(["warm"]);
+    expect(calls.shutdown).toEqual([CRASH_EXIT_CODE]);
+    expect(calls.log[1]).toContain("no running turn of thread warm to stop");
+  });
+
+  it("files only a driver's own work under a turn: what it hands the server through its events runs outside the turn", async () => {
+    const seen: Array<string | undefined> = [];
+    let emit: (event: never) => void = () => {};
+    const instance = withTurnScope({ adapter: {
+      sendTurn: async () => { seen.push(currentTurn()?.threadId); await Promise.resolve(); setTimeout(() => emit({} as never), 1); },
+      onEvent: (listener: (event: never) => void) => { emit = listener; return () => {}; },
+    } } as unknown as Pick<ProviderInstance, "adapter">);
+    instance.adapter.onEvent(() => seen.push(currentTurn()?.threadId ?? "outside"));
+    await instance.adapter.sendTurn({ threadId: "t9", botId: "b" } as never);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(seen).toEqual(["t9", "outside"]);
   });
 
   it("logs a rejection outside any turn and a peer that went away, and stays up", () => {

@@ -281,7 +281,7 @@ import { cloudPowerNow, createCloudPower, registerCloudPower, wokeFromSleep, typ
 import { lentCopies, noteSyncBotTurn } from "./routes/cloud-sync.ts"; import { mcpReconnectLine, retryBrokeredMcp } from "./bot-box/broker-mcp.ts";
 import { type CloudOwnership } from "./cloud-owner.ts"; import { memberLoginRefusal, personalMoveRefusal } from "./cloud-team.ts"; import { createCloudTeamHost, type MemberProfile } from "./host/cloud-team-host.ts"; import { engineHomes } from "./engine-homes/engine-homes.ts"; import { audienceMember, layerId, memberAudience } from "./audience.ts"; import { createPersonRooms, createRoomReads, type OwnGroupFrames } from "./host/room-reads.ts"; import { createPersonBotOrder } from "./host/person-bot-order.ts"; import { createMeRoutes } from "./routes/me.ts"; import { createTeamPhoneRoutes } from "./routes/team-phone.ts"; import { settleCloudHome } from "./cloud-home-settle.ts"; import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts"; import { createTeamSlackHost } from "./host/team-slack-host.ts"; import { createTeamSlackMessages } from "./team-slack.ts"; import { createTeamSlackRoutes } from "./routes/team-slack.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
-import { RESTART_EXIT_CODE } from "./restart.ts"; import { installCrashGuard, runInTurn, SERVER_ERROR_CAUSE } from "./crash-guard.ts"; import { markRequestArrival } from "./perf/loop-stalls.ts"; import { createThreadMaps, keepThreadEntry } from "./host/thread-maps.ts"; import { botLimitRefusal } from "./bot-limit.ts";
+import { RESTART_EXIT_CODE } from "./restart.ts"; import { installCrashGuard, SERVER_ERROR_CAUSE } from "./crash-guard.ts"; import { markRequestArrival } from "./perf/loop-stalls.ts"; import { createThreadMaps, keepThreadEntry } from "./host/thread-maps.ts"; import { botLimitRefusal } from "./bot-limit.ts";
 import { applyIncludedXMessage, holdIncludedServices, hostingCredential, researchCredential, trialCreditCredential, xCredential, xResearchStatus } from "./included-services.ts"; import { applyPhoneLinkMessage, phoneLinkPart } from "./phone-link.ts"; import { createResearchAvailability } from "./research.ts";
 import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { createCreditMoves } from "./cloud-credit-moves.ts"; import { createRoutineHoldsHost } from "./host/routine-holds-host.ts"; import { tellTurnedBackOn } from "./host/routines-turned-back-on.ts";
@@ -7777,7 +7777,7 @@ async function beginTurn(
   turnUsage.delete(threadId);
   turnContext.delete(threadId);
 
-  void runInTurn({ botId: bot.id, threadId }, async () => {
+  void (async () => {
     try {
       const engineRead = registry.engineRead(instance.instanceId);
       if (engineRead) {
@@ -8632,7 +8632,7 @@ async function beginTurn(
       // A dispatch failure emits no turn.completed, so drain here or the queue behind this turn strands.
       drainQueuedSends();
     }
-  });
+  })();
   return userMessage;
 }
 
@@ -9601,7 +9601,7 @@ function goalRunLive(groupId: string, threadId: string, runId: string): boolean 
 
 async function runGroupMemberTurn(...args: Parameters<typeof runClaimedGroupMemberTurn>): Promise<boolean> {
   try {
-    return await runInTurn({ botId: args[2], threadId: args[1] }, () => runClaimedGroupMemberTurn(...args));
+    return await runClaimedGroupMemberTurn(...args);
   } finally {
     roomMemberLock.release(args[2], args[1]);
   }
@@ -15442,4 +15442,4 @@ const gracefulShutdown = createGracefulShutdown({
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) process.on(signal, () => gracefulShutdown());
-installCrashGuard({ failTurn: (turn) => watchdog.fail(turn.threadId), shutdown: (code) => gracefulShutdown(code), redact: redactSecretsInText }); threadMaps.start(keepThreadEntry(store, threadBusy));
+installCrashGuard({ failTurn: (turn) => watchdog.fail(turn.threadId), redact: redactSecretsInText, shutdown: (code) => { /* Fatal: no flush of what memory holds (ledgers, journals, sessions, bus, registries); running turns stay "running" in the runtime store, so the next start reruns them. Engines are stopped so none is orphaned. */ companyShutdown = true; try { noteTurnsCutByShutdown(); } catch { /* best effort */ } void Promise.race([registry.disposeAll(), new Promise((done) => setTimeout(done, 5_000))]).catch(() => {}).finally(() => { releaseDataDirLeaseAtExit(); process.exit(code); }); } }); threadMaps.start(keepThreadEntry(store, threadBusy));

@@ -141,3 +141,19 @@ describe("ThreadCache byte cap", () => {
     expect(cache.approxBytes).toBe(0);
   });
 });
+
+describe("the transcript cache's count of a thread with live screens", () => {
+  beforeEach(() => { rmSync(DATA_DIR, { recursive: true, force: true }); });
+  afterEach(() => { closeMessageDb(); });
+
+  it("gives back what pruned screen frames held, so many frames do not fill the cap", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const cache = (store as unknown as { threads: ThreadCache }).threads;
+    const frame = "x".repeat(200_000);
+    for (let i = 0; i < 50; i++) store.appendMessage(bot.threadId, { role: "bot", kind: "screen", png: frame } as never);
+    const kept = store.messagesFor(bot.threadId).filter((message) => message.kind === "screen" && message.png).length;
+    expect(kept).toBe(4);
+    expect(cache.approxBytes).toBeLessThan(5 * 200_000 + 100_000);
+  });
+});

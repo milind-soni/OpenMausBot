@@ -436,10 +436,11 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   // Names only, never values: what the server does not get from here.
   if (dropped.length) console.log(`cloud home: not passed to the server: ${dropped.join(", ")}`);
   const children: ChildProcess[] = [];
-  let stopping = false;
+  let stopping = false, restartTimer: ReturnType<typeof setTimeout> | undefined;
   const stop = (failed: boolean) => {
     if (stopping) return;
     stopping = true;
+    if (restartTimer) clearTimeout(restartTimer);
     process.exitCode = failed ? 1 : 0;
     for (const child of children) if (child.exitCode === null) child.kill("SIGTERM");
     const force = setTimeout(() => { for (const child of children) if (child.exitCode === null) child.kill("SIGKILL"); }, 20_000);
@@ -459,7 +460,7 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
     watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code, signal) => {
       if (!policy.again(code, stopping, signal)) return false;
       console.warn(`cloud home: ${restartLine(code, policy.delayMs())}`);
-      if (policy.delayMs() > 0) setTimeout(runServer, policy.delayMs());
+      if (policy.delayMs() > 0) restartTimer = setTimeout(runServer, policy.delayMs());
       else runServer();
       return true;
     });

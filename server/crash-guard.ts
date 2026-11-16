@@ -4,16 +4,20 @@
 // The rule:
 // - A promise rejection nobody handled is survivable: the operation it belonged to is over, and what it changed before
 //   failing was written step by step. It is logged, and the turn it ran for (if any) is stopped.
-// - An exception thrown inside a turn's work is that turn's: the turn is stopped and its resources freed, the server
-//   stays up.
+// - An exception thrown by an engine driver's own code while it runs a turn is that turn's: the turn is stopped and its
+//   resources freed, the server stays up. Only driver code runs in a turn's scope (withTurnScope wraps sendTurn); what a
+//   driver hands the server (its events) runs outside it, so an error in shared server code is never filed as a turn's.
+//   If that turn is no longer running (a warm process or timer outlived it), nothing can be stopped: that is fatal.
 // - An exception from a socket or pipe whose other end went away (EPIPE, ECONNRESET, ...) is survivable: it is logged.
 // - Anything else (an exception outside any turn, a stack overflow, an internal assertion) may have left shared state
-//   half-changed: the server closes as it does on a stop (saves flushed, turns marked cut so the next start reruns
-//   them) and exits with CRASH_EXIT_CODE, and its launcher starts it again after a pause.
+//   half-changed: the server marks its running turns cut (so the next start reruns them), flushes nothing else it
+//   holds in memory (the files keep their last whole state), and exits with CRASH_EXIT_CODE; its launcher starts it
+//   again after a pause.
 // - More than STORM_LIMIT errors within STORM_WINDOW_MS is treated as the last kind, so a failing loop cannot keep the
 //   server up and broken.
 import { AsyncLocalStorage } from "node:async_hooks";
 
+import type { ProviderInstance } from "./contracts.ts";
 import { CRASH_EXIT_CODE } from "./restart.ts";
 
 export interface TurnScope { botId: string; threadId: string }
@@ -23,6 +27,19 @@ const scope = new AsyncLocalStorage<TurnScope>();
 /** Runs a turn's work so that an error nothing catches inside it, however late, is known to be that turn's. */
 export const runInTurn = <T>(turn: TurnScope, run: () => T): T => scope.run(turn, run);
 export const currentTurn = (): TurnScope | undefined => scope.getStore();
+/** Runs server code a driver calls into (its event listeners) outside any turn's scope. */
+export const outsideTurn = <T>(run: () => T): T => scope.exit(run);
+
+/** A driver's sendTurn runs in the turn's scope, and its events reach the server's listeners outside it. */
+export function withTurnScope<I extends Pick<ProviderInstance, "adapter">>(instance: I): I {
+  const adapter = instance.adapter;
+  (instance as { adapter: ProviderInstance["adapter"] }).adapter = {
+    ...adapter,
+    sendTurn: (input) => runInTurn({ botId: input.botId ?? "", threadId: input.threadId }, () => adapter.sendTurn(input)),
+    onEvent: (listener) => adapter.onEvent((event) => outsideTurn(() => listener(event))),
+  };
+  return instance;
+}
 
 /** What the person is told in a turn the guard stopped. */
 export const SERVER_ERROR_CAUSE = "turn stopped — the server hit an unexpected error (details in the server log)";
@@ -63,7 +80,7 @@ export function crashLine(kind: "exception" | "rejection", error: unknown, turn:
 export interface CrashGuardDeps {
   /** Stops the turn and frees what it holds; false when the turn had already ended. */
   failTurn(turn: TurnScope, detail: string): boolean;
-  /** The server's graceful close, ending in process.exit(code). */
+  /** The close after a fatal error: mark running turns cut, flush nothing else, process.exit(code). */
   shutdown(code: number): void;
   log?: (line: string) => void;
   redact?: (text: string) => string;
@@ -83,11 +100,14 @@ export function installCrashGuard(deps: CrashGuardDeps) {
       while (recent.length && at - recent[0]! > STORM_WINDOW_MS) recent.shift();
       recent.push(at);
       const turn = currentTurn();
-      const verdict = closing ? "exit" : crashVerdict(kind, error, turn, recent.length);
+      let verdict = closing ? "exit" : crashVerdict(kind, error, turn, recent.length);
       log(crashLine(kind, error, turn, verdict, redact));
       if (verdict === "fail-turn" && turn) {
-        try { deps.failTurn(turn, error instanceof Error ? error.name : "error"); } catch (failure) { log(redact(`crash guard: stopping the turn failed: ${String(failure)}`)); }
-        return;
+        let stopped = false;
+        try { stopped = deps.failTurn(turn, error instanceof Error ? error.name : "error"); } catch (failure) { log(redact(`crash guard: stopping the turn failed: ${String(failure)}`)); }
+        if (stopped) return;
+        log(`crash guard: no running turn of thread ${turn.threadId} to stop — the server closes and starts again`);
+        verdict = "exit";
       }
       if (verdict !== "exit") return;
       if (closing) { exit(CRASH_EXIT_CODE); return; }
