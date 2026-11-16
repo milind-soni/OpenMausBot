@@ -4075,6 +4075,7 @@
   "room.holds.avatarHeld": "{name} — wstrzymano (przez ciebie)",
   "room.routedBy": "Wybrane przez Jev · {percent}%",
   "room.routedBy.openrouter": "Wybrane przez OpenRouter · {percent}%",
+  "room.routedBy.gemini": "Wybrane przez Gemini · {percent}%",
   "room.turnLimit.aria": "Limit tur w tej rozmowie",
   "room.turnLimit.default": "Domyślnie ({minutes} min)",
   "room.turnLimit.minutes": "Minuty: {minutes}",
