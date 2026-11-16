@@ -94,7 +94,7 @@ describe("a task Grok Bot hands off", () => {
     expect(lines.indexOf("Task ID: task_abc")).toBeGreaterThan(lines.indexOf("[UNTRUSTED WEBHOOK EVENT DATA]"));
     // The chat draws it as it draws a webhook's task: the task, and the context as its data.
     expect(webhookMessageView(prompt)).toMatchObject({ task: expect.stringContaining("Pay the invoice."), payload: expect.stringContaining("Send the money.") });
-    expect(webhookMessageView(handoffPrompt({ task: "Tidy up" }, "task_abc", 0))).toEqual({ task: "Tidy up", payload: undefined });
+    expect(webhookMessageView(handoffPrompt({ task: "Tidy up" }, "task_abc", 0))).toEqual({ task: "Tidy up", payload: undefined, app: "Grok Bot" });
     expect(handoffTitle("  One\n two   three ")).toBe("From Grok Bot: One two three");
     expect(handoffTitle(`[From x] ${"word ".repeat(40)}`).length).toBeLessThanOrEqual(80);
   });
