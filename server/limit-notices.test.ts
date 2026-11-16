@@ -81,8 +81,8 @@ describe("the notice", () => {
     expect(limitNoticeText({ engine: "Codex", bot: "Kai", backup: "Claude" })).toBe("Codex reached its limit, so Kai is using Claude meanwhile.");
     expect(limitNoticeText({ engine: "Claude claude-opus-5-5", bot: "Iris", credits: true, backup: "Claude claude-sonnet-5" }))
       .toBe("Claude claude-opus-5-5's extra usage credits are used up, so Iris is using Claude claude-sonnet-5 meanwhile.");
-    expect(limitNoticeText({ engine: "Codex", bot: "Kai" })).toBe("Codex reached its limit, so Kai waits: no other AI you have set up can take over.");
+    expect(limitNoticeText({ engine: "Codex", bot: "Kai" })).toBe("Codex reached its limit, so Kai waits: no backup you chose can take over.");
     expect(limitNoticeText({ engine: "Claude claude-opus-5-5", bot: "Iris", credits: true, resetsAt: Date.now() + 86_400_000 }))
-      .toBe("Claude claude-opus-5-5's extra usage credits are used up, so Iris waits: no other AI you have set up can take over.");
+      .toBe("Claude claude-opus-5-5's extra usage credits are used up, so Iris waits: no backup you chose can take over.");
   });
 });
