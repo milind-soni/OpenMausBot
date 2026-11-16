@@ -157,7 +157,7 @@ describe("a routine every minute by cron whose tool server is dead", () => {
 });
 
 describe("a routine every 5 minutes on a server whose engines cannot start", () => {
-  // Each of the 9 runs waits once for room (#6179) and then fails with the refusal, instead of a spawn every 30 s for an hour.
+  // Each of the 9 runs waits once for room and then fails with the refusal, instead of a spawn every 30 s for an hour.
   it("tries 9 runs in its first day, each started once more 30 s later for room and no more, never its retry", async () => {
     const h = harness(async () => { throw new Error(SPAWN_REFUSED); });
     await h.passTo(START + 24 * HOUR, () => {});
