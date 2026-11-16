@@ -9,6 +9,7 @@ import type { Coordinator, HandoffView } from "../coordinator.ts";
 import { redactSecretsInText } from "../redact.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { createBotLinkRoutes, linkSessionUser } from "../routes/bot-link.ts";
+import { isLinkedId } from "../bot-link/protocol.ts";
 import type { Level } from "../runtime/types.ts";
 import type { BotRecord, Store } from "../store.ts";
 import type { HandoffFiles, PassedFile } from "./handoff-files.ts";
@@ -17,7 +18,7 @@ import { sentRow, teammateResultRow } from "./handoff-sent.ts";
 export interface BotLinkHostDeps {
   dataDir: string;
   environmentId: string;
-  store: Pick<Store, "bots" | "bot" | "createTask" | "taskByThread" | "appendMessage" | "patchTask" | "onChange" | "group" | "groupTaskByThread" | "markGroupThreadUnread">;
+  store: Pick<Store, "bots" | "bot" | "standIns" | "createTask" | "taskByThread" | "appendMessage" | "patchTask" | "onChange" | "group" | "groupTaskByThread" | "markGroupThreadUnread">;
   coordinator(): Coordinator;
   kick(): void;
   level(bot: BotRecord): Level;
@@ -36,8 +37,20 @@ export interface BotLinkHostDeps {
 
 export function createBotLinkHost(deps: BotLinkHostDeps) {
   const { store } = deps;
+  /** Each bot of each linked place as a record this place finds by its address: its name and look, and where it lives.
+   * It has no conversation, model or tools here, and takes no turn here. */
+  const syncStandIns = () => {
+    const next = new Map<string, BotRecord>();
+    for (const { id, peer, place, bot } of link.linked()) {
+      next.set(id, { id, name: bot.name, color: bot.color ?? "blue", threadId: "", tasks: [], resumeCursors: {}, modelSelection: { instanceId: "", model: bot.model ?? "" },
+        home: { place: peer, placeName: place.name, botId: bot.id }, ...(bot.title ? { title: bot.title } : {}), ...(bot.description ? { description: bot.description } : {}),
+        ...(bot.mascotBody ? { mascotBody: bot.mascotBody } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}) } as unknown as BotRecord);
+    }
+    store.standIns.clear();
+    for (const [id, record] of next) if (isLinkedId(id)) store.standIns.set(id, record);
+  };
   const link = createBotLink({
-    dataDir: deps.dataDir, coordinator: deps.coordinator, kick: deps.kick, log: deps.log, revoke: (sessionId) => { deps.sessions.revoke(sessionId); },
+    dataDir: deps.dataDir, coordinator: deps.coordinator, kick: deps.kick, log: deps.log, directoryChanged: () => syncStandIns(), revoke: (sessionId) => { deps.sessions.revoke(sessionId); },
     bots: () => store.bots, bot: (id) => store.bot(id),
     refusal: (bot) => deps.refusal(bot as BotRecord),
     model: (bot) => (bot as BotRecord).modelSelection.model,
@@ -94,6 +107,7 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     /** Once the server is up. Off: nothing. On, on the computer: it starts asking the Cloud. */
     start(): void {
       if (!link.on()) return;
+      syncStandIns();
       watch();
       link.tidy();
       if (link.role() === "dialer") dialer.start({ gentle: true });

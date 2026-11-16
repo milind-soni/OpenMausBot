@@ -36,7 +36,7 @@ const call = (botIds: string[], message: string, more: Partial<CoordinateBotsCal
   ({ botIds, message, rework: false, thread: "standing", reply: "resume", consult: false, ...more });
 
 /** One place. `boot()` again over the same folder is that place's server restarted. */
-function place(label: string, bots: Bot[]) {
+function place(label: string, bots: Bot[], version?: number) {
   const dir = mkdtempSync(join(tmpdir(), `bot-link-${label}-`));
   const threads = new Set<string>();
   const runs: Array<{ botId: string; threadId: string; text: string; resumed: boolean; requester: string; origin: unknown }> = [];
@@ -57,7 +57,7 @@ function place(label: string, bots: Bot[]) {
   const failing: Array<{ match: RegExp; status: number }> = [];
   let run: Run = async (node) => ({ ok: true, text: `${node.botId} did: ${node.text}` });
   let coordinator!: Coordinator, link!: BotLink, dialer!: ReturnType<typeof createDialer>, ticker: NodeJS.Timeout | undefined, http: Server | undefined;
-  let opened = 0, port = 0, generation = 0, skew = 0, minted = 0;
+  let opened = 0, port = 0, generation = 0, skew = 0, minted = 0, directoryChanges = 0;
   const sockets = new Set<import("node:net").Socket>();
 
   function boot(options: { limits?: { queueMs?: number; stallMs?: number } } = {}) {
@@ -70,6 +70,7 @@ function place(label: string, bots: Bot[]) {
       kick: () => { queueMicrotask(() => { try { coordinator.tick(); } catch { /* closed */ } }); },
       revoke: (sessionId) => { for (const [token, id] of issued) if (id === sessionId) issued.delete(token); },
       now: () => Date.now() + skew,
+      directoryChanged: () => { directoryChanges += 1; },
       files: {
         carried: (id, way) => ledger.get(`${id}:${way}`)?.files ?? [],
         crossed: (id, way, from, files) => { if (!ledger.has(`${id}:${way}`)) ledger.set(`${id}:${way}`, { from, files: [...files] }); },
@@ -86,7 +87,7 @@ function place(label: string, bots: Bot[]) {
       },
     };
     coordinator = createCoordinator({ dataDir: dir, host: link.host(inner), log: () => {}, ...(options.limits ? { runtimeLimits: options.limits } : {}) });
-    dialer = createDialer({ link, holdMs: 400, firstRetryMs: 20 });
+    dialer = createDialer({ link, holdMs: 400, firstRetryMs: 20, ...(version ? { level: version } : {}) });
     ticker = setInterval(() => coordinator.tick(), 15);
     return api;
   }
@@ -100,7 +101,7 @@ function place(label: string, bots: Bot[]) {
 
   async function listen(at = 0): Promise<string> {
     const routes = routesOf({
-      link, dialer, environmentId: `${label}-environment`, seenMs: 900, power: () => null,
+      link, dialer, environmentId: `${label}-environment`, seenMs: 900, power: () => null, ...(version ? { level: version } : {}),
       local: (who) => who.kind === "loopback", owner: (who) => who.kind === "session" && who.session.id === "owner-session",
       issue: () => { const token = `link-token-${++minted}-0123456789`; issued.set(token, `link-session-${minted}`); return { token, sessionId: issued.get(token)! }; },
       revoke: (sessionId) => { for (const [token, id] of issued) if (id === sessionId) issued.delete(token); },
@@ -158,6 +159,7 @@ function place(label: string, bots: Bot[]) {
     /** Time passes for this place's link. */
     later(ms: number) { skew += ms; },
     sessions: () => [...issued.values()],
+    directoryChanges: () => directoryChanges,
     async fetch(method: string, path: string, body?: unknown, bearer?: string) {
       const response = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers: { "content-type": "application/json", ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -690,6 +692,58 @@ describe("the link between a computer and its Cloud", () => {
     expect(String(left.answer.body.error)).toContain("a room you are a member of");
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(cloud.runs.filter((run) => run.botId === "cloud-analyst")).toHaveLength(1);
+  });
+
+  it("each place keeps the other's bots with their address, place and look, and hears when they change or the link ends", async () => {
+    const { computer, cloud } = await two();
+    expect(computer.link.linked().map((one) => [one.id, one.place.name, one.online, one.bot.name])).toEqual([[onCloud("shared"), "My Cloud", true, "Atlas"], [onCloud("cloud-analyst"), "My Cloud", true, "Analyst"]]);
+    expect(cloud.link.linked().map((one) => one.id)).toEqual([onComputer("shared"), onComputer("local-writer")]);
+    const before = cloud.directoryChanges();
+    computer.bots.push({ id: "new", name: "Newcomer" });
+    computer.link.botsChanged();
+    await until(() => cloud.link.linked().some((one) => one.bot.name === "Newcomer"), "the Cloud hears of the new bot");
+    expect(cloud.directoryChanges()).toBeGreaterThan(before);
+    const heard = computer.directoryChanges();
+    await computer.fetch("PUT", STATE_PATH, { on: false });
+    expect(computer.link.linked()).toEqual([]);
+    expect(computer.directoryChanges()).toBeGreaterThan(heard);
+    await until(() => cloud.link.linked().length === 0, "the Cloud drops the computer's bots");
+  });
+
+  it("a place on the first version is sent only what that version reads, and a place on this one the bots' looks too", async () => {
+    const looks = (bots: Bot[]) => bots.map((bot) => ({ ...bot, color: "green", mascotBody: "classic", threadId: `${bot.id}-chat` }));
+    const meet = async (computerVersion?: number, cloudVersion?: number) => {
+      const computer = place("computer", looks([{ id: "shared", name: "Scout" }]), computerVersion).boot(), cloud = place("cloud", looks([{ id: "shared", name: "Atlas" }]), cloudVersion).boot();
+      places.push(computer, cloud);
+      const origin = await cloud.listen();
+      await computer.listen();
+      await pair(computer, cloud, origin);
+      return { computer, cloud };
+    };
+    const seen = (side: ReturnType<typeof place>) => side.link.linked().map((one) => Object.keys(one.bot).sort().join());
+    const older = await meet(undefined, 1);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(seen(older.cloud), "an older Cloud is sent no field it would refuse").toEqual(["id,level,name"]);
+    const olderApp = await meet(1, undefined);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(seen(olderApp.computer), "an older app is sent no field it would refuse").toEqual(["id,level,name"]);
+    const both = await meet();
+    await until(() => seen(both.cloud)[0] === "color,id,level,mascotBody,name,threadId" && seen(both.computer)[0] === "color,id,level,mascotBody,name,threadId", "both on this version: each learns the other's looks, the computer after its first answer");
+    // Work crosses a mixed pair as it always did.
+    const { receipts } = await older.computer.handOff("shared", call(["Atlas"], "Count the orders"));
+    await until(() => older.cloud.runs.some((run) => run.botId === "shared"), "the older Cloud's bot gets the work");
+    expect(receipts[0]?.outcome).toBe("queued");
+  });
+
+  it("a hello whose bot id could not be a bot's own id is dropped whole, and such a bot of this place is never told", async () => {
+    const { computer, cloud } = await two();
+    const known = cloud.link.linked().map((one) => one.id);
+    for (const id of ["../../etc", "a/b", "a\\b", "a b", ".", "x".repeat(129), ""]) cloud.link.receive(COMPUTER, [{ t: "hello", place: { id: "computer-environment", name: "Sam's Mac" }, bots: [{ id, name: "Evil" }, { id: "fine", name: "Fine" }] }]);
+    expect(cloud.link.linked().map((one) => one.id)).toEqual(known);
+    computer.bots.push({ id: "../up", name: "Odd" }, { id: "plain_id-2", name: "Plain" });
+    computer.link.botsChanged();
+    await until(() => cloud.link.linked().some((one) => one.bot.name === "Plain"), "the Cloud hears of the bot with an ordinary id");
+    expect(cloud.link.linked().some((one) => one.bot.name === "Odd")).toBe(false);
   });
 
   it("the link's sign-in reaches the link's own routes and nothing else", () => {

@@ -199,6 +199,31 @@ describe("Store", () => {
       .toEqual(JSON.parse(before).find((g: { id: string }) => g.id === room.id).memberIds);
   });
 
+  it("a stand-in is read-only: no write method finds it, so naming one changes nothing of this place's own", () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ section: "Delivery" });
+    store.setChiefOfStaff(chief.id);
+    store.patchBot(chief.id, { managedSections: ["Office"] });
+    const room = store.createGroup("Room", [chief.id], false, "Delivery");
+    const id = "link-0a1b2c3d-atlas";
+    store.standIns.set(id, { id, name: "Atlas", color: "blue", threadId: "", tasks: [], resumeCursors: {}, modelSelection: { instanceId: "", model: "" }, section: "Delivery", home: { place: "0a1b2c3d", placeName: "My Cloud", botId: "atlas" } } as unknown as BotRecord);
+    const bots = readFileSync(join(DATA_DIR, "bots.json"), "utf8"), groups = readFileSync(join(DATA_DIR, "groups.json"), "utf8");
+    const changes: string[] = [];
+    store.onChange((change) => { changes.push(change.type); });
+    expect(store.bot(id)?.name).toBe("Atlas");
+    expect(store.setChiefOfStaff(id)).toBeNull();
+    expect(store.bot(chief.id)).toMatchObject({ chiefOfStaff: true, managedSections: ["Office"] });
+    expect(store.deleteBot(id)).toBe(false);
+    expect(store.patchBot(id, { name: "Renamed" })).toBeNull();
+    expect(store.createTask(id, "A thread")).toBeFalsy();
+    expect(store.tasks(id)).toEqual([]);
+    expect(store.standIns.get(id)).toMatchObject({ name: "Atlas", tasks: [] });
+    expect(store.group(room.id)?.memberIds).toEqual([chief.id]);
+    expect(changes).toEqual([]);
+    expect(readFileSync(join(DATA_DIR, "bots.json"), "utf8")).toBe(bots);
+    expect(readFileSync(join(DATA_DIR, "groups.json"), "utf8")).toBe(groups);
+  });
+
   it("renames populated teams without changing members, conversations, grants or computer identity", () => {
     const store = new Store(selection);
     const chief = store.createBot({ section: "Delivery" });
