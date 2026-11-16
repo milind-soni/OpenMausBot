@@ -90,7 +90,7 @@ describe("the usage cap gate", () => {
     let refused: unknown;
     try { open.assertTurn("a", false); } catch (error) { refused = error; }
     expect(refused).toMatchObject({ status: 409, code: "spend_cap", resetsAt: Date.parse("2026-10-01T00:00:00Z"),
-      message: `Not started: Ada’s monthly usage cap (5,000 tokens) is reached. New work starts again by itself after ${capResets(Date.parse("2026-10-01T00:00:00Z"))}, or sooner if the owner raises the cap in Settings → Usage.` });
+      message: `Not started: Ada’s monthly usage cap (5,000 tokens) is reached. New work starts again by itself after ${capResets(Date.parse("2026-10-01T00:00:00Z"))}, or sooner if the owner raises the cap in Settings → Spending.` });
     expect(notices).toHaveLength(1);
     expect(notices[0]).toMatchObject({ about: "a" });
 
