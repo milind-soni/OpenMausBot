@@ -251,8 +251,9 @@ agent-browser 0.37.0 itself adds `--no-sandbox` and
 `/run/.containerenv`, runs as root or under CI, or finds docker, kubepods
 or lxc in `/proc/1/cgroup`; a runtime that shows none of these (a
 Kubernetes pod on cgroup v2, for one) is covered by the `/dev/shm` check.
-The Cloud home image has no entrypoint of its own: on Fly Machines Fly's
-init runs as PID 1, and a plain `docker run` of that image wants `--init`.
+The Cloud home image has the same tini entrypoint: on Fly Machines Fly's
+init runs as PID 1 and tini collects beneath it, and on a host that starts
+the image with a plain `docker run` tini is PID 1.
 See [Running on a container platform](self-hosting.md#running-on-a-container-platform-railway-render-kubernetes-cloud-run).
 
 ## Video recording
