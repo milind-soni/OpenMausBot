@@ -1364,7 +1364,7 @@ describe("structured tool execution boundaries", () => {
     expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
-  it("stops a model that keeps requesting tools after 64 steps, with one next action that does not repeat the steps that ran", async () => {
+  it("stops a model that keeps requesting one tool per step at 200 tool calls, with one next action that does not repeat the steps that ran", async () => {
     const f = await fixture((_body, response, round) => sse(response, [
       chunk({ tool_calls: [toolCall("audit_write", '{"name":"receipt","value":"done"}', `call_${round}`)] }, "tool_calls"),
     ]), "grok");
@@ -1374,10 +1374,10 @@ describe("structured tool execution boundaries", () => {
     await f.start();
     expect(await f.completed()).toMatchObject({ ok: false, stopReason: "error" });
     stop();
-    expect(f.requests).toHaveLength(64);
-    expect(f.effects()).toHaveLength(64);
+    expect(f.requests).toHaveLength(201);
+    expect(f.effects()).toHaveLength(200);
     expect(f.recorder.events.filter((event) => event.type === "runtime.error")).toEqual([expect.objectContaining({
-      message: "Stopped after 64 steps without a final answer. The steps so far already ran, so ask only for what's left.",
+      message: "Stopped after 200 tool calls without a final answer. The steps so far already ran, so ask only for what's left.",
       terminal: true,
     })]);
   });
@@ -1413,33 +1413,19 @@ describe("structured tool execution boundaries", () => {
     for (const update of updates) expect(handoff).toContain(update);
     expect(handoff.indexOf(updates[0]!)).toBeLessThan(handoff.indexOf(updates[1]!));
     expect(JSON.stringify(f.requests[1]!.messages)).toContain(updates.join("\\n\\n"));
-    expect(f.requests).toHaveLength(callsPerReply === 1 ? 64 : 9);
-    expect(f.effects()).toHaveLength(callsPerReply === 1 ? 64 : 200);
+    expect(f.requests).toHaveLength(callsPerReply === 1 ? 201 : 9);
+    expect(f.effects()).toHaveLength(200);
   });
 
-  it("answers in the last allowed step and leaves a message steered during it for the next turn", async () => {
-    const last = deferred<ServerResponse>();
-    const f = await fixture((_body, response, round) => round < 64
+  it("finishes a turn that needs more than 64 steps", async () => {
+    const f = await fixture((_body, response, round) => round < 100
       ? sse(response, [chunk({ tool_calls: [toolCall("audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
-      : last.resolve(response));
+      : answer(response));
     await f.start({ approvalMode: "full" });
-    const response = await last.promise;
-    await expect(f.instance.adapter.steer!(f.threadId, "One more thing.")).resolves.toBe("refused");
-    answer(response);
     expect(await f.completed()).toMatchObject({ ok: true });
-    expect(f.requests).toHaveLength(64);
-  });
-
-  it.each([
-    ["a failed tool call", "audit_fail", "The operation is complete.", "tool_error"],
-    ["an announced action", "audit_write", "I'll write the next receipt.", "incomplete_action"],
-  ])("ends on %s in the last allowed step without asking for another step", async (_, lastTool, text, stopReason) => {
-    const f = await fixture((_body, response, round) => round < 64
-      ? sse(response, [chunk({ tool_calls: [toolCall(round === 63 ? lastTool : "audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
-      : answer(response, text));
-    await f.start({ approvalMode: "full", toolErrorCorrectiveRounds: 1 });
-    expect(await f.completed()).toMatchObject({ ok: false, stopReason });
-    expect(f.requests).toHaveLength(64);
+    expect(f.requests).toHaveLength(100);
+    expect(f.effects()).toHaveLength(99);
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
   it("stops at 200 tool calls in one turn without running the batch that crosses it", async () => {
