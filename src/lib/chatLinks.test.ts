@@ -12,12 +12,14 @@ describe("chat links", () => {
     expect(classifyChatHref("mailto:a@b.c")?.kind).toBe("other");
     expect(classifyChatHref("javascript:alert(1)")?.kind).toBe("other");
     expect(classifyChatHref("#section")).toBeNull();
+    expect(classifyChatHref("/Users/me/The%20Gerer%20Company/plan.md")).toEqual({ kind: "file", path: "/Users/me/The Gerer Company/plan.md" });
   });
   it("only treats single absolute paths to previewable files as file paths", () => {
     expect(looksLikeFilePath("/Users/me/p/docs/plan.md")).toBe(true);
     expect(looksLikeFilePath("~/p/shot.png")).toBe(true);
     expect(looksLikeFilePath("src/index.ts")).toBe(false);
     expect(looksLikeFilePath("/usr/bin/node")).toBe(false);
-    expect(looksLikeFilePath("/a b.md")).toBe(false);
+    expect(looksLikeFilePath("/Users/me/The Gerer Company/a b.md")).toBe(true);
+    expect(looksLikeFilePath("/a.md\n/b.md")).toBe(false);
   });
 });

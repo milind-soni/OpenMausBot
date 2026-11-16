@@ -13,21 +13,28 @@ export type ChatHref =
   | { kind: "file"; path: string }
   | { kind: "other"; href: string };
 
+/** Markdown output percent-encodes link targets ("The%20Gerer%20Company"); file paths need the real name. */
+function decodePath(value: string): string {
+  try { return decodeURI(value); } catch { return value; }
+}
+
 export function classifyChatHref(href: string | undefined | null): ChatHref | null {
   const value = (href ?? "").trim();
   if (!value || value.startsWith("#")) return null;
   if (/^https?:\/\//i.test(value)) return { kind: "web", url: value };
-  if (/^file:\/\//i.test(value) || value.startsWith("/") || value.startsWith("~/")) return { kind: "file", path: value };
+  if (/^file:\/\//i.test(value)) return { kind: "file", path: value };
+  if (value.startsWith("/") || value.startsWith("~/")) return { kind: "file", path: decodePath(value) };
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return { kind: "other", href: value };
   // Bare relative paths only count when they name a previewable file.
   const bare = value.split(/[?#]/)[0];
-  return FILE_EXT.test(bare) ? { kind: "file", path: value } : { kind: "other", href: value };
+  return FILE_EXT.test(bare) ? { kind: "file", path: decodePath(value) } : { kind: "other", href: value };
 }
 
 /** True for inline-code text that is clearly a local file path we could preview. */
 export function looksLikeFilePath(text: string): boolean {
   const value = text.trim();
-  return !/\s/.test(value) && (value.startsWith("/") || value.startsWith("~/") || /^file:\/\//i.test(value)) && FILE_EXT.test(value);
+  // Spaces are allowed ("The Gerer Company"); line breaks are not.
+  return !/[\n\r]/.test(value) && (value.startsWith("/") || value.startsWith("~/") || /^file:\/\//i.test(value)) && FILE_EXT.test(value);
 }
 
 export interface ResolvedChatFile {
