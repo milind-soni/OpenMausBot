@@ -514,3 +514,18 @@ describe("CloudWelcome", () => {
     });
   });
 });
+
+describe("the last step on a new Team Cloud", () => {
+  it("sends its Owner to the invite box on the team's People page, saying a 2-person team has room for one more", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { WelcomeDone } = await import("./WelcomeSteps");
+    const invite = "https://cloud.example.test/cloud/team/team-acme/people?do=invite";
+    const done = (link: string | null) => renderToStaticMarkup(createElement(WelcomeDone, {
+      name: "Acme", bot: null, team: true, headingRef: null, onSayHi: () => {}, onJob: () => {}, invite: link }));
+    const html = done(invite);
+    expect(html).toContain(`href="${invite}"`);
+    expect(html).toContain("A 2-person team includes one more person besides you");
+    expect(html).not.toMatch(/up to \d|\$\d/);
+    expect(done(null)).not.toContain("data-welcome-invite");
+  });
+});

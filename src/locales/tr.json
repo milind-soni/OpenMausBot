@@ -371,7 +371,7 @@
   "cloudBuy.promise.starter": "Dizüstü bilgisayarınız kapalıyken bile botlarınız çalışmaya devam eder, en düşük fiyata.",
   "cloudBuy.promise.pro": "Dizüstü bilgisayarınız kapalıyken bile botlarınız 7/24 çalışmaya devam eder.",
   "cloudBuy.promise.max": "Gün boyu bilgisayar kullanan botlar için en büyük bulut makinesi.",
-  "cloudBuy.promise.team": "En fazla {seats} kişi için tek bir ortak Cloud: botlar, grup sohbetleri ve tüm ekibinin kullandığı roller.",
+  "cloudBuy.promise.teamPlan": "Tüm ekibin için tek bir ortak Cloud: botlar, grup sohbetleri ve herkesin kullandığı roller. İstediğin zaman kişi ekle.",
   "cloudBuy.plan.limit": "Adil kullanım: aynı anda en fazla {count}",
   "cloudBuy.plan.voiceMinutes": "Sesli yanıtlar: ayda yaklaşık {minutes} dakika konuşma",
   "cloudBuy.plan.voiceHour": "Sesli yanıtlar: ayda yaklaşık bir saat konuşma",

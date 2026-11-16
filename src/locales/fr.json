@@ -335,7 +335,7 @@
   "cloudBuy.promise.starter": "Vos bots continuent de travailler ordinateur portable fermé, au prix le plus bas.",
   "cloudBuy.promise.pro": "Vos bots travaillent 24 h/24 et 7 j/7, même quand votre ordinateur portable est fermé.",
   "cloudBuy.promise.max": "La plus grande machine cloud, pour les bots qui utilisent des ordinateurs toute la journée.",
-  "cloudBuy.promise.team": "Un Cloud partagé pour {seats} personnes maximum : bots, discussions de groupe et rôles pour toute votre équipe.",
+  "cloudBuy.promise.teamPlan": "Un Cloud partagé pour toute votre équipe : bots, discussions de groupe et rôles pour tous. Ajoutez des personnes à tout moment.",
   "cloudBuy.plan.limit": "Usage raisonnable : jusqu'à {count} à la fois",
   "cloudBuy.plan.voiceMinutes": "Réponses vocales : environ {minutes} minutes de parole par mois",
   "cloudBuy.plan.voiceHour": "Réponses vocales : environ une heure de parole par mois",
