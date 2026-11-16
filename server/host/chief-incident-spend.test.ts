@@ -147,7 +147,7 @@ describe("a routine every 5 minutes whose tool server is dead, for a day", () =>
 });
 
 describe("a routine every 5 minutes on a server whose engines cannot start, for a day", () => {
-  // 9 runs, each started once more 30 s later while it waits for room (#6179); nothing reaches the AI until one starts.
+  // 9 runs, each started once more 30 s later while it waits for room; nothing reaches the AI until one starts.
   it("tries 18 starts in 9 runs and starts 2 Chief turns", async () => {
     const w = world(1, spawnRefused, true);
     await w.passTo(START + 24 * HOUR);
