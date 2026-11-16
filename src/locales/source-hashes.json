@@ -37192,7 +37192,11 @@
       "chat.notice.computerToolsDidNotStart": "4aebe8c275ab226b4539fcc0c5da946e30c460b9f44a81906424b975fe30a28f",
       "chat.notice.computerToolsStillNotStarting": "145c73dc919e8c43dd7fc564b8d55227b3140ac2f5d433b0fa4a581a375e8b8b",
       "devices.computers.address": "56ef8f20955f256423d328f65b62106005252551db25d660031887e421cb4684",
-      "devices.computers.pairLine": "91c4c8aa1fbe700ec88726f05c00ff5d863e5884c94c30bb9c26e0482322b380"
+      "devices.computers.pairLine": "91c4c8aa1fbe700ec88726f05c00ff5d863e5884c94c30bb9c26e0482322b380",
+      "room.queue.busyIn": "57c8a5a630dcea31ceae7b194162bcaaa5dcef4f7bb24eeaf532f5143cc791c7",
+      "room.queue.busyElsewhere": "ecdbe34c1cca24d6d0365a04bf672203b437647795ac4e358fbcf671ef345b97",
+      "room.queue.busyInAfter": "a944c189ff63871adf83e91509d65f6ec8044478de1969f5a8874a11d2f15847",
+      "room.queue.busyElsewhereAfter": "3432832abb792772c22e30806a674a4edcd22f660ee53d47ba4e2075121a79e8"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
