@@ -207,6 +207,7 @@ describe("the Simple composer in a bot chat", () => {
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "interrupt", botId: "atlas", threadId: "atlas-thread" });
 
     restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "and also this", attachments: [] });
+    fixture.call = null;
     render({ bot: busy });
     expect(container.querySelector('[data-composer-stop="beside"]')).not.toBeNull();
     expect(container.querySelector('[data-composer-stop="slot"]')).toBeNull();
