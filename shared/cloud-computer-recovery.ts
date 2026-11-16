@@ -24,6 +24,18 @@ export interface CloudComputerAnswering {
   lastAnsweredAt: number | null;
 }
 
+/** From this share of the disk used, the computer's caches are cleared and the panel shows the figure. */
+export const DISK_WARN_PERCENT = 85;
+
+/** The computer's disk, beside `answering`, on the same route; absent or null while it is under DISK_WARN_PERCENT and
+ * nothing was cleared in the last day. `percent`: the fullest of its root and home filesystems. `clearedAt`: when its caches
+ * were last cleared. `spaceClearedAt`: when more than caches was last removed to keep it from filling, given in place of `clearedAt`. */
+export interface CloudComputerDisk {
+  percent: number;
+  clearedAt?: number;
+  spaceClearedAt?: number;
+}
+
 /** What the bot is told, in place of a computer call, while its computer is being restarted or replaced. */
 export const CLOUD_COMPUTER_NOT_RESPONDING =
   "This bot's cloud computer isn't responding; MausBot is replacing it. Try again in a minute. Do not retry now.";
@@ -51,7 +63,7 @@ export const CLOUD_COMPUTER_NEEDS_PERSON =
   "This bot's cloud computer isn't responding. The person can replace it from the computer panel. Do not retry computer work in this turn; tell the person.";
 /** A team's shared computer is never restarted or deleted by itself: every teammate's work is on it. */
 export const CLOUD_COMPUTER_TEAM_NOT_RESPONDING =
-  "This team's shared cloud computer isn't responding. A team admin can delete it in Settings → Computers and create it again from the Team map. Do not retry computer work in this turn; tell the person.";
+  "This team's shared cloud computer isn't responding. A team admin can delete it in Settings → Desktops & browser → Desktops and create it again from the Team map. Do not retry computer work in this turn; tell the person.";
 /** The provider says the machine is gone, but not yet for long enough to delete it by itself. */
 export const CLOUD_COMPUTER_DEAD_WAITING =
   "This bot's cloud computer isn't responding. MausBot replaces it if it is still down in half an hour; the person can replace it now from the computer panel. Do not retry computer work in this turn; tell the person.";
@@ -80,6 +92,7 @@ export const RUN_COMPUTER_LINES = {
   personBusy: "The cloud computer is not answering, and it was not restarted because someone is using it, so this run did not start. The next scheduled run tries again.",
   restartLimited: "The cloud computer is not answering, and it was already restarted within the last hour, so this run did not start. The next scheduled run tries again.",
   shared: "The team's shared cloud computer is not answering, so this run did not start. A team admin can look at it in the Team map.",
+  diskStillFull: "This run started with its cloud computer's disk still almost full, after MausBot removed what it safely could. Check that what the run did is complete, and free space on the computer.",
   lastCallUnanswered: "This run finished, but its last cloud computer call got no answer, so check that what it did on the computer is complete. It was not run again.",
 } as const;
 

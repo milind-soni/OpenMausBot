@@ -135,6 +135,14 @@ describe("McpOAuthManager tokens", () => {
     await settled("docs", started.flowId);
   }
 
+  it("requests offline access advertised by the authorization server and refreshes the resulting token", async () => {
+    await signedIn({ expiresIn: 60, offlineAccess: true });
+    expect(oauth.lastAuthorize?.get("scope")).toBe("mcp offline_access");
+    expect(oauth.isValid(`Bearer ${await manager.accessToken("docs", mcp.url)}`)).toBe(true);
+    expect(oauth.counts.refresh).toBe(1);
+    expect(manager.authState("docs", mcp.url)).toBe("signed-in");
+  });
+
   it("refreshes a token about to expire, once for concurrent callers", async () => {
     await signedIn({ expiresIn: 60 });
     const [a, b] = await Promise.all([manager.accessToken("docs", mcp.url), manager.accessToken("docs", mcp.url)]);
@@ -345,6 +353,13 @@ describe("a sign-in app registered in advance", () => {
     expect(oauth.counts.register).toBe(0);
     expect(oauth.clientAuths).toEqual([{ method: "none", clientId: "entra-app" }]);
     expect(oauth.isValid(`Bearer ${await manager.accessToken("docs", mcp.url)}`)).toBe(true);
+  });
+
+  it("preserves explicitly configured scopes when offline access is advertised", async () => {
+    await setup({ noRegistration: true, preRegistered: { "read-only": null }, offlineAccess: true });
+    registered = { clientId: "read-only", scopes: ["mcp"] };
+    const started = await manager.start("docs", mcp.url);
+    expect(new URL(started.authorizationUrl!).searchParams.get("scope")).toBe("mcp");
   });
 
   it("uses the app in place of registration even when the server offers it", async () => {

@@ -101,7 +101,10 @@ it.each([false, true])("recovers the same conversation after an ACP internal err
     const prompt = JSON.stringify(JSON.parse(readFileSync(`${dumpFile}.prompt.json`, "utf8")));
     expect(prompt.split(retryText).length - 1).toBe(1);
     expect(prompt).not.toContain(firstText);
-    expect(prompt).not.toContain(failedText);
+    // session/prompt resolving is the receipt boundary: rejected before the agent acted, the failed
+    // message never entered the session, so a strict-resume handoff offers it once as unseen.
+    if (afterOutput) expect(prompt).not.toContain(failedText);
+    else expect(prompt.split(failedText).length - 1).toBe(1);
     const finalMessages = await messages();
     for (const text of [firstText, failedText, retryText]) {
       expect(finalMessages.filter((message) => message.role === "user" && message.text === text)).toHaveLength(1);

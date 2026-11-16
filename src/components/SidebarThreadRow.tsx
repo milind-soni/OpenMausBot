@@ -212,10 +212,10 @@ export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
 }
 
 /** The store actions behind a bot's thread-row menu, for every list that draws that bot's threads. */
-export function threadRowActions(botId: string, dispatch: Dispatch<Action>, generatedTitles: boolean) {
+export function threadRowActions(botId: string, dispatch: Dispatch<Action>) {
   return {
     onRename: (task: { threadId: string }, title: string) => dispatch({ type: "renameTask", botId, threadId: task.threadId, title }),
-    onRegenerateTitle: generatedTitles ? (task: { threadId: string }, onSettled: (ok: boolean) => void) => dispatch({ type: "regenerateTaskTitle", botId, threadId: task.threadId, onSettled }) : undefined,
+    onRegenerateTitle: (task: { threadId: string }, onSettled: (ok: boolean) => void) => dispatch({ type: "regenerateTaskTitle", botId, threadId: task.threadId, onSettled }),
     onDelete: (task: { threadId: string }) => dispatch({ type: "deleteTask", botId, threadId: task.threadId }),
     onMove: (task: { threadId: string }, projectId: string | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { projectId } }),
     onArchive: (task: { threadId: string }, archivedAt: number | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { archivedAt } }),

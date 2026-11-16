@@ -548,7 +548,7 @@ class LoginRun {
       }
       if ((fields.password && this.done.has("password")) || (fields.code > 0 && this.done.has("code"))) {
         const said = fields.alert ? ` It said: “${fields.alert}”.` : "";
-        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}: it asked for it again, and nothing was submitted twice.${said} Check the saved login in Settings → Logins, or call request_sign_in.`);
+        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}: it asked for it again, and nothing was submitted twice.${said} Check the saved login in Settings → Vault, or call request_sign_in.`);
       }
       if (step > 0 && !fields.password && fields.code === 0) {
         if (fields.human) return this.finish(true, `Submitted ${this.filledWords()} for ${this.who()}, and a human check (CAPTCHA) appeared. Call request_sign_in so the person finishes signing in.`);
@@ -589,7 +589,7 @@ class LoginRun {
       if (sent.human) return this.failed(`A human check (CAPTCHA) appeared on ${this.host} after the login for ${this.who()} was submitted. Call request_sign_in so the person finishes signing in.`);
       if (!sent.changed) {
         const said = sent.alert ? ` It said: “${sent.alert}”.` : " The page did not change.";
-        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}.${said} Check the saved login in Settings → Logins, or call request_sign_in.`);
+        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}.${said} Check the saved login in Settings → Vault, or call request_sign_in.`);
       }
       if (step + 1 >= MAX_STEPS) return this.finish(true, this.signedIn(sent.href, sent.title));
       const waitMs = !this.done.has("password") && !(this.addressOnly && this.done.has("code")) ? NEXT_STEP_WAIT_MS : this.secretsHaveTotp() && !this.done.has("code") ? 5_000 : 1_500;

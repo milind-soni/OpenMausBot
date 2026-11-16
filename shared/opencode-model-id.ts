@@ -29,3 +29,7 @@ export function openCodeRunsTypedModel(model: string, listed: ReadonlyArray<{ id
   const provider = model.slice(0, model.indexOf("/") + 1);
   return provider.length > 1 && listed.some((option) => option.id.startsWith(provider) && !option.id.startsWith(TYPED_PREFIX));
 }
+
+/** OpenCode Go's subscription models: its usage meter and its weekly or monthly allowance hold them all, never Zen's free
+ * models on the same login, which have an allowance of their own. */
+export const OPENCODE_GO_MODEL_PREFIX = "opencode-go/";

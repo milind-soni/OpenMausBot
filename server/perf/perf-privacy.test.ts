@@ -10,7 +10,7 @@ import type { StoreChange } from "../store.ts";
 import { createPerfHost, PERF_FILE } from "./perf-host.ts";
 import { PERF_HEALTH_MAX_BYTES, perfHealth } from "./perf-report.ts";
 import { createProcessSampler, type ProcessList } from "./process-sampler.ts";
-import { createTurnTimings } from "./turn-timings.ts";
+import { createTurnTimings, RING_CAP } from "./turn-timings.ts";
 
 const START = 1_800_000_000_000;
 const SECRETS = [
@@ -209,7 +209,7 @@ describe("the recorder's cost", () => {
     console.log(`recorder: ${perEventUs.toFixed(2)} µs per event over ${turns * (events.length + 2)} events; window()+day() ${reportMs.toFixed(2)} ms`);
     expect(perEventUs).toBeLessThan(50);
     expect(reportMs).toBeLessThan(50);
-    expect(timings.recent()).toHaveLength(200);
+    expect(timings.recent()).toHaveLength(RING_CAP);
     expect(timings.live()).toHaveLength(0);
   });
 });

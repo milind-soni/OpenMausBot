@@ -5,6 +5,7 @@ import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { z } from "zod";
 
 import { APPROVAL_MODES } from "../../shared/approval-mode.ts";
+import { timeBlocking } from "../perf/loop-stalls.ts";
 import { TERMINAL, type Assignment, type AssignmentEvent, type EventKind, type InboxItem, type Owner } from "./types.ts";
 
 const evidenceSchema = z.object({
@@ -53,6 +54,7 @@ const assignmentSchema = z.object({
   outcome: z.enum(["done", "needs_input", "cap_continued", "stalled", "interrupted", "budget", "provider_error", "denied",
     "expired", "stopped", "refused", "duplicate"]).optional(),
   outcomeDetail: z.string().optional(),
+  fault: z.enum(["process_start", "out_of_room", "disk_full", "tool_server", "signed_out"]).optional(),
   level: z.enum(APPROVAL_MODES),
   levelSource: z.enum(["own", "chief", "engine_cap"]),
   executions: z.number().int().nonnegative(),
@@ -72,7 +74,7 @@ const assignmentSchema = z.object({
   decide: z.object({ default: z.string().optional() }).optional(),
   answer: z.string().optional(),
   answeredBy: z.discriminatedUnion("kind", [z.object({ kind: z.literal("bot"), botId: z.string().min(1) }), z.object({ kind: z.literal("default") })]).optional(),
-  budgets: z.object({ since: z.number(), requests: z.number(), executions: z.number(), wakes: z.number() }).optional(),
+  budgets: z.object({ since: z.number(), requests: z.number(), executions: z.number(), wakes: z.number(), total: z.number().optional(), failed: z.number().optional() }).optional(),
   // The schema strips any field it does not name: every optional Assignment field must be listed here.
   cards: z.array(z.string()).optional(),
   continuation: z.object({ note: z.string(), handoffPath: z.string().optional(), count: z.number().int().nonnegative() }).optional(),
@@ -130,6 +132,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS assignments_requester_thread ON assignments(requester_thread_id);
   CREATE INDEX IF NOT EXISTS assignments_requester_run ON assignments(requester_run_id);
   CREATE INDEX IF NOT EXISTS assignments_assignee ON assignments(assignee_bot_id, assignee_thread_id);
+  CREATE INDEX IF NOT EXISTS assignments_assignee_thread ON assignments(assignee_thread_id, created_at);
   -- The live rows in all()'s order. NOT IN cannot use assignments_status, so
   -- without this every nonTerminal read walks the ended rows too, and those
   -- only grow (#2765). Created on every open, so an existing file gets it too;
@@ -322,7 +325,7 @@ export function openRuntimeStore(path: string): RuntimeStore {
       if (filter.roots) where.push("parent_id IS NULL");
       if (filter.openSince !== undefined) { where.push("(finished_at IS NULL OR finished_at >= ?)"); params.push(filter.openSince); }
       const sql = `SELECT id, json FROM assignments${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at, rowid`;
-      return (db.prepare(sql).all(...params) as Row[]).map(readAssignment);
+      return timeBlocking("runtimeReads", () => (db.prepare(sql).all(...params) as Row[]).map(readAssignment));
     },
     insert(a, event) {
       transaction(() => {

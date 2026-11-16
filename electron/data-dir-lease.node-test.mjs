@@ -11,6 +11,8 @@ import {
   acquireDataDirLeaseForProcess,
   clearRecordsFromEarlierRunOfThisContainer,
   clearRecordsFromOtherMachines,
+  inMacSyncedFolder,
+  macMountIsLocal,
 } from "./data-dir-lease.mjs";
 
 const MODULE_URL = new URL("./data-dir-lease.mjs", import.meta.url).href;
@@ -534,6 +536,120 @@ test("a delegated child from an earlier boot cannot block a new parent", (t) => 
 
 // macOS renames the host when it joins another network.
 const renamedHost = (current) => (current.host === "Ryans-MacBook-Pro.local" ? "Ryans-MBP.lan" : "Ryans-MacBook-Pro.local");
+const anotherMachineId = (current) => (current.machine === "0".repeat(32) ? "1".repeat(32) : "0".repeat(32));
+const withoutMachineId = ({ machine: _machine, ...record }) => record;
+
+test("a record names this machine by a hashed id where the platform has one", () => {
+  const { dataDir } = temporaryDirectory();
+  const record = recordWrittenByThisProcess(dataDir);
+  if (process.platform === "darwin" || process.platform === "win32") assert.match(record.machine, /^[0-9a-f]{32}$/);
+  else assert.ok(record.machine === null || /^[0-9a-f]{32}$/.test(record.machine));
+});
+
+// Only macOS renames the host per network; elsewhere the same id under another hostname may be a VM cloned from a template.
+test("a lease with this machine id under another hostname from an earlier boot: recovered on macOS, refused elsewhere", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.machine === null) return t.skip("no machine id on this platform");
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  // A live pid too: a lease from an earlier boot of this machine is stale whatever now runs under its pid.
+  for (const pid of [await exitedPid(), process.pid]) {
+    const planted = `${JSON.stringify({ ...current, host: renamedHost(current), boot: current.boot === null ? null : randomUUID(), uptime: Math.floor(osUptime() * 1000) + 3_600_000, pid, token: randomUUID() })}\n`;
+    writeFileSync(leasePath, planted, { mode: 0o600 });
+    if (process.platform !== "darwin") {
+      assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+      assert.equal(readFileSync(leasePath, "utf8"), planted);
+      continue;
+    }
+    const lease = acquireDataDirLease(dataDir);
+    const written = JSON.parse(readFileSync(leasePath, "utf8"));
+    assert.deepEqual({ host: written.host, machine: written.machine }, { host: hostname(), machine: current.machine });
+    assert.equal(lease.release(), true);
+  }
+});
+
+test("a Mac's volume is local only when the mount line naming df's mount point says so", () => {
+  const df = (filesystem, point) => `Filesystem 512-blocks Used Available Capacity  Mounted on\n${filesystem} 1942597960 1842607672 39598832 98%    ${point}\n`;
+  const table = [
+    "/dev/disk3s3s1 on / (apfs, sealed, local, read-only, journaled)",
+    "/dev/disk3s1 on /System/Volumes/Data (apfs, local, journaled, nobrowse, protect, root data)",
+    "//u@nas/Files on /Volumes/Files on NAS (smbfs, nodev, nosuid, mounted by u)",
+    "/dev/disk5s1 on /Volumes/Backup (local) (apfs, local, nodev, nosuid, journaled, noowners)",
+  ].join("\n");
+  assert.equal(macMountIsLocal(df("/dev/disk3s1", "/System/Volumes/Data"), table), true);
+  assert.equal(macMountIsLocal(df("//u@nas/Files", "/Volumes/Files on NAS"), table), false);
+  assert.equal(macMountIsLocal(df("/dev/disk5s1", "/Volumes/Backup (local)"), table), true);
+  // A mount point the table does not name, an unreadable df and an empty table are all doubts.
+  assert.equal(macMountIsLocal(df("/dev/disk9s1", "/Volumes/Gone"), table), false);
+  assert.equal(macMountIsLocal("df: /x: No such file or directory\n", table), false);
+  assert.equal(macMountIsLocal(df("/dev/disk3s1", "/System/Volumes/Data"), ""), false);
+});
+
+test("iCloud Drive and File Provider folders count as synced, whatever their case", () => {
+  const home = "/Users/someone";
+  assert.equal(inMacSyncedFolder("/Users/someone/Library/Mobile Documents/com~apple~CloudDocs/omb", home), true);
+  assert.equal(inMacSyncedFolder("/Users/someone/library/cloudstorage/Dropbox/omb", home), true);
+  assert.equal(inMacSyncedFolder("/Users/someone/Library/CloudStorage", home), true);
+  assert.equal(inMacSyncedFolder("/Users/someone/Library/CloudStorageOld/omb", home), false);
+  assert.equal(inMacSyncedFolder("/Users/someone/.openmausbot", home), false);
+  assert.equal(inMacSyncedFolder("/Users/other/Library/CloudStorage/Dropbox", home), false);
+});
+
+test("a live owner with this machine id under another hostname still blocks a second instance", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.machine === null) return t.skip("no machine id on this platform");
+  plantOwner(dataDir, { host: renamedHost(current), pid: process.pid, token: randomUUID() });
+
+  // Without a boot session (Windows) the other hostname is refused before the pid is even asked.
+  assert.throws(() => acquireDataDirLease(dataDir), current.boot === null ? /another machine/i : /already using this data directory/i);
+});
+
+test("a lease with another machine id fails closed even under this hostname", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.machine === null) return t.skip("no machine id on this platform");
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  for (const boot of [current.boot, randomUUID()]) {
+    const planted = `${JSON.stringify({ ...current, machine: anotherMachineId(current), boot, pid: await exitedPid(), token: randomUUID() })}\n`;
+    writeFileSync(leasePath, planted, { mode: 0o600 });
+    assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+    assert.equal(readFileSync(leasePath, "utf8"), planted);
+  }
+});
+
+// An older build wrote no machine id. On a Mac's local disk, its record from an earlier boot is this Mac's whatever the
+// hostname was then; elsewhere (Windows and Linux keep their hostname across networks) another hostname still fails closed.
+test("an older build's lease from an earlier boot under another hostname: recovered on a Mac's local disk, refused elsewhere", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.boot === null) return t.skip("no boot identity on this platform");
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  const older = withoutMachineId({ ...current, host: renamedHost(current), boot: randomUUID(), pid: await exitedPid(), token: randomUUID() });
+  writeFileSync(leasePath, `${JSON.stringify(older)}\n`, { mode: 0o600 });
+
+  if (process.platform !== "darwin") {
+    assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+    assert.deepEqual(JSON.parse(readFileSync(leasePath, "utf8")), older);
+    return;
+  }
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(JSON.parse(readFileSync(leasePath, "utf8")).host, hostname());
+  assert.equal(lease.release(), true);
+});
+
+test("an older build's lease from this boot under another hostname is judged by its pid", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.boot === null) return t.skip("no boot identity on this platform");
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  writeFileSync(leasePath, `${JSON.stringify(withoutMachineId({ ...current, host: renamedHost(current), pid: process.pid, token: randomUUID() }))}\n`);
+  assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
+  rmSync(leasePath);
+  writeFileSync(leasePath, `${JSON.stringify(withoutMachineId({ ...current, host: renamedHost(current), pid: await exitedPid(), token: randomUUID() }))}\n`);
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.release(), true);
+});
 
 test("a lease this computer left under its old hostname is recovered", async (t) => {
   const { dataDir } = temporaryDirectory();
@@ -564,7 +680,7 @@ test("a delegated child this computer left under its old hostname cannot block a
 test("a lease under another name from another boot still fails closed, and says how to recover", async () => {
   const { dataDir } = temporaryDirectory();
   const current = recordWrittenByThisProcess(dataDir);
-  const foreign = { host: renamedHost(current), boot: randomUUID(), pid: await exitedPid(), token: randomUUID() };
+  const foreign = { host: renamedHost(current), boot: randomUUID(), machine: anotherMachineId(current), pid: await exitedPid(), token: randomUUID() };
   const leasePath = plantOwner(dataDir, foreign);
   const planted = JSON.parse(readFileSync(leasePath, "utf8"));
   assert.throws(() => acquireDataDirLease(dataDir), (error) => {
@@ -708,8 +824,155 @@ test("a live but unrelated Windows pid reused within the same boot is treated as
   }
 });
 
+/**
+ * The Windows liveness probes faked on any host: kill answers EPERM for the given pids (the OS answer
+ * for a pid this account cannot signal — live processes of another user, and exited processes that a
+ * handle still keeps referenced), tasklist answers from a PATH shim, and powershell.exe under a faked
+ * SystemRoot. On Windows 11 wmic is absent, so the PATH shim intentionally carries no wmic. On Windows
+ * itself the shims cannot execute, so only the platform and kill fakes apply and the real tasklist and
+ * powershell answer for themselves.
+ */
+function fakeWindowsHost(t, { epermPids = [], tasklist, powershell = null } = {}) {
+  const realWindows = process.platform === "win32";
+  const priorPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { ...priorPlatform, value: "win32" });
+  const eperm = new Set(epermPids);
+  const priorKill = process.kill;
+  process.kill = (pid, signal) => {
+    if (eperm.has(pid)) throw Object.assign(new Error(`kill EPERM: ${pid}`), { code: "EPERM" });
+    return priorKill.call(process, pid, signal);
+  };
+  const priorEnv = {};
+  for (const name of ["PATH", "SystemRoot"]) priorEnv[name] = process.env[name];
+  t.after(() => {
+    Object.defineProperty(process, "platform", priorPlatform);
+    process.kill = priorKill;
+    for (const name of Object.keys(priorEnv)) {
+      if (priorEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = priorEnv[name];
+    }
+  });
+
+  if (realWindows) return;
+
+  const { root } = temporaryDirectory("windows-tools");
+  const binDir = path.join(root, "bin");
+  mkdirSync(binDir);
+  const script = (name, source) => writeFileSync(name, `#!/bin/sh\n${source}\n`, { mode: 0o755 });
+  if (Array.isArray(tasklist)) {
+    const rows = tasklist.map((pid) => `  *"PID eq ${pid}"*) echo '"openmausbot-server.exe","${pid}","Console","1","64,000 K"' ;;`).join("\n");
+    script(path.join(binDir, "tasklist"), `case "$*" in\n${rows}\n  *) echo "INFO: No tasks are running which match the specified criteria." ;;\nesac`);
+  } else if (tasklist === "error") {
+    script(path.join(binDir, "tasklist"), "exit 1");
+  }
+  const systemRoot = path.join(root, "windows");
+  if (Array.isArray(powershell)) {
+    const bin = path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0");
+    mkdirSync(bin, { recursive: true });
+    const rows = powershell.map((pid) => `  *"ProcessId=${pid}"*) echo 1 ;;`).join("\n");
+    script(path.join(bin, "powershell.exe"), `case "$*" in\n${rows}\n  *) : ;;\nesac`);
+  }
+  process.env.PATH = binDir;
+  process.env.SystemRoot = systemRoot;
+}
+
+/** The record a Windows build leaves on disk: no boot id, no pid namespace, no start ticks. */
+function windowsLeaseRecord(pid, createdAt = Date.now() - 60_000) {
+  return {
+    version: 1,
+    pid,
+    host: hostname(),
+    token: randomUUID(),
+    createdAt,
+    boot: null,
+    uptime: 1,
+    ns: null,
+    start: null,
+  };
+}
+
+function plantWindowsChildLease(dataDir, pid, createdAt) {
+  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  mkdirSync(path.dirname(childPath));
+  writeFileSync(childPath, `${JSON.stringify(windowsLeaseRecord(pid, createdAt))}\n`, { mode: 0o600 });
+  return childPath;
+}
+
+/** A pid the real process list shows as running, for the Windows-host runs where no shim can fake one. */
+function runningPid(t) {
+  const child = spawn(process.execPath, ["--eval", "setInterval(()=>{}, 1_000);"], { stdio: "ignore" });
+  assert.ok(child.pid);
+  t.after(() => child.kill());
+  return child.pid;
+}
+
+test("an exited Windows server child that still answers EPERM no longer blocks startup", async (t) => {
+  const zombiePid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [zombiePid], tasklist: [] });
+  const { dataDir } = temporaryDirectory();
+  plantWindowsChildLease(dataDir, zombiePid);
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("an exited Windows lease owner that still answers EPERM is retired, not served forever", async (t) => {
+  const zombiePid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [zombiePid], tasklist: [] });
+  const { dataDir } = temporaryDirectory();
+  writeFileSync(path.join(dataDir, LEASE_NAME), `${JSON.stringify(windowsLeaseRecord(zombiePid))}\n`, { mode: 0o600 });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("a Windows zombie is still dead when tasklist cannot answer and the process list does", async (t) => {
+  if (process.platform === "win32") return t.skip("the tool-failure fixtures are POSIX shims; real Windows probes cannot be made to fail");
+  const zombiePid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [zombiePid], tasklist: "error", powershell: [process.pid] });
+  const { dataDir } = temporaryDirectory();
+  writeFileSync(path.join(dataDir, LEASE_NAME), `${JSON.stringify(windowsLeaseRecord(zombiePid))}\n`, { mode: 0o600 });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("a Windows owner this account cannot signal but that still runs keeps blocking startup", async (t) => {
+  const realWindows = process.platform === "win32";
+  const liveForeignPid = realWindows ? runningPid(t) : await exitedPid();
+  fakeWindowsHost(t, { epermPids: [liveForeignPid], tasklist: [liveForeignPid] });
+  const { dataDir } = temporaryDirectory();
+  // On Windows the record must postdate the live pid's real creation time, or it reads as a reused pid.
+  plantWindowsChildLease(dataDir, liveForeignPid, realWindows ? Date.now() : undefined);
+
+  assert.throws(() => acquireDataDirLease(dataDir), /still shutting down/i);
+});
+
+test("a Windows owner stays alive when the fallback process list still shows it running", async (t) => {
+  if (process.platform === "win32") return t.skip("the tool-failure fixtures are POSIX shims; real Windows probes cannot be made to fail");
+  const liveForeignPid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [liveForeignPid], tasklist: "error", powershell: [liveForeignPid] });
+  const { dataDir } = temporaryDirectory();
+  plantWindowsChildLease(dataDir, liveForeignPid);
+
+  assert.throws(() => acquireDataDirLease(dataDir), /still shutting down/i);
+});
+
+test("a Windows owner that can be neither signalled nor listed still fails closed", async (t) => {
+  if (process.platform === "win32") return t.skip("the tool-failure fixtures are POSIX shims; real Windows probes cannot be made to fail");
+  const foreignPid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [foreignPid], tasklist: "error" });
+  const { dataDir } = temporaryDirectory();
+  plantWindowsChildLease(dataDir, foreignPid);
+
+  assert.throws(() => acquireDataDirLease(dataDir), /still shutting down/i);
+});
+
 // A Cloud home's volume mounts on one machine at a time, and each new home on it has a new hostname and boot.
-const otherMachine = (current) => ({ host: renamedHost(current), boot: randomUUID(), uptime: 1 });
+const otherMachine = (current) => ({ host: renamedHost(current), boot: randomUUID(), uptime: 1, machine: anotherMachineId(current) });
 
 test("on request, the lease, delegated child and recovery record another machine left are cleared and their holder named; then the lease is free", async () => {
   const { dataDir } = temporaryDirectory();

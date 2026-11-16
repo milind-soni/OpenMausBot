@@ -44,7 +44,7 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
       ...document("Tango", { memories: ["likes cheese", `the key is ${TOKEN}`], skills: [{ name: "Greet", instructions: "Say hello." }, { name: "Empty" }], extra: { anything: 1 } }),
       stray: "x",
     } });
-    expect(sent).toEqual({ refused: false, text: "Arrived in MausBot. Tango: 1 skill, 0 routines, 2 memories. Left out: 1 skill without instructions. Send those again with their full text if the Bot has it. The person can now import it in MausBot, under Settings → Import." });
+    expect(sent).toEqual({ refused: false, text: "Arrived in MausBot. Tango: 1 skill, 0 routines, 2 memories. Left out: 1 skill without instructions. Send those again with their full text if the Bot has it. The person can now import it in MausBot, under Settings → Import & export." });
     expect(call(to, "send_export", { document: JSON.stringify(document("Maus")) }).refused).toBe(false);
     expect(call(to, "send_export", { document: document("tango", { memories: ["more"] }) }).refused).toBe(false);
 

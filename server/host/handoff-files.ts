@@ -245,6 +245,16 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     return true;
   }
 
+  /** Files that crossed from the person's other place with `assignmentId` (server/bot-link/): the ones sent with it, or the
+   * ones its result returned. They are in the attachment store already, and the place they came from charged its sender. */
+  function crossed(assignmentId: string, way: Way, from: { botId: string; name: string }, files: readonly PassedFile[]): void {
+    if (!files.length || batchOf(assignmentId, way)) return;
+    load().batches.push({ assignmentId, way, from, files: files.slice(0, HANDOFF_FILES_PER_ASSIGNMENT), at: now() });
+    save();
+  }
+  /** What an assignment carries one way, for sending to the person's other place. */
+  const carriedOne = (assignmentId: string, way: Way): readonly PassedFile[] => batchOf(assignmentId, way)?.files ?? [];
+
   /** The chips of a hand-off line, as the row's `attachments`. */
   function sentWith(assignmentId: string): Attached {
     return attachedRow(batchOf(assignmentId, "sent")?.files);
@@ -458,7 +468,7 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     else if (change.type === "bot.deleted" && change.botId && id.test(change.botId)) forget({ botId: change.botId });
   });
 
-  return { stage, drop, reserveDay, releaseDay, sent, attached, sentWith, returnedWith, forTurn, around, coordinate, forget };
+  return { stage, drop, reserveDay, releaseDay, sent, attached, sentWith, returnedWith, forTurn, around, coordinate, forget, crossed, carried: carriedOne };
 }
 
 export type HandoffFiles = ReturnType<typeof createHandoffFiles>;

@@ -101,13 +101,26 @@ describe("the keys page", () => {
     expect(rowsShown()).not.toContain("elevenlabs");
   });
 
-  it("offers the Live calls service, OpenAI, Azure OpenAI, Fish Audio, Gemini or ElevenLabs, on the separate live key row", () => {
+  it("offers the Live calls service, OpenAI, Azure OpenAI, Fish Audio, Gemini, ElevenLabs or a custom endpoint, on the separate live key row", () => {
     setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
     page();
     const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
-    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure", "fish", "gemini", "elevenlabs"]);
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure", "fish", "gemini", "elevenlabs", "custom"]);
     expect(select.value).toBe("azure");
     expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
+  });
+
+  it("with a custom endpoint chosen, the Live key row asks for that endpoint's key, with its address and model, and no OpenAI page", () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "custom", customEndpoint: "https://gateway.example.com/v1", customModel: "my-live" } });
+    page();
+    const custom = row("liveKey")!;
+    expect(custom.textContent).toContain("Custom endpoint key for Live calls");
+    expect(custom.textContent).toContain("Required");
+    expect(custom.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe("https://gateway.example.com/v1");
+    expect([...custom.querySelectorAll("input")].map((input) => input.value)).toContain("my-live");
+    expect(custom.querySelector<HTMLAnchorElement>('a[href*="platform.openai.com"]')).toBeNull();
+    expect(row("liveCalls")).toBeNull();
   });
 
   it("with Azure chosen, the Live key row asks for an Azure key: required, no OpenAI wording, and no row saying Live uses the OpenAI key", () => {

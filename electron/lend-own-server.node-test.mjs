@@ -31,13 +31,13 @@ async function scratch(t) {
 /** A self-hosted server as this desktop's sign-in there sees it: `scopes`, whether nobody else signs in there (`own`, which
  * the server says only to its one owner, with what it takes from them), and whether it is a team's or a Cloud. Its public
  * description offers no lending, as before pairing. */
-function selfHosted({ scopes = ["admin", "client"], own = true, extra = {}, mcp = true } = {}) {
+function selfHosted({ scopes = ["admin", "client"], own = true, extra = {}, mcp = true, caller = false } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, headers: { get: () => null }, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
   const state = { environmentId: randomUUID(), sessionId: randomUUID(), scopes, own, extra, connects: [], disconnects: [], polls: 0 };
   state.fetch = async (url, init) => {
     const route = new URL(url).pathname;
     const owner = state.own && state.scopes.includes("admin");
-    if (route === "/api/auth/session") return json({ kind: "session", id: state.sessionId, scopes: state.scopes, ...(owner ? { own: true, lending: { sharedComputers: true, lendingDetails: true, fileEdits: true, ...(mcp ? { lentMcp: true } : {}) } } : {}), ...state.extra });
+    if (route === "/api/auth/session") return json({ kind: "session", id: state.sessionId, scopes: state.scopes, ...(owner ? { own: true, lending: { sharedComputers: true, lendingDetails: true, fileEdits: true, ...(mcp ? { lentMcp: true } : {}), ...(mcp && caller ? { mcpCaller: true } : {}) } } : {}), ...state.extra });
     if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { remoteSessions: true } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
@@ -91,10 +91,20 @@ test("once the person allows it, a server of their own gets the apps on the scre
   assert.deepEqual({ computer: connect.computer, terminal: connect.terminal, folders: connect.folders, mcpServers: connect.mcpServers, environments: connect.environments, fileEdits: connect.fileEdits },
     { computer: true, terminal: false, folders: [], mcpServers: true, environments: [server.environmentId], fileEdits: true });
   assert.equal("internet" in connect || "chrome" in connect, false, "the device link is a Cloud's alone");
+  assert.equal("mcpCaller" in connect, false, "an older server refuses fields it does not know");
   assert.equal(await mac.sharing.ownOffer(garage), null, "answered for this pairing");
   assert.deepEqual(mac.summaries.at(-1).lending, [garage.id]);
   assert.deepEqual(mac.summaries.at(-1).clouds, ["Garage"], "the menu-bar item names it like a Cloud");
   assert.equal(mac.summaries.at(-1).terminalSwitch, false, "the Clouds' terminal switch stays out of the menu without a Cloud");
+});
+
+test("a server of their own that takes an MCP call's caller hears that this computer passes it on", async t => {
+  const server = selfHosted({ caller: true });
+  const mac = await desktop(t, server);
+  await mac.sharing.ownOffer(garage);
+  await mac.sharing.lendOwn(garage, { folders: [], terminal: false, computer: true });
+  await until(() => server.connects.length === 1 && mac.sharing.state(garage.id).connected, "the server to take this computer");
+  assert.deepEqual({ mcpServers: server.connects[0].mcpServers, mcpCaller: server.connects[0].mcpCaller }, { mcpServers: true, mcpCaller: true });
 });
 
 test("a narrower pairing, a server others sign in to, a team's server or a Cloud is never asked about and is never lent", async t => {

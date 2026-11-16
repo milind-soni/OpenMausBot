@@ -13,7 +13,9 @@ import { closeMessageDb,
   insertNotificationLog,
   lastRowAt,
   liveAppRows,
+  latestMessageAts,
   latestPersonLineAts,
+  optionCardsForTools,
   logNotification,
   openRescueMessages,
   latestSaidByBot,
@@ -495,12 +497,44 @@ describe("messages_thread_at", () => {
           "AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)" +
           ") WHERE rn = 1 ORDER BY at DESC LIMIT ?",
       );
-      const ats = planOf("SELECT thread_id, MAX(at) AS at FROM messages WHERE thread_id IN (?, ?) GROUP BY thread_id");
+      const ats = planOf("SELECT value AS thread_id, (SELECT MAX(at) FROM messages  WHERE thread_id = value ) AS at FROM json_each(?)");
       expect(said).toContain("messages_thread_at");
       expect(ats).toContain("messages_thread_at");
     } finally {
       raw.close();
     }
+  });
+});
+
+describe("start-up reads on their indexes", () => {
+  beforeEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    mkdirSync(DATA_DIR, { recursive: true });
+  });
+
+  it("orders a thread by its newest person line or finished reply, at the turn's completion when it has one", () => {
+    insertMessage("chat", msg("asked", "Plan the week.", { at: 10 }));
+    insertMessage("chat", msg("working", "Looking.", { at: 20, role: "bot", turnId: "turn-1" }));
+    insertMessage("chat", msg("done", "Here it is.", { at: 30, role: "bot", turnId: "turn-1", turnTerminal: true, turnCompletedAt: 45 }));
+    insertMessage("chat", { ...msg("tool", "", { at: 60, role: "bot", turnId: "turn-1" }), kind: "activity" });
+    insertMessage("peer", msg("handoff", "Take this over.", { at: 70, peerAsk: { botId: "teammate", name: "Teammate" } }));
+    insertMessage("peer", msg("note", "No turn.", { at: 50, role: "bot" }));
+    insertMessage("quiet", { ...msg("only-tool", "", { at: 80, role: "bot" }), kind: "activity" });
+    expect(Object.fromEntries(latestMessageAts(["chat", "peer", "quiet", "empty"], true))).toEqual({ chat: 45, peer: 50 });
+    expect(Object.fromEntries(latestMessageAts(["chat", "peer", "quiet", "empty"]))).toEqual({ chat: 60, peer: 70, quiet: 80 });
+  });
+
+  it("finds the option cards naming a tool, oldest first, among every other kind of row", () => {
+    const card = (id: string, tool: string, at: number): Message => ({ ...msg(id, "", { at, role: "bot" }), kind: "options", card: { title: "Allow?", subtitle: "", options: ["Yes"], requestType: "question", tool } as Message["card"] });
+    insertMessage("b", card("second", "your_computer", 20));
+    insertMessage("a", card("first", "your_computer", 10));
+    insertMessage("a", card("other", "ask_peer", 30));
+    insertMessage("a", { ...msg("call", "", { at: 40, role: "bot" }), kind: "activity", tool: { name: "your_computer", ok: true } as Message["tool"] });
+    insertMessage("a", msg("said", "your_computer", { at: 50 }));
+    expect(optionCardsForTools(["your_computer"])).toEqual([{ threadId: "b", messageId: "second" }, { threadId: "a", messageId: "first" }]);
+    expect(optionCardsForTools(["your_computer", "ask_peer"]).map((row) => row.messageId)).toEqual(["second", "first", "other"]);
+    expect(optionCardsForTools([])).toEqual([]);
   });
 });
 

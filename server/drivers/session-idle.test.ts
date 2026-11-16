@@ -112,6 +112,19 @@ describe("idle engines on a small box", () => {
     expect(idleEnginesAllowed({ bytes: DESKTOP }, 0)).toBe(Infinity);
   });
 
+  it("keeps no more idle engines than a self-hosted server's limits fit, on a box of any size, the longest idle closing first", () => {
+    expect(idleEnginesAllowed({ bytes: DESKTOP }, 0, 2)).toBe(2);
+    expect(idleEnginesAllowed(small, 0.4 * GB, 5)).toBe(1);
+    const [a, b, d] = [engine(), engine(), engine()];
+    const fits = () => 2;
+    keepWarm("a", a.warm, { bytes: DESKTOP }, () => 8 * GB, fits);
+    keepWarm("b", b.warm, { bytes: DESKTOP }, () => 8 * GB, fits);
+    expect([a.state.closed, b.state.closed]).toEqual([0, 0]);
+    keepWarm("d", d.warm, { bytes: DESKTOP }, () => 8 * GB, fits);
+    expect([a.state.closed, b.state.closed, d.state.closed]).toEqual([1, 0, 0]);
+    expect(warmEngineKeys()).toEqual(["b", "d"]);
+  });
+
   it("closes the engine idle longest when another goes idle and memory is tight, never a busy one", () => {
     const [a, b, c] = [engine(), engine(true), engine()];
     keepWarm("a", a.warm, small, () => 0.6 * GB);
@@ -124,8 +137,8 @@ describe("idle engines on a small box", () => {
 
   it("keeps every idle engine on a large box, and forgets one once it closes or works again", () => {
     const [a, b] = [engine(), engine()];
-    keepWarm("a", a.warm, { bytes: DESKTOP }, () => 0);
-    keepWarm("b", b.warm, { bytes: DESKTOP }, () => 0);
+    keepWarm("a", a.warm, { bytes: DESKTOP }, () => 0, () => Infinity);
+    keepWarm("b", b.warm, { bytes: DESKTOP }, () => 0, () => Infinity);
     expect([a.state.closed, b.state.closed, warmEngineKeys()]).toEqual([0, 0, []]);
     keepWarm("a", a.warm, small, () => 0.6 * GB);
     stopIdleClose("a", null);

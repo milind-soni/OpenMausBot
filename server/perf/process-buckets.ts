@@ -14,6 +14,9 @@ export interface ProcessRow {
   rssBytes: number;
   /** Tells a pid apart from an earlier process that had it (its start time, as the source gives it). */
   start: string;
+  /** Linux: the process's threads, and its state letter ("Z": exited, not yet collected). */
+  threads?: number;
+  state?: string;
 }
 
 /** Engine CLIs by executable name, as the drivers' kinds name them. */
@@ -86,7 +89,9 @@ export function parseProcStat(pid: number, text: string): ProcessRow | null {
   const fields = text.slice(close + 2).split(" ");
   const ppid = Number(fields[1]), user = Number(fields[11]), system = Number(fields[12]), start = fields[19], rss = Number(fields[21]);
   if (!Number.isInteger(ppid) || !Number.isFinite(user) || !Number.isFinite(system) || !start) return null;
-  return { pid, ppid, name: text.slice(open + 1, close).toLowerCase(), cpuMs: ((user + system) * 1000) / CLOCK_TICKS, rssBytes: (Number.isFinite(rss) ? rss : 0) * PAGE_BYTES, start };
+  const threads = Number(fields[17]);
+  return { pid, ppid, name: text.slice(open + 1, close).toLowerCase(), cpuMs: ((user + system) * 1000) / CLOCK_TICKS, rssBytes: (Number.isFinite(rss) ? rss : 0) * PAGE_BYTES, start,
+    ...(Number.isInteger(threads) && /^[A-Za-z]$/.test(fields[0] ?? "") ? { threads, state: fields[0]! } : {}) };
 }
 
 /** `/proc/self/stat`'s CPU time of children this process waited for, ms. */

@@ -55,7 +55,7 @@ export function createThemeTool(deps: ThemeToolDeps) {
       return id ? (store.read(person, id)?.name ?? id) : "";
     };
     return {
-      id: "appearance.theme", label: "Theme", help: "A custom look for the app.", where: "Settings → Appearance", synonyms: [], tier: "safe",
+      id: "appearance.theme", label: "Theme", help: "A custom look for the app.", where: "theme", synonyms: [], tier: "safe",
       value: z.unknown(), allowed: "a theme", read,
       current: () => ({ undoTo: store.history(person)[0]?.seq ?? 0 }) satisfies Wear,
       write: async (value) => {

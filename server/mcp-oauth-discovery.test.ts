@@ -34,6 +34,18 @@ describe("resourceMetadataUrl", () => {
 });
 
 describe("discoverMcpAuth", () => {
+  it.each([
+    [["read"], ["read", "offline_access"], ["read", "offline_access"]],
+    [["read", "offline_access"], ["offline_access"], ["read", "offline_access"]],
+    [["read"], ["read"], ["read"]],
+    [[], ["offline_access"], undefined],
+  ])("combines advertised offline access without changing unspecified or duplicate scopes", async (resourceScopes, authScopes, expected) => {
+    const { impl } = stubFetch({
+      "https://mcp.example.com/.well-known/oauth-protected-resource/mcp": { authorization_servers: ["https://auth.example.com"], scopes_supported: resourceScopes },
+      "https://auth.example.com/.well-known/oauth-authorization-server": { ...AS, scopes_supported: authScopes },
+    });
+    expect((await discoverMcpAuth("https://mcp.example.com/mcp", null, { fetch: impl }))?.scopes).toEqual(expected);
+  });
   it("follows the header hint to the authorization server", async () => {
     const { impl } = stubFetch({
       "https://mcp.example.com/prm": { resource: "https://mcp.example.com/mcp", authorization_servers: ["https://auth.example.com"], scopes_supported: ["read", "write"] },

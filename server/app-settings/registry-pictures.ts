@@ -25,7 +25,7 @@ export function pictureEntries(deps: Pick<RegistryDeps, "bots" | "patchBot" | "c
   const ownPicture = () => deps.cfg().profile?.avatarUrl ?? "";
   return [
     writable({
-      id: "bots.picture", label: "Bot picture", where: "a bot's Settings", fromFile: true,
+      id: "bots.picture", label: "Bot picture", where: "bot-settings", fromFile: true,
       help: "A bot's own picture, shown instead of its mascot face wherever the bot appears. Use a picture file you have: one you made or downloaded, or one the person sent in this conversation.",
       synonyms: ["picture", "avatar", "photo", "image", "profile picture", "icon", "face", "pfp", "bot picture"],
       value: withoutKeys(z.object({ botId: z.string().regex(/^[\w-]{1,120}$/), path }).strict()),
@@ -52,7 +52,7 @@ export function pictureEntries(deps: Pick<RegistryDeps, "bots" | "patchBot" | "c
       },
     }),
     writable({
-      id: "profile.photo", label: "Your photo", where: "Settings → You and your bots", fromFile: true,
+      id: "profile.photo", label: "Your photo", where: "about-you", fromFile: true,
       help: "The person's own picture, shown wherever the app shows them. Use a picture file you have: one you made or downloaded, or one the person sent in this conversation.",
       synonyms: ["photo", "avatar", "profile picture", "my picture", "my photo", "pfp", "picture of me"],
       value: z.object({ path }).strict(), allowed: `{"path"}: path is ${SOURCE}; an empty path takes the photo off`,

@@ -10,9 +10,10 @@ import {
   type FailedRequest, type HealthDelta, type RelayRead,
 } from "./browser-page-health.ts";
 import { RelayPorts, RelayTimeout, relay, relayPorts, relayTarget, type RelayTarget } from "./browser-relay.ts";
-import type { BrowserSpawnSpec } from "./browser-runtime.ts";
+import { attachesToChrome, type BrowserSpawnSpec } from "./browser-runtime.ts";
 import { sanitizeUrl, scrubBrowserResult } from "./browser-tool-shape.ts";
 import { browserEgress } from "./browser/egress/registry.ts";
+import { chromeLauncher } from "./browser/chrome/launcher.ts";
 
 export interface StepContext {
   botId: string;
@@ -77,6 +78,8 @@ const CODE_LATCH_MS = 60_000;
 const FRESH_IMAGE_MS = 2_000;
 
 const RELAUNCHED = "The browser had stopped and was started again during this call: pages, refs and form input from before are gone. Take a snapshot before acting on refs.";
+/** Said when a page answers 403 to the headless shell: many sites refuse it, and only the person can bring a real Chrome. */
+export const SHELL_REFUSED = "This page answered 403 Forbidden, and this built-in browser is Chromium's headless shell (Google Chrome is not installed on this computer), which many sites refuse. If the site keeps refusing it, do not try to get around the block: tell the person that once they install Google Chrome the built-in browser uses it instead, or that they can open the site and sign in themselves in their own browser or on their Local VM.";
 
 /** Read-only; reports how much the focused element holds, never its value. A cross-origin frame stops the focus walk. */
 export const GEOMETRY_SCRIPT = `(() => {
@@ -315,9 +318,11 @@ export class BrowserSteps {
   private sessions = new Map<string, SessionSteps>();
   private now: () => number;
   private sleep: (ms: number) => Promise<void>;
+  private shellForWantOfChrome: () => boolean;
 
-  constructor(options: { ports: RelayPorts; evidence: BrowserEvidence | null; health?: PageHealthReader; now?: () => number; sleep?: (ms: number) => Promise<void> }) {
+  constructor(options: { ports: RelayPorts; evidence: BrowserEvidence | null; health?: PageHealthReader; now?: () => number; sleep?: (ms: number) => Promise<void>; shellForWantOfChrome?: () => boolean }) {
     this.ports = options.ports;
+    this.shellForWantOfChrome = options.shellForWantOfChrome ?? (() => chromeLauncher.runsShellForWantOfChrome());
     this.evidence = options.evidence;
     this.health = options.health ?? new PageHealthReader();
     this.now = options.now ?? Date.now;
@@ -452,9 +457,13 @@ export class BrowserSteps {
       const delta = await this.health.read(call.session, read, call.ctx?.threadId ?? null, state.noDaemon);
       if (this.ports.takeStarted(call.session)) await this.started(call, steps, true, out);
       const pageHost = this.health.pageHost(call.session);
+      const late = state.late ? this.health.visible(call.session, state.late) : null;
+      const visible = delta ? this.health.visible(call.session, delta) : null;
+      const refused = [late, visible].some((seen) => seen?.requests.some((request) => request.status === 403 && request.type.toLowerCase() === "document"));
       const lines = [
-        state.late ? healthLine(this.health.visible(call.session, state.late), [], "late", SETTLE_CAP_MS / 1000, pageHost) : null,
-        delta ? healthLine(this.health.visible(call.session, delta), recording ? unansweredWorthSaying(pending) : [], state.action ? "after" : "late", SETTLE_CAP_MS / 1000, pageHost) : null,
+        late ? healthLine(late, [], "late", SETTLE_CAP_MS / 1000, pageHost) : null,
+        visible ? healthLine(visible, recording ? unansweredWorthSaying(pending) : [], state.action ? "after" : "late", SETTLE_CAP_MS / 1000, pageHost) : null,
+        refused && !attachesToChrome(call.spec.env) && this.shellForWantOfChrome() ? SHELL_REFUSED : null,
         browserEgress.takeNotice(call.session),
       ];
       for (const text of lines) if (text) out.parts.push({ type: "text", text });

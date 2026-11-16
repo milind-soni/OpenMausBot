@@ -163,6 +163,9 @@ export interface SendTurnInput {
    * carry the volatile half in the newest user message so the cached prefix stays byte-identical. */
   systemStable?: string;
   systemVolatile?: string;
+  /** The team roster as it appears in systemStable. It changes whenever a bot is added, renamed or removed, so a per-thread
+   * process keys on systemStable without it and a warm one gets a changed roster as a note (prompt-split.ts). */
+  systemRoster?: string;
   /** The message tags teammates, so digest-based delivery must not suppress the mentions note even when it is unchanged. */
   mentionTurn?: boolean;
   /** The bot will likely browse, so a driver may load browser tools up front rather than behind tool search. */
@@ -470,7 +473,8 @@ export interface ProviderAuthenticationStart {
 }
 
 export interface ProviderAuthenticationStatus extends Omit<ProviderAuthenticationStart, "phase"> {
-  phase: "waiting" | "succeeded" | "failed" | "expired" | "cancelled";
+  /** `verifying`: the person's part is done and the provider is finishing the sign-in. */
+  phase: "waiting" | "verifying" | "succeeded" | "failed" | "expired" | "cancelled";
   /** Safe, actionable copy; never unfiltered CLI output or credentials. */
   message?: string;
 }
@@ -572,7 +576,8 @@ export interface ProviderInstance {
   /** Optional first-party runtime installation and account setup. */
   readonly installRuntime?: () => Promise<void>;
   readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;
-  readonly authenticationMethod?: "browser-pkce" | "browser";
+  /** Named when the calls an instance offers do not tell its sign-in apart; `callback-url` is a link plus a redirect URL pasted back. */
+  readonly authenticationMethod?: "browser-pkce" | "browser" | "callback-url";
   readonly getAuthentication?: (flowId: string) => Promise<ProviderAuthenticationStatus>;
   readonly completeAuthentication?: (flowId: string, callbackUrl: string) => Promise<void>;
   readonly cancelAuthentication?: () => Promise<void>;

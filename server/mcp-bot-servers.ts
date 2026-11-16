@@ -207,7 +207,7 @@ export function claimBotMcpServers(raw: Record<string, unknown> | undefined, dat
 export function withoutBotMcpServers(raw: Record<string, unknown> | undefined, botId: string): Record<string, unknown> | null {
   const kept = Object.entries(raw ?? {}).filter(([name, value]) => {
     const parsed = parseStoredMcpServer(name, value);
-    return !(parsed.ok && !isRemoteMcpServer(parsed.server) && parsed.server.bot === botId);
+    return !(parsed.ok && parsed.server.bot === botId);
   });
   return kept.length === Object.keys(raw ?? {}).length ? null : Object.fromEntries(kept);
 }

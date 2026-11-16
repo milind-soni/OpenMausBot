@@ -100,7 +100,7 @@ const TRIGGER_FIELDS_SCHEMA = {
   },
   timeout_minutes: { type: "integer", minimum: 5, maximum: 240, description: "Schedules: optional limit on a run, 5 to 240." },
   clear_timeout: { type: "boolean", description: "Update: true removes the limit." },
-  same_conversation: { type: "boolean", description: "app_event or webhook: each run continues the last run's conversation." },
+  same_conversation: { type: "boolean", description: "app_event, webhook or schedule: each run continues the last run's conversation." },
   continuity: { type: "boolean", description: "Schedules: each run gets the last run's report." },
   overlap: { type: "string", enum: ["skip", "queue"], description: "Schedules: while a run works, skip (default) or queue one." },
   run_on_startup: { type: "boolean", description: "Repeating schedules: also run when OpenMausBot starts." },

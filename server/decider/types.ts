@@ -1,11 +1,13 @@
-/** workersai: Cloudflare's Clef on Workers AI, Jev-compatible. custom: a gateway the person points at. */
-export type DeciderProvider = "jev" | "workersai" | "openrouter" | "custom";
+/** workersai: Cloudflare's Clef on Workers AI, Jev-compatible. custom: a gateway the person points at. gemini: Google's
+ * Decisions API with the Gemini key saved for speech or images. */
+export type DeciderProvider = "jev" | "workersai" | "openrouter" | "custom" | "gemini";
 
 /** chat: a chat model asked for strict JSON; decisions: OpenRouter's Decisions API (output modality `decisions`). */
 export type OpenRouterApi = "chat" | "decisions";
 
-/** A custom gateway's protocol: systemone is `POST {base}/systemone` (Jev's shape), decisions is `POST {base}/decisions`. */
-export type CustomApi = "systemone" | "decisions";
+/** A custom gateway's protocol: systemone is `POST {base}/systemone` (Jev's shape), decisions is `POST {base}/decisions`,
+ * chat is `POST {base}/chat/completions` (any OpenAI-compatible server, such as Gemini's, asked for strict JSON). */
+export type CustomApi = "systemone" | "decisions" | "chat";
 
 export type DeciderJob = "roomRouting" | "inboxTriage";
 export const DECIDER_JOBS: readonly DeciderJob[] = ["roomRouting", "inboxTriage"];

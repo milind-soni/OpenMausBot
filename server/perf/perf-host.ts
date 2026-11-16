@@ -5,7 +5,9 @@ import { join } from "node:path";
 import type { EngineLimitsReport } from "../../shared/limit-reset.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import type { StoreChange } from "../store.ts";
+import { createLoopStalls, requestArrivedBefore, type LoopStalls } from "./loop-stalls.ts";
 import { duration, limitHolds, perfHealth, perfLines, turnLine, type PerfHealth } from "./perf-report.ts";
+import { createProcessHealth, type ProcessHealthRecorder } from "./process-health.ts";
 import { createProcessSampler, linuxProcessList, LINUX_SAMPLE_MS, nodeUtilization, OTHER_SAMPLE_MS, psProcessList, type ProcessSampler } from "./process-sampler.ts";
 import type { FailoverWhy } from "./turn-record.ts";
 import { createTurnTimings, type Refusal, type SlowNote, type TurnTimings } from "./turn-timings.ts";
@@ -28,7 +30,11 @@ export interface PerfHostDeps {
   timer?: false;
   now?: () => number;
   sampler?: ProcessSampler;
-  /** The engine processes the server tracks, with the threads each runs (engine-memory, on a Cloud home). */
+  /** Tests: the event-loop delay recorder. */
+  stalls?: LoopStalls;
+  /** Tests: the process-room recorder. */
+  processes?: ProcessHealthRecorder;
+  /** The engine processes the server tracks, with the threads each runs (engine-memory, where turns wait for room). */
   engines?: () => ReadonlyArray<{ pid: number; threads: readonly string[] }>;
 }
 
@@ -63,7 +69,7 @@ export function createPerfHost(deps: PerfHostDeps) {
   const guarded = <T>(what: string, read: () => T, fallback: T): T => {
     try { return read(); } catch (error) { say(`failed:${what}`, `the performance recorder failed (${what}): ${error instanceof Error ? error.name : "error"}`); return fallback; }
   };
-  deps.store.onChange((change) => { if (change.type === "message") guarded("message", () => timings.noteMessage(change.threadId, change.message), undefined); });
+  deps.store.onChange((change) => { if (change.type === "message") guarded("message", () => timings.noteMessage(change.threadId, change.message, requestArrivedBefore(change.message.at)), undefined); });
   deps.bus.subscribe((event) => guarded("event", () => timings.noteEvent(event), undefined));
 
   /** The limit clock is made after this host; until it is, there are no limits to read. */
@@ -77,14 +83,20 @@ export function createPerfHost(deps: PerfHostDeps) {
   };
   const enginePids = () => new Map((deps.engines?.() ?? []).map(({ pid, threads }) => [pid, threads.map(timings.engineOf).find((kind) => kind !== null) ?? "unknown"] as const));
   const linux = process.platform === "linux", windows = process.platform === "win32";
+  /** Its two warnings are said once each for the life of the server. */
+  const processes = deps.processes ?? createProcessHealth({ warn: (kind, line) => say(kind, line) });
   const sampler = deps.sampler ?? createProcessSampler({
     list: linux ? () => linuxProcessList() : psProcessList, intervalMs: linux ? LINUX_SAMPLE_MS : OTHER_SAMPLE_MS,
     scope: deps.wholeMachine && linux ? "all" : "tree", utilization: nodeUtilization(), now, engines: enginePids,
     stalled: (ms) => say("loop", `event loop stalled: the ${linux ? 60 : 300}s sampler fired ${duration(ms)} late`), afterSample: watchHolds,
+    seen: (rows, buckets) => processes.sample(rows, buckets),
   });
   if (deps.timer !== false && !windows) sampler.start();
+  const stalls = deps.stalls ?? createLoopStalls();
+  if (deps.timer !== false) stalls.start();
+  if (deps.timer !== false && linux) guarded("limits", () => (deps.log ?? ((line: string) => console.warn(line)))(processes.startLine()), undefined);
 
-  const sources = () => ({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: limits(), process: windows ? null : sampler.report() });
+  const sources = () => ({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: limits(), process: windows ? null : sampler.report(), stalls: guarded("stalls", () => stalls.report(), null), processes: processes.report() });
   return {
     timings,
     sampler,
@@ -103,7 +115,7 @@ export function createPerfHost(deps: PerfHostDeps) {
       return guarded("text", () => perfLines(sources(), timings.recent({ limit: RECENT_IN_REPORT }), "Latest turns, newest last:"), PERF_UNAVAILABLE).join("\n");
     },
     /** The graceful shutdown: no more samples, and the turns since the last save written now. */
-    stop() { sampler.stop(); guarded("save", () => timings.flush(), undefined); },
+    stop() { sampler.stop(); stalls.stop(); guarded("save", () => timings.flush(), undefined); },
   };
 }
 export type PerfHost = ReturnType<typeof createPerfHost>;

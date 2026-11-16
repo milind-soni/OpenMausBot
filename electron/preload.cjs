@@ -23,6 +23,21 @@ ipcRenderer.on("chat:open", (_event, link) => {
   for (const listener of chatLinkListeners) listener(link);
 });
 
+// A new bot asked for from the person's other place is made only by a page that is listening soon after: held for a
+// page still starting, then forgotten, so a sign-in document or an older page never makes one later.
+const NEW_BOT_HELD_MS = 10_000;
+let pendingNewBotAt = null;
+const newBotListeners = new Set();
+const hearNewBot = () => {
+  pendingNewBotAt = null;
+  void ipcRenderer.invoke("places-together:new-bot-heard").catch(() => {});
+  for (const listener of newBotListeners) listener();
+};
+ipcRenderer.on("places-together:new-bot", () => {
+  if (!newBotListeners.size) { pendingNewBotAt = Date.now(); return; }
+  hearNewBot();
+});
+ipcRenderer.on("places-together:new-bot-cancel", () => { pendingNewBotAt = null; });
 let pendingNotificationOpen = null;
 const notificationOpenListeners = new Set();
 ipcRenderer.on("desktop-notifications:open", (_event, target) => {
@@ -75,7 +90,7 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
@@ -565,6 +580,28 @@ const bridge = {
       const handler = (_event, notice) => cb(notice);
       ipcRenderer.on("cloud-send:notice-changed", handler);
       return () => ipcRenderer.removeListener("cloud-send:notice-changed", handler);
+    },
+  } : undefined,
+  // This computer's page and My Cloud's own page (main refuses any other): the other one's bots, listed beside this one's.
+  placesTogether: process.argv.includes("--omb-company-desktop=1") ? {
+    state: () => ipcRenderer.invoke("places-together:state"),
+    set: on => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:set", on === true) : Promise.reject(new Error("Turn the switch to list both places' bots.")),
+    open: botId => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:open", String(botId)) : Promise.reject(new Error("Choose a bot to open it.")),
+    onChanged: cb => {
+      const handler = () => cb();
+      ipcRenderer.on("places-together:changed", handler);
+      return () => ipcRenderer.removeListener("places-together:changed", handler);
+    },
+    newBotChoice: () => ipcRenderer.invoke("places-together:new-bot-choice"),
+    newBot: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:new-bot") : Promise.reject(new Error("Choose where the new bot lives.")),
+    onNewBot: cb => {
+      newBotListeners.add(cb);
+      if (pendingNewBotAt !== null && Date.now() - pendingNewBotAt <= NEW_BOT_HELD_MS) hearNewBot();
+      pendingNewBotAt = null;
+      return () => newBotListeners.delete(cb);
     },
   } : undefined,
   // This computer's page only (never in REMOTE_SAFE, and main refuses any other): bots in two places, brought together on one.

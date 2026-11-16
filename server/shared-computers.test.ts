@@ -189,6 +189,27 @@ describe("shared computer authority and lifecycle", () => {
       broker.close();
     }
   });
+  it("sends an MCP call's caller only to a desktop that said it takes one, so an older desktop keeps running MCP calls", async () => {
+    const server = { name: "local", url: "http://127.0.0.1:19501/mcp", type: "http" as const, headers: {} };
+    const caller = { botId: "kiwi", threadId: "t-1" };
+    for (const [scopes, sent] of [[{ mcpServers: true as const }, false], [{ mcpServers: true as const, mcpCaller: true as const }, true]] as const) {
+      const broker = new SharedComputers(() => true);
+      const computer = { ...registration(), ...scopes }; broker.register(computer, alice, secret);
+      const call = broker.request({ computer_id: computer.id, action: "mcp_call", server, tool_name: "search", arguments: {}, caller }, alice.person, () => true);
+      call.catch(() => {});
+      const job = await broker.poll(computer.id, alice.session, secret);
+      expect(job!.operation.caller, JSON.stringify(scopes)).toEqual(sent ? caller : undefined);
+      expect("caller" in job!.operation).toBe(sent);
+      broker.close();
+    }
+    const broker = new SharedComputers(() => true);
+    const computer = { ...registration(), mcpServers: true as const, mcpCaller: true as const }; broker.register(computer, alice, secret);
+    const list = broker.request({ computer_id: computer.id, action: "mcp_tools", server, caller }, alice.person, () => true);
+    list.catch(() => {});
+    expect("caller" in (await broker.poll(computer.id, alice.session, secret))!.operation, "only a tool call names its caller").toBe(false);
+    broker.close();
+    expect(sharedComputerOperation.safeParse({ computer_id: computer.id, action: "mcp_call", server, tool_name: "x", caller }).success, "a bot's own operation can't name a caller").toBe(false);
+  });
   it("turn cancellation rejects queued and already delivered actions", async () => {
     vi.useFakeTimers();
     const broker = new SharedComputers(() => true);

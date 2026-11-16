@@ -12,7 +12,7 @@ import { augmentedPath } from "../../env-path.ts";
 import { calibrateIdentity, chromeFingerprint, loadOrCalibrateIdentity, type CalibratedIdentity } from "./calibrate.ts";
 import { needsNoSandbox, type ChromeIdentity } from "./identity.ts";
 import { installChromeForTesting, type ChromeForTestingPin, type DownloadProgress } from "./install.ts";
-import { chromeHost, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
+import { chromeHost, installedGoogleChrome, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
 import { IdentitySidecars } from "./sidecar.ts";
 import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, writeLauncher, type LauncherBox, type LauncherSettings, type Screen } from "./wrapper.ts";
 
@@ -114,6 +114,15 @@ export class ChromeLauncher implements BrowserLaunch {
     // Once a download has started, a browser agent-browser's PATH shows later must not switch a session's launcher.
     const downloading = this.state.kind === "preparing" || this.state.kind === "downloading";
     return resolveChromePlan(this.host, this.options.engine ? this.options.engine() : this.managedEngine(), { downloading });
+  }
+
+  /** agent-browser runs its own headless shell, which many sites refuse, only because no Google Chrome is installed here. */
+  runsShellForWantOfChrome(): boolean {
+    const plan = this.plan();
+    if (plan.kind === "legacy") return plan.noChrome === true;
+    // A download that failed, or a downloaded Chrome that then failed its checks, leaves the engine on its own shell; an installed Chrome it would use instead does not.
+    const downloadFailed = plan.kind === "download" || (plan.kind === "chrome" && plan.chrome.source === "downloaded");
+    return this.state.kind === "failed" && downloadFailed && installedGoogleChrome(this.host) === null;
   }
 
   /** Keep the shared agent-browser launcher and sidecar in the application's current language. */
