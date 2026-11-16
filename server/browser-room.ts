@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+// cgroup paths are POSIX paths on every platform this reads them, and in tests run on Windows.
+import { posix } from "node:path";
 import { boxMemory } from "./box-memory.ts";
 
 /** One open browser with one page in the server image (Chromium 156, agent-browser 0.37.0): 13 processes, about 160
@@ -17,8 +18,8 @@ const readText: Read = (path) => { try { return readFileSync(path, "utf8"); } ca
 /** The tightest `pids.max` from `at` up to the hierarchy's root under `root`. */
 function tightest(read: Read, root: string, from: string): number | null {
   let limit: number | null = null;
-  for (let at = from.trim(); ; at = dirname(at)) {
-    const value = Number(read(join(root, at, "pids.max"))?.trim());
+  for (let at = from.trim(); ; at = posix.dirname(at)) {
+    const value = Number(read(posix.join(root, at, "pids.max"))?.trim());
     if (Number.isInteger(value) && value > 0) limit = Math.min(limit ?? value, value);
     if (at === "/" || at === ".") return limit;
   }
@@ -74,6 +75,9 @@ export interface BrowserRoomOptions {
   spare(session: string): number | null;
   /** Closes an unused browser; true once it is gone. */
   close(session: string): Promise<boolean>;
+  /** Asked once the count allows a new browser: the server's own room for its processes (process-room.ts, a self-hosted
+   * server's pids limit). Null once it fits; otherwise the refusal, after a spare browser is closed if one may go. */
+  admit?(session: string): Promise<string | null>;
   waitMs?: number;
   pollMs?: number;
 }
@@ -95,6 +99,13 @@ export class BrowserRoom {
       if (this.#open.has(session)) return null;
       const others = [...this.#open];
       if (others.length < Math.max(1, this.#options.max())) {
+        const refused = await this.#options.admit?.(session) ?? null;
+        if (refused !== null) {
+          if (await this.#closeOneSpare(others)) continue;
+          return refused;
+        }
+        // Another session may have taken the last place while the server's room was asked.
+        if (!this.#open.has(session) && this.#open.size >= Math.max(1, this.#options.max())) continue;
         this.#open.add(session);
         return null;
       }

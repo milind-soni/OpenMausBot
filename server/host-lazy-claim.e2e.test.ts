@@ -354,7 +354,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     const first = timed(client.state(true, { app: "Chrome", site: "calendar.google.com" }));
     const card = await openYourComputerCard(base, task.threadId);
     expect(card.title).toBe("I need to use your Chrome where you're signed in to calendar.google.com. Allow once?");
-    expect(card.subtitle).toBe("Host Asking Bot would see your screen and click and type on it, for this request only.");
+    expect(card.subtitle).toBe("Host Asking Bot can use your files and apps here: it sees your screen and clicks and types on it, for this request only.");
     expect((await threadState(bot.id, task.threadId))?.activity).toBe("waiting-on-you");
     // Unanswered, the call is not performed and says why, then waits again.
     const unanswered = await first;

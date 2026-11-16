@@ -2,6 +2,7 @@
 // (usage-caps.ts) and adds its own warning threshold, admin notifications and a stop on every kind of turn.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { SPEND_LIMIT_REFUSAL } from "../shared/setting-fixes.ts";
 import type { AppConfig } from "./config.ts";
 import { entitled } from "./enterprise.ts";
 import { CAP_WARN_PERCENT, measure, monthKeyOf, noteUsage, periodEnd, resetUsageTotalsForTests, usageTotals } from "./usage-caps.ts";
@@ -52,7 +53,7 @@ export function assertWithinBudget(
   const state = spendState(cfg, dataDir, now, isEntitled);
   if (!state?.exceeded) return;
   throw Object.assign(
-    new Error(`this workspace has reached its monthly spend limit of $${usd(state.monthlyUsd)} — an admin can raise it under Settings → Usage`),
+    new Error(`${SPEND_LIMIT_REFUSAL} of $${usd(state.monthlyUsd)} — an admin can raise it under Settings → Spending`),
     // When the month rolls over and work may start again: a Bot API caller is told it as Retry-After.
     { status: 409, code: "spend_cap", resetsAt: periodEnd("month", now) },
   );
@@ -116,6 +117,6 @@ export function resetSpendAlertsForTests(): void {
 export function spendAlertText(alert: SpendAlert, state: SpendState): { title: string; body: string } {
   const spent = `$${state.spentUsd.toFixed(2)} of $${usd(state.monthlyUsd)} spent this month (${state.month})`;
   return alert === "cap"
-    ? { title: "Monthly spend limit reached", body: `${spent}. New turns are refused until an admin raises the limit under Settings → Usage.` }
+    ? { title: "Monthly spend limit reached", body: `${spent}. New turns are refused until an admin raises the limit under Settings → Spending.` }
     : { title: `Spend is at ${state.percent}% of the monthly limit`, body: `${spent}. New turns stop when the limit is reached.` };
 }

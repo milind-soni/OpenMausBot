@@ -182,10 +182,10 @@ describe("setupSystemPrompt connected apps", () => {
 
   it("says in one sentence where connected apps are set up when this OpenMausBot has none", () => {
     expect(prompt({ state: "not-configured", host: "server" })).toContain(
-      "Connected apps are not set up here, so you cannot connect an app such as Gmail yourself. If the job needs one, say so in one sentence: they are set up by adding a Composio project key in Settings → API keys, under Self-host connected apps.",
+      "Connected apps are not set up here, so you cannot connect an app such as Gmail yourself. If the job needs one, say so in one sentence: they are set up by adding a Composio project key in Settings → AI → Other services, under Self-host connected apps.",
     );
     expect(prompt({ state: "not-configured", host: "desktop" })).toContain(
-      "restarting OpenMausBot usually brings them back, or they can add their own Composio project key in Settings → API keys, under Self-host connected apps.",
+      "restarting OpenMausBot usually brings them back, or they can add their own Composio project key in Settings → AI → Other services, under Self-host connected apps.",
     );
     const cloud = prompt({ state: "not-configured", host: "cloud" });
     expect(cloud).toContain("Connected apps come with their MausBot Cloud plan but are not answering right now");

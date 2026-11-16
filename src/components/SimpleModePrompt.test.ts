@@ -56,7 +56,7 @@ describe("the Simple mode popup", () => {
     expect(dialog()?.getAttribute("aria-modal")).toBe("true");
     expect(host.querySelector("h2")?.textContent).toBe("Try the new Simple mode");
     expect(host.textContent).toContain("A calmer screen, with every feature still there.");
-    expect(host.textContent).toContain("Switch any time in Settings → General.");
+    expect(host.textContent).toContain("Switch any time in Settings → Advanced mode.");
     expect(toggle().getAttribute("role")).toBe("switch");
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     expect(document.activeElement, "focus starts on the title, so no key flips the switch by accident").toBe(host.querySelector("h2"));

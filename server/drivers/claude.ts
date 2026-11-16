@@ -45,7 +45,7 @@ import { claudeApiError, claudeApiErrorMessage, claudeLimitError, claudeLimitFac
 import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-model-access.ts";
 import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
-import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "./session-idle.ts";
+import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose, stoppedForRoom } from "./session-idle.ts";
 import { keyedStable, promptHalves, withRosterNote, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts";
 import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
 import {
@@ -149,7 +149,7 @@ export function claudeInheritWarning(env: NodeJS.ProcessEnv): ProviderSnapshot["
       "OMB_CLAUDE_INHERIT_USER_CONFIG=1 is set on the OpenMausBot process, so every Claude bot also loads this " +
       "computer's own MCP servers, connectors, skills, hooks and personal CLAUDE.md on every turn — often thousands " +
       "of extra tokens per model call, and tools nobody gave the bot. Unless a bot genuinely needs a server from " +
-      "your user-scope Claude config, remove the variable and restart; add the server under Settings → MCP servers " +
+      "your user-scope Claude config, remove the variable and restart; add the server under the Apps panel → MCP servers " +
       "or the bot project's .mcp.json instead.",
   };
 }
@@ -260,7 +260,7 @@ export function claudeCliUpdate(version: string | null, cli: string): ProviderSn
 
 const DRIVER_KIND = "claudeAgent";
 
-const NO_ANTHROPIC_KEY = "No Anthropic API key — open Settings → API keys.";
+const NO_ANTHROPIC_KEY = "No Anthropic API key — open Settings → AI → Providers.";
 
 export interface ClaudeConfig {
   cli: string;
@@ -1733,7 +1733,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
           const endedBeforeTurn = session.turn.awaitingInit === true || (refusedAutocompact && !session.turn.sawStreamDelta && session.turn.answered !== true);
-          if (!retry.cancelled && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
+          if (!retry.cancelled && !stoppedForRoom(threadId, session.child.pid) && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
             streamed: session.turn.sawStreamDelta, answered: session.turn.answered === true, attempt: retry.attempt })) {
             // `active` stays: an interrupt during the backoff reaches stop() and cancels the retry.
             const failedBroker = session.broker;

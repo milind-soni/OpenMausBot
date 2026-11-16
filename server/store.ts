@@ -1,7 +1,7 @@
-import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path"; import { isDeepStrictEqual } from "node:util";
 
-import { OwnedFile, writeFileAtomic } from "./atomic.ts"; import { saveLater, saveSoon, supersedeLaterSave } from "./save-batch.ts"; import { discardNativeLog } from "./drivers/native.ts";
+import { writeFileAtomic } from "./atomic.ts"; import { BOTS_FILE, JsonRegistry, persistedPin, type RegistryDurability, type RegistryStore } from "./registry-store.ts"; import { discardNativeLog } from "./drivers/native.ts";
 import { commitRegistryChange, deferrablePatch, keptRevocation, saveRegistryFor, touchesPermissions } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts"; import { grantScopedApps } from "../shared/connector-scopes.ts"; import { dropRetiredApps } from "./retired-apps.ts";
 import { reorderInPlace } from "../shared/bot-order.ts"; import { trimOutboundPolicy } from "../shared/outbound.ts";
@@ -116,13 +116,6 @@ export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number
 export type GroupTaskPatch = Partial<Pick<GroupTaskRecord, "title" | "pinned">> & { turnTimeoutMinutes?: number | null; archivedAt?: number | null; activity?: "waiting-on-you" | null };
 
 
-function persistedPin<T extends { pinned?: boolean }>(task: T): T {
-  if (task.pinned === true) return task;
-  if (!("pinned" in task)) return task;
-  const { pinned: _pinned, ...rest } = task;
-  return rest as T;
-}
-
 export const ACTIVITY_BUSY: ReadonlySet<BotActivity> = new Set(["working", "waiting-on-you", "no-signal"]);
 
 export type StoreChange =
@@ -178,19 +171,9 @@ export type BotWireProjection = Pick<BotRecord, Exclude<keyof BotRecord, BotWire
 export type BotWireProjectionIsExact = AssertExact<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection> & AssertSameKeys<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection>;
 export const botWireProjectionIsExact: BotWireProjectionIsExact = true;
 
-const BOTS_FILE = join(DATA_DIR, "bots.json");
-const GROUPS_FILE = join(DATA_DIR, "groups.json");
 const THREAD_MODEL_COPIES_CLEARED = join(DATA_DIR, "thread-model-copies-cleared");
 const ASKED_AT_FILLED = join(DATA_DIR, "asked-at-filled");
 
-/** Owner-only (0600): the registries hold souls, project paths and per-bot settings. Best effort; Windows has no POSIX mode bits. */
-function tightenRegistryFile(file: string): void {
-  if (process.platform === "win32") return;
-  try {
-    if ((statSync(file).mode & 0o077) !== 0) chmodSync(file, 0o600);
-  } catch {
-  }
-}
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
 
 export const sectionKey = (section?: string | null): string => section?.trim() || "";
@@ -285,7 +268,8 @@ export class Store {
   newBotSharing: NewBotSharingRule = sharedUnlessRestricted;
   private listeners = new Set<(change: StoreChange) => void>();
   private registeringInitialSections = true;
-  private readonly botsFile = new OwnedFile(BOTS_FILE, { mode: 0o600 }); private readonly groupsFile = new OwnedFile(GROUPS_FILE, { mode: 0o600 });
+  /** Where bots, rooms and their threads are saved (server/registry-store.ts). */
+  private readonly registry: RegistryStore = new JsonRegistry();
   /** Clearing this slot must not clear a concurrently running task's activity. */
   private legacyActivities = new Map<string, BotActivity>();
 
@@ -305,16 +289,15 @@ export class Store {
     this.initialLanguage = initialLanguage;
     this.personName = personName;
     mkdirSync(DATA_DIR, { recursive: true });
-    for (const file of [BOTS_FILE, GROUPS_FILE]) tightenRegistryFile(file);
     // An unreadable bots.json must never read as "every member was deleted".
     let botsLoaded = false;
     try {
-      supersedeLaterSave(BOTS_FILE); const text = readFileSync(BOTS_FILE, "utf8"); this.bots = JSON.parse(text); this.botsFile.loaded(text); botsLoaded = Array.isArray(this.bots);
+      this.bots = this.registry.loadBots(); botsLoaded = Array.isArray(this.bots);
     } catch {
       this.bots = [];
     }
     try {
-      const text = readFileSync(GROUPS_FILE, "utf8"); this.groups = JSON.parse(text); this.groupsFile.loaded(text);
+      this.groups = this.registry.loadGroups();
     } catch {
       this.groups = [];
     }
@@ -654,27 +637,22 @@ export class Store {
   }
 
   private commitBotChange(bot: BotRecord, action: string, change: () => void, onRollback?: () => void, bookkeeping: boolean | "later" = false) {
-    commitRegistryChange(bot, "bots.json", action, bookkeeping === "later" ? () => this.saveBotsLater() : bookkeeping ? () => this.saveBotsSoon() : () => this.saveBots(), change, onRollback);
+    commitRegistryChange(bot, "bots.json", action, () => this.saveBotThread(bot.id, undefined, bookkeeping === "later" ? "later" : bookkeeping ? "pass" : "now"), change, onRollback);
   }
 
   private commitGroupChange(group: GroupRecord, action: string, change: () => void) {
-    commitRegistryChange(group, "groups.json", action, () => this.saveGroups(), change);
+    commitRegistryChange(group, "groups.json", action, () => this.registry.upsertThread({ kind: "group", id: group.id }, undefined, "now", () => this.saveGroups()), change);
   }
 
-  private saveBotsSoon() { saveSoon(this.botsFile, () => this.saveBots()); } private saveBotsLater() { saveLater(BOTS_FILE, () => this.saveBots()); }
+  private saveBotThread(botId: string, threadId: string | undefined, durability: RegistryDurability) { this.registry.upsertThread({ kind: "bot", id: botId }, threadId, durability, () => this.saveBots()); }
   private saveBots(bots: BotRecord[] = this.bots, registerSections = true) {
     if (registerSections) this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
-    this.botsFile.write(JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({ ...bot,
-      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
-    })))); if (bots === this.bots) supersedeLaterSave(BOTS_FILE);
+    this.registry.writeBots(bots, bots === this.bots);
   }
 
   private saveGroups(groups: GroupRecord[] = this.groups, registerSections = true) {
     if (registerSections) this.rememberSections(groups.map((group) => group.section));
-    this.groupsFile.write(JSON.stringify(groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
-      ...g,
-      ...(g.tasks ? { tasks: g.tasks.map((task) => persistedPin(task)) } : {}),
-    }))));
+    this.registry.writeGroups(groups);
   }
 
   get sections(): string[] { return readSections(); }
@@ -904,7 +882,7 @@ export class Store {
     const group = this.group(id);
     if (!group) return false;
     const remaining = this.groups.filter((g) => g.id !== id); this.threadsGoing([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)]);
-    saveRegistryFor("groups.json", group.dm ? "the chat deletion" : "the room deletion", () => this.saveGroups(remaining));
+    saveRegistryFor("groups.json", group.dm ? "the chat deletion" : "the room deletion", () => this.registry.deleteOwner({ kind: "group", id }, () => this.saveGroups(remaining)));
     this.groups = remaining;
     for (const threadId of new Set([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)])) {
       this.deleteThreadRecord(threadId);
@@ -1459,7 +1437,7 @@ export class Store {
       nextBots = nextBots.map((candidate) => candidate.id === chief.id ? { ...candidate, lastTeamSetupReceipt } : candidate);
     }
     // Persist removal before deleting data: a failed save must leave the bot recoverable.
-    this.saveBots(nextBots);
+    this.registry.deleteOwner({ kind: "bot", id }, () => this.saveBots(nextBots));
     this.bots = nextBots;
     this.legacyActivities.delete(id);
     const rooms = this.groups.filter((g) => !g.dm && g.memberIds.includes(id));
@@ -1812,7 +1790,7 @@ export class Store {
     const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId), mirrored = !threadId || bot.threadId === threadId;
     if (isDeepStrictEqual(task?.resumeCursors[instanceId], cursor) && (!mirrored || isDeepStrictEqual(bot.resumeCursors[instanceId], cursor))) return;
     if (task) task.resumeCursors[instanceId] = cursor; if (mirrored) bot.resumeCursors[instanceId] = cursor;
-    saveRegistryFor("bots.json", "the conversation's engine session", () => this.saveBotsSoon());
+    saveRegistryFor("bots.json", "the conversation's engine session", () => this.saveBotThread(botId, task?.threadId, "pass"));
     this.emit({ type: "bot", botId, ...(task ? { threadId: task.threadId } : {}) });
   }
 
@@ -1820,7 +1798,7 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task || task.lastInstanceId === instanceId) return;
     task.lastInstanceId = instanceId;
-    saveRegistryFor("bots.json", "which engine has this conversation", () => this.saveBotsSoon());
+    saveRegistryFor("bots.json", "which engine has this conversation", () => this.saveBotThread(botId, threadId, "pass"));
   }
 
   setHandedMessages(botId: string, threadId: string, instanceId: string, state: HandedState) {
@@ -1829,7 +1807,7 @@ export class Store {
     const live = Object.entries(task.handedMessages ?? {})
       .filter(([id, record]) => id !== instanceId && record.session !== undefined && record.session === task.resumeCursors[id]);
     task.handedMessages = { ...Object.fromEntries(live), [instanceId]: state };
-    saveRegistryFor("bots.json", "what this conversation handed its engine", () => this.saveBotsSoon());
+    saveRegistryFor("bots.json", "what this conversation handed its engine", () => this.saveBotThread(botId, threadId, "pass"));
   }
 
   addTaskUsage(
@@ -1866,7 +1844,7 @@ export class Store {
         ? { context: { tokens: contextTokens, ...(contextWindow > 0 ? { window: contextWindow } : {}) } }
         : prev.context ? { context: prev.context } : {}),
     };
-    saveRegistryFor("bots.json", "the thread's usage", () => this.saveBotsLater());
+    saveRegistryFor("bots.json", "the thread's usage", () => this.saveBotThread(botId, threadId, "later"));
     this.emit({ type: "bot", botId, threadId });
     return task.usage;
   }
@@ -2200,7 +2178,7 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task || !Number.isFinite(at) || (task.askedAt ?? -1) >= at) return task ?? null;
     task.askedAt = at;
-    saveRegistryFor("bots.json", "when you last wrote in this thread", () => this.saveBotsSoon());
+    saveRegistryFor("bots.json", "when you last wrote in this thread", () => this.saveBotThread(botId, threadId, "pass"));
     this.emit({ type: "bot", botId, threadId });
     return task;
   }

@@ -10,6 +10,7 @@ import { isCountedSkip, type RoutineRetryCause } from "../shared/routines.ts";
 import { engineFailureKind } from "./drivers/engine-errors.ts";
 import { classifyError } from "./drivers/retry.ts";
 import { hostFaultOf, retryCannotFix } from "./host-fault.ts";
+import { outOfProcesses } from "./process-shortage.ts";
 import { nextOccurrence } from "./routine-schedules.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import { codedLine, fittedLine, type RoutineLine, type RoutineLineKey } from "./routine-lines.ts";
@@ -93,7 +94,8 @@ const FIRST_START: Record<RoutineRetryCause, string> = {
  * stop someone pressed or typed, a refusal, a spent cap, and a fault a second start would meet again (no process could
  * start, a full disk, a tool server that is down). Routine runs and teammate threads both judge by this. */
 export function classifyRoutineFailure(failure: string, facts: RoutineFailureFacts = {}): RoutineFailureClass {
-  if (facts.cause === "busy") return { kind: "busy" };
+  // The server had no room to start the run's engine: the run waits and starts again, as for a busy bot.
+  if (facts.cause === "busy" || outOfProcesses(failure)) return { kind: "busy" };
   if (facts.cause === "stalled" || facts.cause === "cap") return { kind: "final" };
   if (facts.stopReason && NOT_RETRIED_STOPS.has(facts.stopReason)) return { kind: "final" };
   if (classifyContinuable(facts.stopReason, failure) === "cap") return { kind: "final" };
@@ -216,9 +218,16 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
     return { queued: false, error: line.text, ...(alert === undefined ? {} : { alert }) };
   };
   if (verdict.kind === "busy") {
+    // A server with no room to start the run's engine is waited for once, 30 s, behind the server's own wait for room; a
+    // second refusal fails the run with it. Each recheck is a real spawn, unlike a busy bot's, so a server that stays full
+    // is not asked for a process every 30 s for an hour, and the routine's failure spacing counts the run at once.
+    const noRoom = outOfProcesses(failure);
+    if (noRoom && run.roomWaited) return failed(again);
+    if (noRoom) run.roomWaited = true;
     run.deferredAt ??= now;
-    // A run of checked items waits as long as it takes: its bot is busy with the person, which is not a failure.
-    if (now - run.deferredAt >= ROUTINE_BUSY_WAIT_MS && run.checkKey === undefined) return failed(codedLine("error", "routines.server.stillBusy", { minutes: ROUTINE_BUSY_WAIT_MS / 60_000, failure }));
+    // A run of checked items waits as long as its bot is busy with the person, which is not a failure; a server with no room
+    // to start it is held to the same hour as any other run.
+    if (now - run.deferredAt >= ROUTINE_BUSY_WAIT_MS && (run.checkKey === undefined || noRoom)) return failed(codedLine("error", "routines.server.stillBusy", { minutes: ROUTINE_BUSY_WAIT_MS / 60_000, failure }));
     run.status = "queued";
     run.retryAt = now + ROUTINE_BUSY_RECHECK_MS;
     attend(run, codedLine("attention", "routines.server.waitingToStart", { failure }));

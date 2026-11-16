@@ -589,8 +589,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** A "Sent to" row for work addressed into a room the bot `name` isn't in, so it went to the bot directly. `room`
    * names that room when this row is not in it. Clients say it in their own words; `tool.name` is the English. */
   sentDirectly?: { name: string; room?: string };
-  /** A page the bot published to a public link (publish_page), or why it couldn't. `text` carries the link too. */
-  publishedPage?: PublishedPageCard;
+  /** A page the bot published to a public link (publish_page), or why it couldn't; `template`, a shareable template of the bot or its department (the share tool). `text` says the same in words. */
+  publishedPage?: PublishedPageCard; template?: import("./share-card.ts").TemplateCard;
   /** A published Data result, linked to its bot's main viewer. */
   dataResult?: { botId: string; cardId: string; title: string; kind: "table" | "chart" | "text"; sql?: string };
   /** user messages: the Data result the person was viewing when they sent
@@ -701,7 +701,7 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   fixedOptions?: boolean;
   quotaSwitch?: QuotaSwitchCardData;
   /** Asks before a bot uses the person's own computer; what its first call names, for the question in their language. */
-  yourComputer?: { app?: string; site?: string };
+  yourComputer?: { app?: string; site?: string; files?: boolean };
 }
 
 /** Kept on the card so the offer survives a restart. `engines` follow the card's options; `messageId` is the
