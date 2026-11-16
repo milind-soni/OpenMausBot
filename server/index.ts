@@ -12798,7 +12798,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, { ok: true });
     }
     if (method === "GET" && path === "/api/auth/sessions") {
-      return json(res, 200, { sessions: sessions.list(), current: auth.kind === "session" ? auth.session.id : null });
+      return json(res, 200, { sessions: sessions.list(sessionPersonName), current: auth.kind === "session" ? auth.session.id : null });
     }
     m = path.match(/^\/api\/auth\/sessions\/([\w-]+)$/);
     if (m && method === "DELETE") {
