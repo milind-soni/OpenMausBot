@@ -156,7 +156,7 @@ export function titleFromLlm(raw: string): string | null {
 export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   tasks?: TaskRecord[];
   avatarUrl?: string;
-  resumeCursors: Record<string, unknown>; /** Set on a stand-in: the place this bot lives in, and its id there. */ home?: { place: string; placeName: string; botId: string; /** What that place is, as the sidebar's rows say it. */ kind?: "computer" | "cloud" }; mainThreadChoice?: string; // mainThreadChoice ("Set as main thread") is host-only; clients get mainThreadId.
+  resumeCursors: Record<string, unknown>; /** Set on a stand-in: the place this bot lives in, and its id there. */ home?: { place: string; placeName: string; botId: string; /** What that place is, as the sidebar's rows say it. */ kind?: "computer" | "cloud"; /** It cannot be reached now: the link is off or its place is unlinked ("off"), or its place no longer has it ("missing"). */ gone?: "off" | "missing" }; mainThreadChoice?: string; // mainThreadChoice ("Set as main thread") is host-only; clients get mainThreadId.
   /** Elevation journal: Full/Custom runs as Ask until Electron confirms the prepared reply; a marker surviving a restart is revoked on load. */
   approvalGrant?: {
     requestId: string;
@@ -441,8 +441,8 @@ export class Store {
     for (const g of this.groups) {
       g.busyBotId = null;
       delete g.turnStartedAt;
-      if (botsLoaded && !g.dm && g.memberIds.some((id) => !botIds.has(id))) {
-        g.memberIds = g.memberIds.filter((id) => botIds.has(id));
+      if (botsLoaded && !g.dm && g.memberIds.some((id) => !botIds.has(id) && !id.startsWith("link-"))) {
+        g.memberIds = g.memberIds.filter((id) => botIds.has(id) || id.startsWith("link-")); // A member that lives in another of the person's places (server/bot-link/) is no bot of bots.json: the link, which starts later, says whether it is still there.
         groupsMigrated = true;
       }
       const normalized = normalizeGroupDefaultResponder(g.defaultResponder, g.memberIds, Boolean(g.dm));

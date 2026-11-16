@@ -11010,5 +11010,15 @@
   "sidebar.newBotOn.noAi": "Nenhuma IA está conectada lá ainda.",
   "sidebar.newBotOn.onlyThere": "Conectada só lá: {ais}.",
   "sidebar.newBotOn.onlyHere": "Conectada só aqui: {ais}.",
-  "sidebar.newBotOn.needsUpdate": "O My Cloud precisa da próxima atualização para isso."
+  "sidebar.newBotOn.needsUpdate": "O My Cloud precisa da próxima atualização para isso.",
+  "server.rooms.linkedAway": "{bot} fica em {place}, que está desligado ou em repouso agora. Responde aqui quando {place} voltar.",
+  "server.rooms.linkedGone": "{bot} fica em {place}. A ligação com {place} está desligada agora, então só pode responder aqui quando ela voltar.",
+  "server.rooms.linkedNotSent": "Não foi possível passar a vez de {bot} para {place}. Mencione {bot} de novo para tentar mais uma vez.",
+  "server.rooms.linkedNoAnswer": "{bot} terminou em {place} sem uma resposta para este grupo.",
+  "server.rooms.linkedFailed": "{bot} não conseguiu responder a partir de {place}.",
+  "server.rooms.linkedMissing": "{bot} não está mais em {place}, então não pode responder aqui. Remova-o dos membros deste grupo.",
+  "server.rooms.linkedEnded": "{place} não se conecta há 30 dias, então a ligação com ele terminou. Não está mais neste grupo: {bots}.",
+  "room.members.far.place": "em {place}",
+  "room.members.far.off": "Ligação desligada",
+  "room.members.far.missing": "Não está mais disponível"
 }
