@@ -16,14 +16,12 @@ import { isArchived, isSnoozed, isWorking, threadRecency, threadRowActions, thre
 export const PEEK_LIMIT = 3;
 /** Long enough that sweeping the pointer down the list opens nothing. */
 export const PEEK_OPEN_MS = 350;
-/** Long enough to cross from the row onto the sheet. */
 export const PEEK_CLOSE_MS = 200;
 const SHEET_WIDTH = 240;
 const EDGE = 8;
 
 type PeekBot = Pick<Bot, "id" | "name" | "threadId" | "mainThreadId" | "tasks">;
 
-/** The bot's open conversations other than the one its row opens, newest first. */
 export function peekThreads(bot: Pick<PeekBot, "threadId" | "mainThreadId" | "tasks">): Task[] {
   const rowThread = botOpensTo(bot, false);
   return (bot.tasks ?? [])
@@ -49,7 +47,6 @@ const ROW_ACTIONS = "pointer-events-none absolute end-2 top-1/2 flex -translate-
 const ROW_ACTION = "flex size-6 items-center justify-center rounded-md text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:bg-ink/[0.06] focus-visible:text-ink active:bg-ink/[0.08] disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-ink-secondary touch:size-10";
 const ROW_TIME = "min-w-13 text-end tabular-nums transition-opacity group-hover/peek:opacity-0 group-focus-within/peek:opacity-0 touch:min-w-21 touch:opacity-0 motion-reduce:transition-none";
 
-/** Beside a Simple row's "…": a "+" for a bot with one conversation, else the disclosure of a sheet listing its other open ones, which hovering the row also opens. */
 export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatch: Dispatch<Action> }) {
   const threads = useMemo(() => peekThreads(bot), [bot.tasks, bot.mainThreadId, bot.threadId]);
   const [place, setPlace] = useState<Place | null>(null);
