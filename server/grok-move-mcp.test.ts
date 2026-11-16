@@ -41,7 +41,8 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
     for (const [asked, given] of [["2025-06-18", "2025-06-18"], ["2025-03-26", "2025-03-26"], ["2024-11-05", "2024-11-05"], ["1999-01-01", "2025-06-18"], [undefined, "2025-06-18"]]) {
       expect(await moveMcp(rpc("initialize", { protocolVersion: asked, capabilities: {} }), to)).toMatchObject({
         status: 200,
-        body: { jsonrpc: "2.0", id: 1, result: { protocolVersion: given, capabilities: { tools: {} }, serverInfo: { name: "MausBot" } } },
+        body: { jsonrpc: "2.0", id: 1, result: { protocolVersion: given, capabilities: { tools: {} }, serverInfo: { name: "MausBot" },
+          instructions: expect.stringContaining("The link's address changes when MausBot restarts or updates: if calls stop reaching MausBot, ask the person to remove this connector and add the new link MausBot shows them.") } },
       });
     }
     expect(await moveMcp(rpc("notifications/initialized", undefined, null), to)).toEqual({ status: 202 });
@@ -56,7 +57,7 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
 
   it("keeps a sent Bot as the importer reads it, whether it came as an object or as JSON text, and counts it in the status", async () => {
     const to = link();
-    expect((await call(to, "move_status")).text).toBe("Connected to MausBot. 0 Bots received so far. This link works while MausBot stays open, until the person turns it off. To move a Bot, send it with send_export, one Bot per call. To have MausBot do something, call hand_off_task.");
+    expect((await call(to, "move_status")).text).toBe("Connected to MausBot. 0 Bots received so far. This link stays on until the person turns it off, but its address changes when MausBot restarts or updates: if MausBot stops answering, ask the person to remove the MausBot connector and add the new link MausBot shows them. To move a Bot, send it with send_export, one Bot per call. To have MausBot do something, call hand_off_task.");
     expect((await call(link(place().host), "move_status")).text).toContain("MausBot's bots: MausBot (Chief of Staff); Scout.");
     const crowd: MoveHost = { ...place().host, bots: () => Array.from({ length: 34 }, (_, index) => ({ name: `Bot ${index}` })) };
     expect((await call(link(crowd), "move_status")).text).toMatch(/Bot 29; and 4 more\.$/);

@@ -195,7 +195,7 @@ function moveStatus(link: MoveLink): ToolResult {
   const app = productName();
   const bots = link.host.bots();
   const roster = bots.slice(0, ROSTER_MAX).map((bot) => (bot.job ? `${bot.name} (${bot.job})` : bot.name)).join("; ");
-  return said(`Connected to ${app}. ${plural(names.size, "Bot")} received so far. This link works while ${app} stays open, until the person turns it off. To move a Bot, send it with send_export, one Bot per call. To have ${app} do something, call hand_off_task.`
+  return said(`Connected to ${app}. ${plural(names.size, "Bot")} received so far. This link stays on until the person turns it off, but its address changes when ${app} restarts or updates: if ${app} stops answering, ask the person to remove the ${app} connector and add the new link ${app} shows them. To move a Bot, send it with send_export, one Bot per call. To have ${app} do something, call hand_off_task.`
     + (roster ? ` ${app}'s bots: ${roster}${bots.length > ROSTER_MAX ? `; and ${bots.length - ROSTER_MAX} more` : ""}.` : ""));
 }
 
@@ -283,7 +283,7 @@ export async function moveMcp(message: unknown, link: MoveLink, now = Date.now()
       protocolVersion: typeof asked === "string" && PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
       capabilities: { tools: {} },
       serverInfo: { name: productName(), version: "1.1.0" },
-      instructions: `Connects Grok Bot to ${productName()}. Call move_status first. To move a Bot, call send_export once per Bot. To have ${productName()} do something, call hand_off_task, then task_status for the result.`,
+      instructions: `Connects Grok Bot to ${productName()}. Call move_status first. To move a Bot, call send_export once per Bot. To have ${productName()} do something, call hand_off_task, then task_status for the result. The link's address changes when ${productName()} restarts or updates: if calls stop reaching ${productName()}, ask the person to remove this connector and add the new link ${productName()} shows them.`,
     });
   }
   if (method === "ping") return result({});
