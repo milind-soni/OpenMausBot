@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Notification } from "../shared/notification.ts";
 import type { Message } from "./store.ts";
-import { cancelWaitFromCard, createWaitHost, waitRunChat, type WaitHostDeps } from "./wait-host.ts";
+import { cancelWaitFromCard, createWaitHost, waitContinuesHere, waitRunChat, type WaitHostDeps } from "./wait-host.ts";
 import type { WaitRecord } from "./waits.ts";
 
 const NOW = 1_700_000_000_000;
@@ -109,5 +109,20 @@ describe("the store side of waits", () => {
 
   it("knows a deleted bot from an idle one", () => {
     expect([host.botBusy("bot-1"), host.botBusy("gone")]).toEqual([false, undefined]);
+  });
+
+  it("proves a wait continuation from the run and its fired notice in the same chat", () => {
+    const run = { eventSource: "wait" as const, triggerSource: "webhook" as const, botId: "bot-1", threadId: "t-1", resultsThreadId: "t-1", webhookId: "wait:w1", deliveryId: "w1" };
+    expect(waitContinuesHere(run, "bot-1", "t-1", store)).toBe(false);
+    host.post(wait, { status: "fired", text: "done" });
+    expect(waitContinuesHere(run, "bot-1", "t-1", store)).toBe(true);
+    expect(waitContinuesHere(null, "bot-1", "t-1", store)).toBe(false);
+    for (const patch of [
+      { eventSource: "app" as const }, { eventSource: undefined }, { triggerSource: "schedule" as const },
+      { botId: "other" }, { threadId: "other" }, { resultsThreadId: "other" },
+      { deliveryId: "other" }, { deliveryId: undefined }, { webhookId: "other" },
+    ]) expect(waitContinuesHere({ ...run, ...patch }, "bot-1", "t-1", store)).toBe(false);
+    store.messages[0]!.wait!.status = "expired";
+    expect(waitContinuesHere(run, "bot-1", "t-1", store)).toBe(false);
   });
 });

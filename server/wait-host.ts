@@ -28,6 +28,19 @@ export function waitRunChat(
   return directChat(run.botId, run.resultsThreadId) ? run.resultsThreadId : null;
 }
 
+/** A wait continuation is proved by the server's run and fired notice in the same bot's chat, never its prompt. */
+export function waitContinuesHere(
+  run: Pick<RoutineRun, "eventSource" | "triggerSource" | "botId" | "threadId" | "resultsThreadId" | "webhookId" | "deliveryId"> | null,
+  botId: string,
+  threadId: string,
+  store: Pick<Store, "messagesFor">,
+): boolean {
+  if (!run || run.eventSource !== "wait" || run.triggerSource !== "webhook" || run.botId !== botId
+    || run.threadId !== threadId || run.resultsThreadId !== threadId || !run.deliveryId
+    || run.webhookId !== `wait:${run.deliveryId}`) return false;
+  return store.messagesFor(threadId).some((message) => message.wait?.status === "fired" && message.wait.id === run.deliveryId);
+}
+
 type CardStore = Pick<Store, "messagesFor" | "patchMessage">;
 
 function settleWaitCard(store: CardStore, threadId: string, messageId: string, how: "fired" | "expired" | "cancelled"): void {
