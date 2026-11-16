@@ -100,7 +100,7 @@ const noKey = { configured: false, voice: "marin", readTypedReplies: true, idleM
 const CLOUD = { cloudHome: true, tts: { configured: true, ready: true, voice: "preset" }, live: noKey } as AppState["config"];
 const SERVER = { tts: { configured: true, ready: true, voice: "preset" }, live: noKey } as AppState["config"];
 const THIS_COMPUTER = { tts: { configured: true, ready: true, voice: "voice-1" }, live: noKey } as AppState["config"];
-const KEY_NEEDED = "Live calls use your own OpenAI key. Add it in Settings → API keys.";
+const KEY_NEEDED = "Live calls use your own OpenAI key. Add it in Settings → AI → Other services.";
 const APP_REFUSED = "The app didn't let this page use the microphone. Open it in your web browser to make the Live call.";
 
 function Page({ config, children }: { config: AppState["config"]; children: ReactNode }) {
@@ -263,7 +263,7 @@ describe("calling a bot off the Mac", () => {
   it.each(["win32", "linux"] as const)("on This computer in the %s app with no Fish Audio key, the call is Live, Take turns asks for the key, and Live points to API keys", async (platform) => {
     open(desktopApp(platform, "this-computer"));
     chat(THIS_COMPUTER);
-    expectTurnsDisabled("Add a Fish Audio or ElevenLabs key to take turns on calls. On this computer, Take turns hears you through Fish Audio or ElevenLabs speech-to-text. Add either key in Settings → API keys.");
+    expectTurnsDisabled("Add a Fish Audio or ElevenLabs key to take turns on calls. On this computer, Take turns hears you through Fish Audio or ElevenLabs speech-to-text. Add either key in Settings → AI → Other services.");
     await firstLiveCall();
   });
 

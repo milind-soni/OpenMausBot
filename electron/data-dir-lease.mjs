@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname, uptime } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 
 const LEASE_NAME = "openmausbot-server.lease";
 const DELEGATED_CHILD_DIR = ".openmausbot-server-child";
@@ -211,11 +211,12 @@ export function macMountIsLocal(dfOutput, mountTable) {
 
 const MAC_SYNCED_FOLDERS = [["Library", "Mobile Documents"], ["Library", "CloudStorage"]];
 
-/** iCloud Drive and File Provider sync folders (Dropbox, OneDrive, Google Drive) are local disks other Macs write to. */
+/** iCloud Drive and File Provider sync folders (Dropbox, OneDrive, Google Drive) are local disks other Macs write to. Mac
+ * paths, so joined with "/" on any host. */
 export function inMacSyncedFolder(path, home) {
   const lower = path.toLowerCase();
   return MAC_SYNCED_FOLDERS.some((parts) => {
-    const root = join(home, ...parts).toLowerCase();
+    const root = posix.join(home, ...parts).toLowerCase();
     return lower === root || lower.startsWith(`${root}/`);
   });
 }
@@ -414,11 +415,20 @@ function windowsProcessListed(pid) {
   return tasklistHasPid(pid) ?? cimHasPid(pid);
 }
 
+/**
+ * `tasklist /FI "PID eq <pid>" /FO CSV /NH`: a quoted CSV row when the pid runs, an INFO line (in the system's language)
+ * when it does not; null for no output at all, which proves nothing, so the next probe answers.
+ */
+export function tasklistListsPid(output) {
+  const lines = String(output).replace(/^﻿/, "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  return lines.some((line) => line.startsWith('"'));
+}
+
 /** tasklist ships with every Windows and lists every running process, whatever account or session owns it. */
 function tasklistHasPid(pid) {
   try {
-    const output = windowsOutput("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], 5_000);
-    return output.split(/\r?\n/).some((line) => line.startsWith('"'));
+    return tasklistListsPid(commandOutput("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], 5_000));
   } catch {
     return null;
   }
@@ -427,7 +437,7 @@ function tasklistHasPid(pid) {
 function cimHasPid(pid) {
   const powershell = join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   try {
-    const output = windowsOutput(powershell, [
+    const output = commandOutput(powershell, [
       "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
       `if (Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction Stop) { '1' }`,
     ], 15_000);
@@ -445,9 +455,22 @@ function ownerIdentityMatches(owner) {
     return started === null || started === owner.start;
   }
   if (process.platform !== "win32") return true;
-  const created = processCreationTimeMs(owner.pid);
-  if (created === null) return true;
-  return created < owner.createdAt;
+  return windowsCreationFitsLease(processCreationTimeMs(owner.pid), owner.createdAt);
+}
+
+/**
+ * How far a process' creation time, as Windows reports it, may run past the createdAt its own Date.now() wrote. The two
+ * clocks are read differently (the kernel's stamp at creation, JavaScript's clock in the process), so they disagree by
+ * up to a timer tick or more, and NTP may step the wall clock between the two readings. Without slack a live owner that
+ * wrote its lease moments after starting reads as a reused pid and its lease is taken over: two servers on one folder.
+ * Erring this way only keeps a lease whose pid was reused within these seconds blocked while that process lives.
+ */
+const WINDOWS_CREATION_SLACK_MS = 5_000;
+
+/** Windows: whether the process now holding the pid can be the lease's owner; unknown (null) creation time counts as yes. */
+export function windowsCreationFitsLease(createdMs, leaseCreatedAt) {
+  if (createdMs === null) return true;
+  return createdMs < leaseCreatedAt + WINDOWS_CREATION_SLACK_MS;
 }
 
 function unlinkExact(path, message) {

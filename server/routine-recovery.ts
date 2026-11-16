@@ -218,10 +218,16 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
     return { queued: false, error: line.text, ...(alert === undefined ? {} : { alert }) };
   };
   if (verdict.kind === "busy") {
+    // A server with no room to start the run's engine is waited for once, 30 s, behind the server's own wait for room; a
+    // second refusal fails the run with it. Each recheck is a real spawn, unlike a busy bot's, so a server that stays full
+    // is not asked for a process every 30 s for an hour, and the routine's failure spacing counts the run at once.
+    const noRoom = outOfProcesses(failure);
+    if (noRoom && run.roomWaited) return failed(again);
+    if (noRoom) run.roomWaited = true;
     run.deferredAt ??= now;
     // A run of checked items waits as long as its bot is busy with the person, which is not a failure; a server with no room
     // to start it is held to the same hour as any other run.
-    if (now - run.deferredAt >= ROUTINE_BUSY_WAIT_MS && (run.checkKey === undefined || outOfProcesses(failure))) return failed(codedLine("error", "routines.server.stillBusy", { minutes: ROUTINE_BUSY_WAIT_MS / 60_000, failure }));
+    if (now - run.deferredAt >= ROUTINE_BUSY_WAIT_MS && (run.checkKey === undefined || noRoom)) return failed(codedLine("error", "routines.server.stillBusy", { minutes: ROUTINE_BUSY_WAIT_MS / 60_000, failure }));
     run.status = "queued";
     run.retryAt = now + ROUTINE_BUSY_RECHECK_MS;
     attend(run, codedLine("attention", "routines.server.waitingToStart", { failure }));

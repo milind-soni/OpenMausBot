@@ -56,7 +56,7 @@ export const ModelgoDriver: ProviderDriver<ModelgoConfig> = {
   install: {
     docsUrl: MODELGO_URL,
     settings: "connections",
-    signInCommand: "Save a ModelGo API key in Settings → API keys, or set MODELGO_API_KEY on the server.",
+    signInCommand: "Save a ModelGo API key in Settings → AI → Providers, or set MODELGO_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
@@ -106,8 +106,8 @@ export const ModelgoDriver: ProviderDriver<ModelgoConfig> = {
       requestBody: (model, messages, stream) => ({ model, messages, stream }),
       httpErrorLabel: "ModelGo",
       plainRefusal,
-      missingKeyError: "Save a ModelGo API key in Settings → API keys, or set MODELGO_API_KEY.",
-      unavailableReason: "No ModelGo API key — open Settings → API keys.",
+      missingKeyError: "Save a ModelGo API key in Settings → AI → Providers, or set MODELGO_API_KEY.",
+      unavailableReason: "No ModelGo API key — open Settings → AI → Providers.",
       serverUnavailable: async () => {
         await firstRefresh;
         return apiKey && !catalog.options.length ? { reason: "ModelGo listed no models for this key. Check the key in the ModelGo console, then check again." } : null;

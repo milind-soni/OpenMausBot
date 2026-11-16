@@ -92,7 +92,7 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
 
   it("offers threads in Simple mode, and Usage and the Inspector unlocked", () => {
     const menu = menuOf(createElement(ChatMoreMenu, { bot }));
-    expect(keys(menu.items)).toEqual(["find", "new-thread", "threads", "start-fresh", "copy", "download", "activity", "inspector"]);
+    expect(keys(menu.items)).toEqual(["find", "new-thread", "threads", "start-fresh", "as-template", "copy", "download", "activity", "inspector"]);
     for (const item of menu.items) {
       expect(item.disabled, item.key).toBeFalsy();
       expect(item.heading ?? "", item.key).not.toBe("In Advanced mode");
@@ -142,7 +142,7 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
 
   it("leaves All threads out while the bot has one thread", () => {
     const single = { ...bot, threadId: "main", tasks: [task("main", "Our chat", 1), task("routine", "Morning digest", 5, { routineRunId: "run-1" })] };
-    expect(keys(menuOf(createElement(ChatMoreMenu, { bot: single })).items)).toEqual(["find", "new-thread", "start-fresh", "copy", "download", "activity", "inspector"]);
+    expect(keys(menuOf(createElement(ChatMoreMenu, { bot: single })).items)).toEqual(["find", "new-thread", "start-fresh", "as-template", "copy", "download", "activity", "inspector"]);
     expect(keys(menuOf(createElement(ChatMoreMenu, { bot: { ...bot, tasks: undefined } })).items)).not.toContain("threads");
   });
 
@@ -191,9 +191,9 @@ describe("the phone header's ⋯", () => {
 });
 
 describe("ChatShareMenu, the bot panel's Share", () => {
-  it("copies or downloads the conversation, in those words", () => {
+  it("shares the bot as a template, or copies or downloads the conversation, in those words", () => {
     const menu = menuOf(createElement(ChatShareMenu, { bot, className: "" }));
-    expect(menu.items.map((item) => [item.key, item.label])).toEqual([["copy", "Copy conversation"], ["download", "Download conversation"]]);
+    expect(menu.items.map((item) => [item.key, item.label])).toEqual([["as-template", "Share as template"], ["copy", "Copy conversation"], ["download", "Download conversation"]]);
   });
 });
 
@@ -201,7 +201,7 @@ describe("ChatHeaderMenu, Advanced mode's header ⋯", () => {
   it("keeps main's items, trigger and hover menu below the header", () => {
     fixture.advanced = true;
     const menu = menuOf(createElement(ChatHeaderMenu, { bot }));
-    expect(keys(menu.items)).toEqual(["find", "start-fresh", "copy", "download", "activity", "inspector"]);
+    expect(keys(menu.items)).toEqual(["find", "start-fresh", "as-template", "copy", "download", "activity", "inspector"]);
     expect(menu.items.find((item) => item.key === "inspector")).toMatchObject({ separatorBefore: true });
     expect(menu.items.every((item) => !item.disabled && item.heading !== "In Advanced mode")).toBe(true);
     expect(menu).toMatchObject({ placement: "below", openOnHover: true });

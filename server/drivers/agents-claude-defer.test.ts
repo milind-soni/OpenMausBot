@@ -5,14 +5,15 @@ import { describe, expect, it } from "vitest";
 import { WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { waitForExit } from "../testing/cleanup.ts";
 import { TOOL_BRIDGE_ENV } from "./agents-bridge.ts";
-import { ALWAYS_LOAD_META, CLAUDE_ALWAYS_LOADED_TOOL_NAMES, DEFER_TOOLS_ENV, claudeUpFrontBytes } from "./agents-claude-defer.ts";
+import { ALWAYS_LOAD_META, CLAUDE_ALWAYS_LOADED_TOOL_NAMES, CLAUDE_CHIEF_ALWAYS_LOADED_TOOL_NAMES, DEFER_TOOLS_ENV, claudeUpFrontBytes } from "./agents-claude-defer.ts";
 import { agentsToolList } from "./agents-mcp.ts";
 
 const PROXY_SOURCE = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
 const BASE = { OMB_BOT_ID: "bot-defer", OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1", OMB_SKILL_AUTHORING_ENABLED: "0", OMB_SHARED_COMPUTERS_ENABLED: "0", OMB_VOICE_NOTES: "0" };
-/** The catalog wire test's default and fullest profiles. */
+/** The catalog wire test's default and fullest profiles (both a Chief's), and a bot that is not a Chief. */
 const PROFILES: Record<string, Record<string, string>> = {
   default: BASE,
+  specialist: { ...BASE, OMB_CHIEF_OF_STAFF: "0" },
   fullest: {
     ...BASE, OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1",
     OMB_TEAM_PEOPLE: "1", OMB_IMAGE_GENERATION: "1", OMB_APP_HOSTING: "1",
@@ -22,8 +23,9 @@ const DEFER = { [DEFER_TOOLS_ENV]: "1" };
 
 /** Bytes Claude Code sends up front for the agents server when the budget was last set; each may move at most 2%. */
 const UP_FRONT_BASELINE: Record<string, { whole: number; deferred: number }> = {
-  default: { whole: 4514, deferred: 1186 },
-  fullest: { whole: 5308, deferred: 1494 },
+  default: { whole: 3855, deferred: 1209 },
+  specialist: { whole: 1495, deferred: 1037 },
+  fullest: { whole: 3855, deferred: 1546 },
 };
 
 const listed = (env: Record<string, string>) => agentsToolList(env).listed as Array<{ name: string; description: string; inputSchema: unknown; _meta?: Record<string, unknown> }>;
@@ -33,9 +35,12 @@ describe("agents tools deferred on a Claude turn", () => {
   it("marks every tool outside the always-loaded set, and nothing without the switch or behind the bridge", () => {
     for (const env of Object.values(PROFILES)) {
       const tools = listed({ ...env, ...DEFER });
-      expect(tools.filter((tool) => !marked(tool)).map((tool) => tool.name).every((name) => CLAUDE_ALWAYS_LOADED_TOOL_NAMES.has(name))).toBe(true);
-      expect(tools.filter(marked).length).toBeGreaterThan(40);
+      const loaded = env.OMB_CHIEF_OF_STAFF === "1" ? CLAUDE_CHIEF_ALWAYS_LOADED_TOOL_NAMES : CLAUDE_ALWAYS_LOADED_TOOL_NAMES;
+      expect(tools.filter((tool) => !marked(tool)).map((tool) => tool.name).every((name) => loaded.has(name))).toBe(true);
+      expect(tools.filter(marked).length).toBeGreaterThan(35);
       expect(tools.find((tool) => tool.name === "list_bots")?._meta, "a deferred list_bots loses to Claude Code's ListAgents").toBeUndefined();
+      expect(marked(tools.find((tool) => tool.name === "coordinate_bots")!), "a Chief's hand-off needs no search first").toBe(env.OMB_CHIEF_OF_STAFF !== "1");
+      for (const name of ["memory_update", "attach_file"]) expect(marked(tools.find((tool) => tool.name === name)!), name).toBe(true);
       expect(listed(env).some((tool) => tool._meta !== undefined)).toBe(false);
       expect(listed({ ...env, ...DEFER, [TOOL_BRIDGE_ENV]: "1" }).some((tool) => tool._meta !== undefined)).toBe(false);
     }
@@ -46,7 +51,7 @@ describe("agents tools deferred on a Claude turn", () => {
       ...listed(PROFILES.fullest!).map((tool) => tool.name),
       ...listed({ ...BASE, OMB_BOT_ID: WATCHER_OPTIONS_CARD_BOT_ID }).map((tool) => tool.name),
     ]);
-    expect([...CLAUDE_ALWAYS_LOADED_TOOL_NAMES].filter((name) => !names.has(name))).toEqual([]);
+    expect([...CLAUDE_CHIEF_ALWAYS_LOADED_TOOL_NAMES].filter((name) => !names.has(name))).toEqual([]);
   });
 
   it("keeps what a Claude turn sends up front within its budget", () => {
@@ -85,7 +90,8 @@ describe("agents tools deferred on a Claude turn", () => {
       });
       const tools = (JSON.parse(line) as { result: { tools: Array<{ name: string; _meta?: Record<string, unknown> }> } }).result.tools;
       expect(tools.find((tool) => tool.name === "trigger")?._meta).toEqual({ [ALWAYS_LOAD_META]: false });
-      expect(tools.find((tool) => tool.name === "memory_update")?._meta).toBeUndefined();
+      expect(tools.find((tool) => tool.name === "memory_update")?._meta).toEqual({ [ALWAYS_LOAD_META]: false });
+      expect(tools.find((tool) => tool.name === "list_bots")?._meta).toBeUndefined();
     } finally {
       await waitForExit(child, { signal: "SIGTERM" });
     }

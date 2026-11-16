@@ -142,7 +142,7 @@ export const mistralVibeSupport: AcpSupport = {
   nativeSource: "mistral-vibe.acp",
   images: true,
   loginNote:
-    "Start a first chat: the browser sign-in to Mistral AI Studio opens (it completes behind it). Or paste a Mistral API key under Settings → Connections → Model providers.",
+    "Start a first chat: the browser sign-in to Mistral AI Studio opens (it completes behind it). Or paste a Mistral API key under Settings → AI → Providers.",
   install: {
     command: {
       darwin: "curl -LsSf https://mistral.ai/vibe/install.sh | bash",
@@ -163,7 +163,7 @@ export const mistralVibeSupport: AcpSupport = {
     methodId: (methods) => (methods.some((method) => method.id === "browser-auth") ? "browser-auth" : null),
     signedIn: (env) => vibeSignedIn(env),
     get serverHint() {
-      return `${productName()} cannot reach a browser on this server. Sign in from a machine that runs ${productName()}, or paste a Mistral API key under Settings → Connections → Model providers.`;
+      return `${productName()} cannot reach a browser on this server. Sign in from a machine that runs ${productName()}, or paste a Mistral API key under Settings → AI → Providers.`;
     },
     failure(stage, detail) {
       switch (stage) {
