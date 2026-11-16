@@ -211,8 +211,11 @@ function syncedFoldersPrompt(synced: ReadonlyArray<{ computerName: string; pcPat
     + " A path on that computer inside one of these means its copy here. Read from these copies, never change or delete files in them directly: to change a file in a folder lent with editing, use shared_computer edit_file for a passage or write_file for a whole file, which reaches their computer; save other work in your own working folder; the person gets it on their computer in Documents › MausBot.";
 }
 
+/** Composio runs app tools on its own servers; OpenMausBot uploads a local file a tool takes (server/connector-files.ts). */
+const APP_FILE_PROMPT = " A file argument such as file_to_upload takes the full path of a file in your working folder or attached here; OpenMausBot uploads it.";
+
 export const COMPOSIO_PROMPT =
-  " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service.";
+  " The user's connected apps (Gmail, Calendar, Slack, Notion, and the rest) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Reach for them before telling the user you have no access to a service." + APP_FILE_PROMPT;
 
 /** The app tools a bot with these apps can call by name, on every engine. */
 const APP_TOOLS_PROMPT: Record<string, { label: string; tools: string; note?: string }> = {
@@ -234,7 +237,7 @@ export function composioSystemPrompt(grants: Record<string, ConnectorToolGrant> 
     return " No connected apps are assigned to this bot. If a task needs one, or an app's sign-in has expired, call COMPOSIO_MANAGE_CONNECTIONS to show the user a card that connects it, and ask them to allow that app for this bot in OpenMausBot.";
   }
   const named = services.map(connectorServiceLabel).join(", ");
-  return ` The user's connected apps assigned to this bot (${named}) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Only the tools this bot was granted will run; when a needed tool is refused, tell the user and ask them to grant it in OpenMausBot. Reach for the granted services before telling the user you have no access.${appToolsPrompt(services)}`;
+  return ` The user's connected apps assigned to this bot (${named}) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Only the tools this bot was granted will run; when a needed tool is refused, tell the user and ask them to grant it in OpenMausBot. Reach for the granted services before telling the user you have no access.${APP_FILE_PROMPT}${appToolsPrompt(services)}`;
 }
 
 function connectorServiceLabel(slug: string): string {

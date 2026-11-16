@@ -54,3 +54,17 @@ describe("OutboundRequestService", () => {
     });
   });
 });
+
+describe("outboundCard", () => {
+  it("lists every file a send uploads before its arguments are cut", async () => {
+    const { outboundCard } = await import("./outbound-requests.ts");
+    const card = outboundCard([{
+      slug: "GMAIL_SEND_EMAIL",
+      arguments: { to: "a@example.com", body: "x".repeat(800), attachment: "/Users/sam/.private/plans.pdf" },
+      files: [{ name: "plans.pdf", path: "/Users/sam/.private/plans.pdf", bytes: 2_500_000 }],
+    }]);
+    expect(card.summary).toContain("Uploads plans.pdf (/Users/sam/.private/plans.pdf, 2.4 MB)");
+    expect(card.summary.indexOf("plans.pdf")).toBeLessThan(card.summary.indexOf("[arguments truncated]"));
+    expect(outboundCard([{ slug: "GMAIL_SEND_EMAIL", arguments: { to: "a@example.com" } }]).summary).not.toContain("Uploads");
+  });
+});

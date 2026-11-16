@@ -259,7 +259,7 @@ export async function relayMcp(
   cfg: AppConfig,
   payload: JsonValue,
   transportSessionId?: string,
-  beforeSend?: () => void, signal?: AbortSignal, as?: BrokerAccess,
+  beforeSend?: () => void | JsonValue | Promise<void | JsonValue>, signal?: AbortSignal, as?: BrokerAccess,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string; transportSessionId?: string }> {
   const apiKey = as ? null : projectApiKey(cfg);
   let url: string;
@@ -291,7 +291,7 @@ export async function relayMcp(
     headers.set("mcp-session-id", forwardedTransportSessionId);
   }
   // Discovery may await I/O: check turn authority and permissions after it, right before dispatch.
-  beforeSend?.();
+  const sent = await beforeSend?.(); if (sent !== undefined) payload = sent; // beforeSend may answer the frame to send instead (files it uploaded)
   const response = await withToolsListFallback(identity, payload, () => fetch(url, {
     method: "POST",
     headers,
