@@ -86,7 +86,7 @@ beforeAll(async () => {
         await new Promise<void>(resolve => { blockSession = resolve; });
       }
       return res.end(JSON.stringify({ session_id: "fixture-session", mcp: { type: "http", url: brokerOrigin + "/mcp" },
-        config: { user_id: "fixture-user", multi_account: { enable: true, max_accounts_per_toolkit: 5, require_explicit_selection: true } } }));
+        config: { user_id: "fixture-user", multi_account: { enable: true, max_accounts_per_toolkit: 10, require_explicit_selection: true } } }));
     }
     if (req.url === "/mcp") {
       relayed.push(body);
