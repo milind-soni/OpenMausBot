@@ -128,6 +128,9 @@ Give the call an 8-minute `timeout`: a new site's first deploy can take Netlify 
   Netlify, so it may be taken. Without it Netlify picks a name.
 - `--project <folder>` when the project folder is not the current one. `--draft` publishes a preview at its own
   address and leaves the live site as it is.
+- Sites are public by default: every run opens the site to anyone with the link, even where the person's Netlify team
+  keeps new sites private. Pass `--keep-private` only when the person asks for a private site; then only people
+  signed in to their Netlify team can open it, if their team protects sites at all (`access` says which).
 - It never uploads dotfiles and dot folders (`.env`, `.git`, `.openmausbot-secrets`, the site record),
   `node_modules`, env files, keys or certificates, or links to files elsewhere, and it stops if any file contains the
   token. The answer lists what it left out under `skipped`.
@@ -138,11 +141,9 @@ It prints one line of JSON:
 
 - `"ok": true`, `"state": "ready"`, `"live": true`: Netlify processed the deploy and the link answered. Reply with the
   link (`url`), what you published in one or two lines, and that the link is public.
-- `"access": "private"`: the site is deployed, but the link asks for a Netlify login. New Netlify accounts keep every
-  site visible to the account's own team only. This is not a failure. Give the link, say that right now only people
-  signed in to their Netlify team can open it, and ask whether to open it to anyone with the link. Run
-  `node "<root>/deploy.mjs" --make-public --token-file <the secret file's path>` only after they say yes; it changes
-  that one site and checks the link again.
+- `"access": "private"` with a `message`: the site is deployed, but their Netlify team's settings keep it private
+  and Netlify refused to open it. This is not a failure. Give the link, say only people signed in to their Netlify
+  team can open it, and pass on where the `message` says the setting is. Don't change anything else on their account.
 - `live` false with `"liveStatus": 200`: the link answers, but not as a web page (`contentType` is not `text/html`),
   so a browser would show the page's source. Say so; don't call it published.
 - `"pending": true` (`state` is `processing` or similar): Netlify is still working on it. It is not live yet and it

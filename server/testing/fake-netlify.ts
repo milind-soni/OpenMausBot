@@ -31,10 +31,12 @@ export interface FakeNetlify {
   rootContentType: string;
   /** How many status reads a new deploy answers "processing" before it is ready; a new site's first deploy is slow. */
   processingPolls: number;
+  /** A team that enforces its protection: turning `sso_login` off is refused with 403. */
+  refusePublic: boolean;
   stop(): Promise<void>;
 }
 
-/** `teamLogin`: new sites answer 401 until `sso_login` is turned off, as on a new Netlify account (2026-11). */
+/** `teamLogin`: new sites answer 401 until `sso_login` is turned off, as on a team that protects new sites (2026-11). */
 export async function startFakeNetlify(token: string, { teamLogin = false }: { teamLogin?: boolean } = {}): Promise<FakeNetlify> {
   const blobs = new Map<string, Buffer>();
   let failure: { status: number; body: unknown } | null = null;
@@ -43,6 +45,7 @@ export async function startFakeNetlify(token: string, { teamLogin = false }: { t
     failNext: (status, body) => { failure = { status, body }; },
     rootContentType: "text/html; charset=UTF-8",
     processingPolls: 0,
+    refusePublic: false,
   };
   const origin = () => `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const deployView = (deploy: FakeDeploy) => ({
@@ -108,6 +111,7 @@ export async function startFakeNetlify(token: string, { teamLogin = false }: { t
         return res.end();
       }
       if (req.method === "PATCH" && changed) {
+        if (fake.refusePublic) return send(403, { code: 403, message: "Your team's settings don't allow changing site protection" });
         if ((JSON.parse(body.toString()) as { sso_login?: boolean }).sso_login === false) changed.teamLogin = false;
         return send(200, { id: change[1], name: changed.name, sso_login: changed.teamLogin });
       }

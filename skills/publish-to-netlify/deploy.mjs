@@ -154,19 +154,21 @@ class NetlifyError extends Error {
 }
 
 function parseArgs(argv) {
-  const args = { draft: false, public: false, check: false, delete: false };
+  const args = { draft: false, public: false, keepPrivate: false, check: false, delete: false };
   for (let at = 0; at < argv.length; at += 1) {
     const flag = argv[at];
     if (flag === "--draft") args.draft = true;
     else if (flag === "--make-public") args.public = true;
+    else if (flag === "--keep-private") args.keepPrivate = true;
     else if (flag === "--check") args.check = true;
     else if (flag === "--delete") args.delete = true;
     else if (["--dir", "--token-file", "--project", "--name", "--title", "--bot-name"].includes(flag) && argv[at + 1]) args[flag.slice(2)] = argv[(at += 1)];
     else throw new Error(`unknown or incomplete option ${flag}`);
   }
-  if (args.delete && (args.dir || args.public || args.check || args.draft)) throw new Error("--delete takes only --token-file and --project");
+  if (args.delete && (args.dir || args.public || args.keepPrivate || args.check || args.draft)) throw new Error("--delete takes only --token-file and --project");
+  if (args.public && args.keepPrivate) throw new Error("--make-public and --keep-private ask for opposite things; pass one");
   if (!args["token-file"] || !(args.dir || args.public || args.check || args.delete)) {
-    throw new Error("usage: node deploy.mjs --dir <folder to publish> --token-file <secret file> [--project <folder>] [--name <site name>] [--title <title>] [--bot-name <your name>] [--draft] [--make-public] | --check --token-file <secret file> | --make-public --token-file <secret file> | --delete --token-file <secret file>");
+    throw new Error("usage: node deploy.mjs --dir <folder to publish> --token-file <secret file> [--project <folder>] [--name <site name>] [--title <title>] [--bot-name <your name>] [--draft] [--keep-private] | --check --token-file <secret file> | --make-public --token-file <secret file> | --delete --token-file <secret file>");
   }
   return args;
 }
@@ -197,11 +199,21 @@ export function siteRecord(fields) {
   return record;
 }
 
+/** Answers to the PATCH that mean the team keeps its sites private (Netlify 2026-11: a team can enforce its default). */
+const PUBLIC_REFUSED = new Set([400, 403, 422]);
+// Netlify's docs (2026-11): the site's own setting is under Project configuration > General > Visitor access; the
+// team default is under Team settings > General > Visitor access, or Team settings > Access & security > Visitor
+// access on Enterprise and older plans.
+const TEAM_KEEPS_PRIVATE = "The site is deployed, but the Netlify team's settings keep it private: only people signed in to that team can open the link. "
+  + "To open it to anyone with the link, open the site in Netlify and change Project configuration > General > Visitor access. "
+  + "To make new sites public, a team owner changes the default in Team settings > General > Visitor access (Team settings > Access & security > Visitor access on some plans).";
+const PRIVATE_ON_CHECK = "The link asks for a Netlify login. Unless the person asked for a private site, run again with --make-public.";
+
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 
-/** Netlify (2026-11): a new account's sites answer 401 with a redirect to its team login until `sso_login` is turned
- * off on the site, so a 401 is a deployed site that only the account's team can open. Turning it off takes a few
- * seconds to show, so `expectPublic` waits through 401s. */
+/** Netlify (2026-11): where a team protects new sites, they answer 401 with a redirect to the team login until
+ * `sso_login` is turned off on the site, so a 401 is a deployed site that only the account's team can open. Turning
+ * it off takes a few seconds to show, so `expectPublic` waits through 401s. */
 async function checkLink(url, env, { pollMs, waitMs, privateAfterMs, expectPublic }) {
   const started = Date.now();
   for (;;) {
@@ -243,9 +255,23 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
       writeFileSync(siteFile, `${JSON.stringify(site, null, 2)}\n`);
     };
     const makePublic = () => api("Making the site public", "PATCH", `/sites/${site.siteId}`, { sso_login: false });
+    /** Sites are public unless the person asked for a private one. A team that enforces its protection refuses the
+     * change (or keeps `sso_login` on): that is not a failed publish, the answer says the site stays private. */
+    const openToAll = async () => {
+      try {
+        return (await makePublic())?.sso_login !== true;
+      } catch (error) {
+        if (error instanceof NetlifyError && PUBLIC_REFUSED.has(error.status)) return false;
+        throw error;
+      }
+    };
 
     /** Waits for Netlify to finish a deploy, then for its link. A deploy still being processed at the deadline is
      * neither a success nor a failure: the answer says so and `--check` picks it up. */
+    const linkAnswer = async (url, expectPublic) => {
+      const link = await checkLink(url, env, { pollMs, waitMs: linkWaitMs, privateAfterMs, expectPublic });
+      return link.access === "private" && !args.keepPrivate ? { ...link, message: args.dir || args.public ? TEAM_KEEPS_PRIVATE : PRIVATE_ON_CHECK } : link;
+    };
     const finish = async (deploy, { draft, expectPublic, firstLook }) => {
       const deadline = Date.now() + waitMs;
       while (deploy.state !== "ready" && deploy.state !== "error" && Date.now() < deadline) {
@@ -263,7 +289,7 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
         if (!draft) save({ deployState: state });
         return { ...common, pending: true, live: false, message: `Netlify is still processing this deploy (${state}). It is not live yet and has not failed. Run again with --check in a minute.` };
       }
-      const link = await checkLink(url, env, { pollMs, waitMs: linkWaitMs, privateAfterMs, expectPublic });
+      const link = await linkAnswer(url, expectPublic);
       if (!draft) save({ url, deployState: state, ...(link.access ? { access: link.access } : {}), ...(firstLook ? { publishedAt: now().toISOString() } : {}) });
       return { ...common, ...link };
     };
@@ -282,10 +308,10 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
 
     if (!dir) {
       if (!site) throw new Error(`${siteFile} is missing; publish the site first`);
-      if (args.public) await makePublic();
-      if (!site.deployId) return { ok: true, draft: false, siteId: site.siteId, name: site.name, url: site.url, adminUrl: site.adminUrl, ...(await checkLink(site.url, env, { pollMs, waitMs: linkWaitMs, privateAfterMs, expectPublic: args.public })) };
+      const opened = args.public && await openToAll();
+      if (!site.deployId) return { ok: true, draft: false, siteId: site.siteId, name: site.name, url: site.url, adminUrl: site.adminUrl, ...(await linkAnswer(site.url, opened)) };
       const deploy = await api("Checking the deploy", "GET", `/sites/${site.siteId}/deploys/${site.deployId}`);
-      return await finish(deploy, { draft: false, expectPublic: args.public, firstLook: site.deployState !== "ready" || !site.publishedAt });
+      return await finish(deploy, { draft: false, expectPublic: opened, firstLook: site.deployState !== "ready" || !site.publishedAt });
     }
 
     const { files, skipped } = collectFiles(dir);
@@ -306,7 +332,7 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
     } else if (Object.keys(labels).length && !args.draft) {
       save(labels);
     }
-    if (args.public) await makePublic();
+    const opened = !args.keepPrivate && await openToAll();
 
     let deploy = await api("Starting the deploy", "POST", `/sites/${site.siteId}/deploys`, {
       files: digest,
@@ -340,7 +366,7 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
     }));
 
     return {
-      ...(await finish(deploy, { draft: args.draft, expectPublic: args.public, firstLook: true })), created,
+      ...(await finish(deploy, { draft: args.draft, expectPublic: opened, firstLook: true })), created,
       files: files.length, uploaded: required.length, alreadyOnNetlify: new Set(Object.values(digest)).size - required.length,
       bytes: files.reduce((sum, file) => sum + file.size, 0), skipped,
     };
