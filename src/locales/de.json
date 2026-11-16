@@ -4019,5 +4019,13 @@
   "server.rooms.linkedEnded": "{place} hat sich 30 Tage lang nicht verbunden, deshalb wurde die Verbindung dorthin beendet. Nicht mehr in diesem Raum: {bots}.",
   "room.members.far.place": "auf {place}",
   "room.members.far.off": "Verbindung ist aus",
-  "room.members.far.missing": "Nicht mehr verfügbar"
+  "room.members.far.missing": "Nicht mehr verfügbar",
+  "voice.deepseek.sharedKey": "DeepSeek verwendet den vorhandenen DeepSeek-Schlüssel dieser Installation.",
+  "voice.deepseek.description": "Liest Antworten und Sprachnachrichten mit der DeepSeek-Stimme Stella oder Tide vor. Mit DeepSeek hören dich auch Diktat und abwechselndes Sprechen über die DeepSeek-Spracherkennung, bis zu etwa zwei Minuten pro Aufnahme. Nutzt deinen DeepSeek-API-Schlüssel und wird von DeepSeek abgerechnet.",
+  "voice.deepseek.missingKey": "Füge auf dem Host unter Einstellungen → API-Schlüssel einen DeepSeek-API-Schlüssel hinzu, um die DeepSeek-Stimme zu nutzen.",
+  "voice.deepseek.stella": "Stella (weiblich)",
+  "voice.deepseek.tide": "Tide (männlich)",
+  "call.capability.turnsNeedDeepSeekKey": "Füge einen DeepSeek-Schlüssel hinzu, um in Anrufen abwechselnd zu sprechen",
+  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek ist deine Stimme, daher hört dich das abwechselnde Sprechen über die DeepSeek-Spracherkennung. Füge unter Einstellungen → API-Schlüssel einen DeepSeek-Schlüssel hinzu.",
+  "serverError.voice.deepseekKeyRequired": "Füge unter Einstellungen → API-Schlüssel einen DeepSeek-API-Schlüssel hinzu, um mit der DeepSeek-Stimme mit deinen Bots zu sprechen."
 }

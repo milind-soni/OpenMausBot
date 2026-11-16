@@ -6007,5 +6007,13 @@
   "remote.tailscale.needsApproval": "Máy tính này đang chờ được phê duyệt trên mạng Tailscale của bạn. Hãy phê duyệt trong bảng điều khiển quản trị Tailscale, rồi thử lại.",
   "together.switch.title": "Máy tính này và My Cloud cùng nhau",
   "together.switch.line": "Mặc định là tắt. Bot trên Cloud và bot trên máy tính này hiện trong một danh sách, và mỗi bot mở ở nơi nó đang ở.",
-  "together.switch.failed": "Không lưu được. Hãy thử lại."
+  "together.switch.failed": "Không lưu được. Hãy thử lại.",
+  "voice.deepseek.sharedKey": "DeepSeek sử dụng khóa DeepSeek hiện có của bản cài đặt này.",
+  "voice.deepseek.description": "Đọc to câu trả lời và tin nhắn thoại bằng giọng Stella hoặc Tide của DeepSeek. Khi chọn DeepSeek, tính năng đọc chính tả và chế độ Luân phiên cũng nghe bạn qua chuyển giọng nói thành văn bản của DeepSeek, tối đa khoảng hai phút mỗi lần ghi. Dùng khóa API DeepSeek của bạn và do DeepSeek tính phí.",
+  "voice.deepseek.missingKey": "Thêm khóa API DeepSeek trong Cài đặt → Khóa API trên máy chủ để dùng giọng DeepSeek.",
+  "voice.deepseek.stella": "Stella (nữ)",
+  "voice.deepseek.tide": "Tide (nam)",
+  "call.capability.turnsNeedDeepSeekKey": "Thêm khóa DeepSeek để nói luân phiên trong cuộc gọi",
+  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek là giọng của bạn, nên chế độ Luân phiên nghe bạn qua chuyển giọng nói thành văn bản của DeepSeek. Thêm khóa DeepSeek trong Cài đặt → Khóa API.",
+  "serverError.voice.deepseekKeyRequired": "Thêm khóa API DeepSeek trong Cài đặt → Khóa API để trò chuyện với bot bằng giọng DeepSeek."
 }

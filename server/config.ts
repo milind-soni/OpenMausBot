@@ -366,13 +366,13 @@ const appConfigSchema = z.object({
   vps: vpsConfigSchema.optional(),
   /** OpenCode key, plus `providerKeys` for its other providers by the env name OpenCode reads; both write-only and only for its child. */
   opencodeGo: z.object({ apiKey: optionalText, providerKeys: z.record(z.string(), z.string()).optional() }).optional(),
-  /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`), "gemini" (`geminiKey`, `model`), "openai" (`openai.key`) or "chatterbox" (local; `baseUrl`, `model`). */
+  /** `provider`: "elevenlabs" (default, `key`), "fish" (`fishKey`, `fishModel`), "system", "xai" (`xai.key`), "gemini" (`geminiKey`, `model`), "openai" (`openai.key`), "deepseek" (`deepseek.key`; it also hears dictation) or "chatterbox" (local; `baseUrl`, `model`). */
   tts: z.object({
     key: optionalText,
     fishKey: optionalText,
     geminiKey: optionalText,
     voice: optionalText,
-    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini", "openai"]).optional(),
+    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini", "openai", "deepseek"]).optional(),
     baseUrl: z
       .string()
       .trim()
@@ -473,7 +473,7 @@ export interface AppConfig extends HelperConfig {
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
-  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean };
+  tts?: { key?: string; fishKey?: string; geminiKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek"; baseUrl?: string; model?: string; fishModel?: FishTtsModel; everyReply?: boolean };
   decider?: DeciderConfig;
   imageGen?: ImageGenerationConfig;
   live?: LiveConfig;

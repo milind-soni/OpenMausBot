@@ -3,9 +3,11 @@
 import { api, ApiError } from "@/state/api";
 import { t } from "./i18n";
 
+/** `maxMs`: the longest one manual recording runs before it is heard; call turns keep their own cap. */
+type StartOptions = { endpointMs?: number; maxMs?: number };
 export type SpeechBridge = Required<
-  Pick<NonNullable<Window["ogb"]>, "speechStart" | "speechStop" | "speechFinish" | "onSpeechTranscript" | "onSpeechEnd">
->;
+  Pick<NonNullable<Window["ogb"]>, "speechStop" | "speechFinish" | "onSpeechTranscript" | "onSpeechEnd">
+> & { speechStart(options?: StartOptions): Promise<void> };
 type Line = Parameters<Parameters<SpeechBridge["onSpeechTranscript"]>[0]>[0];
 type End = Parameters<Parameters<SpeechBridge["onSpeechEnd"]>[0]>[0];
 
@@ -29,8 +31,8 @@ export function rms(frame: Float32Array): number {
 export type Heard = "waiting" | "speaking" | "done";
 
 /** `endpointMs` set: quiet that long after speech ends the turn. Unset: only the cap ends it. */
-export function createEndpointer(endpointMs: number | undefined, frameMs = FRAME_MS) {
-  const cap = endpointMs === undefined ? MANUAL_MAX_MS : CALL_TURN_MAX_MS;
+export function createEndpointer(endpointMs: number | undefined, frameMs = FRAME_MS, manualMaxMs = MANUAL_MAX_MS) {
+  const cap = endpointMs === undefined ? manualMaxMs : CALL_TURN_MAX_MS;
   let loud = 0;
   let quiet = 0;
   let elapsed = 0;
@@ -192,7 +194,7 @@ export const fishSpeech: SpeechBridge = {
     }
     if (gen !== generation) return release(mic);
     const endpointed = options?.endpointMs !== undefined;
-    const hear = createEndpointer(options?.endpointMs);
+    const hear = createEndpointer(options?.endpointMs, FRAME_MS, options?.maxMs);
     const clip = createClip();
     let announced = false;
     mic.processor.onaudioprocess = (event) => {

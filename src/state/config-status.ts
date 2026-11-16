@@ -94,7 +94,7 @@ export interface ConfigStatus {
     configured: boolean;
     ready: boolean;
     voice: string;
-    provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai";
+    provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek";
     baseUrl?: string;
     model?: string;
     /** Voice note with every reply, for every bot without its own choice. Absent from older servers. */

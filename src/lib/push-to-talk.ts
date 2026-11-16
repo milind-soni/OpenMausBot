@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { currentCall } from "./call";
 import { isMacPlatform } from "./keyboard-shortcuts";
-import { speechBridge } from "./speech";
+import type { speechBridge } from "./speech";
 
 type ModifierEvent = Pick<KeyboardEvent, "altKey" | "ctrlKey" | "code" | "repeat">;
 
@@ -17,7 +17,7 @@ export function isPushToTalkPress(event: ModifierEvent): boolean {
   return modifier && event.altKey && event.ctrlKey && !event.repeat;
 }
 
-export function usePushToTalk(targetId: string, enabled: boolean, onError: () => void): boolean {
+export function usePushToTalk(targetId: string, bridge: ReturnType<typeof speechBridge>, enabled: boolean, onError: () => void): boolean {
   const [active, setActive] = useState(false);
   const held = useRef(false);
   const enabledRef = useRef(enabled);
@@ -32,7 +32,6 @@ export function usePushToTalk(targetId: string, enabled: boolean, onError: () =>
   }, [enabled]);
 
   useEffect(() => {
-    const bridge = speechBridge();
     if (!bridge?.speechFinish) return;
 
     const finish = () => {
@@ -75,7 +74,7 @@ export function usePushToTalk(targetId: string, enabled: boolean, onError: () =>
       window.removeEventListener("blur", onBlur);
       held.current = false;
     };
-  }, [targetId]);
+  }, [bridge, targetId]);
 
   return active;
 }
