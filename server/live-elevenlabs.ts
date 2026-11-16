@@ -110,7 +110,7 @@ export interface CreateElevenLabsSessionInput {
  * the key, never ElevenLabs' raw body; `elevenlabsStatus` is ElevenLabs' own status. */
 export async function createElevenLabsLiveSession(input: CreateElevenLabsSessionInput): Promise<LiveElevenLabsSession> {
   const key = input.key.trim();
-  if (!key) throw new LiveSessionError("Add an ElevenLabs API key in Settings → API keys to use Live calls.", 409);
+  if (!key) throw new LiveSessionError("Add an ElevenLabs API key in Settings → AI → Other services to use Live calls.", 409);
   const answer = await elevenLabsRequest(input.fetchImpl ?? fetch, key, `${input.endpoint.apiBase}/conversation/get-signed-url?agent_id=${encodeURIComponent(input.endpoint.model)}`);
   const url = typeof answer.signed_url === "string" ? answer.signed_url : "";
   // ElevenLabs answers with a wss URL; only a loopback override may answer with a loopback ws one.
@@ -129,7 +129,7 @@ export function elevenLabsErrorMessage(status: number): string {
     case 400:
     case 422: return `ElevenLabs rejected the call settings (HTTP ${status}).`;
     case 401:
-    case 403: return "ElevenLabs rejected the API key, or the key may not use Agents. Check the ElevenLabs key in Settings → API keys.";
+    case 403: return "ElevenLabs rejected the API key, or the key may not use Agents. Check the ElevenLabs key in Settings → AI → Other services.";
     case 404: return "ElevenLabs could not find the agent for calls.";
     case 429: return "ElevenLabs is limiting calls on this key right now. Try again in a moment.";
     default: return status >= 500 ? "ElevenLabs had a problem starting the call. Try again in a moment." : `ElevenLabs could not start the call (HTTP ${status}).`;

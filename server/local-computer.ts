@@ -49,13 +49,10 @@ export function gatedLocalComputer(
   };
 }
 
-/** This computer's bridge also answers file tools in the person's own folders (host-files.ts); `appData` stays closed. */
-export function withHostFiles<T extends { env: Record<string, string>; scope?: "local-computer"; platform?: LocalComputerConnection["platform"] }>(
-  connection: T,
-  appData: readonly string[],
-): T {
+/** This computer's bridge also answers file tools (host-file-tools.ts); the person's approval level gates each call. */
+export function withHostFiles<T extends { env: Record<string, string>; scope?: "local-computer"; platform?: LocalComputerConnection["platform"] }>(connection: T): T {
   if (connection.scope !== "local-computer" || !connection.env.OMB_CUA_COMMAND || !connection.platform) return connection;
-  return { ...connection, env: { ...connection.env, OMB_HOST_FILES: JSON.stringify({ appData }) } };
+  return { ...connection, env: { ...connection.env, OMB_HOST_FILES: "1" } };
 }
 
 type LegacyConnectionDescriptor = {

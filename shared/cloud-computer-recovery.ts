@@ -63,7 +63,7 @@ export const CLOUD_COMPUTER_NEEDS_PERSON =
   "This bot's cloud computer isn't responding. The person can replace it from the computer panel. Do not retry computer work in this turn; tell the person.";
 /** A team's shared computer is never restarted or deleted by itself: every teammate's work is on it. */
 export const CLOUD_COMPUTER_TEAM_NOT_RESPONDING =
-  "This team's shared cloud computer isn't responding. A team admin can delete it in Settings → Computers and create it again from the Team map. Do not retry computer work in this turn; tell the person.";
+  "This team's shared cloud computer isn't responding. A team admin can delete it in Settings → Desktops & browser → Desktops and create it again from the Team map. Do not retry computer work in this turn; tell the person.";
 /** The provider says the machine is gone, but not yet for long enough to delete it by itself. */
 export const CLOUD_COMPUTER_DEAD_WAITING =
   "This bot's cloud computer isn't responding. MausBot replaces it if it is still down in half an hour; the person can replace it now from the computer panel. Do not retry computer work in this turn; tell the person.";

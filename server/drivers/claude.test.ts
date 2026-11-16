@@ -4898,7 +4898,7 @@ describe("ClaudeDriver billing (fake CLI)", () => {
   const instances: ProviderInstance[] = [];
   const KEY = { billing: "metered", method: "api-key" };
   const LOGIN = { billing: "subscription", method: null };
-  const NO_KEY = { unavailable: "No Anthropic API key — open Settings → API keys." };
+  const NO_KEY = { unavailable: "No Anthropic API key — open Settings → AI → Providers." };
 
   const billed = async (id: "claude" | "claudeApi", anthropic: AppConfig["anthropic"]) => {
     const entry = instanceConfigs({ anthropic })[id]!;

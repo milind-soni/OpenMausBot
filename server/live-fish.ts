@@ -161,7 +161,7 @@ export interface CreateFishSessionInput {
  * body; `fishStatus` is Fish's own status. */
 export async function createFishLiveSession(input: CreateFishSessionInput): Promise<LiveFishSessionToken> {
   const key = input.key.trim();
-  if (!key) throw new LiveSessionError("Add a Fish Audio API key in Settings → API keys to use Live calls.", 409);
+  if (!key) throw new LiveSessionError("Add a Fish Audio API key in Settings → AI → Other services to use Live calls.", 409);
   const body = {
     agent_id: input.endpoint.model,
     // Fish refuses an override the agent's `overrides_allowed` does not list (400).
@@ -218,7 +218,7 @@ export async function endFishLiveSession(sessionId: string, key: string, endpoin
 export function fishErrorMessage(status: number): string {
   switch (status) {
     case 400: return "Fish Audio rejected the call settings (HTTP 400).";
-    case 401: return "Fish Audio rejected the API key. Check the Fish Audio key in Settings → API keys.";
+    case 401: return "Fish Audio rejected the API key. Check the Fish Audio key in Settings → AI → Other services.";
     case 402: return "The Fish Audio account has no credit for agent calls.";
     case 403: return "This Fish Audio key may not start agent calls.";
     case 404: return "Fish Audio could not find the agent for Live calls. Try the call again.";

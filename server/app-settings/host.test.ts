@@ -111,9 +111,22 @@ describe("reads", () => {
     const { host, turn } = fixture();
     const found = await host.handle({ action: "find", query: "dark mode" }, turn);
     const hits = JSON.parse(String(found.body.text)) as Array<Record<string, unknown>>;
-    expect(hits[0]).toMatchObject({ id: "appearance.skin", tier: "safe", value: "daylight", where: "Settings → Appearance" });
+    expect(hits[0]).toMatchObject({ id: "appearance.skin", tier: "safe", value: "daylight", where: "Settings → Appearance → Theme" });
     const got = await host.handle({ action: "get", id: "rooms.turnTimeoutMinutes" }, turn);
     expect(JSON.parse(String(got.body.text))).toMatchObject({ id: "rooms.turnTimeoutMinutes", value: "30", allowed: "1 to 1440 minutes", change: "set applies at once, with Undo on the card" });
+  });
+
+  it("names real places only: find falls back to where a thing is, places lists them all", async () => {
+    const { host, turn } = fixture();
+    const owner = await host.handle({ action: "get", id: "phone.pairing" }, turn);
+    expect(JSON.parse(String(owner.body.text))).toMatchObject({ where: "Settings → Phone & devices → Pair a phone", change: "only the person, in Settings → Phone & devices → Pair a phone" });
+    const none = await host.handle({ action: "find", query: "invoice" }, turn);
+    expect(none.body.text).toMatch(/^No setting you can change matches "invoice"\. Where the person finds it in the app: Settings → Plan & billing/);
+    expect((await host.handle({ action: "places", query: "spending" }, turn)).body.text).toMatch(/^Settings → Spending \(shown in Advanced mode only/);
+    const every = String((await host.handle({ action: "places" }, turn)).body.text).split("\n");
+    expect(every[0]).toMatch(/^Settings opens from/);
+    expect(every).toContain("Settings → AI → Other services");
+    expect(every.join("\n")).not.toMatch(/API keys|Computers\b/);
   });
 
   it("works in a turn that is not the owner's, where writes are refused", async () => {
@@ -288,7 +301,7 @@ describe("AI engines", () => {
   it("never removes an engine: the bot is told in one line that the person does that in Settings", async () => {
     const fx = fixture();
     const refused = await fx.set("engines", JSON.stringify({ kind: "remove", instanceId: "openai-compat-gw" }));
-    expect(refused).toMatchObject({ status: 409, body: { error: "Removing an AI engine is changed only by the person, in Settings → AI. Tell them where in one line; do not try another way." } });
+    expect(refused).toMatchObject({ status: 409, body: { error: "Removing an AI engine is changed only by the person, in Settings → AI → Providers. Tell them where in one line; do not try another way." } });
     expect(fx.engineCalls).toEqual([]);
     expect(fx.cards()).toEqual([]);
   });
@@ -333,7 +346,7 @@ describe("owner-only tier", () => {
     expect(on.body.text).toMatch(/^Done: Let your paired phones reach this computer from anywhere, through MausBot's relay\./);
     expect(fx.windowValues.get("remote.relay")).toBe(true);
     const off = await fx.set("remote.relay", false);
-    expect(off).toMatchObject({ status: 409, body: { error: "Turning off Reach from anywhere is changed only by the person, in Settings → Phone & devices. Tell them where in one line; do not try another way." } });
+    expect(off).toMatchObject({ status: 409, body: { error: "Turning off Reach from anywhere is changed only by the person, in Settings → Phone & devices → How your phone reaches this computer → Anywhere, through MausBot (only in the desktop app, on this computer's own page). Tell them where in one line; do not try another way." } });
     expect(fx.windowValues.get("remote.relay")).toBe(true);
     expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
     expect(fx.windowValues.get("remote.relay")).toBe(false);
