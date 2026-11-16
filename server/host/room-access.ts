@@ -41,7 +41,7 @@ export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy,
   function reachProblem(from: BotRecord, bot: BotRecord, parent: Pick<HandoffView, "threadId">, node: Pick<HandoffView, "threadId" | "botId"> & Partial<Pick<HandoffView, "id" | "origin" | "groupId">>): string | undefined {
     const laneThread = laneRoomThread({ botId: node.botId, threadId: node.threadId, groupId: node.groupId });
     const room = node.groupId ? store.group(node.groupId) : laneThread ? store.groupByThread(laneThread) : undefined;
-    if (peerAllowed(from, bot)) return sameAudience(from.visibility, bot.visibility) || roomWithin(from, room) ? undefined : ROOM_SHARED_APART;
+    if (peerAllowed(from, bot)) return roomWithin(from, room) ? undefined : ROOM_SHARED_APART;
     const personal = personalReach?.();
     if (personal?.carries(from, bot, parent.threadId, node)) return undefined;
     return personal?.refusal(from, bot, parent.threadId) ?? reachRefusal(from, bot, lookedAfterBy)!;

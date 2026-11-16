@@ -165,4 +165,10 @@ describe("roomHandoffProblem into a wider room", () => {
     expect(roomHandoffProblem({ groupId: "floored", threadId: "floored-thread", botId: "helper" }, from)).toMatch(/room is shared with different people/);
     expect(roomHandoffProblem({ botId: "helper", threadId: "helper-main" }, from)).toBeUndefined();
   });
+
+  it("refuses a result from a room that narrowed while it ran, even once both bots share the sender's audience", () => {
+    const narrowed = { ...bots, helper: { ...bots.helper, visibility: { people: ["ada@acme.test"] } } } as unknown as Record<string, BotRecord>;
+    const access = createRoomAccess({ store: { ...store, bot: (id: string) => narrowed[id] } as unknown as Store });
+    expect(access.roomHandoffProblem({ groupId: "floored", threadId: "floored-thread", botId: "helper" }, from)).toMatch(/room is shared with different people/);
+  });
 });
