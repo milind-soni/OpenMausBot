@@ -28,7 +28,7 @@ import {
 } from "../claude-bedrock.ts";
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
-import { addEndpoint, addEndpointSchema, changeEndpointAddress, endpointBaseUrl, isAddedEndpoint, localServerAlreadyAdded, withEndpointUrls } from "../openai-compat-endpoints.ts";
+import { addEndpoint, addEndpointSchema, changeEndpointAddress, endpointBaseUrl, endpointModelsReadable, isAddedEndpoint, localServerAlreadyAdded, withEndpointUrls } from "../openai-compat-endpoints.ts";
 import { findOllama, probeOllama } from "../drivers/ollama.ts";
 import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "../contracts.ts";
 import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
@@ -66,6 +66,8 @@ export interface InstanceRouteDeps {
   activeGroupTurnForBot(botId: string): { threadId: string } | null;
   /** The server's tested-AI record (server/tested-ai.ts): a check there also settles the new-bot default. */
   checkInstance?(instance: ProviderInstance): Promise<EngineCheck>;
+  /** Whether an added server lists its models (server/openai-compat-endpoints.ts); replaced in tests. */
+  endpointModelsReadable?(config: { url: string; key: string; catalog?: unknown }): Promise<boolean>;
 }
 
 export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
@@ -74,6 +76,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     persistProviderInstance, configStatus, broadcast, testCliBinary, cliProbeEnvironment, threadBusy,
     botForThread, activeGroupTurnForBot,
   } = deps;
+  const detectModels = deps.endpointModelsReadable ?? endpointModelsReadable;
   const describeInstances = async () => hostedModels ? deps.describeInstances()
     : withEndpointUrls(withCodexEndpointInfo(withClaudeBedrockInfo(withClaudeEndpointInfo(await deps.describeInstances(), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {});
   /** Bots, their backups and threads, the new-bot default, or a turn running on it: a provider in use can't go away. */
@@ -477,6 +480,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
         return json(res, 409, { error: "Wait for bots using this account to finish before changing its settings." });
       }
+      /** Set when the model list is read again from a new address or with a new key: after the busy guard, so bots on
+       * this server are not refused while a slow server answers. */
+      let detect: { url: string; key: string; catalog?: unknown } | null = null;
       providerConfigBusy.set(true);
       providerInstancesChanging.add(instanceId);
       try {
@@ -515,14 +521,14 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           }
           entry.config = models.length ? { ...rest, managedModels: models } : rest;
         }
-        let detectModels = false;
         if (body.url !== undefined || body.apiKey !== undefined) {
           if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only the owner or an admin can change a server's address or key." });
           if (!isAddedEndpoint(instanceId, entry)) return json(res, 400, { error: "The base URL and key can be changed here for added OpenAI-compatible servers only." });
           const changed = changeEndpointAddress(instances, instanceId, { url: body.url, apiKey: body.apiKey });
           if ("error" in changed) return json(res, changed.status, { error: changed.error });
           // A model list read from the server's /models is read again from the new address or with the new key.
-          detectModels = (changed.addressChanged || body.apiKey !== undefined) && !Array.isArray((entry.config as { managedModels?: unknown } | undefined)?.managedModels);
+          const config = entry.config as { url: string; key: string; catalog?: unknown; managedModels?: unknown };
+          if ((changed.addressChanged || body.apiKey !== undefined) && !Array.isArray(config.managedModels)) detect = { url: config.url, key: config.key, catalog: config.catalog };
         }
         if (body.displayName !== undefined) entry.displayName = body.displayName;
         if (body.configDir !== undefined) {
@@ -537,12 +543,17 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           }
         }
         await persistProviderInstance(instanceId, instances);
-        if (detectModels) await registry?.refreshModels(instanceId).catch(() => {});
-        return json(res, 200, { instances: await describeInstances() });
+        if (!detect) return json(res, 200, { instances: await describeInstances() });
       } finally {
         providerInstancesChanging.delete(instanceId);
         providerConfigBusy.set(false);
       }
+      // Saved either way; a list that can't be read leaves sample models in the picker, so the answer says so.
+      const [, readable] = await Promise.all([registry?.refreshModels(instanceId).catch(() => {}), detectModels(detect)]);
+      return json(res, 200, {
+        instances: await describeInstances(),
+        ...(readable ? {} : { warning: "Saved. The model list could not be read at this address with this key, so the model picker may show sample models. Check the address and key, or enter the model IDs." }),
+      });
     }
 
     if (method === "DELETE" && instancePatch) {

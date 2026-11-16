@@ -2,7 +2,7 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as store from "@/state/store";
-import { BuiltInReplyWait, hostChanged, modelIds, OtherOpenAiCompatServers, LmStudioServer, lmStudioBaseUrl } from "./OpenAiCompatServers";
+import { BuiltInReplyWait, modelIds, originChanged, OtherOpenAiCompatServers, LmStudioServer, lmStudioBaseUrl } from "./OpenAiCompatServers";
 
 const fixture = vi.hoisted(() => ({ counting: false, values: [] as unknown[], index: 0, api: vi.fn(), track: vi.fn() }));
 vi.mock("react", async (original) => {
@@ -297,9 +297,9 @@ describe("changing an added server's model IDs", () => {
   const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
     Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
   const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
-  function row(managedModels?: string[], dispatch = vi.fn()) {
+  function row(managedModels?: string[], dispatch = vi.fn(), extra: Record<string, unknown> = {}) {
     vi.stubGlobal("window", {});
-    const servers = [instance("openai-compat-1", "Zhipu", { url: "https://open.bigmodel.cn/api/paas/v4", ...(managedModels ? { managedModels } : {}) })];
+    const servers = [instance("openai-compat-1", "Zhipu", { url: "https://open.bigmodel.cn/api/paas/v4", ...(managedModels ? { managedModels } : {}), ...extra })];
     vi.spyOn(store, "useStore").mockReturnValue({
       state: { ...store.initialState, instances: servers }, dispatch, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
     });
@@ -379,7 +379,7 @@ describe("changing an added server's model IDs", () => {
     labelled(row(["glm-5"]), "Edit Zhipu")!.props.onClick!();
     labelled(row(["glm-5"]), "Base URL for Zhipu")!.props.onChange!({ target: { value: "https://api.z.ai/api/paas/v4" } });
     expect((save(row(["glm-5"])).props as { disabled?: boolean }).disabled).toBe(true);
-    expect(JSON.stringify(row(["glm-5"]).map((node) => node.props.children))).toContain("This address is on another host.");
+    expect(JSON.stringify(row(["glm-5"]).map((node) => node.props.children))).toContain("This address is on another server or protocol.");
     labelled(row(["glm-5"]), "New API key for Zhipu")!.props.onChange!({ target: { value: " sk-new " } });
     expect((save(row(["glm-5"])).props as { disabled?: boolean }).disabled).toBe(false);
     save(row(["glm-5"])).props.onClick!();
@@ -388,14 +388,52 @@ describe("changing an added server's model IDs", () => {
       method: "PATCH", body: JSON.stringify({ models: ["glm-5"], url: "https://api.z.ai/api/paas/v4", apiKey: "sk-new" }),
     });
   });
+
+  it("asks for the key again when https becomes http on the same host", () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    labelled(row(["glm-5"]), "Edit Zhipu")!.props.onClick!();
+    labelled(row(["glm-5"]), "Base URL for Zhipu")!.props.onChange!({ target: { value: "http://open.bigmodel.cn/api/paas/v4" } });
+    expect((save(row(["glm-5"])).props as { disabled?: boolean }).disabled).toBe(true);
+    expect(JSON.stringify(row(["glm-5"]).map((node) => node.props.children))).toContain("This address is on another server or protocol.");
+  });
+
+  it("moves a server with Ollama's placeholder key to another host without asking for a key", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockResolvedValue({ instances: [] });
+    const ollama = { url: "http://127.0.0.1:11434", placeholderKey: true };
+    labelled(row(undefined, vi.fn(), ollama), "Edit Zhipu")!.props.onClick!();
+    labelled(row(undefined, vi.fn(), ollama), "Base URL for Zhipu")!.props.onChange!({ target: { value: "http://192.168.1.20:11434" } });
+    expect((save(row(undefined, vi.fn(), ollama)).props as { disabled?: boolean }).disabled).toBe(false);
+    save(row(undefined, vi.fn(), ollama)).props.onClick!();
+    await flush();
+    expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/instances/openai-compat-1", {
+      method: "PATCH", body: JSON.stringify({ models: [], url: "http://192.168.1.20:11434" }),
+    });
+  });
+
+  it("keeps the editor open with one line when the new address's model list could not be read", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockResolvedValue({ instances: [], warning: "Saved. The model list could not be read" });
+    labelled(row(), "Edit Zhipu")!.props.onClick!();
+    labelled(row(), "Base URL for Zhipu")!.props.onChange!({ target: { value: "https://open.bigmodel.cn/api/v5" } });
+    save(row()).props.onClick!();
+    await flush();
+    const status = row().find((node) => (node.props as { role?: string }).role === "status");
+    expect(status?.props.children).toMatch(/^Saved\. The model list could not be read at this address/);
+    expect(labelled(row(), "Base URL for Zhipu")).toBeDefined();
+  });
 });
 
-describe("hostChanged", () => {
-  it("compares host and port only", () => {
-    expect(hostChanged("https://a.example/v1", "https://a.example/v2")).toBe(false);
-    expect(hostChanged("https://a.example/v1", "https://b.example/v1")).toBe(true);
-    expect(hostChanged("https://a.example/v1", "https://a.example:8443/v1")).toBe(true);
-    expect(hostChanged(undefined, "https://a.example/v1")).toBe(true);
-    expect(hostChanged("https://a.example/v1", "not a url")).toBe(false);
+describe("originChanged", () => {
+  it("compares scheme, host and port", () => {
+    expect(originChanged("https://a.example/v1", "https://a.example/v2")).toBe(false);
+    expect(originChanged("https://a.example/v1", "https://b.example/v1")).toBe(true);
+    expect(originChanged("https://a.example/v1", "https://a.example:8443/v1")).toBe(true);
+    expect(originChanged("https://a.example/v1", "http://a.example/v1")).toBe(true);
+    expect(originChanged(undefined, "https://a.example/v1")).toBe(true);
+    expect(originChanged("https://a.example/v1", "not a url")).toBe(false);
   });
 });

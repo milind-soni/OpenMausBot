@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AppConfig } from "../config.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
 import { json, readBody } from "../harness/http.ts";
-import { endpointBaseUrl, endpointDisplayUrl } from "../openai-compat-endpoints.ts";
+import { endpointBaseUrl, endpointDisplayUrl, endpointModelsReadable } from "../openai-compat-endpoints.ts";
 import { requiredScope, type RequestAuth } from "../request-auth.ts";
 import { createInstanceRoutes, type InstanceRouteDeps } from "./instances.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -17,7 +17,10 @@ afterEach(async () => {
 
 const SECRET = "sk-test-0123456789";
 
-async function serve(options: { hosted?: boolean; botInstance?: string; botBusy?: boolean; auth?: RequestAuth } = {}) {
+async function serve(options: {
+  hosted?: boolean; botInstance?: string; botBusy?: boolean; auth?: RequestAuth;
+  readable?: (config: { url: string; key: string }) => Promise<boolean>;
+} = {}) {
   const cfg = { instances: { openaiCompat: { driver: "openai-compat" }, claude: { driver: "claudeAgent" } } } as unknown as AppConfig;
   const persisted: InstanceConfigMap[] = [];
   const refreshed: string[] = [];
@@ -29,6 +32,7 @@ async function serve(options: { hosted?: boolean; botInstance?: string; botBusy?
     store: { bots, tasks: () => [] },
     cfg,
     registry: { refreshModels: async (instanceId: string) => { refreshed.push(instanceId); return true; } },
+    endpointModelsReadable: options.readable ?? (async () => true),
     hostedModels: Boolean(options.hosted),
     providerConfigBusy: { get: () => busy, set: (value: boolean) => { busy = value; } },
     providerInstancesChanging: new Set<string>(),
@@ -62,7 +66,7 @@ async function serve(options: { hosted?: boolean; botInstance?: string; botBusy?
     const text = await response.text();
     return { status: response.status, text, body: JSON.parse(text) as any };
   };
-  return { cfg, persisted, refreshed, call };
+  return { cfg, persisted, refreshed, call, busy: () => busy };
 }
 
 const add = { displayName: "Zhipu", url: "https://open.bigmodel.cn/api/paas/v4/", key: SECRET, models: ["glm-4.6", "glm-4.6", "glm-5"] };
@@ -195,6 +199,45 @@ describe("changing an added server's base URL", () => {
     expect(cfg.instances?.[ID]?.config).toMatchObject({ key: "sk-third", url: "https://new.example.com/v1" });
   });
 
+  it("needs the key again when https becomes http on the same host", async () => {
+    const { cfg, call } = await serve();
+    seed(cfg);
+    const refused = await call("PATCH", `/api/instances/${ID}`, { url: "http://old.example.com/v1" });
+    expect(refused.status, refused.text).toBe(400);
+    expect(refused.body.error).toMatch(/API key again/);
+    expect(cfg.instances?.[ID]?.config).toMatchObject({ key: SECRET, url: "https://old.example.com/v1" });
+  });
+
+  it("moves an Ollama server's placeholder key to another host without asking", async () => {
+    const { cfg, call } = await serve();
+    seed(cfg, { key: "ollama", url: "http://127.0.0.1:11434", catalog: "ollama" });
+    const listed = await call("GET", "/api/instances");
+    expect(listed.body.instances.find((row: any) => row.instanceId === ID)).toMatchObject({ placeholderKey: true });
+    const moved = await call("PATCH", `/api/instances/${ID}`, { url: "http://192.168.1.20:11434" });
+    expect(moved.status, moved.text).toBe(200);
+    expect(cfg.instances?.[ID]?.config).toEqual({ key: "ollama", url: "http://192.168.1.20:11434", catalog: "ollama" });
+  });
+
+  it("saves an address whose model list can't be read, says so, and reads it after the busy guard", async () => {
+    let busyWhileReading: boolean | undefined;
+    const asked: Array<{ url: string; key: string }> = [];
+    const server = await serve({ readable: async (config) => { asked.push(config); busyWhileReading = server.busy(); return false; } });
+    seed(server.cfg, { key: SECRET, url: "https://old.example.com/v1" });
+    const saved = await server.call("PATCH", `/api/instances/${ID}`, { url: "https://old.example.com/v2" });
+    expect(saved.status, saved.text).toBe(200);
+    expect(saved.body.warning).toMatch(/model list could not be read/);
+    expect(saved.text).not.toContain(SECRET);
+    expect(asked).toEqual([{ url: "https://old.example.com/v2", key: SECRET }]);
+    expect(busyWhileReading).toBe(false);
+    expect((server.cfg.instances?.[ID]?.config as { url?: string } | undefined)?.url).toBe("https://old.example.com/v2");
+
+    const fine = await serve();
+    seed(fine.cfg, { key: SECRET, url: "https://old.example.com/v1" });
+    const clean = await fine.call("PATCH", `/api/instances/${ID}`, { url: "https://old.example.com/v2" });
+    expect(clean.status).toBe(200);
+    expect(clean.body).not.toHaveProperty("warning");
+  });
+
   it("waits while a bot using it is mid-turn, or while provider settings are changing", async () => {
     const { cfg, persisted, call } = await serve({ botInstance: ID, botBusy: true });
     seed(cfg);
@@ -213,6 +256,21 @@ describe("changing an added server's base URL", () => {
     const hosted = await serve({ hosted: true });
     seed(hosted.cfg);
     expect((await hosted.call("PATCH", `/api/instances/${ID}`, { url: "https://old.example.com/v2" })).status).toBe(403);
+  });
+});
+
+describe("reading an added server's model list", () => {
+  it("is true only when /models answers a list with the key", async () => {
+    const server = createServer((req, res) => {
+      const ok = req.url === "/v1/models" && req.headers.authorization === `Bearer ${SECRET}`;
+      res.writeHead(ok ? 200 : 401, { "content-type": "application/json" }).end(JSON.stringify(ok ? { data: [{ id: "m" }] } : { error: "no" }));
+    });
+    servers.push(server);
+    await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`;
+    expect(await endpointModelsReadable({ url, key: SECRET })).toBe(true);
+    expect(await endpointModelsReadable({ url, key: "wrong" })).toBe(false);
+    expect(await endpointModelsReadable({ url: `${url}/nope`, key: SECRET })).toBe(false);
   });
 });
 
