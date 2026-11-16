@@ -1,3 +1,4 @@
+import { taskSummary } from "@/lib/taskSummary";
 import { UsageRings } from "./UsageRings";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import {
@@ -504,6 +505,7 @@ function TaskCard({
   onDragEnterCard: () => void;
   onDropBefore: (event: DragEvent) => void;
 }) {
+  const summary = useMemo(() => taskSummary(task.description, task.title), [task.description, task.title]);
   const overdue = task.dueAt !== null && task.dueAt < Date.now() && task.status !== "done";
   return (
     <div className="relative">
@@ -548,9 +550,9 @@ function TaskCard({
           />
           <button onClick={onOpen} className="min-w-0 flex-1 text-left">
             <h3 className="text-[13px] font-semibold leading-5 text-ink">{task.title}</h3>
-            {task.description && (
-              <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-ink-secondary">
-                {task.description}
+            {summary && (
+              <p className="mt-1 line-clamp-2 text-[11.5px] leading-4 text-ink-secondary">
+                {summary}
               </p>
             )}
           </button>
@@ -607,14 +609,13 @@ function TaskCard({
             )}
           </div>
         )}
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="text-[9px] text-ink-secondary/70">rev {task.revision}</span>
+        <div className="mt-2 flex items-center justify-end gap-2">
           <select
             value={task.status}
             onClick={(event) => event.stopPropagation()}
             onChange={(event) => onMove(event.target.value as TaskStatus)}
             aria-label={`Move ${task.title}`}
-            className="rounded-md border border-hairline/50 bg-inset px-1.5 py-1 text-[10px] text-ink-secondary focus:border-accent focus:outline-none"
+            className="cursor-pointer rounded-md border border-transparent bg-transparent px-1.5 py-0.5 text-[11px] text-ink-secondary transition-colors hover:border-hairline/50 hover:bg-inset hover:text-ink focus:border-accent focus:outline-none"
           >
             {TASK_STATUSES.map((status) => (
               <option key={status} value={status}>

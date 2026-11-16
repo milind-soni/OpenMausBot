@@ -268,7 +268,8 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
           const cards: ToolkitCard[] = items.map((t: any) => ({
             slug: (t.slug ?? t.key ?? t.name ?? "").toLowerCase(),
             label: t.name ?? t.slug ?? "",
-            blurb: (t.meta?.description ?? t.description ?? "").slice(0, 90),
+            // Cards clamp to two lines with an ellipsis; a hard cut left words like "bui" and "eff".
+            blurb: (t.meta?.description ?? t.description ?? "").slice(0, 280),
             logo: t.meta?.logo ?? t.logo ?? null,
             domain: null,
           }));

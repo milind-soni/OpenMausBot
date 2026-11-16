@@ -1,5 +1,5 @@
 // Provider brand marks, keyed by driver kind. Dark-theme fills.
-import { Monitor } from "lucide-react";
+import { Monitor, Orbit, Sparkles } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 export interface IconProps {
@@ -45,7 +45,11 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <ClaudeMark size={size} className={className} />;
     case "codex":
       return <CodexMark size={size} className={className} />;
+    case "antigravityAgent":
+      return <Orbit aria-hidden="true" size={size ?? 16} className={cn("shrink-0 text-sky-400", className)} />;
+    case "geminiAgent":
+      return <Sparkles aria-hidden="true" size={size ?? 16} className={cn("shrink-0 text-sky-400", className)} />;
     default:
-      return <span className="text-[11px] font-semibold text-ink-secondary">{driverKind.slice(0, 2).toUpperCase()}</span>;
+      return <ComputerMark size={size} className={className} />;
   }
 }

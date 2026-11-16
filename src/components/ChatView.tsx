@@ -18,6 +18,7 @@ import {
   Smartphone,
   Square,
   X,
+  AlarmClock,
 } from "lucide-react";
 import { useStore, useStreaming, formatTime, messageVersions, visibleMessages, type Bot, type Message } from "@/state/store";
 import { TasksPanel } from "./TasksPanel";
@@ -295,7 +296,7 @@ function Bubble({
           {user ? (
             <>
               <AttachmentList attachments={message.attachments} />
-              {message.scheduled && <span className="mb-1 block text-[11px] text-ink-secondary">⏰ Scheduled</span>}
+              {message.scheduled && <span className="mb-1 flex items-center gap-1 text-[11px] text-ink-secondary"><AlarmClock size={11} /> Scheduled</span>}
               {text && (
                 <div
                   className={cn(collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
@@ -833,7 +834,7 @@ export function ChatView({ bot }: { bot: Bot }) {
               onClick={() => dispatch({ type: "openSchedule", target: { botId: bot.id } })}
               className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"
             >
-              ⏰
+              <AlarmClock size={16} />
             </button>
           )}
 
@@ -866,7 +867,7 @@ export function ChatView({ bot }: { bot: Bot }) {
                 {
                   id: "schedule",
                   label: "Schedule run…",
-                  icon: "⏰",
+                  icon: <AlarmClock size={14} />,
                   onClick: () => dispatch({ type: "openSchedule", target: { botId: bot.id } }),
                 },
                 {

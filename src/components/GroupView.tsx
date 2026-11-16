@@ -6,7 +6,7 @@ import { UsageRings } from "./UsageRings";
 // bot messages carry a small maus + name cluster label. Bots reply only
 // when @mentioned (the composer's @ picker knows the members).
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowDown, ClipboardList, Pin, Smartphone } from "lucide-react";
+import { Activity, ArrowDown, ClipboardList, Pin, Smartphone, AlarmClock } from "lucide-react";
 import { useStore, useStreaming, formatTime, type Attachment, type Bot, type Group } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
@@ -93,7 +93,7 @@ const Transcript = memo(function Transcript({
                   title={new Date(m.at).toLocaleString()}
                 >
                   <AttachmentList attachments={m.attachments} />
-                  {m.scheduled && <span className="mb-1 block text-[11px] text-ink-secondary">⏰ Scheduled</span>}
+                  {m.scheduled && <span className="mb-1 flex items-center gap-1 text-[11px] text-ink-secondary"><AlarmClock size={11} /> Scheduled</span>}
                   {m.text && (user ? <ProjectMentionText text={m.text} /> : <ChatMarkdown text={m.text} />)}
                 </div>
                 {!user && <ReactionBar threadId={group.threadId} message={m} />}
@@ -393,7 +393,7 @@ export function GroupView({ group }: { group: Group }) {
               onClick={() => dispatch({ type: "openSchedule", target: { groupId: group.id } })}
               className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"
             >
-              ⏰
+              <AlarmClock size={16} />
             </button>
           )}
 
@@ -426,7 +426,7 @@ export function GroupView({ group }: { group: Group }) {
                 {
                   id: "schedule",
                   label: "Schedule run…",
-                  icon: "⏰",
+                  icon: <AlarmClock size={14} />,
                   onClick: () => dispatch({ type: "openSchedule", target: { groupId: group.id } }),
                 },
                 {

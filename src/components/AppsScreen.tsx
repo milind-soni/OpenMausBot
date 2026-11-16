@@ -147,7 +147,7 @@ function ServiceIcon({ card, size = 36 }: { card: ToolkitCard; size?: number }) 
         src={card.logo}
         alt=""
         style={{ width: size, height: size }}
-        className="shrink-0 rounded-xl object-contain bg-inset/50 p-0.5 border border-hairline/40"
+        className="shrink-0 rounded-xl object-contain bg-white p-1.5 border border-white/10"
         onError={() => setStage(1)}
       />
     );
@@ -158,7 +158,7 @@ function ServiceIcon({ card, size = 36 }: { card: ToolkitCard; size?: number }) 
         src={`https://www.google.com/s2/favicons?domain=${card.domain}&sz=64`}
         alt=""
         style={{ width: size, height: size }}
-        className="shrink-0 rounded-xl object-contain bg-inset/50 p-1 border border-hairline/40"
+        className="shrink-0 rounded-xl object-contain bg-white p-1.5 border border-white/10"
         onError={() => setStage(2)}
       />
     );
@@ -514,6 +514,11 @@ export function AppsScreen() {
     return Object.values(status).filter((s) => s.connected).length;
   }, [status]);
 
+  // The featured banner shows these; the grid below skips them so no app appears twice.
+  const spotlightSlugs = useMemo(
+    () => new Set((cards ?? []).filter((c) => FEATURED_SLUGS.includes(c.slug)).slice(0, 3).map((c) => c.slug)),
+    [cards],
+  );
   const filteredCards = useMemo(() => {
     if (!cards) return [];
     return cards.filter((card) => {
@@ -736,8 +741,11 @@ export function AppsScreen() {
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredCards.map((card) => {
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,240px),1fr))] gap-4">
+                {(activeCategory === "all" && !search
+                  ? filteredCards.filter((c) => !spotlightSlugs.has(c.slug))
+                  : filteredCards
+                ).map((card) => {
                   const connected = Boolean(status[card.slug]?.connected);
                   const busy = busySlug === card.slug;
                   const category = categorizeApp(card);
@@ -774,9 +782,6 @@ export function AppsScreen() {
                             <h3 className="text-[14px] font-semibold text-ink group-hover:text-accent transition-colors">
                               {card.label}
                             </h3>
-                            <span className="text-[10px] text-ink-secondary/70">
-                              #{card.slug}
-                            </span>
                           </div>
                           <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-ink-secondary">
                             {card.blurb || "Integrate external automation and data capabilities for bots."}

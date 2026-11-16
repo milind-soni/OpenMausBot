@@ -119,7 +119,7 @@ function ProfileSection() {
         </div>
 
         <div className="mt-5 flex items-center justify-between border-t border-hairline/40 pt-4 text-[12px] text-ink-secondary">
-          <span>Saved automatically to your local configuration on blur.</span>
+          <span>Changes save automatically.</span>
           <div className="flex items-center gap-1.5 text-accent font-medium">
             {saving ? (
               <>
@@ -331,14 +331,14 @@ function ModelsSection() {
     <div className="space-y-6">
       <div className="rounded-2xl border border-hairline/50 bg-card p-6 shadow-sm">
         <div className="border-b border-hairline/40 pb-4">
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1 basis-[280px]">
               <h2 className="text-[16px] font-semibold text-ink">Active Model Providers & CLIs</h2>
               <p className="mt-1 text-[13px] text-ink-secondary">
                 Live drivers detected by the local harness server on your machine.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
               <button onClick={refreshModels} disabled={refreshingModels} className="flex items-center gap-1 rounded-full bg-raised px-3 py-1 text-[12px] text-ink disabled:opacity-50">
                 <RefreshCw size={12} className={refreshingModels ? "animate-spin" : ""} /> Refresh models
               </button>

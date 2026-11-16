@@ -628,11 +628,11 @@ export function ProjectsScreen() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <h2 className="truncate text-[14px] font-semibold text-ink">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <h2 title={project.name} className="w-full break-words text-[14px] font-semibold leading-5 text-ink">
                         {project.name}
                       </h2>
-                      <span className="shrink-0 rounded bg-accent/10 px-1.5 py-0.5 text-[11px] font-medium text-accent">
+                      <span className="max-w-full truncate rounded bg-accent/10 px-1.5 py-0.5 text-[11px] font-medium text-accent">
                         #{project.mention}
                       </span>
                       {project.missing && (

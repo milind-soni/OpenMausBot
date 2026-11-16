@@ -436,7 +436,7 @@ export default function PreviewScreen() {
       className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-app text-ink"
     >
       {/* Top Bar Row 1: Source Bar & Mode Switch */}
-      <header className="flex min-h-[52px] flex-wrap items-center justify-between gap-2 border-b border-hairline/60 bg-raised/80 px-4 py-2">
+      <header className="flex min-h-[52px] flex-wrap items-center justify-between gap-2 border-b border-hairline/60 bg-panel px-4 py-3">
         <div className="flex items-center gap-2.5">
           <button
             type="button"
@@ -482,7 +482,7 @@ export default function PreviewScreen() {
         </div>
 
         {/* Center: Address Input or Project File Selector + Auto-refresh */}
-        <div className="flex min-w-[280px] max-w-[600px] flex-1 items-center gap-1.5">
+        <div className="order-3 flex w-full min-w-0 items-center gap-1.5">
           <div className="relative flex min-w-0 flex-1 items-center" ref={historyDropdownRef}>
             <input
               type="text"
@@ -586,8 +586,7 @@ export default function PreviewScreen() {
             }`}
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            <span className="hidden xl:inline">Refresh automatically when files change</span>
-            <span className="xl:hidden">Auto-refresh</span>
+            <span>Auto-refresh</span>
           </button>
         </div>
 
