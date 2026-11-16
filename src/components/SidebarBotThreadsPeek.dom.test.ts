@@ -194,6 +194,19 @@ describe("the hover sheet of a bot's other conversations", () => {
     expect(watchers.filter((entry) => entry.live)).toEqual([]);
   });
 
+  it("lists a snoozed conversation once its snooze ends, with nothing else changing", async () => {
+    const tasks = [task("a", { snoozedUntil: Date.now() + 60_000 })];
+    await mount(tasks);
+    expect(row.querySelector("[data-bot-new-thread]")).not.toBeNull();
+    expect(row.querySelector("[data-bot-threads-peek]")).toBeNull();
+    await wait(60_000);
+    expect(row.querySelector("[data-bot-threads-peek]")).toBeNull();
+    await wait(1);
+    expect(row.querySelector("[data-bot-new-thread]")).toBeNull();
+    await open();
+    expect([...sheet()!.querySelectorAll<HTMLElement>("[data-peek-thread]")].map((entry) => entry.dataset.peekThread)).toEqual(["main", "a"]);
+  });
+
   it("offers neither action for a conversation that is working", async () => {
     await mount([task("a", { busy: true })]);
     await open();

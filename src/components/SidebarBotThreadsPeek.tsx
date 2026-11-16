@@ -11,7 +11,7 @@ import { botOpensTo } from "@/state/thread-navigation";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { MENU_GUTTER, MENU_ICON, MENU_META, MENU_ROW, MENU_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 import { useHeldMenuMotion } from "./MenuMotion";
-import { isArchived, isSnoozed, isWorking, threadRecency, threadRowActions, threadUpdatedLabel } from "./SidebarThreadRow";
+import { isArchived, isSnoozed, isWorking, nextSnoozeExpiry, threadRecency, threadRowActions, threadUpdatedLabel, useSnoozeExpiry } from "./SidebarThreadRow";
 
 export const PEEK_LIMIT = 3;
 /** Long enough that sweeping the pointer down the list opens nothing. */
@@ -53,7 +53,11 @@ const ROW_TIME_YIELDS = "transition-opacity group-hover/peek:opacity-0 group-foc
 
 export function SidebarBotThreadsPeek({ bot, onScreen = false, dispatch }: { bot: PeekBot; onScreen?: boolean; dispatch: Dispatch<Action> }) {
   const main = botOpensTo(bot, false), current = onScreen ? bot.switchingTo ?? bot.threadId : undefined;
-  const threads = useMemo(() => peekThreads(bot, current), [bot.tasks, bot.mainThreadId, bot.threadId, current]);
+  const tasks = bot.tasks ?? [];
+  useSnoozeExpiry(tasks);
+  // A snooze ends by the clock alone, so the nearest deadline still ahead stands in for it.
+  const wake = nextSnoozeExpiry(tasks);
+  const threads = useMemo(() => peekThreads(bot, current), [bot.tasks, bot.mainThreadId, bot.threadId, current, wake]);
   const others = threads.filter((task) => task.threadId !== main).length;
   const [place, setPlace] = useState<Place | null>(null);
   const motion = useHeldMenuMotion(place);
