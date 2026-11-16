@@ -17,7 +17,7 @@ afterEach(() => {
 
 type Services = Record<string, { connected: boolean; accounts?: Array<{ id: string; status: string }> }>;
 
-function setup(options: { team?: boolean; driver?: string; configured?: () => boolean; cloud?: boolean; services?: Services } = {}) {
+function setup(options: { team?: boolean; driver?: string; configured?: () => boolean; cloud?: boolean; services?: Services; connectedServices?: () => Promise<Services> } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-proactive-"));
   dirs.push(dir);
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
@@ -34,7 +34,7 @@ function setup(options: { team?: boolean; driver?: string; configured?: () => bo
   let routines: RoutineManager | null = null;
   const make = () => createProactive({
     store, cfg: {} as AppConfig, dataDir: dir, team: options.team ?? false, routines: () => routines,
-    composio: { configured: options.configured ?? (() => true), connectedServices: async () => options.services ?? { gmail: { connected: true }, googlecalendar: { connected: true } }, relayMcp: relay },
+    composio: { configured: options.configured ?? (() => true), connectedServices: options.connectedServices ?? (async () => options.services ?? { gmail: { connected: true }, googlecalendar: { connected: true } }), relayMcp: relay },
     registry: { get: () => ({ driverKind: options.driver ?? "claudeAgent", adapter: {} as never }) },
     mainThread: (botId) => store.bot(botId)?.threadId, threadBusy: () => false, notify: () => {}, engineName: () => "Claude", needsYou: () => [],
     hostTimeZone: () => "UTC", decide: () => {}, stale: () => false, release: () => {}, owned: () => {},
@@ -134,6 +134,20 @@ describe("the watch's checks", () => {
     const gmail = s.reads.flatMap((slug, index) => (slug.startsWith("GMAIL_") ? [s.accounts[index]] : []));
     expect(gmail.length).toBeGreaterThan(0);
     expect(new Set(gmail)).toEqual(new Set(["ca_gone"]));
+  });
+
+  it("still name an allowed account when the account lookup fails", async () => {
+    let calls = 0;
+    const s = setup({ connectedServices: async () => {
+      if (calls++) throw new Error("composio down");
+      return { gmail: { connected: true, accounts: [{ id: "ca_newest", status: "ACTIVE" }, { id: "ca_older", status: "ACTIVE" }] }, googlecalendar: { connected: false } };
+    } });
+    const limited: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["ca_older"] } };
+    s.store.patchBot(s.chief.id, { connectorScopes: limited });
+    await s.proactive.checks.check(s.proactive.ensureWatch()!, { manual: true });
+    const gmail = s.reads.flatMap((slug, index) => (slug.startsWith("GMAIL_") ? [s.accounts[index]] : []));
+    expect(gmail.length).toBeGreaterThan(0);
+    expect(new Set(gmail)).toEqual(new Set(["ca_older"]));
   });
 
   it("belong to the main agent only: a briefing routine of another bot reads nothing", async () => {

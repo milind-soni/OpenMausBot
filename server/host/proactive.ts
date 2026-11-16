@@ -100,10 +100,13 @@ export function createProactive(deps: ProactiveDeps) {
     },
     // Several accounts of one app: read the newest active one, as Composio refuses a read that names none. A bot limited
     // to some accounts reads one of those, named even when it is the app's only one; with none of them active the read
-    // names the first anyway, so it is refused rather than run as another account.
+    // names the first anyway, so it is refused rather than run as another account, also when the lookup fails.
     accounts: async (botId) => {
-      const services = await composio.connectedServices(cfg);
       const scopes = botId ? store.bot(botId)?.connectorScopes : undefined;
+      const services = await composio.connectedServices(cfg).catch((error: unknown) => {
+        if (!READ_APPS.some((app) => accountLimit(scopes, app))) throw error;
+        return {} as Awaited<ReturnType<typeof composio.connectedServices>>;
+      });
       return Object.fromEntries(READ_APPS.flatMap((app) => {
         const active = (services[app]?.accounts ?? []).filter((one) => /^active$/i.test(one.status)).map((one) => one.id);
         const allowed = accountLimit(scopes, app);
