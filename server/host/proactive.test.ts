@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 import type { AppConfig } from "../config.ts";
 import { RoutineManager } from "../routines.ts";
 import { Store } from "../store.ts";
@@ -107,6 +108,32 @@ describe("the watch's checks", () => {
     expect(gmail.length).toBeGreaterThan(0);
     expect(new Set(gmail)).toEqual(new Set(["ca_newest"]));
     expect(s.reads.flatMap((slug, index) => (slug.startsWith("GOOGLECALENDAR_") ? [s.accounts[index]] : []))).not.toContain("ca_cal");
+  });
+
+  it("read only an account the bot's limit allows, and name it even for an app with one account", async () => {
+    const s = setup({ services: {
+      gmail: { connected: true, accounts: [{ id: "ca_newest", status: "ACTIVE" }, { id: "ca_expired", status: "EXPIRED" }, { id: "ca_older", status: "ACTIVE" }] },
+      googlecalendar: { connected: true, accounts: [{ id: "ca_cal", status: "ACTIVE" }] },
+    } });
+    const limited: ConnectorScopes = { apps: { gmail: "read", googlecalendar: "read" }, accounts: { gmail: ["ca_expired", "ca_older"], googlecalendar: ["ca_cal"] } };
+    s.store.patchBot(s.chief.id, { connectorScopes: limited });
+    await s.proactive.checks.check(s.proactive.ensureWatch()!, { manual: true });
+    const gmail = s.reads.flatMap((slug, index) => (slug.startsWith("GMAIL_") ? [s.accounts[index]] : []));
+    expect(gmail.length).toBeGreaterThan(0);
+    expect(new Set(gmail)).toEqual(new Set(["ca_older"]));
+    const calendar = s.reads.flatMap((slug, index) => (slug.startsWith("GOOGLECALENDAR_") ? [s.accounts[index]] : []));
+    expect(calendar.length).toBeGreaterThan(0);
+    expect(new Set(calendar)).toEqual(new Set(["ca_cal"]));
+  });
+
+  it("never read as another account when none of the allowed accounts is active", async () => {
+    const s = setup({ services: { gmail: { connected: true, accounts: [{ id: "ca_newest", status: "ACTIVE" }, { id: "ca_older", status: "ACTIVE" }] }, googlecalendar: { connected: false } } });
+    const limited: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["ca_gone"] } };
+    s.store.patchBot(s.chief.id, { connectorScopes: limited });
+    await s.proactive.checks.check(s.proactive.ensureWatch()!, { manual: true });
+    const gmail = s.reads.flatMap((slug, index) => (slug.startsWith("GMAIL_") ? [s.accounts[index]] : []));
+    expect(gmail.length).toBeGreaterThan(0);
+    expect(new Set(gmail)).toEqual(new Set(["ca_gone"]));
   });
 
   it("belong to the main agent only: a briefing routine of another bot reads nothing", async () => {
