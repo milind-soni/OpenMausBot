@@ -90,7 +90,8 @@ const newestRequest = new Map<string, number>();
 let requests = 0;
 
 /** The engine's own count, asked for while the panel is open in Advanced mode and again whenever a turn starts or ends. The last answer
- * shows until the new one lands; none is asked for or shown between a summary or fresh start and the end of the next turn. */
+ * shows until the new one lands; none is asked for or shown between a summary or fresh start and the end of the next turn,
+ * and a count taken on one branch of the conversation is dropped when another is picked. */
 function useContextBreakdown(bot: Bot | undefined, open: boolean): ContextBreakdown | null {
   const id = bot?.id;
   const threadId = bot?.threadId;
@@ -98,8 +99,20 @@ function useContextBreakdown(bot: Bot | undefined, open: boolean): ContextBreakd
   const messages = bot ? visibleMessages(bot) : [];
   const slot = `${id}:${threadId ?? ""}`;
   const withheld = summaryNotCounted(messages, busy);
-  const moment = `${messages.filter((message) => message.kind === "compaction").length}:${withheld}`;
+  const leaf = messages.at(-1)?.id;
+  const [path, setPath] = useState({ slot, leaf, switches: 0 });
+  if (path.slot !== slot || path.leaf !== leaf) {
+    // A message that is still in the conversation but no longer shown means another branch was picked.
+    const switched = path.slot === slot && !messages.some((message) => message.id === path.leaf) && Boolean(bot?.messages.some((message) => message.id === path.leaf));
+    setPath({ slot, leaf, switches: path.slot === slot ? path.switches + Number(switched) : 0 });
+  }
+  const moment = `${messages.filter((message) => message.kind === "compaction").length}:${withheld}:${path.switches}`;
   const [answer, setAnswer] = useState<{ slot: string; moment: string; breakdown: ContextBreakdown | null } | null>(null);
+  useEffect(() => {
+    if (!path.switches) return;
+    lastBreakdown.delete(slot);
+    newestRequest.delete(slot);
+  }, [slot, path.switches]);
   useEffect(() => {
     if (withheld) {
       lastBreakdown.delete(slot);

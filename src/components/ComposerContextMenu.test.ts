@@ -219,6 +219,27 @@ describe("the composer's context button", () => {
     expect([...panel()!.querySelectorAll("[data-context-breakdown] dd")].map((cell) => cell.textContent)).toEqual(["18k · 9%", "182k · 91%"]);
   });
 
+  it("drops the count and asks again when another branch of the conversation is picked", async () => {
+    advancedMode();
+    const bot = chat({ tokens: 12, window: 200_000 }, {
+      id: "b5", activeLeafId: "m2",
+      messages: [line("m1", "user"), line("m2", "bot", "text", { parentId: "m1" }), line("m2b", "bot", "text", { parentId: "m1" })],
+    });
+    const asked = () => requests().filter(([path]) => path.endsWith("/context")).length;
+    breakdown = { tokens: 6_000, window: 200_000, categories: [{ id: "messages", kind: "used", tokens: 6_000 }, { id: "free_space", kind: "free", tokens: 194_000 }] };
+    await render({ bot });
+    await press(trigger());
+    expect(words()).toContain("6k of 200k tokens");
+    expect(asked()).toBe(1);
+
+    breakdown = null;
+    await render({ bot: { ...bot, activeLeafId: "m2b" } as Bot });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(asked()).toBe(2);
+    expect(words()).not.toContain("6k");
+    expect(panel()!.querySelector("[data-context-breakdown]")).toBeNull();
+  });
+
   it("keeps the total alone when the engine has no count, and the last count on screen while a new one loads", async () => {
     advancedMode();
     await render({ bot: chat({ tokens: 136_000, window: 200_000 }, { id: "b2" }) });
