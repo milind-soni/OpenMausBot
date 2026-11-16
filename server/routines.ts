@@ -65,7 +65,7 @@ export interface Routine extends RoutineTroubleCode {
   durationMinutes: number;
   timeoutMinutes?: number;
   attachments?: RoutineContextAttachment[];
-  continuity?: boolean;
+  continuity?: boolean; sameConversation?: boolean;
   modelSelection?: ModelSelection;
   overlap?: "skip" | "queue";
   runOnStartup?: boolean;
@@ -189,7 +189,7 @@ export interface RoutineInput {
   durationMinutes?: number;
   timeoutMinutes?: number | null;
   attachments?: RoutineContextAttachment[];
-  continuity?: boolean;
+  continuity?: boolean; sameConversation?: boolean;
   modelSelection?: ModelSelection | null;
   overlap?: "skip" | "queue";
   runOnStartup?: boolean;
@@ -615,7 +615,7 @@ export class RoutineManager {
       durationMinutes: patch.durationMinutes ?? routine.durationMinutes,
       timeoutMinutes: Object.hasOwn(patch, "timeoutMinutes") ? patch.timeoutMinutes : routine.timeoutMinutes,
       attachments: patch.attachments ?? routine.attachments,
-      continuity: patch.continuity ?? routine.continuity,
+      continuity: patch.continuity ?? routine.continuity, sameConversation: patch.sameConversation ?? routine.sameConversation,
       modelSelection: Object.hasOwn(patch, "modelSelection") ? patch.modelSelection : routine.modelSelection,
       overlap: Object.hasOwn(patch, "overlap") ? patch.overlap : routine.overlap,
       runOnStartup: patch.runOnStartup ?? routine.runOnStartup,
@@ -646,7 +646,7 @@ export class RoutineManager {
         updatedAt: Math.max(now, routine.updatedAt + 1),
       });
       if (patch.enabled !== undefined) delete routine.heldFor;
-      for (const key of ["continuity", "modelSelection", "overlap", "runOnStartup", "access", "deliver"] as const) if (!clean[key]) delete routine[key];
+      for (const key of ["continuity", "sameConversation", "modelSelection", "overlap", "runOnStartup", "access", "deliver"] as const) if (!clean[key]) delete routine[key];
       if (!clean.checks) for (const key of ["checks", "checkedAt", "checkTrouble", "checkTroubleCode", "wakeAt"] as const) delete routine[key];
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;

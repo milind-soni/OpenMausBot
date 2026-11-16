@@ -48,8 +48,9 @@ export interface LiveCallRecord {
 /** Who runs a Live call's voice session: OpenAI itself, a GPT-Live deployment on the user's own Azure OpenAI / Foundry
  * resource, a Fish Audio Live 3 agent the harness sets up on the person's Fish Audio account, whose session the client joins with Fish's SDK,
  * the Gemini Live API on the person's Gemini key, which the client reaches with a single-use token the harness creates, or an
- * ElevenLabs agent the harness sets up on the person's ElevenLabs account, which the client reaches with a signed URL. */
-export type LiveProvider = "openai" | "azure" | "fish" | "gemini" | "elevenlabs";
+ * ElevenLabs agent the harness sets up on the person's ElevenLabs account, which the client reaches with a signed URL, or
+ * "custom": an OpenAI-compatible server the person names (a gateway that serves the GPT-Live API), reached like OpenAI. */
+export type LiveProvider = "openai" | "azure" | "fish" | "gemini" | "elevenlabs" | "custom";
 
 /** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key;
  * `fishAudio`: the Fish Audio key from Settings → API keys, the only key a Fish Audio call uses;
@@ -62,13 +63,17 @@ export interface LiveSettings {
   /** A Live call has everything it needs: a key (`keySource` says which; never the key itself), and for Azure a valid endpoint and deployment. */
   configured: boolean;
   keySource?: LiveKeySource;
-  /** Absent means "openai". With "azure" only the `live` key is used, with "fish" only the Fish Audio key, with "gemini" only the
+  /** Absent means "openai". With "azure" or "custom" only the `live` key is used, with "fish" only the Fish Audio key, with "gemini" only the
    * Gemini key and with "elevenlabs" only the ElevenLabs key, never the OpenAI API key. */
   provider?: LiveProvider;
   /** The Azure resource endpoint as saved, e.g. `https://my-resource.openai.azure.com`. Not a secret. */
   azureEndpoint?: string;
   /** The Azure deployment of gpt-live-1; empty means "gpt-live-1". */
   azureDeployment?: string;
+  /** The custom endpoint as saved, e.g. `https://gateway.example.com/v1`. Not a secret. */
+  customEndpoint?: string;
+  /** The model a custom endpoint's calls use; empty means "gpt-live-1". */
+  customModel?: string;
   voice: string;
   /** The Gemini Live voice for "gemini" calls; absent means Gemini's default. */
   geminiVoice?: string;

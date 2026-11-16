@@ -61,6 +61,8 @@ export interface RoutineRequestDefinition {
   overlap?: "skip" | "queue";
   /** Also run once each time OpenMausBot starts. Repeating routines only. */
   runOnStartup?: boolean;
+  /** Each run continues the conversation the run before worked in. */
+  sameConversation?: boolean;
 }
 
 export type RoutineRequestChanges =

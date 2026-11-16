@@ -4262,7 +4262,7 @@ describe("event automations that keep one conversation", () => {
     const h = harness();
     const first = event(h, "d1");
     expect(previousEventThread(h.manager.listRuns(), first as never)).toBeNull();
-    expect(previousEventThread(h.manager.listRuns(), { id: "x", botId: "maus-1" })).toBeNull();
+    expect(previousEventThread(h.manager.listRuns(), { id: "x", routineId: "other-trigger", botId: "maus-1" })).toBeNull();
   });
 
   it("starts a new conversation for every run when the option is off", async () => {
@@ -4285,5 +4285,46 @@ describe("event automations that keep one conversation", () => {
     expect(h.manager.mergeIntoQueuedRun("hook", "d2", true, add)).toBeNull();
     expect(h.manager.mergeIntoQueuedRun("hook", "d3", false, add)).toEqual({ id: queued.id });
     expect(h.manager.listRuns().find((run) => run.id === queued.id)?.prompt).toBe("Handle it\n+event");
+  });
+});
+
+describe("schedule automations that keep one conversation", () => {
+  const daily = { name: "Daily brief", prompt: "Write the brief", botId: "maus-1", schedule: { type: "daily" as const, time: "09:00", weekdays: [0, 1, 2, 3, 4, 5, 6] } };
+  const done = (h: ReturnType<typeof harness>, threadId: string) => h.manager.handleRuntimeEvent({
+    eventId: `done-${threadId}-${h.started.length}`, provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok: true,
+  });
+  const twoRuns = async (h: ReturnType<typeof harness>, routineId: string) => {
+    h.options.joinConversation = (run) => run.sameConversation ? previousEventThread(h.manager.listRuns(), run) : null;
+    h.manager.runNow(routineId); await h.manager.tick();
+    done(h, h.started[0].threadId); await h.manager.tick();
+    h.manager.runNow(routineId); await h.manager.tick();
+    return h.started.map((turn) => turn.threadId);
+  };
+
+  it("continues the previous run's conversation when on, with continuity too", async () => {
+    const h = harness();
+    const routine = h.manager.create({ ...daily, sameConversation: true, continuity: true });
+    expect(await twoRuns(h, routine.id)).toEqual(["thread-1", "thread-1"]);
+    expect(h.taskTitles).toHaveLength(1);
+    expect(h.manager.listRuns().every((run) => run.sameConversation === true)).toBe(true);
+    expect(new RoutineManager(h.options).listRoutines()[0]).toMatchObject({ sameConversation: true, continuity: true });
+  });
+
+  it("opens a new conversation for every run by default and once turned off", async () => {
+    const h = harness();
+    const routine = h.manager.create(daily);
+    expect(routine.sameConversation).toBeUndefined();
+    expect(await twoRuns(h, routine.id)).toEqual(["thread-1", "thread-2"]);
+
+    const other = harness();
+    const on = other.manager.create({ ...daily, sameConversation: true });
+    expect(other.manager.update(on.id, { sameConversation: false })?.sameConversation).toBeUndefined();
+    expect(await twoRuns(other, on.id)).toEqual(["thread-1", "thread-2"]);
+  });
+
+  it("is refused for room goals and limit-reset routines", () => {
+    const h = harness();
+    expect(() => h.manager.create({ ...daily, sameConversation: true, target: "room-goal", botId: "chief-1", groupId: "room-1" })).toThrow("Room goals do not keep one conversation");
+    expect(() => h.manager.create({ ...daily, sameConversation: true, schedule: { type: "limit_reset", engine: "claude" } as never })).toThrow("already continues its conversation");
   });
 });

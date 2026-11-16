@@ -1703,7 +1703,7 @@
           },
           "same_conversation": {
             "type": "boolean",
-            "description": "app_event or webhook: each run continues the last run's conversation."
+            "description": "app_event, webhook or schedule: each run continues the last run's conversation."
           },
           "continuity": {
             "type": "boolean",

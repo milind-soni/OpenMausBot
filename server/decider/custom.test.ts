@@ -6,7 +6,7 @@ import { createDecider, deciderAccount, deciderPatchKey, deciderSavePatch, descr
 const KEY = "gw-unit-secret-key";
 const BASE = "https://gateway.example.com/v1";
 const MODEL = "decision-model-1";
-const ON = (api: "systemone" | "decisions"): AppConfig => ({
+const ON = (api: "systemone" | "decisions" | "chat"): AppConfig => ({
   decider: { enabled: true, provider: "custom", customKey: KEY, customBaseUrl: BASE, customModel: MODEL, customApi: api },
 });
 const QUESTIONS = {
@@ -82,6 +82,43 @@ describe("a custom decision endpoint", () => {
     });
   });
 
+  it("speaks OpenAI-compatible chat: strict JSON from {base}/chat/completions, with nothing only OpenRouter reads", async () => {
+    const content = JSON.stringify({
+      answers: {
+        wants_refund: { noul: 0.98 },
+        queue: { choice: "billing", probabilities: { billing: 0.9, technical: 0.03, other: 0.07 } },
+        urgency: { score: 1.7, probabilities: { 0: 0.05, 1: 0.2, 2: 0.75 } },
+      },
+    });
+    const { fetchImpl, result } = run(ON("chat"), reply({
+      model: MODEL, choices: [{ message: { role: "assistant", content } }], usage: { prompt_tokens: 140, completion_tokens: 40 },
+    }));
+    expect(await result).toMatchObject({
+      ok: true, provider: "custom", inputTokens: 140, model: MODEL,
+      answers: { wants_refund: { p: 0.98 }, queue: { choice: "billing", pTop: 0.9 }, urgency: { score: 1.7, level: 2 } },
+    });
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(String(url)).toBe(`${BASE}/chat/completions`);
+    expect(init).toMatchObject({ method: "POST", redirect: "error", headers: { authorization: `Bearer ${KEY}` } });
+    const body = JSON.parse(String(init?.body));
+    expect(body).toMatchObject({
+      model: MODEL, temperature: 0,
+      response_format: { type: "json_schema", json_schema: { strict: true } },
+      messages: [{ role: "system" }, { role: "user" }],
+    });
+    expect(body).not.toHaveProperty("provider");
+    // A thinking model (Gemini 2.5 and later) counts its thinking against max_tokens; a cap sized for the answer alone could leave it empty.
+    expect(body).not.toHaveProperty("max_tokens");
+    expect(JSON.stringify(init?.headers)).not.toContain("openrouter");
+  });
+
+  it("refuses a chat reply that is not the answers JSON", async () => {
+    const say = (content: unknown) => reply({ choices: [{ message: { role: "assistant", content } }] });
+    expect(await run(ON("chat"), say("Sure! The queue is billing.")).result).toMatchObject({ ok: false, reason: "malformed" });
+    expect(await run(ON("chat"), say(JSON.stringify({ answers: { wants_refund: { noul: 0.9 } } }))).result).toMatchObject({ ok: false, reason: "malformed" });
+    expect(await run(ON("chat"), reply({ choices: [] })).result).toMatchObject({ ok: false, reason: "malformed" });
+  });
+
   it("refuses /decisions answers out of order or short", async () => {
     const swapped = [DECISIONS_ANSWERS[1], DECISIONS_ANSWERS[0], DECISIONS_ANSWERS[2]];
     expect(await run(ON("decisions"), reply({ answers: swapped })).result).toMatchObject({ ok: false, reason: "malformed" });
@@ -118,6 +155,10 @@ describe("a custom decision endpoint", () => {
     expect(deciderPatchKey({ customKey: "new" }, ON("decisions").decider)).toEqual({
       provider: "custom", check: { key: "new", provider: "custom", api: "decisions", model: MODEL },
     });
+    expect(deciderPatchKey({ customKey: "new" }, ON("chat").decider)).toEqual({
+      provider: "custom", check: { key: "new", provider: "custom", api: "chat", model: MODEL },
+    });
+    expect(describeDecider(ON("chat"))).toMatchObject({ provider: "custom", api: "chat", configured: true });
     expect(deciderSavePatch({ customKey: "new" }, { customBaseUrl: BASE })).toMatchObject({ ok: true, patch: { enabled: true } });
     expect(deciderSavePatch({ customKey: "new" }, {})).toMatchObject({ ok: false, errorKey: "serverError.decider.baseUrlRequired" });
     expect(deciderSavePatch({ customKey: "" }, ON("systemone").decider)).toMatchObject({ ok: true, patch: { enabled: false } });
