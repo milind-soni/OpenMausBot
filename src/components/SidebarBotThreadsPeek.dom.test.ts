@@ -16,15 +16,18 @@ let chat: HTMLElement;
 let root: Root;
 const dispatch = vi.fn<(action: Action) => void>();
 
+const show = async (tasks: Task[]) => {
+  await act(async () => {
+    root.render(createElement("div", { "data-row": "" },
+      createElement(SidebarBotThreadsPeek, { bot: { id: "atlas", name: "Atlas", threadId: "main", mainThreadId: "main", tasks: [task("main"), ...tasks] }, dispatch })));
+  });
+};
 const mount = async (tasks: Task[]) => {
   scroller = document.createElement("div");
   chat = document.createElement("div");
   document.body.append(scroller, chat);
   root = createRoot(scroller);
-  await act(async () => {
-    root.render(createElement("div", { "data-row": "" },
-      createElement(SidebarBotThreadsPeek, { bot: { id: "atlas", name: "Atlas", threadId: "main", mainThreadId: "main", tasks: [task("main"), ...tasks] }, dispatch })));
-  });
+  await show(tasks);
   row = scroller.querySelector<HTMLElement>("[data-row]")!;
 };
 const chevron = () => row.querySelector<HTMLButtonElement>("[data-bot-threads-peek]")!;
@@ -113,6 +116,25 @@ describe("the hover sheet of a bot's other conversations", () => {
     expect(dialog.textContent).toContain("“a” and its conversation will be deleted.");
     await act(async () => { [...dialog.querySelectorAll("button")].find((button) => button.textContent === "Delete thread")!.click(); });
     expect(dispatch.mock.calls).toEqual([[{ type: "deleteTask", botId: "atlas", threadId: "a" }]]);
+  });
+
+  it("does not delete a conversation that started working while the confirmation was open", async () => {
+    await mount([task("a")]);
+    await open();
+    await act(async () => { action("a", "delete").click(); });
+    await show([task("a", { busy: true })]);
+    const dialog = document.querySelector<HTMLElement>("[role=alertdialog], [role=dialog]")!;
+    await act(async () => { [...dialog.querySelectorAll("button")].find((button) => button.textContent === "Delete thread")!.click(); });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("stays inside the window when its rows are taller than a mouse's, as on a touch screen", async () => {
+    await mount([task("a"), task("b"), task("c")]);
+    row.getBoundingClientRect = () => ({ left: 8, right: 300, top: window.innerHeight - 20 }) as DOMRect;
+    const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(185);
+    await open();
+    height.mockRestore();
+    expect(sheet()!.style.top).toBe(`${window.innerHeight - 185 - 8}px`);
   });
 
   it("offers neither action for a conversation that is working", async () => {
