@@ -115,7 +115,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     spare: (session) => spareForRoom(agentBrowserRuntime.spare(session), { holds: !turnResources.free(`browser:${session}`), idleMs: idleMs() }),
     close: (session) => agentBrowserRuntime.closeIfIdle(session, 1),
   });
-  const agentBrowserRuntime = new BrowserRuntime({
+  const agentBrowserRuntime: BrowserRuntime = new BrowserRuntime({
     closeBrowser: (session, spec) => closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })),
     applyViewport: (spec, size) => setBrowserViewport(spec.command, spec.env, size),
     // A browser a person's view started counts toward the limit too. It is not refused, so a bot's next new one waits.
