@@ -45,7 +45,21 @@ export function classifyCodexUsage(payload: unknown): UsageClassification {
   return {};
 }
 
-/** Claude numbers stay unknown: the spike did not verify their scale/units. */
+function windowsStatus(windows: NonNullable<UsagePatch["windows"]>): UsagePatch["status"] {
+  const known = windows.flatMap(w => typeof w.remainingPercent === "number" ? [w.remainingPercent] : []);
+  if (!known.length) return "unknown";
+  const tightest = Math.min(...known);
+  return tightest <= 0 ? "exhausted" : tightest <= 40 ? "low" : "ok";
+}
+
+const CLAUDE_WINDOW_LABELS: Record<string, string> = {
+  five_hour: "5-hour allowance",
+  seven_day: "Weekly allowance",
+  seven_day_opus: "Weekly Opus allowance",
+  seven_day_sonnet: "Weekly Sonnet allowance",
+};
+
+/** Claude stream-json rate_limit_event: unifiedWindows carry utilization as a 0-1 fraction. */
 export function classifyClaudeUsage(payload: unknown): UsageClassification {
   const message = object(payload);
   if (message.type === "rate_limit_event") {
@@ -53,12 +67,54 @@ export function classifyClaudeUsage(payload: unknown): UsageClassification {
     if (info.status === "rejected" || info.errorCode === "credits_required") {
       return { usage: { source: "reported", status: "exhausted" }, failure: { kind: "usage_limit" } };
     }
-    if (info.status === "allowed" || info.status === "allowed_warning") return { usage: { source: "reported", status: "unknown" } };
+    if (info.status === "allowed" || info.status === "allowed_warning") {
+      const windows: NonNullable<UsagePatch["windows"]> = [];
+      for (const [key, raw] of Object.entries(object(info.unifiedWindows))) {
+        const w = object(raw);
+        if (typeof w.utilization !== "number" || !Number.isFinite(w.utilization)) continue;
+        windows.push({ id: `claude:${key}`, label: CLAUDE_WINDOW_LABELS[key] ?? "Current allowance",
+          remainingPercent: Math.max(0, Math.min(100, 100 - w.utilization * 100)), resetsAt: seconds(w.resetsAt) });
+      }
+      return { usage: { source: "reported", windows, status: windowsStatus(windows) } };
+    }
   }
   if (message.type === "assistant" && ["rate_limit", "billing_error"].includes(message.error)) {
     return { usage: { source: "inferred", status: "exhausted" }, failure: { kind: "usage_limit" } };
   }
   return {};
+}
+
+/** Claude account usage endpoint (what Claude Code's /usage shows): utilization is 0-100. */
+export function classifyClaudeAccountUsage(payload: unknown): UsageClassification {
+  const data = object(payload);
+  const windows: NonNullable<UsagePatch["windows"]> = [];
+  for (const key of Object.keys(CLAUDE_WINDOW_LABELS)) {
+    const w = object(data[key]);
+    if (typeof w.utilization !== "number" || !Number.isFinite(w.utilization)) continue;
+    const reset = typeof w.resets_at === "string" && Number.isFinite(Date.parse(w.resets_at)) ? new Date(w.resets_at).toISOString() : null;
+    windows.push({ id: `claude:${key}`, label: CLAUDE_WINDOW_LABELS[key], remainingPercent: Math.max(0, Math.min(100, 100 - w.utilization)), resetsAt: reset });
+  }
+  return windows.length ? { usage: { source: "reported", windows, status: windowsStatus(windows) } } : {};
+}
+
+/** Antigravity fetchAvailableModels: per-model quotaInfo, grouped by family (tightest model wins). */
+export function classifyAntigravityQuota(payload: unknown): UsageClassification {
+  const models = object(object(payload).models);
+  const families = new Map<string, { remaining: number; resetsAt: string | null }>();
+  for (const raw of Object.values(models)) {
+    const model = object(raw);
+    const quota = object(model.quotaInfo);
+    if (typeof model.displayName !== "string" || typeof quota.remainingFraction !== "number") continue;
+    const name = model.displayName.toLowerCase();
+    const family = name.startsWith("claude") ? "Claude models" : name.includes("pro") ? "Gemini Pro" : name.startsWith("gemini") ? "Gemini Flash" : "Other models";
+    const remaining = Math.max(0, Math.min(100, quota.remainingFraction * 100));
+    const resetsAt = typeof quota.resetTime === "string" && Number.isFinite(Date.parse(quota.resetTime)) ? new Date(quota.resetTime).toISOString() : null;
+    const prev = families.get(family);
+    if (!prev || remaining < prev.remaining) families.set(family, { remaining, resetsAt });
+  }
+  if (!families.size) return {};
+  const windows = [...families].map(([label, f]) => ({ id: `antigravity:${label.toLowerCase().replace(/\s+/g, "-")}`, label, remainingPercent: f.remaining, resetsAt: f.resetsAt }));
+  return { usage: { source: "reported", windows, status: windowsStatus(windows) } };
 }
 
 /** No validated wire mapping: generic 429/resource errors are not plan exhaustion. */

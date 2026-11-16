@@ -1,4 +1,5 @@
-import { classifyClaudeUsage } from "../usage-classifiers.ts";
+import { classifyClaudeAccountUsage, classifyClaudeUsage } from "../usage-classifiers.ts";
+import { readClaudeAccountUsage } from "./account-usage.ts";
 import type { UsageLimitFailure } from "../usage-types.ts";
 // Claude driver — upstream ClaudeDriver skeleton over agentcal's
 // drivers/claude.js runtime (stream-json both directions, prompt over
@@ -483,6 +484,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       return { state: "available", version, authenticated };
     };
 
+    const refreshUsage = async () => {
+      if (active.size) return;
+      try {
+        const classified = classifyClaudeAccountUsage(await readClaudeAccountUsage());
+        if (classified.usage) emit({ ...base("", ""), type: "usage.updated", usage: classified.usage });
+      } catch {}
+    };
+
     return {
       instanceId,
       driverKind: DRIVER_KIND,
@@ -495,6 +504,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         provider: DRIVER_KIND,
         capabilities: { sessionModelSwitch: "in-session", agentsMcp: true },
         sendTurn,
+        refreshUsage,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
         respondToRequest: async (threadId, requestId, decision) => {
           const broker = active.get(threadId)?.broker;

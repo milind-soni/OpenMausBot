@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { classifyAntigravityUsage, classifyClaudeUsage, classifyCodexUsage, classifyGrokUsage, usageLimitReset } from "./usage-classifiers.ts";
+import { classifyAntigravityQuota, classifyAntigravityUsage, classifyClaudeAccountUsage, classifyClaudeUsage, classifyCodexUsage, classifyGrokUsage, usageLimitReset } from "./usage-classifiers.ts";
 const fixture = (name: string) => JSON.parse(readFileSync(new URL(`./testing/fixtures/usage/${name}.json`, import.meta.url), "utf8"));
 
 describe("usage classifiers", () => {
@@ -21,7 +21,7 @@ describe("usage classifiers", () => {
   });
   it("handles passive Claude limits while leaving unverified percentages and resets unknown", () => {
     const events = fixture("claude-events-schema-examples").events;
-    expect(classifyClaudeUsage(events[0])).toEqual({ usage: { status: "unknown", source: "reported" } });
+    expect(classifyClaudeUsage(events[0])).toEqual({ usage: { status: "unknown", source: "reported", windows: [] } });
     for (const event of events.slice(1)) {
       expect(classifyClaudeUsage(event).failure).toEqual({ kind: "usage_limit" });
       expect(classifyClaudeUsage(event).usage?.status).toBe("exhausted");
@@ -37,6 +37,29 @@ describe("usage classifiers", () => {
       expect(classifyAntigravityUsage(payload).failure).toBeUndefined();
       expect(classifyGrokUsage(payload).failure).toBeUndefined();
     }
+  });
+  it("reads Claude unifiedWindows fractions and account usage percentages", () => {
+    const stream = classifyClaudeUsage({ type: "rate_limit_event", rate_limit_info: { status: "allowed",
+      unifiedWindows: { five_hour: { utilization: 0.09, resetsAt: 1794855600 }, seven_day: { utilization: 0.7, resetsAt: 1795114800 } } } });
+    expect(stream.usage?.windows?.map(w => [w.id, Math.round(w.remainingPercent!)])).toEqual([["claude:five_hour", 91], ["claude:seven_day", 30]]);
+    expect(stream.usage?.status).toBe("low");
+    const account = classifyClaudeAccountUsage({ five_hour: { utilization: 8, resets_at: "2026-11-16T19:00:00.037226+00:00" }, seven_day: { utilization: 37, resets_at: null }, seven_day_opus: null });
+    expect(account.usage?.windows).toEqual([
+      { id: "claude:five_hour", label: "5-hour allowance", remainingPercent: 92, resetsAt: "2026-11-16T19:00:00.037Z" },
+      { id: "claude:seven_day", label: "Weekly allowance", remainingPercent: 63, resetsAt: null },
+    ]);
+    expect(account.usage?.status).toBe("ok");
+  });
+  it("groups Antigravity model quotas by family, tightest model first", () => {
+    const result = classifyAntigravityQuota({ models: {
+      a: { displayName: "Gemini 3 Flash", quotaInfo: { remainingFraction: 0.5, resetTime: "2026-11-16T19:22:07Z" } },
+      b: { displayName: "Gemini 2.5 Pro", quotaInfo: { remainingFraction: 1 } },
+      c: { displayName: "Claude Opus 5.5 (High)", quotaInfo: { remainingFraction: 0 } },
+      d: { quotaInfo: { remainingFraction: 0 } },
+    } });
+    expect(result.usage?.windows?.map(w => [w.label, w.remainingPercent])).toEqual([["Gemini Flash", 50], ["Gemini Pro", 100], ["Claude models", 0]]);
+    expect(result.usage?.status).toBe("exhausted");
+    expect(classifyAntigravityQuota({})).toEqual({});
   });
   it("returns a reset only when all exhausted windows have a known future reset", () => {
     const windows = [{ id: "p", label: "Current", remainingPercent: 0, resetsAt: "2030-01-01T00:00:00Z" }];

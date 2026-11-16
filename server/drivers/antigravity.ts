@@ -29,6 +29,8 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
+import { classifyAntigravityQuota } from "../usage-classifiers.ts";
+import { readAntigravityQuota } from "./account-usage.ts";
 import { cliText, parseTabModels } from "../model-discovery.ts";
 
 const DRIVER_KIND = "antigravityAgent";
@@ -327,6 +329,14 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
       return { state: "available", version };
     };
 
+    const refreshUsage = async () => {
+      if (active.size) return;
+      try {
+        const classified = classifyAntigravityQuota(await readAntigravityQuota(config.cli));
+        if (classified.usage) emit({ ...base("", ""), type: "usage.updated", usage: classified.usage });
+      } catch {}
+    };
+
     return {
       instanceId,
       driverKind: DRIVER_KIND,
@@ -339,6 +349,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
         provider: DRIVER_KIND,
         capabilities: { sessionModelSwitch: "in-session" },
         sendTurn,
+        refreshUsage,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
         respondToRequest: async () => {
           throw new Error(
