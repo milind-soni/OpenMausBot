@@ -448,10 +448,11 @@ describe("Chat MCP session", () => {
   });
 
   describe("how long a server gets to start", () => {
-    it("is about half a minute on a Cloud home, twenty seconds on Windows and eight seconds elsewhere", () => {
+    it("is about half a minute on a Cloud home, twenty seconds for the app's own servers on Windows and eight seconds elsewhere", () => {
       expect(mcpStartupMs({ OMB_CLOUD_ROLE: "home" }, "win32")).toBe(30_000);
-      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "team" }, "linux")).toBe(30_000);
+      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "team" }, "linux", false)).toBe(30_000);
       expect(mcpStartupMs({}, "win32")).toBe(20_000);
+      expect(mcpStartupMs({}, "win32", false)).toBe(8_000);
       expect(mcpStartupMs({}, "darwin")).toBe(8_000);
       expect(mcpStartupMs({}, "linux")).toBe(8_000);
     });
@@ -1141,7 +1142,7 @@ describe("Chat MCP startup budgets", () => {
     }
   });
 
-  it("still gives a command server its own budget: 8 seconds, or 20 on Windows", async () => {
+  it("still gives a configured command server 8 seconds, on Windows too", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const f = fixture(`if (message.method === "tools/list") return;`);
@@ -1149,10 +1150,10 @@ describe("Chat MCP startup budgets", () => {
       const listed = () => { try { return f.read().calls.some((call) => call.method === "tools/list"); } catch { return false; } };
       await untilReal(listed);
       // The deadline runs on the real clock from the spawn, so a loaded runner has already spent some of it.
-      await vi.advanceTimersByTimeAsync(mcpStartupMs() - 3_000);
+      await vi.advanceTimersByTimeAsync(mcpStartupMs(process.env, process.platform, false) - 3_000);
       expect(mounting.done).toBe(false);
       await vi.advanceTimersByTimeAsync(3_100);
-      // stopped at its budget: short of the 30 seconds a URL server gets
+      // stopped at 8 seconds: well short of the 30 a URL server gets
       await settleWithin(1_000, () => mounting.done);
       expect(mounting.error).toBeUndefined();
       expect(mounting.value?.skipped).toEqual([{ server: "audit", reason: expect.stringMatching(/timed out/) }]);

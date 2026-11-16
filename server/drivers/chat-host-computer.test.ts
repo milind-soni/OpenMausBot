@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { chatToolNoticeLines, mountChatTools, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { mountChatTools, type ChatToolSession } from "./chat-mcp-tools.ts";
 import { HOST_COMPUTER_READY, HOST_COMPUTER_STAND_IN, hostComputerKey, hostComputerStartupMs } from "./chat-host-computer.ts";
 
 const FAKE = `
@@ -21,6 +21,7 @@ const FAKE = `
       const message = JSON.parse(buffer.slice(0, newline));
       buffer = buffer.slice(newline + 1);
       if (MODE === "silent") continue;
+      if (MODE === "exit") process.exit(3);
       if (message.method === "initialize") setTimeout(() => {
         writeFileSync(ANSWERED, "1");
         reply(message, { protocolVersion: "2024-11-05", capabilities: { tools: {} } });
@@ -62,8 +63,11 @@ function computer(driver: string, env: Record<string, string> = {}) {
   };
 }
 
-async function mount(server: ReturnType<typeof computer>["server"], startup: { ms: number; hostComputerMs: number }) {
-  const session = await mountChatTools({ localComputer: server }, controller.signal, true, undefined, undefined, undefined, undefined, undefined, undefined, startup);
+type Line = { message: string; text: { key: string; params?: Record<string, string | number> } };
+
+async function mount(server: ReturnType<typeof computer>["server"], startupMs: number, hostComputerMs: number, conversation?: string, lines: Line[] = []) {
+  const session = await mountChatTools({ localComputer: server }, controller.signal, true, undefined, undefined, undefined, undefined, undefined, undefined,
+    { startupMs, hostComputerMs, ...(conversation ? { conversation } : {}), notice: (line) => lines.push(line as Line) });
   sessions.push(session);
   return session;
 }
@@ -81,58 +85,71 @@ describe("this desktop's own computer in a chat turn", () => {
     expect(hostComputerKey(one)).not.toBe(hostComputerKey({ ...one, env: { ...one.env, OMB_CUA_ARGS: '["mcp","--embedded"]' } }));
   });
 
-  it("is not skipped when it starts slower than the turn's budget, and the next turn lists it at once and waits at its first call", async () => {
+  it("is not skipped when slow, and the next turn lists its last tools after a short wait and its first call waits for the start", async () => {
     const driver = `slow-${randomUUID()}`;
-    const first = computer(driver, { DELAY_MS: "1500" });
-    const cold = await mount(first.server, { ms: 150, hostComputerMs: 20_000 });
+    const cold = await mount(computer(driver, { DELAY_MS: "1500" }).server, 10_000, 20_000);
     expect(cold.skipped).toEqual([]);
     expect(names(cold)).toEqual(["computer_write"]);
 
-    const second = computer(driver, { DELAY_MS: "1500" });
-    const warm = await mount(second.server, { ms: 150, hostComputerMs: 20_000 });
+    const second = computer(driver, { DELAY_MS: "6000" });
+    const warm = await mount(second.server, 10_000, 20_000);
     expect(existsSync(second.answered)).toBe(false);
     expect(warm.skipped).toEqual([]);
     expect(names(warm)).toEqual(["computer_write"]);
     await expect(warm.execute("computer_write", { value: "x" }, controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:x" });
     expect(existsSync(second.answered)).toBe(true);
-  });
+  }, 30_000);
 
-  it("says through a tool, never by leaving it out, that it did not start, and tells the person", async () => {
-    const session = await mount(computer(`dead-${randomUUID()}`, { MODE: "silent" }).server, { ms: 150, hostComputerMs: 400 });
-    expect(session.skipped).toEqual([]);
-    expect(names(session)).toEqual([HOST_COMPUTER_STAND_IN]);
-    expect(session.definitions[0]!.function.description).toContain("did not start this time (MCP startup timed out)");
-    expect(session.view(HOST_COMPUTER_STAND_IN, {})).toMatchObject({ ask: false });
-    const result = await session.execute(HOST_COMPUTER_STAND_IN, {}, controller.signal);
-    expect(result.ok).toBe(false);
-    expect(result.text).toContain("nothing needs linking or connecting");
-    expect(chatToolNoticeLines(session)).toEqual([expect.objectContaining({ text: { key: "chat.notice.computerToolsDidNotStart", params: { reason: "MCP startup timed out" } } })]);
-  });
-
-  it("after a failed start, waits for the next one through the stand-in and then lists the real tools beside the runtime's own", async () => {
-    const driver = `flaky-${randomUUID()}`;
-    await mount(computer(driver, { MODE: "silent" }).server, { ms: 150, hostComputerMs: 400 });
-    const starting = computer(driver, { DELAY_MS: "1200" });
-    const session = await mount(starting.server, { ms: 150, hostComputerMs: 20_000 });
+  it("on a first start slower than the turn's wait, goes on with a stand-in that waits for it and then lists the real tools beside the runtime's own", async () => {
+    const starting = computer(`first-${randomUUID()}`, { DELAY_MS: "1200" });
+    const lines: Line[] = [];
+    const session = await mount(starting.server, 150, 20_000, "c-first", lines);
     expect(existsSync(starting.answered)).toBe(false);
     expect(names(session)).toEqual([HOST_COMPUTER_STAND_IN]);
-    expect(session.definitions[0]!.function.description).toContain("still starting");
-    expect(session.hostComputerFailure).toBeUndefined();
-    const runtime = { type: "function" as const, function: { name: "ask_user", description: "Ask", parameters: { type: "object" } } };
-    session.definitions.push(runtime);
+    const described = session.definitions[0]!.function.description;
+    expect(described).toContain("still starting");
+    expect(described).toContain("If the person's request needs this computer");
+    expect(described).not.toContain("already linked");
+    expect(session.view(HOST_COMPUTER_STAND_IN, {})).toMatchObject({ ask: false });
+    session.definitions.push({ type: "function", function: { name: "ask_user", description: "Ask", parameters: { type: "object" } } });
 
     await expect(session.execute(HOST_COMPUTER_STAND_IN, {}, controller.signal)).resolves.toEqual({ ok: true, text: HOST_COMPUTER_READY });
     expect(names(session)).toEqual(["computer_write", "ask_user"]);
     await expect(session.execute("computer_write", { value: "y" }, controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
+    expect(lines).toEqual([]);
   });
 
-  it("answers a call on the last start's tools with why this start failed, and the turn goes on", async () => {
+  it("says through a tool, never by leaving it out, that it did not start, and tells the person once per conversation", async () => {
+    const lines: Line[] = [];
+    const driver = `dead-${randomUUID()}`;
+    const session = await mount(computer(driver, { MODE: "exit" }).server, 2_000, 4_000, "c-dead", lines);
+    expect(session.skipped).toEqual([]);
+    expect(names(session)).toEqual([HOST_COMPUTER_STAND_IN]);
+    const described = session.definitions[0]!.function.description;
+    expect(described).toContain("unavailable this time (MCP server exited before the session closed");
+    expect(described).toContain("Only mention it if the person's request needs this computer");
+    expect(described).toContain("never ask the person to link or connect this computer");
+    const result = await session.execute(HOST_COMPUTER_STAND_IN, {}, controller.signal);
+    expect(result.ok).toBe(false);
+    expect(result.text).toContain("not a missing link");
+    expect(lines).toEqual([{ message: expect.stringContaining("(their helper stopped). Send your message again in a moment."),
+      text: { key: "chat.notice.computerToolsDidNotStart", params: { why: "chat.notice.part.computerToolsHelperStopped" } } }]);
+
+    await mount(computer(driver, { MODE: "exit" }).server, 2_000, 4_000, "c-dead", lines);
+    expect(lines[1]).toEqual({ message: "The tools for this computer are still not starting.", text: { key: "chat.notice.computerToolsStillNotStarting" } });
+    await mount(computer(driver, { MODE: "exit" }).server, 2_000, 4_000, "c-other", lines);
+    expect(lines[2]!.text.key).toBe("chat.notice.computerToolsDidNotStart");
+  });
+
+  it("answers a call on the last start's tools with why this start failed, tells the person, and the turn goes on", async () => {
     const driver = `lost-${randomUUID()}`;
-    await mount(computer(driver).server, { ms: 5_000, hostComputerMs: 20_000 });
-    const session = await mount(computer(driver, { MODE: "silent" }).server, { ms: 150, hostComputerMs: 600 });
+    await mount(computer(driver).server, 10_000, 20_000);
+    const lines: Line[] = [];
+    const session = await mount(computer(driver, { MODE: "silent" }).server, 150, 600, "c-lost", lines);
     expect(names(session)).toEqual(["computer_write"]);
     const result = await session.execute("computer_write", { value: "z" }, controller.signal);
     expect(result).toMatchObject({ ok: false, text: expect.stringContaining("did not start this time (MCP startup timed out)") });
     expect(() => session.validate("computer_write", { value: "z" })).not.toThrow();
+    await vi.waitFor(() => expect(lines).toEqual([expect.objectContaining({ text: { key: "chat.notice.computerToolsDidNotStart", params: { why: "chat.notice.part.computerToolsTookTooLong" } } })]));
   });
 });

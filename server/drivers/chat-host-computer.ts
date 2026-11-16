@@ -1,13 +1,16 @@
 // This desktop's own computer for the Chat Completions runtime: its tools are listed even when its helper is slow to
 // start, and a turn whose helper did not start says so through a tool instead of having no computer tools.
-import { noticeFailure } from "../chat-notices.ts";
+import { noticeFailure, type ChatNoticeKey } from "../chat-notices.ts";
+import type { ServerText } from "../../shared/server-text.ts";
 
 const HOST_COMPUTER_STARTUP_MS = 20_000;
 /** Windows: each turn starts the gate proxy as Electron and cua-driver.exe behind it, beside every other built-in;
  * a cold start there (Defender scanning both executables on a busy disk) runs well past the general budget. */
 const WINDOWS_HOST_COMPUTER_STARTUP_MS = 45_000;
+/** How long a turn waits before going on with an earlier list, or with the stand-in after a failed start. */
+export const HOST_COMPUTER_QUICK_MS = 1_500;
 
-/** How long this computer's helper gets to start; past the turn's own budget it starts in the background. */
+/** How long this computer's helper gets to start; past the turn's own wait it starts in the background. */
 export function hostComputerStartupMs(platform: NodeJS.Platform = process.platform): number {
   return platform === "win32" ? WINDOWS_HOST_COMPUTER_STARTUP_MS : HOST_COMPUTER_STARTUP_MS;
 }
@@ -38,10 +41,10 @@ function reasonOf(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "its helper did not start";
 }
 
-/** Waits for the listing up to `turnMs` once this driver has listed or failed before; on its first start, for the
- * whole listing, which `list` bounds by hostComputerStartupMs. */
+/** The turn waits `quickMs` once this driver has listed or failed before, `firstMs` on its first start; `list` bounds
+ * the start itself by hostComputerStartupMs, and past the wait it goes on in the background. */
 export async function startHostComputer(key: string, list: (include: (tool: unknown) => boolean) => Promise<unknown[]>,
-  include: (tool: unknown) => boolean, turnMs: number, signal: AbortSignal): Promise<HostComputerStart> {
+  include: (tool: unknown) => boolean, wait: { quickMs: number; firstMs: number }, signal: AbortSignal): Promise<HostComputerStart> {
   const seen: unknown[] = [];
   const listing = list((tool) => { seen.push(tool); return include(tool); }).then((tools) => {
     lastListed.set(key, seen);
@@ -54,7 +57,7 @@ export async function startHostComputer(key: string, list: (include: (tool: unkn
   listing.catch(() => {});
   const cached = lastListed.get(key);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = cached || lastFailed.has(key) ? new Promise<undefined>((resolve) => { timer = setTimeout(resolve, turnMs, undefined); }) : new Promise<undefined>(() => {});
+  const late = new Promise<undefined>((resolve) => { timer = setTimeout(resolve, cached || lastFailed.has(key) ? wait.quickMs : wait.firstMs, undefined); });
   const outcome = await Promise.race([listing.then((tools) => ({ tools }), (error: unknown) => ({ error })), late]);
   clearTimeout(timer);
   if (outcome && "tools" in outcome) return { state: "listed", tools: outcome.tools };
@@ -74,22 +77,52 @@ export function hostComputerFailure(ready: Promise<unknown>, signal: AbortSignal
   });
 }
 
-const NEVER_LINK = "This computer is already linked to you; nothing needs linking or connecting, so never ask the person to link it.";
+/** Whether or not this bot was given this computer, a slow helper is never a missing link. */
+const NOT_A_LINK = "This is a start-up problem of the computer's tools, not a missing link: never ask the person to link or connect this computer.";
 
 export function hostComputerDidNotStart(reason: string): string {
-  return `The tools for this computer did not start this time (${reason}). ${NEVER_LINK} Tell the person they did not start and to send the message again in a moment.`;
+  return `The tools for this computer did not start this time (${reason}). ${NOT_A_LINK} Tell the person they did not start and to try again in a moment.`;
 }
 
 export const HOST_COMPUTER_READY = "The tools for this computer are ready and listed for your next step.";
 
 export function hostComputerStandIn(reason?: string) {
   const description = reason === undefined
-    ? `The tools for this computer (the person's own computer) are still starting. Call this before any step on this computer: it waits for them, then lists them for your next step. ${NEVER_LINK}`
-    : `${hostComputerDidNotStart(reason)} Call this for the same answer.`;
+    ? `The tools for this computer are still starting. If the person's request needs this computer, call this first: it waits for them, then lists them for your next step. ${NOT_A_LINK}`
+    : `The tools for this computer are unavailable this time (${reason}). Only mention it if the person's request needs this computer; then tell them its tools did not start and to try again in a moment. ${NOT_A_LINK}`;
   return { type: "function" as const, function: { name: HOST_COMPUTER_STAND_IN, description, parameters: { type: "object", properties: {}, additionalProperties: false } } };
 }
 
-/** For the person: their computer's tools did not start at the start of this turn. */
-export function hostComputerNotice(reason: string | undefined) {
-  return reason === undefined ? undefined : noticeFailure("chat.notice.computerToolsDidNotStart", { reason });
+/** A catalog piece for the cause, so the person's line is worded in their language rather than carrying the English. */
+function why(reason: string): string {
+  if (/timed out/i.test(reason)) return "chat.notice.part.computerToolsTookTooLong";
+  if (/exited|could not start|input closed|stopped/i.test(reason)) return "chat.notice.part.computerToolsHelperStopped";
+  return "chat.notice.part.computerToolsHelperFailed";
+}
+
+const NOTICED_KEPT = 500;
+const noticed = new Set<string>();
+
+/** The person's line for a start that failed: in full once per conversation, then a short one while it keeps failing. */
+export function hostComputerNotice(conversation: string | undefined, reason: string): { message: string; text: ServerText } {
+  const repeat = conversation !== undefined && noticed.has(conversation);
+  if (conversation !== undefined && !repeat) {
+    noticed.add(conversation);
+    if (noticed.size > NOTICED_KEPT) noticed.delete(noticed.values().next().value!);
+  }
+  const key: ChatNoticeKey = repeat ? "chat.notice.computerToolsStillNotStarting" : "chat.notice.computerToolsDidNotStart";
+  return noticeFailure(key, repeat ? undefined : { why: why(reason) });
+}
+
+/** The computer started in this conversation, so its next failure is told in full again. */
+export function hostComputerStarted(conversation: string | undefined): void {
+  if (conversation !== undefined) noticed.delete(conversation);
+}
+
+/** Tells the person when a start the turn went on without fails, unless the turn ended first. */
+export function watchHostComputerStart(ready: Promise<unknown>, conversation: string | undefined, notice: ((line: { message: string; text: ServerText }) => void) | undefined,
+  open: () => boolean): void {
+  ready.then(() => hostComputerStarted(conversation), (error: unknown) => {
+    if (open()) notice?.(hostComputerNotice(conversation, reasonOf(error)));
+  });
 }
