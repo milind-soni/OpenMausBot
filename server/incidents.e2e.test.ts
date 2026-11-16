@@ -534,9 +534,11 @@ it("reports a routine that keeps failing the same way once, again when it is spa
     const routine = (await api("POST", "/api/routines", {
       name: "Inbox brief", prompt: "Summarise my inbox.", botId: ada.id, schedule: { type: "cron", expression: "0 7 * * *", timeZone: "Europe/London" },
     }, undefined, 201)).routine;
+    // Each run fails twice: its one automatic second start comes 15 s after the first (ROUTINE_RETRY_MS), so a run takes
+    // over 15 s before it fails, and a busy machine needs room beyond that.
     const runFails = async () => {
       const { id } = (await api("POST", `/api/routines/${routine.id}/run`, undefined, undefined, 201)).run;
-      await expect.poll(async () => ((await api("GET", "/api/routines")).runs as any[]).find((run) => run.id === id)?.status, { timeout: 30_000 }).toBe("failed");
+      await expect.poll(async () => ((await api("GET", "/api/routines")).runs as any[]).find((run) => run.id === id)?.status, { timeout: 45_000 }).toBe("failed");
     };
     const reports = async (incidents: string) => (await messages(incidents))
       .filter((m) => m.kind === "activity" && (m.tool?.name ?? "").startsWith("Ada hit a problem: its scheduled routine")).map((m) => m.tool.name as string);
@@ -558,4 +560,4 @@ it("reports a routine that keeps failing the same way once, again when it is spa
   } finally {
     await close();
   }
-}, 150_000);
+}, 240_000);
