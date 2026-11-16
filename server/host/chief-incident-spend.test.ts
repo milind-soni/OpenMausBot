@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import "../server-line-packs.ts";
 import { INCIDENT_WINDOW_MS, incidentText } from "../incidents.ts";
 import { failureShape } from "../routine-outcomes.ts";
 import { RoutineManager, type RoutineRun } from "../routines.ts";
