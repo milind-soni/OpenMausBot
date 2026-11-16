@@ -6,6 +6,7 @@ import { openExternalLink } from "@/lib/app-links";
 import type { AppDoneState, AppNetwork } from "../../../shared/app";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_QUIET_BUTTON } from "../AskCard";
 
+const PAGE_ICON = "flex shrink-0 text-ink-secondary";
 export const APP_SURFACE = "w-full overflow-hidden rounded-2xl bg-composer ring-1 ring-composer-ring";
 const ICON_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/[0.07] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
@@ -70,13 +71,10 @@ export function AppHeader({
   );
 }
 
-export const PAGE_GLAZE = "pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-composer to-transparent backdrop-blur-md [mask-image:linear-gradient(to_bottom,transparent,black)]";
-
-export function PageCardFooter({ title, detail, updated, glazed = false, infoId, infoOpen, onInfo, onReload, reloading = false }: {
+export function PageCardFooter({ title, detail, updated, infoId, infoOpen, onInfo, onReload, reloading = false }: {
   title: string;
   detail: string;
   updated: boolean;
-  glazed?: boolean;
   infoId: string;
   infoOpen: boolean;
   onInfo(): void;
@@ -84,11 +82,13 @@ export function PageCardFooter({ title, detail, updated, glazed = false, infoId,
   reloading?: boolean;
 }) {
   return (
-    <div data-page-footer className={cn("flex items-center gap-3 px-4 py-3", !glazed && "border-t border-ink/[0.08]")}>
-      <AppWindow aria-hidden="true" size={16} className="shrink-0 text-ink-tertiary" />
+    <div data-page-footer className="flex min-h-18 items-center gap-3 border-t border-ink/[0.08] px-5 py-4">
+      <span data-page-icon className={PAGE_ICON}>
+        <AppWindow aria-hidden="true" size={16} />
+      </span>
       <div className="min-w-0 flex-1">
-        <div title={title} className="truncate text-[13px] font-medium leading-[18px] text-ink"><bdi dir="auto">{title}</bdi></div>
-        <div className="truncate text-xs leading-4 text-ink-tertiary">{detail}</div>
+        <div title={title} className="truncate text-sm font-medium leading-[18px] text-ink"><bdi dir="auto">{title}</bdi></div>
+        <div className="truncate text-[13px] leading-[18px] text-ink-secondary">{detail}</div>
       </div>
       {updated && <span role="status" data-page-updated className="shrink-0 rounded-full bg-accent/15 px-2 py-px text-[13px] font-medium text-accent-text">{t("chat.preview.updated")}</span>}
       <div className={cn(

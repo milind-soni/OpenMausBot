@@ -7,7 +7,7 @@ import { appBlockedLine } from "./app-blocked";
 import { APP_FRAME_LIMITS } from "../../../shared/app-frame/bridge";
 import { AppDocumentError, fetchAppDocument, type AppFetchFailure } from "./app-api";
 import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
-import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE, PAGE_GLAZE, PageCardFooter } from "./AppChrome";
+import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE, PageCardFooter } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
 import type { AppSelection } from "./app-frame-host";
 import { PageCitationButton } from "../CitationUI";
@@ -17,13 +17,29 @@ import { closePage, onPageOpened, openPage, openPageFor } from "@/lib/open-page"
 import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePin, usePagePoint, usePageSave, usePageShare, usePageVersion } from "./PageTools";
 
 const WIDTH = "max-w-[760px]";
+const CARD_WIDTH = "max-w-[560px]";
+const CARD_TITLE = "truncate px-5 pt-5 text-[17px] font-semibold leading-6 text-ink";
+const CARD_TITLE_HEIGHT = 44;
 const DOC_REUSE_MS = 60_000;
 
 const heights = new Map<string, number>();
+/** Whether a page opens with a heading of its own, as it last said: by message id and version. */
+const headings = new Map<string, boolean>();
+/** How long a card waits for its page to say, before it shows the preview with the title above it for good. */
+const HEADING_WAIT_MS = 1_500;
+/** The same once the page has said it is still drawing itself. */
+const HEADING_DRAWING_MS = 10_000;
 const docs = new Map<string, { doc: AppDocument; at: number }>();
+
+function rememberHeading(key: string, opens: boolean) {
+  headings.delete(key);
+  headings.set(key, opens);
+  while (headings.size > 200) headings.delete(headings.keys().next().value!);
+}
 
 export function forgetAppRows(): void {
   heights.clear();
+  headings.clear();
   docs.clear();
 }
 
@@ -99,6 +115,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const [problem, setProblem] = useState<AppFrameProblem | null>(null);
   // Text the person selected in the page, to cite in the composer as chat text is; never in a room.
   const [selection, setSelection] = useState<AppSelection | null>(null);
+  const [heading, setHeading] = useState<{ key: string; opens: boolean | null } | null>(null);
   const yourAccess = store?.bots?.find((candidate) => candidate.id === botId)?.yourAccess;
   const canWrite = useCanWriteIn(threadId, yourAccess) !== false;
   const frame = useRef<AppFrameHandle | null>(null);
@@ -160,6 +177,13 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const onHeight = useCallback((next: number) => {
     heights.set(`${message.id}:${rev}`, next);
     if (mounted.current) setHeight(next);
+  }, [message.id, rev]);
+  const onHeading = useCallback((next: boolean | null) => {
+    const key = `${message.id}:${rev}`;
+    if (next !== null) rememberHeading(key, next);
+    // Once the card has an answer, or stopped waiting for one, "still drawing" cannot take the preview away again.
+    else if (headings.has(key)) return;
+    if (mounted.current) setHeading((was) => (next === null && was?.key === key && was.opens !== null ? was : { key, opens: next }));
   }, [message.id, rev]);
 
   const current = slot.live ? loaded?.doc : undefined;
@@ -223,8 +247,27 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const state = collapsed ? "collapsed" : current ? "live" : noPage ? "unavailable" : slot.live ? "loading" : "idle";
   const infoId = `${uid}-info`;
 
+  // The page says, once it has rendered, whether it opens with a heading of its own; a card whose page does not gets
+  // the title above the preview. Until the page has spoken the preview stays covered, so nothing moves under the eye.
+  const said = heading?.key === `${message.id}:${rev}` ? heading.opens : undefined;
+  const opens = said ?? headings.get(`${message.id}:${rev}`);
+  const undecided = compact && Boolean(current) && opens === undefined;
+  const drawing = said === null;
+  const frameKey = loaded?.key;
+  useEffect(() => {
+    if (!undecided) return;
+    const key = `${message.id}:${rev}`;
+    const timer = setTimeout(() => {
+      rememberHeading(key, false);
+      setHeading({ key, opens: false });
+    }, drawing ? HEADING_DRAWING_MS : HEADING_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [undecided, drawing, frameKey, message.id, rev]);
+  // The title stays while the frame is away (the pool took its slot), so the card keeps its height.
+  const titled = compact && opens === false;
   // The compact card clips the page at its natural size, so it reads as a preview of the real thing.
-  const boxHeight = compact ? Math.min(height, PAGE_PREVIEW_HEIGHT) : height;
+  const previewHeight = height + (titled ? CARD_TITLE_HEIGHT : 0);
+  const boxHeight = compact ? Math.min(previewHeight, PAGE_PREVIEW_HEIGHT) : height;
   const body = collapsed ? null : fullScreen && current ? (
     <div data-app-box className={cn("relative w-full", bordered && !compact && "border-t border-ink/[0.08]")} style={{ height: boxHeight }}>
       {compact
@@ -238,6 +281,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       // The whole card opens the page, so the keyboard must not reach what the preview shows underneath it.
       inert={(compact && Boolean(current) && !point.pointing) || undefined}
       style={{ height: boxHeight }}>
+      {titled && <div data-page-title title={payload.title} className={CARD_TITLE}><bdi dir="auto">{payload.title}</bdi></div>}
       {current ? (
         <AppFrame
           key={loaded!.key}
@@ -248,18 +292,25 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
           height={height}
           handle={frame}
           onHeight={onHeight}
+          {...(compact ? { onHeading } : {})}
           onProblem={setProblem}
           onTeardownRequested={onTeardownRequested}
           {...(page ? { maxHeight: PAGE_HEIGHT.cap } : {})}
           {...(!room ? { onSelection: setSelection } : {})}
         />
       ) : (
-        <AppPlaceholder height={boxHeight} loading={slot.live} open={slot.live ? undefined : reloadNow} />
+        <AppPlaceholder height={boxHeight - (titled ? CARD_TITLE_HEIGHT : 0)} loading={slot.live} open={slot.live ? undefined : reloadNow} />
       )}
-      {compact && <div aria-hidden="true" data-page-glaze className={PAGE_GLAZE} />}
+      {undecided && (
+        <div data-page-settling className="absolute inset-0 bg-composer">
+          <AppPlaceholder height={boxHeight} loading />
+        </div>
+      )}
+      {compact && current && !undecided && previewHeight > PAGE_PREVIEW_HEIGHT && (
+        <div data-page-fade aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-composer to-transparent" />
+      )}
     </div>
   );
-  const glazed = compact && !collapsed && !noPage && !(fullScreen && current);
   const info = infoOpen && <AppInfo id={infoId} network={payload.network ?? { connect: [], resources: [] }} bytes={payload.bytes ?? 0} bordered={bordered || compact} />;
   const reopen = collapsed && (
     <div className={cn("flex", bordered || compact ? "px-4 pb-3.5" : "pb-2", compact && "pt-3.5")}>
@@ -278,7 +329,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       data-app-source={payload.source}
       {...(page ? { "data-app-rev": rev } : {})}
       {...(room ? { "data-app-room": "" } : {})}
-      className={cn("w-full text-start", WIDTH)}
+      className={cn("w-full text-start", compact ? CARD_WIDTH : WIDTH)}
     >
       {compact ? (
         <div className={APP_SURFACE}>
@@ -289,7 +340,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
               title={payload.title}
               detail={version.last > 0 ? `${kind} · ${t("chat.preview.version", { n: version.rev + 1 })}` : kind}
               updated={version.flash}
-              glazed={glazed}
               infoId={infoId}
               infoOpen={infoOpen}
               onInfo={() => setInfoOpen((open) => !open)}
@@ -336,7 +386,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
         />
       )}
       {page && fullScreen && current && (
-        <PageFullScreen {...tools} title={payload.title} doc={current} botId={botId} threadId={threadId} handle={wide} close={() => setFullScreen(false)} pane={pane}
+        <PageFullScreen {...tools} title={payload.title} doc={current} botId={botId} threadId={threadId} handle={wide} close={() => { point.stop(); setFullScreen(false); }} pane={pane}
           {...(!room ? { onSelection: setSelection } : {})} />
       )}
     </div>
