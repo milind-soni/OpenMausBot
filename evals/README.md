@@ -75,6 +75,11 @@ On Claude with tool search on, a turn sends a few agents tools whole and the res
 
     npx vitest run --config evals/vitest.config.ts evals/dream
 
+`evals/dream/run-dream.ts` sends each case to a real model with the dream's own prompt and scores the answer the same way, with time and cost per case. It talks to the engine directly through its driver, with no server, and the server code it loads gets a temporary data folder. It is closed unless `OMB_EVAL_LIVE=1`, never runs in CI, and writes its report under the gitignored `evals/reports/runs/`. The instance uses the live tier's shape:
+
+    OMB_EVAL_LIVE=1 OMB_EVAL_LIVE_INSTANCE='{"instanceId":"claude","driver":"claudeAgent","model":"claude-haiku-5-5","config":{"cli":"/path/to/claude"},"environmentFrom":["HOME","USER","PATH"]}' \
+        node --experimental-strip-types evals/dream/run-dream.ts [--only id,id]
+
 ## Tier 3 — opt-in live-model smoke
 
 Live-model runs never execute by default: `pnpm eval --live` prints one skip line and exits 0 unless the gate is open.
