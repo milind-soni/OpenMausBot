@@ -2,6 +2,7 @@
   "version": 1,
   "locales": {
     "de": {
+      "server.incidents.folded": "f078095fca075a51881f5d3cb35cef70bc39273e6794547b04de8b728c3f5f6a",
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
       "pro.seePlans": "30d9abfd7c7af513814bdfadcafe7ec4a90bc6bcee519086dc513f63f2cd7384",
       "pro.reauthShort": "089c74d900d6e3d84b0d4981fb4eb0b4038d9a243ca8209862f7500766382473",

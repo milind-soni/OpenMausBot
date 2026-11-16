@@ -1503,6 +1503,35 @@ apart from the AI's errors, because starting the same work again cannot fix it.
 
 A routine stays on however often it fails.
 
+A failed run starts once more by itself only when a second start can plausibly
+pass: a rate limit, a provider that is overloaded or answered with a temporary
+error, an engine that crashed or was stopped for memory (that start waits for
+room). A tool server that is down, an AI that is signed out, a full disk or an
+engine that could not be started fail the run at once. The second start sends
+the routine's instructions again only when its conversation does not already
+hold them; otherwise it sends one short line saying to finish the run.
+
+Past these limits, something is held back and says so in one line: on the
+routine's run row, or in the Chief's "Problems to look at" chat.
+
+| Setting | Default | What it bounds |
+| --- | --- | --- |
+| `OMB_ROUTINE_FAILURES_BEFORE_SPACING` | `3` | The runs of one routine that may fail in a row before its next scheduled runs are spaced out. A run that completes, a change to the routine or turning it on again ends the spacing. Runs that failed only because the bot's AI is signed out, out of credit or at its usage limit are not counted. The skipped runs share one row: "Skipped 12 scheduled runs because its last runs failed, so its next tries are spaced out". From `1`. |
+| `OMB_ROUTINE_FAILURE_SPACING_MS` | `3600000` (1 hour) | How long after the failure that starts the spacing the next run waits. From `60000`. |
+| `OMB_ROUTINE_FAILURE_SPACING_MAX_MS` | `14400000` (4 hours) | How long after each later failure the next run waits. Never below `OMB_ROUTINE_FAILURE_SPACING_MS`. |
+| `OMB_CHIEF_INCIDENT_TURNS_PER_HOUR` | `6` | The turns a Chief of Staff is started for problems in an hour, across all the chats it hears about. Past that, the problems are counted on one line in its "Problems to look at" chat, which names the newest. From `1`. |
+| `OMB_STARTUP_ROUTINE_GAP_MS` | `1800000` (30 minutes) | On a server not started by the desktop app, how soon after the start that last ran them routines set to "Also run when OpenMausBot starts" may run again. A start within that time leaves one row per routine: "Not run at 4 starts because OpenMausBot started again soon after the start that last ran it". `0` runs them at every start. |
+| `OMB_ROUTINE_RESTART_STAGGER_MS` | `30000` (30 seconds) | The time between the runs a restart cut off as each starts again, so they do not all start at once. From `0`. |
+| `OMB_BURST_PART_MAX_RESTARTS` | `2` | The times a burst's part, or its merge, starts again after a restart cut it off. Past that the part fails with "Not started again: OpenMausBot restarted while this part ran 3 times.", and the parts are posted as they came instead of merged. From `0`. |
+
+A routine every minute (`* * * * *`) is still accepted and is spaced out the
+same way. Identical failures are told to you and to the Chief once: two
+failures that differ only in ids, paths, numbers or times count as the same.
+A Chief told of a failure that is this server's own is told not to retry it.
+
+Any value that is not a whole number in range leaves the default. Set them in
+the server's environment and restart it.
+
 ### Hand-offs and unattended turns
 
 A turn with a person waiting in the chat keeps the limits described under

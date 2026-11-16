@@ -523,7 +523,7 @@ it("tells the person of a failure whose report waited and was then refused", asy
   }
 }, 150_000);
 
-it("reports a routine that keeps failing the same way once, and again when the failure changes", async () => {
+it("reports a routine that keeps failing the same way once, again when it is spaced out, and again when the failure changes", async () => {
   const { dataDir, api, control, messages, useCli, incidentsThread, close } = await launch();
   try {
     const chief = (await control(["new-bot", "--name", "Clive", "--section", "Ops"])).bot;
@@ -546,11 +546,14 @@ it("reports a routine that keeps failing the same way once, and again when the f
     await expect.poll(() => reports(incidents), { timeout: 20_000 }).toHaveLength(1);
     await runFails();
     await runFails();
+    // The third failure in a row spaces the routine out, and says so once.
+    await expect.poll(() => reports(incidents), { timeout: 20_000 }).toHaveLength(2);
     writeFileSync(changedFlag, "changed");
     await runFails();
-    await expect.poll(() => reports(incidents), { timeout: 20_000 }).toHaveLength(2);
-    const [crashed, changed] = await reports(incidents);
+    await expect.poll(() => reports(incidents), { timeout: 20_000 }).toHaveLength(3);
+    const [crashed, spaced, changed] = await reports(incidents);
     expect(crashed).toContain("simulated crash before result");
+    expect(spaced).toContain("3 runs in a row failed. It stays on, and tries again less often until a run completes.");
     expect(changed).not.toContain("simulated crash before result");
   } finally {
     await close();

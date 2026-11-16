@@ -2,13 +2,14 @@ import { failedTurnTool } from "../../shared/failed-turn.ts";
 import { admit } from "../admission.ts";
 import { memoryStopped } from "../engine-memory.ts";
 import {
-  AUTO_RETRY_LEAD, chiefForBot, INCIDENTS_THREAD_TITLE, OLD_INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText, RETRY_BLOCKED, RETRY_LEAD,
+  AUTO_RETRY_LEAD, ChiefIncidentBudget, chiefForBot, INCIDENTS_THREAD_TITLE, OLD_INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText, RETRY_BLOCKED, RETRY_LEAD,
   type Incident, type IncidentKind, type IncidentRetry,
 } from "../incidents.ts";
 import { buildNotification, type Notification } from "../notify.ts";
 import { quoteInNote } from "../peer-provenance.ts";
 import { peerName } from "../peer-roster.ts";
 import { redactSecretsInText } from "../redact.ts";
+import { serverLine } from "../server-lines.ts";
 import { retriesTeammateThread, type RoutineFailureFacts } from "../routine-recovery.ts";
 import { queueSteeredMessage } from "../steer-queue.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
@@ -16,7 +17,7 @@ import type { BotRecord, Message, Store } from "../store.ts";
 type PeerAsk = NonNullable<Message["peerAsk"]>;
 
 export interface ChiefNoticeDeps {
-  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "groupByThread" | "createTask" | "appendMessage" | "messagesFor" | "activePath">;
+  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "groupByThread" | "createTask" | "appendMessage" | "messagesFor" | "activePath"> & Partial<Pick<Store, "patchMessage">>;
   assignerOf(threadId: string): unknown;
   notify(notification: Notification | null): void;
   threadBusy(botId: string, threadId: string): boolean;
@@ -43,6 +44,9 @@ export interface ChiefNoticeDeps {
   confined?(threadId: string): boolean;
   /** The language a line about this conversation is written in for its person (server/server-lines.ts). */
   threadLanguage?(threadId: string): string | undefined;
+  /** The incident turns a Chief may start in an hour, across threads (OMB_CHIEF_INCIDENT_TURNS_PER_HOUR by default). */
+  chiefTurnsPerHour?(): number;
+  now?(): number;
   /** A Team Cloud: a notice reaches a Chief only when the conversation's asks are its person's (a member's private chat
    * is theirs alone), into a notices chat of that person's own. */
   routing?: {
@@ -61,6 +65,9 @@ export const MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itself, onc
 export function createChiefNotices(deps: ChiefNoticeDeps) {
   const { store } = deps;
   const incidentLedger = new IncidentLedger();
+  const chiefBudget = new ChiefIncidentBudget({ now: deps.now, limit: deps.chiefTurnsPerHour });
+  /** Each Chief's line that counts the problems it was not started for, while its hour's share is spent. */
+  const folded = new Map<string, { threadId: string; messageId: string; count: number; until: number }>();
   const schedule = deps.schedule ?? ((run: () => void) => { setTimeout(run, 0).unref?.(); });
   const later = deps.later ?? ((run: () => void, ms: number) => { setTimeout(run, ms).unref?.(); });
   /** Each thread's last request a run stopped for memory was started again for: once a request. */
@@ -137,6 +144,18 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     }
   }
 
+  /** Past its hour's share a Chief is not started again: the problem is counted on one line in its notices chat instead,
+   * which names the newest. */
+  function fold(chief: BotRecord, threadId: string, until: number, chip: string): void {
+    const open = folded.get(chief.id), now = deps.now?.() ?? Date.now();
+    const same = open && open.threadId === threadId && open.until > now ? open : null;
+    const count = (same?.count ?? 0) + 1;
+    const name = serverLine(deps.threadLanguage?.(threadId), "server.incidents.folded", { count, chief: chief.name, newest: chip });
+    const line = same && store.patchMessage?.(threadId, same.messageId, { tool: { name, ok: false } })
+      || store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name, ok: false } });
+    folded.set(chief.id, { threadId, messageId: line.id, count, until: Math.max(until, same?.until ?? 0) });
+  }
+
   function deliver(input: {
     chief: BotRecord | null; title: string; bot: BotRecord; threadId: string; chip: string; text: string; alreadyNotified: boolean;
   }): "chief" | "person" {
@@ -161,6 +180,8 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
         routing && person ? (created) => routing.open(created.threadId, person) : undefined);
     if (!notices || notices.threadId === threadId) return tellThePerson();
     if (routing && person && routing.startedBy(notices.threadId) === undefined) routing.open(notices.threadId, person);
+    const spent = chiefBudget.take(chief.id);
+    if (spent) { fold(chief, notices.threadId, spent.until, input.chip); return "chief"; }
     store.appendMessage(notices.threadId, {
       role: "bot",
       kind: "activity",

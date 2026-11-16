@@ -8868,7 +8868,7 @@ routines = new RoutineManager({
     }
   },
   interruptGoal: interruptRoutineGroupGoal,
-  onRunChanged: (run) => { syncRoutineRunToSource(run); }, moveFrozen: () => moveFreeze.frozen(), restartsToReload: () => { if (!CLOUD_HOME) return false; restartRequested = true; gracefulShutdown(); return true; }, onReadable: routinesReadable,
+  onRunChanged: (run) => { syncRoutineRunToSource(run); }, promptSaid: (threadId, prompt) => store.messagesFor(threadId).some((line) => line.role === "user" && line.text === prompt), moveFrozen: () => moveFreeze.frozen(), restartsToReload: () => { if (!CLOUD_HOME) return false; restartRequested = true; gracefulShutdown(); return true; }, onReadable: routinesReadable,
   onRunCut: (run) => run.groupId ? coordinator.cancelRoom(run.groupId, run.threadId!, ROUTINE_RESTARTED) : coordinator.cancelDirect(run.threadId!, ROUTINE_RESTARTED),
   onRunFailed: (run, alert) => {
     const bot = store.bot(run.botId);
