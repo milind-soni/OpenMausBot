@@ -8409,6 +8409,9 @@
   "computer.answering.waking": "Waking: it is on but not answering yet.",
   "computer.answering.restoring": "Restoring its disk after waking. This can take a few minutes.",
   "computer.answering.notResponding": "Not responding since {time}.",
+  "computer.disk.full": "Disk {percent}% full.",
+  "computer.disk.cleared": "Cleared caches at {time}.",
+  "computer.disk.clearedSpace": "Cleared space at {time}.",
   "computer.recovery.replacing": "This cloud computer isn't responding. MausBot is replacing it.",
   "computer.recovery.replacedManual": "Replaced. {name} gets a new cloud computer the next time it needs one.",
   "computer.recovery.restartedManual": "Restarted. The cloud computer answers again.",
@@ -10939,5 +10942,15 @@
   "settings.browser.proxyConfigured": "New built-in browser connections use this SOCKS5 proxy. My Chrome keeps its own settings; private and local destinations stay protected.",
   "settings.browser.proxyInactive": "Saved, but active only with the built-in browser on supported hosts.",
   "settings.browser.proxySave": "Save",
-  "settings.browser.proxyClear": "Remove"
+  "settings.browser.proxyClear": "Remove",
+  "together.onCloud": "On My Cloud",
+  "together.onComputer": "On this computer",
+  "together.state.asleep": "My Cloud is asleep. Open a bot to wake it.",
+  "together.state.waking": "My Cloud is waking up…",
+  "together.state.offlineCloud": "My Cloud can't be reached right now.",
+  "together.state.offlineComputer": "This computer's bots can't be read right now.",
+  "together.switch.title": "This computer and My Cloud together",
+  "together.switch.line": "Off by default. The Cloud's bots and this computer's bots show in one list, and each opens where it lives.",
+  "together.switch.failed": "That couldn't be saved. Try again.",
+  "together.state.signin": "Open My Cloud once to sign in."
 }

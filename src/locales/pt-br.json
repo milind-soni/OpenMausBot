@@ -10912,6 +10912,9 @@
   "computer.recovery.restoring": "Este computador na nuvem está ligado, mas ainda está restaurando o disco, então ainda não responde. O MausBot está esperando e reinicia o computador se isso levar mais de dez minutos.",
   "computer.answering.awake": "Acordado. Respondeu pela última vez às {time}.",
   "computer.answering.waking": "Acordando: já está ligado, mas ainda não responde.",
+  "computer.disk.cleared": "Caches limpos às {time}.",
+  "computer.disk.clearedSpace": "Espaço liberado às {time}.",
+  "computer.disk.full": "Disco {percent}% cheio.",
   "computer.answering.restoring": "Restaurando o disco depois de acordar. Isso pode levar alguns minutos.",
   "computer.answering.notResponding": "Sem resposta desde as {time}.",
   "computer.recovery.replacing": "Este computador na nuvem não está respondendo. O MausBot está substituindo ele.",
@@ -10939,5 +10942,15 @@
   "devices.computers.typeCode": "No outro computador, abra Conectar a um servidor no {app} e cole o link que você copiar aqui. Ou digite lá este endereço e este código.",
   "devices.computers.address": "Endereço",
   "devices.computers.pairLine": "Cria um link que seu outro computador abre. Funciona uma vez.",
-  "chat.settingsCard.elsewhere": "Isso é definido no próprio computador: abra o MausBot lá, depois Configurações → Celular e dispositivos → Seus outros computadores."
+  "chat.settingsCard.elsewhere": "Isso é definido no próprio computador: abra o MausBot lá, depois Configurações → Celular e dispositivos → Seus outros computadores.",
+  "together.onCloud": "No My Cloud",
+  "together.onComputer": "Neste computador",
+  "together.state.asleep": "O My Cloud está em repouso. Abra um bot para ativá-lo.",
+  "together.state.waking": "O My Cloud está sendo ativado…",
+  "together.state.offlineCloud": "Não é possível acessar o My Cloud agora.",
+  "together.state.offlineComputer": "Não é possível ler os bots deste computador agora.",
+  "together.switch.title": "Este computador e o My Cloud juntos",
+  "together.switch.line": "Desativado por padrão. Os bots do Cloud e os deste computador aparecem em uma só lista, e cada um abre onde está.",
+  "together.switch.failed": "Não foi possível salvar. Tente de novo.",
+  "together.state.signin": "Abra o My Cloud uma vez para entrar."
 }

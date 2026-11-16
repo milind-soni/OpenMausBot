@@ -1390,7 +1390,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             if (variant !== undefined && requestedVariantOption().currentValue !== variant) {
               throw new Error(`${support.displayName} changed variant before the prompt`);
-            }
+            } const promptOutcome = await support.promptOutcome?.(instanceId, sessionId);
             if (state.settled || state.stopped || session.closing) throw new Error("turn stopped");
             state.promptSent = true;
             if (!support.promptUnreachedModel) acknowledge();
@@ -1452,7 +1452,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   : {}),
               });
             }
-            const reason = result?.stopReason;
+            const reason = result?.stopReason, reported = await promptOutcome?.(result); if (reported) throw reported;
             if (reason === "end_turn") settle(threadId, session, true, null);
             else if (reason === "cancelled" || state.stopped) settle(threadId, session, true, "cancelled");
             else {
