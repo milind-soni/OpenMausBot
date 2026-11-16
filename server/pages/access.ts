@@ -12,21 +12,22 @@ export type PagesAccess =
   | { kind: "desktop"; url: string; token: string }
   | { kind: "home"; url: string; machineId: string; secret: string };
 
-/** Must match openmaus-cloud server/cloud-pages.ts `pagesHomeSignature`. */
-export function pagesHomeSignature(secret: string, machineId: string, timestamp: string, nonce: string, body: string): string {
+/** Must match openmaus-cloud server/cloud-pages.ts `homeSignature`: each Admin route signs over a label of its own
+ * (`omb-pages-v1` for page tokens, `omb-community-v1` for community submissions). */
+export function pagesHomeSignature(secret: string, machineId: string, timestamp: string, nonce: string, body: string, label = "omb-pages-v1"): string {
   const bodyHash = createHash("sha256").update(body).digest("base64url");
-  return createHmac("sha256", secret).update(`omb-pages-v1\n${machineId}\n${timestamp}\n${nonce}\n${bodyHash}`).digest("base64url");
+  return createHmac("sha256", secret).update(`${label}\n${machineId}\n${timestamp}\n${nonce}\n${bodyHash}`).digest("base64url");
 }
 
-/** The headers that prove a request to the Admin's token route comes from this account. */
-export function pagesAuthHeaders(access: PagesAccess, body: string, now = Date.now()): Record<string, string> {
+/** The headers that prove a request to an Admin route comes from this account. */
+export function pagesAuthHeaders(access: PagesAccess, body: string, now = Date.now(), label = "omb-pages-v1"): Record<string, string> {
   if (access.kind === "desktop") return { authorization: `Bearer ${access.token}` };
   const timestamp = String(Math.floor(now / 1000)), nonce = randomBytes(18).toString("base64url");
   return {
     "x-omb-cloud-machine": access.machineId,
     "x-omb-cloud-timestamp": timestamp,
     "x-omb-cloud-nonce": nonce,
-    "x-omb-cloud-signature": `v1=${pagesHomeSignature(access.secret, access.machineId, timestamp, nonce, body)}`,
+    "x-omb-cloud-signature": `v1=${pagesHomeSignature(access.secret, access.machineId, timestamp, nonce, body, label)}`,
   };
 }
 
