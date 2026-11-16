@@ -174,7 +174,7 @@ describe("changing an added server's base URL", () => {
     }
     expect((await call("PATCH", `/api/instances/${ID}`, { url: "https://old.example.com/v2", apiKey: "https://x.example" })).status).toBe(400);
     expect(persisted).toEqual([]);
-    expect((cfg.instances?.[ID]?.config as { url?: string }).url).toBe("https://old.example.com/v1");
+    expect((cfg.instances?.[ID]?.config as { url?: string } | undefined)?.url).toBe("https://old.example.com/v1");
   });
 
   it("needs the key again when the host changes, and takes a new key with the address", async () => {
@@ -185,7 +185,7 @@ describe("changing an added server's base URL", () => {
       expect(refused.status, url).toBe(400);
       expect(refused.body.error).toMatch(/API key again/);
     }
-    expect((cfg.instances?.[ID]?.config as { url?: string }).url).toBe("https://old.example.com/v1");
+    expect((cfg.instances?.[ID]?.config as { url?: string } | undefined)?.url).toBe("https://old.example.com/v1");
     const moved = await call("PATCH", `/api/instances/${ID}`, { url: "https://new.example.com/v1", apiKey: "sk-new" });
     expect(moved.status, moved.text).toBe(200);
     expect(moved.text).not.toContain("sk-new");
