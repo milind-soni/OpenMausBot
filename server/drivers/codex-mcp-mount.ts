@@ -1,7 +1,7 @@
 import type { McpServerSpec, StdioMcpSpec } from "../contracts.ts";
 import { BOX_NO_PROXY_ENV, BOX_PROXY_ENV, botBox } from "../bot-box/box.ts";
 import { tomlInlineTable } from "./codex-process.ts";
-import { ownMcpHttpEnabled } from "./own-mcp-http.ts";
+import { ownMcpHttpEnabled, withLoopbackNoProxy } from "./own-mcp-http.ts";
 import { ownMcpOverHttp } from "./turn-mcp.ts";
 
 /** Codex's default for one MCP server's tools (openai/codex#17843): "auto"
@@ -67,6 +67,7 @@ function mountOwnOverHttp(appServerArgs: string[], env: Record<string, string | 
   const tokenName = http && Object.keys(server.env).find((key) => http.headers.authorization === `Bearer ${server.env[key]}`);
   if (!http || !tokenName) return false;
   env[tokenName] = server.env[tokenName];
+  withLoopbackNoProxy(env);
   written.add(tokenName);
   const { authorization: _token, ...headers } = http.headers;
   appServerArgs.push("-c", `${prefix}.url=${JSON.stringify(http.url)}`, "-c", `${prefix}.bearer_token_env_var=${JSON.stringify(tokenName)}`);

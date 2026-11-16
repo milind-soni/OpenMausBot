@@ -4,19 +4,31 @@
 // the same capability token, so identity and permissions are the stdio form's. The permission prompt server (ogb, over the
 // turn's broker socket), the Android phone tools (which run adb themselves) and the person's own servers stay as they are.
 import { botBox } from "../bot-box/box.ts";
-import { cloudHomeConfigured } from "../cloud-home.ts";
 import { ownMcpOverHttp } from "./turn-mcp.ts";
 
-/** "1" or "0"; unset: on for a self-hosted Linux server, off on the desktop app, a Cloud and anything else. */
+/** "1" turns the URL form on; off unless set, on every kind of server. */
 export const OWN_MCP_HTTP_ENV = "OMB_OWN_MCP_HTTP";
 
-/** Whether engines get OpenMausBot's own servers by URL. Never while the bot box is on: a boxed engine reaches this server
- * only through the box's relays, which carry the stdio proxies' requests, not an engine's own. */
-export function ownMcpHttpEnabled(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform, boxed: boolean = botBox.enabled()): boolean {
-  if (boxed) return false;
-  if (env[OWN_MCP_HTTP_ENV] === "1") return true;
-  if (env[OWN_MCP_HTTP_ENV] === "0") return false;
-  return platform === "linux" && env.OMB_DESKTOP_PARENT !== "1" && !cloudHomeConfigured(env);
+/** Whether engines get OpenMausBot's own servers by URL: only with OMB_OWN_MCP_HTTP=1, and never while the bot box is on
+ * (a boxed engine reaches this server only through the box's relays, which carry the stdio proxies' requests, not an
+ * engine's own). */
+export function ownMcpHttpEnabled(env: NodeJS.ProcessEnv = process.env, boxed: boolean = botBox.enabled()): boolean {
+  return !boxed && env[OWN_MCP_HTTP_ENV] === "1";
+}
+
+const LOOPBACK = ["127.0.0.1", "localhost", "::1"];
+
+/** An engine set up to use a proxy for HTTP (HTTPS_PROXY, ALL_PROXY) would send its calls to this server's loopback URL
+ * there too: the loopback names join NO_PROXY and no_proxy, both spellings, keeping whatever either held. */
+export function withLoopbackNoProxy(env: Record<string, string | undefined>): void {
+  const hosts = [env.NO_PROXY, env.no_proxy].flatMap((value) => (value ?? "").split(",")).map((host) => host.trim()).filter(Boolean);
+  env.NO_PROXY = env.no_proxy = [...new Set([...hosts, ...LOOPBACK])].join(",");
+}
+
+/** `http` as given; an engine that will reach this server by URL gets the loopback names in its NO_PROXY first. */
+export function loopbackUnproxied(env: Record<string, string | undefined>, http: boolean): boolean {
+  if (http) withLoopbackNoProxy(env);
+  return http;
 }
 
 type StdioMount = { command?: unknown; args?: unknown; env?: unknown; alwaysLoad?: unknown };
@@ -30,13 +42,16 @@ export function claudeOwnHttpMount(server: unknown): Record<string, unknown> | n
   return http ? { type: "http", url: http.url, headers: http.headers, ...(mount.alwaysLoad === true ? { alwaysLoad: true } : {}) } : null;
 }
 
-/** Turns every one of OpenMausBot's own proxies in a Claude --mcp-config into its HTTP form, when the setting is on. */
-export function claudeOwnMcpOverHttp(servers: Record<string, unknown>, enabled: boolean = ownMcpHttpEnabled()): void {
-  if (!enabled) return;
+/** Turns every one of OpenMausBot's own proxies in a Claude --mcp-config into its HTTP form, when the setting is on;
+ * true when any was. */
+export function claudeOwnMcpOverHttp(servers: Record<string, unknown>, enabled: boolean = ownMcpHttpEnabled()): boolean {
+  if (!enabled) return false;
+  let converted = false;
   for (const [name, server] of Object.entries(servers)) {
     const http = claudeOwnHttpMount(server);
-    if (http) servers[name] = http;
+    if (http) { servers[name] = http; converted = true; }
   }
+  return converted;
 }
 
 /** ACP engine instances whose agent said, in its `initialize` answer, that it reaches MCP servers by URL
