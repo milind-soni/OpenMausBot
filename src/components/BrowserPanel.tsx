@@ -1,3 +1,5 @@
+import { browserMessage } from "@/lib/browser-picker";
+import { BrowserElementPicker } from "./browser/BrowserElementPicker";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Globe, Hand, Loader2, LockKeyhole, Moon, X } from "lucide-react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
@@ -149,9 +151,13 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     browserControl.current = created;
   }, []);
 
+  const pickerScope = useRef(`${bot.id}:${scopedThread ?? ""}`);
+  pickerScope.current = `${bot.id}:${scopedThread ?? ""}`;
+
   const onControl = useCallback((next: PreviewStreamControl | null) => {
     const previous = controlRef.current;
     controlRef.current = next;
+    browserMessage(pickerScope.current, { type: "ombPickerControl", controller: next?.controller ?? null });
     setControl(next);
     if (previous?.controller === "you" && next?.controller !== "you") setKept(false);
     if (next === null) setTakeStatus("");
@@ -160,6 +166,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   }, []);
 
   const onMessage = useCallback((message: Readonly<Record<string, unknown>>) => {
+    browserMessage(pickerScope.current, message);
     if (message.type === "tabs") {
       const next = tabsOf(message.tabs);
       setTabs(next);
@@ -288,6 +295,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink"} data-browser-transport={stream ? "stream" : "live"}>
     <ChromeRow
       ref={address}
+      picker={stream ? <BrowserElementPicker scopeKey={`${bot.id}:${scopedThread ?? ""}`} read={() => ({ scopeKey: `${bot.id}:${scopedThread ?? ""}`, connected, control: controlRef.current, surface: () => surface.current?.canvas() ?? null, send: message => clientRef.current?.send(message), take: () => browserControl.current?.takeControl() })} /> : undefined}
       botName={bot.name}
       tabs={tabs}
       nav={nav}

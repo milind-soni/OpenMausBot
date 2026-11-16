@@ -605,3 +605,26 @@ describe("what the panel shows besides the page", () => {
   });
 });
 
+
+it.each([false, true])("does not inspect a webpage for a non-controlling viewer (another holder: %s)", async anotherHolder => {
+  const { watch, chrome } = await setup();
+  const observer = await watch({ owner: "observer" });
+  if (anotherHolder) {
+    const holder = await watch({ owner: "holder" });
+    await holder.viewer.input({ type: "takeControl" });
+  }
+  const inspections = () => chrome().sent.filter(command => command.method === "Runtime.evaluate" && String(command.params.expression).includes("inspectElementAt"));
+  const before = inspections().length;
+  await observer.viewer.input({ type: "ombElementInspect", requestId: "denied-inspection", x: 10, y: 12, capture: true });
+  expect(inspections()).toHaveLength(before);
+  expect(observer.outputs.some(output => (output as { type: string }).type === "ombElementInspection")).toBe(false);
+});
+
+it("routes an authorized element inspection and returns an unavailable-element response", async () => {
+  const { watch, chrome } = await setup();
+  const holder = await watch();
+  await holder.viewer.input({ type: "takeControl" });
+  await holder.viewer.input({ type: "ombElementInspect", requestId: "authorized-inspection", x: 10, y: 12, capture: false });
+  expect(chrome().sent.some(command => command.method === "Runtime.evaluate" && String(command.params.expression).includes("inspectElementAt"))).toBe(true);
+  expect(holder.outputs).toContainEqual(expect.objectContaining({ type: "ombElementInspection", requestId: "authorized-inspection", error: "The webpage element is no longer available." }));
+});

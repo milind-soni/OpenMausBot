@@ -1,3 +1,4 @@
+import { inspectBrowserElement } from "./inspect-element.ts";
 // People watching and driving a bot's browser. Every viewer gets its own CDP session on the tab in front, with its own
 // screencast sized to it, and the page fills the panel: in fill mode it takes the shape of the latest viewer's panel at
 // a desktop's width, 1280x800 with nobody watching. Frames come at the screen's real device scale, so they stay sharp.
@@ -970,6 +971,7 @@ export class ViewerHub {
         if (message.ignoreCache === true) await tab.page.session.send("Page.reload", { ignoreCache: true });
         else await tab.page.reload({ readiness: "none" });
         return;
+      case "ombElementInspect": return inspectBrowserElement({ push: message => viewer.push(message as Parameters<Viewer["push"]>[0]) }, tab, message);
       case "probe": {
         const x = num(message.x);
         const y = num(message.y);
