@@ -13,6 +13,7 @@ import { BROWSER_VIEWPORT, viewportArgs, type PageSize } from "./browser-page-si
 import { browserRuntimeEnv, ownsBrowserViewport } from "./browser-runtime.ts";
 import { spawnBotWork } from "./oom-score.ts";
 import { SIGN_IN_PROMPT } from "./system-prompt.ts";
+import { devShmIsSmall } from "./browser/chrome/shm.ts";
 import { gateChromeSettings } from "./browser/egress/gate.ts";
 import {
   AGENT_BROWSER_VERSION,
@@ -581,6 +582,8 @@ export function agentBrowserIntegration(input: {
   /** The Chrome OMB prepared for the engine to start (server/browser/chrome/launcher.ts); unused when attaching. */
   launcher?: Record<string, string>;
   dataDir?: string;
+  /** /dev/shm is too small for Chrome's shared memory; read from the host when absent. */
+  smallShm?: boolean;
 }): { command: string; args: string[]; env: Record<string, string> } {
   const sourceEnv = input.env ?? process.env;
   const env: Record<string, string> = {
@@ -624,6 +627,8 @@ export function agentBrowserIntegration(input: {
     const launch = { ...env, ...input.launcher };
     // A kept profile's disk cache would otherwise grow to Chrome's default of several hundred megabytes per profile.
     if (env.AGENT_BROWSER_PROFILE) launch.AGENT_BROWSER_ARGS = [launch.AGENT_BROWSER_ARGS, PROFILE_CACHE_ARG].filter(Boolean).join("\n");
+    // agent-browser 0.37 adds this itself only where it recognises Docker, and a container platform leaves no such mark.
+    if (input.smallShm ?? devShmIsSmall(input.platform ?? process.platform)) launch.AGENT_BROWSER_ARGS = [launch.AGENT_BROWSER_ARGS, "--disable-dev-shm-usage"].filter(Boolean).join("\n");
     Object.assign(env, input.launcher, agentBrowserEgressEnv(launch, input.egressPort ?? 0, input.platform ?? process.platform));
   }
   return { command: input.binaryPath, args: ["mcp", "--tools", "core", "--no-webmcp"], env };
