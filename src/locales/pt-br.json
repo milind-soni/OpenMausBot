@@ -10944,5 +10944,12 @@
   "together.switch.title": "Este computador e o My Cloud juntos",
   "together.switch.line": "Desativado por padrão. Os bots do Cloud e os deste computador aparecem em uma só lista, e cada um abre onde está.",
   "together.switch.failed": "Não foi possível salvar. Tente de novo.",
-  "together.state.signin": "Abra o My Cloud uma vez para entrar."
+  "together.state.signin": "Abra o My Cloud uma vez para entrar.",
+  "sidebar.newBotOn.computer": "Novo bot neste computador",
+  "sidebar.newBotOn.cloud": "Novo bot no My Cloud",
+  "sidebar.newBotOn.asleep": "O My Cloud está em repouso. Isto o ativa.",
+  "sidebar.newBotOn.noAi": "Nenhuma IA está conectada lá ainda.",
+  "sidebar.newBotOn.onlyThere": "Conectada só lá: {ais}.",
+  "sidebar.newBotOn.onlyHere": "Conectada só aqui: {ais}.",
+  "sidebar.newBotOn.needsUpdate": "O My Cloud precisa da próxima atualização para isso."
 }

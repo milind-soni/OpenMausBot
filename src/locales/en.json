@@ -10944,5 +10944,12 @@
   "together.switch.title": "This computer and My Cloud together",
   "together.switch.line": "Off by default. The Cloud's bots and this computer's bots show in one list, and each opens where it lives.",
   "together.switch.failed": "That couldn't be saved. Try again.",
-  "together.state.signin": "Open My Cloud once to sign in."
+  "together.state.signin": "Open My Cloud once to sign in.",
+  "sidebar.newBotOn.computer": "New bot on this computer",
+  "sidebar.newBotOn.cloud": "New bot on My Cloud",
+  "sidebar.newBotOn.asleep": "My Cloud is asleep. This wakes it.",
+  "sidebar.newBotOn.noAi": "No AI is signed in there yet.",
+  "sidebar.newBotOn.onlyThere": "Signed in only there: {ais}.",
+  "sidebar.newBotOn.onlyHere": "Signed in only here: {ais}.",
+  "sidebar.newBotOn.needsUpdate": "My Cloud needs its next update for this."
 }

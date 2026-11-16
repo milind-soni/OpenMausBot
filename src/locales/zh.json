@@ -10237,5 +10237,12 @@
   "together.switch.title": "这台电脑和 My Cloud 合在一起",
   "together.switch.line": "默认关闭。Cloud 上的机器人和这台电脑上的机器人显示在同一个列表中，各自在所在的位置打开。",
   "together.switch.failed": "未能保存。请重试。",
-  "together.state.signin": "打开一次 My Cloud 以登录。"
+  "together.state.signin": "打开一次 My Cloud 以登录。",
+  "sidebar.newBotOn.computer": "在这台电脑上新建机器人",
+  "sidebar.newBotOn.cloud": "在 My Cloud 上新建机器人",
+  "sidebar.newBotOn.asleep": "My Cloud 已休眠。这会唤醒它。",
+  "sidebar.newBotOn.noAi": "那里还没有登录任何 AI。",
+  "sidebar.newBotOn.onlyThere": "只在那里登录：{ais}。",
+  "sidebar.newBotOn.onlyHere": "只在这里登录：{ais}。",
+  "sidebar.newBotOn.needsUpdate": "My Cloud 需要下一次更新才能这样做。"
 }

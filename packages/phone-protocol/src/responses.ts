@@ -96,6 +96,8 @@ export interface BotsResponse<Message = WireMessage> {
   groups: Array<WireGroup & WireMessagePage<Message>>;
   /** By bot id. */
   computerControl: Record<string, WireComputerControl>;
+  /** What this place's page does when the person's other place asks: `newBot`, it makes a new bot. */
+  together?: { newBot: true };
 }
 
 /** One match in GET /api/search, in a bot's conversation (`botId`) or a room's (`groupId`). */

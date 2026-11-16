@@ -126,6 +126,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
             return [bot.id, { held: snapshot.held, helpReason: snapshot.helpReason, ...(snapshot.help ? { help: snapshot.help } : {}) }];
           }),
         ),
+        together: { newBot: true },
       } satisfies BotsResponse<MessagePage["messages"][number]>);
     }
 
