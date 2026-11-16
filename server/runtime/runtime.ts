@@ -259,13 +259,22 @@ export class Runtime {
     }
   }
 
-  /** When each node was last seen held for a place that could not be reached, queued for it or running there: no window
-   * counts time up to then. */
+  /** When each node was last seen held for a place that could not be reached, queued for it or running there, or first
+   * seen with that place back: no window counts time up to then. */
   private readonly heldAway = new Map<string, number>();
+  /** The nodes whose place was away when last asked. */
+  private readonly awayNow = new Set<string>();
 
   private away(n: Assignment): boolean {
-    if ((n.status !== "queued" && n.status !== "running") || this.runner.away === undefined || this.safe("away", () => this.runner.away!(n)) !== true) return false;
+    if ((n.status !== "queued" && n.status !== "running") || this.runner.away === undefined) return false;
+    if (this.safe("away", () => this.runner.away!(n)) !== true) {
+      // The place is back: its windows start when that is first seen, not when it was last seen away. However long this
+      // look took to come (a slow disk, a busy host), the node is not expired by the look that finds its place again.
+      if (this.awayNow.delete(n.id)) this.heldAway.set(n.id, this.clock.now());
+      return false;
+    }
     this.heldAway.set(n.id, this.clock.now());
+    this.awayNow.add(n.id);
     return true;
   }
 
@@ -273,7 +282,7 @@ export class Runtime {
     const now = this.clock.now();
     const mono = this.clock.monotonic();
     const live = this.store.all({ nonTerminal: true });
-    if (this.heldAway.size > 0) { const ids = new Set(live.map(n => n.id)); for (const id of this.heldAway.keys()) if (!ids.has(id)) this.heldAway.delete(id); }
+    if (this.heldAway.size > 0) { const ids = new Set(live.map(n => n.id)); for (const id of this.heldAway.keys()) if (!ids.has(id)) { this.heldAway.delete(id); this.awayNow.delete(id); } }
     // Deepest first, so each node fails with its own reason.
     for (const snapshot of [...live].sort((a, b) => b.depth - a.depth)) {
       const n = this.store.get(snapshot.id);

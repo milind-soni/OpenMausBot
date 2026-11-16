@@ -806,7 +806,7 @@ function ensureCloudAccount() {
       cloudSync.accountChanged(state.account?.id ?? null); rememberCloudHome(state);
       rememberedHome = rememberedCloudHome(rememberedHome, state);
       sendUpdaterState();
-      cloudPower.changed(); computerSharing?.cloudChanged(); try { placesTogether.scopeChanged(); } catch {} void botLink?.look(); try { void oneHome.kick(); void homeWindow.changed(); announceAddedCloud(state); railChanged(); } catch {}
+      cloudPower.changed(); computerSharing?.cloudChanged(); try { placesTogether.scopeChanged(); } catch {} try { void botLink?.look(); } catch {} try { void oneHome.kick(); void homeWindow.changed(); announceAddedCloud(state); railChanged(); } catch {}
       void includedX.onState(state); void includedPages.onState(state); updatesConsent?.accountChanged(state); accounts.tell();
       refreshCloudMenus();
       announceCloudReady(state);

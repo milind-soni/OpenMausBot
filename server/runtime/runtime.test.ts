@@ -222,6 +222,31 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
+  it("work held for a place that was away is not expired by the look that finds the place back: its queue window starts then", () => {
+    const w = world(undefined, { queueMs: 1_000, stallMs: 1e9 });
+    let away = true;
+    w.runner.away = a => a.assignee.botId === "far" && away;
+    w.runner.canStartAnswer = "far is not ready";
+    const root = w.runtime.begin(beginReq());
+    const held = ok(w.runtime.enqueue(toBot("far", root.id)));
+    w.runtime.tick();
+    w.clock.advance(50_000);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    // The place comes back, and the next look comes later than the whole queue window.
+    w.clock.advance(5_000);
+    away = false;
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    w.clock.advance(999);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    // From then on it is ordinary queued work, and the queue window is its bound again.
+    w.clock.advance(2);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "never started" });
+  });
+
   it("expires a queue entry that never started and a question nobody answered, never as completed", async () => {
     const w = world(undefined, { queueMs: 1_000, inputWaitMs: 5_000 });
     const root = w.runtime.begin(beginReq());
