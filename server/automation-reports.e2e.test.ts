@@ -383,7 +383,11 @@ it("does not take a person's failed turn in a run's conversation for the run's o
 
 it("says in the main chat, once per run of failures, that an automation could not finish", async () => {
   const s = await server();
-  s.script([{ key: "run", match: [s.header("Inbox watch")], reply: "never", fail: true, repeat: true }]);
+  // The automatic second start does not repeat the routine's header; it fails the same way, so both runs end on one error.
+  s.script([
+    { key: "run", match: [s.header("Inbox watch")], reply: "never", fail: true, repeat: true },
+    { key: "retry", match: ["this run's first start"], reply: "never", fail: true, repeat: true },
+  ]);
   const routineId = await s.routine("Inbox watch");
   const first = await s.runNow(routineId);
   await s.settled(first, "failed");
@@ -393,6 +397,7 @@ it("says in the main chat, once per run of failures, that an automation could no
   })]);
   const second = await s.runNow(routineId);
   await s.settled(second, "failed");
+  expect((await s.run(first)).error).toContain("Scripted addressed agent failure");
   expect((await s.run(second)).error).toBe((await s.run(first)).error);
   expect(await s.lines()).toHaveLength(1);
 }, 120_000);
