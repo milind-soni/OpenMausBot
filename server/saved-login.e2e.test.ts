@@ -193,7 +193,7 @@ it.skipIf(process.platform === "win32")("fills a login saved for example.com on 
     page.navigate("https://www.example.com/login", LOGIN_FORM);
     page.answer = () => ({ error: "Incorrect password." });
     await turn("Try www.", 3);
-    expect(answered(2, "fill_login")[0].content[0].text).toBe(`The site did not accept the login for ${USERNAME} on www.example.com. It said: “Incorrect password.”. Check the saved login in Settings → Logins, or call request_sign_in. The password was cleared from the page.`);
+    expect(answered(2, "fill_login")[0].content[0].text).toBe(`The site did not accept the login for ${USERNAME} on www.example.com. It said: “Incorrect password.”. Check the saved login in Settings → Vault, or call request_sign_in. The password was cleared from the page.`);
     expect(page.sent).toHaveLength(1);
     expect(page.field("#password").value).toBe("");
     expect(JSON.stringify(evidence())).not.toContain(PASSWORD);

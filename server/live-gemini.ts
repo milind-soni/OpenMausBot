@@ -71,7 +71,7 @@ export interface CreateGeminiSessionInput {
  * Gemini's raw body. */
 export async function createGeminiLiveSession(input: CreateGeminiSessionInput): Promise<LiveGeminiSession> {
   const key = input.key.trim();
-  if (!key) throw new LiveSessionError("Add a Gemini API key in Settings → API keys to use Live calls.", 409);
+  if (!key) throw new LiveSessionError("Add a Gemini API key in Settings → AI → Other services to use Live calls.", 409);
   const now = (input.now ?? Date.now)();
   const setup = geminiLiveSetup(input.endpoint.model, fishInstructions(input.bot, input.history, { cloudHome: input.cloudHome }), input.voice);
   const expiresAt = new Date(now + CONNECT_WITHIN_MS).toISOString();
@@ -114,7 +114,7 @@ export function geminiErrorMessage(status: number): string {
   switch (status) {
     case 400: return "Gemini rejected the call settings (HTTP 400).";
     case 401:
-    case 403: return "Gemini rejected the API key. Check the Gemini key in Settings → API keys.";
+    case 403: return "Gemini rejected the API key. Check the Gemini key in Settings → AI → Other services.";
     case 404: return "Gemini could not find the Live model for calls.";
     case 429: return "Gemini is limiting Live sessions on this key right now. Try again in a moment.";
     default: return status >= 500 ? "Gemini had a problem starting the call. Try again in a moment." : `Gemini could not start the call (HTTP ${status}).`;

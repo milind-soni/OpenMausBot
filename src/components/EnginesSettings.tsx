@@ -23,6 +23,7 @@ import { OllamaModels, ollamaShortStatus } from "./OllamaStatusLine";
 import { isAddedServer } from "@/lib/openai-compat-endpoints";
 import { InstanceProviderMark } from "./ProviderIcons";
 import { HiddenEngines, HiddenProviderRows, useHiddenProviders } from "./HiddenProviders";
+import { AdminOnly } from "./AdminOnly";
 
 export { HiddenEngines };
 
@@ -466,16 +467,18 @@ function ProviderRow({ instance, ready, open, onToggle, compact, children }: {
   </>;
 }
 
-function SimpleEngines({ rows, isReady, renderEngine, more }: {
+function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false }: {
   rows: InstanceInfo[];
   isReady: (instance: InstanceInfo) => boolean;
   renderEngine: (instance: InstanceInfo, bare?: boolean) => ReactNode;
   more: { id: string; open: boolean; onToggle: () => void };
+  /** The chat's sign-in card: every account row in view, no fold and no hidden providers. */
+  accountsOnly?: boolean;
 }) {
   const [opened, setOpened] = useState<string | null>(null);
   // A hidden provider is gone from the instance list, so without these rows nothing in Settings brings it back.
-  const hidden = useHiddenProviders();
-  const featured = rows.filter((instance) => isReady(instance) || instance.authentication !== undefined);
+  const allHidden = useHiddenProviders(), hidden = accountsOnly ? [] : allHidden;
+  const featured = rows.filter((instance) => accountsOnly || isReady(instance) || instance.authentication !== undefined);
   const others = rows.filter((instance) => !featured.includes(instance));
   const row = (instance: InstanceInfo, compact: boolean) => {
     const open = opened === instance.instanceId;
@@ -498,12 +501,8 @@ function SimpleEngines({ rows, isReady, renderEngine, more }: {
   );
 }
 
-export function EnginesSettings({ simple = false, more }: { simple?: boolean; more?: { id: string; open: boolean; onToggle: () => void } }) {
-  const { state } = useStore();
-  // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
-  useEffect(() => forgetAppCopySwitches, []);
-  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
-  // A provider's accounts share one card, which takes the place of its first account.
+/** A provider's accounts share one card, which takes the place of its first account. */
+function groupedAccounts(listed: InstanceInfo[]) {
   const groups = new Map<AccountGroup, InstanceInfo[]>();
   for (const instance of listed) {
     const group = accountGroupOf(instance);
@@ -513,7 +512,30 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
     const group = accountGroupOf(instance);
     return group && groups.get(group)?.[0] === instance ? group : null;
   };
-  const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
+  return { groups, groupOf, rows: listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance)) };
+}
+
+/** The chat's AI sign-in card: Simple Providers with only the accounts a person signs in to (Claude, ChatGPT or Codex,
+ * Antigravity), for an owner or admin. */
+export function AiSignInSettings() {
+  const { state } = useStore();
+  const { groups, groupOf, rows } = groupedAccounts(state.instances.filter((instance) => accountGroupOf(instance) !== null || (instance.driverKind === "antigravityAgent" && !instance.readOnly)));
+  const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
+  const renderEngine = (instance: InstanceInfo, bare = false) => {
+    const group = groupOf(instance);
+    return group ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare} /> : <EngineRow instance={instance} bare={bare} />;
+  };
+  return <AdminOnly><div data-ai-sign-in="">
+    <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} accountsOnly more={{ id: "ai-sign-in-more", open: false, onToggle: () => {} }} />
+  </div></AdminOnly>;
+}
+
+export function EnginesSettings({ simple = false, more }: { simple?: boolean; more?: { id: string; open: boolean; onToggle: () => void } }) {
+  const { state } = useStore();
+  // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
+  useEffect(() => forgetAppCopySwitches, []);
+  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
+  const { groups, groupOf, rows } = groupedAccounts(listed);
   // A hidden ordinary Claude instance takes its card, and the endpoint section inside it, away. A hosted
   // workspace lists every engine read-only and refuses instance changes, so there the section has no Add.
   const hostedWorkspace = rows.length > 0 && rows.every((instance) => instance.readOnly);

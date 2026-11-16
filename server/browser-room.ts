@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+// cgroup paths are POSIX paths on every platform this reads them, and in tests run on Windows.
+import { posix } from "node:path";
 import { boxMemory } from "./box-memory.ts";
 
 /** One open browser with one page in the server image (Chromium 156, agent-browser 0.37.0): 13 processes, about 160
@@ -17,8 +18,8 @@ const readText: Read = (path) => { try { return readFileSync(path, "utf8"); } ca
 /** The tightest `pids.max` from `at` up to the hierarchy's root under `root`. */
 function tightest(read: Read, root: string, from: string): number | null {
   let limit: number | null = null;
-  for (let at = from.trim(); ; at = dirname(at)) {
-    const value = Number(read(join(root, at, "pids.max"))?.trim());
+  for (let at = from.trim(); ; at = posix.dirname(at)) {
+    const value = Number(read(posix.join(root, at, "pids.max"))?.trim());
     if (Number.isInteger(value) && value > 0) limit = Math.min(limit ?? value, value);
     if (at === "/" || at === ".") return limit;
   }
