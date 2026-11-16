@@ -914,7 +914,7 @@ export function latestSaidByBot(threadIds: readonly string[], botId: string, sin
   if (!threadIds.length) return [];
   const rows = db()
     .prepare(LATEST_SAID_BY_BOT_SQL)
-    .all(since, botId, JSON.stringify(threadIds), limit) as Array<{ thread_id: string; id: string; at: number; head: string }>;
+    .all(since, botId, JSON.stringify([...new Set(threadIds)]), limit) as Array<{ thread_id: string; id: string; at: number; head: string }>;
   return rows.map((row) => ({
     threadId: row.thread_id,
     messageId: row.id,

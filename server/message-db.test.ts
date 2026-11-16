@@ -280,6 +280,8 @@ describe("message-db", () => {
       { threadId: "room", messageId: "r1", at: now - 2 * hour, head: "I can take the deploy" },
     ]);
     expect(latestSaidByBot(["dm", "room"], "me", now - 48 * hour, 1).map((row) => row.threadId)).toEqual(["dm"]);
+    expect(latestSaidByBot(["dm", "dm", "room", "dm"], "me", now - 48 * hour).map((row) => row.threadId)).toEqual(["dm", "room"]);
+    expect(latestSaidByBot(["dm", "dm", "room"], "me", now - 48 * hour, 2).map((row) => row.threadId)).toEqual(["dm", "room"]);
     expect(latestSaidByBot([], "me", 0)).toEqual([]);
   });
 
