@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { FileCode2, FileImage, FileText, FolderOpen, RefreshCw, Search, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, FileCode2, FileImage, FileText, Folder, FolderOpen, RefreshCw, Search, X } from "lucide-react";
+import { buildFileTree, visibleTreeRows } from "@/lib/fileTree";
+import { cn } from "@/lib/cn";
 import type { PreviewFileKind, PreviewFileSource } from "@/lib/mobilePreviewUrl";
 import { useDialogFocus } from "@/lib/dialogFocus";
 
@@ -69,14 +71,22 @@ export function usePreviewAutoRefreshWatcher(
 function fileKindIcon(kind: PreviewFileKind) {
   switch (kind) {
     case "image":
-      return <FileImage className="h-3.5 w-3.5 text-accent" />;
-    case "markdown":
-    case "text":
+      return <FileImage className="h-3.5 w-3.5 shrink-0 text-emerald-400" />;
     case "pdf":
-      return <FileText className="h-3.5 w-3.5 text-ink-secondary" />;
+      return <FileText className="h-3.5 w-3.5 shrink-0 text-rose-400" />;
+    case "markdown":
+      return <FileText className="h-3.5 w-3.5 shrink-0 text-violet-400" />;
+    case "text":
+      return <FileText className="h-3.5 w-3.5 shrink-0 text-ink-secondary" />;
     default:
-      return <FileCode2 className="h-3.5 w-3.5 text-ink-secondary" />;
+      return <FileCode2 className="h-3.5 w-3.5 shrink-0 text-amber-400" />;
   }
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function PreviewFilePicker({
@@ -93,6 +103,9 @@ export function PreviewFilePicker({
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [focusedPath, setFocusedPath] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLElement>());
 
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -165,12 +178,69 @@ export function PreviewFilePicker({
     };
   }, [open, selectedProjectId]);
 
+  useEffect(() => {
+    setExpanded(new Set());
+    setFocusedPath(null);
+  }, [selectedProjectId]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? files.filter((file) => file.path.toLowerCase().includes(q)) : files;
+  }, [files, query]);
+  const tree = useMemo(() => buildFileTree(filtered), [filtered]);
+  const filtering = query.trim().length > 0;
+  const rows = useMemo(
+    () => visibleTreeRows(tree, (path) => filtering || expanded.has(path)),
+    [tree, expanded, filtering],
+  );
+
   if (!open) return null;
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
-  const filtered = files.filter((file) =>
-    query.trim() ? file.path.toLowerCase().includes(query.trim().toLowerCase()) : true,
-  );
+  const toggleFolder = (path: string, force?: boolean) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (force ?? !next.has(path)) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  const chooseFile = (file: ProjectPreviewFileEntry) => {
+    onSelectFile({
+      kind: "file",
+      projectId: selectedProjectId,
+      projectName: selectedProject?.name,
+      filePath: file.path,
+      fileType: file.kind,
+    });
+    onClose();
+  };
+  const activePath = rows.some((r) => r.node.path === focusedPath) ? focusedPath : rows[0]?.node.path ?? null;
+  const moveFocus = (path: string | null | undefined) => {
+    if (!path) return;
+    setFocusedPath(path);
+    rowRefs.current.get(path)?.focus();
+  };
+  const onTreeKeyDown = (e: React.KeyboardEvent) => {
+    const index = rows.findIndex((r) => r.node.path === activePath);
+    const row = rows[index];
+    if (!row) return;
+    const isOpen = row.node.type === "folder" && (filtering || expanded.has(row.node.path));
+    if (e.key === "ArrowDown") moveFocus(rows[Math.min(rows.length - 1, index + 1)]?.node.path);
+    else if (e.key === "ArrowUp") moveFocus(rows[Math.max(0, index - 1)]?.node.path);
+    else if (e.key === "Home") moveFocus(rows[0]?.node.path);
+    else if (e.key === "End") moveFocus(rows[rows.length - 1]?.node.path);
+    else if (e.key === "ArrowRight" && row.node.type === "folder") {
+      if (isOpen) moveFocus(rows[index + 1]?.node.path);
+      else toggleFolder(row.node.path, true);
+    } else if (e.key === "ArrowLeft") {
+      if (isOpen && !filtering) toggleFolder(row.node.path, false);
+      else moveFocus(row.parentPath);
+    } else if (e.key === "Enter" || e.key === " ") {
+      if (row.node.type === "file") chooseFile(row.node.file);
+      else if (!filtering) toggleFolder(row.node.path);
+    } else return;
+    e.preventDefault();
+  };
 
   return (
     <div
@@ -219,8 +289,8 @@ export function PreviewFilePicker({
                 <option value="">No registered projects found</option>
               ) : (
                 projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name} ({project.path})
+                  <option key={project.id} value={project.id} title={project.path}>
+                    {project.name}
                   </option>
                 ))
               )}
@@ -235,7 +305,7 @@ export function PreviewFilePicker({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               aria-label="Filter project files"
-              placeholder="Filter HTML, PDF, Markdown, or image files…"
+              placeholder="Search HTML, PDF, Markdown, text or image files…"
               className="h-8 w-full rounded-lg border border-hairline/70 bg-inset pl-8 pr-3 text-[12px] text-ink placeholder:text-ink-secondary focus:border-accent/60 focus:outline-none"
             />
           </div>
@@ -258,38 +328,57 @@ export function PreviewFilePicker({
             </div>
           ) : filtered.length === 0 ? (
             <div className="flex h-40 flex-col items-center justify-center px-6 text-center text-[12px] text-ink-secondary">
-              No matching previewable files (.html, .pdf, .md, .png, .jpg, .webp, .gif, .svg) in this
+              No matching previewable files (.html, .pdf, .md, .txt, .png, .jpg, .webp, .gif, .svg) in this
               project.
             </div>
           ) : (
-            <ul className="space-y-0.5">
-              {filtered.map((file) => (
-                <li key={file.path}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSelectFile({
-                        kind: "file",
-                        projectId: selectedProjectId,
-                        projectName: selectedProject?.name,
-                        filePath: file.path,
-                        fileType: file.kind,
-                      });
-                      onClose();
+            <div role="tree" aria-label={`Files in ${selectedProject?.name ?? "project"}`} onKeyDown={onTreeKeyDown} className="py-0.5">
+              {rows.map(({ node, depth }) => {
+                const isActive = node.path === activePath;
+                const isOpen = node.type === "folder" && (filtering || expanded.has(node.path));
+                return (
+                  <div
+                    key={`${node.type}:${node.path}`}
+                    ref={(el) => {
+                      if (el) rowRefs.current.set(node.path, el);
+                      else rowRefs.current.delete(node.path);
                     }}
-                    className="flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-ink transition-colors hover:bg-raised-hover"
+                    role="treeitem"
+                    aria-level={depth + 1}
+                    aria-expanded={node.type === "folder" ? isOpen : undefined}
+                    aria-selected={isActive}
+                    tabIndex={isActive ? 0 : -1}
+                    onFocus={() => setFocusedPath(node.path)}
+                    onClick={() => (node.type === "file" ? chooseFile(node.file) : !filtering && toggleFolder(node.path))}
+                    title={node.type === "file" ? node.path : undefined}
+                    style={{ paddingLeft: 8 + depth * 16 }}
+                    className={cn(
+                      "group flex h-8 cursor-pointer items-center gap-1.5 rounded-md pr-2.5 text-[12.5px] outline-none transition-colors",
+                      "hover:bg-raised-hover focus-visible:bg-raised-hover focus-visible:ring-1 focus-visible:ring-accent/60",
+                      node.type === "folder" ? "text-ink" : "text-ink/90",
+                    )}
                   >
-                    <span className="flex min-w-0 items-center gap-2">
-                      {fileKindIcon(file.kind)}
-                      <span className="truncate font-mono">{file.path}</span>
-                    </span>
-                    <span className="shrink-0 rounded bg-inset px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-ink-secondary">
-                      {file.kind}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+                    {node.type === "folder" ? (
+                      <>
+                        <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-ink-secondary transition-transform", isOpen && "rotate-90")} />
+                        {isOpen ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-accent" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-accent/80" />}
+                        <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
+                        <span className="shrink-0 text-[10.5px] tabular-nums text-ink-secondary">{node.fileCount}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-3.5 shrink-0" aria-hidden="true" />
+                        {fileKindIcon(node.file.kind)}
+                        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+                        <span className="shrink-0 text-[10.5px] tabular-nums text-ink-secondary opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                          {formatSize(node.file.size)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>
