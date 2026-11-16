@@ -186,7 +186,7 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
   const close = () => { setOpen(false); trigger.current?.focus(); };
   usePopoverDismiss(open, root, close);
   useEffect(() => {
-    if (open) (panel.current?.querySelector<HTMLElement>("button:not(:disabled)") ?? panel.current)?.focus();
+    if (open) panel.current?.focus();
   }, [open]);
   const advanced = useAdvancedMode();
   const breakdown = useContextBreakdown(group || !advanced ? undefined : bot, open);
