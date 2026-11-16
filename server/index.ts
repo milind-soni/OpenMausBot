@@ -7550,8 +7550,7 @@ async function beginTurn(
     /** A one-on-one goal step: a card continuation that is still its own turn, as a room goal step is. */
     goalRunId?: string;
     coordination?: { id: string; resumed: boolean; settle: (outcome: HostTurnResult) => void };
-    /** The turn carries on a run that already started (a hand-off's result came back, its owner answered a card, a restart
-     * re-runs it): usage caps are checked only before new work starts, so none refuses it (usage-caps.ts). */ continuesRun?: boolean;
+    /** Carries on a run already started (a hand-off's result, an answered card, a restart): usage caps never refuse it (usage-caps.ts). */ continuesRun?: boolean;
     /** A person's own send: it may run beside a room turn on another thread. */ allowRoomTurnElsewhere?: boolean;
   },
 ) {
