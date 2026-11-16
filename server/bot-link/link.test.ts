@@ -494,7 +494,8 @@ describe("the link between a computer and its Cloud", () => {
   it("a computer that goes off while it works for the Cloud holds the work without a clock and without keeping the Cloud busy", async () => {
     const { computer, cloud } = await two();
     // Only the Cloud's clocks are short: the computer's own work is not what is measured.
-    await cloud.restart({ limits: { queueMs: 80, stallMs: 2_000 } });
+    // 3 s: seeing the computer gone takes about a second, longer on a busy Windows runner, and the clock runs until then.
+    await cloud.restart({ limits: { queueMs: 80, stallMs: 3_000 } });
     await until(() => computer.link.online() && cloud.link.online(), "the link is back after the Cloud restarted");
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -504,7 +505,7 @@ describe("the link between a computer and its Cloud", () => {
     expect(cloud.coordinator.pace()).toBe("busy");
     await computer.dialer.stop();
     await until(() => !cloud.link.online(), "the Cloud sees the computer gone");
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
     expect(cloud.coordinator.node(receipts[0]!.requestId!)?.status).toBe("running");
     expect(cloud.coordinator.pace()).toBe("parked");
     release();
@@ -786,12 +787,15 @@ describe("the link between a computer and its Cloud", () => {
     await new Promise((resolve) => setTimeout(resolve, 900));
     expect(waiting().map((node) => node.status)).toEqual(["queued"]);
     expect(computer.coordinator.pace()).not.toBe("busy");
-    await computer.restart({ limits: { queueMs: 80, stallMs: 400 } });
+    // The clocks are proven; restarted with its usual ones, the answer's round trip once the place is back (slower on
+    // Windows) is not raced by a 400 ms stall clock.
+    await computer.restart();
     expect(waiting().map((node) => node.status)).toEqual(["queued"]);
     expect(cloud.runs).toEqual([]);
     await cloud.listen(cloud.port);
     computer.dialer.start();
-    await until(() => computer.said(room.id).length === 4, "the answer is in the room");
+    await until(() => computer.said(room.id).some((line) => line.startsWith("Analyst: ")), "the answer is in the room");
+    expect(computer.said(room.id).slice(0, 3)).toEqual(["Sam: @Analyst how many orders this week?", "(server.rooms.linkedAway Analyst [My Cloud])", "Sam: @Analyst and split them by country."]);
     const turns = cloud.runs.filter((run) => run.botId === "cloud-analyst");
     expect(turns).toHaveLength(1);
     expect(turns[0]!.text).toContain("Sam: @Analyst how many orders this week?\nSam: @Analyst and split them by country.");

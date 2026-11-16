@@ -5,6 +5,7 @@ import {
   browserIsThePlace,
   chosenPin,
   cloudPlaceRefusal,
+  computerSelectionPrompt,
   computerSkippedNote,
   computerToolsRefusal,
   handoffUsesOwnCloud,
@@ -316,6 +317,29 @@ describe("surfacePrompt", () => {
     expect(text).toContain("when it needs desktop apps or capabilities the current Browser lacks, select an available Local VM");
     expect(text).toContain("then you must carry out the task");
     expect(text).not.toContain("ask the user to choose and connect a computer");
+  });
+
+  // The rules are the same for every turn that may choose, so a turn's system prompt carries them in its cached half; the
+  // turn itself says only that it may.
+  it("can leave the selection rules to the standing prompt and say only that this turn may choose", () => {
+    for (const mounted of [{ computer: null, browser: false }, { computer: "cloud", browser: true }] as const) {
+      const full = surfacePrompt(mounted, { canSelect: true });
+      const short = surfacePrompt(mounted, { canSelect: true, selectionRules: false });
+      expect(short).toContain("This turn you may choose where to work with select_computer");
+      expect(short).not.toContain("use select_computer with no arguments");
+      expect(full).toContain("use select_computer with no arguments");
+      expect(surfacePrompt(mounted, { selectionRules: false })).toBe(surfacePrompt(mounted, {}));
+    }
+    const rules = computerSelectionPrompt();
+    expect(rules).toContain("on a turn that says you may");
+    for (const sentence of ["use select_computer with no arguments", "surface auto instead of asking them to operate the menu", "highlight the selected target",
+      "then you must carry out the task", "Never silently replace an explicitly requested VM with the host desktop", "select_computer can provision one for this computer task"]) {
+      expect(rules).toContain(sentence);
+      expect(surfacePrompt({ computer: null, browser: false }, { canSelect: true })).toContain(sentence);
+    }
+    const cloud = computerSelectionPrompt({ cloudHome: true });
+    expect(cloud).toContain("select an available cloud computer without asking");
+    expect(cloud).not.toMatch(/Local VM|host desktop/);
   });
 
   it("keeps explicit destinations and uses a turn-bound switch when supported", () => {

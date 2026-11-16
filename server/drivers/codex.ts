@@ -1595,7 +1595,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       providerArgs = managedCodexArgs(config.managed);
     }
     const route = codexBackgroundRoute(models, smallModelsUsable(), options.fallback, openaiUnreachable);
-    if (!route) { authBridge?.close(); throw new Error("Codex lists no model for background calls. Refresh models in Settings → Model providers → Codex."); }
+    if (!route) { authBridge?.close(); throw new Error("Codex lists no model for background calls. Refresh models in Settings → AI → Providers, on Codex."); }
     try { return await runCodexBackgroundRoute(route, (id) => {
       const selection = planAuth || routed ? { model: id, modelProvider: null } : decodeCodexSelection(id);
       return runCodexOneShot({

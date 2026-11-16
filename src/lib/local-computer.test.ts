@@ -75,7 +75,7 @@ describe("local computer UI eligibility", () => {
     expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(true);
     expect(localComputerSelectable({ capabilities, providerSupportsLocal: false })).toBe(false);
     expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(
-      "Bots can't use this PC right now. Restart MausBot, and if that doesn't help, open Settings → Diagnostics.",
+      "Bots can't use this PC right now. Restart MausBot, and if that doesn't help, open Settings → This app → Help.",
     );
   });
 

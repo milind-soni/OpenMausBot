@@ -5,7 +5,6 @@ import { createBotPackageExport, createTeamPackageExport, shareableAddress, TEAM
 import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import type { Routine } from "./routines.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
-import { includedSkills, requestedSkills, startingTicks } from "../src/lib/team-share-skills.ts";
 
 describe("package export", () => {
   it("preserves the exact cron and timezone through export and import", () => {
@@ -464,24 +463,6 @@ describe("whole-team export (package v2)", () => {
       expect(kept).toContain("e-30");
       expect(result.skipped.filter((skip) => skip.reason === "team_skill_limit")).toEqual([{ part: "skills[a-off]", reason: "team_skill_limit" }]);
       expect(result.document.package.agents.find((agent) => agent.key === "fifth")?.skills).toEqual(["b-01"]);
-    });
-
-    it("starts the dialog's boxes on a choice that fits, so unticking any one box still fits", () => {
-      // Morgan holds s-01..s-31; Scout holds the same s-31 plus z-only, so "all" puts 32 names in the file.
-      const shared = many("s", 31);
-      const skillsByBot = new Map([["lead", shared], ["scout", [shared[30]!, skill("z-only")]]]);
-      const all = createTeamPackageExport({ ...fixture(), skillSelection: "all", skillsByBot });
-      expect(includedSkills(all.document)).toHaveLength(32);
-      const exactly = (names: readonly string[]) => createTeamPackageExport({ ...fixture(),
-        skillsByBot: new Map([...skillsByBot].map(([id, list]) => [id, list.filter((entry) => names.includes(entry.name))])) });
-      expect(() => exactly(includedSkills(all.document).filter((name) => name !== "z-only"))).toThrow("Morgan has more than 30 skills");
-      const ticks = startingTicks(all);
-      expect(ticks).not.toContain("s-31");
-      expect(() => exactly(ticks)).not.toThrow();
-      for (const unticked of ticks) {
-        const choice = requestedSkills(new Set(ticks.filter((name) => name !== unticked)), [...shared.map((entry) => entry.name), "z-only"]);
-        expect(() => exactly(choice as string[])).not.toThrow();
-      }
     });
 
     it("refuses an exact choice that cannot fit, in a sentence the dialog shows", () => {

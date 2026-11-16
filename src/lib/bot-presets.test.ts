@@ -4,8 +4,6 @@ import { api, persistBotUpdate, type Bot } from "@/state/store";
 import { BotCreationDraft, EMPTY_BOT_DEFAULTS } from "./bot-creation-draft";
 import { chosenPreset, presetDraftPatch, presetGroups, presetPictureFile, presetSummaryLines, type BotPreset } from "./bot-presets";
 import { createConfiguredBot } from "./create-configured-bot";
-import { describePart, describeSkip, shareRequestBody } from "./team-share";
-import { parsePackageDocument } from "../../shared/package-format";
 
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
@@ -87,30 +85,5 @@ describe("presets in New bot", () => {
     calls.length = 0;
     await createConfiguredBot(draft, request, persistBotUpdate);
     expect(calls[0]!.body).not.toHaveProperty("preset");
-  });
-});
-
-describe("sharing with a preset", () => {
-  it("asks for the New bot defaults preset only when ticked, with its picture", () => {
-    const base = { team: "Desk", skills: "all" as const, includeMemory: true };
-    expect(shareRequestBody(base)).not.toHaveProperty("includeDefaultsPreset");
-    expect(shareRequestBody({ ...base, includeDefaultsPreset: false, presetAvatar: "data:x" })).not.toHaveProperty("presetAvatar");
-    expect(shareRequestBody({ ...base, includeDefaultsPreset: true, presetAvatar: `data:image/png;base64,${PNG}` }))
-      .toMatchObject({ includeDefaultsPreset: true, presetAvatar: `data:image/png;base64,${PNG}` });
-  });
-
-  it("names a preset's parts by the preset's name", () => {
-    const document = parsePackageDocument({
-      format: "openmaus.package", version: 2,
-      package: {
-        id: "desk", release: "1.0.0", name: "Desk", tagline: "t", summary: "s", category: "c", author: { name: "Mira" }, license: "MIT",
-        outcomes: ["o"], setupMinutes: 2, requirements: { apps: [], capabilities: [] },
-        presets: [{ key: "new-bot-defaults", name: "Support agent", bot: { soul: "x" } }],
-      },
-    });
-    expect(describePart("presets[new-bot-defaults].bot.soul", document)).toBe("Support agent · standing instructions");
-    expect(describePart("presets[new-bot-defaults].skills[follow-up]", document)).toBe("Support agent · skill · follow-up");
-    expect(describePart("presets[new-bot-defaults].seed.memory[\"MEMORY.md\"]", document)).toBe("Support agent · starter notes · MEMORY.md");
-    expect(describeSkip({ part: "presets[new-bot-defaults]", reason: "preset_empty" })).toBe("New bot defaults preset — empty: give your New bot defaults a name, instructions, skills or notes first");
   });
 });

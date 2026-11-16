@@ -129,10 +129,8 @@ it("no Admin, Owner or other member lists, changes or deletes it; she lists hers
   }
   for (const token of [admin, owner]) {
     expect((await as(token, "POST", "/api/vault/secrets", { id, name: LABEL, value: "fake-overwrite", bots: "all" })).status, "a move's secret by her id").toBe(404);
-    for (const format of ["backup", "share"]) {
-      const exported = await as(token, "POST", "/api/teams/export", { format });
-      expect(JSON.stringify(exported.body).includes(id), `the team export as ${format}`).toBe(false);
-    }
+    const exported = await as(token, "POST", "/api/teams/export", { format: "backup" });
+    expect(JSON.stringify(exported.body).includes(id), "the team backup").toBe(false);
   }
   expect((await ask(adaThread)).status, "still hers after all that").toBe(200);
 }, hostTimeout(60_000));

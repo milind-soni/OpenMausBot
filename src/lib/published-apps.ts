@@ -24,10 +24,22 @@ export function appInitial(title: string): string {
 }
 
 let known: readonly PublishedApp[] = [];
+const listeners = new Set<() => void>();
 
-/** The list the Published apps page last loaded: a link to one of these opens beside the chat. */
+/** The viewer's Published apps list as last loaded (at startup, by the Published apps page, or when a reply links a
+ * site it doesn't hold yet): a link to one of these opens beside the chat, and a reply gets its preview card. */
 export function rememberPublishedApps(apps: readonly PublishedApp[]): void {
   known = apps;
+  for (const listener of listeners) listener();
+}
+
+export function knownPublishedApps(): readonly PublishedApp[] {
+  return known;
+}
+
+export function onPublishedAppsChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
 }
 
 /** The app in the loaded list that this address is inside. */
