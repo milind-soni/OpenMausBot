@@ -128,7 +128,7 @@ describe("LiveCallController lifecycle", () => {
       expect(t.deps.createSession).not.toHaveBeenCalled();
       expect(t.controller.current()).toBeNull();
     }
-    expect(LIVE_NEEDS_KEY).toBe("Live calls use your own OpenAI key. Add it in Settings → AI.");
+    expect(LIVE_NEEDS_KEY).toBe("Live calls use your own OpenAI key. Add it in Settings → AI → Other services.");
   });
 
   it("refuses an Azure call whose setup is incomplete with the setup message, before reaching Azure", async () => {
