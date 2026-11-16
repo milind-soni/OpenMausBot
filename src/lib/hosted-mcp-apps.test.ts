@@ -54,7 +54,7 @@ describe("hosted MCP apps", () => {
   });
 
   it("takes a pasted key exactly for the services with no browser sign-in, each with an https page to make one", () => {
-    expect(HOSTED_MCP_APPS.filter((app) => "key" in app).map((app) => app.id)).toEqual(["vapi", "telnyx"]);
+    expect(HOSTED_MCP_APPS.filter((app) => "key" in app).map((app) => app.id)).toEqual(["vapi", "telnyx", "joinbot"]);
     for (const app of HOSTED_MCP_APPS) if ("key" in app) expect(app.key.url).toMatch(/^https:\/\//);
   });
 
