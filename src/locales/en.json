@@ -5255,6 +5255,8 @@
   "room.panel.responder.autoOption": "Let MausBot choose",
   "room.panel.responder.everyone": "Everyone",
   "room.panel.responder.mentions": "Only who I @mention",
+  "room.panel.turns.title": "Turns per member",
+  "room.panel.turns.hint": "How many turns each member who answers takes before waiting for you. On its last turn, a member is told to wrap up.",
   "room.panel.folder.own": "Its own folder",
   "room.panel.instructions": "Instructions",
   "room.panel.instructionsHint": "Tell the bots what this room is for",
