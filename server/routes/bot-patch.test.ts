@@ -399,17 +399,19 @@ describe("PATCH /api/bots/:id connectorScopes", () => {
       activeGroupTurnForBot: (botId: string) => (botId === roomBotId ? { group: {} as never, threadId: "room-thread" } : null),
     });
     roomBotId = store.createBot({ name: "Room worker" }).id;
+    const firstAndSecond: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["first", "second"] } };
     const firstOnly: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["first"] } };
-    store.patchBot(bot.id, { connectorScopes: firstOnly });
+    store.patchBot(bot.id, { connectorScopes: firstAndSecond });
 
-    const widened = await patch(bot.id, { connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["first", "second"] } } });
+    const widened = await patch(bot.id, { connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["first", "second", "third"] } } });
 
     expect(widened.status).toBe(409);
-    expect(store.bot(bot.id)?.connectorScopes).toEqual(firstOnly);
+    expect(store.bot(bot.id)?.connectorScopes).toEqual(firstAndSecond);
 
     const narrowed = await patch(bot.id, { connectorScopes: firstOnly });
 
     expect(narrowed.status).toBe(200);
+    expect(store.bot(bot.id)?.connectorScopes).toEqual(firstOnly);
   });
 });
 
