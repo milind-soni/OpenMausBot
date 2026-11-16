@@ -80,7 +80,8 @@ export function useBotMessageMenu({
   const speak = useSpeakAction({ text, botId, messageId, voiceId, tts, localVoice });
   const teamMemory = useTeamMemoryItem(text, messageId, botId, threadId);
   const items: MessageMenuItem[] = [];
-  if (canSpeak && text) {
+  // Once a voice is set up, Read this aloud is its own button in the hover bar; the menu keeps only the setup hint.
+  if (canSpeak && text && !speak.ready) {
     items.push({
       key: "speak",
       icon: speak.mine ? <Square {...ACTION_ICON} /> : <Volume2 {...ACTION_ICON} />,
