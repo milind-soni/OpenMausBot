@@ -98,7 +98,8 @@ it("carries a Chief's level down every hop it hands out, in threads and in a roo
     const roomAda = turnOf(ada.id, 2);
     const roomBea = turnOf(bea.id, 2);
     expect(roomAda.threadId).toBe(room.activeTaskId);
-    expect(roomBea.threadId).toBe(room.activeTaskId);
+    // Ada's job is already out, so Bea's runs beside the room in a thread of her own.
+    expect(roomBea.threadId).not.toBe(room.activeTaskId);
     expect(roomAda.permissionMode).toBe("auto");
     expect(roomBea.permissionMode, "the second hop in a room runs at the Chief's level too").toBe("auto");
     expect(await unanswered(room.activeTaskId)).toHaveLength(0);
