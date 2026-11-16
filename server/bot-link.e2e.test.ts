@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { linkedAddress } from "../electron/bot-link-address.mjs";
 
 type Fixture = Awaited<ReturnType<typeof launchVerificationServer>>;
 
@@ -66,7 +67,9 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     // and it takes no turn on the computer.
     const rows = (await computer.api("GET", "/api/bot-link/bots")).bots as any[];
     const standIn = rows.find((row) => row.name === "Atlas");
-    expect(standIn).toMatchObject({ botId: atlas.id, home: { name: "My server", online: true }, threadId: expect.any(String) });
+    expect(standIn).toMatchObject({ botId: atlas.id, home: { name: "My server", kind: "cloud", key: expect.stringMatching(/^[0-9a-f]{8}$/u), online: true }, threadId: expect.any(String) });
+    // The address is the one the app's main process works out for the sidebar's row of the same bot.
+    expect(standIn.id).toBe(linkedAddress(paired.place.id, atlas.id));
     expect(standIn.id).toMatch(/^link-[0-9a-f]{8}-/);
     expect(JSON.stringify(await computer.api("GET", `/api/bots/${standIn.id}`))).toContain("\"Atlas\"");
     expect((await computer.api("GET", "/api/bots?messages=0")).bots.some((bot: any) => bot.id === standIn.id)).toBe(false);

@@ -41,9 +41,9 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
    * It has no conversation, model or tools here, and takes no turn here. */
   const syncStandIns = () => {
     const next = new Map<string, BotRecord>();
-    for (const { id, peer, place, bot } of link.linked()) {
+    for (const { id, peer, place, kind, bot } of link.linked()) {
       next.set(id, { id, name: bot.name, color: bot.color ?? "blue", threadId: "", tasks: [], resumeCursors: {}, modelSelection: { instanceId: "", model: bot.model ?? "" },
-        home: { place: peer, placeName: place.name, botId: bot.id }, ...(bot.title ? { title: bot.title } : {}), ...(bot.description ? { description: bot.description } : {}),
+        home: { place: peer, placeName: place.name, botId: bot.id, kind }, ...(bot.title ? { title: bot.title } : {}), ...(bot.description ? { description: bot.description } : {}),
         ...(bot.mascotBody ? { mascotBody: bot.mascotBody } : {}), ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}) } as unknown as BotRecord);
     }
     store.standIns.clear();

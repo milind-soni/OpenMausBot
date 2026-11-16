@@ -698,6 +698,7 @@ describe("the link between a computer and its Cloud", () => {
     const { computer, cloud } = await two();
     expect(computer.link.linked().map((one) => [one.id, one.place.name, one.online, one.bot.name])).toEqual([[onCloud("shared"), "My Cloud", true, "Atlas"], [onCloud("cloud-analyst"), "My Cloud", true, "Analyst"]]);
     expect(cloud.link.linked().map((one) => one.id)).toEqual([onComputer("shared"), onComputer("local-writer")]);
+    expect([...new Set(computer.link.linked().map((one) => one.kind)), ...new Set(cloud.link.linked().map((one) => one.kind))]).toEqual(["cloud", "computer"]);
     const before = cloud.directoryChanges();
     computer.bots.push({ id: "new", name: "Newcomer" });
     computer.link.botsChanged();

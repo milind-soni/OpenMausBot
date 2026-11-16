@@ -101,7 +101,7 @@ export function createBotLinkRoutes(deps: BotLinkRouteDeps): RouteHandler {
       if (!deps.local(auth)) return json(res, 403, { error: "Only the app on this computer lists its other places' bots." });
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });
       // Names and looks only, as each place told this one: no message, address or sign-in.
-      return json(res, 200, { bots: link.linked().map(({ id, place, online, bot }) => ({ id, home: { id: place.id, name: place.name, online }, botId: bot.id, name: bot.name,
+      return json(res, 200, { bots: link.linked().map(({ id, peer, place, kind, online, bot }) => ({ id, home: { id: place.id, key: peer, kind, name: place.name, online }, botId: bot.id, name: bot.name,
         ...(bot.title ? { title: bot.title } : {}), ...(bot.color ? { color: bot.color } : {}), ...(bot.mascotBody ? { mascotBody: bot.mascotBody } : {}),
         ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}), ...(bot.chief ? { chiefOfStaff: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}) })) });
     }
