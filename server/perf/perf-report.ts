@@ -6,6 +6,7 @@ import type { DayAggregate } from "./day-ledger.ts";
 import { SLOW_TURN_MS } from "./day-ledger.ts";
 import { PHASES, type Phase, type PhaseStats } from "./phases.ts";
 import type { StallsReport, StallStats, Tally } from "./loop-stalls.ts";
+import { processHealthLines, trimmedProcessHealth, type ProcessHealth } from "./process-health.ts";
 import type { ProcessReport } from "./process-sampler.ts";
 import { RING_CAP, type LiveTurnView, type WindowStats } from "./turn-timings.ts";
 import type { TurnTiming } from "./turn-record.ts";
@@ -27,6 +28,8 @@ export interface PerfSources {
   process: ProcessReport | null;
   /** The loop's delays measured all the time, and the blocking work the server times (loop-stalls.ts). */
   stalls?: StallsReport | null;
+  /** How close the server is to its process and memory limits (process-health.ts); null where nothing records it. */
+  processes?: ProcessHealth | null;
 }
 
 /** Engines refusing work, or within 10 points of their limit: driver kind, window, use and reset time only. */
@@ -51,13 +54,16 @@ export function perfHealth(sources: PerfSources) {
     holds: limitHolds(sources.limits),
     process: sources.process,
     stalls: sources.stalls ?? null,
+    processes: sources.processes ?? null,
   };
   const size = () => JSON.stringify(body).length;
   if (size() > PERF_HEALTH_MAX_BYTES && body.process) body.process = { ...body.process, buckets: body.process.buckets.slice(0, 6) };
   if (size() > PERF_HEALTH_MAX_BYTES) body.h24.tools = body.h24.tools.slice(0, 4);
   if (size() > PERF_HEALTH_MAX_BYTES) body.live = body.live.slice(0, 2);
+  if (size() > PERF_HEALTH_MAX_BYTES && body.processes) body.processes = trimmedProcessHealth(body.processes);
   if (size() > PERF_HEALTH_MAX_BYTES) body.process = null;
   if (size() > PERF_HEALTH_MAX_BYTES) body.stalls = null;
+  if (size() > PERF_HEALTH_MAX_BYTES) body.processes = null;
   return body;
 }
 export type PerfHealth = ReturnType<typeof perfHealth>;
@@ -124,6 +130,7 @@ export function perfLines(sources: PerfSources, recent: readonly TurnTiming[], r
     lines.push(`Event loop: busy ${proc.loop.eluPct ?? "?"}% (max ${proc.loop.eluMaxPct ?? "?"}%), sampler timer late p95 ${duration(proc.loop.driftP95Ms)}, max ${duration(proc.loop.driftMaxMs)} (one reading per sample)`);
   } else lines.push("Processes: not sampled yet");
   if (sources.stalls) lines.push(...stallLines(sources.stalls));
+  if (sources.processes) lines.push(...processHealthLines(sources.processes));
   lines.push(recentTitle);
   lines.push(...(recent.length ? recent.map((turn) => `  ${turnLine(turn)}`) : ["  (none)"]));
   return lines;

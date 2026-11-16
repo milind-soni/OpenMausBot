@@ -8,6 +8,8 @@ export interface YourComputerCall {
   app?: string;
   /** A host name only, never a path or query: "calendar.google.com". */
   site?: string;
+  /** The call reads or saves files in the person's folders. */
+  files?: boolean;
 }
 
 export const YOUR_COMPUTER_WORDS = {
@@ -16,6 +18,7 @@ export const YOUR_COMPUTER_WORDS = {
   "approval.yourComputer.site": "I need to use your browser where you're signed in to {site}. Allow once?",
   "approval.yourComputer.app": "I need to use {app} on your computer. Allow once?",
   "approval.yourComputer.screen": "I need to use your files and apps on this computer for this. Allow once?",
+  "approval.yourComputer.files": "I need to read and save files in your folders on this computer. Allow once?",
   "approval.yourComputer.detail": "{name} can use your files and apps here: it sees your screen and clicks and types on it, for this request only.",
 } as const;
 
@@ -91,6 +94,7 @@ export function describeComputerCall(frame: unknown): YourComputerCall {
 
 /** The question for this call, as a catalog key and its values. */
 export function yourComputerQuestion(call: YourComputerCall = {}): { key: YourComputerKey; params: Record<string, string> } {
+  if (call.files === true) return { key: "approval.yourComputer.files", params: {} };
   const app = cleanAppName(call.app);
   const site = cleanSiteName(call.site);
   const browser = app && Object.values(BROWSERS).includes(app) ? app : undefined;
