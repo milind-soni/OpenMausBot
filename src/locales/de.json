@@ -4024,5 +4024,6 @@
   "imageGen.complexity.help": "Wie detailreich GPT-Image-2.6-Bilder sind. Niedriger ist einfacher und schneller.",
   "imageGen.complexity.low": "Niedrig",
   "imageGen.complexity.medium": "Mittel",
-  "imageGen.complexity.high": "Hoch"
+  "imageGen.complexity.high": "Hoch",
+  "activity.tool.team.editImage": "Bild bearbeiten"
 }

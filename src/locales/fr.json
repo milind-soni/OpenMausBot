@@ -3812,5 +3812,6 @@
   "imageGen.complexity.help": "Le niveau de détail des images GPT-Image-2.6. Plus bas, c'est plus simple et plus rapide.",
   "imageGen.complexity.low": "Faible",
   "imageGen.complexity.medium": "Moyen",
-  "imageGen.complexity.high": "Élevé"
+  "imageGen.complexity.high": "Élevé",
+  "activity.tool.team.editImage": "Modifier l'image"
 }

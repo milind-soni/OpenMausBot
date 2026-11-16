@@ -10257,5 +10257,6 @@
   "imageGen.complexity.help": "GPT-Image-2.6 图片的细节程度。越低越简单、越快。",
   "imageGen.complexity.low": "低",
   "imageGen.complexity.medium": "中",
-  "imageGen.complexity.high": "高"
+  "imageGen.complexity.high": "高",
+  "activity.tool.team.editImage": "编辑图片"
 }

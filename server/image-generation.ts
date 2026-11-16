@@ -25,12 +25,41 @@ export interface ImageSlot {
 
 export type ImageAspect = "1:1" | "16:9" | "9:16";
 
+export interface ImageInput {
+  bytes: Buffer;
+  mime: string;
+}
+
 export interface ImageRequest {
   prompt: string;
   aspect?: ImageAspect;
   draft?: boolean;
   /** An animated GIF, from a GPT-Image-2.6 model only. */
   gif?: { frames?: number; frameDurationMs?: number };
+  /** Changes `image` instead of making a new one; `markup` is a transparent PNG of marks drawn over it. GPT-Image-2.6 only. */
+  edit?: { image: ImageInput; markup?: ImageInput };
+}
+
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function pngInfo(bytes: Buffer): { width: number; height: number; alpha: boolean } | null {
+  if (bytes.length < 26 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
+  return {
+    width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20),
+    alpha: bytes[25] === 4 || bytes[25] === 6 || bytes.includes("tRNS", 0, "latin1"),
+  };
+}
+
+/** Why the markup cannot go with this image, in words a bot can act on; null when it can. */
+export function markupProblem(image: ImageInput, markup: ImageInput): string | null {
+  const marks = pngInfo(markup.bytes);
+  if (!marks) return "The markup must be a PNG.";
+  if (!marks.alpha) return "The markup must be a transparent PNG: the marks drawn on a transparent background, not a flattened copy of the image.";
+  const base = pngInfo(image.bytes);
+  if (base && (base.width !== marks.width || base.height !== marks.height)) {
+    return `The markup is ${marks.width}x${marks.height} but the image is ${base.width}x${base.height}; they must be the same size.`;
+  }
+  return null;
 }
 
 export interface GeneratedImage {
@@ -217,13 +246,22 @@ export async function generateImageWith(
   const gif = request.gif && {
     output_format: "gif", ...(frames && { frame_count: frames }), ...(frameDurationMs && { frame_duration_ms: frameDurationMs }),
   };
-  const body = { model: slot.model, prompt: request.prompt, ...provider.body(request), ...(complexity && { complexity }), ...gif };
+  const { edit } = request;
+  if (edit && !gpt26) fail("Editing an image needs a GPT-Image-2.6 model (Sunburst or Flare) on OpenAI", 409, true);
+  const { size: _generatedSize, ...params } = provider.body(request);
+  const dataUrl = ({ bytes, mime }: ImageInput) => ({ image_url: `data:${mime};base64,${bytes.toString("base64")}` });
+  const editFields = edit && { images: [dataUrl(edit.image)], ...(edit.markup && { markup: dataUrl(edit.markup) }) };
+  const url = edit ? provider.url(cfg).replace(/\/generations$/, "/edits") : provider.url(cfg);
+  const body = {
+    model: slot.model, prompt: request.prompt, ...(edit ? params : { ...params, size: _generatedSize }),
+    ...(complexity && { complexity }), ...gif, ...editFields,
+  };
 
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const cancelled = () => cancel?.aborted === true && !timeoutSignal.aborted;
   const send = async (payload: Record<string, unknown>): Promise<Response> => {
     try {
-      return await fetchImpl(provider.url(cfg), {
+      return await fetchImpl(url, {
         method: "POST",
         headers,
         body: JSON.stringify(payload),

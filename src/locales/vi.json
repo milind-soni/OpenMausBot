@@ -6012,5 +6012,6 @@
   "imageGen.complexity.help": "Mức độ chi tiết của ảnh GPT-Image-2.6. Thấp hơn thì đơn giản và nhanh hơn.",
   "imageGen.complexity.low": "Thấp",
   "imageGen.complexity.medium": "Trung bình",
-  "imageGen.complexity.high": "Cao"
+  "imageGen.complexity.high": "Cao",
+  "activity.tool.team.editImage": "Chỉnh sửa ảnh"
 }

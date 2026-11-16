@@ -96,6 +96,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   fill_login: "activity.tool.team.fillLogin",
   find_tool: "activity.tool.team.findTool",
   generate_image: "activity.tool.team.generateImage",
+  edit_image: "activity.tool.team.editImage",
   list_bots: "activity.tool.team.listBots",
   list_room_targets: "activity.tool.team.listRoomTargets",
   list_rooms: "activity.tool.team.listRooms",

@@ -4087,5 +4087,6 @@
   "imageGen.complexity.help": "Наскільки детальними є зображення GPT-Image-2.6. Нижчий рівень простіший і швидший.",
   "imageGen.complexity.low": "Низький",
   "imageGen.complexity.medium": "Середній",
-  "imageGen.complexity.high": "Високий"
+  "imageGen.complexity.high": "Високий",
+  "activity.tool.team.editImage": "Редагувати зображення"
 }

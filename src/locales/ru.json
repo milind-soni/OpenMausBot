@@ -7330,5 +7330,6 @@
   "imageGen.complexity.help": "Насколько детализированы изображения GPT-Image-2.6. Ниже — проще и быстрее.",
   "imageGen.complexity.low": "Низкий",
   "imageGen.complexity.medium": "Средний",
-  "imageGen.complexity.high": "Высокий"
+  "imageGen.complexity.high": "Высокий",
+  "activity.tool.team.editImage": "Редактировать изображение"
 }

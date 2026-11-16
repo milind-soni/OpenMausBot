@@ -8107,5 +8107,6 @@
   "imageGen.complexity.help": "GPT-Image-2.6 の画像の詳細さ。低いほどシンプルで高速です。",
   "imageGen.complexity.low": "低",
   "imageGen.complexity.medium": "中",
-  "imageGen.complexity.high": "高"
+  "imageGen.complexity.high": "高",
+  "activity.tool.team.editImage": "画像を編集"
 }
