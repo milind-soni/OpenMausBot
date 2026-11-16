@@ -8,6 +8,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 
 import { launchVerificationServer, verificationServerArgs, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const SECRET = "sk-test-123";
 const XAI_URL = "https://example.test/v1";
@@ -66,11 +67,11 @@ beforeAll(async () => {
 
   // Fixture setup, not a production grant: the stopped fixture's own bot is put on Full access on disk.
   await waitForExit(fixture.child, { signal: "SIGTERM" });
-  const saved = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"));
+  const saved = readRegistry(dataDir).bots;
   const setter = saved.find((one: any) => one.id === bot.id);
   setter.approvalMode = "full"; setter.autoApprove = false;
   for (const task of setter.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
-  writeFileSync(join(dataDir, "bots.json"), JSON.stringify(saved, null, 2));
+  writeRegistry(dataDir, { bots: saved });
   const env = verificationServerEnvironment({}, dataDir, Number(new URL(url).port));
   const log = openSync(fixture.info.logPath, "a", 0o600);
   child = spawn(process.execPath, verificationServerArgs(env), { cwd: join(import.meta.dirname, ".."), env, stdio: ["ignore", log, log] });

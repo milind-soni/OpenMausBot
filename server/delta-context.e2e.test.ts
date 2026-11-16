@@ -16,6 +16,7 @@ import { readHandoffs } from "./testing/handoff-rows.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { openSse } from "./testing/sse.ts";
 import { withoutTurnClock } from "./testing/turn-clock-text.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const count = (text: string, needle: string) => text.split(needle).length - 1;
 
@@ -112,7 +113,7 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
     const messages = async (threadId = thread) => (await api(`/api/threads/${threadId}/messages`)).messages;
     const nodes = () => readHandoffs(dataDir);
     const root = () => nodes().filter((node: any) => !node.parentId && node.threadId === thread).at(-1);
-    const task = (threadId = thread) => JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"))
+    const task = (threadId = thread) => readRegistry(dataDir).bots
       .find((b: any) => b.id === chief.id).tasks.find((stored: any) => stored.threadId === threadId);
     const handed = (threadId = thread) => task(threadId).handedMessages;
     // A person-stopped or failed turn does not settle as "settled" for `wait`.
@@ -154,9 +155,9 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
     const open = (path: string) => writeFileSync(path, "open");
     const restart = async (edit: (bots: any[]) => void, signal: NodeJS.Signals = "SIGTERM", extraEnv: NodeJS.ProcessEnv = {}) => {
       await waitForExit(restarted ?? session.child, { signal });
-      const bots = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"));
+      const bots = readRegistry(dataDir).bots;
       edit(bots);
-      writeFileSync(join(dataDir, "bots.json"), JSON.stringify(bots, null, 2));
+      writeRegistry(dataDir, { bots });
       const env = { ...verificationServerEnvironment(parentEnv, dataDir, Number(new URL(session.info.url).port)), ...extraEnv };
       const log = openSync(session.info.logPath, "a", 0o600);
       restarted = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))],
