@@ -30,19 +30,35 @@ export async function antigravityAccount(tokenPath: string): Promise<Identity> {
   }
 }
 
-async function lookup(credentials: { client_id: string; client_secret: string; refresh_token: string }): Promise<Identity> {
+export interface AntigravityStoredSignIn { client_id: string; client_secret: string; refresh_token: string }
+type AccessFetch = (url: string, init: { method?: "POST"; headers?: Record<string, string>; body?: string | URLSearchParams; redirect: "error" | "manual"; signal: AbortSignal }) => Promise<Pick<Response, "ok" | "json">>;
+
+/** A short-lived access token for the stored sign-in, from Google only. The token stays in memory: it is never logged,
+ * written or returned to a client. Undefined when Google refuses or cannot be reached. */
+export async function refreshAntigravityAccess(
+  credentials: AntigravityStoredSignIn,
+  signal: AbortSignal,
+  fetchImpl: AccessFetch = fetch,
+  redirect: "error" | "manual" = "error",
+): Promise<{ accessToken: string; expiresInSeconds: number | null } | undefined> {
+  const response = await fetchImpl("https://oauth2.googleapis.com/token", {
+    method: "POST", redirect, signal,
+    body: new URLSearchParams({ grant_type: "refresh_token", client_id: credentials.client_id,
+      client_secret: credentials.client_secret, refresh_token: credentials.refresh_token }),
+  });
+  if (!response.ok) return undefined;
+  const token = await response.json() as { access_token?: unknown; expires_in?: unknown };
+  if (typeof token.access_token !== "string" || !token.access_token) return undefined;
+  return { accessToken: token.access_token, expiresInSeconds: typeof token.expires_in === "number" && token.expires_in > 0 ? token.expires_in : null };
+}
+
+async function lookup(credentials: AntigravityStoredSignIn): Promise<Identity> {
   try {
     const signal = AbortSignal.timeout(3_000);
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST", redirect: "error", signal,
-      body: new URLSearchParams({ grant_type: "refresh_token", client_id: credentials.client_id,
-        client_secret: credentials.client_secret, refresh_token: credentials.refresh_token }),
-    });
-    if (!response.ok) return undefined;
-    const token = await response.json() as { access_token?: unknown };
-    if (typeof token.access_token !== "string" || !token.access_token) return undefined;
+    const access = await refreshAntigravityAccess(credentials, signal);
+    if (!access) return undefined;
     const identity = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-      headers: { Authorization: `Bearer ${token.access_token}` }, redirect: "error", signal,
+      headers: { Authorization: `Bearer ${access.accessToken}` }, redirect: "error", signal,
     });
     if (!identity.ok) return undefined;
     const user = await identity.json() as { email?: unknown };

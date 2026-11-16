@@ -466,6 +466,26 @@ describe("plan usage fetcher", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
+  it("serves a caller that asks for some of a report's accounts from that read, and reads again for one it does not hold", async () => {
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({
+      five_hour: { utilization: 25, resets_at: "2026-09-26T12:00:00.000Z" },
+      seven_day: { utilization: 40, resets_at: "2026-10-03T00:00:00.000Z" },
+    }));
+    const both = [account("claude"), account("claude", { id: "second", name: "Second" })];
+    const credentials = { read: () => ({ token: SECRET, accountId: null, expired: false }) };
+    await loadPlanUsage({ accounts: both, now: NOW, fetch: fetchImpl, credentials });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const some = await loadPlanUsage({ accounts: [both[1]!], now: NOW + 1_000, fetch: fetchImpl, credentials });
+    expect(some.providers.map((row) => row.id)).toEqual(["second"]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect((await loadPlanUsage({ accounts: both, now: NOW + 2_000, fetch: fetchImpl, credentials })).providers).toHaveLength(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    await loadPlanUsage({ accounts: [account("claude", { id: "third", name: "Third" })], now: NOW + 3_000, fetch: fetchImpl, credentials });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    await loadPlanUsage({ accounts: [{ ...both[1]!, configDir: "/elsewhere" }], now: NOW + 4_000, fetch: fetchImpl, credentials });
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+  });
+
   it("does not share the cache when GROK_HOME changes", async () => {
     const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({
       five_hour: { utilization: 25, resets_at: "2026-09-26T12:00:00.000Z" },

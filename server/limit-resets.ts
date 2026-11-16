@@ -265,7 +265,8 @@ export class LimitResetClock {
 
   async refresh(force: boolean): Promise<void> {
     if (this.loading) return this.loading;
-    const accounts = this.options.accounts();
+    // An engine whose usage holds nothing here (engineLimitFromUsage) is not asked for it.
+    const accounts = this.options.accounts().filter((account) => REPORTED_DRIVERS.has(account.driver));
     this.loading = (async () => {
       try {
         if (!accounts.length) { this.checkedAt = this.now(); this.failures = 0; return; }
@@ -360,6 +361,6 @@ export class LimitResetClock {
 
   private unnamed(engine: string): EngineLimit {
     const account = this.options.accounts().find((candidate) => candidate.id === engine);
-    return { engine, name: account?.name ?? engine, driver: account?.driver ?? "claude", window: null, usedPercent: null, resetsAt: null, blocked: false };
+    return { engine, name: account?.name ?? engine, driver: account && REPORTED_DRIVERS.has(account.driver) ? account.driver as Driver : "claude", window: null, usedPercent: null, resetsAt: null, blocked: false };
   }
 }
