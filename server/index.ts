@@ -216,7 +216,7 @@ import { decodeGeneratedImage } from "./generated-image.ts";
 import { createMcpServersHost } from "./host/mcp-servers-host.ts"; import { createMcpKeys } from "./vault/mcp-keys.ts"; import { createLimitTakeover, signedOutStop } from "./host/limit-takeover.ts";
 import {
   isRemoteMcpServer,
-  mcpServerServes,
+  mcpServerProblemFor,
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
 import { attachCustomMcp } from "./mcp-result-budget.ts"; import { mcpToolProblem } from "./mcp-failure.ts";
@@ -9195,12 +9195,7 @@ const teamSetupRequests = new TeamSetupRequestService({
   store, teams: teamSetupTeams, hasTeamAuthority, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
   autoApply: appliesDirectly,
   validateChange: (before, fields) => assertTeamComputerChangeIdle(before, { ...before, ...fields }),
-  mcpServerProblem: (name, botId) => {
-    const server = cfg.mcpServers && Object.hasOwn(cfg.mcpServers, name) ? cfg.mcpServers[name] : undefined;
-    if (!server) return "no such server";
-    return mcpServerServes(server, botId) ? null : "that server belongs to another bot";
-  },
-  ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
+  mcpServerProblem: (name, botId) => mcpServerProblemFor(cfg.mcpServers, name, botId), ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
   targetBusy: (botId, sourceThreadId) => {
     if (!sourceThreadId) return Boolean(store.bot(botId)?.busy || hasDirectDispatch(botId) || activeGroupTurnForBot(botId) || routines?.activeRunForBot(botId));
     const group = activeGroupTurnForBot(botId);
