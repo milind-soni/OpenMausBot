@@ -93,11 +93,15 @@ describe("image edits", () => {
     const image = png(64, 64, 2), markup = png(64, 64, 6);
     await generateImage(cfg("gpt-image-2.6-sunburst"), { prompt: "remove the circled cup", edit: { image, markup } }, { fetchImpl: fetchMock });
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    const body = JSON.parse(String(init.body));
+    const form = init.body as FormData;
     expect(url).toBe("https://api.openai.com/v1/images/edits");
-    expect(body.images).toEqual([{ image_url: `data:image/png;base64,${image.bytes.toString("base64")}` }]);
-    expect(body.markup).toEqual({ image_url: `data:image/png;base64,${markup.bytes.toString("base64")}` });
-    expect(body).not.toHaveProperty("size");
+    expect(init.headers).not.toHaveProperty("content-type");
+    expect(form.get("model")).toBe("gpt-image-2.6-sunburst");
+    expect(form.get("prompt")).toBe("remove the circled cup");
+    expect(Buffer.from(await (form.get("image") as Blob).arrayBuffer())).toEqual(image.bytes);
+    expect((form.get("markup") as Blob).type).toBe("image/png");
+    expect(Buffer.from(await (form.get("markup") as Blob).arrayBuffer())).toEqual(markup.bytes);
+    expect(form.has("size")).toBe(false);
   });
 
   it("refuses models that are not GPT-Image-2.6 before any request", async () => {

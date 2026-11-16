@@ -80,6 +80,7 @@ const PROVIDERS: Record<ImageProvider, {
   missing: string;
   key: (cfg: ImageCredentials) => string | undefined;
   url: (cfg: ImageCredentials) => string;
+  editUrl?: string;
   body: (request: ImageRequest) => Record<string, unknown>;
 }> = {
   openai: {
@@ -87,6 +88,7 @@ const PROVIDERS: Record<ImageProvider, {
     missing: "Add an OpenAI image API key first",
     key: (cfg) => cfg.imageGen?.key,
     url: () => "https://api.openai.com/v1/images/generations",
+    editUrl: "https://api.openai.com/v1/images/edits",
     body: (request) => ({ size: OPENAI_SIZES[request.aspect ?? "1:1"], quality: request.draft ? "low" : "auto", output_format: "webp" }),
   },
   xai: {
@@ -237,7 +239,8 @@ export async function generateImageWith(
   if (!imageSlotConfigured(cfg, slot)) fail(provider.missing, 409, true);
 
   const apiKey = provider.key(cfg)?.trim();
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const { edit } = request;
+  const headers: Record<string, string> = edit ? {} : { "content-type": "application/json" };
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
   const gpt26 = supportsImageComplexity(slot);
   if (request.gif && !gpt26) fail("Animated GIFs need a GPT-Image-2.6 model (Sunburst or Flare) on OpenAI", 409, true);
@@ -246,15 +249,19 @@ export async function generateImageWith(
   const gif = request.gif && {
     output_format: "gif", ...(frames && { frame_count: frames }), ...(frameDurationMs && { frame_duration_ms: frameDurationMs }),
   };
-  const { edit } = request;
-  if (edit && !gpt26) fail("Editing an image needs a GPT-Image-2.6 model (Sunburst or Flare) on OpenAI", 409, true);
-  const { size: _generatedSize, ...params } = provider.body(request);
-  const dataUrl = ({ bytes, mime }: ImageInput) => ({ image_url: `data:${mime};base64,${bytes.toString("base64")}` });
-  const editFields = edit && { images: [dataUrl(edit.image)], ...(edit.markup && { markup: dataUrl(edit.markup) }) };
-  const url = edit ? provider.url(cfg).replace(/\/generations$/, "/edits") : provider.url(cfg);
+  if (edit && !(gpt26 && provider.editUrl)) fail("Editing an image needs a GPT-Image-2.6 model (Sunburst or Flare) on OpenAI", 409, true);
+  const { size: generatedSize, ...params } = provider.body(request);
+  const url = (edit && provider.editUrl) || provider.url(cfg);
   const body = {
-    model: slot.model, prompt: request.prompt, ...(edit ? params : { ...params, size: _generatedSize }),
-    ...(complexity && { complexity }), ...gif, ...editFields,
+    model: slot.model, prompt: request.prompt, ...(edit ? params : { ...params, size: generatedSize }),
+    ...(complexity && { complexity }), ...gif,
+  };
+  const multipart = (fields: Record<string, unknown>, { image, markup }: NonNullable<typeof edit>) => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(fields)) form.append(key, String(value));
+    form.append("image", new Blob([new Uint8Array(image.bytes)], { type: image.mime }), "image");
+    if (markup) form.append("markup", new Blob([new Uint8Array(markup.bytes)], { type: markup.mime }), "markup.png");
+    return form;
   };
 
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -264,7 +271,7 @@ export async function generateImageWith(
       return await fetchImpl(url, {
         method: "POST",
         headers,
-        body: JSON.stringify(payload),
+        body: edit ? multipart(payload, edit) : JSON.stringify(payload),
         redirect: "error",
         signal: cancel ? AbortSignal.any([timeoutSignal, cancel]) : timeoutSignal,
       });
