@@ -38,7 +38,7 @@ describe("Preview dialog focus management & return (abe7fe48 regression)", () =>
       }),
     );
     expect(html).toContain('role="dialog"');
-    expect(html).toContain('placeholder="Filter HTML, PDF, Markdown, or image files…"');
+    expect(html).toContain('placeholder="Search HTML, PDF, Markdown, text or image files…"');
     expect(html).not.toMatch(/<input[^>]*\bautofocus\b/i);
   });
 

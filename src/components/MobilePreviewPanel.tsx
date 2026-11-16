@@ -50,6 +50,7 @@ import {
 } from "@/lib/mobilePreviewState";
 import { PreviewFrame, type PreviewFrameHandle, type PreviewFrameStatus } from "@/components/PreviewFrame";
 import { DocumentChromeContext } from "@/components/DocumentView";
+import { OPEN_PREVIEW_EVENT, type OpenPreviewDetail } from "@/lib/chatLinks";
 import { PreviewFilePicker, usePreviewAutoRefreshWatcher } from "@/components/PreviewFilePicker";
 import { PreviewMoreMenu } from "@/components/PreviewMoreMenu";
 import { usePanelResize } from "@/lib/usePanelResize";
@@ -259,6 +260,24 @@ export function MobilePreviewPanel({
     }
   }, [open]);
 
+  // Links and images clicked in chat messages
+  const navigateRef = useRef<(url: string) => void>(() => {});
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const detail = (event as CustomEvent<OpenPreviewDetail>).detail;
+      if (!detail) return;
+      if ("file" in detail) {
+        setActiveSource(detail.file);
+        setInputUrl("");
+      } else {
+        setInputUrl(detail.url);
+        navigateRef.current(detail.url);
+      }
+    };
+    window.addEventListener(OPEN_PREVIEW_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_PREVIEW_EVENT, onOpen);
+  }, []);
+
   // Persist quick preview state
   useEffect(() => {
     saveMobilePreviewState({
@@ -436,6 +455,7 @@ export function MobilePreviewPanel({
     },
     [activeSource, commitUrl, inputUrl],
   );
+  navigateRef.current = handleNavigate;
 
   const handleSelectProjectFile = useCallback((fileSource: PreviewFileSource) => {
     setPendingLocalUrl(null);

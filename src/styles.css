@@ -737,3 +737,59 @@ body.gbs-resizing webview {
 .markdown-reading .callout:is([data-callout="abstract"], [data-callout="summary"], [data-callout="tldr"]) .callout-title::before { content: "≡"; }
 .markdown-reading .callout[data-callout="todo"] { --callout: 8, 109, 221; }
 .markdown-reading .callout[data-callout="todo"] .callout-title::before { content: "☐"; }
+
+/* Chat bubbles share the Obsidian document styles at conversation scale. */
+.markdown-reading.is-chat {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+.markdown-reading.is-chat > * { margin-block: 0 0.75em; }
+.markdown-reading.is-chat > :last-child { margin-bottom: 0; }
+.markdown-reading.is-chat h1, .markdown-reading.is-chat h2, .markdown-reading.is-chat h3,
+.markdown-reading.is-chat h4, .markdown-reading.is-chat h5, .markdown-reading.is-chat h6 { margin-block: 1.1em 0.45em; }
+.markdown-reading.is-chat > :first-child { margin-top: 0; }
+.markdown-reading.is-chat h1 { font-size: 1.4em; }
+.markdown-reading.is-chat h2 { font-size: 1.25em; }
+.markdown-reading.is-chat h3 { font-size: 1.12em; }
+.markdown-reading.is-chat h4, .markdown-reading.is-chat h5 { font-size: 1em; }
+.markdown-reading.is-chat h6 { font-size: 0.94em; }
+.markdown-reading.is-chat hr { margin-block: 1.2em; }
+.markdown-reading.is-chat .callout { padding: 8px 12px; }
+.markdown-reading.is-chat .task-list-item-checkbox { pointer-events: none; }
+.markdown-reading.is-chat .task-list-item-checkbox:not(:checked) { background: transparent; }
+.markdown-reading .file-link { cursor: pointer; text-decoration: underline dotted; text-decoration-color: color-mix(in srgb, var(--md-accent) 55%, transparent); }
+.markdown-reading .file-link code { color: var(--md-accent); }
+.markdown-reading .md-image {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 1px solid var(--color-hairline);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-inset);
+  cursor: zoom-in;
+  transition: border-color 0.15s;
+}
+.markdown-reading .md-image:hover, .markdown-reading .md-image:focus-visible { border-color: var(--md-accent); outline: none; }
+.markdown-reading .md-image img { display: block; max-width: 100%; max-height: 420px; object-fit: contain; border-radius: 0; }
+.markdown-reading .md-image-loading {
+  display: block;
+  width: min(320px, 100%);
+  height: 180px;
+  border-radius: 8px;
+  background: var(--color-inset);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.markdown-reading .md-image-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px dashed var(--color-hairline);
+  border-radius: 6px;
+  color: var(--md-muted);
+  font-size: 0.9em;
+}

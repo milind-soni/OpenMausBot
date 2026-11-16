@@ -42,3 +42,31 @@ describe("writePreviewTextFile", () => {
     expect(() => resolvePreviewFile(projects, "p", "../escape.md")).toThrow(expect.objectContaining({ status: 403 }));
   });
 });
+
+import { mkdirSync, symlinkSync } from "node:fs";
+import { resolveChatFileReference } from "./previewFiles.ts";
+
+describe("resolveChatFileReference", () => {
+  it("maps absolute, file://, ~ and relative paths into a registered project", () => {
+    const { dir, projects } = project();
+    mkdirSync(join(dir, "docs"));
+    writeFileSync(join(dir, "docs", "plan.md"), "# Plan");
+    for (const ref of [join(dir, "docs/plan.md"), `file://${join(dir, "docs/plan.md")}`, "docs/plan.md", "./docs/plan.md"]) {
+      const hit = resolveChatFileReference(projects, ref, "/nowhere");
+      expect([hit.project.id, hit.relativePath, hit.kind]).toEqual(["p", "docs/plan.md", "markdown"]);
+    }
+    expect(resolveChatFileReference(projects, "~/docs/plan.md", dir).relativePath).toBe("docs/plan.md");
+  });
+  it("refuses paths outside projects, escapes and unsupported files", () => {
+    const { dir, projects } = project();
+    const outside = mkdtempSync(join(tmpdir(), "gbs-outside-"));
+    dirs.push(outside);
+    writeFileSync(join(outside, "secret.md"), "x");
+    symlinkSync(join(outside, "secret.md"), join(dir, "link.md"));
+    writeFileSync(join(dir, "key.pem"), "x");
+    expect(() => resolveChatFileReference(projects, join(outside, "secret.md"), "/")).toThrow(expect.objectContaining({ status: 404 }));
+    expect(() => resolveChatFileReference(projects, join(dir, "link.md"), "/")).toThrow(expect.objectContaining({ status: 403 }));
+    expect(() => resolveChatFileReference(projects, "../secret.md", "/")).toThrow(expect.objectContaining({ status: 403 }));
+    expect(() => resolveChatFileReference(projects, join(dir, "key.pem"), "/")).toThrow(expect.objectContaining({ status: 415 }));
+  });
+});

@@ -24,6 +24,7 @@ import { TasksPanel } from "./TasksPanel";
 import { MausAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { OPEN_PREVIEW_EVENT } from "@/lib/chatLinks";
 import { OptionCard } from "./OptionCard";
 import { Composer } from "./Composer";
 import { ModelPicker } from "./ModelPicker";
@@ -659,6 +660,19 @@ export function ChatView({ bot }: { bot: Bot }) {
   }, []);
 
   const [lastRequestedDrawer, setLastRequestedDrawer] = useState<"preview" | "tasks">("preview");
+
+  // A link or image clicked in a message opens the Quick preview on it.
+  useEffect(() => {
+    const onOpen = () => {
+      setMobilePreviewOpen(true);
+      if (!isLargeScreen) {
+        setLastRequestedDrawer("preview");
+        setTasksOpen(false);
+      }
+    };
+    window.addEventListener(OPEN_PREVIEW_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_PREVIEW_EVENT, onOpen);
+  }, [isLargeScreen]);
 
   const togglePreview = useCallback(() => {
     setMobilePreviewOpen((open) => {

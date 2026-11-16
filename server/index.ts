@@ -29,11 +29,13 @@ import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { automaticHandoffBots, mentionedBots, Store, type Attachment, type Message } from "./store.ts";
 import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContext } from "./projects.ts";
+import { CHAT_FORMATTING_HINT } from "./chat-formatting.ts";
 import {
   listProjectPreviewFiles,
   PreviewWatchManager,
   isEditablePreviewKind,
   readPreviewFileContent,
+  resolveChatFileReference,
   resolvePreviewFile,
   writePreviewTextFile,
   type RegisteredProjectLike,
@@ -720,6 +722,7 @@ async function startTurn(
         transcript,
         system:
           persona +
+          `\n\n${CHAT_FORMATTING_HINT}` +
           (projectContext.system ? `\n\n${projectContext.system}` : "") +
           (taskContext.system ? `\n\n${taskContext.system}` : "") +
           composioPrompt +
@@ -888,6 +891,7 @@ async function runGroupMemberTurn(
     composioPrompt.trim(),
     computerPromptHint(integrations),
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
+    CHAT_FORMATTING_HINT,
   ]
     .filter(Boolean)
     .join("\n");
@@ -1926,6 +1930,16 @@ const server = createServer(async (req, res) => {
         ...(isEditablePreviewKind(resolved.kind) ? { "x-file-mtime": String(resolved.mtimeMs) } : {}),
       });
       return res.end(data);
+    }
+    if (method === "GET" && path === "/api/preview/resolve") {
+      const resolved = resolveChatFileReference(await allRegisteredProjects(), url.searchParams.get("path") ?? "", homedir());
+      if (resolved.kind === "resource") return json(res, 415, { error: "Unsupported preview file type" });
+      return json(res, 200, {
+        projectId: resolved.project.id,
+        projectName: resolved.project.name,
+        path: resolved.relativePath,
+        kind: resolved.kind,
+      });
     }
     if (method === "PUT" && path === "/api/preview/file") {
       const body = await readBody(req);

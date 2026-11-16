@@ -1,5 +1,7 @@
-// Real markdown for bot bubbles: react-markdown + GFM (tables, task lists,
-// strikethrough, autolinks) with a chromed code block — language label, copy
+// Real markdown for bot bubbles, styled like the Obsidian document view:
+// react-markdown + GFM + Obsidian callouts/highlights/tags. Links and images
+// open in the Quick preview (web pages and registered-project files). Code
+// blocks keep their chrome — language label, copy
 // button, lazy Shiki highlighting for a curated set of languages (src/lib/highlighter.ts). Model output never reaches the DOM as raw
 // HTML: no rehype-raw, so HTML in the text renders as text; Shiki's output is
 // generator-escaped. While a message is still streaming, code blocks render
@@ -8,6 +10,8 @@ import { memo, useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy } from "lucide-react";
+import { remarkObsidian } from "@/lib/obsidianMarkdown";
+import { chatFileUrl, classifyChatHref, looksLikeFilePath, openChatHref, resolveChatFile } from "@/lib/chatLinks";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content-hashed, capped, never written while streaming
@@ -81,97 +85,97 @@ export function CodeBlock({ code, lang, streaming }: { code: string; lang: strin
   );
 }
 
+function flatText(n: any): string {
+  return typeof n === "string" ? n : Array.isArray(n) ? n.map(flatText).join("") : n?.props?.children ? flatText(n.props.children) : "";
+}
+
+/** Opens in the Quick preview; ⌘/Ctrl-click (or anything the preview can't show) uses the browser. */
+function ChatLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const target = classifyChatHref(href);
+  const previewable = target?.kind === "web" || target?.kind === "file";
+  return (
+    <a
+      href={target?.kind === "file" ? undefined : href}
+      target="_blank"
+      rel="noreferrer"
+      role={target?.kind === "file" ? "link" : undefined}
+      tabIndex={target?.kind === "file" ? 0 : undefined}
+      title={previewable ? `${href} — opens in Preview (⌘-click for browser)` : href}
+      className={target?.kind === "file" ? "internal-link file-link" : "external-link"}
+      onClick={(e) => {
+        if (!href || !previewable || (target?.kind === "web" && (e.metaKey || e.ctrlKey))) return;
+        e.preventDefault();
+        void openChatHref(href);
+      }}
+      onKeyDown={(e) => {
+        if (target?.kind === "file" && e.key === "Enter") void openChatHref(href!);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+function ChatImage({ src, alt }: { src?: string; alt?: string }) {
+  const target = classifyChatHref(src);
+  const [resolved, setResolved] = useState<string | null>(() =>
+    target?.kind === "web" || /^data:image\//i.test(src ?? "") ? src ?? null : null,
+  );
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (target?.kind !== "file") return;
+    let alive = true;
+    void resolveChatFile(target.path).then((file) => {
+      if (!alive) return;
+      if (file?.kind === "image") setResolved(chatFileUrl(file));
+      else setFailed(true);
+    });
+    return () => { alive = false; };
+  }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (failed || (!resolved && target?.kind !== "file")) {
+    return <span className="md-image-missing" title={src}>🖼 {alt || src}</span>;
+  }
+  if (!resolved) return <span className="md-image-loading" aria-label={`Loading ${alt || "image"}`} />;
+  return (
+    <button
+      type="button"
+      className="md-image"
+      title={`${alt || src} — open in Preview`}
+      onClick={() => src && void openChatHref(src)}
+    >
+      <img src={resolved} alt={alt ?? ""} loading="lazy" onError={() => setFailed(true)} />
+    </button>
+  );
+}
+
 function ChatMarkdownComponent({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return (
-    <div className="chat-md min-w-0 [&>*+*]:mt-2">
+    <div className="markdown-reading is-chat min-w-0">
       <Markdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkObsidian]}
         components={{
           pre({ children }: { children?: ReactNode }) {
             // fenced code arrives as <pre><code class="language-x">…</code></pre>
             const child: any = Array.isArray(children) ? children[0] : children;
-            const className: string = child?.props?.className ?? "";
-            const lang = /language-([\w-]+)/.exec(className)?.[1] ?? "";
-            // children can be a string OR an array of strings/nodes — flatten
-            // strings only, so String() never comma-joins an array
-            const flat = (n: any): string =>
-              typeof n === "string" ? n : Array.isArray(n) ? n.map(flat).join("") : (n?.props?.children ? flat(n.props.children) : "");
-            const code = flat(child?.props?.children).replace(/\n$/, "");
-            return <CodeBlock code={code} lang={lang} streaming={streaming} />;
-          },
-          img({ src, alt }: { src?: string; alt?: string }) {
-            return (
-              <img
-                src={src}
-                alt={alt ?? ""}
-                loading="lazy"
-                className="max-h-96 max-w-full rounded-lg border border-hairline/30"
-              />
-            );
+            const lang = /language-([\w-]+)/.exec(child?.props?.className ?? "")?.[1] ?? "";
+            return <CodeBlock code={flatText(child?.props?.children).replace(/\n$/, "")} lang={lang} streaming={streaming} />;
           },
           code({ children }: { children?: ReactNode }) {
-            return (
-              <code className="rounded bg-inset px-1 py-px text-[13px]">{children}</code>
-            );
+            const value = flatText(children);
+            if (!streaming && looksLikeFilePath(value)) {
+              return (
+                <ChatLink href={value.trim()}>
+                  <code>{children}</code>
+                </ChatLink>
+              );
+            }
+            return <code>{children}</code>;
           },
-          a({ href, children }: { href?: string; children?: ReactNode }) {
-            return (
-              <a
-                href={href}
-                target="_blank"
-                rel="noreferrer"
-                className="break-words text-accent underline decoration-accent/40 hover:decoration-accent"
-              >
-                {children}
-              </a>
-            );
-          },
+          a: ChatLink,
+          img: ChatImage,
           table({ children }: { children?: ReactNode }) {
-            return (
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-[13.5px]">{children}</table>
-              </div>
-            );
-          },
-          th({ children }: { children?: ReactNode }) {
-            return (
-              <th className="border-b border-hairline/40 px-2 py-1.5 text-left font-semibold">{children}</th>
-            );
-          },
-          td({ children }: { children?: ReactNode }) {
-            return <td className="border-b border-hairline/20 px-2 py-1.5 align-top">{children}</td>;
-          },
-          ul({ children }: { children?: ReactNode }) {
-            return <ul className="list-disc space-y-1 pl-5">{children}</ul>;
-          },
-          ol({ children }: { children?: ReactNode }) {
-            return <ol className="list-decimal space-y-1 pl-5">{children}</ol>;
-          },
-          h1({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[16px] font-semibold">{children}</div>;
-          },
-          h2({ children }: { children?: ReactNode }) {
-            return <div className="mt-2 text-[15.5px] font-semibold">{children}</div>;
-          },
-          h3({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 font-semibold">{children}</div>;
-          },
-          h4({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 font-semibold">{children}</div>;
-          },
-          h5({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 text-[14px] font-semibold">{children}</div>;
-          },
-          h6({ children }: { children?: ReactNode }) {
-            return <div className="mt-1.5 text-[13.5px] font-semibold text-ink-secondary">{children}</div>;
-          },
-          blockquote({ children }: { children?: ReactNode }) {
-            return (
-              <blockquote className="border-l-2 border-hairline pl-3 text-ink-secondary">{children}</blockquote>
-            );
-          },
-          hr() {
-            return <hr className="border-hairline/40" />;
+            return <div className="md-table-wrap"><table>{children}</table></div>;
           },
         }}
       >

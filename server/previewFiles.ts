@@ -236,6 +236,40 @@ export function readPreviewFileContent(resolved: ResolvedPreviewFile): Buffer {
   return readFileSync(resolved.realFilePath);
 }
 
+/**
+ * Maps a path a model wrote in chat (absolute, ~/, file:// or project-relative) to a previewable
+ * file in a registered project. Every candidate goes through resolvePreviewFile, so the same
+ * containment, symlink and extension rules apply. Relative paths try each project in order.
+ */
+export function resolveChatFileReference(projects: RegisteredProjectLike[], rawPath: string, home: string): ResolvedPreviewFile {
+  let value = String(rawPath ?? "").trim();
+  if (!value || value.includes("\0")) throw new PreviewFileError(400, "A file path is required");
+  if (/^file:\/\//i.test(value)) {
+    try { value = decodeURIComponent(new URL(value).pathname); } catch { throw new PreviewFileError(400, "Invalid file link"); }
+  }
+  value = value.split(/[?#]/)[0];
+  if (value === "~" || value.startsWith("~/")) value = join(home, value.slice(1));
+  const available = projects.filter((project) => !project.missing && existsSync(project.path));
+  if (isAbsolute(value)) {
+    const target = resolve(value);
+    for (const project of available) {
+      for (const root of new Set([resolve(project.path), realpathSync(project.path)])) {
+        if (isStrictSubpath(root, target)) return resolvePreviewFile(projects, project.id, relative(root, target));
+      }
+    }
+    throw new PreviewFileError(404, "That file isn't inside a registered project");
+  }
+  let lastError: unknown = new PreviewFileError(404, "That file isn't inside a registered project");
+  for (const project of available) {
+    try {
+      return resolvePreviewFile(projects, project.id, value.replace(/^\.\//, ""));
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
 /** Text documents (Markdown, plain text) are the only editable preview files. */
 export function isEditablePreviewKind(kind: PreviewFileKind): boolean {
   return kind === "markdown" || kind === "text";
