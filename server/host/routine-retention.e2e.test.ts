@@ -40,11 +40,12 @@ it("sweeps only eligible scheduled executions on an isolated server restart", as
     writeFileSync(join(fixture.dataDir, "routines.json"), JSON.stringify({ version: 1, routines: [], runs, frozenResultsCleared: true }));
     execFileSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", `
       import { Store } from './server/store.ts';
-      const [botId, destination, execution, at] = process.argv.slice(1);
+      const [botId, destination, execution, at, fileThread] = process.argv.slice(1);
       const store = new Store(() => ({ instanceId: 'claude', model: 'fixture' }));
       store.appendMessage(destination, { role: 'bot', kind: 'text', text: 'orphan result', at: Number(at),
         automation: { routineId: 'r', runId: 'orphan', name: 'Routine', trigger: 'schedule', executionThreadId: execution, scheduledFor: Number(at) } });
-    `, bot.id, bot.threadId, threads[9]!, String(old)], { cwd: process.cwd(), env: verificationServerEnvironment(process.env, fixture.dataDir, fixture.port) });
+      store.appendMessage(fileThread, { role: 'bot', kind: 'text', text: '[Report](report.csv)', at: Number(at) });
+    `, bot.id, bot.threadId, threads[9]!, String(old), threads[8]!], { cwd: process.cwd(), env: verificationServerEnvironment(process.env, fixture.dataDir, fixture.port) });
     await fixture.start();
 
     expect((await api("GET", "/api/config")).threads.routineExecutionRetentionSupported).toBe(true);
@@ -57,13 +58,12 @@ it("sweeps only eligible scheduled executions on an isolated server restart", as
     expect(after).toHaveLength(9);
     expect(after.find((run) => run.id === "run-5")).toMatchObject({ status: "completed", report: { state: "quiet" } });
     expect(after.find((run) => run.id === "run-5")).not.toHaveProperty("prompt");
-    expect(after.find((run) => run.id === "run-8")).not.toHaveProperty("threadId");
+    expect(after.find((run) => run.id === "run-8")).toMatchObject({ threadId: threads[8], prompt: "long prompt" });
     expect(after.find((run) => run.id === "run-0")).toMatchObject({ prompt: "long prompt", output: "result", threadId: threads[0] });
     expect(after.find((run) => run.id === "run-6")).toMatchObject({ triggerSource: "webhook", sameConversation: true, threadId: threads[6] });
     expect(tasks.map((task) => task.threadId)).not.toContain(threads[5]);
-    expect(tasks.map((task) => task.threadId)).not.toContain(threads[8]);
     expect(tasks.map((task) => task.threadId)).not.toContain(threads[9]);
-    expect(tasks.map((task) => task.threadId)).toEqual(expect.arrayContaining([bot.threadId, threads[0], threads[6], threads[7]]));
+    expect(tasks.map((task) => task.threadId)).toEqual(expect.arrayContaining([bot.threadId, threads[0], threads[6], threads[7], threads[8]]));
     expect((await api("GET", `/api/threads/${bot.threadId}/messages?limit=100`)).messages).toEqual(expect.arrayContaining([
       expect.objectContaining({ text: "orphan result", automation: expect.objectContaining({ runId: "orphan" }) }),
     ]));

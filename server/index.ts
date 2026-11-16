@@ -12349,7 +12349,7 @@ const mcpConfig = createMcpConfig({
   connectionsChanged: (change) => void routineHolds?.connections(change), probeAs: mcpServersHost.probeAs, testElsewhere: (name, server, lender, signal) => lentMcp.test(name, server, lender, signal),
   changed: () => broadcast({ kind: "mcp.changed" }) });
 const persistAnnouncedMcpServers = (next: Record<string, unknown>) => { persistMcpServers(next); broadcast({ kind: "mcp.changed" }); };
-const sweepRoutineExecutions = createRoutineRetention({
+const sweepRoutineExecutions = createRoutineRetention({ paused: () => workspaceMaintenance.active || moveFreeze.frozen(),
   retentionDays: () => cfg.routineExecutionRetentionDays ?? undefined, routines: () => routines, store,
   botWaits, neededByChecks: proactive.needsRun, threadBusy, settlingTurns, coordinator, phoneSecretSubmissions,
   hasQueuedSteeredMessages, openPersonCard, deleteTasks: taskRoutes.deleteTasks,

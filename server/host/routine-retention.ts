@@ -8,6 +8,7 @@ import type { Coordinator } from "../coordinator.ts";
 const DAY = 24 * 60 * 60 * 1000;
 
 export function createRoutineRetention(deps: {
+  paused: () => boolean;
   retentionDays: () => number | undefined;
   routines: () => RoutineManager | null;
   store: Store;
@@ -23,6 +24,7 @@ export function createRoutineRetention(deps: {
 }) {
   return () => {
     try {
+      if (deps.paused()) return;
       const retentionDays = deps.retentionDays();
       const routines = deps.routines();
       if (retentionDays === undefined || !routines) return;
@@ -109,7 +111,8 @@ export function sweepRoutineExecutions(deps: {
       !task.unread && !task.busy && !task.waitingForTeammates && !task.openAsks &&
       (task.updatedAt ?? task.createdAt) < cutoff && !deps.busy(bot.id, threadId) &&
       !deps.store.messagesFor(threadId).some((message) => liveCardKind(message.card) || waitingCardText(message) ||
-        message.publishedPage?.state === "live" || message.attachments?.some((file) => file.kind !== "image" || !file.fromTool));
+        message.publishedPage?.state === "live" || message.attachments?.some((file) => file.kind !== "image" || !file.fromTool) ||
+        (message.text && messageFileTargets(message.text, true).length));
   };
   const markForDeletion = (botId: string, threadId: string, run?: RoutineRun) => {
     const group = deleting.get(botId) ?? [];

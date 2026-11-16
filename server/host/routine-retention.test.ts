@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { RoutineManager, type RoutineRun } from "../routines.ts";
 import type { BotRecord, Message, Store, TaskRecord } from "../store.ts";
 import { createRoutineRetention, sweepRoutineExecutions } from "./routine-retention.ts";
+import { WorkspaceBackupMaintenance } from "../workspace-backup-maintenance.ts";
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 10, 15);
@@ -21,6 +22,7 @@ describe("scheduled execution retention", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const sweep = createRoutineRetention({
+        paused: () => false,
         retentionDays: () => 7,
         routines: () => { throw new Error("fixture disk failure"); },
         store: {} as Store,
@@ -39,12 +41,46 @@ describe("scheduled execution retention", () => {
     } finally { warn.mockRestore(); }
   });
 
+  it("skips the entire sweep during workspace maintenance and a workspace move", async () => {
+    const maintenance = new WorkspaceBackupMaintenance();
+    let frozen = false;
+    const routines = vi.fn<() => RoutineManager | null>(() => null);
+    const deleteTasks = vi.fn(() => ({ deleted: [] as string[] }));
+    const sweep = createRoutineRetention({
+      paused: () => maintenance.active || frozen,
+      retentionDays: () => 7,
+      routines,
+      store: {} as Store,
+      botWaits: { all: () => [] },
+      neededByChecks: () => false,
+      threadBusy: () => false,
+      settlingTurns: new Set(),
+      coordinator: { activeDirect: () => false, awaitingAnswer: () => false, awaitingTeammateThreads: () => new Set() },
+      phoneSecretSubmissions: { hasThread: () => false },
+      hasQueuedSteeredMessages: () => false,
+      openPersonCard: () => null,
+      deleteTasks,
+    });
+    await maintenance.run(async () => {
+      sweep();
+      expect(routines).not.toHaveBeenCalled();
+      expect(deleteTasks).not.toHaveBeenCalled();
+    }, { idle: () => true, pause: () => {}, resume: () => {}, flush: async () => {} });
+    frozen = true;
+    sweep();
+    expect(routines).not.toHaveBeenCalled();
+    frozen = false;
+    sweep();
+    expect(routines).toHaveBeenCalledOnce();
+  });
+
   it("deletes only old, detached, settled executions whose results remain available", () => {
     const latest = Array.from({ length: 5 }, (_, n) => makeRun(`new-${n}`, { scheduledFor: NOW - n, finishedAt: NOW - n }));
     const cases = [
       makeRun("safe"), makeRun("missing"), makeRun("pinned"), makeRun("busy"), makeRun("referenced"),
       makeRun("needs-input", { output: "NEEDS INPUT: Approve this?" }), makeRun("needs-check"),
       makeRun("output-file", { output: "Saved /tmp/report.md" }), makeRun("attachment"), makeRun("published"),
+      makeRun("execution-file"), makeRun("execution-plain-file"),
       makeRun("pending", { report: { state: "pending" } }), makeRun("failed", { status: "failed" }),
       makeRun("brief", { deliver: "brief" }), makeRun("webhook", { triggerSource: "webhook", sameConversation: true }),
       makeRun("question", { report: { state: "posted", threadId: "result", messageId: "question" } }),
@@ -60,7 +96,7 @@ describe("scheduled execution retention", () => {
       ...(run.id === "shared" ? { shared: true } : {}), ...(run.id === "asked" ? { askedAt: old } : {}),
       ...(run.id === "custom-link" ? { link: "https://example.com" } : {}),
     } as TaskRecord);
-    for (const id of ["orphan-safe", "orphan-webhook", "orphan-file", "orphan-recent"]) tasks.set(`t-${id}`, {
+    for (const id of ["orphan-safe", "orphan-webhook", "orphan-file", "orphan-execution-file", "orphan-recent"]) tasks.set(`t-${id}`, {
       threadId: `t-${id}`, routineRunId: id, createdAt: old, updatedAt: old,
     } as TaskRecord);
     const bot = { id: "b", threadId: "result", tasks: [...tasks.values()] } as BotRecord;
@@ -68,7 +104,7 @@ describe("scheduled execution retention", () => {
       { id: "question", text: "Please answer", automation: { runId: "question", needsYou: true } },
       { id: "file", text: "[Report](report.md)", automation: { runId: "file" } },
       { id: "plain-file", text: "See /tmp/report.md", automation: { runId: "plain-file" } },
-      ...["orphan-safe", "orphan-webhook", "orphan-file", "orphan-recent"].map((id) => ({
+      ...["orphan-safe", "orphan-webhook", "orphan-file", "orphan-execution-file", "orphan-recent"].map((id) => ({
         id, role: "bot", kind: "text", at: id === "orphan-recent" ? NOW : old, text: id === "orphan-file" ? "[file](out.md)" : "Result",
         automation: { runId: id, trigger: id === "orphan-webhook" ? "webhook" : "schedule", executionThreadId: `t-${id}` },
       })),
@@ -80,6 +116,8 @@ describe("scheduled execution retention", () => {
       taskByThread: (_bot: string, thread: string) => tasks.get(thread) ?? null,
       messagesFor: (thread: string) => thread === "result" ? lines : thread === "t-card"
         ? [{ kind: "options", card: { requestId: "ask", options: [], title: "Continue?" } }]
+        : ["t-execution-file", "t-orphan-execution-file"].includes(thread) ? [{ text: "[Report](report.csv)" }]
+        : thread === "t-execution-plain-file" ? [{ text: "Saved /tmp/report.csv" }]
         : thread === "t-attachment" ? [{ attachments: [{ kind: "file", path: "/attachments/report.pdf" }] }]
         : thread === "t-published" ? [{ publishedPage: { state: "live", url: "https://example.com/page" } }] : [],
     } as unknown as Store;
