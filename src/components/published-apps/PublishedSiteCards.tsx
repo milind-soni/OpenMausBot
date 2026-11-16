@@ -1,35 +1,70 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { ArrowUpRight, Eye } from "lucide-react";
 
 import { openExternalLink } from "@/lib/app-links";
-import type { AppPreview } from "@/lib/app-preview";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { askAboutSite, useKnownPublishedApps } from "@/lib/own-published-apps";
 import { showAppBesideChat } from "@/lib/page-open";
-import { publishedSiteLinks } from "@/lib/published-site-links";
+import { publishedSiteLinks, type SiteCardLink } from "@/lib/published-site-links";
 import { isLiveReply } from "@/state/live-reply";
 import type { Message } from "@/state/store";
 import { useOptionalStoreRef } from "@/state/store-ref";
 import { ASK_CHIP, ASK_CHIP_IDLE } from "../AskCard";
 import { SiteThumb } from "./SiteThumb";
 
-/** One card under a bot's reply for each site it links to that a bot put online: the site drawn small, its name and
- * address, Open (the preview beside the chat, full screen on a phone) and Open in browser. Nothing while the reply is
- * still streaming. */
+/** Which shown message links each site, so only the newest of them draws it. */
+const claims = new Map<string, Map<string, number>>();
+const claimListeners = new Set<() => void>();
+let claimsVersion = 0;
+
+function changeClaims(change: () => void): void {
+  change();
+  claimsVersion += 1;
+  for (const listener of claimListeners) listener();
+}
+
+function newestClaim(appId: string): string | undefined {
+  let best: [string, number] | undefined;
+  for (const [messageId, at] of claims.get(appId) ?? []) {
+    if (!best || at > best[1] || (at === best[1] && messageId > best[0])) best = [messageId, at];
+  }
+  return best?.[0];
+}
+
+function useNewestFor(links: readonly SiteCardLink[], messageId: string, at: number): SiteCardLink[] {
+  const sites = links.map((link) => link.appId).join("\n");
+  useEffect(() => {
+    const ids = sites ? sites.split("\n") : [];
+    if (!ids.length) return;
+    changeClaims(() => { for (const id of ids) { if (!claims.has(id)) claims.set(id, new Map()); claims.get(id)!.set(messageId, at); } });
+    return () => changeClaims(() => { for (const id of ids) { claims.get(id)?.delete(messageId); if (claims.get(id)?.size === 0) claims.delete(id); } });
+  }, [sites, messageId, at]);
+  useSyncExternalStore((listener) => { claimListeners.add(listener); return () => { claimListeners.delete(listener); }; }, () => claimsVersion, () => claimsVersion);
+  return links.filter((link) => newestClaim(link.appId) === messageId);
+}
+
+/** One card under a bot's reply for each of the viewer's own published sites it links to (their Published apps list),
+ * on the newest reply that links it: the site drawn small, its name and address, Open (the preview beside the chat,
+ * full screen on a phone) and Open in browser. Any other site stays a plain link. Nothing while the reply streams, and
+ * nothing on a published page's own card. */
 export function PublishedSiteCards({ message }: { message: Message }) {
-  const done = message.role === "bot" && message.kind === "text" && !isLiveReply(message);
+  const apps = useKnownPublishedApps();
+  const done = message.role === "bot" && message.kind === "text" && !message.publishedPage && !isLiveReply(message);
   const text = done ? message.text ?? "" : "";
   const origin = typeof window === "undefined" ? undefined : window.location?.origin;
-  const links = useMemo(() => (text && origin ? publishedSiteLinks(text, origin) : []), [text, origin]);
-  if (links.length === 0) return null;
+  const { cards, unknown } = useMemo(() => (text && origin ? publishedSiteLinks(text, origin, apps) : { cards: [], unknown: [] }), [text, origin, apps]);
+  useEffect(() => { for (const href of unknown) askAboutSite(href); }, [unknown]);
+  const shown = useNewestFor(cards, message.id, message.at ?? 0);
+  if (shown.length === 0) return null;
   return (
     <div data-published-sites="" className="flex w-full flex-col items-start gap-2">
-      {links.map((link) => <PublishedSiteCard key={link.url} link={link} />)}
+      {shown.map((link) => <PublishedSiteCard key={link.appId} link={link} />)}
     </div>
   );
 }
 
-function PublishedSiteCard({ link }: { link: AppPreview }) {
+function PublishedSiteCard({ link }: { link: SiteCardLink }) {
   const store = useOptionalStoreRef();
   const host = new URL(link.url).host;
   const preview = () => {
@@ -39,10 +74,11 @@ function PublishedSiteCard({ link }: { link: AppPreview }) {
   const browser = () => void openExternalLink(link.url).catch(() => undefined);
   return (
     <div role="group" aria-label={link.title} data-published-site={link.url} className="w-full max-w-md overflow-hidden rounded-xl border border-hairline/40 bg-panel text-sm max-md:max-w-none">
-      <button type="button" onClick={preview} aria-label={t("publishedApps.card.previewOf", { name: link.title })}
-        className="block w-full border-b border-hairline/30 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
-        <SiteThumb url={link.url} title={link.title} loginOnly={link.loginOnly === true} sayLogin />
-      </button>
+      <div className="relative border-b border-hairline/30">
+        <SiteThumb url={link.url} title={link.title} loginOnly={link.loginOnly === true} sayLogin unloadOffScreen />
+        <button type="button" onClick={preview} aria-label={t("publishedApps.card.previewOf", { name: link.title })}
+          className="absolute inset-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus" />
+      </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-3 py-2.5">
         <div className="min-w-0 flex-1 basis-40">
           {link.title !== host && <p dir="auto" className="truncate font-medium text-ink" title={link.title}>{link.title}</p>}
