@@ -373,7 +373,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "propose_team_setup",
-    description: "Chief of Staff only: create specialists and change bots' profiles, models, Chiefs and teams as the person asked, all in ONE plan, with exact ids from list_team_setup. One operation per bot, at most 40 (8 new). A new team goes in newTeams with a specialist in this plan; teams you are not authorized for cannot be included. Models change defaults for new threads; execution permissions never change." + APPLIES_OUTCOME,
+    description: "Chief of Staff only: create specialists and change bots' profiles, models, Chiefs and teams as the person asked, all in ONE plan, with exact ids from list_team_setup. One operation per bot, at most 40 (8 new). A new team goes in newTeams with a specialist in this plan; teams you are not authorized for cannot be included. Models change defaults for new threads; an MCP server list always waits for the person; other execution permissions never change." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {
@@ -395,6 +395,7 @@ const TOOL_DEFINITIONS = [
               modelSelection: { type: "object", additionalProperties: false, properties: {
                 instanceId: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, variant: { type: "string" },
               }, required: ["instanceId", "model"] },
+              mcpServers: { type: "array", maxItems: 20, items: { type: "string" }, description: "update: the bot's full MCP server list by name." },
             } },
           }, required: ["action", "fields"],
         } },
