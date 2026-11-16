@@ -1,9 +1,7 @@
 // routines.json as it is read at start, and again while it cannot be read. A file that is there but unreadable is never
 // taken for an empty one: the caller refuses every save while it stays so, a copy is set aside the first time each
 // unreadable content is seen, and the read is tried again until it works.
-import { createHash } from "node:crypto";
-import { chmodSync, constants, copyFileSync, existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { readFileSync } from "node:fs";
 
 import type { RoutineHoldCause } from "../shared/routines.ts";
 import { attachmentsMalformed } from "./routine-attachments.ts";
@@ -15,9 +13,6 @@ import type { Routine, RoutineRequestReceipt, RoutineRun } from "./routines.ts";
 
 /** While routines.json cannot be read, the read is tried again this often. */
 export const UNREADABLE_RETRY_MS = 60_000;
-/** Copies of unreadable content kept beside the file; a further one is not copied. */
-const ASIDE_COPIES = 5;
-
 export interface RoutineFileContents {
   text: string;
   routines: Routine[];
@@ -71,17 +66,4 @@ export function readRoutineFile(file: string, now: number): RoutineFileRead {
   }
 }
 
-/** Copies the unreadable file beside itself, named by its content so the same content is copied once. Returns the copy's
- * path, or null when there is nothing to copy or the copy cannot be made. The file itself stays where it is. */
-export function keepUnreadableAside(file: string): string | null {
-  try {
-    const aside = `${file}.unreadable-${createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 12)}`;
-    if (existsSync(aside)) return aside;
-    if (readdirSync(dirname(file)).filter((name) => name.startsWith(`${basename(file)}.unreadable-`)).length >= ASIDE_COPIES) return null;
-    copyFileSync(file, aside, constants.COPYFILE_EXCL);
-    chmodSync(aside, 0o600);
-    return aside;
-  } catch {
-    return null;
-  }
-}
+export { keepUnreadableAside } from "./unreadable-aside.ts";
