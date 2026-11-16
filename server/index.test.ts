@@ -14099,7 +14099,8 @@ describe("bot memory API", () => {
         bytes: 78,
       });
       expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("soul");
-      expect(before.body.sections.map((s: { id: string }) => s.id)).toContain("memory");
+      // A new bot has no memory yet: the preview shows how memory works, and the notes section once there is something in it.
+      expect(before.body.sections.map((s: { id: string }) => s.id)).toContain("memory-rules");
       expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("cloud-home");
       expect((await api("GET", "/api/config")).body).not.toHaveProperty("cloudHome");
       expect(before.body.totalBytes).toBe(
