@@ -7221,6 +7221,7 @@
   "botAccess.scopes.empty": "No apps connected yet. Connect one, then allow it here.",
   "botAccess.scopes.notConnected": "not connected",
   "botAccess.scopes.accessLabel": "{app} access",
+  "botAccess.scopes.accountsLabel": "Accounts this bot may use",
   "botAccess.phone.title": "Phone apps",
   "botAccess.phone.subtitle": "What this bot may do on {phone}",
   "botAccess.phone.notOnPhone": "Not allowed on the phone",
