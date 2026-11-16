@@ -1,11 +1,11 @@
-import { mkdtempSync } from "node:fs";
+import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "./testing/cleanup.ts";
 import { capsFromEnv, capStates, capTokens, effectiveCaps, noteUsage, periodEnd, personWaiting, personWaitingInRoom, reachedCap, resetUsageTotalsForTests, usageCapsSchema, usageTotals, type ThreadStanding } from "./usage-caps.ts";
-import { appendUsage, flushUsageLedger } from "./usage-ledger.ts";
+import { appendUsage, flushUsageLedger, usageFileFor } from "./usage-ledger.ts";
 
 const NO_ENV = {};
 const row = (at: string, botId: string, costUsd: number | null, input = 1_000, output = 500, cachedInput?: number) => ({
@@ -48,6 +48,30 @@ describe("what has been used", () => {
     expect(usageTotals(dataDir, new Date("2026-10-01T00:00:01Z")).server.month).toEqual({ usd: 0, tokens: 0 });
     expect([periodEnd("day", now), periodEnd("month", now)]).toEqual([Date.parse("2026-09-16T00:00:00Z"), Date.parse("2026-10-01T00:00:00Z")]);
     expect(periodEnd("month", new Date("2026-12-31T23:00:00Z"))).toBe(Date.parse("2027-01-01T00:00:00Z"));
+  });
+
+  it("reads only what was appended since the last look, counts a landed row once, and reads a rewritten file again", async () => {
+    const at = (seconds: number) => new Date(now.getTime() + seconds * 1_000);
+    appendUsage(dataDir, row("2026-09-15T08:00:00.000Z", "a", 1));
+    await flushUsageLedger(dataDir);
+    expect(usageTotals(dataDir, now).server.day.usd).toBe(1);
+    // Booked here: counted from memory while it is written and once it has landed, and not again when the file is read past it.
+    const booked = row("2026-09-15T11:59:00.000Z", "a", 0.5);
+    noteUsage(dataDir, booked, appendUsage(dataDir, booked));
+    await flushUsageLedger(dataDir);
+    await Promise.resolve();
+    expect(usageTotals(dataDir, at(1)).server.day.usd).toBe(1.5);
+    // Written by something else: seen at the next look after the cache window, from the appended bytes alone.
+    appendUsage(dataDir, row("2026-09-15T11:59:30.000Z", "b", 2));
+    await flushUsageLedger(dataDir);
+    expect(usageTotals(dataDir, at(16)).server.day.usd).toBe(3.5);
+    expect(usageTotals(dataDir, at(32)).bots.get("b")!.day.usd).toBe(2);
+    // A line still being written is left for the next look.
+    appendFileSync(usageFileFor(dataDir, now), JSON.stringify(row("2026-09-15T11:59:40.000Z", "b", 4)).slice(0, 20));
+    expect(usageTotals(dataDir, at(48)).server.day.usd).toBe(3.5);
+    // The file was rewritten shorter (a restore): it is read from the start.
+    writeFileSync(usageFileFor(dataDir, now), JSON.stringify(row("2026-09-15T09:00:00.000Z", "a", 0.25)) + "\n");
+    expect(usageTotals(dataDir, at(64)).server).toEqual({ day: { usd: 0.25, tokens: 1_500 }, month: { usd: 0.25, tokens: 1_500 } });
   });
 
   it("sets no cap at all until one is asked for, and reads 0 as no cap", () => {

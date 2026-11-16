@@ -13,12 +13,15 @@ import { CAP_FIELDS, capsFromEnv, capStates, effectiveCaps, reachedCap, type Cap
 export const USAGE_CAP_CODE = "spend_cap";
 
 export interface UsageCapView {
+  /** What a reached cap stops now: the environment's choice when it makes one, else the saved one. */
   stops: CapStops;
+  /** What `config.json` holds, which a save keeps when the environment makes the choice. */
+  savedStops: CapStops;
   /** The saved caps, as `config.json` holds them. */
   server: CapLimits;
   bots: Record<string, CapLimits>;
-  /** Fields the environment sets: they win over the saved ones and cannot be changed here. */
-  env: { stops: boolean; server: Array<keyof CapLimits> };
+  /** Fields the environment sets: they win over the saved ones and cannot be changed here. `values` is what it sets. */
+  env: { stops: boolean; server: Array<keyof CapLimits>; values: { stops?: CapStops; server: CapLimits } };
   /** Every cap in force with its use now. */
   caps: CapState[];
 }
@@ -29,7 +32,7 @@ export interface UsageCapGate {
   /** The same refusal as words, or null when the work may start. */
   refusal(botId: string | undefined, personWaiting: boolean, language?: string): string | null;
   /** A scheduled occurrence that will not run: the cause its counted `missed` row is kept under, and that row's line. */
-  routineSkip(botId: string): { behind: string; words(count: number): RoutineLine } | null;
+  routineSkip(botId: string, routineId: string): { behind: string; resetsAt: number; words(count: number): RoutineLine } | null;
   /** A run already queued (a webhook's, an app event's) that will not start; a run started by hand counts as a person's. */
   runText(botId: string, trigger: string | undefined, language?: string): string | null;
   /** What a bot handing work to `botId` is told when nobody is waiting on it; null when the hand-off may go. */
@@ -40,6 +43,19 @@ export interface UsageCapGate {
 }
 
 type Marks = Record<string, { period: string; limit: number; warn?: true; reached?: true }>;
+
+/** The notice marks as the file holds them: an entry out of shape is dropped, so a bad file never stops a turn. */
+export function marksOf(value: unknown): Marks {
+  const marks: Marks = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return marks;
+  for (const [id, raw] of Object.entries(value)) {
+    const mark = raw as Partial<Marks[string]> | null;
+    if (id === "__proto__" || !mark || typeof mark !== "object" || typeof mark.period !== "string" || !/^\d{4}-\d{2}(-\d{2})?$/.test(mark.period) ||
+      typeof mark.limit !== "number" || !Number.isFinite(mark.limit)) continue;
+    marks[id] = { period: mark.period, limit: mark.limit, ...(mark.warn === true ? { warn: true } : {}), ...(mark.reached === true ? { reached: true } : {}) };
+  }
+  return marks;
+}
 
 const NAME: Record<`${CapState["scope"]}:${CapState["period"]}`, { line: ServerLineKey; part: RoutineLineKey }> = {
   "server:day": { line: "server.usageCap.name.serverDay", part: "routines.server.part.capServerDay" },
@@ -76,8 +92,7 @@ export function createUsageCapGate(deps: {
   const load = (): Marks => {
     if (marks) return marks;
     try {
-      const value: unknown = JSON.parse(readFileSync(file, "utf8"));
-      marks = value && typeof value === "object" && !Array.isArray(value) ? value as Marks : {};
+      marks = marksOf(JSON.parse(readFileSync(file, "utf8")));
     } catch {
       marks = {};
     }
@@ -138,12 +153,13 @@ export function createUsageCapGate(deps: {
       const state = blocking(botId, personWaiting);
       if (state) throw Object.assign(new Error(refusedWords(state, language)), { status: 409, code: USAGE_CAP_CODE, resetsAt: state.resetsAt });
     },
-    routineSkip(botId) {
+    routineSkip(botId, routineId) {
       const state = blocking(botId, false);
       if (!state) return null;
       const params = { why: NAME[`${state.scope}:${state.period}`].part, amount: capAmount(state.unit, state.limit), resets: capResets(state.resetsAt) };
+      // One row per routine, cap and period: two routines under one cap never share (or misfile) a row.
       return {
-        behind: `cap:${state.id.replace(/[^\w:-]/g, "-")}:${state.periodKey}`.slice(0, 160),
+        behind: `cap:${routineId}:${state.id}:${state.periodKey}`.replace(/[^\w:-]/g, "-").slice(0, 160), resetsAt: state.resetsAt,
         words: (count) => count === 1 ? codedLine("error", "routines.server.capSkippedOne", params) : codedLine("error", "routines.server.capSkippedMany", { count, ...params }),
       };
     },
@@ -164,8 +180,8 @@ export function createUsageCapGate(deps: {
       const saved = deps.caps();
       const fromEnv = capsFromEnv(env);
       return {
-        stops: effectiveCaps(saved, env).stops, server: saved?.server ?? {}, bots: saved?.bots ?? {},
-        env: { stops: fromEnv.stops !== undefined, server: CAP_FIELDS.map(({ field }) => field).filter((field) => fromEnv.server[field] !== undefined) },
+        stops: effectiveCaps(saved, env).stops, savedStops: saved?.stops ?? "unattended", server: saved?.server ?? {}, bots: saved?.bots ?? {},
+        env: { stops: fromEnv.stops !== undefined, server: CAP_FIELDS.map(({ field }) => field).filter((field) => fromEnv.server[field] !== undefined), values: fromEnv },
         caps: capStates(saved, deps.dataDir, now(), env),
       };
     },

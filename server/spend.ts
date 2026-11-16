@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AppConfig } from "./config.ts";
 import { entitled } from "./enterprise.ts";
-import { CAP_WARN_PERCENT, measure, monthKeyOf, noteUsage, resetUsageTotalsForTests, usageTotals } from "./usage-caps.ts";
+import { CAP_WARN_PERCENT, measure, monthKeyOf, noteUsage, periodEnd, resetUsageTotalsForTests, usageTotals } from "./usage-caps.ts";
 
 export interface SpendState {
   month: string;
@@ -53,7 +53,8 @@ export function assertWithinBudget(
   if (!state?.exceeded) return;
   throw Object.assign(
     new Error(`this workspace has reached its monthly spend limit of $${usd(state.monthlyUsd)} — an admin can raise it under Settings → Usage`),
-    { status: 409, code: "spend_cap" },
+    // When the month rolls over and work may start again: a Bot API caller is told it as Retry-After.
+    { status: 409, code: "spend_cap", resetsAt: periodEnd("month", now) },
   );
 }
 

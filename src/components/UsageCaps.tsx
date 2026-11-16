@@ -27,10 +27,13 @@ export interface CapState {
 
 /** `caps` on GET /api/usage and the body of /api/usage/caps: only the owner gets one. */
 export interface UsageCapView {
+  /** What a reached cap stops now; `savedStops` is what config.json holds. */
   stops: "unattended" | "everything";
+  savedStops?: "unattended" | "everything";
+  /** The saved caps; `env.values` holds what the environment sets, which wins field by field. */
   server: CapLimits;
   bots: Record<string, CapLimits>;
-  env: { stops: boolean; server: CapField[] };
+  env: { stops: boolean; server: CapField[]; values?: { server: CapLimits } };
   caps: CapState[];
 }
 
@@ -104,19 +107,34 @@ export function UsageCapsCard({ view, onSaved }: { view: UsageCapView | null | u
   return view ? <CapsForm view={view} onSaved={onSaved} /> : null;
 }
 
+/** The server's caps in force: an environment value shows (greyed) in place of the saved one. */
+const serverInForce = (view: UsageCapView): CapLimits => ({ ...view.server, ...view.env.values?.server });
+
+/** What a save sends: the owner's own values, never one the environment holds. A greyed field keeps what config.json
+ * has, and the choice of what a cap stops keeps the saved one while the environment makes it. */
+export function capsToSave(view: UsageCapView, stops: UsageCapView["stops"], server: CapLimits, bots: Record<string, CapLimits>): { stops: UsageCapView["stops"]; server: CapLimits; bots: Record<string, CapLimits> } {
+  const own: CapLimits = { ...server };
+  for (const field of view.env.server) {
+    const saved = view.server[field];
+    if (saved === undefined) delete own[field];
+    else own[field] = saved;
+  }
+  return { stops: view.env.stops ? view.savedStops ?? "unattended" : stops, server: own, bots };
+}
+
 const botRows = (view: UsageCapView) => Object.entries(view.bots).map(([botId, limits]) => ({ botId, draft: draftOf(limits) }));
 
 function CapsForm({ view, onSaved }: { view: UsageCapView; onSaved?: () => void }) {
   const { state } = useStore();
   const [stops, setStops] = useState(view.stops);
-  const [server, setServer] = useState(() => draftOf(view.server));
+  const [server, setServer] = useState(() => draftOf(serverInForce(view)));
   const [bots, setBots] = useState(() => botRows(view));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const saved = JSON.stringify([view.stops, view.server, view.bots]);
+  const saved = JSON.stringify([view.stops, view.server, view.bots, view.env]);
   useEffect(() => {
     setStops(view.stops);
-    setServer(draftOf(view.server));
+    setServer(draftOf(serverInForce(view)));
     setBots(botRows(view));
   }, [saved]);
 
@@ -134,7 +152,7 @@ function CapsForm({ view, onSaved }: { view: UsageCapView; onSaved?: () => void 
     setSaving(true);
     setError(null);
     try {
-      await api("/api/usage/caps", { method: "PUT", body: JSON.stringify({ stops, server: serverLimits, bots: Object.fromEntries(botLimits) }) });
+      await api("/api/usage/caps", { method: "PUT", body: JSON.stringify(capsToSave(view, stops, serverLimits, Object.fromEntries(botLimits) as Record<string, CapLimits>)) });
       onSaved?.();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

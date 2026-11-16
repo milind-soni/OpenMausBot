@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { CostCaveats } from "./UsageSection";
-import { capTone, limitsOf, UsageCapsCard, type CapState, type UsageCapView } from "./UsageCaps";
+import { capsToSave, capTone, limitsOf, UsageCapsCard, type CapState, type UsageCapView } from "./UsageCaps";
 
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
@@ -57,9 +57,23 @@ describe("the usage caps card", () => {
 
   it("locks what the environment sets and says where it is changed", () => {
     const markup = render(view({ stops: "everything", env: { stops: true, server: ["dailyUsd"] } }));
+    expect(markup).toContain("<option value=\"everything\" selected=\"\">");
     expect(markup).toContain("The greyed-out values are set in this installation’s environment and are changed there.");
     expect(markup).toMatch(/<input[^>]*aria-label="All bots together: Per day \(USD\)"[^>]*disabled=""/);
     expect(markup).not.toMatch(/<input[^>]*aria-label="All bots together: Per day \(tokens\)"[^>]*disabled=""/);
+  });
+
+  it("shows the value in force in a greyed input, and a save keeps config.json's own values, never the environment's", () => {
+    const locked = view({ stops: "everything", savedStops: "unattended", server: { dailyUsd: 4, monthlyUsd: 30 },
+      env: { stops: true, server: ["dailyUsd", "dailyTokens"], values: { server: { dailyUsd: 2, dailyTokens: 500 } } } });
+    const markup = render(locked);
+    expect(markup).toMatch(/<input[^>]*aria-label="All bots together: Per day \(USD\)" disabled=""[^>]*value="2"\/>/);
+    expect(markup).toMatch(/<input[^>]*aria-label="All bots together: Per day \(tokens\)" disabled=""[^>]*value="500"\/>/);
+    expect(markup).toMatch(/<input[^>]*aria-label="All bots together: Per month \(USD\)" class[^>]*value="30"\/>/);
+    // The form holds 2 and 500 from the environment and the owner typed 40 per month: only 40 is theirs to save.
+    expect(capsToSave(locked, "everything", { dailyUsd: 2, dailyTokens: 500, monthlyUsd: 40 }, { b1: { dailyUsd: 1 } }))
+      .toEqual({ stops: "unattended", server: { dailyUsd: 4, monthlyUsd: 40 }, bots: { b1: { dailyUsd: 1 } } });
+    expect(capsToSave(view(), "everything", { dailyUsd: 2 }, {})).toEqual({ stops: "everything", server: { dailyUsd: 2 }, bots: {} });
   });
 
   it("reads a row of inputs as caps: empty and 0 are no cap, dollars may be fractions, tokens are whole", () => {

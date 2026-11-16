@@ -2,7 +2,8 @@
 // lets the turn that reaches it finish, then refuses a Bot API call and a webhook, counts a routine's scheduled run on one
 // skipped row, tells the owner once, still answers the owner's own message, and lets everything start again once raised.
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
@@ -44,7 +45,7 @@ it("stops unattended work at a reached cap with one line each and one notice, ke
   const hook = await ok("POST", "/api/webhooks", { name: "New lead", prompt: "Handle the lead.", botId: scout.id });
 
   // Nothing is capped until the owner sets a cap.
-  expect(await ok("GET", "/api/usage/caps")).toEqual({ stops: "unattended", server: {}, bots: {}, env: { stops: false, server: [] }, caps: [] });
+  expect(await ok("GET", "/api/usage/caps")).toEqual({ stops: "unattended", savedStops: "unattended", server: {}, bots: {}, env: { stops: false, server: [], values: { server: {} } }, caps: [] });
   expect((await call("PUT", "/api/usage/caps", { server: { dailyUsd: -1 } })).status).toBe(400);
   expect((await call("PUT", "/api/usage/caps", { bots: { nobody: { dailyUsd: 1 } } })).status).toBe(404);
   const set = await ok("PUT", "/api/usage/caps", { bots: { [scout.id]: { dailyUsd: 0.01, monthlyTokens: 0 } } });
@@ -72,7 +73,7 @@ it("stops unattended work at a reached cap with one line each and one notice, ke
   await expect.poll(async () => (await ok("GET", "/api/routines")).runs.filter((run: any) => run.routineId === routine.id).map((run: any) => run.status), { timeout: hostTimeout(90_000), interval: 1_000 }).toEqual(["missed"]);
   const state = await ok("GET", "/api/routines");
   const skipped = state.runs.find((run: any) => run.routineId === routine.id);
-  expect(skipped).toMatchObject({ skipped: { count: 1, behind: expect.stringMatching(/^cap:bot:.+:day:usd:\d{4}-\d\d-\d\d$/) }, errorCode: "routines.server.capSkippedOne" });
+  expect(skipped).toMatchObject({ skipped: { count: 1, behind: expect.stringMatching(new RegExp(`^cap:${routine.id}:bot:.+:day:usd:\\d{4}-\\d\\d-\\d\\d$`)) }, errorCode: "routines.server.capSkippedOne" });
   expect(skipped.error).toMatch(/^Skipped: this bot’s daily usage cap \(\$0\.01\) is reached\. Runs start again after /);
   expect(skipped.threadId).toBeUndefined();
   expect(state.routines.find((each: any) => each.id === routine.id)).toMatchObject({ enabled: true });
@@ -142,3 +143,45 @@ it("takes a headless server's caps from the environment, and they win over the s
   expect(refused.status).toBe(429);
   expect((await ok("GET", `/api/bots/${scout.id}/bot-api`)).calls[0].reason).toContain("the daily usage cap for all bots (1 tokens) is reached");
 }, hostTimeout(180_000));
+
+it("lets a run that already started carry on when its hand-off comes back after the cap is reached, and the owner's webhook test run", async () => {
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284" }, undefined, undefined, undefined, undefined, { scripted: true });
+  const { url, dataDir } = fixture.info;
+  const { ok } = client(url);
+  const pepper = await newBot(url, "Pepper");
+  const sam = await newBot(url, "Sam");
+  const samGate = join(dataDir, "sam-counts");
+  writeFileSync(join(dataDir, "room-plan.json"), JSON.stringify({
+    [pepper.id]: { script: [
+      { key: "run", match: ["Do the stock check."], steps: [{ tool: "coordinate_bots", arguments: { bot_ids: [sam.id], message: "Count the boxes in stock." } }], reply: "Asked Sam to count the stock." },
+      { key: "resume", match: ["42 boxes"], reply: "We have 42 boxes in stock." },
+      { key: "test", match: ["Do the stock check."], reply: "Test run done." },
+    ] },
+    [sam.id]: { script: [{ key: "count", match: ["Count the boxes in stock."], reply: "Counted 42 boxes.", gateFile: samGate }] },
+  }));
+  // Pepper's cap is reached by the first turn of the webhook's run: the run's hand-off is under way by then.
+  await ok("PUT", "/api/usage/caps", { bots: { [pepper.id]: { dailyTokens: 1 } } });
+  const hook = await ok("POST", "/api/webhooks", { name: "Stock", prompt: "Do the stock check.", botId: pepper.id });
+  const delivery = await fetch(hook.credential.url, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "stock-1" }, body: JSON.stringify({ shelf: "A" }) });
+  expect(delivery.status).toBeLessThan(300);
+  const run = async () => ((await ok("GET", "/api/routines")).runs as any[]).find((each) => each.webhookId === hook.webhook.id);
+  await expect.poll(async () => (await run())?.status, { timeout: hostTimeout(60_000), interval: 500 }).toBe("waiting");
+  await expect.poll(async () => (await ok("GET", "/api/usage/caps")).caps[0]?.reached, { timeout: hostTimeout(20_000) }).toBe(true);
+
+  // Sam answers; Pepper's run picks the result up and finishes, though new work for Pepper is refused now.
+  writeFileSync(samGate, "done");
+  await expect.poll(async () => (await run())?.status, { timeout: hostTimeout(60_000), interval: 500 }).toBe("completed");
+  const { threadId } = await run();
+  const lines = ((await ok("GET", `/api/threads/${threadId}/messages?limit=200`)).messages as any[]);
+  expect(lines.filter((line) => line.role === "bot" && line.kind === "text").map((line) => line.text)).toContain("We have 42 boxes in stock.");
+  expect(lines.filter((line) => /usage cap/.test(`${line.tool?.name ?? ""} ${line.text ?? ""}`))).toEqual([]);
+  const again = await fetch(hook.credential.url, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "stock-2" }, body: JSON.stringify({ shelf: "B" }) });
+  expect(again.status).toBe(429);
+
+  // The owner's own Run now of the webhook is theirs, as a routine started by hand is: it runs under the cap.
+  const test = await ok("POST", `/api/webhooks/${hook.webhook.id}/test`, { shelf: "C" });
+  const tested = async () => ((await ok("GET", "/api/routines")).runs as any[]).find((each) => each.id === test.runId);
+  await expect.poll(async () => (await tested())?.status, { timeout: hostTimeout(60_000), interval: 500 }).toBe("completed");
+  const testLines = ((await ok("GET", `/api/threads/${(await tested()).threadId}/messages?limit=200`)).messages as any[]);
+  expect(testLines.filter((line) => line.role === "bot" && line.kind === "text").map((line) => line.text)).toContain("Test run done.");
+}, hostTimeout(240_000));

@@ -671,10 +671,15 @@ describe("WebhookManager", () => {
 describe("turning a webhook back on, Run now, and a deleted bot's webhooks", () => {
   it("turns a paused webhook back on, and Run now works while it is paused, like a schedule's", () => {
     const h = harness();
-    const { webhook } = create(h.manager);
+    const { webhook, secret } = create(h.manager);
     expect(h.manager.update(webhook.id, { enabled: false, verificationPending: false })).toMatchObject({ enabled: false });
     expect(h.manager.test(webhook.id)).toMatchObject({ runId: "run-1", duplicate: false });
+    // The person's own test: a usage cap lets it run as it lets a routine started by hand; an outside delivery is not.
+    expect(h.queued.at(-1)).toMatchObject({ byPerson: true });
     expect(h.manager.update(webhook.id, { enabled: true, verificationPending: false })).toMatchObject({ enabled: true });
+    h.manager.receive(webhook.endpointId, secret, { payload: { lead: "Ada" }, deliveryId: "outside-1" });
+    expect(h.queued).toHaveLength(2);
+    expect(h.queued.at(-1)?.byPerson).toBeUndefined();
   });
 
   it("removes a deleted bot's webhooks for good, with their calls, and cancels their queued work", () => {

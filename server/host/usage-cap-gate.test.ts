@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { resetUsageTotalsForTests, type UsageCapsConfig } from "../usage-caps.ts";
 import { appendUsage, flushUsageLedger } from "../usage-ledger.ts";
-import { capResets, createUsageCapGate } from "./usage-cap-gate.ts";
+import { capResets, createUsageCapGate, marksOf } from "./usage-cap-gate.ts";
 
 describe("the usage cap gate", () => {
   let dataDir: string;
@@ -38,8 +38,8 @@ describe("the usage cap gate", () => {
     const open = gate();
     open.assertTurn("a", false);
     open.booked("a");
-    expect([open.refusal("a", false), open.routineSkip("a"), open.runText("a", "webhook"), open.handoff("a", "outside")]).toEqual([null, null, null, null]);
-    expect(open.view()).toEqual({ stops: "unattended", server: {}, bots: {}, env: { stops: false, server: [] }, caps: [] });
+    expect([open.refusal("a", false), open.routineSkip("a", "r1"), open.runText("a", "webhook"), open.handoff("a", "outside")]).toEqual([null, null, null, null]);
+    expect(open.view()).toEqual({ stops: "unattended", savedStops: "unattended", server: {}, bots: {}, env: { stops: false, server: [], values: { server: {} } }, caps: [] });
     expect([notices, log]).toEqual([[], []]);
   });
 
@@ -104,9 +104,11 @@ describe("the usage cap gate", () => {
     caps = { server: { dailyTokens: 1_000 } };
     await spend("2026-09-15T08:00:00.000Z", "a", 0, 1_000);
     const open = gate();
-    const skip = open.routineSkip("a")!;
+    const skip = open.routineSkip("a", "r1")!;
     const resets = capResets(Date.parse("2026-09-16T00:00:00Z"));
-    expect(skip.behind).toBe("cap:server:day:tokens:2026-09-15");
+    // Each routine under the cap keeps its own row: the routine's id is part of the row's cause.
+    expect([skip.behind, skip.resetsAt]).toEqual(["cap:r1:server:day:tokens:2026-09-15", Date.parse("2026-09-16T00:00:00Z")]);
+    expect(open.routineSkip("b", "r2")!.behind).toBe("cap:r2:server:day:tokens:2026-09-15");
     expect(skip.words(1)).toEqual({ text: `Skipped: the daily usage cap for all bots (1,000 tokens) is reached. Runs start again after ${resets}`,
       codes: { errorCode: "routines.server.capSkippedOne", errorParams: { why: "routines.server.part.capServerDay", amount: "1,000 tokens", resets } } });
     expect(skip.words(3).text).toBe(`Skipped 3 runs: the daily usage cap for all bots (1,000 tokens) is reached. Runs start again after ${resets}`);
@@ -122,7 +124,23 @@ describe("the usage cap gate", () => {
     caps = { stops: "unattended", server: { dailyUsd: 4 }, bots: { a: { dailyUsd: 1 } } };
     await spend("2026-09-15T08:00:00.000Z", "a", 0.5);
     const view = gate({ OMB_USAGE_CAP_DAILY_USD: "2", OMB_USAGE_CAP_STOPS: "everything" }).view();
-    expect(view).toMatchObject({ stops: "everything", server: { dailyUsd: 4 }, bots: { a: { dailyUsd: 1 } }, env: { stops: true, server: ["dailyUsd"] } });
+    expect(view).toMatchObject({ stops: "everything", savedStops: "unattended", server: { dailyUsd: 4 }, bots: { a: { dailyUsd: 1 } },
+      env: { stops: true, server: ["dailyUsd"], values: { stops: "everything", server: { dailyUsd: 2 } } } });
     expect(view.caps.map((cap) => [cap.id, cap.limit, cap.used, cap.percent])).toEqual([["server:day:usd", 2, 0.5, 25], ["bot:a:day:usd", 1, 0.5, 50]]);
+  });
+
+  it("reads a notices file out of shape as far as it is good, and never throws at the start of a turn", async () => {
+    expect(marksOf({ ok: { period: "2026-09-15", limit: 10, warn: true }, noPeriod: { limit: 1 }, badPeriod: { period: 7, limit: 1 }, oddPeriod: { period: "soon", limit: 1 },
+      noLimit: { period: "2026-09" }, nothing: null, text: "x", list: [1] })).toEqual({ ok: { period: "2026-09-15", limit: 10, warn: true } });
+    for (const value of [null, [], "x", 3]) expect(marksOf(value)).toEqual({});
+    caps = { server: { dailyTokens: 1_000 } };
+    await spend("2026-09-15T08:00:00.000Z", "a", 0, 1_000);
+    mkdirSync(join(dataDir, "usage"), { recursive: true });
+    writeFileSync(join(dataDir, "usage", "cap-notices.json"), JSON.stringify({ "server:day:tokens": { period: null }, other: 5 }));
+    const open = gate();
+    expect(() => open.assertTurn("a", false)).toThrow(/is reached/);
+    open.booked("a");
+    expect(notices).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(dataDir, "usage", "cap-notices.json"), "utf8"))).toEqual({ "server:day:tokens": { period: "2026-09-15", limit: 1_000, warn: true, reached: true } });
   });
 });

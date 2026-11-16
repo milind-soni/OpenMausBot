@@ -8,6 +8,8 @@ import { BotApiManager } from "./bot-api.ts";
 import { BOT_API_DEFAULT_WAIT_MS, createBotApiHost, type BotApiHostDeps, type BotApiTurnOptions } from "./bot-api-host.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message } from "./store.ts";
+import { assertWithinBudget, resetSpendCacheForTests } from "./spend.ts";
+import { appendUsage } from "./usage-ledger.ts";
 import { createWebhookIngressHandler } from "./webhook-ingress.ts";
 import type { WebhookManager } from "./webhooks.ts";
 
@@ -310,6 +312,30 @@ describe("the Bot API door on the webhook receiver", () => {
     const refused = await send();
     expect(refused.status).toBe(409);
     expect(await refused.json()).toEqual({ error: "This Cloud moved" });
+  });
+
+  it("answers the licensed monthly spend limit with 429 and a Retry-After up to the next UTC month", async () => {
+    const fake = fakeStore();
+    const dir = mkdtempSync(join(tmpdir(), "omb-bot-api-budget-"));
+    dirs.push(dir);
+    resetSpendCacheForTests();
+    await appendUsage(dir, { botId: "b1", botName: "b1", threadId: "t", instanceId: "claude", driverKind: "claudeAgent", model: "m", input: 1, output: 1, costUsd: 2, trigger: { kind: "owner" } });
+    const host = createBotApiHost({
+      store: fake.store, manager: new BotApiManager({ file: join(dir, "bot-api.json") }), waitMs: 5_000,
+      startTurn: async () => assertWithinBudget({ budgets: { monthlyUsd: 1 } }, dir, new Date(), () => true),
+      threadBusy: () => false, canStart: () => true, canConfine: () => true, hooksBaseUrl: () => "https://x", manageRefusal: () => null,
+    });
+    const key = host.manager.enable("b1").key;
+    const server = createServer((req, res) => { void createWebhookIngressHandler({} as WebhookManager, undefined, host.door)(req, res); });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const answer = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/hooks/api/bots/b1/messages`, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "Hi" }) });
+    expect(answer.status).toBe(429);
+    const now = new Date(), next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+    const retryAfter = Number(answer.headers.get("retry-after"));
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(Math.abs(retryAfter - (next - Date.now()) / 1000)).toBeLessThan(60);
+    resetSpendCacheForTests();
   });
 
   it("shows what callers sent only to those who manage the key", async () => {

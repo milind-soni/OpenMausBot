@@ -1,8 +1,10 @@
 // The cap engine over the usage ledger: what has been used this UTC day and month, by the server and by each bot, in
 // estimated dollars and in tokens, and which caps that use has reached. The open caps (`usageCaps`) and the licensed
 // monthly budget (spend.ts) both read their totals here.
+import { closeSync, openSync, readFileSync, readSync, statSync } from "node:fs";
+
 import { directTurnKind } from "./agents-turn.ts";
-import { readUsage, usageRowKey, type UsageRow } from "./usage-ledger.ts";
+import { isUsageRow, usageFileFor, usageRowKey, type UsageRow } from "./usage-ledger.ts";
 import type { CapLimits, UsageCapsConfig } from "./usage-caps-config.ts";
 
 export { usageCapsSchema, type CapLimits, type UsageCapsConfig } from "./usage-caps-config.ts";
@@ -32,7 +34,17 @@ export interface UsageTotals {
 }
 
 type Entry = { at: string; botId: string; usd: number; tokens: number };
-const cache = new Map<string, { at: number; day: string; rows: Entry[]; keys: Set<string> }>();
+type Sums = { server: Record<CapPeriod, Used>; bots: Map<string, Record<CapPeriod, Used>> };
+/** One month file as far as it was read: running sums for its month and for `day`, and how many bytes they cover. The
+ * ledger only grows by whole lines, so a later look reads just what was appended, and only when the file changed. */
+type Read = {
+  at: number; day: string; month: string; size: number; mtimeMs: number; sums: Sums;
+  /** Every row counted, by ledger key. */
+  keys: Set<string>;
+  /** Rows counted from memory when their append landed, which the file has not yet been read past. */
+  fromMemory: Set<string>;
+};
+const cache = new Map<string, Read>();
 // Rows whose async ledger append may not have landed yet: a long turn would otherwise re-read the month without its own row.
 const unwritten = new Map<string, Map<string, Entry>>();
 
@@ -57,26 +69,87 @@ export function periodEnd(period: CapPeriod, now: Date): number {
     : Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
 }
 
+const zero = (): Record<CapPeriod, Used> => ({ day: { usd: 0, tokens: 0 }, month: { usd: 0, tokens: 0 } });
+
+function addTo(sums: Sums, entry: Entry, month: string, day: string): void {
+  if (!entry.at.startsWith(month)) return;
+  const bot = sums.bots.get(entry.botId) ?? zero();
+  sums.bots.set(entry.botId, bot);
+  for (const used of entry.at.startsWith(day) ? [sums.server.month, bot.month, sums.server.day, bot.day] : [sums.server.month, bot.month]) {
+    used.usd += entry.usd;
+    used.tokens += entry.tokens;
+  }
+}
+
+/** Counts the whole lines of `bytes`; returns how many bytes they span (a line still being written is left for later). */
+function countLines(read: Read, bytes: Buffer): number {
+  const end = bytes.lastIndexOf(10) + 1;
+  for (const line of bytes.subarray(0, end).toString("utf8").split("\n")) {
+    if (!line) continue;
+    let value: unknown;
+    try { value = JSON.parse(line); } catch { continue; }
+    if (!isUsageRow(value)) continue;
+    const key = usageRowKey(value);
+    if (read.fromMemory.delete(key)) continue;
+    read.keys.add(key);
+    addTo(read.sums, entryOf(value), read.month, read.day);
+  }
+  return end;
+}
+
+function statOf(file: string): { size: number; mtimeMs: number } {
+  try {
+    const { size, mtimeMs } = statSync(file);
+    return { size, mtimeMs };
+  } catch {
+    return { size: 0, mtimeMs: 0 };
+  }
+}
+
+/** Reads the month file from the start. */
+function readMonth(dataDir: string, now: Date): Read {
+  const read: Read = { at: now.getTime(), day: dayKey(now), month: monthKeyOf(now), size: 0, mtimeMs: 0, sums: { server: zero(), bots: new Map() }, keys: new Set(), fromMemory: new Set() };
+  const file = usageFileFor(dataDir, now);
+  let bytes: Buffer;
+  try { bytes = readFileSync(file); } catch { return read; }
+  read.mtimeMs = statOf(file).mtimeMs;
+  read.size = countLines(read, bytes);
+  return read;
+}
+
+/** Brings a read up to date: nothing when the file is as it was, the appended bytes when it grew, all of it otherwise. */
+function refresh(dataDir: string, read: Read, now: Date): Read {
+  const file = usageFileFor(dataDir, now);
+  const { size, mtimeMs } = statOf(file);
+  read.at = now.getTime();
+  if (size === read.size && mtimeMs === read.mtimeMs) return read;
+  if (size < read.size) return readMonth(dataDir, now);
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, "r");
+    const bytes = Buffer.alloc(size - read.size);
+    const got = readSync(fd, bytes, 0, bytes.length, read.size);
+    read.size += countLines(read, bytes.subarray(0, got));
+    read.mtimeMs = mtimeMs;
+    return read;
+  } catch {
+    return readMonth(dataDir, now);
+  } finally {
+    if (fd !== undefined) try { closeSync(fd); } catch { /* already closed */ }
+  }
+}
+
 export function usageTotals(dataDir: string, now = new Date()): UsageTotals {
   const month = monthKeyOf(now), day = dayKey(now);
   let read = cache.get(dataDir);
-  if (!read || read.day !== day || now.getTime() - read.at >= CACHE_MS) {
-    const rows = readUsage(dataDir, { from: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), to: now });
-    read = { at: now.getTime(), day, rows: rows.map(entryOf), keys: new Set(rows.map(usageRowKey)) };
-    cache.set(dataDir, read);
-  }
-  const totals: UsageTotals = { month, day, server: { day: { usd: 0, tokens: 0 }, month: { usd: 0, tokens: 0 } }, bots: new Map() };
-  const add = (entry: Entry) => {
-    if (!entry.at.startsWith(month)) return;
-    const bot = totals.bots.get(entry.botId) ?? { day: { usd: 0, tokens: 0 }, month: { usd: 0, tokens: 0 } };
-    totals.bots.set(entry.botId, bot);
-    for (const used of entry.at.startsWith(day) ? [totals.server.month, bot.month, totals.server.day, bot.day] : [totals.server.month, bot.month]) {
-      used.usd += entry.usd;
-      used.tokens += entry.tokens;
-    }
+  if (!read || read.day !== day) read = readMonth(dataDir, now);
+  else if (now.getTime() - read.at >= CACHE_MS) read = refresh(dataDir, read, now);
+  cache.set(dataDir, read);
+  const totals: UsageTotals = {
+    month, day, server: { day: { ...read.sums.server.day }, month: { ...read.sums.server.month } },
+    bots: new Map([...read.sums.bots].map(([botId, used]) => [botId, { day: { ...used.day }, month: { ...used.month } }])),
   };
-  for (const entry of read.rows) add(entry);
-  for (const [key, entry] of unwritten.get(dataDir) ?? []) if (!read.keys.has(key)) add(entry);
+  for (const [key, entry] of unwritten.get(dataDir) ?? []) if (!read.keys.has(key)) addTo(totals, entry, month, day);
   return totals;
 }
 
@@ -92,9 +165,10 @@ export function noteUsage(dataDir: string, row: Pick<UsageRow, "at" | "threadId"
     entries.delete(key);
     if (entries.size === 0 && unwritten.get(dataDir) === entries) unwritten.delete(dataDir);
     const read = cache.get(dataDir);
-    if (landed && read && !read.keys.has(key) && entry.at.startsWith(read.day.slice(0, 7))) {
-      read.rows.push(entry);
+    if (landed && read && !read.keys.has(key) && entry.at.startsWith(read.month)) {
       read.keys.add(key);
+      read.fromMemory.add(key);
+      addTo(read.sums, entry, read.month, read.day);
     }
   });
 }
