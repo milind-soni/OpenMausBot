@@ -14400,7 +14400,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             threadId: internalCapability.threadId, botId: currentSender.id, botName: currentSender.name,
             tool: access.slug, decision: "auto-denied", source: "connector-scope", rule: `scope:${access.toolkit}:${access.reason}`,
           });
-          return refuseOutbound(sandbox.direct ? sandbox.refusal : connectorScopeRefusalText(call, access.reason, currentSender.name, appName, described.label));
+          return refuseOutbound(sandbox.direct ? sandbox.refusal : connectorScopeRefusalText(call, access.reason, currentSender.name, appName, described.label, access.allowed));
         }
         const opaque = connectorCalls.some(call => call.slug === "COMPOSIO_PROXY_EXECUTE");
         if (opaque && currentSender.connectorTools !== undefined && !sandbox.open(currentSender)) return refuseOutbound(sandbox.refusal);

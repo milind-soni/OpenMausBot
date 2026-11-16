@@ -6474,6 +6474,7 @@
   "botAccess.scopes.empty": "接続されているアプリはまだありません。アプリを接続してから、ここで許可してください。",
   "botAccess.scopes.notConnected": "未接続",
   "botAccess.scopes.accessLabel": "{app}へのアクセス",
+  "botAccess.scopes.accountsLabel": "このボットが使えるアカウント",
   "botAccess.phone.title": "スマートフォンのアプリ",
   "botAccess.phone.subtitle": "このボットが {phone} でできること",
   "botAccess.phone.notOnPhone": "スマートフォンで許可されていません",

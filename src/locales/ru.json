@@ -5805,6 +5805,7 @@
   "botAccess.scopes.empty": "Приложения ещё не подключены. Подключите одно, затем разрешите его здесь.",
   "botAccess.scopes.notConnected": "не подключено",
   "botAccess.scopes.accessLabel": "Доступ к {app}",
+  "botAccess.scopes.accountsLabel": "Аккаунты, которые может использовать этот бот",
   "botAccess.phone.title": "Приложения на телефоне",
   "botAccess.phone.subtitle": "Что этому боту разрешено делать на {phone}",
   "botAccess.phone.notOnPhone": "На телефоне не разрешено",

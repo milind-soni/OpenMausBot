@@ -6889,6 +6889,7 @@
   "botAccess.scopes.empty": "Nenhum app conectado ainda. Conecte um e permita o uso dele aqui.",
   "botAccess.scopes.notConnected": "não conectado",
   "botAccess.scopes.accessLabel": "Acesso a {app}",
+  "botAccess.scopes.accountsLabel": "Contas que este bot pode usar",
   "botAccess.phone.title": "Apps do celular",
   "botAccess.phone.subtitle": "O que este bot pode fazer em {phone}",
   "botAccess.phone.notOnPhone": "Não permitido no celular",

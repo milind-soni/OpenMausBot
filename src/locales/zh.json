@@ -6661,6 +6661,7 @@
   "botAccess.scopes.empty": "还没有连接应用。先连接一个，再在这里允许它。",
   "botAccess.scopes.notConnected": "未连接",
   "botAccess.scopes.accessLabel": "{app} 访问权限",
+  "botAccess.scopes.accountsLabel": "这个机器人可使用的账号",
   "botAccess.phone.title": "手机应用",
   "botAccess.phone.subtitle": "这个机器人在 {phone} 上可以做的事",
   "botAccess.phone.notOnPhone": "手机上未允许",
