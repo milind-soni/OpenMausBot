@@ -4942,6 +4942,8 @@
   "room.panel.responder.autoOption": "Deixar o MausBot escolher",
   "room.panel.responder.everyone": "Todos",
   "room.panel.responder.mentions": "Só quem eu mencionar com @",
+  "room.panel.turns.title": "Turnos por membro",
+  "room.panel.turns.hint": "Quantos turnos cada membro que responde faz antes de esperar por você. No último turno, o membro é avisado para concluir.",
   "room.panel.folder.own": "Pasta própria",
   "room.panel.instructions": "Instruções",
   "room.panel.instructionsHint": "Diga aos bots para que serve este grupo",

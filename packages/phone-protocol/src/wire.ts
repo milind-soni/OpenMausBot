@@ -881,9 +881,9 @@ export interface WireGroup {
   /** True while any member (or hand-off) is mid-turn. Computed at
    * projection time, never persisted. */
   working: boolean;
-  /** A direct-message channel's turn limit (minutes without progress). Null on the wire means the
-   * global group limit. Channel conversations store theirs on each task. */
+  /** A direct-message channel's turn limit (minutes without progress). Null on the wire means the global group limit. Channel conversations store theirs on each task. */
   turnTimeoutMinutes?: number | null;
+  /** Turns each member who answers a person's message takes, in order, before the room waits again; absent = 1. The last of several is marked final. */ turnsPerMember?: number;
   /** Members the person stopped in this room ("stop @Bot"), by bot id. A
    * held member gets no turn until it is @mentioned again or resumed. */
   holds?: Record<string, RoomHold>;

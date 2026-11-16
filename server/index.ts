@@ -324,7 +324,7 @@ import { autoRoomDefault, roomTurnMembers } from "./room-routing-members.ts";
 import { liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError } from "./live-call-controller.ts"; import { liveSessionWiring } from "./live-session-wiring.ts";
 import { liveCallSettings, liveSettingsFor, liveSettingsForClient, saveLiveSettings } from "./live-settings.ts"; import { azureLiveCallRefusal, liveScopeRefusal } from "./live-access.ts";
-import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts"; import { noteGroupTurn, turnsSince } from "./room-round-turns.ts";
+import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts"; import { finalTurnBlock, noteGroupTurn, roomRoundPasses, roomTurnsPerMember, turnsPerMemberPatch, turnsSince } from "./room-round-turns.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { createTtsRoutes } from "./routes/tts.ts";
 import { turnStartLogLine } from "./turn-log.ts";
@@ -3700,7 +3700,7 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
     const responder = checkedGroupResponder(body.defaultResponder, memberIds);
     if (!responder) throw Object.assign(new Error("invalid default responder"), { status: 400 });
     patch.defaultResponder = responder;
-  }
+  } Object.assign(patch, turnsPerMemberPatch(body, existing));
   if (Object.prototype.hasOwnProperty.call(body, "turnTimeoutMinutes")) {
     if (!existing.dm) {
       throw Object.assign(new Error("set the turn limit on that conversation"), { status: 400 });
@@ -10116,7 +10116,7 @@ async function runClaimedGroupMemberTurn(
       : "");
   const liveRosterBlock = !orchestration?.liveRoster || orchestration.resumed ? "" : `\n\n${orchestration.liveRoster}`;
   const heldReplay = heldReplayFor(group.id, threadId, bot.id, userName, roomContext);
-  const roomTail = `\n\n(Reply to the conversation above as ${bot.name}.)${learnBlock}${heldReplay.block}${cardContinuation ? `\n\n${cardContinuation}` : ""}${coordinationReminder}${liveRosterBlock}`;
+  const roomTail = `\n\n(Reply to the conversation above as ${bot.name}.)${learnBlock}${heldReplay.block}${cardContinuation ? `\n\n${cardContinuation}` : ""}${coordinationReminder}${liveRosterBlock}${finalTurnBlock(spoken)}`;
   const text = roomContext + roomTail;
 
   const worksInWorkspace = supportsWorkspaceFiles(instance.driverKind);
@@ -10914,7 +10914,7 @@ function startGroupTurn(
         for (const responder of round) operation.botIds.add(responder.id);
         if (round[0]) startTitle(round[0]);
       }
-      const spoken = new Set<string>();
+      let spoken = new Set<string>(); const passes = roomRoundPasses(round, roomTurnsPerMember(store.group(groupId)), (next) => { spoken = next; if (round.length > 1) operation.line = { pending: round.map(responder => responder.id) }; advanceLine(undefined); });
       const skillAuthoringClaim = { claimed: false };
       if (round.length > 1) operation.line = { pending: round.map(responder => responder.id) };
       const advanceLine = (current: string | undefined) => {
@@ -10922,7 +10922,7 @@ function startGroupTurn(
         if (room) broadcast({ kind: "group", group: publicGroupState(room) });
       };
       advanceLine(undefined);
-      for (const responder of round) {
+      for (const responder of passes) {
         if (operation.cancelled) break;
         if (spoken.has(responder.id)) continue;
         const verdict = await waitForChatRoomMember(operation, threadId, responder);
