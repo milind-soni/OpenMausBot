@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vitest";
 
 import type { AppConfig } from "../config.ts";
 import { mcpServerConfigHash } from "../mcp-app-catalog.ts";
+import { McpOAuthManager } from "../mcp-oauth.ts";
 import { VaultStore } from "../vault-store.ts";
 import { createMcpKeys } from "../vault/mcp-keys.ts";
 import { claimedNotice, createMcpServersHost, startCheckTimeout } from "./mcp-servers-host.ts";
@@ -197,4 +198,28 @@ it("forgets which Vault items a server could read when its bot's own server goes
   host.botDeleted("iris");
   expect(cfg.mcpServers).toEqual({});
   expect(vault.mcpServerKeys("bot-server")).toEqual([]);
+});
+
+it("forgets the sign-in of a bot's own web connection when it goes with the bot, so a new one by that name starts signed out", () => {
+  const data = mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
+  dirs.push(data);
+  const url = "https://mcp.linear.app/mcp";
+  const oauth = new McpOAuthManager({ file: join(data, "mcp-oauth.json") });
+  oauth.adopt("linear_iris", url, { url, state: "signed-in", tokens: { access: "token" } });
+  const cfg = { mcpServers: { linear_iris: { type: "http", url, headers: {}, enabled: true, bot: "iris" } } } as unknown as AppConfig;
+  const host = createMcpServersHost({ dataDir: data, cfg: () => cfg, persist: (next) => { cfg.mcpServers = next; }, bots: () => [IRIS], startsServers: () => true, boxed: () => false, policy: (servers) => servers, tell: () => {}, forgetSignIn: (name) => oauth.forget(name) });
+  host.botDeleted("iris");
+  expect(cfg.mcpServers).toEqual({});
+  expect(oauth.authState("linear_iris", url)).not.toBe("signed-in");
+});
+
+it("still forgets the sign-in when forgetting the server's Vault items fails", () => {
+  const data = mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
+  dirs.push(data);
+  const forgotten: string[] = [];
+  const cfg = { mcpServers: { linear_iris: { type: "http", url: "https://mcp.linear.app/mcp", headers: {}, enabled: true, bot: "iris" } } } as unknown as AppConfig;
+  const keys = { forgetServer: () => { throw new Error("vault write failed"); } } as unknown as ReturnType<typeof createMcpKeys>;
+  const host = createMcpServersHost({ dataDir: data, cfg: () => cfg, persist: (next) => { cfg.mcpServers = next; }, bots: () => [IRIS], startsServers: () => true, boxed: () => false, policy: (servers) => servers, tell: () => {}, keys, forgetSignIn: (name) => forgotten.push(name) });
+  expect(() => host.botDeleted("iris")).toThrow("vault write failed");
+  expect(forgotten).toEqual(["linear_iris"]);
 });

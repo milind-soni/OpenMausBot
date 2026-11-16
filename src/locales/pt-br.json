@@ -232,6 +232,7 @@
   "server.connect.secretHandoff": "Forneça {label} com segurança pelo OpenMausBot no celular ou no computador. O conteúdo nunca é adicionado ao chat.",
   "server.connect.secretFile": "Os comandos de {bot} podem ler o conteúdo em um arquivo privado por 24 horas; esse conteúdo nunca é adicionado ao chat.",
   "server.connect.secretRef": "{bot} recebe uma referência de uso único para as ferramentas do próprio OpenMausBot e nunca vê o valor.",
+  "server.connect.secretSavedAsRef": "{label} já está salvo, mas só para as ferramentas do próprio OpenMausBot. {bot} precisa dele como arquivo para os comandos, então digite de novo aqui.",
   "server.connect.secretKept": "O OpenMausBot guarda com segurança, para que {bot} possa usar de novo sem pedir a você.",
   "server.connect.secretNeverRead": "{bot} pode usar o valor, mas nunca consegue lê-lo.",
   "server.connect.emailOutgoingLabel": "Servidor de saída de {address}",
@@ -2731,6 +2732,8 @@
   "chat.liveness.outputJustNow": "última saída agora mesmo",
   "chat.liveness.outputMinutes": "última saída há {count} min",
   "chat.liveness.outputHours": "última saída há {count} h",
+  "chat.liveness.silentMinutes": "nada de novo há {count} min",
+  "chat.liveness.silentHours": "nada de novo há {count} h",
   "chat.liveness.network": "aguardando a rede",
   "chat.liveness.busy": "em atividade, sem saída ainda",
   "chat.liveness.idle": "sem atividade, sem saída ainda",
@@ -10935,5 +10938,6 @@
   "devices.computers.detail": "Abra os bots deste computador em outro computador conectado à mesma conta do Tailscale. Precisa do Tailscale nos dois.",
   "devices.computers.typeCode": "No outro computador, abra Conectar a um servidor no {app} e cole o link que você copiar aqui. Ou digite lá este endereço e este código.",
   "devices.computers.address": "Endereço",
-  "devices.computers.pairLine": "Cria um link que seu outro computador abre. Funciona uma vez."
+  "devices.computers.pairLine": "Cria um link que seu outro computador abre. Funciona uma vez.",
+  "chat.settingsCard.elsewhere": "Isso é definido no próprio computador: abra o MausBot lá, depois Configurações → Celular e dispositivos → Seus outros computadores."
 }

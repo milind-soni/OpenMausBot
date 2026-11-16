@@ -3,12 +3,13 @@
 // owner-only setting is only explained.
 import { randomUUID } from "node:crypto";
 
-import type { AppSettingRequest } from "../../shared/app-settings.ts";
+import { isSettingsCardId, SETTINGS_CARD_IDS, type AppSettingRequest, type SettingsCardId } from "../../shared/app-settings.ts";
 import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE } from "../direct-apply.ts";
 import { serverLine } from "../server-lines.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import type { ThemeTool } from "../themes/tool.ts";
+import { cardElsewhere, cardNotInRoom, cardShownStatus, SETTINGS_CARDS } from "./cards.ts";
 import type { TakenPicture } from "./picture-file.ts";
 import { findSettings, personOnly, type SettingEntry, type WritableEntry } from "./registry.ts";
 
@@ -72,6 +73,8 @@ export interface AppSettingsDeps {
   themes?: ThemeTool;
   /** For a setting that takes a picture file: stores the file the bot names, or says why not. */
   pictures?: { take(turn: Turn, path: string): Promise<TakenPicture>; discard(avatarUrl: string): void };
+  /** Settings cards: whether a card's control exists on this server's own computer, and whether its setting is known to be on (null when the server cannot tell). Absent: no cards here. */
+  cards?: { here(id: SettingsCardId): boolean; on(id: SettingsCardId): true | null };
 }
 
 export function createAppSettings(deps: AppSettingsDeps) {
@@ -170,6 +173,22 @@ export function createAppSettings(deps: AppSettingsDeps) {
     return asked ? apply(turn, bot, themes.entry(person), asked.wear, asked.change) : themes.addAsset(turn, person, body);
   }
 
+  /** Shows a setting's own control in the conversation. Security invariant: the reply and the row carry fixed words and
+   * the card's id only; the control's code, link and address never pass through here. */
+  function showCard(turn: Turn, body: Record<string, unknown>) {
+    if (!isSettingsCardId(body.card)) return refuse(404, `No settings card ${JSON.stringify(body.card ?? null)}. Cards: ${SETTINGS_CARD_IDS.join(", ")}.`);
+    const card = SETTINGS_CARDS[body.card];
+    const bot = store.bot(turn.botId);
+    if (!bot) return refuse(404, "This bot no longer exists.");
+    if (deps.guestDriven(turn.threadId) || deps.turnOwner(turn) === null) return refuse(403, "A settings card shows only in the owner's own conversation, when they asked. This turn was not started by the owner here, so nothing was shown.");
+    if (!deps.cards?.here(body.card)) return reply(200, { text: cardElsewhere(card) });
+    if (deps.connectorThread(bot.id, turn.threadId)?.group) return reply(200, { text: cardNotInRoom(card) });
+    const budget = spendWrite(turn);
+    if (budget) return refuse(429, budget);
+    store.appendMessage(turn.threadId, { role: "bot", kind: "text", text: card.text, settingsCard: { id: body.card } });
+    return reply(200, { text: cardShownStatus(card, deps.cards.on(body.card)) });
+  }
+
   return {
     async handle(body: Record<string, unknown>, turn: Turn): Promise<{ status: number; body: Record<string, unknown> }> {
       if (body.action === "find") {
@@ -184,8 +203,9 @@ export function createAppSettings(deps: AppSettingsDeps) {
           change: entry.tier === "owner-only" ? `only the person, in ${entry.where}` : entry.tier === "secret" ? "set with no value opens a secure card" : "set applies at once, with Undo on the card" }) });
       }
       if (body.action === "set") return set(turn, body);
+      if (body.action === "show_card") return showCard(turn, body);
       if (typeof body.action === "string" && THEME_ACTIONS.includes(body.action)) return theme(turn, body);
-      return refuse(400, `action must be find, get, set, ${THEME_ACTIONS.join(", ")}.`);
+      return refuse(400, `action must be find, get, set, show_card, ${THEME_ACTIONS.join(", ")}.`);
     },
 
     /** Undo on an applied card: restores the value read before the change, unless it changed since. */

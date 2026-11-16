@@ -1158,7 +1158,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
                   trackPointer={false}
                 />
               }
-              visible={presenceVisible}
+              visible={presenceVisible} threadId={group.threadId}
               phrases={activity?.phrases}
               phase={activity?.phase}
               size={activity?.size} hover={activity?.hover} quiet={live.status && "quiet" in live.status ? live.status.quiet : undefined}

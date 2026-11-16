@@ -468,6 +468,9 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   serverCard?: true;
   /** A setup suggestion the device renders in its own words (server/host/helper-suggestion.ts); `text` is the English. */
   setupSuggestion?: { kind: "helperKey"; answer?: "notNow" };
+  /** A setting's own control, drawn in chat by a device that has it (app_settings show_card); `text` is the English for
+   * every other client. */
+  settingsCard?: import("./app-settings.ts").SettingsCardData;
   /** A person's line Set me up turned into a setup request: the bot reads it as `/setup <text>`; the chat shows `text`. */
   setupRequest?: true;
   /** app rows (kind "app"): bot HTML or an MCP server's UI. `text` is always the readable fallback. */
@@ -516,6 +519,9 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
    * route (the Slack worker): nobody typed it in one of this workspace's
    * clients. A Live call never reads it back as what the caller typed. */
   relayed?: boolean;
+  /** A user line a routine, webhook, room coordination or another bot's
+   * message started a turn with: the person did not write it. */
+  automated?: boolean;
   /** Which person sent this user message, when the workspace has more than
    * one. Absent reads as the profile name. */
   sender?: ResolvedSender;

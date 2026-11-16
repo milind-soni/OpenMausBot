@@ -178,6 +178,11 @@ export function createMcpConfig(deps: McpConfigDeps & { changed(): void }): McpC
     replace: (name, server, keys) => write(() => {
       const found = stored(name);
       if (!found.existing) return found.result!;
+      if (server.bot !== found.existing.bot) {
+        const { [name]: _replaced, ...others } = found.current;
+        const limit = mcpServerLimitError(others, [server]);
+        if (limit) return { status: 400, error: limit };
+      }
       const refusal = refused(name, server);
       if (refusal) return refusal;
       if (keys) deps.keys?.grant(name, keys);
