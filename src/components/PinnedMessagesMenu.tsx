@@ -48,8 +48,11 @@ export function PinnedMessagesMenu({ pins, onJump, onUnpin, triggerClassName }: 
   const unpin = (messageId: string) => {
     if (pins.length === 1) {
       setOpen(false);
-      const beside = [...(root.current?.parentElement?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [])];
-      (beside.find((button) => !root.current?.contains(button) && button.checkVisibility?.() !== false) ?? trigger.current)?.focus();
+      const here = root.current;
+      const beside = [...(here?.parentElement?.querySelectorAll<HTMLElement>("button:not(:disabled)") ?? [])]
+        .filter((button) => !here?.contains(button) && button.checkVisibility?.() !== false);
+      const comesAfter = (button: HTMLElement) => Boolean(here && here.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING);
+      (beside.find(comesAfter) ?? beside.findLast((button) => !comesAfter(button)) ?? trigger.current)?.focus();
     }
     onUnpin?.(messageId);
   };

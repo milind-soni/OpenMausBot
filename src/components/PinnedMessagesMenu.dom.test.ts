@@ -59,6 +59,7 @@ it("closes for good once the last pin is gone, and hands focus to the button bes
   const onUnpin = vi.fn();
   const root = createRoot(document.body.appendChild(document.createElement("div")));
   const render = (pins: typeof PINS) => act(async () => root.render(createElement("div", null,
+    createElement("button", { "data-first": "" }),
     createElement("button", { "data-beside": "" }),
     createElement(PinnedMessagesMenu, { pins, onJump: vi.fn(), onUnpin }),
   )));
@@ -72,6 +73,21 @@ it("closes for good once the last pin is gone, and hands focus to the button bes
   await render(PINS);
   expect(trigger()!.getAttribute("aria-expanded")).toBe("false");
   expect(document.querySelector("[role=menu]:not([inert])")).toBeNull();
+  act(() => root.unmount());
+});
+
+it("prefers the button after the menu to the one before it when the last pin goes", async () => {
+  const root = createRoot(document.body.appendChild(document.createElement("div")));
+  await act(async () => root.render(createElement("div", null,
+    createElement("button", { "data-before": "" }),
+    createElement(PinnedMessagesMenu, { pins: PINS, onJump: vi.fn(), onUnpin: vi.fn() }),
+    createElement("button", { disabled: true }),
+    createElement("button", { "data-after": "" }),
+    createElement("button", { "data-last": "" }),
+  )));
+  await act(async () => trigger()!.click());
+  await act(async () => items()[1]!.click());
+  expect(document.activeElement).toBe(document.querySelector("[data-after]"));
   act(() => root.unmount());
 });
 
