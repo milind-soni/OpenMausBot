@@ -7,6 +7,7 @@ import { audienceMember, type Audience } from "./audience.ts";
 import type { InstanceConfig, InstanceConfigMap, ProviderSnapshot } from "./contracts.ts";
 import { audienceHomeKey, engineHomesRoot } from "./engine-homes/layout.ts";
 import type { PlanProviderRow, PlanUsageReport, PlanWindow } from "./plan-usage.ts";
+import { ANTIGRAVITY_USAGE_LIMITS } from "./drivers/antigravity-usage-limits.ts";
 
 export interface EngineLimitWindow {
   name: string;
@@ -35,7 +36,8 @@ export interface EngineLimitInstance {
   enabled: boolean;
 }
 
-const REPORTING_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "grokAgent", "opencodeGo"]);
+const REPORTING_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "grokAgent", "opencodeGo", "antigravityAgent"]);
+const ANTIGRAVITY = "antigravityAgent";
 const UNSUPPORTED_WHY = "This AI does not report usage limits to this app.";
 const NO_WINDOWS_WHY = "The account answered but reported no usage windows.";
 const NOT_CHECKED_WHY = "Usage could not be checked just now. Try again later.";
@@ -64,9 +66,10 @@ export function accountReadableFrom(entry: InstanceConfig | undefined, turn: Aud
 
 const percent = (value: number) => Math.round(value * 10) / 10;
 
-function rowWindows(row: PlanProviderRow): EngineLimitWindow[] {
+/** `lead` names whose allowance an account's two leading windows are, when its models do not all share them. */
+function rowWindows(row: PlanProviderRow, lead = ""): EngineLimitWindow[] {
   const line = (name: string, window: PlanWindow): EngineLimitWindow[] => window.available && window.usedPercent !== null
-    ? [{ name, usedPercent: percent(window.usedPercent), resetsAt: window.resetsAt }] : [];
+    ? [{ name: `${lead}${name}`, usedPercent: percent(window.usedPercent), resetsAt: window.resetsAt }] : [];
   return [
     ...line("5-hour", row.fiveHour),
     ...line("weekly", row.weekly),
@@ -101,14 +104,17 @@ export function engineLimitsFor(input: {
       seen.set(name, count);
       return { account: count > 1 ? `${name} ${count}` : name, engine: instance.driverKind };
     })();
-    if (!REPORTING_DRIVERS.has(instance.driverKind) || snapshot.billing === "metered") {
+    if (!REPORTING_DRIVERS.has(instance.driverKind) || snapshot.billing === "metered" || (instance.driverKind === ANTIGRAVITY && !ANTIGRAVITY_USAGE_LIMITS)) {
       return snapshot.authenticated === false ? [] : [{ ...base, status: "unsupported", checkedAt: null, windows: [], why: UNSUPPORTED_WHY }];
     }
     if (!report) return [{ ...base, status: "unknown", checkedAt: null, windows: [], why: NOT_CHECKED_WHY }];
     const row = report.providers.find((candidate) => candidate.id === instance.instanceId);
+    // An Antigravity account has no row when its limits could not be read just now, or when nobody is signed in.
+    if (!row && instance.driverKind === ANTIGRAVITY) return snapshot.authenticated === false ? [] : [{ ...base, status: "unknown", checkedAt: report.fetchedAt, windows: [], why: NOT_CHECKED_WHY }];
     if (!row) return [{ ...base, status: "unsupported", checkedAt: null, windows: [], why: UNSUPPORTED_WHY }];
     if (!row.ok) return [{ ...base, status: "unknown", checkedAt: report.fetchedAt, windows: [], why: row.error ?? NOT_CHECKED_WHY }];
-    const windows = rowWindows(row);
+    // Antigravity's leading windows are Gemini's own; its other models draw on the allowances listed after them.
+    const windows = rowWindows(row, instance.driverKind === ANTIGRAVITY ? "Gemini " : "");
     const plan = row.plan ? { plan: row.plan } : {};
     return [windows.length
       ? { ...base, ...plan, status: "ok", checkedAt: report.fetchedAt, windows }
