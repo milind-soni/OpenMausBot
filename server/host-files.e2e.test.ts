@@ -164,19 +164,21 @@ describe("file tools on this computer, through its bridge", () => {
     const gate = await controlServer();
     const controller = new AbortController();
     const sessions: ChatToolSession[] = [];
-    const mount = async (env: Record<string, string>) => {
+    // The first start gets the whole start budget, so a slow runner lists the real tools instead of the stand-in
+    // (computer_tools_status, chat-host-computer.ts); a later turn waits only briefly and goes on with the list remembered.
+    const mount = async (env: Record<string, string>, startupMs: number) => {
       const turn = withHostFileTools({ localComputer: gatedLocalComputer(driver(env), gate.control) });
       const localComputer = { ...turn!.localComputer!, env: { ...turn!.localComputer!.env, HOME: home, USERPROFILE: home } };
-      const session = await mountChatTools({ localComputer }, controller.signal, true, undefined, undefined, undefined, undefined, undefined, undefined, { startupMs: 300, hostComputerMs: 20_000 });
+      const session = await mountChatTools({ localComputer }, controller.signal, true, undefined, undefined, undefined, undefined, undefined, undefined, { startupMs, hostComputerMs: 20_000 });
       sessions.push(session);
       return session;
     };
     const names = (session: ChatToolSession) => session.definitions.map((definition) => definition.function.name);
     try {
-      const cold = await mount({});
+      const cold = await mount({}, 20_000);
       expect(names(cold)).toEqual(["computer_screenshot", ...FILE_TOOLS.map((name) => `computer_${name}`)]);
       const asked = Date.now();
-      const warm = await mount({ FAKE_DELAY_MS: "2500" });
+      const warm = await mount({ FAKE_DELAY_MS: "2500" }, 300);
       expect(Date.now() - asked).toBeLessThan(2_000);
       expect(names(warm)).toEqual(names(cold));
       const saved = await warm.execute("computer_write_file", { path: join(home, "Documents", "nota.txt"), content: "oi" }, controller.signal);
