@@ -23,7 +23,7 @@ describe("laneBulletin", () => {
   };
   const store = { groupByThread: (threadId: string) => rooms[threadId] } as unknown as Store;
   const lanes: Record<string, string> = { lane: "room-thread", "quiet-lane": "quiet-thread" };
-  const { laneBulletin } = createRoomJobs({ store, coordinator: { all: () => [] }, cfg: {} as AppConfig,
+  const { laneBulletin } = createRoomJobs({ store, coordinator: { active: () => [] }, cfg: {} as AppConfig,
     operations: () => [], speakerOf: () => undefined, laneRoomThread: n => lanes[n.threadId] });
 
   it("carries the room's bulletin into a job running beside it", () => {
