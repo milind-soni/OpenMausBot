@@ -383,7 +383,7 @@
   "cloudBuy.promise.starter": "Tus bots siguen trabajando con el portátil cerrado, al precio más bajo.",
   "cloudBuy.promise.pro": "Tus bots siguen trabajando 24/7, incluso con el portátil cerrado.",
   "cloudBuy.promise.max": "La máquina en la nube más grande, para bots que usan equipos todo el día.",
-  "cloudBuy.promise.team": "Una Cloud compartida para hasta {seats} personas: bots, chats de grupo y roles para todo tu equipo.",
+  "cloudBuy.promise.teamPlan": "Una Cloud compartida para todo tu equipo: bots, chats de grupo y roles para todos. Añade personas cuando quieras.",
   "cloudBuy.card.get": "Obtener {plan}",
   "cloudBuy.card.current": "Tu plan",
   "cloudBuy.card.trial.one": "Gratis durante 1 día; después, {price}/mes + impuestos",

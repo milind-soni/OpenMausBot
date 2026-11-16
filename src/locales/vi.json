@@ -371,7 +371,7 @@
   "cloudBuy.promise.starter": "Bot của bạn vẫn làm việc khi laptop đã gập lại, với giá thấp nhất.",
   "cloudBuy.promise.pro": "Bot của bạn làm việc 24/7, kể cả khi laptop đã gập lại.",
   "cloudBuy.promise.max": "Máy đám mây lớn nhất, cho các bot dùng máy tính cả ngày.",
-  "cloudBuy.promise.team": "Một Cloud dùng chung cho tối đa {seats} người: bot, trò chuyện nhóm và vai trò cho cả nhóm của bạn.",
+  "cloudBuy.promise.teamPlan": "Một Cloud dùng chung cho cả nhóm của bạn: bot, trò chuyện nhóm và vai trò cho mọi người. Thêm người bất cứ lúc nào.",
   "cloudBuy.plan.limit": "Sử dụng hợp lý: tối đa {count} cùng lúc",
   "cloudBuy.plan.voiceMinutes": "Trả lời bằng giọng nói: khoảng {minutes} phút giọng nói mỗi tháng",
   "cloudBuy.plan.voiceHour": "Trả lời bằng giọng nói: khoảng một giờ giọng nói mỗi tháng",
