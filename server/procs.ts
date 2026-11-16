@@ -21,6 +21,9 @@ import { engineHomes } from "./engine-homes/engine-homes.ts";
 import type { HomedSpawn } from "./engine-homes/layout.ts";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
 import { spawnBotWork } from "./oom-score.ts";
+import { noticeFailure } from "./chat-notices.ts";
+import { processBudget } from "./process-room.ts";
+import { shortageCode } from "./process-shortage.ts";
 
 export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
   return resolveCliSpawn(cli, args, env);
@@ -169,6 +172,24 @@ function linuxDescendantsStopped(child: ChildProcess): boolean {
   return true;
 }
 
+/** Whether every process still in this group has exited and only waits to be collected. Where nothing collects orphans
+ * (Node as a container's process 1) such members stay for good, and kill(-pgid, 0) goes on succeeding for them. False
+ * when a member runs, when none is found, or when /proc can't say. */
+export function linuxGroupOnlyExited(group: number, list: () => string[] = () => readdirSync("/proc"), stat: (pid: number) => string = (pid) => readFileSync(`/proc/${pid}/stat`, "utf8")): boolean {
+  let entries: string[];
+  try { entries = list(); } catch { return false; }
+  let members = 0;
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry)) continue;
+    let fields: string[];
+    try { const text = stat(Number(entry)); fields = text.slice(text.lastIndexOf(")") + 2).split(" "); } catch { continue; }
+    if (Number(fields[2]) !== group) continue;
+    if (fields[0] !== "Z" && fields[0] !== "X") return false;
+    members += 1;
+  }
+  return members > 0;
+}
+
 function linuxRootIdentityMatches(child: ChildProcess): boolean | undefined {
   const start = child.pid && linuxTrees.get(child)?.get(child.pid);
   if (!child.pid || process.platform !== "linux" || !cliGroups.has(child)) return true;
@@ -303,6 +324,8 @@ export function spawnCli(
     for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
   }
   rememberLiveSpawn(child, [resolved.command, ...resolved.args]);
+  // Node reports a refused spawn (EAGAIN, EMFILE, ENOENT) on the child, a tick later, with no pid.
+  child.once("error", (error: NodeJS.ErrnoException) => { if (!child.pid) { processBudget.spawnFailed(error.code); engineMemory.spawnRefused(error.code); } });
   // The broker token minted for this process dies with it.
   if (boxed?.token) child.once("exit", boxed.release);
   if (process.platform !== "win32") cliGroups.add(child);
@@ -433,9 +456,11 @@ export function cliVersionReader(cli: string): (err: Error | null, stdout: strin
 }
 
 /** Node reports a missing cwd as the CLI's own ENOENT, so pass `cwd` to tell a moved folder from a missing CLI. */
-type SpawnFailure = { message: string; setup: boolean };
+type SpawnFailure = { message: string; setup: boolean; text?: ReturnType<typeof noticeFailure>["text"] };
 
 export function describeSpawnFailure(err: NodeJS.ErrnoException, cli: string, cwd?: string): SpawnFailure {
+  const shortage = shortageCode(err);
+  if (shortage) return { ...noticeFailure("chat.notice.outOfProcesses", { code: shortage }), setup: false };
   if (err.code === "ENOENT") {
     if (cwd && !existsSync(cwd))
       return { message: `This chat's working folder no longer exists: ${cwd}. Choose another folder in the bot's settings, or create it again.`, setup: false };
@@ -477,7 +502,7 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
       if (linuxRootIdentityMatches(child) === undefined) return false;
       try {
         process.kill(-pid, 0);
-        return false;
+        return process.platform === "linux" && linuxGroupOnlyExited(pid);
       } catch (error) {
         // EPERM and other failures do not prove that the group is gone.
         return (error as NodeJS.ErrnoException).code === "ESRCH";
@@ -509,8 +534,10 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
       return true;
     };
     if (settled()) return true;
+    if (exited()) processBudget.noteLateReaped();
     signal("SIGTERM");
     if (await wait(timeoutMs)) return true;
+    processBudget.noteForceKilled();
     signal("SIGKILL");
     return wait(1_000);
   }

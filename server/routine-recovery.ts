@@ -10,6 +10,7 @@ import { isCountedSkip, type RoutineRetryCause } from "../shared/routines.ts";
 import { engineFailureKind } from "./drivers/engine-errors.ts";
 import { classifyError } from "./drivers/retry.ts";
 import { hostFaultOf, retryCannotFix } from "./host-fault.ts";
+import { outOfProcesses } from "./process-shortage.ts";
 import { nextOccurrence } from "./routine-schedules.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import { codedLine, fittedLine, type RoutineLine, type RoutineLineKey } from "./routine-lines.ts";
@@ -93,7 +94,8 @@ const FIRST_START: Record<RoutineRetryCause, string> = {
  * stop someone pressed or typed, a refusal, a spent cap, and a fault a second start would meet again (no process could
  * start, a full disk, a tool server that is down). Routine runs and teammate threads both judge by this. */
 export function classifyRoutineFailure(failure: string, facts: RoutineFailureFacts = {}): RoutineFailureClass {
-  if (facts.cause === "busy") return { kind: "busy" };
+  // The server had no room to start the run's engine: the run waits and starts again, as for a busy bot.
+  if (facts.cause === "busy" || outOfProcesses(failure)) return { kind: "busy" };
   if (facts.cause === "stalled" || facts.cause === "cap") return { kind: "final" };
   if (facts.stopReason && NOT_RETRIED_STOPS.has(facts.stopReason)) return { kind: "final" };
   if (classifyContinuable(facts.stopReason, failure) === "cap") return { kind: "final" };

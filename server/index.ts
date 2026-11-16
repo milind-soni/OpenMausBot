@@ -211,7 +211,7 @@ import {
   newId,
 } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
-import { recoveryCapabilityError, startupBackups } from "./automatic-recovery.ts";
+import { recoveryCapabilityError, startupBackups } from "./automatic-recovery.ts"; import { outOfProcesses } from "./process-shortage.ts";
 import { createQuotaSwitchHost } from "./host/quota-switch.ts"; import { quotaSwitchEnabled } from "./quota-switch.ts"; import { createPeerLimitResend } from "./host/peer-limit-resend.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
 import { createMcpServersHost } from "./host/mcp-servers-host.ts"; import { createMcpKeys } from "./vault/mcp-keys.ts"; import { createLimitTakeover, signedOutStop } from "./host/limit-takeover.ts";
@@ -8506,12 +8506,12 @@ async function beginTurn(
     } catch (cause) {
       let e = cause; perf.noteNotStarted(threadId, cause instanceof TurnNotStartedError ? cause.turnId : null, cause instanceof TurnUsageLimitRefusedError ? { limit: cause.scope, engine: registry.get(instanceId)?.driverKind ?? null, resetsAt: cause.resetsAt } : cause instanceof TurnAuthenticationRefusedError ? { signedOut: true } : {});
       // Only the driver can prove a task was never submitted; an error string is not that proof.
-      const mayRecover = e instanceof TurnNotStartedError &&
-        directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId);
+      const claimed = e instanceof TurnNotStartedError && directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId);
+      const mayRecover = claimed && !outOfProcesses((e as Error).message); // the server had no room: no backup AI is tried
       if (e instanceof TurnNotStartedError) {
         retireProviderTurn(e.turnId);
         if (e instanceof TurnUsageLimitRefusedError && !e.known) { if (e.scope === "engine") limitClock.noteLimit(instanceId, e.resetsAt); else limitTakeover.holdModel({ instanceId, model }, e.scope, e.resetsAt); } else if (e instanceof TurnAuthenticationRefusedError && !e.known) limitTakeover.noteSignedOut(instanceId);
-        if (!mayRecover) e = new DirectTurnSetupCancelled("turn stopped during provider setup");
+        if (!claimed) e = new DirectTurnSetupCancelled("turn stopped during provider setup");
       }
       handoffs.abandon(threadId, dispatchClaimId);
       if (computerSelectionTurns.get(threadId)?.generation === dispatchClaimId) computerSelectionTurns.delete(threadId);

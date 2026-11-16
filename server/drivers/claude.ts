@@ -45,7 +45,7 @@ import { claudeApiError, claudeApiErrorMessage, claudeLimitError, claudeLimitFac
 import { createOrgModelBlocks, modelSwapNotice, withOrgBlocks } from "./claude-model-access.ts";
 import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { TEAM_TOOLS_FAILED, failedCustomMcp, teamToolsFailed } from "./team-tools.ts";
-import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "./session-idle.ts";
+import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose, stoppedForRoom } from "./session-idle.ts";
 import { keyedStable, promptHalves, withRosterNote, withVolatileNote } from "./prompt-split.ts"; import { CLAUDE_OWN_MEMORY_OFF } from "./claude-own-memory.ts";
 import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
 import {
@@ -1733,7 +1733,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
           const endedBeforeTurn = session.turn.awaitingInit === true || (refusedAutocompact && !session.turn.sawStreamDelta && session.turn.answered !== true);
-          if (!retry.cancelled && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
+          if (!retry.cancelled && !stoppedForRoom(threadId) && mayResendTurn({ endedBeforeTurn, exitCode: code, transient: verdict.transient,
             streamed: session.turn.sawStreamDelta, answered: session.turn.answered === true, attempt: retry.attempt })) {
             // `active` stays: an interrupt during the backoff reaches stop() and cancels the retry.
             const failedBroker = session.broker;
