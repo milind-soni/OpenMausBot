@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { GROK_EXPORT_FORMAT, GROK_EXPORT_MAX_CHARS, parseGrokExport } from "../shared/grok-import.ts";
-import { createMoveLink, HANDOFF_CONTEXT_MAX, HANDOFF_TASK_MAX, HANDOFFS_PER_HOUR, HandoffRefused, MOVE_MAX_BYTES, MOVE_MAX_DOCUMENTS, moveMcp, type HandoffAsk, type HandoffStatus, type MoveHost, type MoveLink } from "./grok-move-mcp.ts";
+import { createMoveLink, HANDOFF_CONTEXT_MAX, HANDOFF_TASK_MAX, HANDOFFS_PER_HOUR, HandoffRefused, MOVE_MAX_BYTES, MOVE_MAX_DOCUMENTS, moveBusy, moveManifest, moveMcp, type HandoffAsk, type HandoffStatus, type MoveHost, type MoveLink } from "./grok-move-mcp.ts";
 
 const TOKEN = "sk-abcdefghijklmnopqrstuvwx";
 const link = (host?: MoveHost): MoveLink => {
@@ -42,7 +42,7 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
       expect(await moveMcp(rpc("initialize", { protocolVersion: asked, capabilities: {} }), to)).toMatchObject({
         status: 200,
         body: { jsonrpc: "2.0", id: 1, result: { protocolVersion: given, capabilities: { tools: {} }, serverInfo: { name: "MausBot" },
-          instructions: expect.stringContaining("The link's address changes when MausBot restarts or updates: if calls stop reaching MausBot, ask the person to remove this connector and add the new link MausBot shows them.") } },
+          instructions: expect.stringContaining("when a tool says MausBot isn't open, ask the person to open it, then call the tool again.") } },
       });
     }
     expect(await moveMcp(rpc("notifications/initialized", undefined, null), to)).toEqual({ status: 202 });
@@ -55,9 +55,22 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
     expect(tools.map((tool) => tool.inputSchema.required)).toEqual([undefined, ["document"], ["task"], ["task_id"]]);
   });
 
+  it("hands the hosted address the handshake and the tool list it gives itself, and words for when it isn't there", async () => {
+    const manifest = moveManifest();
+    const listed = (await moveMcp(rpc("tools/list"), link())).body as { result: unknown };
+    const greeted = (await moveMcp(rpc("initialize", {}), link())).body as { result: unknown };
+    expect(manifest.tools).toEqual(listed.result);
+    expect({ ...manifest.initialize, protocolVersion: manifest.versions[0] }).toEqual(greeted.result);
+    expect(manifest.versions).toEqual(["2025-06-18", "2025-03-26", "2024-11-05"]);
+    expect(manifest.offline).toEqual({ isError: true, content: [{ type: "text", text: expect.stringContaining("MausBot isn't open on the person's computer") }] });
+    expect(manifest.late).toEqual({ isError: true, content: [{ type: "text", text: expect.stringContaining("MausBot didn't answer in time") }] });
+    expect(JSON.stringify(manifest)).not.toMatch(/address changes|new link/);
+    expect(moveBusy(4)).toMatchObject({ status: 200, body: { id: 4, result: { isError: true } } });
+  });
+
   it("keeps a sent Bot as the importer reads it, whether it came as an object or as JSON text, and counts it in the status", async () => {
     const to = link();
-    expect((await call(to, "move_status")).text).toBe("Connected to MausBot. 0 Bots received so far. This link stays on until the person turns it off, but its address changes when MausBot restarts or updates: if MausBot stops answering, ask the person to remove the MausBot connector and add the new link MausBot shows them. To move a Bot, send it with send_export, one Bot per call. To have MausBot do something, call hand_off_task.");
+    expect((await call(to, "move_status")).text).toBe("Connected to MausBot. 0 Bots received so far. This link stays on until the person turns it off, and its address never changes. To move a Bot, send it with send_export, one Bot per call. To have MausBot do something, call hand_off_task.");
     expect((await call(link(place().host), "move_status")).text).toContain("MausBot's bots: MausBot (Chief of Staff); Scout.");
     const crowd: MoveHost = { ...place().host, bots: () => Array.from({ length: 34 }, (_, index) => ({ name: `Bot ${index}` })) };
     expect((await call(link(crowd), "move_status")).text).toMatch(/Bot 29; and 4 more\.$/);

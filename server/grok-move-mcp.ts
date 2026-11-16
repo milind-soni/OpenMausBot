@@ -8,6 +8,7 @@
 import { z } from "zod";
 
 import { GROK_EXPORT_FORMAT, GrokImportError, grokExportDocument, parseGrokExport, type GrokBot } from "../shared/grok-import.ts";
+import type { LinkManifest, LinkToolResult } from "../shared/grok-link.ts";
 import { productName } from "./brand.ts";
 
 export const MOVE_MAX_DOCUMENTS = 100;
@@ -138,7 +139,7 @@ const tools = (app = productName()) => [
   },
 ];
 
-type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: true };
+type ToolResult = LinkToolResult;
 const said = (text: string): ToolResult => ({ content: [{ type: "text", text }] });
 const refused = (text: string): ToolResult => ({ content: [{ type: "text", text }], isError: true });
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
@@ -195,7 +196,7 @@ function moveStatus(link: MoveLink): ToolResult {
   const app = productName();
   const bots = link.host.bots();
   const roster = bots.slice(0, ROSTER_MAX).map((bot) => (bot.job ? `${bot.name} (${bot.job})` : bot.name)).join("; ");
-  return said(`Connected to ${app}. ${plural(names.size, "Bot")} received so far. This link stays on until the person turns it off, but its address changes when ${app} restarts or updates: if ${app} stops answering, ask the person to remove the ${app} connector and add the new link ${app} shows them. To move a Bot, send it with send_export, one Bot per call. To have ${app} do something, call hand_off_task.`
+  return said(`Connected to ${app}. ${plural(names.size, "Bot")} received so far. This link stays on until the person turns it off, and its address never changes. To move a Bot, send it with send_export, one Bot per call. To have ${app} do something, call hand_off_task.`
     + (roster ? ` ${app}'s bots: ${roster}${bots.length > ROSTER_MAX ? `; and ${bots.length - ROSTER_MAX} more` : ""}.` : ""));
 }
 
@@ -256,6 +257,29 @@ async function taskStatus(args: unknown, link: MoveLink): Promise<ToolResult> {
   return said(statusText(status));
 }
 
+const initializeResult = (app = productName()) => ({
+  protocolVersion: PROTOCOL_VERSIONS[0],
+  capabilities: { tools: {} },
+  serverInfo: { name: app, version: "1.1.0" },
+  instructions: `Connects Grok Bot to ${app}. Call move_status first. To move a Bot, call send_export once per Bot. To have ${app} do something, call hand_off_task, then task_status for the result. The work runs in ${app} on the person's computer: when a tool says ${app} isn't open, ask the person to open it, then call the tool again.`,
+});
+
+/** What the hosted address answers without this app: the handshake and tool list as moveMcp gives them, and the two
+ * answers to a tool call this app never gave. */
+export function moveManifest(app = productName()): LinkManifest {
+  return {
+    versions: PROTOCOL_VERSIONS,
+    initialize: initializeResult(app),
+    tools: { tools: tools(app) },
+    offline: refused(`${app} isn't open on the person's computer, so nothing was done. Ask the person to open ${app}, then call this tool again. The link still works: nothing needs adding again.`),
+    late: refused(`${app} didn't answer in time. If this was hand_off_task, the task may have started: check in ${app} before handing it off again. Otherwise call the tool again.`),
+  };
+}
+
+/** The answer to a tool call that came while as many as the link runs at once were still running. */
+export const moveBusy = (id: string | number | null): MoveMcpAnswer =>
+  ({ status: 200, body: { jsonrpc: "2.0", id, result: refused(`${productName()} is still working on earlier calls from this link. Wait a few seconds, then call this tool again.`) } });
+
 const rpcSchema = z.object({
   jsonrpc: z.literal("2.0"),
   id: z.union([z.string(), z.number()]).optional(),
@@ -279,12 +303,7 @@ export async function moveMcp(message: unknown, link: MoveLink, now = Date.now()
   const result = (value: unknown): MoveMcpAnswer => ({ status: 200, body: { jsonrpc: "2.0", id, result: value } });
   if (method === "initialize") {
     const asked = params?.protocolVersion;
-    return result({
-      protocolVersion: typeof asked === "string" && PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
-      capabilities: { tools: {} },
-      serverInfo: { name: productName(), version: "1.1.0" },
-      instructions: `Connects Grok Bot to ${productName()}. Call move_status first. To move a Bot, call send_export once per Bot. To have ${productName()} do something, call hand_off_task, then task_status for the result. The link's address changes when ${productName()} restarts or updates: if calls stop reaching ${productName()}, ask the person to remove this connector and add the new link ${productName()} shows them.`,
-    });
+    return result({ ...initializeResult(), protocolVersion: typeof asked === "string" && PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0] });
   }
   if (method === "ping") return result({});
   if (method === "tools/list") return result({ tools: tools() });
