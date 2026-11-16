@@ -88,7 +88,8 @@ describe("room queue labels", () => {
     const entry = { botId: "coder", threadId: "open", state: "queued" as const, position: 2, of: 2, waitingForBotId: "scout", busyIn: { groupId: "room-1", threadId: "g1" } };
     expect(roomQueueLabel(entry, () => "Scout", placeOf)).toBe("Busy in Group 1 · queued after Scout (2 of 2), starts when both finish");
     expect(roomQueueLabel(entry, () => "Scout")).toBe("Busy in another conversation · queued after Scout (2 of 2), starts when both finish");
-    // A waited-for member this viewer can't name falls back to the plain busy line.
-    expect(roomQueueLabel(entry, () => undefined, placeOf)).toBe("Busy in Group 1 · queued (2 of 2), starts when it finishes");
+    // A waited-for member this viewer can't name still keeps the wait in this room.
+    expect(roomQueueLabel(entry, () => undefined, placeOf)).toBe("Busy in Group 1 · queued after a teammate (2 of 2), starts when both finish");
+    expect(roomQueueLabel(entry, () => undefined)).toBe("Busy in another conversation · queued after a teammate (2 of 2), starts when both finish");
   });
 });

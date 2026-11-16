@@ -56,7 +56,10 @@ export function roomQueueLabel(entry: RoomQueueEntry, nameOf: (botId: string) =>
   if (entry.busyIn) {
     const place = placeOf?.(entry);
     const slot = { position: entry.position, of: entry.of };
-    if (name) return place ? t("room.queue.busyInAfter", { place, name, ...slot }) : t("room.queue.busyElsewhereAfter", { name, ...slot });
+    if (entry.waitingForBotId) {
+      const after = name ?? t("room.queue.aTeammate");
+      return place ? t("room.queue.busyInAfter", { place, name: after, ...slot }) : t("room.queue.busyElsewhereAfter", { name: after, ...slot });
+    }
     return place ? t("room.queue.busyIn", { place, ...slot }) : t("room.queue.busyElsewhere", slot);
   }
   return name

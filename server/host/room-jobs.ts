@@ -25,11 +25,14 @@ export function parallelRoomJobsEnabled(cfg: AppConfig): boolean {
 const live = (n: HandoffView) => n.parentId !== undefined && (n.status === "queued" || n.status === "running");
 
 export function createRoomJobs({ store, coordinator, cfg, operations, speakerOf, laneRoomThread }: RoomJobsDeps) {
-  /** Where a member runs now outside this room, if anywhere: a turn in another room, else a busy thread of its own. */
+  /** Where a member runs now outside this room, if anywhere: a turn in another room, else a busy thread of its own.
+   *  The host holds a room hand-off while the member runs (bot.busy), so being due later in another room's round is not busy. */
   function busyElsewhere(botId: string, roomId: string): RoomQueueEntry["busyIn"] {
+    if (!store.bot(botId)?.busy) return undefined;
     for (const other of store.groups) {
       if (other.id === roomId) continue;
-      const turn = [...operations(other.id)].find(operation => !operation.cancelled && operation.botIds.has(botId));
+      const turn = [...operations(other.id)].find(operation => !operation.cancelled && operation.botIds.has(botId)
+        && (!operation.line || operation.line.current === botId || speakerOf(operation.threadId) === botId));
       if (turn) return { groupId: other.id, threadId: turn.threadId };
       if (other.busyBotId === botId || speakerOf(other.threadId) === botId) return { groupId: other.id, threadId: other.threadId };
     }

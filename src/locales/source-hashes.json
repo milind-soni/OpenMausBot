@@ -37196,7 +37196,8 @@
       "room.queue.busyIn": "57c8a5a630dcea31ceae7b194162bcaaa5dcef4f7bb24eeaf532f5143cc791c7",
       "room.queue.busyElsewhere": "ecdbe34c1cca24d6d0365a04bf672203b437647795ac4e358fbcf671ef345b97",
       "room.queue.busyInAfter": "a944c189ff63871adf83e91509d65f6ec8044478de1969f5a8874a11d2f15847",
-      "room.queue.busyElsewhereAfter": "3432832abb792772c22e30806a674a4edcd22f660ee53d47ba4e2075121a79e8"
+      "room.queue.busyElsewhereAfter": "3432832abb792772c22e30806a674a4edcd22f660ee53d47ba4e2075121a79e8",
+      "room.queue.aTeammate": "1ca7804e31164a622443afee44c7ab79a97c1fb2e169b4df211bff0c10bd4a30"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
