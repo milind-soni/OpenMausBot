@@ -791,7 +791,9 @@ describe("the link between a computer and its Cloud", () => {
     expect(cloud.runs).toEqual([]);
     await cloud.listen(cloud.port);
     computer.dialer.start();
-    await until(() => computer.said(room.id).length === 4, "the answer is in the room");
+    // Waits for the answer itself: on a slow runner the computer's 400 ms stall clock can add a line before it.
+    await until(() => computer.said(room.id).some((line) => line.startsWith("Analyst: ")), "the answer is in the room");
+    expect(computer.said(room.id).slice(0, 3)).toEqual(["Sam: @Analyst how many orders this week?", "(server.rooms.linkedAway Analyst [My Cloud])", "Sam: @Analyst and split them by country."]);
     const turns = cloud.runs.filter((run) => run.botId === "cloud-analyst");
     expect(turns).toHaveLength(1);
     expect(turns[0]!.text).toContain("Sam: @Analyst how many orders this week?\nSam: @Analyst and split them by country.");
