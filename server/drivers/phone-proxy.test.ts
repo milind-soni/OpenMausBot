@@ -63,6 +63,55 @@ emulator-5554 device product:sdk model:Emulator transport_id:6
   });
 });
 
+// Lines cut, in their order, from four `dumpsys input_method` outputs of a Huawei Mate 9 (Android 9). Three are from a switch from the Baidu keyboard to ADBKeyBoard with a search
+// field taking input: before `ime set`, right after it (ADBKeyBoard is not bound yet, so the dump has no section for it) and once it shows. The fourth is the home screen with ADBKeyBoard as the keyboard.
+const BEFORE_THE_SWITCH = [
+  "  mCurMethodId=com.baidu.input_huawei/.ImeService",
+  "  mCurId=com.baidu.input_huawei/.ImeService mHaveConnect=true mBoundToMethod=true",
+  "  mShowRequested=true mShowExplicitlyRequested=false mShowForced=false mInputShown=true",
+  "  mServedInputConnectionWrapper=ControlledInputConnectionWrapper{connection=com.android.internal.widget.EditableInputConnection@c49480f finished=false mParentInputMethodManager.mActive=true}",
+  "Input method service state for com.baidu.input_huawei.ImeService@ca25e11:",
+  "  mWindowCreated=true mWindowAdded=true",
+  "  mWindowVisible=true mWindowWasVisible=true mInShowWindow=false",
+  "  mExtractedToken=0",
+  "  mIsInputViewShown=true mStatusIcon=0",
+  "Last computed insets:",
+  "",
+].join("\n");
+const SWITCHED_BUT_NOT_BOUND = [
+  "  mCurMethodId=com.android.adbkeyboard/.AdbIME",
+  "  mCurId=com.android.adbkeyboard/.AdbIME mHaveConnect=true mBoundToMethod=false",
+  "  mShowRequested=true mShowExplicitlyRequested=false mShowForced=false mInputShown=true",
+  "  mServedInputConnectionWrapper=ControlledInputConnectionWrapper{connection=com.android.internal.widget.EditableInputConnection@9c2709c finished=false mParentInputMethodManager.mActive=true}",
+  "",
+].join("\n");
+const SWITCHED_AND_SHOWN = [
+  "  mCurMethodId=com.android.adbkeyboard/.AdbIME",
+  "  mCurId=com.android.adbkeyboard/.AdbIME mHaveConnect=true mBoundToMethod=true",
+  "  mShowRequested=true mShowExplicitlyRequested=false mShowForced=false mInputShown=true",
+  "  mServedInputConnectionWrapper=ControlledInputConnectionWrapper{connection=com.android.internal.widget.EditableInputConnection@9c2709c finished=false mParentInputMethodManager.mActive=true}",
+  "Input method service state for com.android.adbkeyboard.AdbIME@a07f2f1:",
+  "  mWindowCreated=true mWindowAdded=true",
+  "  mWindowVisible=true mWindowWasVisible=true mInShowWindow=false",
+  "  mExtractedToken=0",
+  "  mIsInputViewShown=true mStatusIcon=0",
+  "Last computed insets:",
+  "",
+].join("\n");
+const ON_THE_HOME_SCREEN = [
+  "  mCurMethodId=com.android.adbkeyboard/.AdbIME",
+  "  mCurId=com.android.adbkeyboard/.AdbIME mHaveConnect=true mBoundToMethod=true",
+  "  mShowRequested=false mShowExplicitlyRequested=false mShowForced=false mInputShown=false",
+  "  mServedInputConnectionWrapper=null",
+  "Input method service state for com.android.adbkeyboard.AdbIME@3f66c6f:",
+  "  mWindowCreated=false mWindowAdded=false",
+  "  mWindowVisible=false mWindowWasVisible=false mInShowWindow=false",
+  "  mExtractedToken=0",
+  "  mIsInputViewShown=false mStatusIcon=0",
+  "Last computed insets:",
+  "",
+].join("\n");
+
 describe("phone MCP text input", () => {
   const ADB_KEYBOARD = "com.android.adbkeyboard/.AdbIME";
   const VENDOR_KEYBOARD = "com.baidu.input_huawei/.ImeService";
@@ -88,11 +137,12 @@ describe("phone MCP text input", () => {
   ].join("\n");
   // Android 13 and later print the same value under this name, followed by its handler.
   const NO_FIELD_13 = "  mServedInputConnection=null\n  mServedInputConnectionHandler=null\n";
+  /** A phone whose default keyboard is `keyboard`, the only one switched on in its keyboard list. */
   const device = (keyboard: string, inputState = FIELD) => {
     const commands: string[][] = [];
     const shell = async (...command: string[]) => {
       commands.push(command);
-      return command[0] === "settings" ? `${keyboard}\n` : command[0] === "dumpsys" ? inputState : "";
+      return command[0] === "settings" || command[1] === "list" ? `${keyboard}\n` : command[0] === "dumpsys" ? inputState : "";
     };
     return { commands, shell };
   };
@@ -126,10 +176,10 @@ describe("phone MCP text input", () => {
     await expect(typePhoneText(shell, text)).rejects.toThrow("error: closed");
   });
 
-  it("asks for ADBKeyBoard and types nothing when another keyboard is chosen", async () => {
+  it("asks for ADBKeyBoard and types nothing when it is not switched on in the phone's keyboard list", async () => {
     const phone = device(VENDOR_KEYBOARD);
-    await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
-    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
+    await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and switched on in the phone's keyboard list");
+    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"], ["ime", "list", "-s"]]);
   });
 
   const CLEAR = ["am", "broadcast", "-a", "ADB_CLEAR_TEXT", "-p", "com.android.adbkeyboard"];
@@ -178,12 +228,12 @@ describe("phone MCP text input", () => {
     expect(phone.commands.map((command) => command[3])).toEqual(["default_input_method", undefined, "ADB_CLEAR_TEXT", "ADB_INPUT_B64"]);
   });
 
-  it.each(["二手 iPad", "iPad"])("asks for ADBKeyBoard and changes nothing when another keyboard cannot clear (%s)", async (text) => {
+  it.each(["二手 iPad", "iPad"])("asks for ADBKeyBoard and neither clears nor types when it is not switched on in the phone's keyboard list (%s)", async (text) => {
     const phone = device(VENDOR_KEYBOARD);
     const refused = typePhoneText(phone.shell, text, true);
-    await expect(refused).rejects.toThrow("A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard");
+    await expect(refused).rejects.toThrow("A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and switched on in the phone's keyboard list");
     await expect(refused).rejects.toThrow("call type_text without clear and remove the old text with press delete");
-    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"]]);
+    expect(phone.commands).toEqual([["settings", "get", "secure", "default_input_method"], ["ime", "list", "-s"]]);
   });
 
   it("sends no text after a clear that failed", async () => {
@@ -210,6 +260,96 @@ describe("phone MCP text input", () => {
       await expect(typePhoneText(phone.shell, text, clear)).rejects.toThrow("Android text must be 1 to 256 characters");
       expect(phone.commands).toEqual([]);
     }
+  });
+
+  describe("with another keyboard as the default", () => {
+    const KEYBOARD = ["settings", "get", "secure", "default_input_method"];
+    const KEYBOARDS = ["ime", "list", "-s"];
+    const SWITCH = ["ime", "set", ADB_KEYBOARD];
+    const INPUT_STATE = ["dumpsys", "input_method"];
+    const INPUT = ["am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", "5LqM5omLIGlQYWQ="];
+    const RESTORE = ["ime", "set", VENDOR_KEYBOARD];
+    /** A phone whose keyboard list holds `switchedOn`, and whose input state reads as each of `dumps` in turn, then as the last of them. */
+    const switching = (dumps: string[], keyboard = VENDOR_KEYBOARD, switchedOn = [VENDOR_KEYBOARD, ADB_KEYBOARD]) => {
+      const phone = device(keyboard);
+      let reads = 0;
+      const shell = async (...command: string[]) => {
+        const reply = await phone.shell(...command);
+        if (command[0] === "dumpsys") return dumps[Math.min(reads++, dumps.length - 1)];
+        return command[1] === "list" ? `${switchedOn.join("\n")}\n` : reply;
+      };
+      return { commands: phone.commands, shell };
+    };
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it.each([
+      { clear: false, sends: [INPUT], says: SENT },
+      { clear: true, sends: [INPUT_STATE, CLEAR, INPUT], says: "Asked ADBKeyBoard to clear the field and sent the text. Use read_screen to check that the field holds only this text." },
+    ])("switches to ADBKeyBoard to type, then back to the person's keyboard (clear: $clear)", async ({ clear, sends, says }) => {
+      const phone = switching([SWITCHED_AND_SHOWN]);
+      await expect(typePhoneText(phone.shell, "二手 iPad", clear)).resolves.toBe(says);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE, ...sends, RESTORE]);
+    });
+
+    it.each([
+      ["ADBKeyBoard is not in the phone's keyboard list", VENDOR_KEYBOARD, [VENDOR_KEYBOARD]],
+      ["the default keyboard is not in that list", "com.example.keys/.Ime", [VENDOR_KEYBOARD, ADB_KEYBOARD]],
+      ["the default keyboard is not in that list and its id would run a command in the phone's shell", "a/b;reboot", [VENDOR_KEYBOARD, ADB_KEYBOARD]],
+      ["the phone's shell would not read the default keyboard's id as written", "com.x/.Ime$Inner", ["com.x/.Ime$Inner", ADB_KEYBOARD]],
+      ["the phone's shell would not read the package name in the default keyboard's id as written", "com.x$y/.Ime", ["com.x$y/.Ime", ADB_KEYBOARD]],
+    ])("asks for ADBKeyBoard and switches nothing when %s", async (_case, keyboard, switchedOn) => {
+      const phone = switching([SWITCHED_AND_SHOWN], keyboard, switchedOn);
+      await expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow(new Error("Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and switched on in the phone's keyboard list. Ask the person to set it up, or type only those characters."));
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS]);
+    });
+
+    it("reads the input state again 200 ms later while ADBKeyBoard is not bound, and types once it shows", async () => {
+      const phone = switching([SWITCHED_BUT_NOT_BOUND, SWITCHED_AND_SHOWN]);
+      const typed = typePhoneText(phone.shell, "二手 iPad");
+      await vi.advanceTimersByTimeAsync(199);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE]);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(typed).resolves.toBe(SENT);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE, INPUT_STATE, INPUT, RESTORE]);
+    });
+
+    it("still types when ADBKeyBoard shows only at the tenth read, 1.8 s after the first", async () => {
+      const phone = switching([...Array(9).fill(SWITCHED_BUT_NOT_BOUND), SWITCHED_AND_SHOWN]);
+      const typed = typePhoneText(phone.shell, "二手 iPad");
+      await vi.advanceTimersByTimeAsync(1_799);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, ...Array(9).fill(INPUT_STATE)]);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(typed).resolves.toBe(SENT);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, ...Array(10).fill(INPUT_STATE), INPUT, RESTORE]);
+    });
+
+    const MADE_UP_DUMP_WITH_A_LATER_SECTION = [
+      "Input method service state for com.android.adbkeyboard.AdbIME@a:",
+      "Input method service state for com.baidu.input_huawei.ImeService@b:",
+      "  mIsInputViewShown=true",
+      "",
+    ].join("\n");
+
+    it.each([
+      ["is not bound", SWITCHED_BUT_NOT_BOUND],
+      ["does not show, as on the home screen", ON_THE_HOME_SCREEN],
+      ["has not taken over, though the other keyboard shows", BEFORE_THE_SWITCH],
+      ["does not show in its own section, though another keyboard's section after it does (a made-up dump: no phone has printed one)", MADE_UP_DUMP_WITH_A_LATER_SECTION],
+    ])("types nothing and switches back when at the tenth read, 1.8 s after the switch, ADBKeyBoard still %s", async (_state, dump) => {
+      const phone = switching([dump]);
+      const refused = expect(typePhoneText(phone.shell, "二手 iPad")).rejects.toThrow(new Error("No text field is taking input, so nothing was cleared or typed. Tap the field first, then call type_text again."));
+      await vi.advanceTimersByTimeAsync(1_799);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, ...Array(9).fill(INPUT_STATE)]);
+      await vi.advanceTimersByTimeAsync(1);
+      await refused;
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, SWITCH, ...Array(10).fill(INPUT_STATE), RESTORE]);
+    });
   });
 });
 
@@ -346,6 +486,13 @@ describe("phone batch step parsing", () => {
     { case: "a zero wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: 0 }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":0} step after it. No step was performed.' },
     { case: "an endless wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: "Infinity" }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":3} step after it. No step was performed.' },
     { case: "a list as a wait on another action", raw: [{ action: "tap", x: 1, y: 2, seconds: [5] }], error: 'Step 1 (tap) does not take seconds; put a separate {"action":"wait","seconds":3} step after it. No step was performed.' },
+    { case: "a swipe shorter than 50 pixels", raw: [{ action: "swipe", direction: "up", distance: 10 }], error: 'Step 1 (swipe) needs x and y from 0 to 10000, distance from 50 to 10000 and duration_ms from 50 to 2000, e.g. {"action":"swipe","direction":"up","x":300,"y":1400,"distance":400,"duration_ms":800}. No step was performed.' },
+    { case: "a swipe step lasting 2001 ms", raw: [{ action: "swipe", direction: "up", duration_ms: 2001 }], error: 'Step 1 (swipe) needs x and y from 0 to 10000, distance from 50 to 10000 and duration_ms from 50 to 2000, e.g. {"action":"swipe","direction":"up","x":300,"y":1400,"distance":400,"duration_ms":800}. No step was performed.' },
+    { case: "a tap held for 0 ms", raw: [{ action: "tap", x: 540, y: 900, duration_ms: 0 }], error: 'Step 1 (tap) needs duration_ms from 50 to 2000, e.g. {"action":"tap","x":540,"y":900,"duration_ms":1000}. No step was performed.' },
+    { case: "a tap held for 49 ms", raw: [{ action: "tap", x: 540, y: 900, duration_ms: 49 }], error: 'Step 1 (tap) needs duration_ms from 50 to 2000, e.g. {"action":"tap","x":540,"y":900,"duration_ms":1000}. No step was performed.' },
+    { case: "a tap held for 2001 ms", raw: [{ action: "tap", x: 540, y: 900, duration_ms: 2001 }], error: 'Step 1 (tap) needs duration_ms from 50 to 2000, e.g. {"action":"tap","x":540,"y":900,"duration_ms":1000}. No step was performed.' },
+    { case: "a distance on an action that is not swipe", raw: [{ action: "press", key: "enter", distance: 400 }], error: 'Step 1 (press) does not take distance, which belongs to swipe; write it like {"action":"press","key":"enter"}. No step was performed.' },
+    { case: "a duration on an action that is neither tap nor swipe", raw: [{ action: "press", key: "enter", duration_ms: 1000 }], error: 'Step 1 (press) does not take duration_ms, which belongs to tap or swipe; write it like {"action":"press","key":"enter"}. No step was performed.' },
   ])("refuses $case", ({ raw, error }) => {
     expect(() => parseSteps(raw)).toThrow(new Error(error));
   });
@@ -461,6 +608,23 @@ describe("phone MCP tool surface", () => {
       expect(tool(name).description).toMatch(/\. To do several steps, or to act and then read the screen, in one call, use batch\.$/);
       expect(tool(name).description).not.toContain("then use read_screen to verify");
     }
+  });
+
+  it("offers swipe a start, a distance and a duration, and tap a duration to hold, as designed", () => {
+    expect(tool("swipe").description).toBe("Swipe the Android screen in a direction. By default the finger moves half the screen through the centre in 260 ms. To scroll a list, a pane or a picker wheel by a chosen amount, give x and y (where the finger starts), distance (pixels it moves) and duration_ms (longer is slower). To do several steps, or to act and then read the screen, in one call, use batch.");
+    expect(tool("swipe").inputSchema).toEqual({ type: "object", properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] }, x: { type: "number" }, y: { type: "number" }, distance: { type: "number" }, duration_ms: { type: "integer" }, serial: { type: "string" } }, required: ["direction"] });
+    expect(tool("tap").description).toBe("Tap Android screen pixel coordinates obtained from read_screen or screenshot. Add duration_ms to hold the tap; about 1000 is a long press. To do several steps, or to act and then read the screen, in one call, use batch.");
+    expect(tool("tap").inputSchema).toEqual({ type: "object", properties: { x: { type: "number" }, y: { type: "number" }, duration_ms: { type: "integer" }, serial: { type: "string" } }, required: ["x", "y"] });
+  });
+
+  it("tells a step what distance and duration_ms mean, naming their actions", () => {
+    const fields = tool("batch").inputSchema.properties.steps.items.properties;
+    expect(fields.distance).toEqual({ type: "number", description: "swipe: pixels the finger moves, 50 to 10000, default half the screen." });
+    expect(fields.duration_ms).toEqual({ type: "integer", description: "tap and swipe: milliseconds a tap is held or a swipe takes, 50 to 2000; without it a tap is not held and a swipe takes 260." });
+  });
+
+  it("tells the bot that other text needs ADBKeyBoard switched on, not chosen as the keyboard", () => {
+    expect(tool("type_text").description).toContain("other text, such as Chinese, emoji or +, needs the ADBKeyBoard app switched on in the phone's keyboard list.");
   });
 
   it("keeps serial out of a step's fields", () => {
@@ -787,7 +951,25 @@ describe("phone MCP calls claim before each command sent to the phone", () => {
     ["open_app", { name: "Uber" }, [APPS, onPhone("shell", "monkey", "-p", "com.ubercab", "-c", "android.intent.category.LAUNCHER", "1")], "Opened Uber (com.ubercab)"],
     ["tap_text", { text: "Where to?" }, [DUMP, onPhone("shell", "input", "tap", "206", "140")], "Tapped \"Where to?\""],
     ["tap", { x: 10, y: 20 }, [onPhone("shell", "input", "tap", "10", "20")], "Tapped 10,20"],
+    ["tap", { x: 540, y: 900, duration_ms: 1000 }, [onPhone("shell", "input", "swipe", "540", "900", "540", "900", "1000")], "Pressed 540,900 for 1000 ms"],
+    ["tap", { x: 540, y: 900, duration_ms: null }, [onPhone("shell", "input", "tap", "540", "900")], "Tapped 540,900"],
+    ["tap", { x: 10.4, y: 20.6 }, [onPhone("shell", "input", "tap", "10", "21")], "Tapped 10,21"],
+    ["tap", { x: 540, y: 900, duration_ms: "" }, [onPhone("shell", "input", "tap", "540", "900")], "Tapped 540,900"],
+    ["tap", { x: 540, y: 900, duration_ms: 50 }, [onPhone("shell", "input", "swipe", "540", "900", "540", "900", "50")], "Pressed 540,900 for 50 ms"],
+    ["tap", { x: 540, y: 900, duration_ms: "999.6" }, [onPhone("shell", "input", "swipe", "540", "900", "540", "900", "1000")], "Pressed 540,900 for 1000 ms"],
     ["swipe", { direction: "up" }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1440", "540", "480", "260")], "Swiped up"],
+    ["swipe", { direction: "down", x: 300, y: 1430, distance: 375, duration_ms: 1500 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "300", "1430", "300", "1805", "1500")], "Swiped from 300,1430 to 300,1805 in 1500 ms"],
+    ["swipe", { direction: "left", distance: 300 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "810", "960", "510", "960", "260")], "Swiped from 810,960 to 510,960 in 260 ms"],
+    ["swipe", { direction: "up", x: "300" }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "300", "1440", "300", "480", "260")], "Swiped from 300,1440 to 300,480 in 260 ms"],
+    ["swipe", { direction: "up", x: "", y: null, distance: null, duration_ms: null }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1440", "540", "480", "260")], "Swiped up"],
+    ["swipe", { direction: "up", distance: 49.6 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1440", "540", "1390", "260")], "Swiped from 540,1440 to 540,1390 in 260 ms"],
+    ["swipe", { direction: "down" }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "480", "540", "1440", "260")], "Swiped down"],
+    ["swipe", { direction: "left" }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "810", "960", "270", "960", "260")], "Swiped left"],
+    ["swipe", { direction: "right" }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "270", "960", "810", "960", "260")], "Swiped right"],
+    ["swipe", { direction: "up", duration_ms: 2000.4 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1440", "540", "480", "2000")], "Swiped from 540,1440 to 540,480 in 2000 ms"],
+    ["swipe", { direction: "up", y: 1000 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1000", "540", "40", "260")], "Swiped from 540,1000 to 540,40 in 260 ms"],
+    ["swipe", { direction: "down", x: 0, y: 0 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "0", "0", "0", "960", "260")], "Swiped from 0,0 to 0,960 in 260 ms"],
+    ["swipe", { direction: "right", x: 10000, y: 10000, distance: 10000 }, [onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "10000", "10000", "20000", "10000", "260")], "Swiped from 10000,10000 to 20000,10000 in 260 ms"],
     ["type_text", { text: "hi" }, [onPhone("shell", "input", "text", "hi")], "Typed text into the focused Android field"],
     ["press", { key: "home" }, [onPhone("shell", "input", "keyevent", "KEYCODE_HOME")], "Pressed home"],
   ])("%s sends its commands when every claim is granted", async (name, args, deviceCommands, text) => {
@@ -797,6 +979,24 @@ describe("phone MCP calls claim before each command sent to the phone", () => {
     expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining(text) });
     expect(commands).toEqual([DEVICES, ...deviceCommands]);
     expect(claims()).toBe(1 + deviceCommands.length);
+  });
+
+  const SWIPE_FIELDS_ERROR = 'swipe needs x and y from 0 to 10000, distance from 50 to 10000 and duration_ms from 50 to 2000, e.g. {"direction":"up","x":300,"y":1400,"distance":400,"duration_ms":800}';
+  const TAP_HOLD_ERROR = 'tap needs duration_ms from 50 to 2000, e.g. {"x":540,"y":900,"duration_ms":1000}';
+  it.each([
+    ...[{ distance: 0 }, { distance: 49 }, { distance: -5 }, { distance: 10001 }, { distance: "abc" }, { duration_ms: 0 }, { duration_ms: 0.4 }, { duration_ms: 49 }, { duration_ms: 2001 }, { x: -1 }, { y: 10001 }, { x: 10001 }, { y: -1 }, { distance: 49.4 }, { x: true }]
+      .map((field): [string, Record<string, unknown>, string] => ["swipe", { direction: "up", ...field }, SWIPE_FIELDS_ERROR]),
+    ...[0, 49, 2001].map((duration_ms): [string, Record<string, unknown>, string] => ["tap", { x: 540, y: 900, duration_ms }, TAP_HOLD_ERROR]),
+  ])("%s refuses %j and sends nothing to the phone", async (name, args, error) => {
+    const { commands, call } = phone();
+    expect(await call(name, args)).toEqual({ content: [{ type: "text", text: error }], isError: true });
+    expect(commands).toEqual([DEVICES]);
+  });
+
+  it.each(["sideways", "constructor", "__proto__", "toString"])("swipe refuses the direction %j once it has read the screen size, and swipes nothing", async (direction) => {
+    const { commands, call } = phone();
+    expect(await call("swipe", { direction })).toEqual({ content: [{ type: "text", text: "Invalid swipe direction" }], isError: true });
+    expect(commands).toEqual([DEVICES, onPhone("shell", "wm", "size")]);
   });
 
   it("only a call's first claim may wait for a person: each one before a command says it comes from the middle of the call", async () => {
@@ -832,6 +1032,28 @@ describe("phone MCP calls claim before each command sent to the phone", () => {
     expect(await call("batch", { steps: [TAP_STEP, TAP_TEXT_STEP] })).toEqual({ content: [{ type: "text", text: '1. tap: Tapped 10,20\n2. tap_text: Tapped "Where to?"' }] });
     expect(commands).toEqual([DEVICES, TAP, DUMP, onPhone("shell", "input", "tap", "206", "140")]);
     expect(midCall).toEqual([false, true, true, true, true]);
+  });
+
+  it("a batch step swipes by the distance it gives", async () => {
+    const { commands, call } = phone();
+    expect(await call("batch", { steps: [{ action: "swipe", direction: "up", distance: "400" }, { action: "read_screen" }] })).toEqual({ content: [{ type: "text", text: '1. swipe: Swiped from 540,1440 to 540,1040 in 260 ms\n2. read_screen:\n0: "Where to? · Destination" bounds=12,100,400,180 class=android.widget.TextView' }] });
+    expect(commands).toEqual([DEVICES, onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "540", "1440", "540", "1040", "260"), DUMP]);
+  });
+
+  it("swipe sends whole numbers for a screen whose width and height are odd", async () => {
+    const commands: string[][] = [];
+    const adb = async (args: string[]) => {
+      commands.push(args);
+      const line = args.join(" ");
+      return Buffer.from(line.includes("devices -l") ? DEVICE_LIST : line.includes("wm size") ? "Physical size: 1081x1921\n" : "");
+    };
+    await callPhoneTool("swipe", { direction: "up" }, async () => ({ ok: true }), adb);
+    expect(commands).toEqual([DEVICES, onPhone("shell", "wm", "size"), onPhone("shell", "input", "swipe", "541", "1441", "541", "480", "260")]);
+  });
+
+  it("a held tap answers with the point and the time it was pressed, and nothing more", async () => {
+    const { call } = phone();
+    expect(await call("tap", { x: 540, y: 900, duration_ms: 1000 })).toEqual({ content: [{ type: "text", text: "Pressed 540,900 for 1000 ms" }] });
   });
 
   it.each([
@@ -918,5 +1140,88 @@ describe("phone MCP calls claim before each command sent to the phone", () => {
     expect(result).toEqual({ content: [{ type: "text", text: HANDED_BACK_TEXT }], isError: true });
     expect(commands.filter((command) => command.includes("input"))).toEqual([]);
     hold.stop();
+  });
+
+  const KEYBOARD = onPhone("shell", "settings", "get", "secure", "default_input_method");
+  const KEYBOARDS = onPhone("shell", "ime", "list", "-s");
+  const SWITCH = onPhone("shell", "ime", "set", "com.android.adbkeyboard/.AdbIME");
+  const INPUT_STATE = onPhone("shell", "dumpsys", "input_method");
+  const RESTORE = onPhone("shell", "ime", "set", "com.baidu.input_huawei/.ImeService");
+  const OTHER_TEXT = { text: "二手" };
+
+  /** adb for a phone whose default keyboard is Baidu's, with ADBKeyBoard switched on in its keyboard list and showing as soon as it is set.
+   * `during` runs while adb runs each command. */
+  function adbOfPhoneWithAnotherKeyboard(during: (command: string) => void) {
+    const commands: string[][] = [];
+    const adb = async (args: string[]) => {
+      commands.push(args);
+      const line = args.join(" ");
+      during(line);
+      if (line.includes("devices -l")) return Buffer.from(DEVICE_LIST);
+      if (line.includes("default_input_method")) return Buffer.from("com.baidu.input_huawei/.ImeService\n");
+      if (line.includes("ime list -s")) return Buffer.from("com.baidu.input_huawei/.ImeService\ncom.android.adbkeyboard/.AdbIME\n");
+      return Buffer.from(line.includes("dumpsys input_method") ? SWITCHED_AND_SHOWN : "");
+    };
+    return { commands, adb };
+  }
+
+  const ONLY_THE_RESTORE = "only the command that puts the person's keyboard back";
+  const STEP_REFUSED = `Step 1 failed: A person has taken control of the phone. Do not act until they hand it back. To wait, call read_screen: each phone call waits up to 45 seconds and returns as soon as they hand the phone back. Meanwhile you may work on anything that does not need the phone. Its effect is unknown; call read_screen or screenshot before trying it again. ${EARLIER_AND_LATER}`;
+  it.each([
+    ["type_text", "nothing more", "the device list", OTHER_TEXT, DEVICES, [DEVICES], PERSON_TEXT, 2],
+    ["type_text", "nothing more", "its read of the default keyboard", OTHER_TEXT, KEYBOARD, [DEVICES, KEYBOARD], PERSON_TEXT, 3],
+    ["type_text", ONLY_THE_RESTORE, "its read of the keyboard list", OTHER_TEXT, KEYBOARDS, [DEVICES, KEYBOARD, KEYBOARDS, RESTORE], PERSON_TEXT, 4],
+    ["type_text", ONLY_THE_RESTORE, "the switch to ADBKeyBoard", OTHER_TEXT, SWITCH, [DEVICES, KEYBOARD, KEYBOARDS, SWITCH, RESTORE], PERSON_TEXT, 5],
+    ["type_text", ONLY_THE_RESTORE, "the read that finds ADBKeyBoard shown", OTHER_TEXT, INPUT_STATE, [DEVICES, KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE, RESTORE], PERSON_TEXT, 6],
+    ["batch", ONLY_THE_RESTORE, "the read that finds ADBKeyBoard shown", { steps: [{ action: "type_text", ...OTHER_TEXT }] }, INPUT_STATE, [DEVICES, KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE, RESTORE], STEP_REFUSED, 6],
+  ])("%s sends %s once a person takes the phone during %s", async (name, _more, _moment, args, during, sent, says, claims) => {
+    let taken = false;
+    let asked = 0;
+    const { commands, adb } = adbOfPhoneWithAnotherKeyboard((command) => {
+      if (command === during.join(" ")) taken = true;
+    });
+    const result = await callPhoneTool(name, args, async () => {
+      asked += 1;
+      return taken ? REFUSED : { ok: true };
+    }, adb);
+    expect(result).toEqual({ content: [{ type: "text", text: says }], isError: true });
+    expect(commands).toEqual(sent);
+    expect(asked).toBe(claims);
+  });
+
+  it("type_text sends no broadcast once a person takes the phone during its read of the default keyboard, when that is ADBKeyBoard", async () => {
+    let taken = false;
+    const commands: string[][] = [];
+    const adb = async (args: string[]) => {
+      commands.push(args);
+      const line = args.join(" ");
+      if (line.includes("devices -l")) return Buffer.from(DEVICE_LIST);
+      if (!line.includes("default_input_method")) return Buffer.from("");
+      taken = true;
+      return Buffer.from("com.android.adbkeyboard/.AdbIME\n");
+    };
+    const result = await callPhoneTool("type_text", OTHER_TEXT, async () => (taken ? REFUSED : { ok: true }), adb);
+    expect(result).toEqual({ content: [{ type: "text", text: PERSON_TEXT }], isError: true });
+    expect(commands).toEqual([DEVICES, KEYBOARD]);
+  });
+
+  it("type_text says the phone is still on ADBKeyBoard when adb fails from the switch to ADBKeyBoard on", async () => {
+    let closed = false;
+    const { commands, adb } = adbOfPhoneWithAnotherKeyboard((command) => {
+      closed ||= command === SWITCH.join(" ");
+      if (closed) throw new Error("error: closed");
+    });
+    const result = await callPhoneTool("type_text", OTHER_TEXT, async () => ({ ok: true }), adb);
+    expect(result).toEqual({ content: [{ type: "text", text: "The phone is still on ADBKeyBoard, which shows no keys. Tell the person to choose their keyboard again in the phone's settings, and call read_screen to see whether the text arrived." }], isError: true });
+    expect(commands).toEqual([DEVICES, KEYBOARD, KEYBOARDS, SWITCH, RESTORE]);
+  });
+
+  it("type_text says the phone is still on ADBKeyBoard when the command that puts the person's keyboard back fails", async () => {
+    const { commands, adb } = adbOfPhoneWithAnotherKeyboard((command) => {
+      if (command === RESTORE.join(" ")) throw new Error("error: closed");
+    });
+    const result = await callPhoneTool("type_text", OTHER_TEXT, async () => ({ ok: true }), adb);
+    expect(result).toEqual({ content: [{ type: "text", text: "The phone is still on ADBKeyBoard, which shows no keys. Tell the person to choose their keyboard again in the phone's settings, and call read_screen to see whether the text arrived." }], isError: true });
+    expect(commands).toEqual([DEVICES, KEYBOARD, KEYBOARDS, SWITCH, INPUT_STATE, onPhone("shell", "am", "broadcast", "-a", "ADB_INPUT_B64", "-p", "com.android.adbkeyboard", "--es", "msg", "5LqM5omL"), RESTORE]);
   });
 });

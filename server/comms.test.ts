@@ -288,6 +288,12 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "delegate-peer" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          // the same asker with every RPC request recorded, so a test can count the sessions it built
+          askerResume: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "delegate-peer", FAKE_ACP_RPC_APPEND_FILE: join(home, "asker-resume-rpc.jsonl") },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
           // The resume is a fresh fake process that learns its agents server only from session/new, so it replays into a new session.
           askerRedelegate: {
             driver: "grokAgent",
@@ -611,6 +617,35 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       expect(envelope).toContain("@Asker is resumed with your reply when your turn ends");
       expect(envelope).toContain("Brief from @Asker:\ndelegated task");
       expect(envelope).not.toMatch(/asked: "|outside content|hey @Helper please pick this up/);
+    },
+    45_000,
+  );
+
+  it(
+    "keeps the asker's session when the teammate's result lands instead of rebuilding it",
+    async () => {
+      await hideAll();
+      await named("Helper", { modelSelection: HELPER });
+      const asker = await named("Asker", { modelSelection: { instanceId: "askerResume", model: "fake-model" } });
+
+      const send = await startRoutine(asker.id, "hey @Helper please pick this up");
+      expect(send.status).toBe(201);
+
+      let askerBot: any;
+      await waitUntil(async () => {
+        askerBot = await bot(asker.id);
+        const delegated = askerBot.messages.some((m: any) => m.kind === "text" && m.role === "bot" && m.text?.startsWith("delegated:"));
+        const woke = lastText(askerBot.messages)?.text === WOKE_WITH_RESULT;
+        return delegated && woke && !askerBot.busy;
+      }, 30_000, "the hand-off never settled");
+
+      // The result's landing marks the thread externally updated; a strict-resume driver keeps the live session and is
+      // handed only the unseen lines, so the wake prompt rides the same session rather than session/new again.
+      const sessions = readFileSync(join(home, "asker-resume-rpc.jsonl"), "utf8").trim().split("\n")
+        .map((line) => JSON.parse(line) as { method: string })
+        .map((call) => call.method)
+        .filter((method) => ["session/new", "session/load", "session/prompt"].includes(method));
+      expect(sessions).toEqual(["session/new", "session/prompt", "session/prompt"]);
     },
     45_000,
   );

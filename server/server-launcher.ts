@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { boxMemory, heapSizeArgs, type BoxMemory } from "./box-memory.ts";
+import { containerInit, execUnderInit, UNDER_IMAGE_INIT } from "./container-init.ts";
 import { clearRecordsFromEarlierRunOfThisContainer } from "./data-dir-lease.ts";
 import { restartPolicy } from "./restart.ts";
 
@@ -52,6 +53,11 @@ function isEntry(): boolean {
 }
 
 if (isEntry()) {
+  // First, before anything this run would do twice: as process 1, hand that place to the image's tini.
+  const init = containerInit();
+  if (init.line) console.warn(init.line);
+  if (init.exec) execUnderInit(init.exec);
+  delete process.env[UNDER_IMAGE_INIT];
   const dataDir = process.env.OMB_DATA_DIR || join(homedir(), ".openmausbot");
   try {
     // A container starts with nothing of its own running: a lease its earlier run left is a dead server's.

@@ -430,6 +430,86 @@ across code changes. To pick up the current ones, rebuild with a new tag:
 docker compose build --build-arg CHROME_CACHE_TAG=$(date +%F) omb && docker compose up -d
 ```
 
+## Running on a container platform (Railway, Render, Kubernetes, Cloud Run)
+
+These platforms run the image's own command, with no `--init`, and usually
+with a 64 MB `/dev/shm` and a limit on how many processes the container may
+hold. The server image (`ghcr.io/milind-soni/openmausbot`) is built for that:
+
+- **It brings its own init.** tini is the image's entrypoint and collects
+  the processes that bots' engines, browsers and shell commands leave behind.
+  Without one they stay in the process table as zombies until the container's
+  limit is reached, and then nothing new can start: bots fail with
+  `spawn EAGAIN`. Keep the image's entrypoint when you set a start command.
+  If your platform replaces it, the server says so in one line at start and
+  starts itself again under the image's tini, which then stays process 1; an
+  init of the platform's own on top (`docker run --init`, Compose's
+  `init: true`) does no harm. A command you give the container runs as
+  written, so start it with `openmausbot …` or `node …`
+  (`docker run --rm ghcr.io/milind-soni/openmausbot openmausbot --version`):
+  a bare `--version` or `dist-server/openmausbot.js`, which older images
+  passed on to Node, no longer starts.
+- **Chrome does not need a larger `/dev/shm`.** Where `/dev/shm` is under
+  512 MB the bots' browser keeps its shared memory in `/tmp`, so there is
+  nothing to set. `/tmp` is slower, and where it is itself in memory (Cloud
+  Run) it counts against the container's memory limit; a 512 MB `/dev/shm`,
+  where your platform lets you set one, avoids both.
+- **Mount a volume at `/data`.** Engine sign-ins and all of OpenMausBot's
+  state live there.
+- **Give the platform a way in.** The server listens on `127.0.0.1` inside
+  the container, which a proxy outside the container cannot reach. Any one
+  of these works:
+  - `OMB_LAN=1`: the server listens on every IPv4 address, on `OMB_PORT`
+    (8799 unless you set it; point the platform there). It still drops any
+    connection whose either end is not a private address (10/8, 172.16/12,
+    192.168/16, 100.64/10, link-local), so it answers a proxy that reaches
+    the container over a private network, such as an ingress controller
+    inside a Kubernetes cluster, and refuses one that arrives from a public
+    address: check which your platform's does. Every request through it is
+    a remote one and has to pair.
+  - A proxy next to the server (a sidecar in the same Kubernetes pod or
+    Cloud Run service): share an in-memory volume between the two, set
+    `OMB_TUNNEL_SOCKET` to a socket in it, and point the proxy at that
+    socket, as [the Compose setup](#docker-with-https-on-your-own-domain)'s
+    Caddy does. A sidecar can reach `127.0.0.1:8799` too, but then it must
+    add `X-Forwarded-For` to every request (Caddy does): a loopback request
+    with no forwarding header and a loopback `Host` is taken to be the
+    server's owner.
+  - A tunnel that dials out, so nothing has to reach the container:
+    `openmausbot serve --tunnel` as the start command ([`--tunnel`](#ways-in-in-detail)).
+
+**How many processes and how much memory.** A container's process limit
+(`pids.max`; Docker's `--pids-limit`, Kubernetes' `podPidsLimit`) counts
+threads, not only processes, and every bot that is working holds an engine
+and the small helper programs that give it its tools:
+
+| What | Processes | Counted against the limit | Memory |
+| --- | --- | --- | --- |
+| The server itself | 3 | about 20 | about 1 GB |
+| Each bot that is working | 6 or more | about 45, more while it runs commands | about 700 MB |
+| Each open browser | about 13 | about 165 | about 400 MB |
+
+An engine stays loaded for ten minutes after its bot's last turn, so count
+the bots that work within the same ten minutes, not only in the same second.
+Leave room for the commands bots run: budget about 80 per working bot.
+
+| Bots working at once | Process limit to ask for | Memory |
+| --- | --- | --- |
+| 5 | 1,024 | 6 GB |
+| 10 | 2,048 | 10 GB |
+| 20 | 4,096 | 18 GB |
+| 34 | 4,096 | 28 GB |
+
+The limit column includes two open browsers, which is as many as a server in
+a container keeps open at once (`OMB_BROWSER_MAX_RUNNING` changes that). If
+your platform's limit is fixed and lower than the row you need, have fewer
+bots work at the same moment.
+
+**Bots' cloud computers do not count.** A bot's cloud computer runs at the
+provider that hosts it, not in this container, so its desktop and browser
+use none of the container's processes or memory. Only the built-in browser
+described above runs here.
+
 ## From source
 
 Requirements: Node 24+, pnpm, and at least one agent CLI installed and

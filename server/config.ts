@@ -10,6 +10,7 @@ import type { ImageGenerationConfig } from "../shared/image-generation.ts";
 import { imageGenConfigSchema, imageGenPatchSchema, keepKeysOutOfImageModels, type ImageGenCredentialPatch } from "./image-generation-config.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { configBackupRefusal, configSaveRefusal, readConfigFile, writeConfigBackup } from "./config-backup.ts";
 import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
@@ -897,12 +898,9 @@ export function saveConfig(
   options: { replaceInstances?: boolean } = {},
 ): void {
   const p = join(DATA_DIR, "config.json");
-  let disk: JsonObject = {};
-  try {
-    const parsed = jsonObjectSchema.safeParse(parseJson(readFileSync(p, "utf8")));
-    if (parsed.success) disk = parsed.data;
-  } catch {
-  }
+  const read = readConfigFile(p);
+  if (read.state === "unreadable" || read.state === "invalid") throw configSaveRefusal(read, p);
+  const disk: JsonObject = read.state === "ok" ? read.value : {};
   const checkedPatch = appConfigSchema.partial().extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional(), imageGen: imageGenPatchSchema.optional() }).parse(patch);
   const before = configSaveListeners.size ? structuredClone(disk) : disk;
   const keepImageModels = keepKeysOutOfImageModels(disk, checkedPatch.imageGen);
@@ -1004,6 +1002,7 @@ export function saveConfig(
     }
   }
   mkdirSync(DATA_DIR, { recursive: true });
+  if (read.state === "ok" && !writeConfigBackup(p, read.text)) throw configBackupRefusal(p);
   writeFileAtomic(p, JSON.stringify(disk, null, 2), { mode: 0o600 });
   storedConfig.forget();
   for (const listener of configSaveListeners) {

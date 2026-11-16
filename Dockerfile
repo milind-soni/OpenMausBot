@@ -20,11 +20,15 @@
 # ...) and OpenMausBot's own state (~/.openmausbot) persist across container
 # restarts.
 #
-# The bots' browsers leave exited processes for an init to collect, and Chrome
-# needs shared memory (docs/browser-packaging.md, "Process hygiene"). The
-# server image starts under tini, so a host with no `--init` switch (Railway,
-# for one) still collects them; a plain `docker run` wants `--shm-size=512m`.
-# On Fly Machines (the Cloud home) Fly's own init is PID 1.
+# The bots' browsers, engines and shells leave exited processes for an init to
+# collect (docs/browser-packaging.md, "Process hygiene"). The server image
+# brings its own, tini, as its entrypoint: a container platform runs an image
+# with no `--init`, and Node as PID 1 waits only for its own children, so the
+# rest stay as zombies until the container's pids limit refuses every spawn.
+# The compose files' `init: true` on top of it is harmless. The Cloud home
+# has no entrypoint: Fly's own init is PID 1 there, and a plain `docker run`
+# of that image wants `--init`. Chrome keeps its shared memory out of a small
+# /dev/shm by itself (server/browser/chrome/shm.ts).
 
 FROM caddy:2.10.2 AS edge
 # Official Caddy carries a privileged-port file capability. The Cloud home's
@@ -75,8 +79,8 @@ RUN arch=x64 && if [ "$TARGETARCH" = arm64 ]; then arch=arm64; fi \
 FROM node:24-bookworm-slim AS runtime
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
 # invokes sudo even as root, and this image deliberately does not ship sudo.
-# git + curl: agent CLIs shell out to git; curl backs the healthcheck. tini: the
-# server image's init, for hosts that add none
+# git + curl: agent CLIs shell out to git; curl backs the healthcheck. tini is
+# the server image's init, and what its launcher falls back to as PID 1.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl git tini \
     libxcb-shm0 libx11-xcb1 libx11-6 libxcb1 libxext6 libxrandr2 \
@@ -253,10 +257,10 @@ VOLUME ["/data"]
 USER maus
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot || exit 1
-# -s: under a runtime's own init (compose's `init: true`) tini is not PID 1,
-# and as a subreaper it still collects what the server's children leave.
-ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 # The launcher runs dist-server/index.js and starts it again when it asks to
 # (a copied workspace committing, server/restart.ts), so the container, and a
 # Caddy sharing its network, stays up through that restart.
+# -s: under `docker run --init` or compose's `init: true` tini is not PID 1,
+# and collects the server's orphans as a subreaper instead of warning.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "dist-server/server-launcher.js"]

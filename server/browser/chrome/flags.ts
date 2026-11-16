@@ -65,6 +65,8 @@ export interface ChromeFlagsInput {
   viewport?: { width: number; height: number } | null;
   /** False only when an operator explicitly turned Chrome's sandbox off. */
   sandbox?: boolean;
+  /** /dev/shm is too small for Chrome's shared memory (shm.ts). */
+  smallShm?: boolean;
   /** Null when session restore reopens the profile's tabs. */
   startUrl?: string | null;
   /** A window only: where it opens, e.g. parked off-screen. */
@@ -114,7 +116,7 @@ export function chromeArgs(input: ChromeFlagsInput): string[] {
   // headless never shows: about 50 MB per browser.
   if (headless) args.push("--mute-audio", "--disable-features=WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIReloadButton");
   if (input.host !== "desktop") args.push("--disk-cache-size=52428800");
-  if (input.host === "container") args.push("--disable-dev-shm-usage");
+  if (input.host === "container" || input.smallShm) args.push("--disable-dev-shm-usage");
   if (input.sandbox === false) args.push("--no-sandbox");
   if (input.startUrl !== null) args.push(input.startUrl ?? "about:blank");
   return args;
