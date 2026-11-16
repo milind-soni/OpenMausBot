@@ -1,5 +1,6 @@
 import RFB from "@novnc/novnc";
 import { DESKTOP_VIEWER_TARGET } from "../../shared/desktop-viewer";
+import { isMacPlatform } from "./keyboard-shortcuts";
 
 export interface DesktopConnectionEvents {
   connected(): void;
@@ -62,7 +63,54 @@ export async function connectDesktop(screen: HTMLElement, target: string, option
   client.addEventListener("clipboard", (event) => {
     if (!cancelled.aborted) events.clipboard?.(event.detail.text);
   });
+  forwardPaste(screen, client, cancelled);
   return client;
+}
+
+const XK_CONTROL_L = 0xffe3;
+const XK_CONTROL_R = 0xffe4;
+const XK_V = 0x76;
+// noVNC sends a Mac's ⌘ keys to the desktop as Alt_L (left) and Super_L (right).
+const MAC_COMMAND_KEYSYMS: Record<string, number> = { MetaLeft: 0xffe9, MetaRight: 0xffeb };
+
+/** The local paste shortcut (⌘V on a Mac, Ctrl+V elsewhere) puts the local clipboard's text on the desktop's
+ * clipboard and presses Ctrl+V there. noVNC would send the shortcut on as raw keys and stop the browser pasting, so
+ * the screen takes it first and lets the browser's paste event bring the text, with no clipboard permission prompt. */
+function forwardPaste(screen: HTMLElement, client: RFB, signal: AbortSignal): void {
+  const mac = isMacPlatform();
+  const pasteModifier = mac ? /^Meta(Left|Right)$/ : /^Control(Left|Right)$/;
+  // The paste modifier the person is holding down, which noVNC has already sent on.
+  let held: string | null = null;
+  screen.addEventListener("keydown", (event) => {
+    if (pasteModifier.test(event.code)) held = event.code;
+    const modifier = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+    if (client.viewOnly || !modifier || event.altKey || event.shiftKey || !isPasteKey(event)) return;
+    event.stopPropagation();
+  }, { capture: true, signal });
+  screen.addEventListener("keyup", (event) => { if (event.code === held) held = null; }, { capture: true, signal });
+  screen.addEventListener("focusout", () => { held = null; }, { signal });
+  screen.addEventListener("paste", (event) => {
+    event.preventDefault();
+    pasteOnDesktop(client, event.clipboardData?.getData("text/plain") ?? "", held);
+  }, { signal });
+}
+
+/** V, or the physical V key on a layout whose letter there isn't Latin (Russian "м"), as the browser itself pastes on. */
+function isPasteKey(event: KeyboardEvent): boolean {
+  const key = event.key.toLowerCase();
+  return key === "v" || (event.code === "KeyV" && !/^[a-z]$/.test(key));
+}
+
+/** `held` is the modifier the person holds that noVNC already sent down: Ctrl stays down for their own release; a Mac's
+ * ⌘ is let go once Ctrl is down, so the desktop sees Ctrl+V and not a lone ⌘ tap. */
+function pasteOnDesktop(client: RFB, text: string, held: string | null): void {
+  if (client.viewOnly) return;
+  if (text) client.clipboardPasteFrom(text);
+  const ctrl = held?.startsWith("Control") ? held : "ControlLeft";
+  client.sendKey(ctrl === "ControlRight" ? XK_CONTROL_R : XK_CONTROL_L, ctrl, true);
+  if (held && held in MAC_COMMAND_KEYSYMS) client.sendKey(MAC_COMMAND_KEYSYMS[held]!, held, false);
+  client.sendKey(XK_V, "KeyV");
+  if (ctrl !== held) client.sendKey(XK_CONTROL_L, ctrl, false);
 }
 
 /** Explicit text entry works with phone keyboards without reading the clipboard; non-Latin text uses Unicode keysyms. */

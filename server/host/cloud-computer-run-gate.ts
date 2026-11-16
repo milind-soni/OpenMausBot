@@ -5,7 +5,7 @@
 // what it already did (a message sent, a pull request opened). Only a run nobody started by hand is held.
 //
 // Waking costs computer time, and many routines never touch the bot's cloud computer, so only a routine whose earlier
-// run used the computer is woken for; the first run after a server start is not, and waits at its first computer call.
+// run used the computer is woken for. Which routines those are is remembered across restarts where `remember` is given.
 import { RUN_COMPUTER_LINES, type CloudComputerRecoveryState } from "../../shared/cloud-computer-recovery.ts";
 import type { BoatAnswer } from "../boat-ready.ts";
 import type { RecoveryVerdict } from "../boat-recovery.ts";
@@ -31,6 +31,11 @@ export interface RunComputerGateDeps {
   /** Why the recovery left the owner's silent computer as it is, when it decided that at or after `since`. */
   verdict(owner: string, since: number): RecoveryVerdict | null;
   recoveryState(owner: string): CloudComputerRecoveryState | null;
+  /** Reads the computer's disk and frees space on it when it is nearly full; resolves when the run may start or `signal`
+   * aborts. A number: the disk is still that many percent full, and the run starts all the same. */
+  disk?(boxId: string, signal?: AbortSignal): Promise<number | null | void>;
+  /** Where the routines whose runs used the cloud computer are kept across restarts, so the first run after one is held too. */
+  remember?: { load(): string[]; save(ids: string[]): void };
   /** Restarts the owner's idle window, so the wait itself does not put the computer to sleep. */
   used(owner: string): void;
   /** The routine whose run is active in this bot's thread, if one is. */
@@ -46,12 +51,15 @@ const VERDICT_LINE: Record<RecoveryVerdict, string> = {
 
 export function createRunComputerGate(deps: RunComputerGateDeps) {
   const now = deps.now ?? Date.now;
-  /** Routines whose runs have used the cloud computer since the server started. */
-  const usesComputer = new Set<string>();
+  /** Routines whose runs have used the cloud computer. */
+  const usesComputer = new Set<string>(deps.remember?.load().slice(-MAX_ROUTINES) ?? []);
   /** Threads whose latest computer call got no answer, with the bot whose turn it was. */
   const silent = new Map<string, string>();
+  /** Routines whose run started with the disk still almost full, then the threads of those runs once they use the computer. */
+  const startedFull = new Set<string>();
+  const fullThreads = new Set<string>();
 
-  async function ready(owner: string, signal?: AbortSignal): Promise<string | null> {
+  async function ready(owner: string, routineId: string, signal?: AbortSignal): Promise<string | null> {
     const began = now();
     let machine = await deps.find(owner).catch(() => null);
     if (!machine || signal?.aborted) return null;
@@ -66,6 +74,10 @@ export function createRunComputerGate(deps: RunComputerGateDeps) {
       if (signal?.aborted) return null;
       deps.used(owner);
       const answer = await deps.awaitAnswer(machine.id, { woke, deadline, ...(signal ? { signal } : {}) });
+      if (answer.ok && !signal?.aborted && typeof await deps.disk?.(machine.id, signal).catch(() => null) === "number") {
+        if (startedFull.size >= MAX_ROUTINES) startedFull.clear();
+        startedFull.add(routineId);
+      }
       if (answer.ok || signal?.aborted) return null;
       // A verdict from before this wait belongs to an earlier silence, not this one.
       const why = deps.verdict(owner, began);
@@ -86,7 +98,8 @@ export function createRunComputerGate(deps: RunComputerGateDeps) {
       if (run.target !== "bot" || !usesComputer.has(run.routineId)) return null;
       const owner = deps.computerOf(run);
       if (!owner) return null;
-      return ready(owner, signal).then((reason) => {
+      startedFull.delete(run.routineId);
+      return ready(owner, run.routineId, signal).then((reason) => {
         if (reason) deps.log(`routine ${run.routineId}: its cloud computer (${owner}) was not ready: ${reason}`);
         return reason;
       }, (error) => {
@@ -100,16 +113,24 @@ export function createRunComputerGate(deps: RunComputerGateDeps) {
       if (!answered) { silent.set(threadId, botId); return; }
       silent.delete(threadId);
       const routineId = deps.routineOf(botId, threadId);
+      if (routineId && startedFull.delete(routineId)) {
+        if (fullThreads.size >= MAX_ROUTINES) fullThreads.clear();
+        fullThreads.add(threadId);
+      }
       if (!routineId || usesComputer.has(routineId)) return;
-      if (usesComputer.size >= MAX_ROUTINES) usesComputer.clear();
+      if (usesComputer.size >= MAX_ROUTINES) usesComputer.delete(usesComputer.values().next().value!);
       usesComputer.add(routineId);
+      deps.remember?.save([...usesComputer]);
     },
-    /** When a turn ends: the note for an unattended run that ended well although its last computer call got no answer.
+    /** When a turn ends: the note for an unattended run that ended well although its last computer call got no answer,
+     * and for one that used a computer whose disk was still almost full when it started, however it ended.
      * The run stays done. A turn that failed is the scheduler's to start once more, as any failed run is. */
     turnEnded(threadId: string, ok: boolean): string | null {
       const botId = silent.get(threadId);
       silent.delete(threadId);
-      return ok && botId !== undefined && deps.routineOf(botId, threadId) ? RUN_COMPUTER_LINES.lastCallUnanswered : null;
+      const unanswered = ok && botId !== undefined && deps.routineOf(botId, threadId) ? RUN_COMPUTER_LINES.lastCallUnanswered : null;
+      const full = fullThreads.delete(threadId) ? RUN_COMPUTER_LINES.diskStillFull : null;
+      return full && unanswered ? `${full} ${unanswered}` : full ?? unanswered;
     },
   };
 }

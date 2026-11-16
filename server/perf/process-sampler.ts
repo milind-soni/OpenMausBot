@@ -42,12 +42,16 @@ export interface ProcessReport {
 
 const readText = (path: string): string | null => { try { return readFileSync(path, "utf8"); } catch { return null; } };
 
-/** Every process /proc shows, read synchronously: one stat file each. */
+/** A sample reads at most this many processes: a container holds a few thousand at its limit, a shared host may show more. */
+export const MAX_SAMPLED_PROCESSES = 8_192;
+
+/** Every process /proc shows, up to MAX_SAMPLED_PROCESSES, read synchronously: one stat file each. */
 export function linuxProcessList(read: (path: string) => string | null = readText, list: () => string[] = () => readdirSync("/proc")): ProcessList {
   const rows: ProcessRow[] = [];
   let names: string[] = [];
   try { names = list(); } catch {}
   for (const name of names) {
+    if (rows.length >= MAX_SAMPLED_PROCESSES) break;
     if (!/^\d+$/.test(name)) continue;
     const text = read(`/proc/${name}/stat`);
     const row = text === null ? null : parseProcStat(Number(name), text);
@@ -83,6 +87,8 @@ export interface ProcessSamplerOptions {
   engines?: () => ReadonlyMap<number, string>;
   /** After each timed sample: other once-a-sample checks ride the same timer. */
   afterSample?: () => void;
+  /** Each sample's rows with their buckets, before the rows are dropped. */
+  seen?: (rows: readonly ProcessRow[], buckets: ReadonlyMap<number, ProcessBucket>) => void;
 }
 
 export function nodeUtilization(): () => number | null {
@@ -106,6 +112,7 @@ export function createProcessSampler(options: ProcessSamplerOptions) {
   const take = (list: ProcessList, driftMs: number) => {
     const at = monotonic();
     const buckets = classifyProcesses(list.rows, serverPid, options.scope === "tree", options.engines?.());
+    try { options.seen?.(list.rows, buckets); } catch {}
     const cpu: Partial<Record<ProcessBucket, number>> = {}, procs: Partial<Record<ProcessBucket, number>> = {}, rss: Partial<Record<ProcessBucket, number>> = {};
     const rows = new Map<number, { start: string; cpuMs: number; bucket: ProcessBucket; ppid: number }>();
     let browsers = 0;

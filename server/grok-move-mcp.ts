@@ -104,7 +104,7 @@ function sendExport(args: unknown, inbox: MoveInbox, now: number): ToolResult {
     return refused(`Nothing was saved: this link has taken all it can hold. Tell the person to import what has arrived in ${productName()}, then to make a new link there for the rest.`);
   }
   const app = productName();
-  return said(`Arrived in ${app}. ${bots.map(received).join(" ")} The person can now import ${bots.length === 1 ? "it" : "them"} in ${app}, under Settings → Import.`);
+  return said(`Arrived in ${app}. ${bots.map(received).join(" ")} The person can now import ${bots.length === 1 ? "it" : "them"} in ${app}, under Settings → Import & export.`);
 }
 
 function moveStatus(link: MoveLink): ToolResult {

@@ -67,6 +67,7 @@ export function agentRoutine(routine: Routine, latestRun?: RoutineRun) {
     name: redactSecretsInText(routine.name),
     ...instructionsOf(routine.prompt),
     continuity: routine.continuity === true,
+    sameConversation: routine.sameConversation === true,
     overlap: routine.overlap ?? "skip",
     runOnStartup: routine.runOnStartup === true,
     skippedRuns: routine.skippedRuns ?? 0,
@@ -217,7 +218,6 @@ export function parseTriggerRequest(body: unknown, kindOf: (id: string) => "sche
     if (changes && "eventTypes" in changes) return { ok: false, error: "webhook_event_types applies only to webhook triggers" };
     if (changes && "payloadFilter" in changes) return { ok: false, error: "webhook_payload_filter applies only to webhook triggers" };
     if (changes && ("filter" in changes || "config" in changes)) return { ok: false, error: "filter and event_config apply only to app-event triggers" };
-    if (changes && "sameConversation" in changes) return { ok: false, error: "same_conversation applies only to app-event and webhook triggers" };
     return { ok: true, kind: "schedule", forBotId: request.forBotId, proposal: { action: request.action, routineId: request.triggerId, ...(changes ? { changes } : {}) } };
   }
   const misplaced = changes && Object.keys(changes).find((key) => !WEBHOOK_FIELDS.has(key));

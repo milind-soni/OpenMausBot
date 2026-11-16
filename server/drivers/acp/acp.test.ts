@@ -1213,6 +1213,9 @@ describe("ACP turns (fake CLI)", () => {
       { type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`, headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }] },
       { name: "notes", command: process.execPath, args: ["/tmp/notes-mcp.js"], env: [] },
     ]);
+    // The agent reaches this server's loopback URL around any proxy it was given.
+    const { env } = JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> };
+    for (const name of ["NO_PROXY", "no_proxy"]) expect(env[name]!.split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
   });
 
   it.each([false, true])("mounts Data through the existing stdio transport unless excluded (excluded=%s)", async (excluded) => {
@@ -2463,8 +2466,10 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: true });
   });
 
-  it("falls through to session/new when session/load returns null", async () => {
+  it("fails a resumed turn with no recovery text when session/load returns null", async () => {
     process.env.FAKE_ACP_LOAD_NULL = "1";
+    const rpcFile = join(scratch, "null-load-no-recovery.json");
+    process.env.FAKE_ACP_RPC_DUMP = rpcFile;
     await create(GrokAgentDriver);
     await instance.adapter.sendTurn({
       threadId: "t-resume-null",
@@ -2472,10 +2477,12 @@ describe("ACP turns (fake CLI)", () => {
       resumeCursor: "gone-cursor",
     });
 
-    const started = await recorder.until((e) => e.type === "session.started");
-    expect(started).toMatchObject({ sessionId: "fake-acp-session" });
-    const done = await recorder.until((e) => e.type === "turn.completed");
-    expect(done).toMatchObject({ ok: true });
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
+    expect(recorder.events.some((e) => e.type === "session.started")).toBe(false);
+    const methods = JSON.parse(readFileSync(rpcFile, "utf8"));
+    expect(methods).toContain("session/load");
+    expect(methods).not.toContain("session/new");
+    expect(methods).not.toContain("session/prompt");
   });
 
   it.each(["null", "opencode-not-found", "cursor-message"])("rebuilds a missing native session from the canonical recovery text once (%s)", async (failure) => {

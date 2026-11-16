@@ -654,6 +654,8 @@ export function createSecretCards(deps: SecretCardsDeps) {
     }
     const path = store.activePath(threadId);
     const language = deps.threadLanguage?.(threadId);
+    const savedAsRef = asked.delivery === "file" && !asked.replace && vaultStore.usableSecret(asked.label, from.id, "ref", reader) !== null;
+    const refNote = savedAsRef ? ` ${serverLine(language, "server.connect.secretSavedAsRef", { label: asked.label, bot: from.name })}` : "";
     const message = store.appendMessage(threadId, {
       role: "bot",
       kind: "secret",
@@ -662,7 +664,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
       secret: {
         target: CUSTOM_SECRET_TARGET,
         label: asked.label,
-        description: `${asked.reason} ${deliveryNote(from.name, asked.delivery, language)}`,
+        description: `${asked.reason} ${deliveryNote(from.name, asked.delivery, language)}${refNote}`,
         reason: asked.reason,
         placeholder: asked.placeholder,
         helpUrl: "",
@@ -676,8 +678,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
       store.patchMessage(threadId, prior.id, { secret: { ...prior.secret, superseded: true } });
       deps.followCard(threadId, prior.id, message.id);
     }
-    const savedAs = asked.delivery === "file" && !asked.replace && vaultStore.usableSecret(asked.label, from.id, "ref", reader) ? { savedAs: "ref" } : {};
-    return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...savedAs } };
+    return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...(savedAsRef ? { savedAs: "ref" } : {}) } };
   }
 
   return {

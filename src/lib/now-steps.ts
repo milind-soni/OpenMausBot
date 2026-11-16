@@ -79,3 +79,14 @@ export function quietText(quiet: StepQuiet | undefined, now: number): string | u
   if (minutes < 60) return t("chat.liveness.outputMinutes", { count: minutes });
   return t("chat.liveness.outputHours", { count: Math.floor(minutes / 60) });
 }
+
+export const SILENCE_SHOWN_MS = 2 * 60_000;
+
+/** "nothing new for 5 min" once the whole turn has sent no frame for a while; nothing before that. */
+export function silenceText(lastFrame: number, now: number): string | undefined {
+  const quietMs = now - lastFrame;
+  if (quietMs < SILENCE_SHOWN_MS) return undefined;
+  const minutes = Math.floor(quietMs / 60_000);
+  if (minutes < 60) return t("chat.liveness.silentMinutes", { count: minutes });
+  return t("chat.liveness.silentHours", { count: Math.floor(minutes / 60) });
+}

@@ -14,6 +14,7 @@ import { BotAvatar } from "./Avatar";
 import { PlanUsage } from "./PlanUsage";
 import { Select } from "./Select";
 import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
+import { UsageCapsCard, type UsageCapView } from "./UsageCaps";
 import { TraceView } from "./usage/TraceView";
 import { LiveBadge, modelName, StatStrip, totalsStats } from "./usage/TraceWaterfall";
 
@@ -37,7 +38,25 @@ export interface UsageGroup {
 interface UsageSummary {
   groupBy: UsageGroupBy;
   groups: UsageGroup[];
+  /** The period as a whole; `unpriced` counts its turns whose model has no price, booked at $0. */
+  total?: { turns: number; unpriced: number };
   budget?: BudgetState | null;
+  caps?: UsageCapView | null;
+  /** Dollars booked on engines signed in with a subscription: an estimate nobody is billed. */
+  notBilled?: { usd: number; turns: number };
+}
+
+/** What the period's dollars leave out or overstate, one line each; nothing when the total is complete and billed. */
+export function CostCaveats({ summary }: { summary: Pick<UsageSummary, "total" | "notBilled"> | null }) {
+  const plan = summary?.notBilled?.usd ?? 0;
+  const unpriced = summary?.total?.unpriced ?? 0;
+  if (!(plan > 0) && !unpriced) return null;
+  return (
+    <div data-testid="usage-caveats" className="flex flex-col gap-0.5 px-1 text-[12px] leading-5 text-ink-secondary">
+      {plan > 0 && <p>{t("usage.page.notBilled", { cost: formatCost(plan) })}</p>}
+      {unpriced > 0 && <p>{t("usage.page.unpriced", { count: String(unpriced) })}</p>}
+    </div>
+  );
 }
 
 const GROUP_LABEL_KEYS: Record<UsageGroupBy, LocaleKey> = {
@@ -183,12 +202,12 @@ function ModelLegend({ groups }: { groups: readonly UsageGroup[] }) {
 }
 
 /** The "Where it went" panel: bots on one side, the chosen grouping on the other, both split by model. */
-function WhereItWent({ range, version, onBudget }: { range: { from: string; to: string }; version: number; onBudget: (budget: BudgetState | null) => void }) {
+function WhereItWent({ range, version, onSummary }: { range: { from: string; to: string }; version: number; onSummary: (summary: UsageSummary | null) => void }) {
   const [other, setOther] = useState<UsageGroupBy>("model");
   const settings = useContext(SettingsLook);
   const byBot = useUsageGroups(range, "bot", version, "model");
   const byOther = useUsageGroups(range, other, version, other === "model" ? undefined : "model");
-  useEffect(() => { onBudget(byBot?.budget ?? null); }, [byBot, onBudget]);
+  useEffect(() => { onSummary(byBot); }, [byBot, onSummary]);
   if (settings) return null;
   return (
     <section className="rounded-2xl border border-hairline/50 bg-card p-5" aria-label={t("usage.page.where")}>
@@ -227,12 +246,12 @@ function WhereItWent({ range, version, onBudget }: { range: { from: string; to: 
 const SETTINGS_GROUPINGS: readonly UsageGroupBy[] = ["bot", ...OTHER_GROUPINGS];
 
 /** Settings' Where it went: a select (by bot, model, person…) as the section's action, then one row per item. */
-function SettingsWhereItWent({ range, version, onBudget }: { range: { from: string; to: string }; version: number; onBudget: (budget: BudgetState | null) => void }) {
+function SettingsWhereItWent({ range, version, onSummary }: { range: { from: string; to: string }; version: number; onSummary: (summary: UsageSummary | null) => void }) {
   const { state } = useStore();
   const [by, setBy] = useState<UsageGroupBy>("bot");
   const byBot = useUsageGroups(range, "bot", version);
   const groups = useUsageGroups(range, by, version);
-  useEffect(() => { onBudget(byBot?.budget ?? null); }, [byBot, onBudget]);
+  useEffect(() => { onSummary(byBot); }, [byBot, onSummary]);
   const top = groups?.groupBy === by ? [...groups.groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).filter((group) => headlineTokens(group) > 0).slice(0, 8) : null;
   return (
     <SettingsGroup label={t("usage.page.where")} block="where"
@@ -299,7 +318,8 @@ export function UsageSection() {
   const [list, setList] = useState<TraceList | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
-  const [budget, setBudget] = useState<BudgetState | null>(null);
+  const [summary, setSummary] = useState<UsageSummary | null>(null);
+  const budget = summary?.budget ?? null;
   const [open, setOpen] = useState<{ id: string; at: number } | null>(null);
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -356,7 +376,8 @@ export function UsageSection() {
               </div>
             </SettingsRows>
           </SettingsGroup>
-          <SettingsWhereItWent range={range} version={version} onBudget={setBudget} />
+          <CostCaveats summary={summary} />
+          <SettingsWhereItWent range={range} version={version} onSummary={setSummary} />
           <SettingsGroup label={t("usage.page.runs")} block="runs" footnote={untimed ? t("usage.page.untimedNote") : undefined}
             actions={<a href={usageExportHref(range)} download className="ui-button ui-button-md rounded-full">{t("usage.history.export")}</a>}>
             <SettingsRows>
@@ -367,6 +388,7 @@ export function UsageSection() {
           </SettingsGroup>
         </>}
         <PlanUsage />
+        <UsageCapsCard view={summary?.caps} onSaved={() => setVersion((value) => value + 1)} />
         <UsageBudgetCards budget={budget} />
       </div>
     );
@@ -398,7 +420,8 @@ export function UsageSection() {
             {list ? <StatStrip items={totalsStats(list.totals, t("trace.stat.time"))} />
               : <div className="flex items-center gap-2 p-5 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" />{t("common.checking")}</div>}
           </section>
-          <WhereItWent range={range} version={version} onBudget={setBudget} />
+          <CostCaveats summary={summary} />
+          <WhereItWent range={range} version={version} onSummary={setSummary} />
           <section className="rounded-2xl border border-hairline/50 bg-card p-2" aria-label={t("usage.page.runs")}>
             <div className="px-3 pb-1 pt-3">
               <h3 className="text-[15px] font-medium text-ink">{t("usage.page.runs")}</h3>
@@ -416,6 +439,7 @@ export function UsageSection() {
         </>
       )}
       <PlanUsage />
+      <UsageCapsCard view={summary?.caps} onSaved={() => setVersion((value) => value + 1)} />
       <UsageBudgetCards budget={budget} />
     </div>
   );

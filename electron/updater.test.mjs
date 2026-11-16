@@ -44,6 +44,8 @@ function mainRule() {
   const window = { isDestroyed: () => false, webContents: null };
   const listeners = new Map();
   const signIn = { options: null, state: { status: "signed-out", message: "restoring" } };
+  // The bot link hears every change of the sign-in (bot-link-main.mjs ends a link whose account or Cloud changed).
+  const botLink = { look: vi.fn(async () => {}) };
   const context = vm.createContext({
     ipcMain: { handle: () => {}, on: (channel, listener) => listeners.set(channel, listener) },
     senderIsLocal: localOriginModule.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed, cloudPageSenderAllowed, myCloudOrigin, otherOwnClouds,
@@ -55,7 +57,7 @@ function mainRule() {
     // ensureCloudAccount's world: a packaged app, and a sign-in client whose state the test sets.
     app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin", env: {} }, cloudTarget,
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
-    createCloudAccountStore: () => ({}), cloudEncryption: {}, cloudAccountStore: () => ({}), cloudSync: { accountChanged: () => {} }, accounts: { tell: () => {} }, rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null, updatesConsent: null,
+    createCloudAccountStore: () => ({}), cloudEncryption: {}, cloudAccountStore: () => ({}), cloudSync: { accountChanged: () => {} }, accounts: { tell: () => {} }, rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null, updatesConsent: null, botLink,
     sendUpdaterState: () => {}, refreshCloudMenus: () => {}, announceCloudReady: () => {}, installCloudPlanIpc: () => {},
     includedX: { onState: async () => {} }, includedPages: { onState: async () => {} }, cloudPower: { changed: () => {}, awaiting: () => false }, cloudLogins: { kick: () => {} },
     createCloudAccountClient: (options) => {
@@ -91,7 +93,7 @@ function mainRule() {
     context.cloudSignInRestored = true;
     signIn.options.onState(state);
   };
-  return { context, window, show, offered, launching, signedIn, pageAllowed: vm.runInContext("updaterPageAllowed", context), serverPage: (event) => vm.runInContext("activePageOrigin", context)(event) ?? null };
+  return { context, window, show, offered, launching, signedIn, botLink, pageAllowed: vm.runInContext("updaterPageAllowed", context), serverPage: (event) => vm.runInContext("activePageOrigin", context)(event) ?? null };
 }
 
 async function load(pageAllowed, serverPage = undefined, confirmRestart = undefined) {
@@ -190,6 +192,7 @@ it("another server's page never gets the update bridge; My Cloud's does, even wh
 
   rule.signedIn({ status: "signed-out" });
   expect(has(CLOUD, "cloud")).toBe(false);
+  expect(rule.botLink.look, "a change of the sign-in is told to the bot link").toHaveBeenCalledTimes(1);
 
   rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" } });
   expect(has(CLOUD, "cloud")).toBe(true);

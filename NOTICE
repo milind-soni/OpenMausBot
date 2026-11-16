@@ -6,8 +6,9 @@ Version 2.0, with the consent of all contributors whose copyright was
 incorporated before the transition.
 
 The Google Antigravity ACP integration adapts release, installation, profile,
-authentication, and runtime temporary-folder behavior from T3 Code, Copyright
-2026 T3 Tools Inc., used under the MIT License (third_party/t3-code/LICENSE).
+authentication, sign-out, session setup, client name, turn-outcome,
+usage-limit, and runtime temporary-folder behavior from T3 Code, Copyright 2026 T3 Tools Inc., used under the MIT License
+(third_party/t3-code/LICENSE).
 
 Selected-text citation matching adapts T3 Code's assistant citation selection,
 Copyright 2026 T3 Tools Inc., used under the MIT License.

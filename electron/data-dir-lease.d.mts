@@ -31,6 +31,10 @@ export declare function clearRecordsFromOtherMachines(
   dataDir: string,
 ): { path: string; host: string; pid: number }[];
 
+export declare function macMountIsLocal(dfOutput: string, mountTable: string): boolean;
+
+export declare function inMacSyncedFolder(path: string, home: string): boolean;
+
 export declare function clearRecordsFromEarlierRunOfThisContainer(
   dataDir: string,
 ): { path: string; host: string; pid: number }[];
