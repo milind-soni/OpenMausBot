@@ -3996,5 +3996,10 @@
   "remote.tailscale.needsApproval": "Dieser Computer wartet auf die Genehmigung in Ihrem Tailscale-Netzwerk. Genehmigen Sie ihn in der Tailscale-Admin-Konsole und versuchen Sie es dann erneut.",
   "together.switch.title": "Dieser Computer und Meine Cloud zusammen",
   "together.switch.line": "Standardmäßig aus. Die Bots der Cloud und die Bots dieses Computers stehen in einer Liste, und jeder öffnet sich dort, wo er läuft.",
-  "together.switch.failed": "Das konnte nicht gespeichert werden. Versuch es noch einmal."
+  "together.switch.failed": "Das konnte nicht gespeichert werden. Versuch es noch einmal.",
+  "server.rooms.linkedAway": "{bot} läuft auf {place}, das gerade aus ist oder schläft. Die Antwort kommt hier, sobald {place} wieder da ist.",
+  "server.rooms.linkedGone": "{bot} läuft auf {place}, das nicht mehr mit diesem Ort verbunden ist, und kann hier deshalb nicht antworten.",
+  "server.rooms.linkedNotSent": "{bot} konnte auf {place} nicht an die Reihe kommen. Erwähne {bot} noch einmal, um es erneut zu versuchen.",
+  "server.rooms.linkedNoAnswer": "{bot} ist auf {place} fertig geworden, ohne eine Antwort für diesen Raum.",
+  "server.rooms.linkedFailed": "{bot} konnte von {place} aus nicht antworten."
 }

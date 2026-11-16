@@ -11010,5 +11010,10 @@
   "sidebar.newBotOn.noAi": "Nenhuma IA está conectada lá ainda.",
   "sidebar.newBotOn.onlyThere": "Conectada só lá: {ais}.",
   "sidebar.newBotOn.onlyHere": "Conectada só aqui: {ais}.",
-  "sidebar.newBotOn.needsUpdate": "O My Cloud precisa da próxima atualização para isso."
+  "sidebar.newBotOn.needsUpdate": "O My Cloud precisa da próxima atualização para isso.",
+  "server.rooms.linkedAway": "{bot} fica em {place}, que está desligado ou em repouso agora. Responde aqui quando {place} voltar.",
+  "server.rooms.linkedGone": "{bot} fica em {place}, que não está mais junto com este lugar, então não pode responder aqui.",
+  "server.rooms.linkedNotSent": "Não foi possível passar a vez de {bot} para {place}. Mencione {bot} de novo para tentar mais uma vez.",
+  "server.rooms.linkedNoAnswer": "{bot} terminou em {place} sem uma resposta para este grupo.",
+  "server.rooms.linkedFailed": "{bot} não conseguiu responder a partir de {place}."
 }

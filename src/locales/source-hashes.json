@@ -3995,7 +3995,12 @@
       "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297",
       "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
       "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
-      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8",
+      "server.rooms.linkedAway": "015d3b80112be3f88333b361fb631d562fadeb17de17e2a534c1086560693f5e",
+      "server.rooms.linkedGone": "ff9797127fda5bd03d482d7b6129e110c31a54c03334aa3efa8e160d7e33ccad",
+      "server.rooms.linkedNotSent": "2a7a449dfde6117164372825181d8f4a316f206fc247d15aa19408b0e5667f15",
+      "server.rooms.linkedNoAnswer": "e84a8f83812d4c90e838cb280452b27886f69f6b3fee7d151419407bee121095",
+      "server.rooms.linkedFailed": "f2e5123cd9e1fcc6f0d3f6a304455efc779f5fb95c6dd7abb01820b3ab3205d5"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37056,7 +37061,12 @@
       "sidebar.newBotOn.noAi": "90560bfa52da1eeef7f9a7e212ab43b68e8a9104bf02cff500b08e8440d3e86a",
       "sidebar.newBotOn.onlyThere": "ee143ffe98b9c13337df5499526fa6b85e2df7f1b595a43f94dd907a74ab3789",
       "sidebar.newBotOn.onlyHere": "5fa107188d3ebf59545c5522c3540371a95d16a3625a4f57e84f093849baabc4",
-      "sidebar.newBotOn.needsUpdate": "2fe10ee88189ee8ef942992b455e968fed8af782c1e7353b5a1ac4c54365c1b0"
+      "sidebar.newBotOn.needsUpdate": "2fe10ee88189ee8ef942992b455e968fed8af782c1e7353b5a1ac4c54365c1b0",
+      "server.rooms.linkedAway": "015d3b80112be3f88333b361fb631d562fadeb17de17e2a534c1086560693f5e",
+      "server.rooms.linkedGone": "ff9797127fda5bd03d482d7b6129e110c31a54c03334aa3efa8e160d7e33ccad",
+      "server.rooms.linkedNotSent": "2a7a449dfde6117164372825181d8f4a316f206fc247d15aa19408b0e5667f15",
+      "server.rooms.linkedNoAnswer": "e84a8f83812d4c90e838cb280452b27886f69f6b3fee7d151419407bee121095",
+      "server.rooms.linkedFailed": "f2e5123cd9e1fcc6f0d3f6a304455efc779f5fb95c6dd7abb01820b3ab3205d5"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47297,7 +47307,12 @@
       "sidebar.newBotOn.noAi": "90560bfa52da1eeef7f9a7e212ab43b68e8a9104bf02cff500b08e8440d3e86a",
       "sidebar.newBotOn.onlyThere": "ee143ffe98b9c13337df5499526fa6b85e2df7f1b595a43f94dd907a74ab3789",
       "sidebar.newBotOn.onlyHere": "5fa107188d3ebf59545c5522c3540371a95d16a3625a4f57e84f093849baabc4",
-      "sidebar.newBotOn.needsUpdate": "2fe10ee88189ee8ef942992b455e968fed8af782c1e7353b5a1ac4c54365c1b0"
+      "sidebar.newBotOn.needsUpdate": "2fe10ee88189ee8ef942992b455e968fed8af782c1e7353b5a1ac4c54365c1b0",
+      "server.rooms.linkedAway": "015d3b80112be3f88333b361fb631d562fadeb17de17e2a534c1086560693f5e",
+      "server.rooms.linkedGone": "ff9797127fda5bd03d482d7b6129e110c31a54c03334aa3efa8e160d7e33ccad",
+      "server.rooms.linkedNotSent": "2a7a449dfde6117164372825181d8f4a316f206fc247d15aa19408b0e5667f15",
+      "server.rooms.linkedNoAnswer": "e84a8f83812d4c90e838cb280452b27886f69f6b3fee7d151419407bee121095",
+      "server.rooms.linkedFailed": "f2e5123cd9e1fcc6f0d3f6a304455efc779f5fb95c6dd7abb01820b3ab3205d5"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",

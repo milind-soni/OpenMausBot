@@ -10242,5 +10242,10 @@
   "sidebar.newBotOn.noAi": "那里还没有登录任何 AI。",
   "sidebar.newBotOn.onlyThere": "只在那里登录：{ais}。",
   "sidebar.newBotOn.onlyHere": "只在这里登录：{ais}。",
-  "sidebar.newBotOn.needsUpdate": "My Cloud 需要下一次更新才能这样做。"
+  "sidebar.newBotOn.needsUpdate": "My Cloud 需要下一次更新才能这样做。",
+  "server.rooms.linkedAway": "{bot} 所在的 {place} 现在已关闭或休眠。{place} 恢复后它会在这里回复。",
+  "server.rooms.linkedGone": "{bot} 所在的 {place} 已不再与此处合在一起，所以它无法在这里回复。",
+  "server.rooms.linkedNotSent": "无法把 {bot} 的发言机会传给 {place}。再次提及 {bot} 可重试。",
+  "server.rooms.linkedNoAnswer": "{bot} 在 {place} 上完成了，但没有给这个群组聊天的回复。",
+  "server.rooms.linkedFailed": "{bot} 无法从 {place} 回复。"
 }

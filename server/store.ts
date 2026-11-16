@@ -441,8 +441,8 @@ export class Store {
     for (const g of this.groups) {
       g.busyBotId = null;
       delete g.turnStartedAt;
-      if (botsLoaded && !g.dm && g.memberIds.some((id) => !botIds.has(id))) {
-        g.memberIds = g.memberIds.filter((id) => botIds.has(id));
+      if (botsLoaded && !g.dm && g.memberIds.some((id) => !botIds.has(id) && !id.startsWith("link-"))) {
+        g.memberIds = g.memberIds.filter((id) => botIds.has(id) || id.startsWith("link-")); // A member that lives in another of the person's places (server/bot-link/) is no bot of bots.json: the link, which starts later, says whether it is still there.
         groupsMigrated = true;
       }
       const normalized = normalizeGroupDefaultResponder(g.defaultResponder, g.memberIds, Boolean(g.dm));

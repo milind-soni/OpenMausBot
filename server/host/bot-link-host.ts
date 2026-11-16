@@ -14,11 +14,15 @@ import type { Level } from "../runtime/types.ts";
 import type { BotRecord, Store } from "../store.ts";
 import type { HandoffFiles, PassedFile } from "./handoff-files.ts";
 import { sentRow, teammateResultRow } from "./handoff-sent.ts";
+import { createLinkedRooms, type LinkedRoomsDeps } from "./bot-link-rooms.ts";
 
 export interface BotLinkHostDeps {
   dataDir: string;
   environmentId: string;
-  store: Pick<Store, "bots" | "bot" | "standIns" | "createTask" | "taskByThread" | "appendMessage" | "patchTask" | "onChange" | "group" | "groupTaskByThread" | "markGroupThreadUnread">;
+  store: Pick<Store, "bots" | "bot" | "standIns" | "createTask" | "taskByThread" | "appendMessage" | "patchTask" | "onChange" | "group" | "groups" | "groupTaskByThread" | "markGroupThreadUnread" | "activePath" | "patchGroup">;
+  /** A room line in the language of its thread, and what follows a member's answer (its mentions take their turns). */
+  roomLine: LinkedRoomsDeps["line"];
+  roomFollow?: LinkedRoomsDeps["follow"];
   coordinator(): Coordinator;
   kick(): void;
   level(bot: BotRecord): Level;
@@ -49,8 +53,10 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     store.standIns.clear();
     for (const [id, record] of next) if (isLinkedId(id)) store.standIns.set(id, record);
   };
+  const rooms = createLinkedRooms({ store, coordinator: deps.coordinator, on: () => link.on(), linked: (peer) => link.has(peer), online: (peer) => link.online(peer), selfName: () => link.selfName(), wanted: () => link.wanted(),
+    personName: deps.personName, line: deps.roomLine, log: deps.log, ...(deps.roomFollow ? { follow: deps.roomFollow } : {}) });
   const link = createBotLink({
-    dataDir: deps.dataDir, coordinator: deps.coordinator, kick: deps.kick, log: deps.log, directoryChanged: () => syncStandIns(), revoke: (sessionId) => { deps.sessions.revoke(sessionId); },
+    dataDir: deps.dataDir, coordinator: deps.coordinator, kick: deps.kick, log: deps.log, rooms, directoryChanged: () => { syncStandIns(); rooms.placesLeft(); }, revoke: (sessionId) => { deps.sessions.revoke(sessionId); },
     bots: () => store.bots, bot: (id) => store.bot(id),
     refusal: (bot) => deps.refusal(bot as BotRecord),
     model: (bot) => (bot as BotRecord).modelSelection.model,
@@ -103,7 +109,7 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
     },
     revoke: (sessionId) => { deps.sessions.revoke(sessionId); } });
   return {
-    link, routes,
+    link, routes, rooms,
     /** Once the server is up. Off: nothing. On, on the computer: it starts asking the Cloud. */
     start(): void {
       if (!link.on()) return;

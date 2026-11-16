@@ -16,6 +16,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { createDialer } from "./dial.ts";
 import { createBotLink, SPOOL_KEEP_MS, type BotLink } from "./link.ts";
 import { createBotLinkRoutes as routesOf, linkSessionRefusal } from "../routes/bot-link.ts";
+import { createLinkedRooms, type LinkedRooms } from "../host/bot-link-rooms.ts";
 import { EXCHANGE_BYTES, LINK_EXPIRES_MS, PAIR_PATH, STATE_PATH, SYNC_PATH, linkedId, peerKey, type Frame } from "./protocol.ts";
 
 /** How a place addresses a bot of another: by that place's key and the bot's id there. */
@@ -56,12 +57,36 @@ function place(label: string, bots: Bot[], version?: number) {
   /** Requests this place's server answers with a failure, once each. */
   const failing: Array<{ match: RegExp; status: number }> = [];
   let run: Run = async (node) => ({ ok: true, text: `${node.botId} did: ${node.text}` });
+  /** Rooms of this place, their words, and the receipts that make a line posted under one key one line: all three are
+   * what the store keeps on disk, so they outlive `boot()`. */
+  type Line = { id: string; role: "user" | "bot"; kind: string; text?: string; from?: { botId: string; name: string }; tool?: { name: string; ok?: boolean } };
+  const groups: Array<{ id: string; name: string; threadId: string; memberIds: string[]; dm: boolean }> = [];
+  const words = new Map<string, Line[]>(), receipts = new Set<string>(), followed: string[] = [];
+  let rooms!: LinkedRooms, lines = 0;
+  const member = (id: string) => bots.find((bot) => bot.id === id) ?? (() => { const far = link.linked().find((one) => one.id === id); return far ? { id, name: far.bot.name, color: "blue", home: { place: far.peer, placeName: far.place.name, botId: far.bot.id } } : null; })();
+  const roomStore = {
+    bot: member, groups, group: (id: string) => groups.find((group) => group.id === id) ?? null,
+    groupTaskByThread: (groupId: string, threadId: string) => (groups.some((group) => group.id === groupId && group.threadId === threadId) ? {} : undefined),
+    activePath: (threadId: string) => words.get(threadId) ?? [],
+    appendMessage: (threadId: string, message: Omit<Line, "id">, command?: { kind: string; key: string }) => {
+      if (command && receipts.has(`${command.kind}:${command.key}`)) return (words.get(threadId) ?? []).at(-1)!;
+      if (command) receipts.add(`${command.kind}:${command.key}`);
+      const line = { id: `line-${++lines}`, ...message };
+      words.set(threadId, [...(words.get(threadId) ?? []), line]);
+      return line;
+    },
+    markGroupThreadUnread: () => null,
+    patchGroup: (id: string, patch: { memberIds?: string[] }) => { const group = groups.find((one) => one.id === id); if (group && patch.memberIds) group.memberIds = patch.memberIds; return group ?? null; },
+  };
   let coordinator!: Coordinator, link!: BotLink, dialer!: ReturnType<typeof createDialer>, ticker: NodeJS.Timeout | undefined, http: Server | undefined;
   let opened = 0, port = 0, generation = 0, skew = 0, minted = 0, directoryChanges = 0;
   const sockets = new Set<import("node:net").Socket>();
 
   function boot(options: { limits?: { queueMs?: number; stallMs?: number } } = {}) {
+    rooms = createLinkedRooms({ store: roomStore as never, coordinator: () => coordinator, on: () => link.on(), linked: (peer) => link.has(peer), online: (peer) => link.online(peer), selfName: () => link.selfName(), wanted: () => link.wanted(),
+      personName: () => "Sam", line: (_threadId, key, params) => `${key} ${params.bot}`, follow: (_groupId, _threadId, speaker, text, hop) => { followed.push(`${speaker.name} at ${hop}: ${text}`); } });
     link = createBotLink({
+      rooms, directoryChanged: () => { directoryChanges += 1; rooms.placesLeft(); },
       dataDir: dir, coordinator: () => coordinator, bots: () => bots, bot: (id) => bots.find((bot) => bot.id === id), level: () => "full",
       openThread: (bot) => { const id = `${bot.id}-work-${++opened}`; threads.add(id); return id; },
       hasThread: (_botId, threadId) => threads.has(threadId), personName: () => "Sam",
@@ -70,7 +95,6 @@ function place(label: string, bots: Bot[], version?: number) {
       kick: () => { queueMicrotask(() => { try { coordinator.tick(); } catch { /* closed */ } }); },
       revoke: (sessionId) => { for (const [token, id] of issued) if (id === sessionId) issued.delete(token); },
       now: () => Date.now() + skew,
-      directoryChanged: () => { directoryChanges += 1; },
       files: {
         carried: (id, way) => ledger.get(`${id}:${way}`)?.files ?? [],
         crossed: (id, way, from, files) => { if (!ledger.has(`${id}:${way}`)) ledger.set(`${id}:${way}`, { from, files: [...files] }); },
@@ -154,6 +178,16 @@ function place(label: string, bots: Bot[], version?: number) {
     attach: (id: string, name: string, words: string) => { const batch = ledger.get(`${id}:returned`) ?? { from: { botId: "x", name: "x" }, files: [] }; batch.files.push(keep(name, Buffer.from(words))); ledger.set(`${id}:returned`, batch); },
     /** The files still waiting in this place's spool folder. */
     spooled: () => { const root = join(dir, "bot-link-files"); return existsSync(root) ? readdirSync(root, { recursive: true }).map(String).filter((entry) => /[\\/](?:sent|returned)[\\/]/.test(entry)) : []; },
+    followed, get rooms() { return rooms; },
+    /** A room of this place; its members may live in either. */
+    room(name: string, memberIds: string[]) { const group = { id: `${name.toLowerCase()}-room`, name, threadId: `${name.toLowerCase()}-thread`, memberIds, dm: false }; groups.push(group); return group; },
+    /** The person writes in a room: each member the line names takes its turn. */
+    say(groupId: string, text: string, hop = 0) {
+      const group = groups.find((one) => one.id === groupId)!;
+      roomStore.appendMessage(group.threadId, { role: "user", kind: "text", text });
+      for (const id of group.memberIds) { const bot = member(id); if (bot && text.includes(`@${bot.name}`) && rooms.forwards(bot as never)) rooms.memberTurn(group as never, group.threadId, bot as never, hop); }
+    },
+    said: (groupId: string) => (words.get(groups.find((one) => one.id === groupId)!.threadId) ?? []).map((line) => (line.kind === "text" ? `${line.from?.name ?? "Sam"}: ${line.text}` : `(${line.tool?.name})`)),
     get link() { return link; }, get dialer() { return dialer; }, get coordinator() { return coordinator; }, get port() { return port; },
     engine(next: Run) { run = next; },
     /** Time passes for this place's link. */
@@ -692,6 +726,94 @@ describe("the link between a computer and its Cloud", () => {
     expect(String(left.answer.body.error)).toContain("a room you are a member of");
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(cloud.runs.filter((run) => run.botId === "cloud-analyst")).toHaveLength(1);
+  });
+
+  it("a room with a member from the other place: its turn runs there once, with what was said, and its answer is its own line in the room", async () => {
+    const { computer, cloud } = await two();
+    const room = computer.room("Launch", ["local-writer", onCloud("cloud-analyst")]);
+    cloud.engine(async (node) => ({ ok: true, text: node.text.includes("returns") ? "3 returns." : "42 orders. @Writer please confirm." }));
+    computer.say(room.id, "@Analyst how many orders this week?");
+    await until(() => computer.said(room.id).length === 2, "the answer is in the room");
+    expect(computer.said(room.id)).toEqual(["Sam: @Analyst how many orders this week?", "Analyst: 42 orders. @Writer please confirm."]);
+    expect(computer.followed).toEqual(["Analyst at 0: 42 orders. @Writer please confirm."]);
+    const turn = cloud.runs.find((run) => run.botId === "cloud-analyst")!;
+    expect(turn.text).toContain("room \"Launch\" on Sam's Mac");
+    expect(turn.text).toContain("Sam: @Analyst how many orders this week?");
+    expect(turn.text).toContain("The other members: Writer.");
+    expect(turn.requester).toContain("Launch (Sam's Mac)");
+    // The next turn carries only what was said since, and runs in the same thread there.
+    computer.say(room.id, "@Analyst and how many returns?");
+    await until(() => computer.said(room.id).length === 4, "the second answer is in the room");
+    const turns = cloud.runs.filter((run) => run.botId === "cloud-analyst");
+    expect(turns).toHaveLength(2);
+    expect(turns[1]!.text).toContain("Said in the room since you last spoke:\nSam: @Analyst and how many returns?");
+    expect(turns[1]!.text).not.toContain("how many orders");
+    expect(turns[1]!.threadId).toBe(turns[0]!.threadId);
+    expect(computer.said(room.id).at(-1)).toBe("Analyst: 3 returns.");
+    // A report made twice, as after a restart between the two, leaves one line.
+    const child = computer.coordinator.all().find((node) => node.botId === onCloud("cloud-analyst") && node.status === "completed")!;
+    expect(computer.rooms.reply(child, undefined, "Analyst")).toBe(true);
+    expect(computer.said(room.id)).toHaveLength(4);
+    // Handing work to that member from the room names it as the member it is.
+    await computer.handOff("local-writer", call([onCloud("cloud-analyst")], "Check the returns"), undefined, { id: room.id });
+    expect(computer.sent.at(-1)).toEqual({ recipient: "Analyst (My Cloud)", threadId: `${room.id}-thread` });
+  });
+
+  it("the member's place is off: what is written in the room waits as one turn, is said once, and is answered once when the place is back, across a restart", async () => {
+    const { computer, cloud } = await two({ limits: { queueMs: 80, stallMs: 400 } });
+    const room = computer.room("Launch", ["local-writer", onCloud("cloud-analyst")]);
+    await cloud.unplug();
+    await until(() => !computer.link.online(), "the computer sees the Cloud gone");
+    computer.say(room.id, "@Analyst how many orders this week?");
+    computer.say(room.id, "@Analyst and split them by country.");
+    expect(computer.said(room.id)).toEqual(["Sam: @Analyst how many orders this week?", "(server.rooms.linkedAway Analyst)", "Sam: @Analyst and split them by country."]);
+    const waiting = () => computer.coordinator.active().filter((node) => node.botId === onCloud("cloud-analyst"));
+    expect(waiting().map((node) => node.status)).toEqual(["queued"]);
+    // Past the queue's own clock and the stall window, and it does not count as busy.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(waiting().map((node) => node.status)).toEqual(["queued"]);
+    expect(computer.coordinator.pace()).not.toBe("busy");
+    await computer.restart({ limits: { queueMs: 80, stallMs: 400 } });
+    expect(waiting().map((node) => node.status)).toEqual(["queued"]);
+    expect(cloud.runs).toEqual([]);
+    await cloud.listen(cloud.port);
+    computer.dialer.start();
+    await until(() => computer.said(room.id).length === 4, "the answer is in the room");
+    const turns = cloud.runs.filter((run) => run.botId === "cloud-analyst");
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.text).toContain("Sam: @Analyst how many orders this week?\nSam: @Analyst and split them by country.");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(computer.said(room.id).filter((line) => line.startsWith("Analyst: "))).toHaveLength(1);
+    expect(cloud.runs.filter((run) => run.botId === "cloud-analyst")).toHaveLength(1);
+  });
+
+  it("a member that left the room while its turn waited is not sent it; stopping the room stops the turn where it runs; unlinking takes the member out", async () => {
+    const { computer, cloud } = await two();
+    const room = computer.room("Launch", ["local-writer", onCloud("cloud-analyst")]);
+    await cloud.unplug();
+    await until(() => !computer.link.online(), "the computer sees the Cloud gone");
+    computer.say(room.id, "@Analyst how many orders?");
+    room.memberIds = ["local-writer"];
+    await cloud.listen(cloud.port);
+    computer.dialer.start();
+    await until(() => computer.link.online() && computer.coordinator.active().every((node) => node.botId !== onCloud("cloud-analyst")), "the waiting turn ends");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(cloud.runs).toEqual([]);
+    expect(computer.said(room.id).some((line) => line.startsWith("Analyst: "))).toBe(false);
+
+    room.memberIds = ["local-writer", onCloud("cloud-analyst")];
+    let stopped = false;
+    cloud.engine((_node, _resumed, signal) => new Promise((resolve) => { signal.addEventListener("abort", () => { stopped = true; resolve({ ok: false, text: "stopped" }); }); }));
+    computer.say(room.id, "@Analyst count again.");
+    await until(() => cloud.runs.length === 1, "the turn runs on the Cloud");
+    computer.coordinator.cancelRoom(room.id, room.threadId, "Stopped by Sam");
+    await until(() => stopped, "the Cloud's turn is stopped");
+    expect(computer.said(room.id).some((line) => line.startsWith("Analyst: "))).toBe(false);
+
+    await computer.fetch("PUT", STATE_PATH, { on: false });
+    expect(room.memberIds).toEqual(["local-writer"]);
+    computer.say(room.id, "@Analyst are you there?");
+    expect(computer.coordinator.active().some((node) => node.botId === onCloud("cloud-analyst"))).toBe(false);
   });
 
   it("each place keeps the other's bots with their address, place and look, and hears when they change or the link ends", async () => {

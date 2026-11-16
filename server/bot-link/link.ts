@@ -132,6 +132,19 @@ export interface BotLinkDeps {
   };
   /** The teammate's result in the requester's conversation. */
   resultRow(parent: HandoffView, child: HandoffView, name: string): void;
+  /** The turns of a room member that lives in another place (server/host/bot-link-rooms.ts). Such a turn is a hand-off
+   * like any other: sent once, queued while that place is away, stopped with the room. Absent: no room has such a member. */
+  rooms?: {
+    /** For a room turn, what its hand-off says, worked out as it is sent so that it holds everything said in the room up
+     * to then: who asks (the room), the words, and the person. Undefined: `node` is not a room turn. */
+    brief(node: HandoffView): { from: { botId: string; name: string }; text: string; person?: string } | undefined;
+    /** Why a room turn that waited can no longer go (the room or the thread is gone, the bot left it), or undefined. */
+    problem(node: HandoffView): string | undefined;
+    /** A room turn ended: its answer is the member's line in the room. True when `child` was a room turn. */
+    reply(child: HandoffView, parent: HandoffView | undefined, name: string): boolean;
+    /** Whether that bot of another place is a member of this room. */
+    member(groupId: string, linked: string): boolean;
+  };
   /** The coordinator should look again: a place came back, or went. */
   kick(): void;
   /** The other places' bots changed: one came, went or changed, or a place was linked or unlinked. */
@@ -335,6 +348,12 @@ export function createBotLink(deps: BotLinkDeps) {
       ...(parent && deps.personName(parent.threadId) ? { person: deps.personName(parent.threadId)!.slice(0, 120) } : {}),
       ...(record?.doneWhen ? { doneWhen: record.doneWhen.slice(0, 2_000) } : {}),
     };
+    const room = deps.rooms?.brief(node);
+    if (room) {
+      frame.from = { botId: room.from.botId.slice(0, 200), name: room.from.name.trim().slice(0, 120) || "Room", threadId: frame.from.threadId };
+      frame.text = room.text.slice(0, BRIEF_MAX);
+      if (room.person) frame.person = room.person.slice(0, 120); else delete frame.person;
+    }
     const files = deps.files?.carried(node.id, "sent") ?? [];
     if (files.length) frame.files = metaOf(files);
     return new Promise<HostTurnResult>((settle) => {
@@ -636,7 +655,7 @@ export function createBotLink(deps: BotLinkDeps) {
         if (!online) for (const listener of wantedListeners) listener();
         if (!duplicate) {
           context.handed(node.id);
-          deps.sentRow({ sender: context.sender, threadId: context.address.threadId, recipient: { id: linked, name: `${remote.bot.name} (${place})` }, workThreadId: threadId, nodeId: node.id, ...(context.address.groupId ? { roomId: context.address.groupId } : {}),
+          deps.sentRow({ sender: context.sender, threadId: context.address.threadId, recipient: { id: linked, name: `${remote.bot.name} (${place})` }, workThreadId: threadId, nodeId: node.id, ...(context.address.groupId && !deps.rooms?.member(context.address.groupId, linked) ? { roomId: context.address.groupId } : {}),
             ...(call.reason ? { reason: call.reason } : {}), ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}) });
         }
       } catch (error) {
@@ -676,6 +695,8 @@ export function createBotLink(deps: BotLinkDeps) {
         if (!awayNode(node)) return inner.validate(node, parent && awayNode(parent) ? undefined : parent);
         if (!node.parentId) return undefined;
         if (!state) return "The link to the person's other place was turned off, so this was not delivered.";
+        const left = deps.rooms?.problem(node);
+        if (left) return left;
         return remoteOf(node.botId) ? undefined : "That bot's place is no longer linked, or the bot is no longer there.";
       },
       busy: (node) => (awayNode(node) ? !isOnline(peerOf(node)) : inner.busy(node)),
@@ -691,6 +712,7 @@ export function createBotLink(deps: BotLinkDeps) {
         if (awayNode(child)) {
           // It ended here without its result (cut by restarts, refused, failed): the place that runs it is told to stop.
           if (child.parentId && !resulted.delete(child.id) && child.status !== "completed") send(peerOf(child), { t: "cancel", id: child.id });
+          if (deps.rooms?.reply(child, parent, nameOf(child.botId))) return;
           if (!parent || child.mode === "notify") return;
           deps.resultRow(parent, child, nameOf(child.botId));
           return;
@@ -722,6 +744,9 @@ export function createBotLink(deps: BotLinkDeps) {
   return {
     host, coordinate, resolve,
     on: () => state !== null,
+    /** What this place is called, as the other places were told. */
+    selfName: () => state?.self.name ?? "",
+    placeName,
     /** This place is linked here now. */
     has: (peer: string) => Boolean(state?.peers[peer]),
     /** One place is connected, or (with no place named) any is. */
@@ -851,6 +876,8 @@ export function createBotLink(deps: BotLinkDeps) {
     hasOutgoing: (peer: string, ack = 0) => live.get(peer)?.outbox.some((entry) => entry.seq > ack) === true,
     onOutgoing(listener: (peer: string) => void): () => void { outboundListeners.add(listener); return () => outboundListeners.delete(listener); },
     /** Work was handed to a place that is not connected: a computer asks its Cloud for it now. */
+    /** There is work for a place that is not connected, handed over outside `coordinate` (a room turn). */
+    wanted(): void { for (const listener of wantedListeners) listener(); },
     onWanted(listener: () => void): () => void { wantedListeners.add(listener); return () => wantedListeners.delete(listener); },
     sleeps: () => state?.sleeps === true,
     setSleeps(sleeps: boolean): void { if (state && state.role === "dialer" && (state.sleeps === true) !== sleeps) { state.sleeps = sleeps; save(); } },
