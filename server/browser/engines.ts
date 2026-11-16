@@ -16,6 +16,7 @@ import { ProcessRegistry, sweep } from "./chrome/processes.ts";
 import { browserRoot } from "./chrome/profile.ts";
 import { browserLanguage, browserTimeZone, languageList } from "./chrome/wrapper.ts";
 import { displayScreen } from "./display.ts";
+import type { DesktopBackend } from "./desktop-backend.ts";
 import type { Download } from "./cdp/downloads.ts";
 import { BrowserService, type BrowserTarget } from "./service.ts";
 import { LiveV1 } from "./viewers/live-v1.ts";
@@ -51,6 +52,8 @@ export interface ChromeEngineOptions {
   egressNotice(key: string): string | null;
   language?(): string | undefined;
   log?: (line: string) => void;
+  desktop?: DesktopBackend;
+  nativeSelected?(): boolean;
 }
 
 /** The new engine: one Chrome launcher (no agent-browser wrapper), the browser service, its live views and its sweep. */
@@ -95,7 +98,8 @@ export class ChromeEngine {
     const maxRunning = Number(env.OMB_BROWSER_MAX_RUNNING) || MAX_RUNNING[options.host];
     this.service = new BrowserService({
       dataDir: options.dataDir,
-      backend: () => backend,
+      backend: () => options.nativeSelected?.() ? options.desktop ?? backend : backend,
+      eraseBackend: (key)=>options.desktop?.erase(key)??Promise.resolve(),
       maxRunning,
       idleMs: options.idleMs,
       held: options.held,
@@ -127,7 +131,7 @@ export class ChromeEngine {
     this.#inUse = inUse;
     if (!inUse && !this.#cleared && this.#everUsed()) this.#tick();
     this.#cleared = true;
-    if (inUse && prepare && this.launcher.plan().kind !== "legacy") void this.launcher.prepare();
+    if (inUse && prepare && !this.#options.nativeSelected?.() && this.launcher.plan().kind !== "legacy") void this.launcher.prepare();
     if (starting) this.#tick();
     this.#timer ??= setInterval(() => { if (this.#inUse || this.#running()) this.#tick(); }, SWEEP_MS);
     this.#timer.unref?.();
@@ -159,7 +163,7 @@ export class ChromeEngine {
   /** A deleted bot's or profile's browser: stopped, and its folder, downloads and screenshots gone. */
   async erase(request: { kind: "bot" | "profile"; id: string; partitionId: string }): Promise<boolean> {
     const key = request.kind === "bot" ? `bot:${request.id}` : `shared:${request.partitionId}`;
-    if (!this.#everUsed()) return true;
+    if (!this.#everUsed()&&!this.#options.desktop?.recorded(key)) return true;
     try {
       await this.service.erase(key);
       return true;
@@ -171,6 +175,7 @@ export class ChromeEngine {
 
   /** For the browser status: what the new engine will run here. */
   summary(): { kind: "engine"; version: string; chrome: string } | { kind: "unavailable"; reason: string } {
+    if(this.#options.nativeSelected?.())return this.#options.desktop?.summary()??{kind:"unavailable",reason:"The native browser requires the local desktop app."};
     const plan = this.launcher.plan();
     if (plan.kind === "legacy") return { kind: "unavailable", reason: `Chrome is needed for the new browser: ${plan.reason}` };
     return { kind: "engine", version: "omb-cdp", chrome: this.launcher.describe() };

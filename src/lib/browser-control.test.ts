@@ -43,6 +43,41 @@ function harness() {
 
 afterEach(() => { vi.useRealTimers(); });
 
+describe("native browser activity", () => {
+  it("refreshes a resumed viewer's idle wait and sends only activity without taking control", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    h.server.owned = true;
+    h.control.observe();
+    vi.advanceTimersByTime(BROWSER_HAND_BACK_MS - 1);
+    h.interact({ type: "nativeActivity" });
+    await settle();
+    expect(h.sent).toEqual([{ type: "nativeActivity" }]);
+    expect(h.transport.take).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1); await settle();
+    expect(h.transport.release).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(BROWSER_HAND_BACK_MS - 1); await settle();
+    expect(h.transport.release).toHaveBeenCalledTimes(1);
+    h.control.close();
+  });
+
+  it("neither takes control nor replays native activity that arrived before ownership", async () => {
+    const h = harness();
+    h.interact({ type: "nativeActivity" });
+    await settle();
+    expect(h.transport.take).not.toHaveBeenCalled();
+    const taking = deferred();
+    h.transport.take.mockImplementationOnce(() => taking.promise);
+    h.control.takeControl();
+    await settle();
+    h.interact({ type: "nativeActivity" });
+    h.server.owned = true;
+    taking.resolve(); await settle();
+    expect(h.sent).toEqual([]);
+    h.control.close();
+  });
+});
+
 describe("taking browser control implicitly", () => {
   it("takes control on the first click and sends that click exactly once after the take", async () => {
     const h = harness();

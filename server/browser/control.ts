@@ -3,6 +3,7 @@
 // takeover drains running work, interrupts queued bot work and revokes refs.
 import { BROWSER_CONTROL_REFUSAL } from "../browser-runtime.ts";
 import { BrowserControlInterrupted, type SessionControl } from "./session-control.ts";
+import type { BrowserActor } from "./cdp/transport.ts";
 
 export { BROWSER_CONTROL_REFUSAL };
 
@@ -38,10 +39,12 @@ export class ProfileControl<T extends ControlledTab = ControlledTab> {
   readonly #tabs: () => readonly T[];
   readonly #takeoverMs: number;
   readonly #listeners = new Set<() => void>();
+  readonly #withActor: <R>(actor: BrowserActor, work: () => Promise<R>) => Promise<R>;
 
-  constructor(tabs: () => readonly T[], { takeoverMs = 15_000 }: { takeoverMs?: number } = {}) {
+  constructor(tabs: () => readonly T[], { takeoverMs = 15_000, withActor }: { takeoverMs?: number; withActor?: <R>(actor: BrowserActor, work: () => Promise<R>) => Promise<R> } = {}) {
     this.#tabs = tabs;
     this.#takeoverMs = takeoverMs;
+    this.#withActor=withActor??((_actor,work)=>work());
   }
 
   onChange(listener: () => void): () => void {
@@ -61,7 +64,7 @@ export class ProfileControl<T extends ControlledTab = ControlledTab> {
     if (this.closing) throw new Error("The browser is closing. Try again shortly.");
     this.agents++;
     try {
-      const result = tab ? await tab.control.agent(AGENT, run) : await run();
+      const result = await this.#withActor({kind:"agent"},()=>tab ? tab.control.agent(AGENT,run) : run());
       if (this.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
       return result;
     } catch (error) {
@@ -169,7 +172,7 @@ export class ProfileControl<T extends ControlledTab = ControlledTab> {
     if (!this.canControl(owner)) throw new Error("Take control of this browser before interacting.");
     this.humans++;
     try {
-      return await tab.control.human(owner, run);
+      return await this.#withActor({kind:"viewer",viewerId:owner},()=>tab.control.human(owner,run));
     } finally {
       this.humans--;
       this.changed();

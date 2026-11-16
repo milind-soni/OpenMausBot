@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { browserEngineConfigSchema } from "./config.ts";
+import { browserEngineConfigSchema, browserEngineKind } from "./config.ts";
 
 describe("browser engine proxy configuration", () => {
+  it("retains the explicitly selected native desktop engine without changing the default", () => {
+    expect(browserEngineConfigSchema.parse({ engine: "chrome", nativeDesktop: true }).engine).toBe("chrome");
+    expect(browserEngineKind({ browserEngine: { engine: "chrome", nativeDesktop: true } })).toBe("native");
+    expect(browserEngineKind({})).toBe("agent-browser");
+  });
   it("accepts an unauthenticated SOCKS5 endpoint", () => {
     expect(browserEngineConfigSchema.parse({ egress: { proxy: "socks5://127.0.0.1:1080" } }).egress?.proxy)
       .toBe("socks5://127.0.0.1:1080");

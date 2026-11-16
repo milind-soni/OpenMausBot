@@ -4,7 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildErrorPage, desktopViewerErrorPage } from "./error-pages.mjs";
 import { startCua, stopCua, registerCuaIpc, requestComputerUse, setCuaStateListener, grantLocalComputer } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
@@ -28,6 +28,8 @@ import { activateExistingWindow, releaseSingleInstanceLock } from "./single-inst
 import { bootFailureMessage, listeningSignal, pollServerIdentity, SERVER_BOOT_TIMEOUT_MS, SERVER_LISTENING_GRACE_MS } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import { serverChildLaunch } from "./server-child-launch.mjs";
+import { createNativeBrowserCoordinator } from "./native-browser-main.mjs";
+import { createCapabilityPublisher } from "./capability-publisher.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { chatLinkFrom, chatLinkFromCommandLine } from "./chat-link.mjs"; import { installDesktopNotifications } from "./desktop-notifications.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
@@ -117,7 +119,7 @@ import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
 import { installServerSessions, reportOwnListeners } from "./server-session.mjs";
 
-const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
+const { nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
 const require = createRequire(import.meta.url);
 const { createDisplayMediaGuard, invokeDisplayMediaCallback, selectCaptureSource } = require(
@@ -1085,6 +1087,17 @@ function syncDesktopMutationToken(proc) {
   }
 }
 
+const nativeBrowser = createNativeBrowserCoordinator({
+  ipcMain, session, WebContentsView, BrowserWindow, getOwner: () => mainWindow,
+  isLocalOwner: event => !desktopRemoteAccess && senderIsLocal(event),
+  userData: app.getPath("userData"), product: `Chrome/${process.versions.chrome}`,
+  readFile: async (filePath, roots) => {
+    const entry = app.isPackaged ? path.join(process.resourcesPath, "server", "message-file.js") : path.join(app.getAppPath(), "dist-server", "message-file.js");
+    const files = await import(pathToFileURL(entry).href);
+    return files.openMessageFile(filePath, roots, files.MESSAGE_FILE_DOWNLOAD_MAX_BYTES);
+  },
+});
+
 const savePhoneSecretOnce = createPhoneSecretSaveCoordinator((target, value) =>
   saveWorkspaceCredential(target, value),
 );
@@ -1148,6 +1161,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
   proc.on("message", (message) => {
     if (!serverSupervisor.isCurrent(proc)) return;
     try {
+      if (nativeBrowser.receive(proc, message)) return;
       if (trustedApprovalMode.receive(proc, message)) return;
       if (managedDesktopRelay.receive(proc, message)) return;
       if (orgLibrary?.receive(message)) return;
@@ -1159,12 +1173,14 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
   proc.once("spawn", () => {
     slog(`spawned pid=${proc.pid}`);
     if (!serverSupervisor.isCurrent(proc)) return;
+    nativeBrowser.attach(proc);
     syncDesktopMutationToken(proc); void tailnetShare.attach(proc, port, companionSettings().routes.tailscale);
     syncPhoneSecretKey(proc); grantLocalComputer(proc, (child) => serverSupervisor.isCurrent(child));
   });
   let exited = false;
   proc.once("exit", (code) => {
     exited = true;
+    nativeBrowser.reject(proc);
     trustedApprovalMode.rejectProcess(proc);
     managedDesktopRelay.rejectProcess(proc);
     resolveServerExit();
@@ -2721,15 +2737,12 @@ ipcMain.handle("workspaces:menu", workspaceOnly(async (event, from) => {
   }
 }));
 
-ipcMain.handle("desktop:capabilities", async (event) =>
-  desktopCapabilities({
-    remote: !senderIsLocal(event),
-    platform: process.platform,
-    env: process.env,
-    packaged: app.isPackaged,
-    localConnection: await cuaReady, frame: windowFrameNow(),
-  }),
-);
+const broadcastDesktopCapabilities = createCapabilityPublisher({
+  ipcMain, isLocalSender: senderIsLocal, connection: () => cuaReady,
+  facts: () => ({ platform: process.platform, env: process.env, packaged: app.isPackaged, frame: windowFrameNow(), nativeBrowser: nativeBrowser.available }),
+  windows: () => appWindows(), origin: () => rendererOrigin(),
+  rail: capabilities => chromeRail.send("desktop:capabilities-changed", capabilities),
+});
 
 async function saveWorkspaceCredential(name, value, options) {
   const patchFor = CREDENTIAL_PATCH[name];
@@ -2783,23 +2796,6 @@ ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mo
 
 // Electron fixes a Windows window's title bar when the window is made; on macOS the choice applies at once.
 const windowFrameNow = () => (process.platform === "win32" ? windowFrameMade : null) ?? desktopPrefs?.windowFrame() !== false;
-async function broadcastDesktopCapabilities() {
-  const localConnection = await cuaReady;
-  const build = (remote) =>
-    desktopCapabilities({ remote, platform: process.platform, env: process.env, packaged: app.isPackaged, localConnection, frame: windowFrameNow() });
-  const local = build(false);
-  chromeRail.send("desktop:capabilities-changed", local);
-  let redacted = null;
-  for (const window of appWindows()) {
-    if (window.isDestroyed()) continue;
-    let isLocal = false;
-    try {
-      isLocal = new URL(window.webContents.getURL()).origin === rendererOrigin();
-    } catch {}
-    if (!isLocal) redacted ??= build(true);
-    window.webContents.send("desktop:capabilities-changed", isLocal ? local : redacted);
-  }
-}
 
 setCuaStateListener((connection) => {
   screenControl.changed(connection);

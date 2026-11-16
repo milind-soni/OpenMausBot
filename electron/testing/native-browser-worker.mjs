@@ -1,0 +1,71 @@
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DesktopBrowserClient } from '../../server/browser/desktop-bridge.ts';
+import { DesktopBackend } from '../../server/browser/desktop-backend.ts';
+import { BrowserService } from '../../server/browser/service.ts';
+
+const port = process.parentPort;
+const checks = [];
+const client = new DesktopBrowserClient(port);
+const home = process.env.OMB_NATIVE_SMOKE_HOME;
+const backend = new DesktopBackend({ client, dataDir: home, egressPort: async () => Number(process.env.OMB_NATIVE_SMOKE_PROXY) });
+const service = new BrowserService({ dataDir: home, backend: () => backend, maxRunning: 8, idleMs: () => 600_000, takeoverMs: 250 });
+const target = { key: 'bot:smoke', session: 'bot-smoke' };
+const call = async (name, args = {}, selected = target) => {
+  const result = await service.agentRpc(selected, 'tools/call', { name, arguments: args });
+  const text = result.content?.map(part => part.text ?? '').join('\n') ?? '';
+  assert.ok(!result.isError, `${name}: ${text}`); return text;
+};
+const evaluate = expression => call('agent_browser_eval', { expression, world: 'page' });
+try {
+  port.postMessage({ type: 'native-smoke-ready' });
+  while (!client.available) await once(port, 'message');
+  const opened = await call('agent_browser_open', { url: 'http://fixture.test/form' });
+  assert.match(opened, /Name|Native fixture/); checks.push('real-utility-handshake-and-snapshot');
+  const profile = service.profile(target), page = profile.active().page;
+  assert.equal(page.targetId, page.frames.mainFrameId); checks.push('owned-real-target-frame-identity');
+  assert.equal(await page.evaluate('document.hasFocus()', { world: 'page' }), true);
+  await call('agent_browser_fill', { selector: '#name', text: 'Ada' });
+  await call('agent_browser_click', { selector: '#go' });
+  assert.match(await evaluate('document.querySelector("output").textContent'), /Hello Ada/); checks.push('real-cdp-fill-click');
+  await call('agent_browser_open', { url: 'http://fixture.test/form#hash' }); assert.match(page.url(), /#hash$/); checks.push('same-document-navigation');
+  await call('agent_browser_click', { selector: '#popup' });
+  const popup = await profile.run.browser.waitForPage(candidate => candidate.openerId === page.targetId, 10_000); await popup.ready;
+  assert.match(await call('agent_browser_eval', { expression: 'opener !== null', world: 'page', tab: profile.tabs.byPage(popup).id }), /true/);
+  assert.match(await call('agent_browser_eval', { expression: 'new Promise(resolve=>{if(window.popupMessage)resolve(window.popupMessage);else addEventListener("message",e=>resolve(e.data),{once:true})})', world: 'page', tab: profile.tabs.byPage(page).id }), /popup preserved/); checks.push('popup-opener-postmessage');
+  await call('agent_browser_tabs', { action: 'switch', tab: profile.tabs.byPage(page).id });
+  assert.match(await evaluate('new Promise(resolve=>{const w=new Worker("/worker");w.onmessage=e=>{resolve(e.data);w.terminate()}})'), /worker preserved/); checks.push('worker-through-profile-socks');
+  await evaluate('document.cookie="smoke=one; path=/"');
+  const other = { key: 'bot:other', session: 'bot-other' }; await call('agent_browser_open', { url: 'http://fixture.test/form' }, other);
+  assert.doesNotMatch(await call('agent_browser_eval', { expression: 'document.cookie', world: 'page' }, other), /smoke=one/); checks.push('own-profile-cookie-isolation');
+  const nativeOutput = [];
+  const options = { owner: 'view-smoke', person: 'person-smoke', canOperate: true, maxWidth: 1280, maxHeight: 800, authPrompts: true, pagePopups: true };
+  const viewer = await service.attachViewer(target, { ...options, nativeView: true }, output => nativeOutput.push(output));
+  await viewer.bind(profile.active());
+  assert.ok(nativeOutput.some(output => output.type === 'nativeView' && output.token));
+  assert.ok(!nativeOutput.some(output => output.type === 'frame')); checks.push('native-view-has-no-jpeg-frames');
+  await profile.control.take('person-smoke');
+  await assert.rejects(service.agentRpc(target, 'tools/call', { name: 'agent_browser_eval', arguments: { expression: 'document.title="MUST NOT RUN"' } }), /paused while a person controls/); checks.push('canonical-human-lease-blocks-agent');
+  await profile.control.release('person-smoke', tab => tab.page.releaseInput().then(() => true));
+  const artifact = join(home, 'artifact'); mkdirSync(artifact, { recursive: true });
+  const local = join(artifact, 'report.html'); writeFileSync(local, '<!doctype html><link rel="stylesheet" href="style.css"><label>Local <input></label><output id="done"></output><script src="app.js"></script><!--' + 'x'.repeat(2.5 * 1024 * 1024) + '-->');
+  writeFileSync(join(artifact, 'style.css'), 'body{color:rgb(12,34,56)}'); writeFileSync(join(artifact, 'app.js'), 'document.querySelector("output").textContent="original script loaded"');
+  await service.openArtifact(target, local, [artifact], 'person-smoke', () => {});
+  const localPage = profile.active().page;
+  await profile.control.human('person-smoke', profile.active(), async () => {
+    const value = await localPage.evaluate('({script:document.querySelector("output").textContent,color:getComputedStyle(document.body).color,node:typeof process,bridge:typeof window.ogb})', { world: 'page' });
+    assert.deepEqual(value, { script: 'original script loaded', color: 'rgb(12, 34, 56)', node: 'undefined', bridge: 'undefined' });
+  }); checks.push('large-original-html-relative-css-js-no-preload');
+  const count = profile.tabs.list().length;
+  await service.openArtifact(target, local, [artifact], 'person-smoke', () => {}); assert.equal(profile.tabs.list().length, count); checks.push('same-artifact-reuses-tab');
+  await profile.control.release('person-smoke', tab => tab.page.releaseInput().then(() => true)); await viewer.close();
+  await service.close(target.session); await call('agent_browser_open', { url: 'http://fixture.test/form' });
+  assert.match(await evaluate('document.cookie'), /smoke=one/); checks.push('clean-close-retains-own-cookies');
+  await service.closeAll(); await backend.erase(target.key);
+  await call('agent_browser_open', { url: 'http://fixture.test/form' }); assert.doesNotMatch(await evaluate('document.cookie'), /smoke=one/); checks.push('explicit-profile-deletion-erases-cookies');
+  port.postMessage({ type: 'native-smoke-done', pass: true, checks });
+} catch (error) {
+  port.postMessage({ type: 'native-smoke-done', pass: false, checks, error: error.stack ?? String(error) });
+} finally { await service.closeAll().catch(() => {}); }

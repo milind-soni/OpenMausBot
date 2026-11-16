@@ -290,6 +290,7 @@ export class StreamV2 {
     const params = request.params;
     const size = requestedSize(Number(params.get("width")), Number(params.get("height")));
     const options: ViewerOptions = {
+      nativeView:params.get("native")==="1",
       owner: request.owner,
       ...(request.person ? { person: request.person } : {}),
       canOperate: request.canOperate,

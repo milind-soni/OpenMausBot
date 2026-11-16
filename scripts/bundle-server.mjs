@@ -43,6 +43,7 @@ const ENTRY_POINTS = [
   // Imported directly by the packaged smoke probes. An explicit root sibling,
   // because tsc may emit its own copy under dist-server/server/.
   "proxy-paths.ts",
+  "message-file.ts",
   "local-computer.ts",
   "local-computer-proxy.ts",
   // the hook helper Claude Code runs at PostToolUse/PreCompact/SessionStart/Stop

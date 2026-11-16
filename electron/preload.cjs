@@ -269,6 +269,12 @@ const bridge = {
       ? ipcRenderer.invoke("cloud-add:organization", String(name), color === null ? null : String(color)) : Promise.reject(new Error("Choose Create organization.")),
   },
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
+  nativeBrowser: {
+    layout: input => ipcRenderer.invoke("native-browser:layout", input),
+    onTake: cb => { const listener = (_event, input) => cb(input); ipcRenderer.on("native-browser:take", listener); return () => ipcRenderer.removeListener("native-browser:take", listener); },
+    onFocusAddress: cb => { const listener = (_event, input) => cb(input); ipcRenderer.on("native-browser:focus-address", listener); return () => ipcRenderer.removeListener("native-browser:focus-address", listener); },
+    onActivity: cb => { const listener = (_event, input) => cb(input); ipcRenderer.on("native-browser:activity", listener); return () => ipcRenderer.removeListener("native-browser:activity", listener); },
+  },
   onCapabilitiesChanged: (cb) => {
     const handler = (_event, capabilities) => cb(capabilities);
     ipcRenderer.on("desktop:capabilities-changed", handler);

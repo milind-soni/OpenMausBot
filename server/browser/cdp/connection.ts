@@ -1,6 +1,6 @@
 import { CdpProtocolError, DriverError } from "./errors.ts";
 import { methodRefusal, type SendFlags, type SessionKind } from "./policy.ts";
-import type { CdpTransport } from "./transport.ts";
+import type { BrowserActor, CdpTransport } from "./transport.ts";
 
 export type Params = Record<string, unknown>;
 export type EventListener = (params: Params) => void;
@@ -56,6 +56,10 @@ export class CdpConnection {
 
   get closed(): boolean {
     return this.#closeReason !== null;
+  }
+
+  withActor<T>(actor: BrowserActor, work: () => Promise<T>): Promise<T> {
+    return this.#transport.withActor ? this.#transport.withActor(actor, work) : work();
   }
 
   get closeReason(): string | null {

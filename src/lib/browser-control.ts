@@ -145,6 +145,13 @@ export function createBrowserControl(options: {
   return {
     interact(input: PreviewStreamInput) {
       if (closed) return;
+      if (input.type === "nativeActivity") {
+        if (!options.owned()) return;
+        activity++;
+        arm();
+        transport.send(input);
+        return;
+      }
       const id = inputId(input);
       if (isRelease(input) && dropped.delete(id)) return;
       if (isPress(input)) dropped.delete(id);

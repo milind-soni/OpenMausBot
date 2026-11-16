@@ -5,6 +5,7 @@ import { t } from "@/lib/i18n";
 import { usePageVisible } from "@/lib/page-visible";
 import { api, useStore, type Bot } from "@/state/store";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
+import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ChromeRow, type BrowserNav, type BrowserTab } from "./browser/ChromeRow";
 import { ExtensionsMenu, extensionsOf, type BrowserExtension } from "./browser/ExtensionsMenu";
 import { MoreMenu } from "./browser/MoreMenu";
@@ -23,8 +24,8 @@ const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-in
 const NO_NAV: BrowserNav = { url: "", loading: false, canGoBack: false, canGoForward: false };
 
 export type BrowserSignIn = { url: string; site: string; nonce: number };
-/** A page to open in a new tab once the view is connected and awake: a published page's Open (usePageOpener). */
-export type BrowserPage = { url: string; nonce: number };
+/** Opens a page in a new tab once connected and awake; without a URL, only reveals the current browser. */
+export type BrowserPage = { url?: string; nonce: number };
 
 function tabsOf(value: unknown): BrowserTab[] {
   if (!Array.isArray(value)) return [];
@@ -40,8 +41,11 @@ function tabsOf(value: unknown): BrowserTab[] {
  */
 export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserSignIn; page?: BrowserPage }) {
   const { state } = useStore();
+  const { capabilities } = useDesktopCapabilities();
   const [fallback, setFallback] = useState(false);
-  const stream = state.config?.browserEngine?.engine === "chrome" && !fallback;
+  const engine = state.config?.browserEngine?.engine;
+  const stream = (engine === "chrome" || engine === "native") && !fallback;
+  const native = stream && engine === "native" && capabilities.nativeBrowser?.available === true;
   const [attempt, setAttempt] = useState(0);
   const [connected, setConnected] = useState(false);
   const [control, setControl] = useState<PreviewStreamControl | null>(null);
@@ -112,14 +116,14 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
 
   const connect = useCallback<SurfaceConnect>((target, events) => {
     const scope: Record<string, string> = scopedThread ? { threadId: scopedThread } : {};
-    if (stream) return createPreviewStreamClient({ access: browserStreamAccess(bot.id, window.location, scope), ...target }, events);
+    if (stream) return createPreviewStreamClient({ access: browserStreamAccess(bot.id, window.location, native ? { ...scope, native: "1" } : scope), ...target }, events);
     const key = `${bot.id}\n${bot.browserProfile ?? ""}${scopedThread ? `\n${scopedThread}` : ""}`;
     if (resume.current.key !== key) resume.current = { key, viewer: "" };
     return createLiveStreamClient(bot.id, events, (body, viewerId) => api(withBrowserScope(`/api/bots/${encodeURIComponent(bot.id)}/browser/action`, scope), {
       // 120 s matches the server's browser requestTimeoutMs.
       method: "POST", body: JSON.stringify({ ...body, viewerId }), timeoutMs: 120_000,
     }), resume.current, scope, { width: target.width, height: target.height });
-  }, [bot.id, bot.browserProfile, scopedThread, stream]);
+  }, [bot.id, bot.browserProfile, scopedThread, stream, native]);
 
   const interact = useCallback((input: PreviewStreamInput) => {
     if (controlRef.current?.controller === "another-viewer") { setError(BROWSER_HELD_ELSEWHERE); return; }
@@ -211,6 +215,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   // A new tab, so whatever the bot has open stays as it was; a sleeping browser is woken first.
   useEffect(() => {
     if (!page || !connected || pageHandled.current === page.nonce) return;
+    if (!page.url?.trim()) { pageHandled.current = page.nonce; return; }
     if (asleep) {
       if (asleep === "asleep" && clientRef.current?.send({ type: "wake" })) setAsleep("waking");
       return;
@@ -281,8 +286,20 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     setError("");
   }, [shown]);
   const typingReady = connected && you;
-  const pipSupported = stream && supportsBrowserPictureInPicture();
+  const pipSupported = stream && !native && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
+  const surfaceKey = `${attempt}:${native ? "native" : stream ? "stream" : "live"}:${bot.browserProfile ?? ""}:${scopedThread ?? ""}`;
+  const surfaceProps = {
+    connect,
+    label: t("browser.panel.pageLabel", { name: bot.name }),
+    onClient,
+    onControl,
+    onMessage,
+    onConnectedChange: (next: boolean) => { setConnected(next); if (next) { setStarting(false); setGone(false); setError(""); } },
+    onUnauthorized: () => { if (stream) setFallback(true); else setGone(true); },
+    onGone: () => setGone(true),
+    onClose: (code: number, reason: string) => { if (code === 1013 && reason) setError(reason); },
+  };
   return <div ref={panel} className={maximized
     ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-card text-ink"
     : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink"} data-browser-transport={stream ? "stream" : "live"}>
@@ -337,19 +354,14 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     <div className="relative flex min-h-0 flex-1 flex-col bg-inset/40">
       {shown ? (
         <StreamSurface
-          key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}`}
+          key={surfaceKey}
+          {...surfaceProps}
           ref={surface}
-          connect={connect}
+          native={native}
+          visible={!asleep && !heldElsewhere && !gone && connected && !starting && !showProfiles && !showTyping}
+          onTake={takeControl}
           input={interact}
-          label={t("browser.panel.pageLabel", { name: bot.name })}
-          onClient={onClient}
-          onControl={onControl}
-          onMessage={onMessage}
-          onConnectedChange={(next) => { setConnected(next); if (next) { setStarting(false); setGone(false); setError(""); } }}
           onFirstFrame={() => setStarting(false)}
-          onUnauthorized={() => { if (stream) setFallback(true); else setGone(true); }}
-          onGone={() => setGone(true)}
-          onClose={(code, reason) => { if (code === 1013 && reason) setError(reason); }}
           onLeave={() => address.current?.focus()}
         />
       ) : null}

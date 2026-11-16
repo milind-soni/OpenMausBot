@@ -209,8 +209,18 @@ export class CdpPage implements ActionContext, WaitContext {
     return this.#host.bringToFront(this);
   }
 
-  async navigate(url: string, { readiness = "load", timeoutMs = DEFAULT_NAVIGATION_TIMEOUT_MS, personExtension = false }: NavigateOptions = {}): Promise<NavigationResult> {
-    if (!navigable(url) && !(personExtension && extensionPage(url))) throw new DriverError("refused", `Only http(s), about:blank and data: addresses open here, not ${url.slice(0, 80)}.`);
+  async navigate(url: string, options: NavigateOptions = {}): Promise<NavigationResult> {
+    if (!navigable(url) && !(options.personExtension && extensionPage(url))) throw new DriverError("refused", `Only http(s), about:blank and data: addresses open here, not ${url.slice(0, 80)}.`);
+    return this.#navigate(url,options);
+  }
+
+  /** Only the owner's validated artifact handoff calls this; browser tools keep navigate's URL policy. */
+  async openArtifact(url:string):Promise<NavigationResult>{
+    const target=new URL(url);if(target.protocol!=="file:"||target.username||target.password||target.search||target.hash)throw new DriverError("refused","An authorized local artifact is required.");
+    return this.#navigate(url,{});
+  }
+
+  async #navigate(url: string, { readiness = "load", timeoutMs = DEFAULT_NAVIGATION_TIMEOUT_MS }: NavigateOptions): Promise<NavigationResult> {
     this.#usable();
     await this.bringToFront();
     return this.dialogs.acceptingBeforeUnload(async () => {

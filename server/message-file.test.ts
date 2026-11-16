@@ -472,6 +472,11 @@ describe("message-linked files", () => {
     expect(header).not.toContain("\n");
   });
 
+  it("types original HTML explicitly without interpreting its contents", () => {
+    for (const name of ["index.html", "INDEX.HTM"]) expect(mimeFor(name)).toBe("text/html; charset=utf-8");
+    expect(mimeFor("index.html.txt")).toBe("text/plain; charset=utf-8");
+  });
+
   it("types an archive by its extension alone and serves it as a download", async () => {
     for (const [name, mime] of [
       ["a.zip", "application/zip"], ["a.rar", "application/vnd.rar"], ["a.7z", "application/x-7z-compressed"],
