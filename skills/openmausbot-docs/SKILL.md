@@ -81,7 +81,9 @@ a hand edit races the next save.
   read on demand, `memory/log/` is the bot's own record of its days. The files
   stay on this computer, but what a turn reads goes to the model provider that
   bot is set to, and with a helper model set the helper's provider reads it too.
-  A Cloud moves the whole data folder off the computer; nothing else uploads it.
+  A Cloud moves the whole data folder off the computer; the app uploads it
+  nowhere else, but anything else on this computer that copies the folder — a
+  backup service, a synced home directory — takes it along.
 - **Nothing is changed until you read it back.** After a change, read the file
   or the settings response again and say what it now holds; if it was
   `config.json`, say that a restart is what makes `instances` apply.
