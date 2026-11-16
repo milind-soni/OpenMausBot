@@ -18,6 +18,8 @@ export interface BotApiCall {
   preview?: string;
   reason?: string;
   repeats?: number;
+  /** Taken in a thread that ran as the owner's own work. */
+  asOwner?: true;
 }
 
 export interface BotApiView {
@@ -26,6 +28,10 @@ export interface BotApiView {
   canTakeCalls?: boolean;
   url: string;
   canManage: boolean;
+  /** The key acts as the owner now: its threads run at the bot's own level. Absent from an older server: it doesn't. */
+  actsAsOwner?: boolean;
+  /** This person may change that: the owner, where the server allows it at all. */
+  mayActAsOwner?: boolean;
   callCount: number;
   lastCalledAt?: number;
   calls?: BotApiCall[];
@@ -42,7 +48,7 @@ export function callsLine(view: Pick<BotApiView, "callCount" | "lastCalledAt">, 
   return view.callCount === 1 ? t("botApi.callsOne", { when }) : t("botApi.calls", { count: view.callCount, when });
 }
 
-export function callWords(call: Pick<BotApiCall, "outcome" | "statusCode" | "repeats" | "reason">): string {
+export function callWords(call: Pick<BotApiCall, "outcome" | "statusCode" | "repeats" | "reason" | "asOwner">): string {
   const words = call.reason === BOT_API_UPGRADE ? t("botApi.starter")
     : call.statusCode === 200 ? t("botApi.call.replied")
     : call.statusCode === 202 ? t("botApi.call.accepted")
@@ -53,7 +59,8 @@ export function callWords(call: Pick<BotApiCall, "outcome" | "statusCode" | "rep
               : call.statusCode === 413 ? t("automations.calls.tooLarge")
                 : call.statusCode === 400 || call.statusCode === 415 ? t("automations.calls.unreadable")
                   : t("botApi.call.failed");
-  return call.repeats && call.repeats > 1 ? `${words} (${call.repeats})` : words;
+  const said = call.asOwner ? `${words} · ${t("botApi.call.asOwner")}` : words;
+  return call.repeats && call.repeats > 1 ? `${said} (${call.repeats})` : said;
 }
 
 const onlyThisComputer = (url: string) => /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])[:/]/.test(url);
@@ -120,6 +127,7 @@ function BotApiSection({ bot, webhooksLink = false, className }: { bot: Bot; web
   };
   const toggle = () => change(() => api<BotApiView | Minted>(path, { method: "POST", body: JSON.stringify({ enabled: !view?.enabled }) }));
   const newKey = () => change(() => api<Minted>(`${path}/new-key`, { method: "POST" }));
+  const actAsOwner = () => change(() => api<BotApiView>(`${path}/acts-as-owner`, { method: "POST", body: JSON.stringify({ enabled: !view?.actsAsOwner }) }));
   const curl = view ? botApiCurl(view.url, freshKey ?? BOT_API_KEY_PLACEHOLDER) : "";
   const copy = async () => {
     const result = await copyText(curl);
@@ -136,7 +144,7 @@ function BotApiSection({ bot, webhooksLink = false, className }: { bot: Bot; web
         <div className="min-w-0">
           <div className="text-[15px] font-medium text-ink">{t("botApi.title")}</div>
           <div className="mt-0.5 text-[14px] text-ink">{t("botApi.switch")}</div>
-          <div className="mt-0.5 text-[13px] text-ink-secondary">{canManage || !view ? t("botApi.hint", { name: bot.name }) : t("botApi.notAllowed", { name: bot.name })}</div>
+          <div className="mt-0.5 text-[13px] text-ink-secondary">{!canManage && view ? t("botApi.notAllowed", { name: bot.name }) : view?.actsAsOwner ? t("botApi.hintAsOwner", { name: bot.name }) : t("botApi.hint", { name: bot.name })}</div>
         </div>
         <Switch
           aria-label={t("botApi.switch")}
@@ -160,6 +168,21 @@ function BotApiSection({ bot, webhooksLink = false, className }: { bot: Bot; web
             {freshKey ? t("botApi.keyOnce") : t("botApi.keyHidden")}
           </div>
           <div className="text-[12px] text-ink-secondary" data-testid="bot-api-password">{t("botApi.password")}</div>
+          {(view.mayActAsOwner || view.actsAsOwner) && (
+            <div className="flex items-start justify-between gap-4 rounded-lg bg-inset px-3 py-2" data-testid="bot-api-as-owner">
+              <div className="min-w-0">
+                <div className="text-[13px] text-ink">{t("botApi.asOwner")}</div>
+                <div className={cn("mt-0.5 text-[12px]", view.actsAsOwner ? "text-warning" : "text-ink-secondary")}>{t("botApi.asOwnerHint", { name: bot.name })}</div>
+              </div>
+              <Switch
+                aria-label={t("botApi.asOwner")}
+                checked={view.actsAsOwner === true}
+                disabled={busy || !(view.actsAsOwner ? canManage : view.mayActAsOwner)}
+                onClick={() => void actAsOwner()}
+                data-testid="bot-api-as-owner-switch"
+              />
+            </div>
+          )}
           {onlyThisComputer(view.url) && <div className="text-[12px] text-ink-secondary" data-testid="bot-api-local">{t("botApi.localOnly")}</div>}
           {canManage && (
             confirmingNewKey ? (
