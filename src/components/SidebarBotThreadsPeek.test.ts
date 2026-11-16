@@ -63,7 +63,7 @@ describe("SidebarBotThreadsPeek", () => {
     expect(markup).not.toContain("aria-expanded");
   });
 
-  it("discloses the other open conversations, closed until hovered or pressed", () => {
+  it("discloses the other open conversations, closed until pressed", () => {
     const markup = render([task("a")]);
     expect(markup).toContain('data-bot-threads-peek="atlas" aria-haspopup="menu" aria-expanded="false" aria-label="Expand Atlas threads"');
     expect(markup).not.toContain('role="menu"');

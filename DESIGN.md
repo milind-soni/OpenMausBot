@@ -301,7 +301,8 @@ on. Simple is the default for new installs.
   place in both modes. Advanced may show more rows or more detail.
   One exception: where Advanced already shows something in place (a bot's
   threads as a tree under its row), Simple may offer a shortcut to the same
-  thing there instead of a second copy of it.
+  thing there instead of a second copy of it: a menu that opens on a click
+  of a small chevron, never on hover.
 - **Switching modes never loses data.**
 
 ## 14. Accessibility

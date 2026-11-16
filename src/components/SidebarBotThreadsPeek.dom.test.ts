@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TYPEAHEAD_RESET_MS } from "@/lib/menu-keys";
 import type { Action, Task } from "@/state/store";
-import { PEEK_CLOSE_MS, SidebarBotThreadsPeek } from "./SidebarBotThreadsPeek";
+import { SidebarBotThreadsPeek } from "./SidebarBotThreadsPeek";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -49,33 +49,21 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-describe("the hover sheet of a bot's other conversations", () => {
-  it("stays open while the pointer goes from the row onto it", async () => {
+describe("the sheet of a bot's other conversations", () => {
+  it("opens on a click of the chevron only, never on hover, and stays open when the pointer moves away", async () => {
     await mount([task("a")]);
+    await cross(chat, row);
+    await wait(5_000);
+    expect(chevron().getAttribute("aria-expanded")).toBe("false");
+    expect(sheet()).toBeNull();
+
     await open();
-    await cross(row, sheet()!);
-    await wait(PEEK_CLOSE_MS * 5);
     expect(chevron().getAttribute("aria-expanded")).toBe("true");
-    expect(sheet()).not.toBeNull();
-  });
+    await cross(row, chat);
+    await wait(5_000);
+    expect(chevron().getAttribute("aria-expanded")).toBe("true");
 
-  it("stays open when the pointer crosses something else on the way, and closes shortly after leaving both", async () => {
-    await mount([task("a")]);
     await open();
-    await cross(row, chat);
-    await wait(PEEK_CLOSE_MS / 2);
-    await cross(chat, sheet()!);
-    await wait(PEEK_CLOSE_MS * 5);
-    expect(chevron().getAttribute("aria-expanded")).toBe("true");
-
-    await cross(sheet()!, row);
-    await wait(PEEK_CLOSE_MS * 5);
-    expect(chevron().getAttribute("aria-expanded")).toBe("true");
-
-    await cross(row, chat);
-    await wait(PEEK_CLOSE_MS - 1);
-    expect(chevron().getAttribute("aria-expanded")).toBe("true");
-    await wait(1);
     expect(chevron().getAttribute("aria-expanded")).toBe("false");
   });
 

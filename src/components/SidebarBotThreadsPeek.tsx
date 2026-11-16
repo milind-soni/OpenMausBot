@@ -14,9 +14,6 @@ import { useHeldMenuMotion } from "./MenuMotion";
 import { isArchived, isSnoozed, isWorking, threadRecency, threadRowActions, threadUpdatedLabel } from "./SidebarThreadRow";
 
 export const PEEK_LIMIT = 3;
-/** Long enough that sweeping the pointer down the list opens nothing. */
-export const PEEK_OPEN_MS = 350;
-export const PEEK_CLOSE_MS = 200;
 const SHEET_WIDTH = 240;
 const EDGE = 8;
 
@@ -53,7 +50,6 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
   const motion = useHeldMenuMotion(place);
   const anchor = useRef<HTMLButtonElement>(null);
   const sheet = useRef<HTMLDivElement>(null);
-  const timer = useRef<number | undefined>(undefined);
   const focusSheet = useRef(false);
   const focusAnchor = useRef(false);
   const typed = useRef<Typeahead | null>(null);
@@ -63,35 +59,20 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
   const has = threads.length > 0;
   const open = place !== null;
 
-  const cancel = () => window.clearTimeout(timer.current);
-  const close = () => { cancel(); setPlace(null); };
+  // Opened by a click on the chevron only: resting the pointer on a row opens nothing.
+  const close = () => setPlace(null);
   const show = () => {
-    cancel();
     const row = anchor.current?.parentElement;
     if (!row) return;
     setPlace(peekPlace(row.getBoundingClientRect(), threads.length + 1, { width: window.innerWidth, height: window.innerHeight }, getComputedStyle(row).direction === "rtl"));
   };
-  const later = (run: () => void, ms: number) => { cancel(); timer.current = window.setTimeout(run, ms); };
 
-  useEffect(() => cancel, []);
   useEffect(() => {
     if (has) return;
     close();
     if (focusAnchor.current) anchor.current?.focus();
     focusAnchor.current = false;
   }, [has]);
-  // React reports entering the sheet while the pointer is still leaving the row, so each side checks where the pointer went.
-  const within = (target: EventTarget | null) => target instanceof Node && Boolean(sheet.current?.contains(target) || anchor.current?.parentElement?.contains(target));
-  const leave = (event: Pick<PointerEvent, "pointerType" | "relatedTarget">) => { if (event.pointerType === "mouse" && !within(event.relatedTarget)) later(() => setPlace(null), PEEK_CLOSE_MS); };
-  useEffect(() => {
-    const row = anchor.current?.parentElement;
-    if (!row || !has) return;
-    // offsetParent is null while the disclosure is hidden, which it is on a phone-width window.
-    const enter = (event: PointerEvent) => { if (event.pointerType === "mouse" && event.buttons === 0 && anchor.current?.offsetParent) later(show, PEEK_OPEN_MS); };
-    row.addEventListener("pointerenter", enter);
-    row.addEventListener("pointerleave", leave);
-    return () => { row.removeEventListener("pointerenter", enter); row.removeEventListener("pointerleave", leave); };
-  }, [has, threads.length]);
   // Rows are taller on a touch screen, so the sheet's own height decides how far up it has to sit.
   useLayoutEffect(() => {
     const height = sheet.current?.offsetHeight;
@@ -169,7 +150,7 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
       </button>
       {motion.shown && shown && createPortal(
         <div ref={sheet} role="menu" aria-label={bot.name} data-bot-threads-sheet={bot.id} style={{ left: shown.left, top: shown.top, width: SHEET_WIDTH }}
-          onPointerEnter={cancel} onPointerLeave={leave} onKeyDown={onKeyDown}
+          onKeyDown={onKeyDown}
           className={cn(MENU_SHEET, "fixed z-[60] gap-0", motion.className)} {...motion.exitProps}>
           <button type="button" role="menuitem" className={MENU_ROW} onClick={() => pick({ type: "newTask", botId: bot.id })}>
             <span className={MENU_GUTTER}><Plus size={14} className={MENU_ICON} /></span>
