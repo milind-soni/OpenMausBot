@@ -17,7 +17,19 @@ export interface RuntimeOptions {
   limits?: Partial<Limits>;
   level?: typeof assignmentLevel;
   log?: (line: string) => void;
+  /** Turns a restart cut start again at most one per this many ms (default RERUN_GAP_MS). */
+  rerunGapMs?: number;
 }
+
+/** After a restart, the first RERUN_BURST turns it cut start again at once and the rest one at a time this far apart: a
+ * server that fell under the load of many turns does not meet it again in its first second, and a fall during the
+ * reruns cuts only those already started (a turn cut twice fails; one still waiting here was not cut again). Of 34 cut
+ * turns, the last starts 15 s after the first. */
+export const RERUN_GAP_MS = 500;
+export const RERUN_BURST = 4;
+export const RERUN_HELD = "waiting its turn to start again after the restart";
+/** A cut turn is not run again once newer work in its conversation started first: it would answer out of order. */
+export const RERUN_SUPERSEDED = "cut by a restart; newer work in this conversation started before it could run again, so it was not run again";
 
 export interface BeginRequest {
   /** The host's own id for the requesting turn (its generation); default a fresh uuid. */
@@ -67,6 +79,10 @@ export class Runtime {
   private readonly reportDue = new Set<string>();
   private batch: Map<string, Assignment> | null = null;
   private lastThrew = false;
+  private readonly rerunGapMs: number;
+  /** Monotonic: no turn a restart cut starts before this. */
+  private nextRerunAt = Number.NEGATIVE_INFINITY;
+  private rerunsStarted = 0;
 
   constructor(store: RuntimeStore, runner: TurnRunner, options: RuntimeOptions = {}) {
     this.store = store;
@@ -76,6 +92,7 @@ export class Runtime {
     this.level = options.level ?? assignmentLevel;
     this.log = options.log ?? (line => console.error("runtime:", line));
     this.bootAt = this.clock.now();
+    this.rerunGapMs = options.rerunGapMs ?? RERUN_GAP_MS;
   }
 
   /** Restart reconciliation and re-park of needs_input, from stored data only. Idempotent; runs before the first tick. */
@@ -355,11 +372,14 @@ export class Runtime {
         continue;
       }
       const thread = n.assignee.destination.threadId;
+      if (n.restart === "rerun" && this.newerWorkIn(thread, n)) { this.cancelTree(n, RERUN_SUPERSEDED, "failed", "interrupted"); continue; }
       // Same-conversation turns never overlap; same-room speakers take turns.
       if (busyThreads.has(thread)) { this.heldBehindTurn(n, "an earlier turn in its conversation is running"); continue; }
       const parent = n.parentId ? this.store.get(n.parentId) : undefined;
       const group = n.assignee.destination.groupId;
       if (parent?.status === "running" && group !== undefined && parent.assignee.destination.groupId === group) { this.heldBehindTurn(n, "its requester's turn in the room is running"); continue; }
+      const rerun = n.restart === "rerun";
+      if (rerun && this.clock.monotonic() < this.nextRerunAt) { this.held(n.id, RERUN_HELD); busyThreads.add(thread); continue; }
       const resumed = n.status === "resume";
       if (!resumed) {
         const root = n.parentId ? this.store.get(n.rootId) : n;
@@ -376,8 +396,15 @@ export class Runtime {
         if (typeof can === "string") this.held(n.id, can);
         continue;
       }
-      if (this.dispatch(n, parent, resumed)) busyThreads.add(thread);
+      if (!this.dispatch(n, parent, resumed)) continue;
+      busyThreads.add(thread);
+      if (rerun && ++this.rerunsStarted >= RERUN_BURST) this.nextRerunAt = this.clock.monotonic() + this.rerunGapMs;
     }
+  }
+
+  /** Work in this conversation from another request, begun since this start. */
+  private newerWorkIn(threadId: string, n: Assignment): boolean {
+    return this.store.all({ assigneeThreadId: threadId }).some(other => other.rootId !== n.rootId && other.createdAt >= this.bootAt);
   }
 
   private dispatch(n: Assignment, parent: Assignment | undefined, resumed: boolean): boolean {

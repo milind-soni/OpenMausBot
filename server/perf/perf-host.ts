@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { EngineLimitsReport } from "../../shared/limit-reset.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import type { StoreChange } from "../store.ts";
+import { createLoopStalls, requestArrivedBefore, type LoopStalls } from "./loop-stalls.ts";
 import { duration, limitHolds, perfHealth, perfLines, turnLine, type PerfHealth } from "./perf-report.ts";
 import { createProcessSampler, linuxProcessList, LINUX_SAMPLE_MS, nodeUtilization, OTHER_SAMPLE_MS, psProcessList, type ProcessSampler } from "./process-sampler.ts";
 import type { FailoverWhy } from "./turn-record.ts";
@@ -28,6 +29,8 @@ export interface PerfHostDeps {
   timer?: false;
   now?: () => number;
   sampler?: ProcessSampler;
+  /** Tests: the event-loop delay recorder. */
+  stalls?: LoopStalls;
   /** The engine processes the server tracks, with the threads each runs (engine-memory, on a Cloud home). */
   engines?: () => ReadonlyArray<{ pid: number; threads: readonly string[] }>;
 }
@@ -63,7 +66,7 @@ export function createPerfHost(deps: PerfHostDeps) {
   const guarded = <T>(what: string, read: () => T, fallback: T): T => {
     try { return read(); } catch (error) { say(`failed:${what}`, `the performance recorder failed (${what}): ${error instanceof Error ? error.name : "error"}`); return fallback; }
   };
-  deps.store.onChange((change) => { if (change.type === "message") guarded("message", () => timings.noteMessage(change.threadId, change.message), undefined); });
+  deps.store.onChange((change) => { if (change.type === "message") guarded("message", () => timings.noteMessage(change.threadId, change.message, requestArrivedBefore(change.message.at)), undefined); });
   deps.bus.subscribe((event) => guarded("event", () => timings.noteEvent(event), undefined));
 
   /** The limit clock is made after this host; until it is, there are no limits to read. */
@@ -83,8 +86,10 @@ export function createPerfHost(deps: PerfHostDeps) {
     stalled: (ms) => say("loop", `event loop stalled: the ${linux ? 60 : 300}s sampler fired ${duration(ms)} late`), afterSample: watchHolds,
   });
   if (deps.timer !== false && !windows) sampler.start();
+  const stalls = deps.stalls ?? createLoopStalls();
+  if (deps.timer !== false) stalls.start();
 
-  const sources = () => ({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: limits(), process: windows ? null : sampler.report() });
+  const sources = () => ({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: limits(), process: windows ? null : sampler.report(), stalls: guarded("stalls", () => stalls.report(), null) });
   return {
     timings,
     sampler,
@@ -103,7 +108,7 @@ export function createPerfHost(deps: PerfHostDeps) {
       return guarded("text", () => perfLines(sources(), timings.recent({ limit: RECENT_IN_REPORT }), "Latest turns, newest last:"), PERF_UNAVAILABLE).join("\n");
     },
     /** The graceful shutdown: no more samples, and the turns since the last save written now. */
-    stop() { sampler.stop(); guarded("save", () => timings.flush(), undefined); },
+    stop() { sampler.stop(); stalls.stop(); guarded("save", () => timings.flush(), undefined); },
   };
 }
 export type PerfHost = ReturnType<typeof createPerfHost>;
