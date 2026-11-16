@@ -1,5 +1,5 @@
 // A scheduled occurrence that does not run always leaves a `missed` row saying why. Occurrences skipped for one cause
-// (the same earlier run still going, the same spacing after a cloud computer that did not start) share one row, which
+// (the same earlier run still going, the same spacing after a cloud computer that did not start or after failed runs) share one row, which
 // counts them and keeps the first and last time: a schedule every minute behind a run of hours adds one row, not hundreds.
 import { ROUTINE_DEFERRAL_NOTICE_MS } from "./routine-execution.ts";
 import { codedLine, type RoutineLineKey } from "./routine-lines.ts";
@@ -12,13 +12,14 @@ export interface RoutineSkips {
   /** The scheduled times of the first and the last of them. */
   firstAt: number;
   lastAt: number;
-  /** The cause: the id of the run they waited behind, or `no-start:` and the id of the last run whose computer did not start. */
+  /** The cause: the id of the run they waited behind, `no-start:` and the id of the last run whose computer did not start, `failed:` and the id of the last run that failed, or `startup:`, the time of the start that last ran a startup routine and the routine's id. */
   behind: string;
   /** The owner was told about this cause. */
   told?: true;
 }
 
-export type SkipWhy = Extract<RoutineLineKey, "routines.server.part.stillWaiting" | "routines.server.part.stillRunning" | "routines.server.part.notStarted" | "routines.server.part.computerNoStart">;
+export type SkipWhy = Extract<RoutineLineKey, "routines.server.part.stillWaiting" | "routines.server.part.stillRunning" | "routines.server.part.notStarted" | "routines.server.part.computerNoStart" | "routines.server.part.runsFailed"
+  | "routines.server.part.restartedSoon">;
 
 /** A run of the same routine that an occurrence is skipped behind, and, for one that waits, since when. */
 export function blockingRun(runs: readonly RoutineRun[], routineId: string): { run: RoutineRun; why: SkipWhy; waitingSince?: number } | undefined {
@@ -43,7 +44,9 @@ export function recordSkip(runs: readonly RoutineRun[], make: () => RoutineRun, 
     : { count, firstAt: earlier?.scheduledFor ?? scheduledFor, lastAt: scheduledFor, behind: cause.behind };
   const tell = !skipped.told && cause.waitingSince !== undefined && scheduledFor >= cause.waitingSince + ROUTINE_DEFERRAL_NOTICE_MS;
   if (tell) skipped.told = true;
-  const line = skipped.count === 1 ? codedLine("error", "routines.server.skippedOne", { why: cause.why }) : codedLine("error", "routines.server.skippedMany", { count: skipped.count, why: cause.why });
+  const atStart = cause.why === "routines.server.part.restartedSoon";
+  const line = skipped.count === 1 ? codedLine("error", atStart ? "routines.server.startSkippedOne" : "routines.server.skippedOne", { why: cause.why })
+    : codedLine("error", atStart ? "routines.server.startSkippedMany" : "routines.server.skippedMany", { count: skipped.count, why: cause.why });
   Object.assign(row, line.codes, { status: "missed", error: line.text, finishedAt: now, skipped } satisfies Partial<RoutineRun>);
   if (tell) delete row.seenAt;
   else if (!found) row.seenAt = now;
