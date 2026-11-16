@@ -2,6 +2,7 @@ import { redactSecretsInText } from "../../shared/redact.ts";
 import type { PriceList } from "../prices.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SpendState } from "../spend.ts";
+import type { UsageCapView } from "../host/usage-cap-gate.ts";
 import {
   flushUsageLedger,
   parseUsageRange,
@@ -23,6 +24,10 @@ export interface UsageRouteDeps {
   dataDir: string;
   prices(): PriceList | null;
   budget(): SpendState | null;
+  /** The open usage caps with their use now, for the owner; null for anyone else. */
+  caps(auth: RequestAuth): UsageCapView | null;
+  /** Whether this engine is signed in with a subscription now: its dollars are an estimate nobody is billed. */
+  onPlan(instanceId: string): boolean;
   currency(): string;
   recorder: TraceServiceDeps["recorder"];
   messages: TraceServiceDeps["messages"];
@@ -39,6 +44,21 @@ const whole = (raw: string | null, fallback: number, max: number): number | null
   if (raw === null) return fallback;
   return /^\d{1,7}$/.test(raw) && Number(raw) <= max ? Number(raw) : null;
 };
+
+/** The period's dollars booked on engines signed in with a subscription now, and the turns they came from. A row keeps
+ * no record of how its engine was signed in when it ran, so this reads the sign-in as it is today. */
+export function notBilledShare(rows: readonly UsageRow[], onPlan: (instanceId: string) => boolean): { usd: number; turns: number } {
+  const plan = new Map<string, boolean>();
+  let usd = 0, turns = 0;
+  for (const row of rows) {
+    if (typeof row.costUsd !== "number" || !(row.costUsd > 0)) continue;
+    if (!plan.has(row.instanceId)) plan.set(row.instanceId, onPlan(row.instanceId));
+    if (!plan.get(row.instanceId)) continue;
+    usd += row.costUsd;
+    turns += 1;
+  }
+  return { usd, turns };
+}
 
 /** The usage endpoints: trace browsing plus the grouped token and cost summary with its CSV export. */
 export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
@@ -99,6 +119,8 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
       splitBy,
       ...summarizeUsage(rows, groupBy, prices, splitBy),
       budget: deps.budget(),
+      caps: deps.caps(auth),
+      notBilled: notBilledShare(rows, deps.onPlan),
       billing: prices ? { currency: deps.currency() } : null,
     });
   };

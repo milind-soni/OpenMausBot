@@ -2,7 +2,7 @@
 // (the same earlier run still going, the same spacing after a cloud computer that did not start or after failed runs) share one row, which
 // counts them and keeps the first and last time: a schedule every minute behind a run of hours adds one row, not hundreds.
 import { ROUTINE_DEFERRAL_NOTICE_MS } from "./routine-execution.ts";
-import { codedLine, type RoutineLineKey } from "./routine-lines.ts";
+import { codedLine, type RoutineLine, type RoutineLineKey } from "./routine-lines.ts";
 import type { RoutineRun } from "./routines.ts";
 
 /** What a `missed` row stands for when it counts skipped occurrences. */
@@ -34,8 +34,9 @@ export function blockingRun(runs: readonly RoutineRun[], routineId: string): { r
  * `earlier` occurrences that came due before it while nothing could look (routine-catch-up.ts). `tell` is true once per
  * waiting run, for the first occurrence skipped after it had waited a notice window: the owner is told then, and the row
  * shows as not yet seen. Any other skip is on a row already seen: a run that is still working when the next one comes
- * due, or a spacing the owner was told about when it began, asks nothing more of them. */
-export function recordSkip(runs: readonly RoutineRun[], make: () => RoutineRun, cause: { behind: string; why: SkipWhy; waitingSince?: number }, scheduledFor: number, now: number,
+ * due, or a spacing the owner was told about when it began, asks nothing more of them. A cause
+ * that is not one of the `why` parts (a reached usage cap) gives its row's line itself, as `words`. */
+export function recordSkip(runs: readonly RoutineRun[], make: () => RoutineRun, cause: { behind: string; waitingSince?: number } & ({ why: SkipWhy } | { words: (count: number) => RoutineLine }), scheduledFor: number, now: number,
   earlier?: { count: number; scheduledFor: number }): { row: RoutineRun; added: boolean; tell: boolean } {
   const found = runs.findLast((run) => run.status === "missed" && run.skipped?.behind === cause.behind);
   const row = found ?? make(), count = 1 + (earlier?.count ?? 0);
@@ -44,8 +45,9 @@ export function recordSkip(runs: readonly RoutineRun[], make: () => RoutineRun, 
     : { count, firstAt: earlier?.scheduledFor ?? scheduledFor, lastAt: scheduledFor, behind: cause.behind };
   const tell = !skipped.told && cause.waitingSince !== undefined && scheduledFor >= cause.waitingSince + ROUTINE_DEFERRAL_NOTICE_MS;
   if (tell) skipped.told = true;
-  const atStart = cause.why === "routines.server.part.restartedSoon";
-  const line = skipped.count === 1 ? codedLine("error", atStart ? "routines.server.startSkippedOne" : "routines.server.skippedOne", { why: cause.why })
+  const atStart = "why" in cause && cause.why === "routines.server.part.restartedSoon";
+  const line = "words" in cause ? cause.words(skipped.count)
+    : skipped.count === 1 ? codedLine("error", atStart ? "routines.server.startSkippedOne" : "routines.server.skippedOne", { why: cause.why })
     : codedLine("error", atStart ? "routines.server.startSkippedMany" : "routines.server.skippedMany", { count: skipped.count, why: cause.why });
   Object.assign(row, line.codes, { status: "missed", error: line.text, finishedAt: now, skipped } satisfies Partial<RoutineRun>);
   if (tell) delete row.seenAt;

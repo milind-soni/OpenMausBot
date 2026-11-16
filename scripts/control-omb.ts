@@ -182,6 +182,8 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   for (const key of ["OMB_UNATTENDED_TURN_MAX_MS", "OMB_UNATTENDED_TURN_MAX_REQUESTS", "OMB_UNATTENDED_TURN_MAX_DENIALS", "OMB_LOOP_GUARD_UNATTENDED_STOP_AT"]) if (parentEnv[key]) childEnv[key] = parentEnv[key];
   // Warm summaries' minutes as seconds (server/warm-summary.ts), and the switch that turns them off.
   for (const key of ["OMB_WARM_SUMMARY_TIME_SCALE", "OMB_WARM_SUMMARY"]) if (parentEnv[key]) childEnv[key] = parentEnv[key];
+  // A headless server's usage caps (server/usage-caps.ts).
+  for (const key of ["OMB_USAGE_CAP_DAILY_USD", "OMB_USAGE_CAP_MONTHLY_USD", "OMB_USAGE_CAP_DAILY_TOKENS", "OMB_USAGE_CAP_MONTHLY_TOKENS", "OMB_USAGE_CAP_STOPS"]) if (parentEnv[key]) childEnv[key] = parentEnv[key];
   // A loopback fake only: the key never reaches a real provider.
   const liveUrl = parentEnv.OMB_OPENAI_LIVE_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(liveUrl)) {
