@@ -14,7 +14,7 @@ import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQu
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
-import { ChatToolSessionError, chatToolNotices, mountChatTools, refitChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
+import { ChatToolSessionError, chatToolNotices, joinLateChatTools, mountChatTools, refitChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
 import { noteToolBudget } from "../tool-budgets.ts";
 import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
@@ -609,11 +609,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const scope = parsed.scope;
         const toolsOff = options.tools === false || options.toolUse?.(model) === false;
         tools = await mountChatTools(toolsOff ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
-          toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText, chatToolLimitFor(options.apiUrl, model));
+          toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText, chatToolLimitFor(options.apiUrl, model), true);
         noteToolBudget(turn.botId, tools.budget);
         for (const message of chatToolNotices(tools)) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
         const questionAllowed = !toolsOff && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
-        let optionalQuestionOnly = questionAllowed && tools.definitions.length === 0;
           // An MCP server squatting ask_user cannot shadow it (dispatch intercepts the name); skip its definition.
         if (questionAllowed && !tools.definitions.some((definition) => definition.function.name === ASK_USER_TOOL)) {
           tools.definitions.push(ASK_USER_TOOL_DEFINITION);
@@ -627,9 +626,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             deliveredAsides.push(...unread);
           }
           turnEntry.ending = round === MAX_CHAT_ROUNDS - 1;
+          // Servers still starting when the turn began join once they have, never after the tools were dropped (none left while ask_user is allowed).
+          const joined = !questionAllowed || tools.definitions.length ? await joinLateChatTools(tools, [ASK_USER_TOOL_DEFINITION]) : undefined;
+          for (const message of joined ?? []) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
           native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
-          let attempt = 0;
-          let resized = false;
+          let attempt = 0, resized = false;
           let completion: Completion;
           for (;;) {
             let streamed = false;
@@ -677,9 +678,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             } catch (value) {
               const error = asError(value);
               const verdict = classifyError(error);
-              // A provider refuses a request with too many tools before running anything: learn its limit and list fewer.
-              const refit = streamed || seenCalls.size || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
-              if (refit) {
+              // Refused for too many tools, nothing ran: learn the limit and list fewer (after a call only when servers just joined).
+              const listedBefore = tools.definitions.length, refit = streamed || (seenCalls.size && !joined) || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
+              if (refit && tools.definitions.length < listedBefore) {
                 for (const message of refit) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
                 noteToolBudget(turn.botId, tools.budget);
                 emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt: 1, delayMs: 0, reason: "tool_limit" });
@@ -712,9 +713,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 if (!abort.signal.aborted) throw new ChatProtocolError(refusedToolCallFailure(error, seenCalls.size > 0));
               }
               // A structured parameter rejection executed nothing; never downgrade mounted tools or a handled call.
-              if (optionalQuestionOnly && round === 0 && !streamed && !seenCalls.size && !abort.signal.aborted &&
+              if (questionAllowed && round === 0 && tools.definitions.length && tools.definitions.every((definition) => definition === ASK_USER_TOOL_DEFINITION) && !streamed && !seenCalls.size && !abort.signal.aborted &&
                   error instanceof UnsupportedChatToolsError && verdict.reason === "invalid_request") {
-                optionalQuestionOnly = false;
                 tools.definitions.length = 0;
                 continue;
               }
