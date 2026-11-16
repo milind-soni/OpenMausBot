@@ -661,7 +661,8 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         }
       }
       if (body.connectorScopes !== undefined && widensConnectorScopes(freshBrowserBot?.connectorScopes, trustPatch.connectorScopes) &&
-          auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin && store.bots.some((candidate) => candidate.busy)) {
+          auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin &&
+          store.bots.some((candidate) => candidate.busy || activeGroupTurnForBot(candidate.id))) {
         return json(res, 409, { error: "A bot is working right now, so this change has to come from the desktop app or a paired device. Try again once every bot is idle." });
       }
       // A running turn cannot unmount custom servers; rechecked after the awaits above.
