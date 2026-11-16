@@ -52,6 +52,16 @@ describe("Windows CLI argument safety", () => {
   });
 });
 
+describe("spawn EAGAIN", () => {
+  it("says the machine ran out of processes instead of the raw errno", () => {
+    const error = Object.assign(new Error("spawn claude EAGAIN"), { code: "EAGAIN" });
+    expect(describeSpawnFailure(error, "claude")).toEqual({
+      message: "`claude` couldn't start: this machine has reached its limit of running processes. Run fewer bots at once, or restart the server if this continues",
+      setup: false,
+    });
+  });
+});
+
 describe("spawn ENOENT", () => {
   const enoent = () => Object.assign(new Error("spawn codex ENOENT"), { code: "ENOENT" });
 
