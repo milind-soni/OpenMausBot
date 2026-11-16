@@ -46,16 +46,17 @@ const names = JSON.parse(process.env.CATALOG_TOOLS);
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
 createInterface({ input: process.stdin }).on("line", (line) => {
   const request = JSON.parse(line);
-  if (request.method === "initialize") reply(request.id, { protocolVersion: "2024-11-05", capabilities: { tools: {} } });
+  if (request.method === "initialize") setTimeout(() => reply(request.id, { protocolVersion: "2024-11-05", capabilities: { tools: {} } }), Number(process.env.CATALOG_START_MS ?? 0));
   else if (request.method === "tools/list") reply(request.id, { tools: names.map((name) => ({ name, description: "Synthetic " + name, inputSchema: { type: "object" } })) });
   else if (request.id !== undefined) reply(request.id, { content: [{ type: "text", text: "ran " + request.params?.name }] });
 });
 `;
 
-/** A stdio MCP server, as a turn's integrations take it, that lists exactly `names`. Remove `dir` when done. */
-export function catalogServer(names: readonly string[]): { dir: string; server: { command: string; args: string[]; env: Record<string, string> } } {
+/** A stdio MCP server, as a turn's integrations take it, that lists exactly `names`, `startMs` after it is asked to start.
+ * Remove `dir` when done. */
+export function catalogServer(names: readonly string[], startMs = 0): { dir: string; server: { command: string; args: string[]; env: Record<string, string> } } {
   const dir = mkdtempSync(join(tmpdir(), "omb-catalog-mcp-"));
   const script = join(dir, "catalog.mjs");
   writeFileSync(script, CATALOG_SERVER);
-  return { dir, server: { command: process.execPath, args: [script], env: { CATALOG_TOOLS: JSON.stringify(names) } } };
+  return { dir, server: { command: process.execPath, args: [script], env: { CATALOG_TOOLS: JSON.stringify(names), CATALOG_START_MS: String(startMs) } } };
 }

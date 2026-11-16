@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
 import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { ChatMcpClient, ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatToolNotices, directServers, mcpStartupMs, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { ChatMcpClient, ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatToolNotices, directServers, joinLateChatTools, mcpStartupMs, mountChatTools, trimmedToolsNotice, type ChatToolDefinition, type ChatToolSession } from "./chat-mcp-tools.ts";
 import { EXECUTOR_LIKE_TOOLS } from "../testing/executor-like-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
 import type { SendTurnInput } from "../contracts.ts";
@@ -1487,5 +1487,72 @@ describe("Chat MCP tool limit, fairly shared", () => {
       expect(session.merged).toEqual([]);
       expect(session.budget.servers.map((server) => server.name)).toEqual(["work", "home"]);
     } finally { await remote.close(); }
+  });
+});
+
+describe("Chat MCP servers starting in the background", () => {
+  const slowStart = (ms: number) => `if (message.method === "initialize") { setTimeout(() => reply(message, {protocolVersion:"2024-11-05",capabilities:{tools:{}}}), ${ms}); continue; }`;
+  const ask: ChatToolDefinition = { type: "function", function: { name: "ask_user", description: "Ask", parameters: { type: "object" } } };
+  const background = async (integrations: SendTurnInput["integrations"], signal: AbortSignal) => {
+    const session = await mountChatTools(integrations, signal, false, undefined, undefined, undefined, undefined, undefined, undefined, true);
+    sessions.push(session);
+    return session;
+  };
+  const names = (session: ChatToolSession) => session.definitions.map((definition) => definition.function.name);
+  /** Joins until a server that was still starting has been taken in. */
+  const joined = async (session: ChatToolSession) => {
+    let lines: string[] | undefined;
+    await vi.waitFor(async () => { lines = await joinLateChatTools(session, [ask]); expect(lines).toBeDefined(); }, { timeout: 10_000, interval: 50 });
+    return lines;
+  };
+
+  it("starts the turn once the agents server is up, and lists a slow server's tools when it joins", async () => {
+    const agents = fixture();
+    const slow = fixture(slowStart(1_500));
+    const startedAt = Date.now();
+    const session = await background({ agents: agents.server, custom: { slow: slow.server } }, agents.controller.signal);
+    expect(Date.now() - startedAt).toBeLessThan(1_500);
+    session.definitions.push(ask);
+    expect(names(session)).toEqual(["agents_write", "ask_user"]);
+    expect(await joined(session)).toEqual([]);
+    expect(names(session)).toEqual(["agents_write", "slow_write", "ask_user"]);
+    await expect(session.execute("slow_write", { value: "late" }, agents.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:late" });
+    expect(await session.join()).toBeUndefined();
+  });
+
+  it("says when a server that was still starting is skipped", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const agents = fixture();
+    const late = fixture(`if (message.method === "tools/list") { setTimeout(() => reply(message, {tools:"invalid"}), 800); continue; }`);
+    const session = await background({ agents: agents.server, custom: { late: late.server } }, agents.controller.signal);
+    expect(session.skipped).toEqual([]);
+    expect(await joined(session)).toEqual([expect.stringMatching(/^MCP server "late" was skipped for this turn: .*invalid result/)]);
+    expect(names(session)).toEqual(["agents_write"]);
+    warn.mockRestore();
+  });
+
+  it("keeps a listed tool's name when a server joining later would have taken it", async () => {
+    const agents = fixture(slowStart(300));
+    const builtIn = fixture(slowStart(1_000));
+    const configured = fixture();
+    const session = await background({ agents: agents.server, data: builtIn.server, custom: { Data: configured.server } }, agents.controller.signal);
+    expect(names(session)).toEqual(["agents_write", "data_write"]);
+    await joined(session);
+    expect(names(session)).toEqual(["agents_write", "data_write_2", "data_write"]);
+    await session.execute("data_write", { value: "same tool" }, agents.controller.signal);
+    expect(configured.read().calls.some((call) => call.method === "tools/call")).toBe(true);
+    expect(builtIn.read().calls.some((call) => call.method === "tools/call")).toBe(false);
+  });
+
+  it("waits for every server without the agents server, or when not started in the background", async () => {
+    for (const mount of [
+      (f: ReturnType<typeof fixture>) => background({ custom: { slow: f.server } }, f.controller.signal),
+      (f: ReturnType<typeof fixture>) => mountChatTools({ agents: fixture().server, custom: { slow: f.server } }, f.controller.signal).then((session) => { sessions.push(session); return session; }),
+    ]) {
+      const slow = fixture(slowStart(300));
+      const session = await mount(slow);
+      expect(names(session)).toContain("slow_write");
+      expect(await session.join()).toBeUndefined();
+    }
   });
 });

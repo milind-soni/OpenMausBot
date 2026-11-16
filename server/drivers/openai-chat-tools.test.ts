@@ -1505,18 +1505,35 @@ describe("a configured MCP server that cannot mount", () => {
 });
 
 describe("a turn with the person's Windows computer, the built-in browser and the agents server", () => {
-  function catalog(names: readonly string[]) {
-    const { dir, server } = catalogServer(names);
+  function catalog(names: readonly string[], startMs = 0) {
+    const { dir, server } = catalogServer(names, startMs);
     cleanups.push(() => removeTempDir(dir));
     return server;
   }
   const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => ({
     localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" },
     browser: catalog(syntheticToolNames("agent_browser", 32)),
-    agents: catalog(syntheticToolNames("agent", agents)),
+    // Started last, so the servers that start in the background are listed from the first request.
+    agents: catalog(syntheticToolNames("agent", agents), 1_500),
     composio: catalog(syntheticToolNames("router", 7)),
     data: catalog(syntheticToolNames("table", 5)),
     ...more,
+  });
+
+  it("sends the first request without waiting for a slow server, and lists its tools from the next round", async () => {
+    let firstAt = 0;
+    const f = await fixture(async (_body, response, round) => {
+      if (round > 1) return answer(response);
+      firstAt = Date.now();
+      // Long enough for the slow server to have started before the next round.
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
+    });
+    const startedAt = Date.now();
+    await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes: catalog(["note"], 1_500) } } });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(firstAt - startedAt).toBeLessThan(1_000);
+    expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([["agents_agent_1", "ask_user"], ["agents_agent_1", "notes_note", "ask_user"]]);
   });
 
   it("sends at most 128 tools, ask_user and every agents tool among them", async () => {
