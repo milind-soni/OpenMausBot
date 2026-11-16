@@ -510,10 +510,11 @@ export function directServers(servers: ReadonlyArray<{ name: string; tools: numb
  * A tool result over 50KB is saved whole in `resultFolder`, the bot's working folder, after `scrub` masks secrets (see savedOrBounded).
  * `toolLimit` is the most tools the provider takes in one request, ask_user included; null when it takes any number.
  * With `background`, setup waits only for the agents server, a computer and the built-in browser; the rest keep starting
- * and are listed by `join` once they have. Without the agents server, setup waits for every one. */
+ * and are listed by `join` once they have. Without the agents server, setup waits for every one. `onSettled` hears each
+ * server's name once it has listed its tools or failed, and `join` would take it in. */
 export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope, callTimeoutMs: number = DEFAULT_CALL_MS,
   schemaProfile?: ToolSchemaProfile, resultFolder?: string, scrub: (text: string) => string = redactSecretsInText, toolLimit: number | null = CHAT_TOOL_LIMIT,
-  background = false): Promise<ChatToolSession> {
+  background = false, onSettled?: (server: string) => void): Promise<ChatToolSession> {
   const parsed = parseToolScope(toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
@@ -743,7 +744,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       return { origin, tools };
     });
     const settled = mounts.map((mount, index) => mount.then((value) => { outcomes[index] = { status: "fulfilled", value }; },
-      (reason: unknown) => { outcomes[index] = { status: "rejected", reason }; }));
+      (reason: unknown) => { outcomes[index] = { status: "rejected", reason }; }).then(() => onSettled?.(servers[index]![0])));
     // Waited for in the background too: what the turn can't run without, the computer and browser a computer-use turn
     // acts through from its first step, and a server sharing its name with another, whose tools' names depend on which
     // of the two is listed first.

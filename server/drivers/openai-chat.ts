@@ -679,8 +679,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               const error = asError(value);
               const verdict = classifyError(error);
               // Refused for too many tools, nothing ran: learn the limit and list fewer (after a call only when servers just joined).
-              const refit = streamed || (seenCalls.size && !joined) || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
-              if (refit) {
+              const listedBefore = tools.definitions.length, refit = streamed || (seenCalls.size && !joined) || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
+              if (refit && tools.definitions.length < listedBefore) {
                 for (const message of refit) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
                 noteToolBudget(turn.botId, tools.budget);
                 emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt: 1, delayMs: 0, reason: "tool_limit" });

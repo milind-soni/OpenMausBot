@@ -41,7 +41,7 @@ export function syntheticToolNames(prefix: string, count: number): string[] {
 }
 
 const CATALOG_SERVER = `
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 const names = JSON.parse(process.env.CATALOG_TOOLS);
 const after = JSON.parse(process.env.CATALOG_AFTER ?? "[]");
@@ -53,20 +53,16 @@ const started = (since = Date.now()) => new Promise((resolve) => {
 createInterface({ input: process.stdin }).on("line", (line) => {
   const request = JSON.parse(line);
   if (request.method === "initialize") void started().then(() => reply(request.id, { protocolVersion: "2024-11-05", capabilities: { tools: {} } }));
-  else if (request.method === "tools/list") {
-    reply(request.id, { tools: names.map((name) => ({ name, description: "Synthetic " + name, inputSchema: { type: "object" } })) });
-    writeFileSync(process.env.CATALOG_READY, "");
-  } else if (request.id !== undefined) reply(request.id, { content: [{ type: "text", text: "ran " + request.params?.name }] });
+  else if (request.method === "tools/list") reply(request.id, { tools: names.map((name) => ({ name, description: "Synthetic " + name, inputSchema: { type: "object" } })) });
+  else if (request.id !== undefined) reply(request.id, { content: [{ type: "text", text: "ran " + request.params?.name }] });
 });
 `;
 
-/** A stdio MCP server, as a turn's integrations take it, that lists exactly `names`. It starts once every file in `after`
- * exists (another catalog server's `ready`), then `startMs` later, and writes `ready` once it has listed its tools.
- * Remove `dir` when done. */
-export function catalogServer(names: readonly string[], { startMs = 0, after = [] }: { startMs?: number; after?: readonly string[] } = {}): { dir: string; ready: string; server: { command: string; args: string[]; env: Record<string, string> } } {
+/** A stdio MCP server, as a turn's integrations take it, that lists exactly `names`. It answers `initialize` once every file
+ * in `after` exists (at most 10 s), then `startMs` later. Remove `dir` when done. */
+export function catalogServer(names: readonly string[], { startMs = 0, after = [] }: { startMs?: number; after?: readonly string[] } = {}): { dir: string; server: { command: string; args: string[]; env: Record<string, string> } } {
   const dir = mkdtempSync(join(tmpdir(), "omb-catalog-mcp-"));
   const script = join(dir, "catalog.mjs");
-  const ready = join(dir, "ready");
   writeFileSync(script, CATALOG_SERVER);
-  return { dir, ready, server: { command: process.execPath, args: [script], env: { CATALOG_TOOLS: JSON.stringify(names), CATALOG_START_MS: String(startMs), CATALOG_AFTER: JSON.stringify(after), CATALOG_READY: ready } } };
+  return { dir, server: { command: process.execPath, args: [script], env: { CATALOG_TOOLS: JSON.stringify(names), CATALOG_START_MS: String(startMs), CATALOG_AFTER: JSON.stringify(after) } } };
 }
