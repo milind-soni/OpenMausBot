@@ -10080,6 +10080,7 @@
   "chat.notice.computerDesktopOnly": "Só o app OpenMausBot neste computador pode permitir que um bot o use. Abra o app aqui ou deixe o bot trabalhar no próprio navegador ou em um desktop na nuvem.",
   "chat.notice.computerPermissionsThenRestart": "O OpenMausBot ainda não consegue usar este computador. Confira se o OpenMausBot tem as permissões que pede e reinicie o app.",
   "chat.notice.computerNotReadyDetail": "O OpenMausBot ainda não consegue usar este computador. Motivo: {reason}",
+  "chat.notice.computerToolsDidNotStart": "As ferramentas deste computador não iniciaram desta vez ({reason}). Ele continua vinculado a este bot; envie sua mensagem de novo daqui a pouco.",
   "chat.notice.computerNotReadyMacPermission": "O OpenMausBot ainda não consegue usar este computador. Motivo: {reason}. Abra o OpenMausBot novamente depois de conceder a permissão do macOS que falta.",
   "chat.notice.computerSystemUnsupported": "Os bots não podem usar este computador neste sistema. Escolha outro lugar para este bot trabalhar",
   "chat.notice.computerAiUnsupported": "A IA deste bot não pode usar este computador. Escolha outra IA ou outro lugar para o bot trabalhar",
