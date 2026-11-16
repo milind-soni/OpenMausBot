@@ -590,6 +590,7 @@ export function createHomeWindow(deps) {
       if (!current.clean && parkedAt && !ownMove() && onOwnPage()) {
         clearRetry(); screen = null; status = null; shown = null; away = false;
         ensureWindow();
+        tell();
         let slow = null;
         const mine = {}; recovering = mine;
         try {
@@ -797,7 +798,7 @@ export function createHomeWindow(deps) {
       if (!place && parkedAt?.origin && at === parkedAt.origin) {
         ++opens;
         if (ownMove()) tell();
-        else toScreen({ screen: "offline", name: parkedAt.place, reason: `Your bots are on ${parkedAt.place}.` });
+        else { opening = null; toScreen({ screen: "offline", name: parkedAt.place, reason: `Your bots are on ${parkedAt.place}.` }); }
         later();
         return true;
       }
