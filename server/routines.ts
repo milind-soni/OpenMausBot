@@ -255,6 +255,7 @@ export interface RoutineManagerOptions {
     runOn: RoutineRunOn,
     triggerSource: RoutineRunTrigger,
     onDispatchError: (message: string) => void,
+    runId: string,
   ) => Promise<void>;
   startGoal?: (
     groupId: string | undefined,
@@ -1188,6 +1189,7 @@ export class RoutineManager {
               run.runOn ?? "maus",
               triggerSource,
               (message) => this.failThread(task.threadId, message, { cause: "refused" }),
+              run.id,
             );
           }
         } catch (error) {

@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createWaitRoutes, WAIT_MESSAGES } from "./routes/waits.ts";
 import type { FileStamp, PageResult, ProcessEntry } from "./wait-probes.ts";
 import { CLOUD_IDLE_AWAKE_MS, createCloudPower } from "./cloud-power.ts";
 import { describeCondition, WAIT_WAKE_MS, WaitManager, waitList, type NewWaitCondition, type WaitManagerOptions, type WaitNotice, type WaitRecord } from "./waits.ts";
@@ -90,6 +91,35 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
 }
 
 describe("WaitManager", () => {
+  it.each(["ended", "new generation", "different run"])("refuses to persist a continuation that changed during a URL probe: %s", async (change) => {
+    const h = harness();
+    const route = createWaitRoutes({ waits: h.manager });
+    const json = vi.fn();
+    const turn = { active: true, generation: "generation-1", runId: "run-1" };
+    const continuationAllowed = () => turn.active && turn.generation === "generation-1" && turn.runId === "run-1";
+    let finishProbe!: () => void;
+    h.pageGate = new Promise<void>((resolve) => { finishProbe = resolve; });
+    const pending = route({
+      method: "POST", path: "/api/internal/waits", res: {} as never, json,
+      botId: "bot-1", threadId: "t-1",
+      readBody: async () => ({ label: "the build", kind: "url_contains", url: "https://example.test/build", text: "done", follow_up: "Run tests." }),
+      sourceRefusal: () => null, continuationAllowed, hostRefusal: () => null, guest: () => false, peer: () => null,
+    });
+    try {
+      await expect.poll(() => h.pageInFlight).toBe(1);
+      if (change === "ended") turn.active = false;
+      if (change === "new generation") turn.generation = "generation-2";
+      if (change === "different run") turn.runId = "run-2";
+    } finally {
+      finishProbe();
+      await pending;
+    }
+    expect(json).toHaveBeenCalledWith(expect.anything(), 403, { error: WAIT_MESSAGES.notPerson });
+    expect(h.manager.list("bot-1")).toEqual([]);
+    expect(existsSync(h.file)).toBe(false);
+    expect(h.showCard).not.toHaveBeenCalled();
+  });
+
   it("keeps work a bot handed on to one open wait per assignment, across a restart, until it ends", async () => {
     const h = harness();
     const handed = (assignmentId: string) => h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" }, assignmentId });

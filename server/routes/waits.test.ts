@@ -260,6 +260,18 @@ describe("the waits route", () => {
     await call("POST", "/api/internal/waits", FILE_WAIT);
     expect(waits.create.mock.calls[0]![0]).not.toHaveProperty("stillAllowed");
   });
+  it("rechecks a continuation before storing while leaving ordinary top-level waits unchanged", async () => {
+    waits.create.mockClear();
+    let allowed = true;
+    await call("POST", "/api/internal/waits", FILE_WAIT, { continuationAllowed: () => allowed });
+    const { stillAllowed } = waits.create.mock.calls[0]![0];
+    expect(stillAllowed?.()).toBeNull();
+    allowed = false;
+    expect(stillAllowed?.()).toBe(WAIT_MESSAGES.notPerson);
+    waits.create.mockClear();
+    await call("POST", "/api/internal/waits", FILE_WAIT, { continuationAllowed: () => false });
+    expect(waits.create.mock.calls[0]![0]).not.toHaveProperty("stillAllowed");
+  });
   it("offers files and programs only on the bot's own computer", () => {
     const own = { cloudHome: false, hosted: false, guest: false, place: null };
     for (const place of [null, "local", "browser"] as const) expect(hostWaitRefusal({ ...own, place })).toBeNull();

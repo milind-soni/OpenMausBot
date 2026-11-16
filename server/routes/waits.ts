@@ -171,6 +171,7 @@ export interface WaitRouteContext {
   readBody: () => Promise<unknown>;
   sourceRefusal: (op: "create" | "cancel", assignmentId: string | undefined) => string | null;
   assignmentId?: () => string | undefined;
+  continuationAllowed?: () => boolean;
   hostRefusal: () => string | null;
   /** A Cloud guest's turn: its follow-up would run later as the owner's, so a guest's wait only tells. */
   guest: () => boolean;
@@ -197,6 +198,7 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     if (ctx.method !== "POST" || (ctx.path !== WAITS && ctx.path !== CANCEL)) return PASS;
 
     const assignmentId = ctx.assignmentId?.();
+    const continuation = ctx.continuationAllowed?.() === true;
     const refusal = ctx.sourceRefusal(ctx.path === CANCEL ? "cancel" : "create", assignmentId);
     if (refusal) return void json(res, 403, { error: refusal });
     const body = await ctx.readBody();
@@ -244,7 +246,14 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
       condition,
       ...(request.followUp ? { followUp: request.followUp } : {}),
       hours: request.hours,
-      ...(assignmentId ? { assignmentId, stillAllowed: () => (ctx.assignmentId?.() === assignmentId ? null : WAIT_MESSAGES.notPerson) } : {}),
+      ...(assignmentId ? { assignmentId } : {}),
+      ...(assignmentId || continuation ? {
+        stillAllowed: () => {
+          if (assignmentId && ctx.assignmentId?.() !== assignmentId) return WAIT_MESSAGES.notPerson;
+          if (continuation && (!ctx.continuationAllowed?.() || ctx.sourceRefusal("create", assignmentId))) return WAIT_MESSAGES.notPerson;
+          return null;
+        },
+      } : {}),
     });
     if (result.state === "refused") return void json(res, result.status, { error: result.error });
     if (result.state === "already") return void json(res, 200, { text: request.followUp
