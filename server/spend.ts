@@ -106,7 +106,7 @@ export function assertWithinBudget(
   const state = spendState(cfg, dataDir, now, isEntitled);
   if (!state?.exceeded) return;
   throw Object.assign(
-    new Error(`this workspace has reached its monthly spend limit of $${usd(state.monthlyUsd)} — an admin can raise it under Settings → Usage`),
+    new Error(`this workspace has reached its monthly spend limit of $${usd(state.monthlyUsd)} — an admin can raise it under Settings → Spending`),
     { status: 409, code: "spend_cap" },
   );
 }
@@ -169,6 +169,6 @@ export function resetSpendAlertsForTests(): void {
 export function spendAlertText(alert: SpendAlert, state: SpendState): { title: string; body: string } {
   const spent = `$${state.spentUsd.toFixed(2)} of $${usd(state.monthlyUsd)} spent this month (${state.month})`;
   return alert === "cap"
-    ? { title: "Monthly spend limit reached", body: `${spent}. New turns are refused until an admin raises the limit under Settings → Usage.` }
+    ? { title: "Monthly spend limit reached", body: `${spent}. New turns are refused until an admin raises the limit under Settings → Spending.` }
     : { title: `Spend is at ${state.percent}% of the monthly limit`, body: `${spent}. New turns stop when the limit is reached.` };
 }
