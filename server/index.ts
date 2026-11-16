@@ -524,7 +524,7 @@ import {
   isTurnEventQuarantined, TURN_ENDED_REFUSAL,
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
-import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts"; import { markEngineRunClean, startEngineRecords } from "./engine-records.ts";
+import { acquireDataDirLeaseForProcess, releaseOnceAtExit } from "./data-dir-lease.ts"; import { markEngineRunClean, startEngineRecords } from "./engine-records.ts";
 import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId, OWNER_LENDING, serverVersion } from "./environment.ts"; import { dataFormatAtStart } from "./data-format.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
@@ -665,16 +665,7 @@ const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
 dataFormatAtStart("check", DATA_DIR, serverVersion()); ensureDirs();
 // Acquire before any durable identity, sessions, config or Store state is loaded.
 const dataDirLease = acquireDataDirLeaseForProcess(DATA_DIR); void startEngineRecords(DATA_DIR); // stops what an earlier server left
-let dataDirLeaseReleaseAttempted = false;
-function releaseDataDirLeaseAtExit(): void {
-  if (dataDirLeaseReleaseAttempted) return;
-  dataDirLeaseReleaseAttempted = true;
-  try {
-    dataDirLease.release();
-  } catch (error) {
-    console.error(`[data-directory] lease release failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
+const releaseDataDirLeaseAtExit = releaseOnceAtExit(dataDirLease);
 process.once("exit", releaseDataDirLeaseAtExit);
 // Restore before constructing any long-lived config, Store, session or provider objects.
 let workspaceRestore: WorkspaceRestoreResult = { restored: false };
