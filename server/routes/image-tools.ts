@@ -23,6 +23,9 @@ const requestSchema = z.object({
   prompt: z.string().trim().min(1).max(IMAGE_PROMPT_MAX_CHARS),
   aspect: z.enum(["1:1", "16:9", "9:16"]).optional(),
   provider: z.enum(IMAGE_PROVIDERS).optional(),
+  format: z.literal("gif").optional(),
+  frames: z.number().int().min(2).max(16).optional(),
+  frameDurationMs: z.number().int().min(20).max(2000).optional(),
 });
 
 export interface ImageTurn {
@@ -51,7 +54,7 @@ export async function generateImageForTurn(raw: unknown, deps: ImageToolDeps): P
   if (!parsed.success) {
     return { status: 400, body: { error: `generate_image takes a prompt (1 to ${IMAGE_PROMPT_MAX_CHARS} characters), an optional aspect (1:1, 16:9 or 9:16) and an optional provider.` } };
   }
-  const { prompt, aspect, provider } = parsed.data;
+  const { prompt, aspect, provider, format, frames, frameDurationMs } = parsed.data;
   if (!deps.personTurn) return { status: 403, body: { error: IMAGE_MESSAGES.notPerson } };
   const { turn } = deps;
   if (!turn) return { status: 409, body: { error: IMAGE_MESSAGES.noTurn } };
@@ -78,7 +81,7 @@ export async function generateImageForTurn(raw: unknown, deps: ImageToolDeps): P
   let made = false;
   deps.inFlight.set(turn.key, (deps.inFlight.get(turn.key) ?? 0) + 1);
   try {
-    const image = await generateImage(deps.cfg, { prompt, aspect }, { slot, fetchImpl: deps.fetchImpl, signal: deps.signal });
+    const image = await generateImage(deps.cfg, { prompt, aspect, ...(format && { gif: { frames, frameDurationMs } }) }, { slot, fetchImpl: deps.fetchImpl, signal: deps.signal });
     made = true;
     if (!turn.attach({ bytes: image.bytes, mime: image.mime })) return { status: 409, body: { error: IMAGE_MESSAGES.noTurn } };
     const backup = image.usedFallback ? `, the person's backup image provider${image.baseError ? `, because the base failed: ${image.baseError}` : ""}` : "";
