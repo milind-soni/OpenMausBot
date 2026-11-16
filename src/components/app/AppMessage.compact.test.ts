@@ -74,12 +74,9 @@ describe("a bot's page as a compact card", () => {
     expect(Array.from(card().querySelectorAll("button"), (button) => button.getAttribute("aria-label"))).toEqual(["About this app", "Reload app", "Open page"]);
   });
 
-  it("glazes the foot of the preview into the footer, and only while there is a preview", async () => {
+  it("leaves the preview bare and parts it from the footer with a rule", async () => {
     await render(row(payload()));
-    expect(card().querySelector("[data-app-box] [data-page-glaze]")).not.toBeNull();
-    expect(card().querySelector("[data-page-footer]")!.className).not.toContain("border-t");
-    await press(opener());
-    expect(card().querySelector("[data-page-glaze]")).toBeNull();
+    expect(card().querySelector("[data-app-box]")!.children).toHaveLength(1);
     expect(card().querySelector("[data-page-footer]")!.className).toContain("border-t");
   });
 

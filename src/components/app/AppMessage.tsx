@@ -7,7 +7,7 @@ import { appBlockedLine } from "./app-blocked";
 import { APP_FRAME_LIMITS } from "../../../shared/app-frame/bridge";
 import { AppDocumentError, fetchAppDocument, type AppFetchFailure } from "./app-api";
 import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
-import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE, PAGE_GLAZE, PageCardFooter } from "./AppChrome";
+import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE, PageCardFooter } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
 import type { AppSelection } from "./app-frame-host";
 import { PageCitationButton } from "../CitationUI";
@@ -256,10 +256,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       ) : (
         <AppPlaceholder height={boxHeight} loading={slot.live} open={slot.live ? undefined : reloadNow} />
       )}
-      {compact && <div aria-hidden="true" data-page-glaze className={PAGE_GLAZE} />}
     </div>
   );
-  const glazed = compact && !collapsed && !noPage && !(fullScreen && current);
   const info = infoOpen && <AppInfo id={infoId} network={payload.network ?? { connect: [], resources: [] }} bytes={payload.bytes ?? 0} bordered={bordered || compact} />;
   const reopen = collapsed && (
     <div className={cn("flex", bordered || compact ? "px-4 pb-3.5" : "pb-2", compact && "pt-3.5")}>
@@ -289,7 +287,6 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
               title={payload.title}
               detail={version.last > 0 ? `${kind} · ${t("chat.preview.version", { n: version.rev + 1 })}` : kind}
               updated={version.flash}
-              glazed={glazed}
               infoId={infoId}
               infoOpen={infoOpen}
               onInfo={() => setInfoOpen((open) => !open)}
