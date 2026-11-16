@@ -351,6 +351,36 @@ describe("BotListItem", () => {
     expect(markup).toContain("Waiting on a teammate…");
   });
 
+  it("marks a bot whose last turn failed with a red dot, kept apart from the orange waiting badge", () => {
+    const failedTurn = [
+      { id: "u1", role: "user", kind: "text", text: "check the site", at: 1 },
+      { id: "e1", role: "bot", kind: "activity", at: 2, tool: { name: "error: The site did not answer.", ok: false } },
+    ] as Bot["messages"];
+    const opening = (markup: string, testId: string) => markup.match(new RegExp(`<span[^>]*data-testid="${testId}"[^>]*>`))?.[0] ?? "";
+    const failed = renderRow(bot({ messages: failedTurn }));
+    const dot = opening(failed, "failed-dot");
+    expect(dot).toContain("bg-danger");
+    expect(dot).toContain('role="status"');
+    expect(dot).toContain('aria-label="Ran into a problem"');
+    expect(dot).toContain("size-2.5");
+    expect(failed).not.toContain('data-testid="waiting-dot"');
+    expect(failed).not.toContain("bg-warning");
+    expect(opening(renderRow(bot({ messages: failedTurn }), "icons"), "failed-dot")).toContain("size-3");
+    // An engine that could not start writes the same row in its own thread; another thread's state alone paints nothing.
+    expect(renderRow(bot({ activity: "dead" }))).not.toContain('data-testid="failed-dot"');
+    // A failure outranks a teammate wait, but a question for you or a new turn already running wins.
+    const teammate = renderRow(bot({ messages: failedTurn, waitingForTeammates: true }));
+    expect(teammate).toContain('data-testid="failed-dot"');
+    expect(teammate).not.toContain('data-testid="teammate-wait-dot"');
+    const waiting = renderRow(bot({ messages: failedTurn, activity: "waiting-on-you" }));
+    expect(waiting).toContain('data-testid="waiting-dot"');
+    expect(waiting).not.toContain('data-testid="failed-dot"');
+    const retrying = renderRow(bot({ messages: failedTurn, busy: true }));
+    expect(retrying).toContain('data-testid="working-dot"');
+    expect(retrying).not.toContain('data-testid="failed-dot"');
+    expect(renderRow(bot({ messages: [{ ...failedTurn[1]!, tool: { name: "Read", ok: true } }] }))).not.toContain('data-testid="failed-dot"');
+  });
+
   it("keeps real sibling work visible while another thread waits for a teammate", () => {
     const markup = renderRow(bot({ waitingForTeammates: true, busy: true, activity: "working" }));
     expect(markup).toContain('data-testid="working-dot"');

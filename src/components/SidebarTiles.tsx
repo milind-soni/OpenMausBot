@@ -30,11 +30,11 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
   const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
   const [renaming, setRenaming] = useState(false);
   const visible = useVisibleMessages(bot);
-  const { waiting, working, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued);
+  const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
   const { unread, noticing } = useBotUnread(bot);
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const tooltip = botTooltip(bot, instances);
-  const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : "";
+  const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : failed ? t("sidebar.preview.failed") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : "";
   const label = [bot.name, bot.chiefOfStaff ? t("sidebar.bot.chiefOfStaff") : "", onLiveCall ? t("call.live.badge") : "", status, unread ? t("task.unread") : ""].filter(Boolean).join(" · ");
   const reorder = pinnedCircleDragHandlers(bot.id, { drag, dragging, prevId, nextId });
   const open = () => openBotRow(dispatch, bot, showThreads, selected);
@@ -101,6 +101,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
         ) : waiting ? (
           <span data-testid="waiting-dot" aria-hidden="true" className={cn("absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-warning text-[11px] font-black leading-none text-panel", RING)}>!</span>
         ) : working ? dot("working-dot", "bg-success")
+          : failed ? dot("failed-dot", "bg-danger")
           : teammateWait ? dot("teammate-wait-dot", "bg-accent")
           : queued ? dot("queued-dot", "bg-ink-tertiary")
           : unread ? dot("unread-dot", "bg-accent")

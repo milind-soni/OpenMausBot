@@ -791,6 +791,7 @@
   "sidebar.noMatch": "Nichts passt zu „{query}“",
   "sidebar.preview.waiting": "Wartet auf dich…",
   "sidebar.preview.waitingOnTeammate": "Wartet auf einen Kollegen…",
+  "sidebar.preview.failed": "Ist auf ein Problem gestoßen",
   "sidebar.preview.working": "Arbeitet…",
   "sidebar.preview.botWorking": "{name} arbeitet…",
   "sidebar.preview.aBot": "Ein Bot",

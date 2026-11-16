@@ -2100,6 +2100,7 @@
   "sidebar.noMatch": "Nenhum resultado para “{query}”",
   "sidebar.preview.waiting": "Esperando por você…",
   "sidebar.preview.waitingOnTeammate": "Esperando um colega…",
+  "sidebar.preview.failed": "Teve um problema",
   "sidebar.preview.working": "Trabalhando…",
   "sidebar.preview.botWorking": "{name} está trabalhando…",
   "sidebar.preview.botWorkingQueued": "{name} está trabalhando… · {count} na fila",
