@@ -769,7 +769,11 @@ describe("the link between a computer and its Cloud", () => {
   });
 
   it("the member's place is off: what is written in the room waits as one turn, is said once, and is answered once when the place is back, across a restart", async () => {
-    const { computer, cloud } = await two({ limits: { queueMs: 80, stallMs: 400 } });
+    const { computer, cloud } = await two();
+    // Only the computer holds the waiting turn, so only its clocks are short: the Cloud starts its work with its usual ones.
+    await computer.restart({ limits: { queueMs: 80, stallMs: 400 } });
+    computer.dialer.start();
+    await until(() => computer.link.online() && cloud.link.online(), "the link is back after the computer restarted");
     const room = computer.room("Launch", ["local-writer", onCloud("cloud-analyst")]);
     await cloud.unplug();
     await until(() => !computer.link.online(), "the computer sees the Cloud gone");
