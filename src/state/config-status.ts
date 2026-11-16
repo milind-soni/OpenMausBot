@@ -146,7 +146,7 @@ export interface ConfigStatus {
     fallback?: ImageSlotStatus | null;
     ready?: boolean;
     maxPerTurn?: number;
-    complexity?: ImageComplexity | null;
+    complexity?: ImageComplexity;
     customUrl?: string;
     customModel?: string;
     openaiConfigured?: boolean;
