@@ -1221,6 +1221,7 @@ describe("Store", () => {
       alwaysAllow: ["provider-tool:claude:linear:list_comments:config-one"],
     });
 
+    rmSync(join(DATA_DIR, "always-allow-recovered"), { force: true }); // a data folder from the version that saved them there
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)?.alwaysAllow).toEqual([
       "provider-tool:claude:linear:list_comments:config-one",
@@ -1235,6 +1236,51 @@ describe("Store", () => {
     expect(persisted.find((candidate) => candidate.id === bot.id)?.alwaysAllow).toEqual(
       reloaded.bot(bot.id)?.alwaysAllow,
     );
+  });
+
+  it("says how many grants it kept when a bot's threads hold more than its list has room for, and drops none of the bot's own", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const own = Array.from({ length: 195 }, (_, i) => `provider-tool:claude:linear:own_${i}:config-one`);
+    const inThread = Array.from({ length: 12 }, (_, i) => `provider-tool:claude:linear:thread_${i}:config-one`);
+    store.patchBot(bot.id, { alwaysAllow: own });
+    store.patchTask(bot.id, bot.threadId, { alwaysAllow: [...inThread, "Bash:git status"] });
+    rmSync(join(DATA_DIR, "always-allow-recovered"), { force: true });
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const reloaded = new Store(selection);
+      expect(reloaded.bot(bot.id)?.alwaysAllow).toEqual([...own, ...inThread.slice(0, 5)]);
+      expect(reloaded.taskByThread(bot.id, bot.threadId)?.alwaysAllow, "what did not fit leaves the thread too").toEqual([...inThread.slice(0, 5), "Bash:git status"]);
+      new Store(selection);
+      const lines = warned.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith("[always-allow]"));
+      expect(lines, "said once, not at every start").toEqual([`[always-allow] bot ${bot.id}: kept 200 of 207 always-allowed tools (the limit is 200); the other 7 ask again.`]);
+    } finally {
+      warned.mockRestore();
+    }
+  });
+
+  it("removes a grant from every thread in one save, and a restart does not bring it back", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const [kept, removed] = ["provider-tool:claude:linear:list_issues:config-one", "provider-tool:claude:linear:list_comments:config-one"];
+    store.patchBot(bot.id, { alwaysAllow: [kept, removed] });
+    store.patchTask(bot.id, bot.threadId, { alwaysAllow: [kept, removed, "Bash:git status"] });
+    const sibling = store.createTask(bot.id)!;
+    expect(sibling.alwaysAllow).toEqual([kept, removed]);
+    const save = vi.spyOn(store as unknown as { saveBots(): void }, "saveBots");
+    expect(store.rewriteGrants(bot.id, (keys) => (keys.includes(removed) ? keys.filter((key) => key !== removed) : null), true)).toBe(true);
+    expect(save).toHaveBeenCalledOnce();
+    expect(store.rewriteGrants(bot.id, () => null)).toBe(false);
+    expect(store.rewriteGrants("nobody", () => [])).toBe(false);
+    expect(save).toHaveBeenCalledOnce();
+    save.mockRestore();
+    for (const loaded of [store, new Store(selection), new Store(selection)]) {
+      expect(loaded.bot(bot.id)?.alwaysAllow).toEqual([kept]);
+      expect(loaded.tasks(bot.id).map((task) => task.alwaysAllow)).toEqual([[kept], [kept, "Bash:git status"]]);
+    }
+    // A thread left holding a copy by an earlier version does not hand it back to the bot at the next start.
+    store.patchTask(bot.id, sibling.threadId, { alwaysAllow: [kept, removed] });
+    expect(new Store(selection).bot(bot.id)?.alwaysAllow).toEqual([kept]);
   });
 
   it("persists a bot's effort level across a restart, defaulting to unset", () => {

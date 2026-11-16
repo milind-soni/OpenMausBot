@@ -9,13 +9,14 @@ import { customMcpServers } from "../config.ts";
 import type { McpServerSpec, StdioMcpSpec } from "../contracts.ts";
 import { addBotMcpServer, claimBotMcpServers, keepForBot, withoutBotMcpServers, type BotKept, type BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { MCP_RESTART_ENV } from "../mcp-app-catalog.ts";
+import { grantMover, grantServersMark, storedGrantSpec, type GrantServer } from "../mcp-grant-spec.ts";
 import { createMcpHealth, nameList, toolLabel, type McpHealthDeps } from "../mcp-health.ts";
 import { probeMcpServer } from "../mcp-probe.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
 import type { McpKeys } from "../vault/mcp-keys.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 
-type Bot = { id: string; name: string; mcpServers?: string[]; toolScope?: unknown };
+type Bot = { id: string; name: string; mcpServers?: string[]; toolScope?: unknown; alwaysAllow?: string[] };
 /** A server left out of a bot's turns, with why; `key`: its Vault key is off, as against it not starting. */
 export type McpServerOff = { name: string; error: string; key?: true };
 
@@ -37,6 +38,8 @@ export interface McpServersHostDeps {
   keys?: McpKeys;
   /** Drops a server's sign-in: its tokens and any sign-in still open. */
   forgetSignIn?(name: string): void;
+  /** Rewrites the bot's saved "Always allow" grants with `move`, which answers null when it changes nothing. */
+  moveGrants?(bot: Bot, move: (keys: readonly string[]) => string[] | null): void;
 }
 
 const CLAIMED_FILE = (dataDir: string) => join(dataDir, "mcp-bot-servers.json");
@@ -119,11 +122,36 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
   const restarts = new Map<string, number>();
   const health = { ...checks, changed(name: string): void { restarts.set(name, (restarts.get(name) ?? 0) + 1); checks.changed(name); } };
 
+  const mounted = (bot: Bot): Record<string, McpServerSpec> => withRestarts(health.usable(bot.id, keyed(bot).servers), restarts);
+  /** `servers` as a saved "Always allow" names them (mcp-grant-spec.ts): no Vault key's value and no restart count. */
+  const grantSpecs = (servers: Record<string, McpServerSpec>): Record<string, McpServerSpec> => {
+    const stored = deps.cfg().mcpServers ?? {};
+    return Object.fromEntries(Object.entries(servers).map(([name, server]) => [name, storedGrantSpec(name, stored[name]) ?? server]));
+  };
+  /** Grants an earlier version tied to a key's value or a restart count move to the server as it is named now: once for
+   * a bot's servers as they are, so a turn whose servers have not changed since does none of this. A failed save changes
+   * nothing: the next turn tries again, and until then those tools ask as they did. */
+  const movedFor = new Map<string, string>();
+  const moveGrants = (bot: Bot): void => {
+    if (!deps.moveGrants) return;
+    const started = mounted(bot), names = grantSpecs(started);
+    const servers: Record<string, GrantServer> = Object.fromEntries(Object.keys(started).map((name) => [name, { names: names[name]!, started: started[name]! }]));
+    const mark = grantServersMark(servers);
+    if (movedFor.get(bot.id) === mark) return;
+    try {
+      deps.moveGrants(bot, grantMover(servers));
+      movedFor.set(bot.id, mark);
+    } catch {
+      console.error("[mcp] Could not move this bot's saved tool permissions to their new form.");
+    }
+  };
+
   return {
     health,
     /** How Test starts a command server: as the turns of its bot, or of any bot. */
     probeAs: (server: { bot?: string }) => (server.bot ? asBot(server.bot) : {}),
-    mounted: (bot: Bot): Record<string, McpServerSpec> => withRestarts(health.usable(bot.id, keyed(bot).servers), restarts),
+    mounted,
+    grantSpecs,
     /** The servers set for this bot, started or not: who a change to one reaches. */
     given: (bot: Bot): string[] => Object.keys(configured(bot)),
     /** Before a turn: any Vault key its servers read from a linked password manager, and the first start checks. */
@@ -135,6 +163,7 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
         }
       }
       await health.prepare(bot.id, started(bot));
+      moveGrants(bot);
     },
     off: (bot: Bot): McpServerOff[] => [...health.off(bot.id, started(bot)), ...keyed(bot).off.filter(({ name }) => canUseMcpServer(bot.toolScope, name))],
     listing: <T extends { name: string }>(server: T): T & { offFor?: string[]; keyOff?: true } => {

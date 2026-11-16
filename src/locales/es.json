@@ -824,7 +824,7 @@
   "approval.action.deny": "Denegar",
   "approval.action.stopAsking": "Dejar de preguntar a {name} sobre {key}",
   "approval.action.alwaysAllow": "Permitir siempre",
-  "approval.action.alwaysAllowSession": "Permitir siempre en esta sesión",
+  "approval.action.allowSession": "Permitir en esta sesión",
   "approval.action.alwaysAllowSessionHint": "El proveedor deja de preguntar por esta acción hasta que termine la sesión",
   "approval.action.alwaysAllowCommand": "Permitir siempre este comando",
   "approval.action.alwaysAllowCommandHint": "Recordar este comando exacto para este bot y proveedor en {cwd}, incluidos otros hilos que usen esa carpeta",

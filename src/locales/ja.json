@@ -1012,7 +1012,7 @@
   "approval.action.deny": "拒否",
   "approval.action.stopAsking": "{name} に {key} を今後聞かない",
   "approval.action.alwaysAllow": "常に許可",
-  "approval.action.alwaysAllowSession": "このセッションでは常に許可",
+  "approval.action.allowSession": "このセッションでは許可",
   "approval.action.alwaysAllowSessionHint": "セッションが終わるまで、プロバイダーはこの操作の確認を求めません",
   "approval.action.alwaysAllowCommand": "このコマンドを常に許可",
   "approval.action.alwaysAllowCommandHint": "{cwd} で使うこのコマンドを、このボットとプロバイダーについて完全一致で記憶します。同じフォルダーを使う他のスレッドにも適用されます",

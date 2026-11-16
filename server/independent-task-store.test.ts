@@ -42,6 +42,30 @@ describe("independent bot task state", () => {
     expect(new Store(selection).tasks(bot.id).every(task => task.approvalMode === "ask")).toBe(true);
   });
 
+  it("keeps a bot's saved grants through Full access, so going back to Ask does not ask for each again", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const grants = ["provider-tool:claude:linear:list_issues:0123456789abcdef", "provider-tool:claude:notes:get_note:fedcba9876543210"];
+    store.patchBot(bot.id, { approvalMode: "ask", autoApprove: false, alwaysAllow: grants });
+    const first = bot.threadId;
+    store.patchTask(bot.id, first, { alwaysAllow: grants });
+    const sibling = store.createTask(bot.id, "Sibling")!;
+    store.patchTask(bot.id, sibling.threadId, { alwaysAllow: [grants[0]!] });
+
+    store.setAllThreadApprovalMode(bot.id, "full");
+    expect(approvalModeFor(store.bot(bot.id)!)).toBe("full");
+    expect(store.bot(bot.id)?.alwaysAllow, "unused at Full access, but still saved").toEqual(grants);
+    expect(savedBots().find((saved) => saved.id === bot.id)?.alwaysAllow).toEqual(grants);
+
+    const restarted = new Store(selection);
+    restarted.setAllThreadApprovalMode(bot.id, "ask");
+    expect(approvalModeFor(restarted.bot(bot.id)!)).toBe("ask");
+    expect(restarted.bot(bot.id)?.alwaysAllow).toEqual(grants);
+    expect(restarted.projectBotForTask(bot.id, first)?.alwaysAllow).toEqual(grants);
+    expect(restarted.projectBotForTask(bot.id, sibling.threadId)?.alwaysAllow, "each thread keeps its own list, no wider than before").toEqual([grants[0]]);
+    expect(new Store(selection).bot(bot.id)?.alwaysAllow).toEqual(grants);
+  });
+
   it("refreshes one thread's permissions from the bot default and leaves the rest", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });
