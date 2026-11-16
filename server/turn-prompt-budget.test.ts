@@ -68,7 +68,7 @@ const PROMPT_BUDGET_BASELINE: Record<string, number> = {
   "routine": 3367,
   "profile": 1016,
   "team-memory": 286,
-  // #6203: +130 bytes on both sandbox kinds, on purpose: the person's own files (C:\Users\…, /Users/…, Desktop) are reached only on This computer.
+  // +130 bytes on both sandbox kinds, on purpose: the person's own files (C:\Users\…, /Users/…, Desktop) are reached only on This computer.
   "computer:vm-private": 5913,
   "computer:vm-shared": 5908,
   "computer:box": 4382,
