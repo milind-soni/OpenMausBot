@@ -128,6 +128,27 @@ describe.each([
     expect((await h.messages(launch)).some((line) => line.text?.includes("going with Home"))).toBe(false);
   }, hostTimeout(180_000));
 
+  it("clears a question overtaken by the person's next message from the thread and inbox", async () => {
+    const h = here();
+    const bot = await h.bot(`Quinn ${role}`);
+    const thread = await h.thread(bot.id, "Question left behind");
+    h.script(bot.id,
+      { key: "STALE-ASK", match: ["STALE-ASK-GO"], reply: "NEEDS INPUT: Which page should I use?" },
+      { key: "STALE-NEXT", match: ["STALE-NEXT-GO"], reply: "I will work on the report instead." });
+    await h.say(bot.id, thread, "STALE-ASK-GO");
+    await until(async () => (await h.listed()).some((row) => row.origin?.threadId === thread), "the question in the inbox");
+    const question = (await h.listed()).find((row) => row.origin?.threadId === thread)!;
+    expect(question.tab).toBe("needs-you");
+    await h.say(bot.id, thread, "STALE-NEXT-GO");
+    await until(async () => (await h.messages(thread)).some((line) => line.text === "I will work on the report instead."), "the next turn to finish");
+    expect((await h.messages(thread)).find((line) => line.id === question.id)?.card).not.toHaveProperty("answered");
+    expect((await h.listed()).some((row) => row.id === question.id)).toBe(false);
+    const call = role === "desktop" ? fx.local : fx.onCloud;
+    const state = await call("GET", `/api/bots/${bot.id}`);
+    expect(state.status).toBe(200);
+    expect(state.body.bot.tasks.find((task: { threadId: string }) => task.threadId === thread).activity).not.toBe("waiting-on-you");
+  }, hostTimeout(120_000));
+
   it("gets a bot's message_person to the person once, and their reply reaches the bot", async () => {
     const h = here();
     const eli = await h.bot(`Mel ${role}`);

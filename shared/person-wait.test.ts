@@ -76,3 +76,30 @@ describe("cards that stay in view", () => {
     expect(staysInView(row({}))).toBe(false);
   });
 });
+
+describe("a question the person wrote past", () => {
+  const question = { ...options({ subtitle: "Which page?" }), id: "question" };
+  const password = { ...secret(), id: "password" };
+  const wrote = (fields: Partial<WireMessage> = {}) => row({ id: "said", role: "user", text: "Do the report instead", ...fields });
+
+  it("no longer waits once the person writes after it, while cards that are not questions still do", () => {
+    expect(restingOnPerson([question])?.messageId).toBe("question");
+    expect(restingOnPerson([question, wrote()])).toBeUndefined();
+    expect(restingOnPerson([password, question, wrote()])?.messageId).toBe("password");
+    expect(restingOnPerson([wrote(), question])?.messageId).toBe("question");
+  });
+
+  it.each([
+    ["another bot", { peerAsk: { botId: "scout", name: "Scout" } }],
+    ["a relay", { relayed: true }],
+    ["the API", { via: "api" as const }],
+    ["an automation", { automated: true }],
+  ])("still waits after a line %s wrote", (_name, fields) => {
+    expect(restingOnPerson([question, wrote(fields)])?.messageId).toBe("question");
+  });
+
+  it("in a room, waits until the person replies to the question itself", () => {
+    expect(restingOnPerson([question, wrote()], true)?.messageId).toBe("question");
+    expect(restingOnPerson([question, wrote({ replyToId: "question" })], true)).toBeUndefined();
+  });
+});

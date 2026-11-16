@@ -208,6 +208,15 @@ describe("how many MCP servers fit", () => {
     expect(config.add("one-more", own("bot-new"))).toEqual({ status: 400, error: "You can add at most 100 MCP servers in all." });
   });
 
+  it("an edit that gives a server to a bot counts it against that bot's limit, and other edits still save", () => {
+    const { cfg, config } = fixture();
+    fill(cfg, 20, () => own("bot-a"), "a");
+    fill(cfg, 1, () => own("bot-b"), "b");
+    expect(config.replace("b0", own("bot-a"))).toEqual({ status: 400, error: "A bot can use at most 20 MCP servers: the shared ones plus its own." });
+    expect(config.replace("a0", own("bot-b"))).toMatchObject({ status: 200 });
+    expect(config.replace("a1", { ...own("bot-a"), args: ["--readonly"] } as StoredMcpServer)).toMatchObject({ status: 200 });
+  });
+
   it("an import counts each pasted server against the same limits", async () => {
     const { cfg, config } = fixture();
     fill(cfg, 15, () => own("bot-a"), "a");

@@ -22,6 +22,10 @@ const DB_FILE = () => join(DATA_DIR, "messages.db");
 const WORK_KINDS = "kind IN ('activity', 'digest', 'options')";
 const CARD_KINDS = "kind IN ('secret', 'signin', 'connector')";
 const FAILED_CALL = "kind = 'activity' AND instr(json, '\"ok\":false') > 0";
+/** The rows that order the thread list and the time each one counts at. SQLite uses messages_thread_order only for a
+ * statement whose WHERE and MAX repeat these texts exactly. */
+const ORDERING_ROW = "((role = 'user' AND json_extract(json, '$.peerAsk') IS NULL) OR (role = 'bot' AND kind = 'text' AND (json_extract(json, '$.turnTerminal') = 1 OR json_extract(json, '$.turnId') IS NULL)))";
+const ORDERING_AT = "COALESCE(json_extract(json, '$.turnCompletedAt'), at)";
 
 let handle: DatabaseSync | null = null;
 let handlePath: string | null = null;
@@ -60,6 +64,7 @@ function open(): DatabaseSync {
     -- open, including a database that already has messages.
     CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
     -- Partial, so no other query's plan can move onto them: only a statement that repeats the WHERE may use one.
+    CREATE INDEX IF NOT EXISTS messages_thread_order ON messages(thread_id, ${ORDERING_AT}) WHERE ${ORDERING_ROW};
     CREATE INDEX IF NOT EXISTS messages_work_at ON messages(kind, at) WHERE ${WORK_KINDS};
     CREATE INDEX IF NOT EXISTS messages_cards_at ON messages(kind, at) WHERE ${CARD_KINDS};
     CREATE INDEX IF NOT EXISTS messages_failed_at ON messages(at) WHERE ${FAILED_CALL};
@@ -616,7 +621,7 @@ export function lastRowAt(threadId: string): number | undefined {
 
 export function latestMessageAts(threadIds: readonly string[], forOrdering = false): Map<string, number> {
   return forOrdering
-    ? newestAts(threadIds, "AND ((role = 'user' AND json_extract(json, '$.peerAsk') IS NULL) OR (role = 'bot' AND kind = 'text' AND (json_extract(json, '$.turnTerminal') = 1 OR json_extract(json, '$.turnId') IS NULL)))", "COALESCE(json_extract(json, '$.turnCompletedAt'), at)")
+    ? newestAts(threadIds, `AND ${ORDERING_ROW}`, ORDERING_AT, "INDEXED BY messages_thread_order")
     : newestAts(threadIds, "");
 }
 
@@ -625,19 +630,15 @@ export function latestPersonLineAts(threadIds: readonly string[]): Map<string, n
     "AND json_extract(json, '$.peerAsk') IS NULL AND json_extract(json, '$.relayed') IS NULL");
 }
 
-function newestAts(threadIds: readonly string[], where: string, at = "at"): Map<string, number> {
+/** One MAX per thread, so SQLite reads the newest entry of an index on (thread_id, value) instead of every row. */
+function newestAts(threadIds: readonly string[], where: string, at = "at", index = ""): Map<string, number> {
   const ids = [...new Set(threadIds.filter((id) => id.length > 0))];
   const out = new Map<string, number>();
-  const chunk = 400;
-  for (let i = 0; i < ids.length; i += chunk) {
-    const slice = ids.slice(i, i + chunk);
-    const placeholders = slice.map(() => "?").join(", ");
-    const rows = db()
-      .prepare(`SELECT thread_id, MAX(${at}) AS at FROM messages WHERE thread_id IN (${placeholders}) ${where} GROUP BY thread_id`)
-      .all(...slice) as Array<{ thread_id: string; at: number }>;
-    for (const row of rows) {
-      if (typeof row.at === "number" && Number.isFinite(row.at)) out.set(row.thread_id, row.at);
-    }
+  if (ids.length === 0) return out;
+  const rows = prepared(`SELECT value AS thread_id, (SELECT MAX(${at}) FROM messages ${index} WHERE thread_id = value ${where}) AS at FROM json_each(?)`)
+    .all(JSON.stringify(ids)) as Array<{ thread_id: string; at: number | null }>;
+  for (const row of rows) {
+    if (typeof row.at === "number" && Number.isFinite(row.at)) out.set(row.thread_id, row.at);
   }
   return out;
 }
@@ -665,7 +666,7 @@ export function deleteThreads(threadIds: readonly string[], beforeCommit?: () =>
 export function optionCardsForTools(tools: readonly string[]): Array<{ threadId: string; messageId: string }> {
   if (tools.length === 0) return [];
   const rows = db()
-    .prepare(`SELECT thread_id, id FROM messages WHERE kind = 'options' AND json_extract(json, '$.card.tool') IN (${tools.map(() => "?").join(", ")}) ORDER BY rowid`)
+    .prepare(`SELECT thread_id, id FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' AND json_extract(json, '$.card.tool') IN (${tools.map(() => "?").join(", ")}) ORDER BY rowid`)
     .all(...tools) as Array<{ thread_id: string; id: string }>;
   return rows.map((row) => ({ threadId: row.thread_id, messageId: row.id }));
 }

@@ -4,6 +4,7 @@ import {
   addDisabledMcpServer,
   listMcpServers,
   MAX_MCP_SERVERS,
+  mcpServerLimitError,
   mcpSharedServerRoom,
   mcpServerNameError,
   parseMcpServerMutation,
@@ -397,5 +398,46 @@ describe("mcpSharedServerRoom", () => {
     const full: Record<string, unknown> = {};
     for (let i = 0; i < 100; i++) full[`b${i}`] = own(`bot${i}`);
     expect(mcpSharedServerRoom(full)).toBe(0);
+  });
+});
+
+describe("a web connection that is one bot's own", () => {
+  const BOT = "8c7d0a1e-1111-4222-8333-444455556666";
+  const linear = { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer k" }, bot: BOT };
+
+  it("keeps the bot it is for, lists it, and keeps it through an edit that does not mention it", () => {
+    const stored = parseStoredMcpServer("linear_ada", linear);
+    expect(stored).toEqual({ ok: true, server: { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer k" }, enabled: true, bot: BOT } });
+    if (!stored.ok) throw new Error("unreachable");
+    expect(listMcpServers({ linear_ada: linear })).toEqual([expect.objectContaining({ name: "linear_ada", bot: BOT })]);
+    expect(parseMcpServerMutation("linear_ada", { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: true } }, stored.server))
+      .toMatchObject({ ok: true, server: { bot: BOT } });
+    expect(parseStoredMcpServer("linear_ada", { ...linear, bot: "../x" }).ok).toBe(false);
+  });
+
+  it("starts only for that bot", async () => {
+    const { customMcpServers } = await import("./config.ts");
+    const cfg = { mcpServers: { linear_ada: linear, shared: { type: "http", url: "https://b.example/mcp" } } } as never;
+    expect(Object.keys(customMcpServers(cfg, undefined, BOT))).toEqual(["linear_ada", "shared"]);
+    expect(Object.keys(customMcpServers(cfg, undefined, "someone-else"))).toEqual(["shared"]);
+  });
+
+  it("counts as that bot's own, not against every bot's 20", () => {
+    const own = (i: number) => ({ type: "http", url: `https://mcp.linear.app/mcp?${i}`, headers: {}, enabled: true, bot: `bot${i}` });
+    const servers: Record<string, unknown> = {};
+    for (let i = 0; i < 30; i++) servers[`l${i}`] = own(i);
+    expect(mcpSharedServerRoom(servers)).toBe(MAX_MCP_SERVERS - 1);
+  });
+
+  it("lets one bot reach 20 with its own web connections, refuses a 21st, and leaves other bots' own out of its count", () => {
+    const mine = (i: number) => ({ type: "http", url: `https://m.example/${i}`, headers: {}, enabled: true, bot: BOT });
+    const servers: Record<string, unknown> = { theirs: { ...mine(99), bot: "other-bot" } };
+    for (let i = 0; i < 19; i++) servers[`m${i}`] = mine(i);
+    expect(mcpServerLimitError(servers, [mine(19)])).toBeNull();
+    expect(mcpServerLimitError(servers, [mine(19), mine(20)])).toBe(`A bot can use at most ${MAX_MCP_SERVERS} MCP servers: the shared ones plus its own.`);
+  });
+
+  it("an sse connection can be one bot's own too", () => {
+    expect(parseStoredMcpServer("s", { type: "sse", url: "https://s.example/sse", bot: BOT })).toMatchObject({ ok: true, server: { type: "sse", bot: BOT } });
   });
 });

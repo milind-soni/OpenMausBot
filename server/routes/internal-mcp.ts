@@ -176,11 +176,9 @@ async function act(deps: Ctx, body: unknown, signal: AbortSignal): Promise<Outco
   const server = parsed.server;
   const owner = mcpOwner(name, server, deps.sender.id, deps.personal());
   const may = botMayChange(owner, server);
+  if (owner === "theirs" && !may.ok) return { status: 403, error: may.error };
   if (action === "sign_in") return signIn(deps, name, server, owner);
-  if (action === "test") {
-    if (owner === "theirs" && !may.ok) return { status: 403, error: may.error };
-    return test(deps, name, server, signal);
-  }
+  if (action === "test") return test(deps, name, server, signal);
 
   // The person's own answer to the card for a server this bot added turns it on, wherever it runs.
   const theirAnswer = deps.approved === true && action === "enable" && owner === "elsewhere";
