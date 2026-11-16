@@ -24,7 +24,7 @@ const STATE: Record<GrokHandoff["state"], LocaleKey> = {
 };
 
 /** The link to paste into Grok Bot, its Copy button and where it goes: the same in the move and in Settings. */
-export function GrokLink({ url }: { url: string }) {
+export function GrokLink({ url, where = "grokMove.connect.where" }: { url: string; where?: LocaleKey }) {
   const { state: copied, copy } = useCopyFeedback(url);
   return (
     <>
@@ -36,7 +36,7 @@ export function GrokLink({ url }: { url: string }) {
           {copied === "copied" ? t("grokMove.copied") : copied === "failed" ? t("grokMove.copyFailed") : t("grokMove.connect.copy")}
         </button>
       </div>
-      <p className={LINE}>{t("grokMove.connect.where")}</p>
+      <p className={LINE}>{t(where)}</p>
     </>
   );
 }
@@ -82,7 +82,7 @@ export function GrokConnectorPart() {
           </button>
         )}
       </SettingRow>
-      {url && <div className="flex flex-col items-start gap-1.5 px-4 pb-3"><GrokLink url={url} /></div>}
+      {url && <div className="flex flex-col items-start gap-1.5 px-4 pb-3"><GrokLink url={url} where="grokMove.connector.where" /></div>}
       {connector.handoffs.length > 0 && (
         <section data-grok-handoffs className="flex flex-col px-2 pb-3">
           <h4 className="px-2 py-1 text-[12px] font-medium leading-4 text-ink-tertiary">{t("grokMove.connector.recent")}</h4>
