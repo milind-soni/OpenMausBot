@@ -1388,6 +1388,8 @@
   "chat.error.connectOwnAi": "Connect your own AI",
   "chat.error.switchModel": "Switch model",
   "chat.error.openSpending": "Open Spending",
+  "chat.error.askOwnerSpendLimit": "Ask the owner to raise the spend limit.",
+  "chat.error.raiseSpendLimitAdvanced": "Turn on Advanced mode at the bottom of Settings, then raise the spend limit in Settings → Spending.",
   "cloudPhone.action": "Use the Cloud on your phone",
   "cloudPhone.failed": "Could not open the Cloud.",
   "cloudSend.list.skillOne": "1 skill",

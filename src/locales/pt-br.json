@@ -1320,6 +1320,8 @@
   "chat.error.connectOwnAi": "Conectar sua própria IA",
   "chat.error.switchModel": "Trocar de modelo",
   "chat.error.openSpending": "Abrir Gastos",
+  "chat.error.askOwnerSpendLimit": "Peça ao proprietário para aumentar o limite de gastos.",
+  "chat.error.raiseSpendLimitAdvanced": "Ative o Modo avançado na parte de baixo das Configurações e depois aumente o limite de gastos em Configurações → Gastos.",
   "cloudPhone.action": "Usar o Cloud no celular",
   "cloudPhone.failed": "Não foi possível abrir o Cloud.",
   "files.title": "Arquivos",

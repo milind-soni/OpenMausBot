@@ -10,7 +10,7 @@ import type { SettingsCardId } from "../../shared/app-settings";
 import { SettingsLook } from "./SettingsPrimitives";
 
 const OtherComputersSetting = lazy(() => import("./TailnetComputers").then((module) => ({ default: module.OtherComputersSetting })));
-const AiSignIn = lazy(() => import("./EnginesSettings").then((module) => ({ default: () => <module.EnginesSettings simple /> })));
+const AiSignIn = lazy(() => import("./EnginesSettings").then((module) => ({ default: module.AiSignInSettings })));
 
 const CARDS: Record<SettingsCardId, { here: () => boolean; control: () => ReactNode }> = {
   "other-computers": { here: pageIsThisComputer, control: () => <OtherComputersSetting /> },
