@@ -829,7 +829,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               {working ? (
                 <SidebarWorkingStep bot={bot} last={last} />
               ) : (
-                <FadeLine>{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : botPreview(bot, visible, instances, advanced)}</FadeLine>
+                <FadeLine>{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued && !failed ? t("task.queued") : botPreview(bot, visible, instances, advanced)}</FadeLine>
               )}
             </span>
           )}

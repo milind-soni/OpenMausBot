@@ -381,6 +381,11 @@ describe("BotListItem", () => {
     expect(retrying).toContain('data-testid="working-dot"');
     expect(retrying).not.toContain('data-testid="failed-dot"');
     expect(renderRow(bot({ messages: [{ ...failedTurn[1]!, tool: { name: "Read", ok: true } }] }))).not.toContain('data-testid="failed-dot"');
+    // A message queued behind the failed turn leaves the preview on the failure, like the dot.
+    const queuedState = { ...initialState, pendingQueued: { "thread-atlas": [{ queueId: "q1", text: "try again" }] } };
+    const queuedBehind = renderToStaticMarkup(createElement(BotListItem, botRowProps(queuedState, vi.fn(), bot({ messages: failedTurn }), { density: "comfortable", query: "", onMenu: vi.fn() })));
+    expect(queuedBehind).toContain('data-testid="failed-dot"');
+    expect(queuedBehind).not.toContain(">Queued<");
   });
 
   it("keeps real sibling work visible while another thread waits for a teammate", () => {
