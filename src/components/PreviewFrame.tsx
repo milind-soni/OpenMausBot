@@ -62,6 +62,8 @@ export interface PreviewFrameProps {
   externalScrollRatioY?: number | null;
   frameTitle?: string;
   showDeviceBezel?: boolean;
+  /** Responsive size: the page fills the whole preview area with no device frame. */
+  fill?: boolean;
 }
 
 function dataUrlByteSize(dataUrl: string): number {
@@ -91,6 +93,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     externalScrollRatioY,
     frameTitle = "Preview",
     showDeviceBezel = true,
+    fill = false,
   },
   ref,
 ) {
@@ -534,18 +537,18 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     <div
       ref={viewerRef}
       data-preview-file-viewer={fileViewer || undefined}
-      style={fileViewer ? { width: "100%", height: "100%", flex: "1 1 auto", minHeight: 0 } : { width: `${scaledW}px`, height: `${scaledH}px` }}
+      style={fileViewer || fill ? { width: "100%", height: "100%", flex: "1 1 auto", minHeight: 0 } : { width: `${scaledW}px`, height: `${scaledH}px` }}
       className="relative shrink-0 select-none"
     >
       <div
         style={{
-          width: fileViewer ? "100%" : `${width}px`,
-          height: fileViewer ? "100%" : `${height}px`,
-          transform: !fileViewer && scale !== 1 ? `scale(${scale})` : undefined,
+          width: fileViewer || fill ? "100%" : `${width}px`,
+          height: fileViewer || fill ? "100%" : `${height}px`,
+          transform: !fileViewer && !fill && scale !== 1 ? `scale(${scale})` : undefined,
           transformOrigin: "top left",
         }}
         className={
-          fileViewer ? "relative h-full w-full overflow-hidden bg-panel" : showDeviceBezel
+          fileViewer || fill ? "relative h-full w-full overflow-hidden bg-panel" : showDeviceBezel
             ? "relative overflow-hidden rounded-[22px] border-[3px] border-hairline bg-panel shadow-xl"
             : "relative overflow-hidden rounded-xl border border-hairline bg-panel shadow-lg"
         }

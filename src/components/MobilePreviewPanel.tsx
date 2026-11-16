@@ -14,6 +14,7 @@ import {
   Laptop,
   Maximize2,
   Monitor,
+  MonitorSmartphone,
   RotateCw,
   SlidersHorizontal,
   Smartphone,
@@ -26,6 +27,7 @@ import {
   clampCustomDimension,
   computeFrameScale,
   PREVIEW_SIZE_GROUPS,
+  RESPONSIVE_PREVIEW_SIZE_ID,
   resolvePreviewSize,
   type PreviewSizeGroup,
   type PreviewSizePreset,
@@ -70,6 +72,8 @@ function getDeviceGroupIcon(group: PreviewSizeGroup) {
       return Monitor;
     case "custom":
       return SlidersHorizontal;
+    case "responsive":
+      return MonitorSmartphone;
     case "phone":
     default:
       return Smartphone;
@@ -78,6 +82,7 @@ function getDeviceGroupIcon(group: PreviewSizeGroup) {
 
 function shortDeviceLabel(preset: PreviewSizePreset): string {
   if (preset.id === "custom") return "Custom";
+  if (preset.id === RESPONSIVE_PREVIEW_SIZE_ID) return "Responsive";
   switch (preset.group) {
     case "tablet":
       return "Tablet";
@@ -232,14 +237,18 @@ export function MobilePreviewPanel({
     }
   }, [preset.rotatable, rotated]);
 
+  const responsive = preset.id === RESPONSIVE_PREVIEW_SIZE_ID;
   const effectiveDims = useMemo(
-    () => applyRotation(preset, preset.rotatable ? rotated : false),
-    [preset, rotated],
+    () =>
+      responsive
+        ? { width: Math.max(1, Math.floor(stageBounds.width)), height: Math.max(1, Math.floor(stageBounds.height)) }
+        : applyRotation(preset, preset.rotatable ? rotated : false),
+    [preset, responsive, rotated, stageBounds],
   );
 
   const scale = useMemo(
-    () => computeFrameScale(effectiveDims, stageBounds, zoom, 16),
-    [effectiveDims, stageBounds, zoom],
+    () => (responsive ? 1 : computeFrameScale(effectiveDims, stageBounds, zoom, 16)),
+    [effectiveDims, responsive, stageBounds, zoom],
   );
 
   // Measure viewport stage for Fit zoom
@@ -670,6 +679,7 @@ export function MobilePreviewPanel({
                 rotated={rotated}
                 setRotated={setRotated}
                 isRotatable={Boolean(preset.rotatable)}
+                zoomable={!responsive}
                 onOpenInPreviewPage={handleOpenInPreviewPage}
                 onCaptureScreenshot={handleCaptureScreenshot}
                 historyNav={historyNav}
@@ -815,7 +825,7 @@ export function MobilePreviewPanel({
       <DocumentChromeContext.Provider value={documentChrome}>
       <div
         ref={stageRef}
-        className={cn("relative flex flex-1 items-start justify-center overflow-auto", isDeviceSource ? "bg-inset/50 p-4" : "bg-panel p-0")}
+        className={cn("relative flex flex-1 items-start justify-center overflow-auto", isDeviceSource && !responsive ? "bg-inset/50 p-4" : "bg-panel p-0")}
       >
         {(sizeMenuOpen || moreMenuOpen || historyOpen || screenshotMenuOpen) && (
           <div
@@ -849,6 +859,7 @@ export function MobilePreviewPanel({
           onHistoryStateChange={setHistoryNav}
           frameTitle={preset.label}
           showDeviceBezel={preset.group === "phone" || preset.group === "tablet"}
+          fill={responsive}
         />
       </div>
       </DocumentChromeContext.Provider>
@@ -928,6 +939,26 @@ export function MobilePreviewPanel({
             className="w-64 max-h-[min(360px,calc(100vh-80px))] overflow-y-auto rounded-xl border border-hairline/60 bg-panel p-1.5 shadow-2xl animate-in fade-in zoom-in-95 duration-100"
           >
             <div className="max-h-72 overflow-y-auto">
+              <button
+                type="button"
+                role="menuitem"
+                aria-selected={responsive}
+                tabIndex={responsive ? 0 : -1}
+                onClick={() => {
+                  setPresetId(RESPONSIVE_PREVIEW_SIZE_ID);
+                  setSizeMenuOpen(false);
+                  sizeButtonRef.current?.focus();
+                }}
+                className={`mb-1.5 flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] transition-colors ${
+                  responsive ? "bg-accent/15 font-medium text-ink" : "text-ink-secondary hover:bg-raised-hover hover:text-ink"
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <MonitorSmartphone className="h-3.5 w-3.5" />
+                  Responsive
+                </span>
+                <span className="text-[10.5px] text-ink-secondary">Fills panel</span>
+              </button>
               {PREVIEW_SIZE_GROUPS.map((group) => (
                 <div key={group.group} className="mb-1.5 last:mb-0">
                   <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary">

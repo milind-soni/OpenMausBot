@@ -1,4 +1,7 @@
-export type PreviewSizeGroup = "phone" | "tablet" | "laptop" | "desktop" | "custom";
+export type PreviewSizeGroup = "phone" | "tablet" | "laptop" | "desktop" | "custom" | "responsive";
+
+/** Fills the whole preview area at 100% and follows its size as the panel is resized. */
+export const RESPONSIVE_PREVIEW_SIZE_ID = "responsive";
 
 export type PreviewZoomMode = "fit" | "50" | "75" | "100";
 
@@ -114,7 +117,7 @@ export const PREVIEW_SIZE_PRESETS: PreviewSizePreset[] = [
 ];
 
 export const PREVIEW_SIZE_GROUPS: Array<{
-  group: Exclude<PreviewSizeGroup, "custom">;
+  group: Exclude<PreviewSizeGroup, "custom" | "responsive">;
   label: string;
   presets: PreviewSizePreset[];
 }> = [
@@ -158,6 +161,10 @@ export function resolvePreviewSize(
   id: string,
   customSize?: { width?: number; height?: number } | null,
 ): PreviewSizePreset {
+  if (id === RESPONSIVE_PREVIEW_SIZE_ID) {
+    // Real dimensions come from the preview area (see MobilePreviewPanel); these are placeholders.
+    return { id, label: "Responsive", group: "responsive", width: 1024, height: 768, dpr: 1, rotatable: false, defaultInCanvas: false };
+  }
   if (id === "custom") {
     const clamped = clampCustomSize(customSize);
     return {

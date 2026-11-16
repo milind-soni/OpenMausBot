@@ -23,6 +23,8 @@ export interface PreviewMoreMenuProps {
   rotated: boolean;
   setRotated: React.Dispatch<React.SetStateAction<boolean>>;
   isRotatable: boolean;
+  /** Responsive size always renders at 100%, so zoom doesn't apply. */
+  zoomable?: boolean;
   onOpenInPreviewPage: () => void;
   onCaptureScreenshot: (mode: "visible" | "full") => void;
   historyNav: { canGoBack: boolean; canGoForward: boolean };
@@ -41,6 +43,7 @@ export function PreviewMoreMenu({
   rotated,
   setRotated,
   isRotatable,
+  zoomable = true,
   onOpenInPreviewPage,
   onCaptureScreenshot,
   historyNav,
@@ -299,7 +302,7 @@ export function PreviewMoreMenu({
             )}
 
             {/* Zoom options */}
-            <div className="mt-1 border-t border-hairline/40 pt-1">
+            {zoomable && <div className="mt-1 border-t border-hairline/40 pt-1">
               <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-ink-secondary">
                 Zoom
               </div>
@@ -325,7 +328,7 @@ export function PreviewMoreMenu({
                   {zoom === opt.value && <Check className="h-3 w-3 text-accent shrink-0" />}
                 </button>
               ))}
-            </div>
+            </div>}
 
             {/* History navigation */}
             {hasGbs && (
