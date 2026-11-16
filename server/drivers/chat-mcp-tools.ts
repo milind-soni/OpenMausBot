@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstat, mkdir, readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ValidateFunction } from "ajv";
-import { DATA_DIR, stripControlPlaneEnv } from "../config.ts";
+import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
 import { cloudRole } from "../bot-box/detect.ts";
 import { redactSecretsInText } from "../redact.ts";
@@ -872,7 +872,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   };
 }
 
-/** A chat runtime has no file tools of its own, so on this desktop's own computer its bridge answers them (host-files.ts). */
+/** A chat runtime has no file tools of its own, so on this desktop's own computer its bridge answers them (host-file-tools.ts). */
 export function withHostFileTools(integrations: SendTurnInput["integrations"]): SendTurnInput["integrations"] {
-  return integrations?.localComputer ? { ...integrations, localComputer: withHostFiles(integrations.localComputer, [DATA_DIR]) } : integrations;
+  return integrations?.localComputer ? { ...integrations, localComputer: withHostFiles(integrations.localComputer) } : integrations;
 }
