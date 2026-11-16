@@ -122,6 +122,25 @@ describe("a browser over the limit", () => {
     value.left("viewed");
     expect(await value.enter("b", Date.now() + 1_000)).toBeNull();
   });
+
+  it("asks the server's room for its processes once the count allows, and closes a spare browser before refusing", async () => {
+    let free = 0;
+    const admit = vi.fn(async () => (free > 0 ? (free--, null) : "No room for another browser."));
+    const close = vi.fn(async () => { free++; return true; });
+    const value = new BrowserRoom({ max: () => 3, spare: (session) => (session === "a" ? 1_000 : null), close, admit, waitMs: 300, pollMs: 20 });
+    value.entered("a");
+    value.entered("b");
+    // the count allows a third, the server's room does not: a spare browser closed for it lets the new one in
+    expect(await value.enter("c", Date.now() + 1_000)).toBeNull();
+    expect(close.mock.calls).toEqual([["a"]]);
+    expect(admit.mock.calls).toEqual([["c"], ["c"]]);
+    expect(value.open).toBe(2);
+    // an open browser is never asked about again, and with no spare browser left the refusal is the server's
+    expect(await value.enter("c", Date.now() + 1_000)).toBeNull();
+    expect(await value.enter("d", Date.now() + 1_000)).toBe("No room for another browser.");
+    expect(admit).toHaveBeenCalledTimes(3);
+    expect(value.open).toBe(2);
+  });
 });
 
 describe("which browser a bot waiting for a slot may close", () => {
