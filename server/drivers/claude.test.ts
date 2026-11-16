@@ -41,6 +41,7 @@ import { registerPathDir, resetPathCacheForTests } from "../env-path.ts";
 import * as procs from "../procs.ts";
 import * as localInject from "./local-inject.ts";
 import { DEFER_TOOLS_ENV } from "./agents-claude-defer.ts";
+import { OWN_MCP_HTTP_ENV } from "./own-mcp-http.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
 const dumpedPid = (dump: string): number => JSON.parse(readFileSync(dump, "utf8")).pid;
@@ -542,6 +543,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.FAKE_CLAUDE_TEXT_HANG;
     delete process.env.FAKE_CLAUDE_STEER_GRACE_SCALE;
     delete process.env.FAKE_CLAUDE_STEER_SILENCE_SCALE;
+    vi.unstubAllEnvs();
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.XAI_API_KEY;
     delete process.env.COMPOSIO_API_KEY;
@@ -1328,7 +1330,8 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }
   });
 
-  it.each(["ask", "auto"] as const)("pre-allows the agents comms proxy while retaining native %s approval", async (approvalMode) => {
+  it.each([["ask", "0"], ["auto", "0"], ["ask", "1"], ["auto", "1"]] as const)("pre-allows the agents comms proxy while retaining native %s approval (OMB_OWN_MCP_HTTP=%s)", async (approvalMode, http) => {
+    vi.stubEnv(OWN_MCP_HTTP_ENV, http);
     await create();
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
@@ -1348,11 +1351,19 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.mcpConfig.mcpServers.agents).toMatchObject({
-      alwaysLoad: true,
-      args: ["/fake/agents-proxy.js"],
-      env: { OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok", [DEFER_TOOLS_ENV]: "1" },
-    });
+    if (http === "1") {
+      // By URL: the same capability and settings as headers, and the loopback past any proxy the engine was given.
+      const agents = seen.mcpConfig.mcpServers.agents;
+      expect(agents).toMatchObject({ type: "http", alwaysLoad: true, url: "http://127.0.0.1:1/api/internal/mcp-http/agents", headers: { authorization: "Bearer tok" } });
+      expect(JSON.parse(Buffer.from(agents.headers["x-omb-agents-env"], "base64url").toString("utf8"))).toMatchObject({ OMB_BOT_ID: "b1", [DEFER_TOOLS_ENV]: "1" });
+      for (const name of ["NO_PROXY", "no_proxy"]) expect(seen.env[name].split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
+    } else {
+      expect(seen.mcpConfig.mcpServers.agents).toMatchObject({
+        alwaysLoad: true,
+        args: ["/fake/agents-proxy.js"],
+        env: { OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok", [DEFER_TOOLS_ENV]: "1" },
+      });
+    }
     expect(seen.env.CLAUDE_CODE_DISABLE_CRON, "a deferred trigger must not lose to CronCreate").toBe("1");
     expect(JSON.stringify(seen.argv)).not.toContain("tok");
     const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
