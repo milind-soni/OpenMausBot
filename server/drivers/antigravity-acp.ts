@@ -10,7 +10,9 @@
 //   - apps/server/src/provider/antigravityCallback.ts (the redirect's
 //     validation and delivery);
 //   - apps/server/src/provider/acp/AntigravityAcpSupport.ts:55-79, 108-121
-//     (the session setup for releases that write a workflow skill file).
+//     (the session setup for releases that write a workflow skill file);
+//   - apps/server/src/provider/acp/AntigravityAcpSupport.ts:89-90, 123-129
+//     at b732621b51 (the client name by runtime version).
 // The temp folder stays one per instance, the redirect can go through a relay into a boxed runtime, and startup waits
 // while a Windows unpack is still growing.
 import { execFile } from "node:child_process";
@@ -324,6 +326,7 @@ export class AntigravityAcpClient {
   private stopping?: Promise<boolean>;
   private readonly onAuthorizationUrl?: (url: string) => void;
   private readonly tempDirectory?: string;
+  private readonly runtimeVersion: string | null;
   /** On Windows a running executable pins its file and directory: do not rename or delete before this settles. */
   readonly exited: Promise<void>;
 
@@ -336,6 +339,7 @@ export class AntigravityAcpClient {
   ) {
     this.onAuthorizationUrl = onAuthorizationUrl;
     this.tempDirectory = profile.tempDirectory;
+    this.runtimeVersion = runtime.version;
     this.child = spawnCli(
       runtime.executablePath,
       process.platform === "linux" ? ["--uid="] : [],
@@ -493,7 +497,7 @@ export class AntigravityAcpClient {
     };
     const initialized = await this.request("initialize", {
       protocolVersion: 1,
-      clientInfo: { name: "openmausbot", version: "0.0.0" },
+      clientInfo: antigravityClientInfo(this.runtimeVersion),
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
     }, Math.min(windowMs, Math.max(0, deadline - Date.now())), expired);
     this.initializationComplete = true;
@@ -698,6 +702,19 @@ export async function probeAntigravityModels(input: {
   } finally {
     client.close();
   }
+}
+
+/** Whether runtimes that offer some models only to editors they know are told an editor's name. */
+export const ANTIGRAVITY_EDITOR_CLIENT_NAME = true;
+// `agy acp` 1.5.1 offers every model to every ACP client; older runtimes allowlist editors.
+const OPEN_MODEL_ACCESS_RELEASE = [1, 5, 1] as const;
+
+/** The `clientInfo` a runtime of `version` is started with. Before 1.5.1, and for a version that is not known, a runtime
+ * offers its non-Gemini models only to clients on its allowlist, so it is given a name from that list. */
+export function antigravityClientInfo(version: string | null | undefined, editorName = ANTIGRAVITY_EDITOR_CLIENT_NAME): { name: string; version: string } {
+  const match = /^(\d+)\.(\d+)\.(\d+)/u.exec(version?.trim() ?? "");
+  const open = match !== null && OPEN_MODEL_ACCESS_RELEASE.reduce((difference, part, index) => difference || Number(match[index + 1]) - part, 0) >= 0;
+  return open || !editorName ? { name: "openmausbot", version: "0.0.0" } : { name: "zed", version: "0.0.0" };
 }
 
 const runtimeVersion = (value: unknown) => typeof value === "string" ? value.replace(/^agy_acp_server_/u, "").trim() : "";

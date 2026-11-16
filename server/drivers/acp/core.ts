@@ -1168,7 +1168,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   "initialize",
                   {
                     protocolVersion: 1,
-                    clientInfo: { name: "openmausbot", version: "0.0.0" },
+                    clientInfo: support.clientInfo?.(instanceId) ?? { name: "openmausbot", version: "0.0.0" },
                     clientCapabilities: {
                       fs: {
                         readTextFile: support.clientFileSystem === true,

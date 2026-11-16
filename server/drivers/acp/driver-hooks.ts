@@ -18,6 +18,8 @@ export interface AcpDriverHooks {
   processStarted?(child: ChildProcess, instanceId: string): void;
   /** Extra session/new, session/load and session/resume parameters, from the agent's initialize answer. */
   sessionSetupParams?(initializeResult: unknown): Record<string, unknown>;
+  /** The `clientInfo` of initialize, for an agent that reads it; the app's own name when unset or undefined. */
+  clientInfo?(instanceId: string): { name: string; version: string } | undefined;
   /** Called before each session/prompt. The check it returns gets that prompt's result and names the failure the agent
    * reported as an ordinary reply, which then fails the turn. Neither may throw. */
   promptOutcome?(instanceId: string, sessionId: string): Promise<(result: unknown) => Promise<Error | undefined>>;
