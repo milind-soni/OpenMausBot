@@ -10,7 +10,8 @@
 //   }
 //
 // Outside a room it also reports the person's text selection (mausbot/notifications/selection), so the host can
-// offer to cite it in the chat's composer.
+// offer to cite it in the chat's composer. Everywhere it reports whether the page, as rendered, opens with a heading
+// (mausbot/notifications/heading), so the host's card knows whether to put the page's title above it.
 //
 // A page pasted from an SDK build runs its own App beside this one: the helper's request ids are strings
 // ("mausbot:1"), never the SDK's numeric ones, and it answers no host request but teardown, so it never
@@ -32,6 +33,51 @@ export const APP_THEME_STYLE = [
 export const APP_SELECTION_METHOD = "mausbot/notifications/selection";
 /** One past the longest quote a chat citation holds, so the host can say a longer selection is too long. */
 export const APP_SELECTION_CHARS = 12_001;
+
+/** Whether the page opens with a heading of its own, as rendered: { heading }. Sent again when that changes; null
+ * once, from a page still drawing itself from a script, so the host waits for the answer instead of guessing. */
+export const APP_HEADING_METHOD = "mausbot/notifications/heading";
+/** A heading that starts lower than this is not what the page opens with (px). */
+const HEADING_TOP = 96;
+/** How long a page with nothing to read yet may still be drawing itself before it counts as having no heading. */
+const HEADING_WAIT_MS = 600;
+/** The same for a jsx page, whose libraries come over the network before it draws anything. */
+const HEADING_DRAWING_MS = 8_000;
+
+/** `(window, document) => true | false | null`: whether the first text the page shows sits in a heading near its top;
+ * null while it shows no text at all. Text counts when no ancestor is `display: none` or `hidden`, it is not
+ * `visibility: hidden`, and, where there is a layout to ask, its element is more than a pixel in size. */
+export const APP_OPENS_WITH_HEADING_SOURCE = `function (window, document) {
+  var body = document.body;
+  if (!body) return null;
+  var skipped = { SCRIPT: 1, STYLE: 1, TEMPLATE: 1, NOSCRIPT: 1, TITLE: 1 };
+  var laidOut = document.documentElement.getBoundingClientRect().width > 0;
+  var budget = 2000;
+  var first = function (element) {
+    if (skipped[element.tagName] || element.hasAttribute("hidden")) return null;
+    var style = window.getComputedStyle(element);
+    if (style.display === "none") return null;
+    var shown = style.visibility !== "hidden" && style.visibility !== "collapse";
+    for (var child = element.firstChild; child; child = child.nextSibling) {
+      if ((budget -= 1) < 0) return null;
+      if (child.nodeType === 3) {
+        if (!shown || !/\\S/.test(child.nodeValue || "")) continue;
+        if (!laidOut) return element;
+        var box = element.getBoundingClientRect();
+        if (box.width > 1 && box.height > 1) return element;
+      } else if (child.nodeType === 1) {
+        var found = first(child);
+        if (found) return found;
+      }
+    }
+    return null;
+  };
+  var holder = first(body);
+  if (!holder) return null;
+  var heading = holder.closest("h1, h2, h3, [role=heading]");
+  if (!heading) return false;
+  return !laidOut || heading.getBoundingClientRect().top + (window.scrollY || 0) <= ${HEADING_TOP};
+}`;
 
 /** Plain ES2017 with no imports: it runs as written in every browser engine the apps ship in. */
 const helperSource = (room: boolean) => `(function () {
@@ -156,6 +202,39 @@ const helperSource = (room: boolean) => `(function () {
     window.addEventListener("load", report);
     report();
   };
+  // Whether the page opens with a heading, looked at again whenever the page changes: a page that draws itself from a
+  // script has nothing to read at first, so "no text yet" waits a moment before it counts as "no heading".
+  var opensWithHeading = ${APP_OPENS_WITH_HEADING_SOURCE};
+  var watchHeading = function () {
+    var last;
+    var queued = false;
+    var waiting = null;
+    var later = typeof requestAnimationFrame === "function" ? requestAnimationFrame : function (fn) { return setTimeout(fn, 16); };
+    var send = function (heading) {
+      if (waiting !== null) { clearTimeout(waiting); waiting = null; }
+      if (heading !== last) { last = heading; notify("${APP_HEADING_METHOD}", { heading: heading }); }
+    };
+    var look = function () {
+      if (queued || document.readyState !== "complete") return;
+      queued = true;
+      later(function () {
+        queued = false;
+        var found = opensWithHeading(window, document);
+        if (found !== null || last !== undefined) return send(found === true);
+        if (waiting !== null) return;
+        var mount = document.getElementById("mausbot-root");
+        var drawing = Boolean(mount) && !mount.firstChild;
+        if (drawing) notify("${APP_HEADING_METHOD}", { heading: null });
+        waiting = setTimeout(function () { waiting = null; send(false); }, drawing ? ${HEADING_DRAWING_MS} : ${HEADING_WAIT_MS});
+      });
+    };
+    if (typeof MutationObserver === "function") {
+      new MutationObserver(look).observe(root, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["class", "style", "hidden"] });
+    }
+    window.addEventListener("load", look);
+    window.addEventListener("resize", look);
+    look();
+  };
   // What the person selects, and where it ends, so the host can offer to cite it as chat does. Not in a room.
   var watchSelection = function () {
     if (room || typeof document.getSelection !== "function") return;
@@ -188,6 +267,8 @@ const helperSource = (room: boolean) => `(function () {
   }).then(function (result) {
     apply(result && result.hostContext);
     notify("ui/notifications/initialized");
+    // Before the size, so the host hears both in one go and lays the card out once.
+    watchHeading();
     watchSize();
     watchSelection();
   });

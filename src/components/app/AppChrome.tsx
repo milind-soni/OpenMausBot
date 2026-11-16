@@ -6,6 +6,7 @@ import { openExternalLink } from "@/lib/app-links";
 import type { AppDoneState, AppNetwork } from "../../../shared/app";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_QUIET_BUTTON } from "../AskCard";
 
+const PAGE_ICON = "flex shrink-0 text-ink-secondary";
 export const APP_SURFACE = "w-full overflow-hidden rounded-2xl bg-composer ring-1 ring-composer-ring";
 const ICON_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/[0.07] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
@@ -82,7 +83,7 @@ export function PageCardFooter({ title, detail, updated, infoId, infoOpen, onInf
 }) {
   return (
     <div data-page-footer className="flex min-h-18 items-center gap-3 border-t border-ink/[0.08] px-5 py-4">
-      <span data-page-icon className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-inset text-ink-secondary">
+      <span data-page-icon className={PAGE_ICON}>
         <AppWindow aria-hidden="true" size={16} />
       </span>
       <div className="min-w-0 flex-1">

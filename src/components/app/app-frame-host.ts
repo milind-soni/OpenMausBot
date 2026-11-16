@@ -1,6 +1,6 @@
 import type { AppDocument } from "../../../shared/app";
 import { APP_FRAME_LIMITS, createAppBridge, type AppBridgeAdapter, type AppHostContext } from "../../../shared/app-frame/bridge";
-import { APP_SELECTION_CHARS, APP_SELECTION_METHOD } from "../../../shared/app-frame/helper";
+import { APP_HEADING_METHOD, APP_SELECTION_CHARS, APP_SELECTION_METHOD } from "../../../shared/app-frame/helper";
 
 /** Exactly these two tokens: never allow-same-origin, allow-popups or allow-top-navigation, and no `allow`
  * attribute. */
@@ -110,6 +110,16 @@ export function readPageSelection(data: unknown): AppSelection | null | undefine
   return finite(left) && finite(bottom) ? { text, left, bottom } : undefined;
 }
 
+/** The page helper's word on whether the page opens with a heading, null while it is still drawing itself; undefined
+ * for any other message. */
+export function readPageHeading(data: unknown): boolean | null | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const message = data as { jsonrpc?: unknown; method?: unknown; id?: unknown; params?: { heading?: unknown } };
+  if (message.jsonrpc !== "2.0" || message.method !== APP_HEADING_METHOD || message.id !== undefined) return undefined;
+  const heading = message.params?.heading;
+  return typeof heading === "boolean" || heading === null ? heading : undefined;
+}
+
 export interface AppFrameHostOptions {
   container: HTMLElement;
   doc: AppDocument;
@@ -123,6 +133,8 @@ export interface AppFrameHostOptions {
   fill?: boolean;
   /** Text the person selected in a page that may message (never a room's), or null once it is gone: to cite it. */
   onSelection?(selection: AppSelection | null): void;
+  /** Whether the page, as rendered, opens with a heading of its own; again whenever that changes. Null: still drawing. */
+  onHeading?(heading: boolean | null): void;
 }
 
 export interface AppFrameHost {
@@ -202,6 +214,11 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
     },
   });
   const onMessage = (event: MessageEvent) => {
+    const heading = event.source === iframe.contentWindow ? readPageHeading(event.data) : undefined;
+    if (heading !== undefined) {
+      if (!leaving) options.onHeading?.(heading);
+      return;
+    }
     const selection = event.source === iframe.contentWindow ? readPageSelection(event.data) : undefined;
     if (selection === undefined) return bridge.handleMessage({ source: event.source, data: event.data });
     // Only to cite in the person's own chat: never in a room, and only what they selected themselves.

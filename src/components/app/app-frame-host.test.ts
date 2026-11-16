@@ -176,6 +176,25 @@ describe("text the person selects in a page", () => {
   });
 });
 
+describe("a page's word on whether it opens with a heading", () => {
+  const HEADING = "mausbot/notifications/heading";
+
+  it("is passed on each time the page says it, and only from the page's own window", () => {
+    const onHeading = vi.fn();
+    const host = mountAppFrame({ container, doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: adapter(), onHeading });
+    const send = (data: unknown, source: unknown = host.iframe.contentWindow) => window.dispatchEvent(new MessageEvent("message", { data, source: source as MessageEventSource }));
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: true } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: false } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: null } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: "yes" } });
+    send({ jsonrpc: "2.0", method: HEADING, params: {} });
+    send({ jsonrpc: "2.0", id: 4, method: HEADING, params: { heading: true } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: true } }, window);
+    expect(onHeading.mock.calls).toEqual([[true], [false], [null]]);
+    host.destroy();
+  });
+});
+
 describe("a row leaving the page", () => {
   type Movable = { moveBefore?: (node: Node, child: Node | null) => void };
   const proto = HTMLElement.prototype as unknown as Movable;

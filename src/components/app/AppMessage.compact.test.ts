@@ -36,11 +36,14 @@ const card = () => host.querySelector<HTMLElement>("[data-app=a1]")!;
 const opener = () => card().querySelector<HTMLButtonElement>("[data-page-open]")!;
 const press = (element: HTMLElement) => act(async () => { element.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 
-let html: string;
+/** happy-dom runs no script in the frame, so the page's word on its heading is played by a message from its window. */
+const pageSays = (heading: boolean | null) => act(async () => {
+  const view = card().querySelector("iframe")!.contentWindow;
+  window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", method: "mausbot/notifications/heading", params: { heading } }, source: view as MessageEventSource }));
+});
 
 beforeEach(() => {
-  html = "<p>page</p>";
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(botHtmlDocument({ messageId: "a1", rev: 0, html })),
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(botHtmlDocument({ messageId: "a1", rev: 0, html: "<p>page</p>" })),
     { status: 200, headers: { "content-type": "application/json" } })));
   vi.stubGlobal("IntersectionObserver", undefined);
   forgetAppRows();
@@ -84,24 +87,67 @@ describe("a bot's page as a compact card", () => {
     expect(card().className).not.toContain("max-w-[760px]");
   });
 
-  it("puts the title above a page that has no heading of its own", async () => {
+  it("keeps the preview covered, with no title, until the page has said whether it opens with a heading", async () => {
     await render(row(payload()));
+    const box = card().querySelector<HTMLElement>("[data-app-box]")!;
+    expect(box.querySelector("[data-page-settling]")).not.toBeNull();
+    expect(box.querySelector("[data-page-title]")).toBeNull();
+    expect(box.querySelector("[data-page-fade]")).toBeNull();
+    expect(box.querySelector("iframe")).not.toBeNull();
+  });
+
+  it("puts the title above a page that says it has no heading of its own", async () => {
+    await render(row(payload()));
+    await pageSays(false);
     const box = card().querySelector<HTMLElement>("[data-app-box]")!;
     expect(box.firstElementChild!.matches("[data-page-title]")).toBe(true);
     expect(box.firstElementChild!.textContent).toBe("Pricing");
     expect(box.querySelector("[data-page-title] ~ [data-app-frame-box]")).not.toBeNull();
+    expect(box.querySelector("[data-page-settling]")).toBeNull();
   });
 
-  it("leaves the top of the preview to a page that opens with its own heading", async () => {
-    html = "<h1>Pricing</h1><p>page</p>";
+  it("leaves the top of the preview to a page that says it opens with its own heading", async () => {
     await render(row(payload()));
+    await pageSays(true);
     expect(card().querySelector("[data-page-title]")).toBeNull();
+    expect(card().querySelector("[data-page-settling]")).toBeNull();
     expect(card().querySelector("[data-app-box]")!.firstElementChild!.matches("[data-app-frame-box]")).toBe(true);
     expect(card().querySelector("[data-page-footer]")!.textContent).toBe("PricingPage");
   });
 
+  it("follows the page when it changes what it opens with, and remembers the answer for the next time the card is drawn", async () => {
+    await render(row(payload()));
+    await pageSays(false);
+    await pageSays(true);
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+    act(() => root.unmount());
+    root = createRoot(host);
+    await render(row(payload()));
+    expect(card().querySelector("[data-page-settling]")).toBeNull();
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+  });
+
+  it("shows the preview with the title after a while when the page never says", async () => {
+    await render(row(payload()));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_600)); });
+    expect(card().querySelector("[data-page-settling]")).toBeNull();
+    expect(card().querySelector("[data-page-title]")!.textContent).toBe("Pricing");
+  });
+
+  it("keeps waiting for a page that says it is still drawing itself", async () => {
+    await render(row(payload()));
+    await pageSays(null);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_600)); });
+    expect(card().querySelector("[data-page-settling]")).not.toBeNull();
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+    await pageSays(true);
+    expect(card().querySelector("[data-page-settling]")).toBeNull();
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+  });
+
   it("fades the foot of a clipped preview with a plain gradient and parts it from the footer with a rule", async () => {
     await render(row(payload()));
+    await pageSays(false);
     const fade = card().querySelector<HTMLElement>("[data-app-box] > [data-page-fade]")!;
     expect(fade.className).toContain("bg-gradient-to-t from-composer to-transparent");
     expect(fade.className).toContain("h-8");
@@ -111,6 +157,7 @@ describe("a bot's page as a compact card", () => {
 
   it("shows a short page whole, with nothing over its foot", async () => {
     await render(row(payload({ height: 120 })));
+    await pageSays(false);
     expect(card().querySelector<HTMLElement>("[data-app-box]")!.style.height).toBe("164px");
     expect(card().querySelector("[data-page-fade]")).toBeNull();
   });
