@@ -9196,7 +9196,7 @@ const teamSetupRequests = new TeamSetupRequestService({
   autoApply: appliesDirectly,
   validateChange: (before, fields) => assertTeamComputerChangeIdle(before, { ...before, ...fields }),
   mcpServerProblem: (name, botId) => {
-    const server = cfg.mcpServers?.[name];
+    const server = cfg.mcpServers && Object.hasOwn(cfg.mcpServers, name) ? cfg.mcpServers[name] : undefined;
     if (!server) return "no such server";
     return mcpServerServes(server, botId) ? null : "that server belongs to another bot";
   },
