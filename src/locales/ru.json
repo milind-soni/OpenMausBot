@@ -7329,5 +7329,8 @@
   "devices.computers.pairButton": "Подключить компьютер",
   "devices.computers.title": "Ваши другие компьютеры",
   "devices.computers.pairTitle": "Подключить другой компьютер",
-  "remote.tailscale.needsApproval": "Этот компьютер ждёт одобрения в вашей сети Tailscale. Одобрите его в консоли администратора Tailscale, затем попробуйте снова."
+  "remote.tailscale.needsApproval": "Этот компьютер ждёт одобрения в вашей сети Tailscale. Одобрите его в консоли администратора Tailscale, затем попробуйте снова.",
+  "together.switch.title": "Этот компьютер и Моё облако вместе",
+  "together.switch.line": "По умолчанию выключено. Боты из облака и боты этого компьютера показаны в одном списке, и каждый открывается там, где он находится.",
+  "together.switch.failed": "Не удалось сохранить. Попробуйте ещё раз."
 }

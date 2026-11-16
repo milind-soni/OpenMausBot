@@ -140,6 +140,24 @@ test("one banner per tag, as a page's tag does; the one replaced no longer opens
   assert.equal(w.log.at(-1), "open scout/newer-thread");
 });
 
+test("the same bot and thread id in two places are two banners, and each click opens its own place", async () => {
+  const w = world({ shown: COMPUTER });
+  await w.show();
+  w.at.shown = CLOUD;
+  w.webContents.mainFrame.url = `${CLOUD}/`;
+  await w.show();
+  assert.deepEqual(w.banners.map((banner) => banner.closed), [false, false], "one place's banner never replaces the other's");
+  w.log.length = 0;
+  w.banners[0].emit("click");
+  assert.deepEqual(w.log, ["reveal", `place ${COMPUTER}`]);
+  w.at.shown = COMPUTER;
+  w.arrived();
+  assert.deepEqual(w.log.slice(2), ["open scout/work-thread"]);
+  w.log.length = 0;
+  w.banners[1].emit("click");
+  assert.deepEqual(w.log, ["reveal", `place ${CLOUD}`]);
+});
+
 test("a bot's picture comes only from the page's own origin, and a failed one still shows the banner", async () => {
   const w = world({ picture: async (url) => { if (url.includes("broken")) throw new Error("nope"); return url.includes("missing") ? null : "png-bytes"; } });
   await w.show({ ...NOTE, picture: "/api/attachments/face.png" });

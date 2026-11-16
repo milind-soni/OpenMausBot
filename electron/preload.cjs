@@ -75,7 +75,7 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
@@ -565,6 +565,19 @@ const bridge = {
       const handler = (_event, notice) => cb(notice);
       ipcRenderer.on("cloud-send:notice-changed", handler);
       return () => ipcRenderer.removeListener("cloud-send:notice-changed", handler);
+    },
+  } : undefined,
+  // This computer's page and My Cloud's own page (main refuses any other): the other one's bots, listed beside this one's.
+  placesTogether: process.argv.includes("--omb-company-desktop=1") ? {
+    state: () => ipcRenderer.invoke("places-together:state"),
+    set: on => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:set", on === true) : Promise.reject(new Error("Turn the switch to list both places' bots.")),
+    open: botId => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:open", String(botId)) : Promise.reject(new Error("Choose a bot to open it.")),
+    onChanged: cb => {
+      const handler = () => cb();
+      ipcRenderer.on("places-together:changed", handler);
+      return () => ipcRenderer.removeListener("places-together:changed", handler);
     },
   } : undefined,
   // This computer's page only (never in REMOTE_SAFE, and main refuses any other): bots in two places, brought together on one.

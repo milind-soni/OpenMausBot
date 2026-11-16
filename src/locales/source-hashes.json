@@ -3997,7 +3997,10 @@
       "server.routines.turnedBackOnMany": "b9b1f8055114f9a1b59fc53167a4d2d3be904e945cbe33f829142a8195a1ec4f",
       "server.routines.card.conversationKept": "ea038ec2124d474aa977c0faeb838dae7c8c2436cc44fc5382c231a7539c0fb9",
       "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47",
-      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297"
+      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -10510,7 +10513,10 @@
       "task.bulk.retitle": "70425d709318f9bdf8830f149b5298d8aab8df851a0631bdc40e58759e81296b",
       "task.bulk.retitling": "6570061ecf4e09f529036fa3bba7e33b8150c83dd11cdf3792c435ed9469e4dc",
       "task.bulk.retitleResult": "83306c1404f4170a9594bb2238aeac49e469b340b2f45b5c01952faaf5bc0eb5",
-      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6"
+      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -14321,7 +14327,10 @@
       "chat.notice.devinAccountRefused": "6f12d9c4c2912bc75bfbc26d0b43a2da3b02c1e4e16a807a9162670fcdab80fc",
       "devices.computers.pairButton": "60f8288e33f9f57d2b51409fdb540b47a89c25447061bd354122442818a36ee0",
       "devices.computers.pairTitle": "b7cda6a11ab410daa4b8977624ca72261c0168e7c3d83ae0eed93ac4e3540bc8",
-      "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174"
+      "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -17986,7 +17995,10 @@
       "chat.notice.devinAccountRefused": "6f12d9c4c2912bc75bfbc26d0b43a2da3b02c1e4e16a807a9162670fcdab80fc",
       "devices.computers.pairButton": "60f8288e33f9f57d2b51409fdb540b47a89c25447061bd354122442818a36ee0",
       "devices.computers.pairTitle": "b7cda6a11ab410daa4b8977624ca72261c0168e7c3d83ae0eed93ac4e3540bc8",
-      "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174"
+      "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -26094,7 +26106,10 @@
       "task.bulk.retitle": "70425d709318f9bdf8830f149b5298d8aab8df851a0631bdc40e58759e81296b",
       "task.bulk.retitling": "6570061ecf4e09f529036fa3bba7e33b8150c83dd11cdf3792c435ed9469e4dc",
       "task.bulk.retitleResult": "83306c1404f4170a9594bb2238aeac49e469b340b2f45b5c01952faaf5bc0eb5",
-      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6"
+      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -37039,7 +37054,17 @@
       "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6",
       "server.routines.card.conversationKept": "ea038ec2124d474aa977c0faeb838dae7c8c2436cc44fc5382c231a7539c0fb9",
       "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47",
-      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297"
+      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297",
+      "together.onCloud": "3e863af396d37b7e49f002cb51c62decbf6570f15181b91cc09bd3955f6f484a",
+      "together.onComputer": "e6af7ee2bde2d5b5d9fd1441db828be287079871bc7d14aebab3ee6a73579a9e",
+      "together.state.asleep": "706cc68e2ae8b1d45175e7da7fdf031201030d725764dffa4ed0aeaac95ee5dd",
+      "together.state.waking": "a3d3562bfff4e14a3d0278540318e4948dc2eae6a34497112975d23c143cab4b",
+      "together.state.offlineCloud": "5197d3d5dfa091deab2ed965ef02f829c81a2672402df657cacc82635d8da982",
+      "together.state.offlineComputer": "6674e486fc361c62e6b2a88db89ca9fa42e8a85b6948cb1ad1c62fd54d0dea2c",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8",
+      "together.state.signin": "010c70e3503b8907767eb9dd465788bb7698d05ccddc383e0685031935a70db2"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47270,7 +47295,17 @@
       "settings.ai.hiddenStatus": "cdcd49ccafe7bb5dd24259d6f44022e07a18dfb7654a6d36aff5c0de1ea7c23f",
       "server.routines.card.conversationKept": "ea038ec2124d474aa977c0faeb838dae7c8c2436cc44fc5382c231a7539c0fb9",
       "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47",
-      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297"
+      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297",
+      "together.onCloud": "3e863af396d37b7e49f002cb51c62decbf6570f15181b91cc09bd3955f6f484a",
+      "together.onComputer": "e6af7ee2bde2d5b5d9fd1441db828be287079871bc7d14aebab3ee6a73579a9e",
+      "together.state.asleep": "706cc68e2ae8b1d45175e7da7fdf031201030d725764dffa4ed0aeaac95ee5dd",
+      "together.state.waking": "a3d3562bfff4e14a3d0278540318e4948dc2eae6a34497112975d23c143cab4b",
+      "together.state.offlineCloud": "5197d3d5dfa091deab2ed965ef02f829c81a2672402df657cacc82635d8da982",
+      "together.state.offlineComputer": "6674e486fc361c62e6b2a88db89ca9fa42e8a85b6948cb1ad1c62fd54d0dea2c",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8",
+      "together.state.signin": "010c70e3503b8907767eb9dd465788bb7698d05ccddc383e0685031935a70db2"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -57627,7 +57662,10 @@
       "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
       "server.routines.card.conversationKept": "ea038ec2124d474aa977c0faeb838dae7c8c2436cc44fc5382c231a7539c0fb9",
       "server.routines.card.sessionContinues": "af4dedfee873451f6b9f28c12ef5b4f683c98ae795a706fe7fd58da470374c47",
-      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297"
+      "server.routines.card.onceContinues": "47f36e2af395ab1cc4c1fa758a4e169404e1e0164fb07d2ad82914228cf99297",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -61713,7 +61751,10 @@
       "chat.notice.devinAccountRefused": "6f12d9c4c2912bc75bfbc26d0b43a2da3b02c1e4e16a807a9162670fcdab80fc",
       "devices.computers.pairButton": "60f8288e33f9f57d2b51409fdb540b47a89c25447061bd354122442818a36ee0",
       "devices.computers.pairTitle": "b7cda6a11ab410daa4b8977624ca72261c0168e7c3d83ae0eed93ac4e3540bc8",
-      "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174"
+      "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -67726,7 +67767,10 @@
       "chat.notice.devinAccountRefused": "6f12d9c4c2912bc75bfbc26d0b43a2da3b02c1e4e16a807a9162670fcdab80fc",
       "devices.computers.pairButton": "60f8288e33f9f57d2b51409fdb540b47a89c25447061bd354122442818a36ee0",
       "devices.computers.pairTitle": "b7cda6a11ab410daa4b8977624ca72261c0168e7c3d83ae0eed93ac4e3540bc8",
-      "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174"
+      "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -73739,7 +73783,10 @@
       "chat.notice.devinAccountRefused": "6f12d9c4c2912bc75bfbc26d0b43a2da3b02c1e4e16a807a9162670fcdab80fc",
       "devices.computers.pairButton": "60f8288e33f9f57d2b51409fdb540b47a89c25447061bd354122442818a36ee0",
       "devices.computers.pairTitle": "b7cda6a11ab410daa4b8977624ca72261c0168e7c3d83ae0eed93ac4e3540bc8",
-      "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174"
+      "devices.computers.typeCode": "2a528dfe78f6b331e8cca951872961169ca6f340a886e40e84cc0b53d441c174",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -81017,7 +81064,10 @@
       "task.bulk.retitle": "70425d709318f9bdf8830f149b5298d8aab8df851a0631bdc40e58759e81296b",
       "task.bulk.retitling": "6570061ecf4e09f529036fa3bba7e33b8150c83dd11cdf3792c435ed9469e4dc",
       "task.bulk.retitleResult": "83306c1404f4170a9594bb2238aeac49e469b340b2f45b5c01952faaf5bc0eb5",
-      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6"
+      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -88348,7 +88398,10 @@
       "task.bulk.retitle": "70425d709318f9bdf8830f149b5298d8aab8df851a0631bdc40e58759e81296b",
       "task.bulk.retitling": "6570061ecf4e09f529036fa3bba7e33b8150c83dd11cdf3792c435ed9469e4dc",
       "task.bulk.retitleResult": "83306c1404f4170a9594bb2238aeac49e469b340b2f45b5c01952faaf5bc0eb5",
-      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6"
+      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -95485,7 +95538,10 @@
       "task.bulk.retitle": "70425d709318f9bdf8830f149b5298d8aab8df851a0631bdc40e58759e81296b",
       "task.bulk.retitling": "6570061ecf4e09f529036fa3bba7e33b8150c83dd11cdf3792c435ed9469e4dc",
       "task.bulk.retitleResult": "83306c1404f4170a9594bb2238aeac49e469b340b2f45b5c01952faaf5bc0eb5",
-      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6"
+      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -103283,7 +103339,10 @@
       "task.bulk.retitle": "70425d709318f9bdf8830f149b5298d8aab8df851a0631bdc40e58759e81296b",
       "task.bulk.retitling": "6570061ecf4e09f529036fa3bba7e33b8150c83dd11cdf3792c435ed9469e4dc",
       "task.bulk.retitleResult": "83306c1404f4170a9594bb2238aeac49e469b340b2f45b5c01952faaf5bc0eb5",
-      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6"
+      "task.bulk.retitleFailed": "fe8013b5add18967ec7df89806ef632a9a0c40012e6f651c0b236cc4127fbab6",
+      "together.switch.title": "2829f92e4a9012d2265d7a82806d5750743ca14c0600d688485825dd4272938a",
+      "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
+      "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8"
     }
   }
 }
