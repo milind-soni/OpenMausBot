@@ -10,7 +10,7 @@ import { setTimeout as delay } from "node:timers/promises";
 const shapes = process.argv.slice(2).filter((arg) => !arg.startsWith("--")).map((shape) => shape.split("x").map(Number)).filter((shape) => shape.length === 2 && shape.every((n) => n > 0));
 const TURNS_TOGETHER = 34;
 console.log(JSON.stringify({ benchmark: "bots-save", node: process.version, platform: platform(), arch: arch(),
-  scope: "Real Store and bots.json with fsync, synthetic bots and threads. A round is the bookkeeping 34 turns write, one turn per pass of the event loop, batched as the server batches it." }));
+  scope: "Real Store and bots.json with fsync, synthetic bots and threads. A round is what 34 later turns (engine and session already named) write to bots.json, one turn per pass of the event loop, batched as the server batches it." }));
 for (const [bots, threads] of shapes.length ? shapes : [[34, 200], [100, 200], [200, 200]]) {
   const directory = mkdtempSync(join(tmpdir(), "omb-bots-save-"));
   // Each shape runs in its own process: the store binds its data directory when first imported.
@@ -48,6 +48,24 @@ for (const [bots, threads] of shapes.length ? shapes : [[34, 200], [100, 200], [
 
   let writes = 0, inode = statSync(file).ino;
   const counted = () => { const now = statSync(file).ino; if (now !== inode) { writes += 1; inode = now; } };
+  // As the server does: the turn's start is one batch, its dispatch records which engine has the thread and what it was
+  // handed, the session event names the engine session, and the event that settles the turn is one batch.
+  const oneTurn = (turn: number) => {
+    const botId = rows[turn % bots]!.id, threadId = `thread-${turn % bots}-1`;
+    batch.batchSaves(() => { store.setTaskAskedAt(botId, threadId, Date.now()); store.patchTask(botId, threadId, { unread: false }); }); counted();
+    store.markTaskDispatched(botId, threadId, "claude"); counted();
+    store.setHandedMessages(botId, threadId, "claude", { session: { sessionId: `session-${turn % bots}` }, lastMessageId: `m-${turn}-${Date.now()}` } as never); counted();
+    batch.batchSaves(() => store.setResumeCursor(botId, "claude", { sessionId: `session-${turn % bots}` }, threadId)); counted();
+    batch.batchSaves(() => {
+      store.addTaskUsage(botId, threadId, { input: 900, output: 80, costUsd: null });
+      store.patchTask(botId, threadId, { lastContextModel: "claude:synthetic" });
+      (store.patchTask as (...args: unknown[]) => unknown)(botId, threadId, { unread: true }, { turnEnd: true });
+    }); counted();
+  };
+  // A first round names each thread's engine and session; the measured round is a later one, as most turns are.
+  for (let turn = 0; turn < TURNS_TOGETHER; turn++) oneTurn(turn);
+  batch.flushLaterSaves?.();
+  writes = 0; inode = statSync(file).ino;
   const lag = monitorEventLoopDelay({ resolution: 1 });
   lag.enable();
   await delay(20);
@@ -55,15 +73,8 @@ for (const [bots, threads] of shapes.length ? shapes : [[34, 200], [100, 200], [
   const start = performance.now();
   let busyMs = 0;
   for (let turn = 0; turn < TURNS_TOGETHER; turn++) {
-    const botId = rows[turn % bots]!.id, threadId = `thread-${turn % bots}-1`;
     const at = performance.now();
-    // As the server does: a turn's start is one batch, and the event that settles it another.
-    batch.batchSaves(() => { store.setTaskAskedAt(botId, threadId, Date.now()); store.patchTask(botId, threadId, { unread: false }); }); counted();
-    batch.batchSaves(() => {
-      store.setResumeCursor(botId, "claude", { sessionId: `session-${turn % bots}` }, threadId);
-      store.addTaskUsage(botId, threadId, { input: 900, output: 80, costUsd: null });
-      store.patchTask(botId, threadId, { unread: true });
-    }); counted();
+    oneTurn(turn);
     busyMs += performance.now() - at;
     await new Promise((resolve) => setImmediate(resolve));
     counted();

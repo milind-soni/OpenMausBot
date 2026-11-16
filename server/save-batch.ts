@@ -1,3 +1,5 @@
+import { RESTART_EXIT_CODE } from "./restart.ts";
+
 // Whole-file saves asked for while one synchronous pass runs (one runtime event's delivery, a turn's start) are written
 // once when the pass returns, before anything else can run: the files hold what they would have held at every point
 // the server yields to the event loop, with one write instead of one per change.
@@ -34,11 +36,11 @@ function writePending(): void {
   }
 }
 
-// A turn's own bookkeeping (the engine session it resumes from, its usage, what is unread) changes several times a turn,
-// and each whole-file save blocks the server for as long as the file is big. Those changes are written together, a
-// bounded moment after the first one. A crash inside that moment loses them: the file then holds the state of at most
-// SAVE_LATER_MAX_MS earlier, whole and consistent, since it is still written in one piece. What a person or a bot
-// asked for (a new thread, a title, an approval, a grant) never goes through here.
+// A few changes a turn makes at its end are harmless to lose (server/registry-save.ts DEFERRABLE_FIELDS says which and
+// why), and each whole-file save blocks the server for as long as the file is big. Those changes are written together,
+// a bounded moment after the first one. A crash inside that moment loses them: the file then holds the state of at most
+// SAVE_LATER_MAX_MS earlier, whole and consistent, since it is still written in one piece. Anything else (what a person
+// or a bot asked for, an engine session set or cleared, what was handed to an engine) never goes through here.
 const SAVE_LATER_MIN_MS = 50;
 export const SAVE_LATER_MAX_MS = 1_000;
 /** Saving waits this many times as long as the last save took, so it stays under a tenth of the server's time however big the file is. */
@@ -58,7 +60,7 @@ export function saveLater(owner: unknown, write: () => void): void {
   later.set(owner, write);
   if (!flushesAtExit) {
     flushesAtExit = true;
-    process.on("exit", flushLaterSaves);
+    process.on("exit", flushAtCleanExit);
   }
   laterTimer ??= setTimeout(flushLaterSaves, saveLaterDelayMs());
 }
@@ -69,6 +71,17 @@ export function supersedeLaterSave(owner: unknown): void {
 }
 
 export const waitingSaves = (): number => later.size;
+
+/**
+ * What waits is written when the process ends cleanly: a graceful shutdown (server/index.ts flushes before its exit),
+ * a restart it asked for (75), or a plain exit (0). An exit after a fatal error (1 from an uncaught exception, 70 from
+ * the crash guard) writes nothing: memory may hold half a change, and the file on disk is the last whole state, at most
+ * SAVE_LATER_MAX_MS old. A kill (SIGKILL, or Windows' TerminateProcess, which is how the desktop app stops its server
+ * there) runs no handler at all, so the same holds.
+ */
+export function flushAtCleanExit(code: number): void {
+  if (code === 0 || code === RESTART_EXIT_CODE) flushLaterSaves();
+}
 
 /** Writes everything still waiting, now. Called before the process exits and before anything reads the files from disk. */
 export function flushLaterSaves(): void {

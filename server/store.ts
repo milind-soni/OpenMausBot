@@ -2,7 +2,7 @@ import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, statSync, unlin
 import { join } from "node:path"; import { isDeepStrictEqual } from "node:util";
 
 import { OwnedFile, writeFileAtomic } from "./atomic.ts"; import { saveLater, saveSoon, supersedeLaterSave } from "./save-batch.ts"; import { discardNativeLog } from "./drivers/native.ts";
-import { commitRegistryChange, keptRevocation, onlyTurnBookkeeping, saveRegistryFor, touchesPermissions } from "./registry-save.ts";
+import { commitRegistryChange, deferrablePatch, keptRevocation, saveRegistryFor, touchesPermissions } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts"; import { grantScopedApps } from "../shared/connector-scopes.ts"; import { dropRetiredApps } from "./retired-apps.ts";
 import { reorderInPlace } from "../shared/bot-order.ts"; import { trimOutboundPolicy } from "../shared/outbound.ts";
 import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts"; import { reshowWhenMoved } from "../shared/default-bot.ts";
@@ -1822,7 +1822,7 @@ export class Store {
     const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId), mirrored = !threadId || bot.threadId === threadId;
     if (isDeepStrictEqual(task?.resumeCursors[instanceId], cursor) && (!mirrored || isDeepStrictEqual(bot.resumeCursors[instanceId], cursor))) return;
     if (task) task.resumeCursors[instanceId] = cursor; if (mirrored) bot.resumeCursors[instanceId] = cursor;
-    saveRegistryFor("bots.json", "the conversation's engine session", () => this.saveBotsLater());
+    saveRegistryFor("bots.json", "the conversation's engine session", () => this.saveBotsSoon());
     this.emit({ type: "bot", botId, ...(task ? { threadId: task.threadId } : {}) });
   }
 
@@ -1830,7 +1830,7 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task || task.lastInstanceId === instanceId) return;
     task.lastInstanceId = instanceId;
-    saveRegistryFor("bots.json", "which engine has this conversation", () => this.saveBotsLater());
+    saveRegistryFor("bots.json", "which engine has this conversation", () => this.saveBotsSoon());
   }
 
   setHandedMessages(botId: string, threadId: string, instanceId: string, state: HandedState) {
@@ -1839,7 +1839,7 @@ export class Store {
     const live = Object.entries(task.handedMessages ?? {})
       .filter(([id, record]) => id !== instanceId && record.session !== undefined && record.session === task.resumeCursors[id]);
     task.handedMessages = { ...Object.fromEntries(live), [instanceId]: state };
-    saveRegistryFor("bots.json", "what this conversation handed its engine", () => this.saveBotsLater());
+    saveRegistryFor("bots.json", "what this conversation handed its engine", () => this.saveBotsSoon());
   }
 
   addTaskUsage(
@@ -2045,7 +2045,7 @@ export class Store {
     };
   }
 
-  patchTask(botId: string, threadId: string, patch: TaskPatch): TaskRecord | null {
+  patchTask(botId: string, threadId: string, patch: TaskPatch, options: { turnEnd?: true } = {}): TaskRecord | null {
     const bot = this.bot(botId);
     const task = this.taskByThread(botId, threadId);
     if (!bot || !task) return null;
@@ -2063,7 +2063,7 @@ export class Store {
       if (task.routineRunId) task.unread = false;
       if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
       bot.unread = bot.tasks!.some(taskCountsAsBotUnread);
-    }, revocation && (() => Object.assign(task, revocation)), touchesPermissions(patch) ? false : onlyTurnBookkeeping(patch) && !(task.snoozedUntil === 0 && patch.unread === true) ? "later" : true);
+    }, revocation && (() => Object.assign(task, revocation)), touchesPermissions(patch) ? false : deferrablePatch(patch, options.turnEnd) && !(task.snoozedUntil === 0 && patch.unread === true) ? "later" : true);
     this.emit({ type: "bot", botId, threadId });
     return task;
   }
@@ -2202,7 +2202,7 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!task || !Number.isFinite(at) || (task.askedAt ?? -1) >= at) return task ?? null;
     task.askedAt = at;
-    saveRegistryFor("bots.json", "when you last wrote in this thread", () => this.saveBotsLater());
+    saveRegistryFor("bots.json", "when you last wrote in this thread", () => this.saveBotsSoon());
     this.emit({ type: "bot", botId, threadId });
     return task;
   }

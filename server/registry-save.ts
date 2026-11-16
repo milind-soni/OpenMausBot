@@ -45,10 +45,23 @@ function restore(target: object, saved: object): void {
 
 const PERMISSION_FIELDS = ["approvalMode", "autoApprove", "alwaysAllow"] as const;
 
-/** What a turn writes about itself as it runs. A crash may lose the last moment of these (server/save-batch.ts). */
-const TURN_BOOKKEEPING_FIELDS: ReadonlySet<string> = new Set(["unread", "lastReadMessageId", "resumeCursors", "lastInstanceId", "lastContextModel", "usage"]);
+/**
+ * The only task changes whose save may wait (server/save-batch.ts saveLater), because losing the last second of them in
+ * a crash changes nothing a turn or a person relies on:
+ * - `lastContextModel` (which model the last context reading was for): lost, the next compaction check reads the
+ *   context size as unmeasured, as after a fresh start.
+ * - `unread: true` set by a turn's own end (`turnEnd`): lost, a thread that just answered shows as read.
+ * - `usage` (addTaskUsage, not a patch): lost, the thread's token counters are short by the last turn. Plan limits and
+ *   billing read their own ledgers, not these.
+ * Everything else is saved before the call returns: an engine session set or cleared, which engine has the thread, what
+ * was handed to it, when the person last wrote, read marks, a person's own unread mark, titles, grants.
+ */
+const DEFERRABLE_FIELDS: ReadonlySet<string> = new Set(["lastContextModel"]);
 
-export const onlyTurnBookkeeping = (patch: TaskPatch): boolean => Object.keys(patch).every((key) => TURN_BOOKKEEPING_FIELDS.has(key));
+export const deferrablePatch = (patch: TaskPatch, turnEnd = false): boolean => {
+  const keys = Object.keys(patch);
+  return keys.length > 0 && (keys.every((key) => DEFERRABLE_FIELDS.has(key)) || (turnEnd && keys.length === 1 && patch.unread === true));
+};
 
 export const touchesPermissions = (patch: TaskPatch): boolean => PERMISSION_FIELDS.some((key) => Object.hasOwn(patch, key));
 
