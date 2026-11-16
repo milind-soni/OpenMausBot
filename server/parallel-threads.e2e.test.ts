@@ -395,7 +395,7 @@ describe("a Starter Cloud", () => {
     await starter();
     const saved = await f.api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 8 } });
     expect(saved.status).toBe(200);
-    expect(saved.body.threads).toEqual({ maxConcurrentPerBot: 1 });
+    expect(saved.body.threads).toEqual({ maxConcurrentPerBot: 1, routineExecutionRetentionSupported: true });
     expect(saved.body.cloudStarter).toBe(true);
     const { botId, threads } = await botWithThreads(f, CLAUDE, 3);
     await send(f, botId, threads[1]!, "First separate job");
