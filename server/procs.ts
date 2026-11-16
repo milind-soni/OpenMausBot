@@ -318,14 +318,19 @@ export function spawnCli(
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
   let child: ChildProcessByStdio<Writable, Readable, Readable>;
+  const refused = (code: string | undefined) => { processBudget.spawnFailed(code); engineMemory.spawnRefused(code, owner === "bot"); };
   try {
     child = owner === "bot" || botWork ? spawnBotWork(start) : start();
+  } catch (error) {
+    // Node throws some refusals (ENOMEM) at once rather than reporting them on the child.
+    if (shortageCode(error)) refused((error as NodeJS.ErrnoException).code);
+    throw error;
   } finally {
     for (const fd of boxed?.extraFds ?? []) try { closeSync(fd); } catch {}
   }
   rememberLiveSpawn(child, [resolved.command, ...resolved.args]);
-  // Node reports a refused spawn (EAGAIN, EMFILE, ENOENT) on the child, a tick later, with no pid.
-  child.once("error", (error: NodeJS.ErrnoException) => { if (!child.pid) { processBudget.spawnFailed(error.code); engineMemory.spawnRefused(error.code); } });
+  // Node reports most refused spawns (EAGAIN, EMFILE, ENOENT) on the child, a tick later, with no pid.
+  child.once("error", (error: NodeJS.ErrnoException) => { if (!child.pid) refused(error.code); });
   // The broker token minted for this process dies with it.
   if (boxed?.token) child.once("exit", boxed.release);
   if (process.platform !== "win32") cliGroups.add(child);

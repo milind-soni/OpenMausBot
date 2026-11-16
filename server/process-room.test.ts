@@ -6,10 +6,11 @@ import { engineFailureKind } from "./drivers/engine-errors.ts";
 import { classifyError } from "./drivers/retry.ts";
 import { EngineMemory, FIRST_FRAME_MS, readHostMemory, withEngineMemory, type HostMemory } from "./engine-memory.ts";
 import { containerLimited, readCgroupMemory, readPids, readProcessLimits } from "./process-limits.ts";
-import { ENGINE_TASKS, gateHost, margin, ProcessBudget, turnsSetting, turnsUnder } from "./process-room.ts";
+import { BROWSER_NO_ROOM, BROWSER_TASKS, ENGINE_TASKS, gateHost, linuxTreeUse, margin, ProcessBudget, turnsSetting, turnsUnder, type TreeUse } from "./process-room.ts";
 import { outOfProcesses, shortageCode } from "./process-shortage.ts";
 import { describeSpawnFailure, linuxGroupOnlyExited } from "./procs.ts";
-import { classifyRoutineFailure } from "./routine-recovery.ts";
+import { classifyRoutineFailure, recoverRun, ROUTINE_BUSY_WAIT_MS } from "./routine-recovery.ts";
+import type { RoutineRun } from "./routines.ts";
 
 const MB = 1024 * 1024, GB = 1024 * MB;
 const files = (map: Record<string, string>) => (path: string) => map[path] ?? null;
@@ -189,7 +190,16 @@ describe("a spawn the system refused is the server's shortage, not the AI's fail
   it("knows Node's own words for it too, and nothing else", () => {
     expect(outOfProcesses("spawn failed: spawn /app/engine EAGAIN")).toBe(true);
     expect(outOfProcesses("spawn git EMFILE")).toBe(true);
+    expect(outOfProcesses("Error: spawn ENOMEM")).toBe(true);
     for (const other of ["claude exited 1 before result", "getaddrinfo EAI_AGAIN api.example.test", "Resource temporarily unavailable", "spawn claude ENOENT", ""]) expect(outOfProcesses(other)).toBe(false);
+  });
+
+  it("reads only the head of a failure: an engine that crashed with a file watcher's EMFILE in its stderr ran, and may go to a backup", () => {
+    for (const crash of [
+      "claude exited 1 before result: Error: EMFILE: too many open files, watch '/data/work'\n    at FSWatcher.<computed>",
+      "claude exited 1 before result: [warn] watcher\nError: spawn npx EAGAIN",
+      "The AI stopped before it answered.\nThere is no room to start another program (EAGAIN), so this task could not run.",
+    ]) expect(outOfProcesses(crash)).toBe(false);
   });
 
   it("is never read as a usage limit, a rate limit or a transient AI error, so nothing is retried on a model or handed to a backup", () => {
@@ -237,7 +247,8 @@ class FakeChild extends EventEmitter {
 
 /** A self-hosted server in a container: `pids` is its pids.max, each engine holds 44 against it, and memory is plentiful
  * unless the test says otherwise. */
-function server(options: { pids?: number | "max" | null; turns?: number | "auto"; total?: number; available?: number; perEngine?: number; host?: "server" | "cloud" } = {}) {
+function server(options: { pids?: number | "max" | null; turns?: number | "auto"; total?: number; available?: number; perEngine?: number; host?: "server" | "cloud";
+  tree?: (pid: number) => TreeUse | null } = {}) {
   let clock = 1_800_000_000_000, nextPid = 1000;
   const children = new Map<number, FakeChild>();
   const signals: string[] = [];
@@ -245,8 +256,11 @@ function server(options: { pids?: number | "max" | null; turns?: number | "auto"
   const state = { base: 26, total: options.total ?? 64 * GB, available: options.available ?? 60 * GB };
   const pids = options.pids === undefined ? 512 : options.pids;
   const budget = new ProcessBudget({ read: () => ({ max: pids, current: pids === null ? null : state.base + children.size * 44 }), now: () => clock, log: () => {} });
+  /** Each engine's tree: idle with no child unless the test says otherwise. */
+  const trees = new Map<number, TreeUse>();
   const memory = new EngineMemory({
     enabled: true, host: options.host ?? "server", turns: options.turns ?? "auto", processes: budget, tickMs: 5,
+    tree: options.tree ?? ((pid) => (children.has(pid) ? trees.get(pid) ?? { cpuMs: 0, children: 0 } : null)),
     read: (): HostMemory => ({ totalBytes: state.total, availableBytes: Math.max(0, state.available - children.size * perEngine), swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }),
     groups: () => new Map([...children.keys()].map((pid) => [pid, perEngine])),
     now: () => clock, log: () => {},
@@ -271,7 +285,7 @@ function server(options: { pids?: number | "max" | null; turns?: number | "auto"
     if (!memory.hasEngine(threadId)) spawn(threadId);
     return turn && engine;
   };
-  return { memory, budget, children, signals, state, spawn, start, advance: (ms: number) => { clock += ms; } };
+  return { memory, budget, children, signals, state, trees, spawn, start, advance: (ms: number) => { clock += ms; } };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 25));
@@ -460,40 +474,47 @@ describe("a new engine that never comes up", () => {
     return { instance, sent, interrupted, emit };
   }
 
-  const NO_ROOM = "There is no room to start another program (EAGAIN), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.";
-
-  it("is stopped after a minute and a half with nothing on its stdout, and its turn fails as one the server had no room for", async () => {
-    vi.useFakeTimers();
-    const s = server({ pids: 4096 });
-    const fake = fakeInstance();
-    // The engine starts inside the driver's sendTurn, as spawnCli does.
+  /** An adapter whose sendTurn starts its engine, as spawnCli does inside the driver's own sendTurn. */
+  function spawning(s: ReturnType<typeof server>, driverKind = "claudeAgent") {
+    const fake = fakeInstance(driverKind);
     const send = fake.instance.adapter.sendTurn;
-    (fake.instance.adapter as { sendTurn: typeof send }).sendTurn = async (input) => { s.spawn(input.threadId); return send(input); };
+    (fake.instance.adapter as { sendTurn: typeof send }).sendTurn = async (input) => { if (!s.memory.hasEngine(input.threadId)) s.spawn(input.threadId); return send(input); };
     const decorated = withEngineMemory(fake.instance, s.memory);
     const seen: RuntimeEvent[] = [];
     decorated.adapter.onEvent((event) => seen.push(event));
-    await decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    return { ...fake, decorated, seen, failure: () => (seen.find((event) => event.type === "runtime.error") as (RuntimeEvent & { message: string }) | undefined)?.message };
+  }
+
+  const NO_ROOM = "There is no room to start another program (EAGAIN), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.";
+
+  it("is stopped after a minute and a half with nothing on its stdout while the pids limit is full, and its turn fails as one the server had no room for", async () => {
+    vi.useFakeTimers();
+    const s = server({ pids: 512 });
+    const turn = spawning(s);
+    await turn.decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    // Other work fills the container: 474 of 512, past the 51 kept back.
+    s.state.base = 430;
     // The driver's own "turn started" is not the engine speaking.
-    fake.emit({ type: "turn.started", threadId: "t1", turnId: "turn-t1" });
+    turn.emit({ type: "turn.started", threadId: "t1", turnId: "turn-t1" });
     await vi.advanceTimersByTimeAsync(FIRST_FRAME_MS - 1_000);
     expect(s.signals).toEqual([]);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(s.signals).toEqual(["SIGKILL -1000"]);
     expect(s.memory.stoppedForRoom("t1")).toBe(true);
     expect(s.memory.counts().starvedEver).toBe(1);
-    expect(s.budget.counts().spawnFailed.EAGAIN).toBe(1);
+    // Not a refused spawn: nothing is counted as one, and no limit is learned from it.
+    expect(s.budget.counts().spawnFailed.EAGAIN).toBe(0);
     // The driver reports its engine's exit in its own words; the person reads the server's one line instead.
-    fake.emit({ type: "runtime.error", threadId: "t1", turnId: "turn-t1", message: "claude exited null before result" });
-    fake.emit({ type: "turn.completed", threadId: "t1", turnId: "turn-t1", ok: false, stopReason: "exit_before_result", cost: null });
-    const failure = seen.find((event) => event.type === "runtime.error") as RuntimeEvent & { type: "runtime.error" };
-    expect(failure.message).toBe(NO_ROOM);
-    expect(outOfProcesses(failure.message)).toBe(true);
-    expect(fake.interrupted).toEqual([]);
+    turn.emit({ type: "runtime.error", threadId: "t1", turnId: "turn-t1", message: "claude exited null before result" });
+    turn.emit({ type: "turn.completed", threadId: "t1", turnId: "turn-t1", ok: false, stopReason: "exit_before_result", cost: null });
+    expect(turn.failure()).toBe(NO_ROOM);
+    expect(outOfProcesses(turn.failure()!)).toBe(true);
+    expect(turn.interrupted).toEqual([]);
     await vi.advanceTimersByTimeAsync(10);
     expect(s.memory.stoppedForRoom("t1")).toBe(false);
   });
 
-  it("holds an engine that admits itself (ACP) to the same deadline, and a start it gives up on names the server's shortage, not the engine's words", async () => {
+  it("holds an engine that admits itself (ACP) to the same deadline when a spawn was refused meanwhile, and a start it gives up on names the server's shortage", async () => {
     vi.useFakeTimers();
     const s = server({ pids: 4096 });
     const fake = fakeInstance("geminiAgent", { engineAdmission: true });
@@ -508,13 +529,92 @@ describe("a new engine that never comes up", () => {
     decorated.adapter.onEvent(() => {});
     const turn = decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
     const caught = turn.catch((error: unknown) => error);
-    await vi.advanceTimersByTimeAsync(FIRST_FRAME_MS + 1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    // The server's own spawn of something else is refused while the engine starts.
+    s.memory.spawnRefused("EAGAIN");
+    await vi.advanceTimersByTimeAsync(FIRST_FRAME_MS);
     expect(s.signals).toEqual(["SIGKILL -1000"]);
     fail!(new TurnNotStartedError("turn-t1", "Gemini exited before it answered initialize"));
     const error = await caught;
     expect(error).toBeInstanceOf(TurnNotStartedError);
     expect((error as Error).message).toBe(NO_ROOM);
     expect(outOfProcesses((error as Error).message)).toBe(true);
+  });
+
+  it("names memory when memory is what is short", async () => {
+    vi.useFakeTimers();
+    const s = server({ pids: "max", total: 4 * GB, available: 3 * GB });
+    const turn = spawning(s);
+    await turn.decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    s.state.available = 500 * MB;
+    await vi.advanceTimersByTimeAsync(FIRST_FRAME_MS + 1_000);
+    expect(s.signals).toEqual(["SIGKILL -1000"]);
+    turn.emit({ type: "turn.completed", threadId: "t1", turnId: "turn-t1", ok: false, stopReason: "exit_before_result", cost: null });
+    expect(turn.failure()).toBe(NO_ROOM.replace("EAGAIN", "ENOMEM"));
+    expect(outOfProcesses(turn.failure()!)).toBe(true);
+    expect(s.budget.limit()).toBeNull();
+  });
+
+  it("is left alone with no sign of a shortage, however long it is silent (a cold npx start, a slow first start): its driver's own timeout decides", async () => {
+    vi.useFakeTimers();
+    // A container with only a memory limit (pids.max reads "max"), plenty of it free, three engines already running.
+    const s = server({ pids: "max", total: 8 * GB, available: 7 * GB });
+    const before = s.memory.most();
+    for (const thread of ["a", "b", "c"]) { await s.start(thread); s.children.get([...s.children.keys()].at(-1)!)!.stdout!.bytesRead = 100; }
+    s.memory.expectFrame("d");
+    await s.start("d");
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.signals).toEqual([]);
+    expect(s.memory.stoppedForRoom("d")).toBe(false);
+    expect(s.budget.limit()).toBeNull();
+    expect(s.memory.most()).toBe(before);
+    expect(s.memory.counts().starvedEver).toBe(0);
+  });
+
+  it("is left alone on a Cloud home where nothing is short, an ACP engine that takes minutes to answer initialize among them", async () => {
+    vi.useFakeTimers();
+    const s = server({ host: "cloud" });
+    const fake = fakeInstance("customAcp", { engineAdmission: true });
+    (fake.instance.adapter as { sendTurn: (input: SendTurnInput) => Promise<unknown> }).sendTurn = async (input) => {
+      await input.engineAdmission?.("process"); s.spawn(input.threadId); return new Promise(() => {});
+    };
+    const decorated = withEngineMemory(fake.instance, s.memory);
+    decorated.adapter.onEvent(() => {});
+    void decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(s.signals).toEqual([]);
+    expect(s.memory.stoppedForRoom("t1")).toBe(false);
+  });
+
+  it("is left alone under a real shortage while its processes still work or a child runs (npx installing), and stopped once they are idle", async () => {
+    vi.useFakeTimers();
+    const s = server({ pids: 512 });
+    const turn = spawning(s);
+    await turn.decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    s.state.base = 430;
+    // Busy: a second of CPU every few seconds.
+    let cpuMs = 0;
+    const busy = setInterval(() => { cpuMs += 1_000; s.trees.set(1000, { cpuMs, children: 0 }); }, 2_000);
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(s.signals).toEqual([]);
+    clearInterval(busy);
+    // Idle itself, but its npx child still runs.
+    s.trees.set(1000, { cpuMs, children: 2 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(s.signals).toEqual([]);
+    s.trees.set(1000, { cpuMs, children: 0 });
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(s.signals).toEqual(["SIGKILL -1000"]);
+  });
+
+  it("is never stopped as silent where its processes can't be read", async () => {
+    vi.useFakeTimers();
+    const s = server({ pids: 512, tree: () => null });
+    const turn = spawning(s);
+    await turn.decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    s.state.base = 430;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(s.signals).toEqual([]);
   });
 
   it("is left alone once it has written anything, when its thread's engine was already running, for a process with no stdout, and for an engine that keeps no session", async () => {
@@ -529,11 +629,14 @@ describe("a new engine that never comes up", () => {
     const decorated = withEngineMemory(fake.instance, s.memory);
     decorated.adapter.onEvent(() => {});
     await decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    // A shortage all along: none of these is stopped for it.
+    s.memory.spawnRefused("EMFILE");
     await vi.advanceTimersByTimeAsync(FIRST_FRAME_MS * 3);
     fake.emit({ type: "turn.completed", threadId: "t1", turnId: "turn-t1", ok: true, stopReason: "end_turn", cost: null });
     await vi.advanceTimersByTimeAsync(10);
     // The same thread again: its engine is still up, and a slow model is not a missing engine.
     await decorated.adapter.sendTurn({ threadId: "t1", text: "again" } as SendTurnInput);
+    s.memory.spawnRefused("EMFILE");
     await vi.advanceTimersByTimeAsync(FIRST_FRAME_MS * 3);
     // A process with no stdout to watch, and one started for a turn on an engine that may say nothing until its answer.
     s.memory.expectFrame("t3");
@@ -547,20 +650,174 @@ describe("a new engine that never comes up", () => {
     // Nor another process the same turn starts after its engine.
     await decorated.adapter.sendTurn({ threadId: "t5", text: "hi" } as SendTurnInput);
     s.spawn("t5");
+    s.memory.spawnRefused("EMFILE");
     await vi.advanceTimersByTimeAsync(FIRST_FRAME_MS * 3);
     expect(s.signals).toEqual([]);
     expect(s.memory.counts().starvedEver).toBe(0);
   });
 
-  it("fails a turn whose own spawn the system refused as the server's shortage, and only that thread's", () => {
+  it("tells a driver its exited engine was stopped for room only for the process this gate stopped, so any other exit may be sent again", async () => {
+    vi.useFakeTimers();
+    const s = server({ pids: 512 });
+    const turn = spawning(s);
+    await turn.decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    s.state.base = 430;
+    await vi.advanceTimersByTimeAsync(FIRST_FRAME_MS + 1_000);
+    expect(s.memory.stoppedForRoom("t1", 1000)).toBe(true);
+    expect(s.memory.stoppedForRoom("t1", 1001)).toBe(false);
+    // A memory stop of an earlier turn is not this one's.
+    s.memory.turnStarted("t1");
+    expect(s.memory.stoppedForRoom("t1", 1000)).toBe(false);
+    expect(s.memory.stoppedForRoom("t1")).toBe(false);
+  });
+});
+
+describe("a spawn refused during a turn", () => {
+  const NO_ROOM = "There is no room to start another program (EAGAIN), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.";
+
+  it("fails the turn whose own engine's spawn the system refused as the server's shortage, and only that thread's", () => {
     const s = server({ pids: 4096 });
-    s.memory.turnStarted("t1"); s.memory.turnStarted("t2");
-    s.memory.within("t1", () => s.memory.spawnRefused("EAGAIN"));
-    s.memory.within("t2", () => s.memory.spawnRefused("ENOENT"));
-    s.memory.spawnRefused("EMFILE");
-    expect([s.memory.stoppedForRoom("t1"), s.memory.stoppedForRoom("t2")]).toEqual([true, false]);
+    s.memory.turnStarted("t1"); s.memory.turnStarted("t2"); s.memory.turnStarted("t3");
+    s.memory.within("t1", () => s.memory.spawnRefused("EAGAIN", true));
+    s.memory.within("t2", () => s.memory.spawnRefused("ENOENT", true));
+    // A refusal of some other spawn in a turn (a probe, a helper) is a sign of a shortage, never that turn's failure.
+    s.memory.within("t3", () => s.memory.spawnRefused("EAGAIN"));
+    s.memory.spawnRefused("EMFILE", true);
+    expect([s.memory.stoppedForRoom("t1"), s.memory.stoppedForRoom("t2"), s.memory.stoppedForRoom("t3")]).toEqual([true, false, false]);
     expect(s.memory.stopFailure("t1")?.message).toBe(NO_ROOM);
     s.memory.turnEnded("t1");
     expect(s.memory.stoppedForRoom("t1")).toBe(false);
+  });
+
+  it("is forgotten once a later spawn in the same turn works: the turn goes on, and its end is its own", () => {
+    const s = server({ pids: 4096 });
+    s.memory.turnStarted("t1");
+    s.memory.within("t1", () => s.memory.spawnRefused("EAGAIN", true));
+    s.spawn("t1");
+    expect(s.memory.stoppedForRoom("t1")).toBe(false);
+    expect(s.memory.stopFailure("t1", "claude exited 1 before result: Error: boom")).toBeNull();
+  });
+
+  it("outside a running turn is never carried into the thread's next one", () => {
+    const s = server({ pids: 4096 });
+    s.memory.turnStarted("t1");
+    s.memory.turnEnded("t1");
+    // A spawn from a timer the last turn armed.
+    s.memory.within("t1", () => s.memory.spawnRefused("EAGAIN", true));
+    s.memory.turnStarted("t1");
+    expect(s.memory.stoppedForRoom("t1")).toBe(false);
+    expect(s.memory.stopFailure("t1")).toBeNull();
+  });
+
+  it("never relabels a failure that names its own cause: a usage limit stays a usage limit, and a routine does not wait on it as busy", () => {
+    const s = server({ pids: 4096 });
+    s.memory.turnStarted("t1");
+    s.memory.within("t1", () => s.memory.spawnRefused("EAGAIN", true));
+    const limit = "You've hit your usage limit · resets 5pm";
+    expect(s.memory.stopFailure("t1", limit)).toBeNull();
+    expect(classifyRoutineFailure(limit)).not.toEqual({ kind: "busy" });
+    // A failure in the engine's words of nothing in particular is still the shortage's.
+    expect(s.memory.stopFailure("t1", "claude exited null before result")?.message).toBe(NO_ROOM);
+  });
+
+  it("keeps a usage-limit refusal of the turn's start what it is", async () => {
+    const s = server({ pids: 4096 });
+    const instance = {
+      instanceId: "one", driverKind: "claudeAgent", displayName: "Engine", enabled: true, continuationIdentity: { driverKind: "claudeAgent", continuationKey: "k" },
+      snapshot: { getSnapshot: () => ({}), refresh: async () => ({}) }, models: [],
+      adapter: {
+        provider: "claudeAgent", capabilities: { sessionModelSwitch: "unsupported" }, onEvent: () => () => {},
+        sendTurn: async () => { s.memory.spawnRefused("EAGAIN", true); throw new TurnNotStartedError("turn-t1", "You've hit your usage limit · resets 5pm"); },
+        interruptTurn: async () => {}, stopAll: async () => {},
+      },
+    } as unknown as ProviderInstance;
+    const error = await withEngineMemory(instance, s.memory).adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput).catch((caught: unknown) => caught);
+    expect((error as Error).message).toBe("You've hit your usage limit · resets 5pm");
+  });
+
+  it("does not explain a turn the person stopped, nor one after a refusal from before it began", async () => {
+    const s = server({ pids: 4096 });
+    const listeners = new Set<RuntimeEventListener>();
+    const instance = {
+      instanceId: "one", driverKind: "claudeAgent", displayName: "Engine", enabled: true, continuationIdentity: { driverKind: "claudeAgent", continuationKey: "k" },
+      snapshot: { getSnapshot: () => ({}), refresh: async () => ({}) }, models: [],
+      adapter: {
+        provider: "claudeAgent", capabilities: { sessionModelSwitch: "unsupported" },
+        onEvent: (listener: RuntimeEventListener) => { listeners.add(listener); return () => listeners.delete(listener); },
+        sendTurn: async (input: SendTurnInput) => ({ turnId: `turn-${input.threadId}` }),
+        interruptTurn: async () => {}, stopAll: async () => {},
+      },
+    } as unknown as ProviderInstance;
+    const decorated = withEngineMemory(instance, s.memory);
+    const seen: RuntimeEvent[] = [];
+    decorated.adapter.onEvent((event) => seen.push(event));
+    const stop = (threadId: string) => { for (const listener of listeners) listener({ eventId: "e", provider: "claudeAgent", createdAt: "", type: "turn.completed", threadId, turnId: `turn-${threadId}`, ok: false, stopReason: "interrupted", cost: null } as RuntimeEvent); };
+    s.memory.within("t1", () => s.memory.spawnRefused("EAGAIN", true));
+    await decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput);
+    stop("t1");
+    // Refused in the turn, then the person stopped it.
+    await decorated.adapter.sendTurn({ threadId: "t2", text: "hi" } as SendTurnInput);
+    s.memory.within("t2", () => s.memory.spawnRefused("EAGAIN", true));
+    stop("t2");
+    expect(seen.filter((event) => event.type === "runtime.error")).toEqual([]);
+  });
+
+  it("holds a routine run of checked items that waits for room to the same hour as any other run", () => {
+    const now = 1_800_000_000_000;
+    const run = () => ({ id: "r1", routineId: "x", target: "bot", botId: "b", status: "running", checkKey: "k", deferredAt: now - ROUTINE_BUSY_WAIT_MS }) as unknown as RoutineRun;
+    expect(recoverRun(run(), NO_ROOM, {}, now, [])).toMatchObject({ queued: false });
+    // Its bot busy with the person: it waits as long as that takes, as before.
+    expect(recoverRun(run(), "busy", { cause: "busy" }, now, [])).toEqual({ queued: true });
+  });
+});
+
+describe("browsers under the pids limit", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  function room(current: { value: number }, measured: { value: number | null }, running: Set<string>) {
+    const budget = new ProcessBudget({ read: () => ({ max: 1024, current: current.value }), browserTasks: () => measured.value, log: () => {}, pollMs: 100 });
+    return { budget, room: budget.browserRoom((session) => running.has(session)) };
+  }
+
+  it("opens one only where its processes fit, waits a while for room, then says why it cannot", async () => {
+    vi.useFakeTimers();
+    // 1,024 allowed, 102 kept back: 922 to work in.
+    const current = { value: 700 }, measured = { value: 0 }, running = new Set<string>();
+    const { room: browsers } = room(current, measured, running);
+    expect(await browsers.enter("bot-a")).toBeNull();
+    // bot-a's browser counts at its full size though the count does not show it yet: 700 + 170 + 170 > 922.
+    const second = browsers.enter("bot-b");
+    await vi.advanceTimersByTimeAsync(21_000);
+    expect(await second).toBe(BROWSER_NO_ROOM);
+    // Once it runs and the count shows it, it is counted once.
+    running.add("bot-a");
+    current.value = 700 + BROWSER_TASKS; measured.value = BROWSER_TASKS;
+    expect(await browsers.enter("bot-a")).toBeNull();
+    current.value = 400 + BROWSER_TASKS;
+    expect(await browsers.enter("bot-b")).toBeNull();
+  });
+
+  it("holds each running browser's room against new engines for as long as it runs, and frees it when it closes", async () => {
+    vi.useFakeTimers();
+    const current = { value: 500 }, measured = { value: 40 }, running = new Set<string>(["bot-a"]);
+    const { budget, room: browsers } = room(current, measured, running);
+    expect(await browsers.enter("bot-a")).toBeNull();
+    // 500 now, of which the browser shows 40 while it starts: 130 more are held for it, and an engine's 60 still fit (690 of 922).
+    expect(budget.short(ENGINE_TASKS, 0)).toBe(false);
+    current.value = 750;
+    expect(budget.short(ENGINE_TASKS, 0)).toBe(true);
+    // Long after it started, still running at 40 threads: still held at its full size.
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(budget.short(ENGINE_TASKS, 0)).toBe(true);
+    running.delete("bot-a"); measured.value = 0; current.value = 710;
+    vi.advanceTimersByTime(2_000);
+    expect(budget.short(ENGINE_TASKS, 0)).toBe(false);
+  });
+
+  it("reads each browser and engine tree from /proc's own rows", () => {
+    const row = (pid: number, ppid: number, name: string, cpuMs: number, state = "S", threads = 1) => ({ pid, ppid, name, cpuMs, rssBytes: 0, start: "1", threads, state });
+    const rows = [row(10, 1, "claude", 500), row(11, 10, "npm exec", 2_000), row(12, 11, "node", 300), row(13, 10, "sh", 0, "Z"), row(20, 1, "node", 9_000)];
+    expect(linuxTreeUse(10, () => rows, () => 100)).toEqual({ cpuMs: 2_900, children: 2 });
+    expect(linuxTreeUse(99, () => rows, () => 0)).toBeNull();
   });
 });

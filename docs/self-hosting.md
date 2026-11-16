@@ -518,13 +518,24 @@ engine would not fit, and starts it by itself when there is room:
 - A waiting turn says so in its chat ("Waiting for room on this server…"),
   and again every ten minutes. A routine's run waits the same way; a routine
   is never switched off for it.
-- If the system refuses to start a program anyway (`spawn EAGAIN`, `EMFILE`,
-  `ENOMEM`), or a new engine starts and then says nothing for 90 seconds, or
-  the kernel stops an engine for memory, that is the server's shortage, not
-  the AI's failure: nothing is sent to a backup AI and no Chief is asked
-  about it. The chat shows one line, the turn starts again by itself once,
-  half a minute later, behind the same wait, and only if that fails too are
-  you told.
+- A bot's browser opens only where its processes fit under the process
+  limit. Each open browser is counted at its full size for as long as it
+  runs, so one that a bot opens halfway through its turn is never missed.
+  With no room, the browser call waits up to 20 seconds, then tells the bot
+  that the server is close to its limit and to try again later.
+- If the system refuses to start a bot's engine anyway (`spawn EAGAIN`,
+  `EMFILE`, `ENOMEM`), or the kernel stops an engine for memory, that is the
+  server's shortage, not the AI's failure: nothing is sent to a backup AI
+  and no Chief is asked about it. The chat shows one line, the turn starts
+  again by itself once, half a minute later, behind the same wait, and only
+  if that fails too are you told. A failure that names its own cause (a usage
+  limit, a sign-in) is always shown as it is.
+- A new engine that says nothing for 90 seconds is stopped the same way only
+  while the server is short of room (its process limit nearly full, a start
+  refused since the engine began, or memory short) and only once the
+  engine and everything it started have stopped using the CPU. A slow first
+  start, such as an engine that `npx` is still installing, is left to finish
+  or to time out on its own.
 
 `OMB_TURNS_MAX_RUNNING` sets how many turns run at once on the whole server:
 

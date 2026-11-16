@@ -6,10 +6,13 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { ChildProcess } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { chatNotice, noticeFailure } from "./chat-notices.ts";
-import { newEventId, newId, TurnNotStartedError, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "./contracts.ts";
+import { newEventId, newId, TurnAuthenticationRefusedError, TurnNotStartedError, TurnUsageLimitRefusedError, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "./contracts.ts";
 import { readCgroupMemory } from "./process-limits.ts";
-import { shortageCode, type ShortageCode } from "./process-shortage.ts";
-import { BROWSER_TASKS, ENGINE_TASKS, gateHost, processBudget, SESSION_TASKS, turnsSetting, turnsUnder, type GateHost, type ProcessBudget, type TurnsSetting } from "./process-room.ts";
+import { namesOwnCause, shortageCode, type ShortageCode } from "./process-shortage.ts";
+import {
+  BROWSER_TASKS, ENGINE_TASKS, gateHost, linuxTreeUse, processBudget, SESSION_TASKS, turnsSetting, turnsUnder, type GateHost, type ProcessBudget, type TreeUse,
+  type TurnsSetting,
+} from "./process-room.ts";
 
 const MB = 1024 * 1024;
 const PAGE_BYTES = 4096;
@@ -25,9 +28,13 @@ export const SESSION_BYTES = 200 * MB;
 export const BROWSER_BYTES = 400 * MB;
 /** A new engine's share is held back this long while it starts and grows; it is measured once it has run this long. */
 const RESERVE_MS = 90_000, SETTLED_MS = 30_000, TASKS_RESERVE_MS = 20_000, TASKS_SETTLED_MS = 5_000, SERVER_TURNS_FOR_MS = 5_000;
-/** A new engine process that has sent nothing this long after its turn began never came up: under a full pids limit a
- * process can start and then hang, its threads refused, without any error. */
+/** A new engine process that has sent nothing this long after its turn began, while the server is short of room, never
+ * came up: under a full pids limit a process can start and then hang, its threads refused, without any error. With no
+ * sign of a shortage, or while its processes still work (a cold `npx` install, a slow first start), each driver's own
+ * start timeout decides instead. */
 export const FIRST_FRAME_MS = 90_000;
+/** A silent engine's tree is read this long apart: less CPU than IDLE_CPU_MS between two reads and no child running is idle. */
+const FRAME_SAMPLE_MS = 5_000, FRAME_RECHECK_MS = 15_000, IDLE_CPU_MS = 50, FRAME_WATCH_MS = 10 * 60_000;
 const TICK_MS = 2_000, RELIEF_COOLDOWN_MS = 15_000, NOTICE_REPEAT_MS = 10 * 60_000, STOP_GRACE_MS = 5_000;
 /** How long a bot's turn lets a person's own work go first. Past this it takes its place by arrival, so it is never starved. */
 export const BOT_TURN_GIVES_WAY_MS = 5 * 60_000;
@@ -191,6 +198,8 @@ export interface EngineMemoryOptions {
   groups?: () => Map<number, number>;
   now?: () => number;
   signal?: (pid: number, signal: NodeJS.Signals) => void;
+  /** An engine's process tree: whether it still works. Null where it can't be read, and then it is never stopped as silent. */
+  tree?: (pid: number) => TreeUse | null;
   log?: (line: string) => void;
   tickMs?: number;
 }
@@ -201,6 +210,7 @@ export class EngineMemory {
   private readonly groups: () => Map<number, number>;
   private readonly now: () => number;
   private readonly signal: (pid: number, signal: NodeJS.Signals) => void;
+  private readonly tree: (pid: number) => TreeUse | null;
   private readonly log: (line: string) => void;
   private readonly tickMs: number;
   private readonly context = new AsyncLocalStorage<string>();
@@ -211,8 +221,13 @@ export class EngineMemory {
   private readonly queue: Waiter[] = [];
   /** Threads whose engine was stopped for memory: how many tasks ran then, and whether their browser was running. */
   private readonly stops = new Map<string, { count: number; browser: boolean }>();
-  /** Threads whose engine was stopped because the server had no room to run it: the code the turn's failure names. */
-  private readonly starved = new Map<string, ShortageCode>();
+  /** Threads whose turn could not run its engine for want of room: the code its failure names, and whether the engine's own
+   * spawn was refused (a later spawn in the same turn that works clears that) or the engine was stopped as silent. */
+  private readonly starved = new Map<string, { code: ShortageCode; why: "refused" | "silent" }>();
+  /** Threads whose engine this gate stopped, for room or for want of it, during their turn: that engine's pid. */
+  private readonly roomStopped = new Map<string, number>();
+  /** The last spawn the system refused for want of room, anywhere on the server. */
+  private lastRefusal: { at: number; code: ShortageCode } | null = null;
   /** Threads whose turn is about to start an engine that keeps a session (expectFrame). */
   private readonly expecting = new Set<string>();
   private queuedEver = 0;
@@ -246,6 +261,7 @@ export class EngineMemory {
     this.groups = options.groups ?? (() => processGroupBytes());
     this.now = options.now ?? Date.now;
     this.signal = options.signal ?? ((pid, signal) => process.kill(-pid, signal));
+    this.tree = options.tree ?? ((pid) => linuxTreeUse(pid));
     this.log = options.log ?? ((line) => console.warn(`memory: ${line}`));
     this.tickMs = options.tickMs ?? TICK_MS;
   }
@@ -325,22 +341,54 @@ export class EngineMemory {
     const pid = child.pid, engine: Engine = { child, threads: new Set([threadId]), startedAt: this.now(), stopping: false };
     this.engines.set(pid, engine);
     this.oomKills ??= this.read()?.oomKills ?? null;
-    // An engine that keeps a session (Claude's stream, ACP, Codex's app-server) writes to its stdout first thing; one that
-    // has written nothing by FIRST_FRAME_MS never came up. Read from the pipe's byte count: no listener is added to it.
+    // A spawn that worked after one was refused in the same turn: the turn goes on, and its end is its own.
+    if (this.starved.get(threadId)?.why === "refused") this.starved.delete(threadId);
+    // An engine that keeps a session (Claude's stream, ACP, Codex's app-server) writes to its stdout first thing. Read from
+    // the pipe's byte count: no listener is added to it.
     const out = this.expecting.delete(threadId) ? child.stdout as { bytesRead?: unknown } | null : null;
-    const unheard = out && typeof out.bytesRead === "number" ? setTimeout(() => { if (out.bytesRead === 0) void this.starveEngine(engine); }, FIRST_FRAME_MS) : null;
-    unheard?.unref?.();
-    child.once("exit", (_code, signal) => { if (unheard) clearTimeout(unheard); this.exited(pid, engine, signal); });
+    const unwatch = out && typeof out.bytesRead === "number" ? this.watchFirstFrame(engine, out as { bytesRead: number }) : null;
+    child.once("exit", (_code, signal) => { unwatch?.(); this.exited(pid, engine, signal); });
     this.arm();
+  }
+
+  /** From FIRST_FRAME_MS on, a new engine that has written nothing is stopped as one that never came up, only while the
+   * server shows a shortage (pids at its limit at the start or now, a spawn refused since the start, memory short or
+   * stalled) and only once its process tree has gone idle with no child running. Otherwise it is left to its driver. */
+  private watchFirstFrame(engine: Engine, out: { bytesRead: number }): () => void {
+    const pid = engine.child.pid!, crowdedAtStart = this.processes?.short(ENGINE_TASKS, 0) === true;
+    let timer: ReturnType<typeof setTimeout> | null = null, last: TreeUse | null = null;
+    const watch = (ms: number) => { timer = setTimeout(look, ms); timer.unref?.(); };
+    const look = () => {
+      timer = null;
+      if (engine.stopping || out.bytesRead !== 0 || this.now() - engine.startedAt > FRAME_WATCH_MS) return;
+      const code = this.shortage(engine.startedAt, crowdedAtStart), use = code === null ? null : this.tree(pid);
+      if (code !== null && use && last && use.children === 0 && use.cpuMs - last.cpuMs < IDLE_CPU_MS) { void this.starveEngine(engine, code); return; }
+      last = use;
+      watch(use ? FRAME_SAMPLE_MS : FRAME_RECHECK_MS);
+    };
+    watch(FIRST_FRAME_MS - FRAME_SAMPLE_MS);
+    return () => { if (timer) clearTimeout(timer); };
+  }
+
+  /** The shortage the server shows for an engine started at `since`, by the code its turn's failure would name; null for
+   * none. */
+  private shortage(since: number, crowdedAtStart: boolean): ShortageCode | null {
+    if (this.lastRefusal && this.lastRefusal.at >= since) return this.lastRefusal.code;
+    if (crowdedAtStart || this.processes?.short(0, 0)) return "EAGAIN";
+    const memory = this.read();
+    return memory && ((memory.fullStall10 ?? 0) >= STALL_PERCENT || this.free(memory) < this.floor(memory)) ? "ENOMEM" : null;
   }
 
   /** The next engine process this thread's turn starts keeps a session, and so speaks first: it gets FIRST_FRAME_MS to. */
   expectFrame(threadId: string): void { if (this.enabled) this.expecting.add(threadId); }
 
-  /** A spawn the system refused inside a thread's turn: that turn fails as one the server had no room for. */
-  spawnRefused(code: string | undefined): void {
+  /** A spawn the system refused. Every one is a sign of a shortage; an engine's own (`engine`) inside a thread's running
+   * turn also fails that turn as one the server had no room for. */
+  spawnRefused(code: string | undefined, engine = false): void {
     const threadId = this.context.getStore(), shortage = shortageCode({ code });
-    if (this.enabled && threadId !== undefined && shortage !== null && !this.starved.has(threadId)) this.starved.set(threadId, shortage);
+    if (!this.enabled || shortage === null) return;
+    this.lastRefusal = { at: this.now(), code: shortage };
+    if (engine && threadId !== undefined && this.active.has(threadId) && !this.starved.has(threadId)) this.starved.set(threadId, { code: shortage, why: "refused" });
   }
 
   /** The engine processes tracked now, with the threads each runs: for the performance sampler's buckets. */
@@ -355,7 +403,18 @@ export class EngineMemory {
     if (child.pid) this.engines.get(child.pid)?.threads.delete(threadId);
   }
 
-  turnStarted(threadId: string): void { if (this.enabled) this.active.add(threadId); }
+  /** A turn starts with nothing from an earlier one: what stopped or starved that turn's engine is not this one's cause. */
+  turnStarted(threadId: string): void {
+    if (!this.enabled) return;
+    this.active.add(threadId);
+    this.forget(threadId);
+  }
+
+  private forget(threadId: string): void {
+    this.stops.delete(threadId);
+    this.starved.delete(threadId);
+    this.roomStopped.delete(threadId);
+  }
 
   /** This thread's engine process is still running (an engine keeps one between turns), so its turn starts no new one. */
   hasEngine(threadId: string): boolean {
@@ -368,25 +427,31 @@ export class EngineMemory {
     this.active.delete(threadId);
     this.reserved.delete(threadId);
     this.pressure.delete(threadId);
-    this.stops.delete(threadId);
-    this.starved.delete(threadId);
+    this.forget(threadId);
     this.expecting.delete(threadId);
     this.wake();
   }
 
   /** A new engine never came up: its processes are stopped, and its threads' turns fail as ones the server had no room
    * for, which start again by themselves rather than as the AI's failure. */
-  private async starveEngine(engine: Engine): Promise<void> {
+  private async starveEngine(engine: Engine, code: ShortageCode): Promise<void> {
     if (engine.stopping || engine.child.exitCode !== null || engine.child.signalCode !== null) return;
-    for (const threadId of engine.threads) if (!this.starved.has(threadId)) this.starved.set(threadId, "EAGAIN");
+    // Not a refused spawn: no limit is learned from it, and no count of refusals goes up.
+    for (const threadId of this.working(engine)) if (!this.starved.has(threadId)) this.starved.set(threadId, { code, why: "silent" });
+    this.noteRoomStopped(engine);
     this.starvedEver += 1;
-    this.processes?.spawnFailed("EAGAIN");
-    this.log(`an engine (pid ${engine.child.pid}) sent nothing for ${FIRST_FRAME_MS / 1000} s after it started; stopping it`);
+    this.log(`an engine (pid ${engine.child.pid}) sent nothing for ${Math.round((this.now() - engine.startedAt) / 1000)} s after it started, idle, while the server was short of room (${code}); stopping it`);
     await this.stop(engine, "relief");
   }
 
-  /** Whether this thread's engine was stopped to make room, or for want of it: its turn is not sent again at once. */
-  stoppedForRoom(threadId: string): boolean { return this.stops.has(threadId) || this.starved.has(threadId); }
+  private noteRoomStopped(engine: Engine): void { for (const threadId of this.working(engine)) this.roomStopped.set(threadId, engine.child.pid!); }
+
+  /** Whether this thread's engine was stopped to make room, or for want of it, in its turn: its turn is not sent again at
+   * once. With `pid`, whether that engine process is the one stopped: any other exit is the engine's own. */
+  stoppedForRoom(threadId: string, pid?: number): boolean {
+    if (pid !== undefined) return this.roomStopped.get(threadId) === pid;
+    return this.stops.has(threadId) || this.starved.has(threadId);
+  }
 
   /** How many engines may stay loaded with no turn running, on a self-hosted server: what fits beside the ones working.
    * Infinity elsewhere. */
@@ -486,9 +551,11 @@ export class EngineMemory {
     return this.stopFailure(threadId)?.message ?? null;
   }
 
-  stopFailure(threadId: string, detail?: string): ReturnType<typeof noticeFailure> | null {
-    const code = this.starved.get(threadId);
-    if (code !== undefined) return noticeFailure("chat.notice.outOfProcesses", { code });
+  /** `detail`: the failure that ends the turn, when one names its own cause (a usage limit, a sign-in) it is kept, whatever
+   * shortage was seen in the turn. `interrupted`: the person stopped the turn, which no shortage explains. */
+  stopFailure(threadId: string, detail?: string, interrupted = false): ReturnType<typeof noticeFailure> | null {
+    const starved = this.starved.get(threadId);
+    if (starved !== undefined && !interrupted && (detail === undefined || !namesOwnCause(detail))) return noticeFailure("chat.notice.outOfProcesses", { code: starved.code });
     const stop = this.stops.get(threadId);
     return stop === undefined ? null : noticeFailure(memoryStopKey(stop.browser, detail !== undefined), detail === undefined ? undefined : { detail });
   }
@@ -522,6 +589,7 @@ export class EngineMemory {
     if (idle) { void this.stop(victim, "idle"); return; }
     const stopped = this.working(victim);
     this.noteStops(stopped, () => count);
+    this.noteRoomStopped(victim);
     void this.stop(victim, "relief").then(() => this.closeBrowsers(stopped));
   }
 
@@ -616,6 +684,7 @@ export class EngineMemory {
     const working = this.working(engine);
     if (signal === "SIGKILL" && !engine.stopping && working.length && this.kernelKilled(this.read()?.oomKills ?? null)) {
       this.noteStops(working, (threadId) => this.busy(threadId));
+      for (const threadId of working) this.roomStopped.set(threadId, pid);
       this.log(`the kernel stopped an engine (pid ${pid}) for memory`);
       this.closeBrowsers(working);
     }
@@ -689,7 +758,8 @@ export function withEngineMemory(instance: ProviderInstance, memory: EngineMemor
     queueMicrotask(() => { explained.delete(item.threadId); memory.turnEnded(item.threadId); });
   });
   const present = (item: RuntimeEvent): RuntimeEvent[] => {
-    const stopped = memory.stopFailure(item.threadId, item.type === "runtime.error" ? item.message.slice(0, 200) : undefined);
+    const stopped = memory.stopFailure(item.threadId, item.type === "runtime.error" ? item.message.slice(0, 200) : undefined,
+      item.type === "turn.completed" && item.stopReason === "interrupted");
     if (!stopped) return [item];
     if (item.type === "runtime.error") {
       explained.add(item.threadId);
@@ -736,8 +806,10 @@ export function withEngineMemory(instance: ProviderInstance, memory: EngineMemor
       try {
         return await memory.within(threadId, () => adapter.sendTurn(driverAdmits ? { ...input, engineAdmission: admit } : input));
       } catch (error) {
-        // A start the server had no room for names that, never the engine's own words: no backup AI is tried for it.
-        if (error instanceof TurnNotStartedError && memory.stoppedForRoom(threadId)) error.message = memory.stopFailure(threadId)?.message ?? error.message;
+        // A start the server had no room for names that, never the engine's own words: no backup AI is tried for it. A refusal
+        // that names its own cause (a usage limit, a sign-in) stays what it is.
+        if (error instanceof TurnNotStartedError && !(error instanceof TurnUsageLimitRefusedError || error instanceof TurnAuthenticationRefusedError)
+          && memory.stoppedForRoom(threadId) && !namesOwnCause(error.message)) error.message = memory.stopFailure(threadId)?.message ?? error.message;
         memory.turnEnded(threadId);
         throw error;
       }

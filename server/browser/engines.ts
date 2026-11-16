@@ -186,6 +186,9 @@ export class ChromeEngine {
 export interface RuntimeRouterOptions {
   /** What a tool call is told instead of reaching either engine, or null to run it. */
   refusal?(session: string, spec: BrowserSpawnSpec, params: unknown): string | null;
+  /** Asked next, before a tool call that may open the session's browser: what it is told while the server has no room to
+   * run one (a self-hosted server's pids limit), or null once it has. */
+  room?(session: string, spec: BrowserSpawnSpec, params: unknown): Promise<string | null>;
   /** Asked each time beforeDispatch ran, so after it claimed the session for this call's turn and before anything reaches
    * the engine: what a refusal that depends on who is calling tells the call, or null to run it. */
   afterClaim?(session: string, spec: BrowserSpawnSpec): string | null;
@@ -203,6 +206,7 @@ export class RuntimeRouter {
   readonly #old: BrowserRuntime;
   readonly #chrome: ChromeEngine;
   readonly #refusal: RuntimeRouterOptions["refusal"];
+  readonly #room: RuntimeRouterOptions["room"];
   readonly #afterClaim: RuntimeRouterOptions["afterClaim"];
   readonly #annotate: RuntimeRouterOptions["annotate"];
   readonly #afterCall: RuntimeRouterOptions["afterCall"];
@@ -211,6 +215,7 @@ export class RuntimeRouter {
     this.#old = old;
     this.#chrome = chrome;
     this.#refusal = options.refusal;
+    this.#room = options.room;
     this.#afterClaim = options.afterClaim;
     this.#annotate = options.annotate;
     this.#afterCall = options.afterCall;
@@ -219,6 +224,8 @@ export class RuntimeRouter {
   async agentRpc(session: string, spec: BrowserSpawnSpec, method: "tools/list" | "tools/call", params: unknown, beforeDispatch?: () => void, ctx?: StepContext): Promise<unknown> {
     const refusal = method === "tools/call" ? this.#refusal?.(session, spec, params) : null;
     if (refusal) return { isError: true, content: [{ type: "text", text: refusal }] };
+    const full = method === "tools/call" ? await this.#room?.(session, spec, params) : null;
+    if (full) return { isError: true, content: [{ type: "text", text: full }] };
     const afterClaim = method === "tools/call" ? this.#afterClaim : undefined;
     const dispatch = afterClaim ? () => {
       beforeDispatch?.();

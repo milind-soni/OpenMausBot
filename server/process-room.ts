@@ -1,5 +1,8 @@
 // A server in a container may hold only so many processes and threads (its cgroup's pids.max); past that every spawn
 // fails with EAGAIN. The gate that holds turns for memory (engine-memory.ts) asks here whether one more engine fits.
+import { readFileSync } from "node:fs";
+import { nameBucket, parseReapedChildrenMs, type ProcessRow } from "./perf/process-buckets.ts";
+import { linuxProcessList } from "./perf/process-sampler.ts";
 import { containerLimited, readPids } from "./process-limits.ts";
 import type { ShortageCode } from "./process-shortage.ts";
 
@@ -18,6 +21,12 @@ const SHORTAGE_HOLD_MS = 30_000;
 /** A limit learned from a refused spawn is kept this long after the last refusal: the refusal may have been another
  * limit's (ulimit -u, shared with every process of the same user), or the container's may have been raised. */
 const LEARNED_FOR_MS = 30 * 60_000;
+/** A browser let in counts at its full size while it starts, whatever its process says; after that while it runs. */
+const BROWSER_START_MS = 60_000;
+/** How long a browser call waits for room before it is told why it cannot open one: well inside the call's own budget. */
+const BROWSER_WAIT_MS = 20_000;
+export const BROWSER_NO_ROOM = "This server is close to its limit on running programs, so another browser cannot open now. " +
+  "Try the browser again in a few minutes, or carry on without it.";
 
 /** Kept below the limit for what nobody counts ahead: a command's own children, a probe, a thread pool growing. */
 export const margin = (limit: number) => Math.max(32, Math.round(limit * 0.1));
@@ -35,8 +44,11 @@ export interface ProcessCounts {
 
 export interface ProcessBudgetOptions {
   read?: () => { max: number | "max" | null; current: number | null };
+  /** The threads every browser process runs now, counted against the limit already; null where they can't be read. */
+  browserTasks?: () => number | null;
   now?: () => number;
   log?: (line: string) => void;
+  pollMs?: number;
 }
 
 export class ProcessBudget {
@@ -50,11 +62,19 @@ export class ProcessBudget {
   private forceKilled = 0;
   private lateReaped = 0;
   private refused: (() => void) | null = null;
+  private readonly browserTasks: () => number | null;
+  private readonly pollMs: number;
+  /** Browsers let in (browserRoom), by session, and when. */
+  private readonly browsers = new Map<string, number>();
+  private browserRuns: ((session: string) => boolean) | null = null;
+  private seenBrowsers: { at: number; tasks: number | null } | null = null;
 
   constructor(options: ProcessBudgetOptions = {}) {
     this.read = options.read ?? (() => readPids());
+    this.browserTasks = options.browserTasks ?? (() => browserTasksNow());
     this.now = options.now ?? Date.now;
     this.log = options.log ?? ((line) => console.warn(`processes: ${line}`));
+    this.pollMs = options.pollMs ?? 1_000;
   }
 
   /** Called when the system refuses a spawn for want of room: whoever holds turns back looks again. */
@@ -71,11 +91,42 @@ export class ProcessBudget {
     return this.learned?.limit ?? null;
   }
 
-  /** Whether `tasks` more, on top of `held` already promised to engines still starting, would not fit. */
+  /** Whether `tasks` more, on top of `held` already promised to engines still starting and the browsers running, would
+   * not fit. */
   short(tasks: number, held: number): boolean {
     if (this.now() < this.holdUntil) return true;
     const limit = this.limit(), { current } = this.state();
-    return limit !== null && current !== null && current + held + tasks > limit - margin(limit);
+    return limit !== null && current !== null && current + held + this.browsersHeld() + tasks > limit - margin(limit);
+  }
+
+  /** What the browsers let in still hold against the limit beyond what the count shows of them: each counts at its full
+   * size for as long as it runs, so one opened after its turn was let in (on a bot's first browser call) is never missed,
+   * and one still starting or loading a page has its room kept. */
+  private browsersHeld(): number {
+    const at = this.now();
+    for (const [session, since] of this.browsers) if (at - since >= BROWSER_START_MS && this.browserRuns?.(session) === false) this.browsers.delete(session);
+    if (!this.browsers.size) return 0;
+    if (!this.seenBrowsers || at - this.seenBrowsers.at >= 1_000 || at < this.seenBrowsers.at) this.seenBrowsers = { at, tasks: this.browserTasks() };
+    return Math.max(0, this.browsers.size * BROWSER_TASKS - (this.seenBrowsers.tasks ?? 0));
+  }
+
+  /** The gate a bot's browser passes before it opens: `runs` says whether a session's browser is running now. */
+  browserRoom(runs: (session: string) => boolean): { enter(session: string): Promise<string | null> } {
+    this.browserRuns = runs;
+    return { enter: (session) => this.enterBrowser(session, this.now() + BROWSER_WAIT_MS) };
+  }
+
+  /** Null once this session's browser may run: it already does, or its processes fit. Otherwise it waits for room until
+   * `until`, then answers why it cannot open. */
+  private async enterBrowser(session: string, until: number): Promise<string | null> {
+    for (;;) {
+      const since = this.browsers.get(session);
+      if (since !== undefined && (this.now() - since < BROWSER_START_MS || this.browserRuns?.(session) !== false)) return null;
+      this.browsers.delete(session);
+      if (this.browserRuns?.(session) || !this.short(BROWSER_TASKS, 0)) { this.browsers.set(session, this.now()); return null; }
+      if (this.now() >= until) return BROWSER_NO_ROOM;
+      await new Promise((resolve) => { const timer = setTimeout(resolve, Math.max(1, Math.min(this.pollMs, until - this.now()))); timer.unref?.(); });
+    }
   }
 
   /** Every spawn the operating system refused, by its code. A pids refusal also teaches the limit where none is readable. */
@@ -104,6 +155,38 @@ export class ProcessBudget {
 }
 
 export const processBudget = new ProcessBudget();
+
+/** The threads of every browser process (Chromium, Firefox, agent-browser) /proc shows; null where none can be read. */
+export function browserTasksNow(rows: readonly ProcessRow[] = linuxProcessList().rows): number | null {
+  if (!rows.length) return null;
+  return rows.reduce((sum, row) => sum + (nameBucket(row.name) === "browser" || row.name === "agent-browser" ? row.threads ?? 1 : 0), 0);
+}
+
+/** What one engine's process tree is doing: CPU used so far (its own, its descendants', and its exited children's) and how
+ * many descendants still run. */
+export interface TreeUse { cpuMs: number; children: number }
+
+/** The tree under `pid` by parent, from /proc; null where it can't be read (not Linux) or the process is gone. */
+export function linuxTreeUse(pid: number, rows: () => readonly ProcessRow[] = () => linuxProcessList().rows,
+  reapedMs: (pid: number) => number | null = (of) => { try { return parseReapedChildrenMs(readFileSync(`/proc/${of}/stat`, "utf8")); } catch { return null; } }): TreeUse | null {
+  const below = new Map<number, ProcessRow[]>();
+  let root: ProcessRow | undefined;
+  for (const row of rows()) {
+    if (row.pid === pid) root = row;
+    else below.set(row.ppid, [...below.get(row.ppid) ?? [], row]);
+  }
+  if (!root) return null;
+  let cpuMs = root.cpuMs + (reapedMs(pid) ?? 0), children = 0;
+  const seen = new Set([pid]), queue = [...below.get(pid) ?? []];
+  for (let row = queue.pop(); row; row = queue.pop()) {
+    if (seen.has(row.pid)) continue;
+    seen.add(row.pid);
+    cpuMs += row.cpuMs;
+    if (row.state !== "Z" && row.state !== "X") children += 1;
+    queue.push(...below.get(row.pid) ?? []);
+  }
+  return { cpuMs, children };
+}
 
 export type TurnsSetting = number | "auto" | "off";
 

@@ -219,8 +219,9 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
   };
   if (verdict.kind === "busy") {
     run.deferredAt ??= now;
-    // A run of checked items waits as long as it takes: its bot is busy with the person, which is not a failure.
-    if (now - run.deferredAt >= ROUTINE_BUSY_WAIT_MS && run.checkKey === undefined) return failed(codedLine("error", "routines.server.stillBusy", { minutes: ROUTINE_BUSY_WAIT_MS / 60_000, failure }));
+    // A run of checked items waits as long as its bot is busy with the person, which is not a failure; a server with no room
+    // to start it is held to the same hour as any other run.
+    if (now - run.deferredAt >= ROUTINE_BUSY_WAIT_MS && (run.checkKey === undefined || outOfProcesses(failure))) return failed(codedLine("error", "routines.server.stillBusy", { minutes: ROUTINE_BUSY_WAIT_MS / 60_000, failure }));
     run.status = "queued";
     run.retryAt = now + ROUTINE_BUSY_RECHECK_MS;
     attend(run, codedLine("attention", "routines.server.waitingToStart", { failure }));

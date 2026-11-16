@@ -108,6 +108,6 @@ export function engineIdleMs(threadId: string, policy: SessionIdlePolicy, memory
   return Math.max(policy.minimumMs, Math.round(policy.idleMs * memory.headroom()));
 }
 
-/** Whether this thread's engine was just stopped to make room, or for want of it: a driver does not start it again at
- * once, into the same shortage. */
-export const stoppedForRoom = (threadId: string): boolean => engineMemory.stoppedForRoom(threadId);
+/** Whether this thread's engine (`pid`, the process that exited) was just stopped to make room, or for want of it: a
+ * driver does not start it again at once, into the same shortage. */
+export const stoppedForRoom = (threadId: string, pid?: number): boolean => engineMemory.stoppedForRoom(threadId, pid);
