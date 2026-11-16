@@ -88,7 +88,7 @@ export function OtherPlaceBots({ query = "" }: { query?: string }) {
   const name = homeLabel(other.home);
   return (
     <div data-other-place={other.home} data-other-place-state={other.state} className={cn("flex flex-col gap-0.5", !iconOnly && "pt-3")}>
-      {!iconOnly && <SidebarSectionHeader name={name} line={simple} count={simple ? rows.length : undefined} collapsed={collapsed}
+      {!iconOnly && <SidebarSectionHeader name={name} line={simple} collapsed={collapsed}
         onToggle={() => setCollapsed((was) => !was)} reorderable={false} dragging={false} />}
       {said && !iconOnly && <p role="status" data-other-place-line="" className="px-2 pb-1 text-[12px] leading-4 text-ink-secondary">{said}</p>}
       {!collapsed && rows.map((row) => <OtherPlaceBotRow key={placedKey(row.home, row.id)} row={row} dim={other.state !== "ready" && other.state !== "loading"} iconOnly={iconOnly} simple={simple} />)}
