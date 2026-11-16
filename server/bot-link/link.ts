@@ -118,7 +118,8 @@ export interface BotLinkDeps {
   hasThread(botId: string, threadId: string): boolean;
   personName(threadId: string): string | undefined;
   /** "Sent to …" in the requester's conversation. */
-  sentRow(input: { sender: LocalBot; threadId: string; recipient: { id: string; name: string }; workThreadId: string; nodeId: string; reason?: string; doneWhen?: string }): void;
+  sentRow(input: { sender: LocalBot; threadId: string; recipient: { id: string; name: string }; workThreadId: string; nodeId: string; reason?: string; doneWhen?: string;
+    /** The room the sender speaks in: the bot of the other place is not in it, so it got the work directly. */ roomId?: string }): void;
   /** The files that travel with hand-offs (server/host/handoff-files.ts). Absent: files do not cross. */
   files?: {
     /** What this assignment carries one way, in the attachment store. */
@@ -145,6 +146,8 @@ export interface CoordinateContext {
   parentId?: string;
   /** The caller is not one of this place's own turns. */
   external: boolean;
+  /** Why this conversation may not hand work on at all (it left its room, its task is gone), as for any hand-off. */
+  problem?: string;
   handed(nodeId: string): void;
 }
 type CoordinateResult = { status: number; body: Record<string, unknown> };
@@ -617,7 +620,7 @@ export function createBotLink(deps: BotLinkDeps) {
         if (!online) for (const listener of wantedListeners) listener();
         if (!duplicate) {
           context.handed(node.id);
-          deps.sentRow({ sender: context.sender, threadId: context.address.threadId, recipient: { id: linked, name: `${remote.bot.name} (${place})` }, workThreadId: threadId, nodeId: node.id,
+          deps.sentRow({ sender: context.sender, threadId: context.address.threadId, recipient: { id: linked, name: `${remote.bot.name} (${place})` }, workThreadId: threadId, nodeId: node.id, ...(context.address.groupId ? { roomId: context.address.groupId } : {}),
             ...(call.reason ? { reason: call.reason } : {}), ...(call.doneWhen ? { doneWhen: call.doneWhen } : {}) });
         }
       } catch (error) {
@@ -638,7 +641,10 @@ export function createBotLink(deps: BotLinkDeps) {
   }
   /** Why this call cannot go to another place at all, or null. */
   function unsupportedHere(call: CoordinateBotsCall, context: CoordinateContext, place: string): string | null {
-    return call.groupId || context.address.groupId ? `Work in a room does not reach ${place} yet: hand it to the bot directly, from your own conversation`
+    // A bot of another place is in no room here. Named from a room, it gets the work directly, in a thread of its own
+    // there, and its result comes back to the room, as for any bot outside a room.
+    return context.problem ? context.problem
+      : call.groupId && call.groupId !== context.address.groupId ? `${place}'s bots are in no room here: hand it to the bot from your own conversation, or from the room you are speaking in`
       : call.answers || call.post || call.ownThread ? `That does not reach ${place} yet: send the bot plain work or a question instead`
       : call.consult && call.reply === "none" ? "consult asks a question whose answer comes back to you; leave reply out" : null;
   }
