@@ -439,6 +439,9 @@ const GMAIL_PAGE = 20;
 const GMAIL_PAGE_MIN = 5;
 const GMAIL_PAGES = 6;
 
+/** The account lookup one multi-request read keeps for all its requests. */
+type AccountPin = { accounts?: Promise<AppAccounts> };
+
 const appOf = (slug: string): ReadApp | "outlook" => (slug.startsWith("GMAIL_") ? "gmail" : slug.startsWith("OUTLOOK_") ? "outlook" : "googlecalendar");
 
 export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedReads, "session"> & { session(botId?: string): MailBodySession } {
@@ -460,9 +463,10 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
     }
 
     /** One tool's data, GONE when `gone` says the tool's own failure means the thing asked for is missing, or SHORTENED
-     *  when `shortened` is set and the answer was too large to come back whole. */
-    async function call(slug: string, args: Record<string, unknown>, options: { signal?: AbortSignal; gone?: (toolError: string) => boolean; shortened?: boolean } = {}): Promise<unknown> {
-      const { gone, shortened, signal = AbortSignal.timeout(readTimeoutMs) } = options;
+     *  when `shortened` is set and the answer was too large to come back whole. Calls sharing one `pin` name the same
+     *  account, so the pages and calendars of one read all come from one account. */
+    async function call(slug: string, args: Record<string, unknown>, options: { signal?: AbortSignal; gone?: (toolError: string) => boolean; shortened?: boolean; pin?: AccountPin } = {}): Promise<unknown> {
+      const { gone, shortened, pin, signal = AbortSignal.timeout(readTimeoutMs) } = options;
       const app = appOf(slug);
       let account: string | undefined;
       try {
@@ -474,12 +478,12 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
         const transport = await opened;
         // A failed lookup reads as the fallback (no account named, unless the bot is limited to some) and is asked again
         // on the next read, not kept for the session.
-        accounts ??= deps.accounts?.(botId).catch((): AppAccounts => {
+        const lookup = pin?.accounts ?? (accounts ??= deps.accounts?.(botId).catch((): AppAccounts => {
           accounts = undefined;
           return deps.fallbackAccounts?.(botId) ?? {};
-        }) ?? Promise.resolve({});
+        }) ?? Promise.resolve<AppAccounts>({}));
+        if (pin) pin.accounts = lookup;
         // The lookup counts toward this read's time limit; one that runs out is dropped so the next read asks again.
-        const lookup = accounts;
         account = (await untilAborted(lookup, signal, () => {
           if (accounts === lookup) accounts = undefined;
         }))[app];
@@ -511,13 +515,13 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
       if (times.some((time) => !Number.isFinite(time))) throw new SourceError(app, "the time window was not a finite time");
     }
 
-    async function calendarPages<T>(slug: string, args: Record<string, unknown>, parse: (data: unknown) => T[], signal: AbortSignal): Promise<T[]> {
+    async function calendarPages<T>(slug: string, args: Record<string, unknown>, parse: (data: unknown) => T[], signal: AbortSignal, pin: AccountPin): Promise<T[]> {
       const results: T[] = [];
       const seen = new Set<string>();
       let page: string | undefined;
       for (let index = 0; index < CALENDAR_PAGES; index++) {
         const pageArgs = page ? { ...args, [slug === CALENDARS_TOOL ? "page_token" : "pageToken"]: page } : args;
-        const data = await call(slug, pageArgs, { signal });
+        const data = await call(slug, pageArgs, { signal, pin });
         results.push(...parsed("googlecalendar", () => parse(data)));
         page = nextPageOf(data);
         if (!page) return results;
@@ -532,14 +536,15 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
         requireFinite("googlecalendar", fromMs, toMs);
         const failed = new AbortController();
         const signal = AbortSignal.any([AbortSignal.timeout(readTimeoutMs), failed.signal]);
-        const listed = await calendarPages(CALENDARS_TOOL, {}, calendarsFromData, signal);
+        const pin: AccountPin = {};
+        const listed = await calendarPages(CALENDARS_TOOL, {}, calendarsFromData, signal, pin);
         const read = [...(listed.some((calendar) => calendar.primary) ? [] : [PRIMARY_CALENDAR]), ...listed.filter((calendar) => calendar.read)];
         const perCalendar = await inParallel(read, CALENDAR_READS_AT_ONCE, async (calendar) => {
           try {
             return await calendarPages(CALENDAR_LIST_TOOL, {
               calendarId: calendar.id, timeMin: new Date(fromMs).toISOString(), timeMax: new Date(toMs).toISOString(),
               singleEvents: true, orderBy: "startTime", maxResults: 100, showDeleted: true,
-            }, (data) => eventsFromData(data, { id: calendar.id, owned: calendar.owned }), signal);
+            }, (data) => eventsFromData(data, { id: calendar.id, owned: calendar.owned }), signal, pin);
           } catch (error) {
             failed.abort();
             throw new SourceError("googlecalendar", `calendar ${calendar.name}: ${errorText(error)}`, error instanceof SourceError && error.severalAccounts);
@@ -552,12 +557,13 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
         const found: EmailHeader[] = [];
         let page: string | undefined;
         let size = GMAIL_PAGE;
+        const pin: AccountPin = {};
         // Only whole pages count toward GMAIL_PAGES; a shortened answer is asked again smaller, at most twice per read.
         for (let pages = 0; pages < GMAIL_PAGES;) {
           const data = await call(GMAIL_FETCH_TOOL, {
             user_id: "me", query: `in:inbox after:${seconds(sinceMs)} -category:promotions -category:social`,
             max_results: size, include_payload: false, verbose: false, ...(page ? { page_token: page } : {}),
-          }, { shortened: size > GMAIL_PAGE_MIN });
+          }, { shortened: size > GMAIL_PAGE_MIN, pin });
           if (data === SHORTENED) {
             size = Math.max(GMAIL_PAGE_MIN, Math.floor(size / 2));
             continue;
