@@ -73,7 +73,7 @@ export interface ConfigStatus {
   /** Bots paused for the plan's limit: kept, but taking no turns. */
   pausedBots?: string[];
   /** What the person paused (Pause in the sidebar menus): bots by id and departments by name. Absent from older servers. */
-  pausedByPerson?: { bots: string[]; departments: string[] };
+  pausedByPerson?: { bots: string[]; departments: string[]; all?: true };
   /** Every bot taking no new work because the person paused it or its department. */
   heldBots?: string[];
   /** The server cannot read its saved routines, so none runs until it can. */

@@ -70,6 +70,30 @@ describe("pausing a bot or a department", () => {
   });
 });
 
+describe("pausing every bot", () => {
+  it("holds every bot, says so, survives a restart, and ending it leaves the earlier pauses in place", () => {
+    const { make, dataDir, bots } = setup();
+    const holds = make();
+    holds.set("bot", "cy", true);
+    expect(holds.set("all", "", true).newlyHeld).toEqual(["ada", "bo", "di"]);
+    expect(holds.state()).toEqual({ bots: ["cy"], departments: [], all: true });
+    expect(holds.heldBots()).toEqual(["ada", "bo", "cy", "di"]);
+    expect(holds.text("cy")).toBe("server.botHeldAll:Cy");
+    expect(holds.handoff("di")).toContain("@Di is paused by the person (every bot is paused)");
+    bots.push({ id: "ed", name: "Ed" });
+    expect(holds.held("ed")).toBe(true);
+    expect(JSON.parse(readFileSync(join(dataDir, "paused-bots.json"), "utf8"))).toMatchObject({ bots: ["cy"], all: true });
+    expect(make().heldBots()).toEqual(["ada", "bo", "cy", "di", "ed"]);
+    expect(holds.set("all", "", true).newlyHeld).toEqual([]);
+
+    expect(holds.set("all", "", false).newlyHeld).toEqual([]);
+    expect(holds.state()).toEqual({ bots: ["cy"], departments: [] });
+    expect(holds.heldBots()).toEqual(["cy"]);
+    expect(holds.text("cy")).toBe("server.botHeld:Cy");
+    expect(make().state()).toEqual({ bots: ["cy"], departments: [] });
+  });
+});
+
 describe("the pause routes", () => {
   function call(routes: ReturnType<typeof createBotHoldRoutes>, method: string, body?: unknown) {
     const out: { status?: number; body?: Record<string, unknown> } = {};
@@ -100,5 +124,29 @@ describe("the pause routes", () => {
     expect(await call(routes, "GET")).toMatchObject({ status: 200, body: { bots: ["ada"], departments: [], heldBots: ["ada"] } });
     expect(await call(routes, "POST", { kind: "bot", id: "nobody", paused: true })).toMatchObject({ status: 404 });
     expect(await call(routes, "POST", { kind: "room", id: "x", paused: true })).toMatchObject({ status: 400 });
+  });
+
+  it("pauses every bot in one call, stops the ones that were still working, and records it", async () => {
+    const { make } = setup();
+    const holds = make();
+    holds.set("bot", "ada", true);
+    const stop = vi.fn(async (ids: readonly string[]) => ids.length);
+    const audit = vi.fn();
+    const named = vi.fn(() => null);
+    const routes = createBotHoldRoutes({ holds, stop, audit, named });
+
+    expect(await call(routes, "POST", { kind: "all", paused: true })).toMatchObject({ status: 200, body: { all: true, bots: ["ada"], heldBots: ["ada", "bo", "cy", "di"], stopped: 3 } });
+    expect(stop.mock.calls).toEqual([[["bo", "cy", "di"]]]);
+    expect(await call(routes, "GET")).toMatchObject({ status: 200, body: { all: true, heldBots: ["ada", "bo", "cy", "di"] } });
+    const resumed = await call(routes, "POST", { kind: "all", paused: false });
+    expect(resumed).toMatchObject({ status: 200, body: { bots: ["ada"], heldBots: ["ada"], stopped: 0 } });
+    expect(resumed.body).not.toHaveProperty("all");
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(named).not.toHaveBeenCalled();
+    expect(audit.mock.calls.map(([entry]) => entry)).toEqual([
+      { kind: "all", id: "all", name: "Every bot", paused: true },
+      { kind: "all", id: "all", name: "Every bot", paused: false },
+    ]);
+    expect(await call(routes, "POST", { kind: "all" })).toMatchObject({ status: 400 });
   });
 });
