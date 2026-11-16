@@ -23,7 +23,16 @@ export function lookForGrokBot(): Promise<GrokLook> {
 /** The MausBot bot in Grok Bot: it sends each Bot's setup to the link below. */
 export const MAUSBOT_GROK_TEMPLATE_URL = "https://x.ai/bot/3i4Tvjckmdk05UwntFeNo";
 
-/** The link Grok Bot sends Bots to, when this app can make one, and what arrived through it. */
+/** A task Grok Bot handed off through the link, as the app shows it. */
+export interface GrokHandoff {
+  title: string;
+  state: "working" | "needs_you" | "done" | "failed" | "stopped";
+  botId: string;
+  threadId: string;
+  at: number;
+}
+
+/** The link Grok Bot sends Bots and tasks to, when this app can make one, what arrived through it and the last handoffs. */
 export interface GrokConnector {
   available: boolean;
   connectorUrl?: string;
@@ -32,13 +41,15 @@ export interface GrokConnector {
   arrived: GrokLook["files"];
   /** The last arrival's number: the next look asks for what came after it. */
   seq: number;
+  handoffs: GrokHandoff[];
 }
 
-/** POST opens the link (or gives the one already open; a new one takes a few seconds), GET looks for what arrived after `after`, DELETE ends it. */
-export async function grokConnector(method: "GET" | "POST" | "DELETE", after = 0): Promise<GrokConnector> {
-  const answer = await api<{ available?: boolean; connectorUrl?: string; stopped?: boolean; arrived?: Array<{ seq: number; at: number; text: string }> } | null>(
+/** POST opens the link (or gives the one already open; a new one takes a few seconds) or, with `taken`, lets go of what
+ * was imported up to that number; GET looks for what arrived after `after`; DELETE turns the link off. */
+export async function grokConnector(method: "GET" | "POST" | "DELETE", after = 0, taken?: number): Promise<GrokConnector> {
+  const answer = await api<{ available?: boolean; connectorUrl?: string; stopped?: boolean; arrived?: Array<{ seq: number; at: number; text: string }>; handoffs?: GrokHandoff[] } | null>(
     `/api/setup-import/grok/connector${method === "GET" && after ? `?after=${after}` : ""}`,
-    { method, timeoutMs: 60_000, ...(method === "POST" ? { body: "{}" } : {}) },
+    { method, timeoutMs: 60_000, ...(method === "POST" ? { body: JSON.stringify(taken === undefined ? {} : { taken }) } : {}) },
   );
   const arrived = Array.isArray(answer?.arrived) ? answer.arrived : [];
   return {
@@ -46,7 +57,8 @@ export async function grokConnector(method: "GET" | "POST" | "DELETE", after = 0
     ...(typeof answer?.connectorUrl === "string" ? { connectorUrl: answer.connectorUrl } : {}),
     stopped: answer?.stopped === true,
     arrived: arrived.map((item) => ({ name: String(item.seq), modifiedAt: item.at, text: item.text })),
-    seq: arrived.reduce((last, item) => Math.max(last, item.seq), after),
+    seq: arrived.reduce((last, item) => Math.max(last, item.seq), taken ?? after),
+    handoffs: Array.isArray(answer?.handoffs) ? answer.handoffs : [],
   };
 }
 
