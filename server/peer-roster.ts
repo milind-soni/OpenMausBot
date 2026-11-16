@@ -75,9 +75,10 @@ export function hasAuthority(from: RosterMember, target: RosterMember): boolean 
   return hasTeamAuthority(from, target.section);
 }
 
-/** May change `target`'s setup, automations or threads: authority, and never past what reach allows. */
+/** May change `target`'s setup, automations or threads: authority, within the same audience. Reaching a wider teammate
+ * one way never lets a narrower bot manage it. */
 export function canManage(from: RosterMember, target: RosterMember): boolean {
-  return canReach(from, target) && hasAuthority(from, target);
+  return canReach(from, target) && sameAudience(from.visibility, target.visibility) && hasAuthority(from, target);
 }
 
 /** Why `from` may not manage `target` when the department rule alone decided; otherwise null. */
