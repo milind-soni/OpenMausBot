@@ -52,7 +52,7 @@ export function CostCaveats({ summary }: { summary: Pick<UsageSummary, "total" |
   const unpriced = summary?.total?.unpriced ?? 0;
   if (!(plan > 0) && !unpriced) return null;
   return (
-    <div data-testid="usage-caveats" className="flex flex-col gap-0.5 px-1 text-[12px] leading-relaxed text-ink-secondary">
+    <div data-testid="usage-caveats" className="flex flex-col gap-0.5 px-1 text-[12px] leading-5 text-ink-secondary">
       {plan > 0 && <p>{t("usage.page.notBilled", { cost: formatCost(plan) })}</p>}
       {unpriced > 0 && <p>{t("usage.page.unpriced", { count: String(unpriced) })}</p>}
     </div>
