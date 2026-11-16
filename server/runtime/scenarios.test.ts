@@ -2081,3 +2081,90 @@ describe("§5 outward / §2 loop guard", () => {
     invariants(w);
   });
 });
+
+describe("failed hand-offs spend no more of a request than they must", () => {
+  const CANNOT_START = "spawn /usr/local/bin/claude EAGAIN";
+  const COORDINATOR_LIMITS: Partial<Limits> = { requests: 64, executions: 96, wakes: 48 };
+
+  /** A requester that hands the same work out again every time it is resumed, up to `turns` resumes. Each resume is one model request. */
+  function reworkOnEveryResume(w: World, root: Assignment, turns: number): void {
+    w.runner.script(root.id, ...Array.from({ length: turns }, () => custom((ctx) => {
+      const sent = ctx.handOut(workFor("dev", "Build", { rework: true }));
+      return { kind: "completed", text: sent.ok ? "sent again" : sent.reason };
+    })));
+  }
+
+  async function settleAll(w: World): Promise<void> {
+    await drain(w, 5_000);
+  }
+
+  it("a requester whose teammates cannot start is stopped at the fifth failure in a row: 4 resumes, not one per failure for ever", async () => {
+    const w = world(COORDINATOR_LIMITS);
+    const root = beginChief(w);
+    w.runner.script("dev", ...Array.from({ length: 400 }, () => fail("provider_error", CANNOT_START)));
+    reworkOnEveryResume(w, root, 400);
+    ok(enqueueFrom(w, root, workFor("dev", "Build")));
+    w.rt.end(root.id, { ok: true, text: "" });
+    await settleAll(w);
+
+    expect(w.runner.runs(root.id)).toHaveLength(4);
+    expect(w.runner.runs().filter((call) => call.a?.assignee.botId === "dev")).toHaveLength(5);
+    const stopped = get(w, root.id);
+    expect(stopped).toMatchObject({ status: "failed", outcome: "budget" });
+    expect(stopped.outcomeDetail).toBe(`5 hand-offs in a row failed, so this request was stopped. The last one: ${CANNOT_START}`);
+    expect(w.runner.reports(root.id)).toHaveLength(1);
+    invariants(w);
+  });
+
+  it("failures alone never renew the window: with the failure limit out of the way the request budget still ends the loop", async () => {
+    const w = world({ ...COORDINATOR_LIMITS, failedInARow: 1_000_000 });
+    const root = beginChief(w);
+    w.runner.script("dev", ...Array.from({ length: 400 }, () => fail("provider_error", CANNOT_START)));
+    reworkOnEveryResume(w, root, 400);
+    ok(enqueueFrom(w, root, workFor("dev", "Build")));
+    w.rt.end(root.id, { ok: true, text: "" });
+    await settleAll(w);
+
+    expect(w.runner.runs(root.id)).toHaveLength(64);
+    expect(get(w, root.id)).toMatchObject({ status: "completed", result: "Request budget exhausted: 64 requests without progress" });
+    expect(get(w, root.id).budgets?.requests).toBe(64);
+    invariants(w);
+  });
+
+  it("a completed hand-off ends the row of failures", async () => {
+    const w = world(COORDINATOR_LIMITS);
+    const root = beginChief(w);
+    w.runner.script("dev", ...Array.from({ length: 4 }, () => fail("provider_error", CANNOT_START)), complete("built"),
+      ...Array.from({ length: 4 }, () => fail("provider_error", CANNOT_START)), complete("built again"));
+    reworkOnEveryResume(w, root, 9);
+    ok(enqueueFrom(w, root, workFor("dev", "Build")));
+    w.rt.end(root.id, { ok: true, text: "" });
+    await settleAll(w);
+
+    expect(get(w, root.id)).toMatchObject({ status: "completed" });
+    expect(get(w, root.id).budgets?.failed).toBeUndefined();
+    invariants(w);
+  });
+
+  it("no request starts more turns than its absolute limit, however much of its work completes", async () => {
+    const w = world({ ...COORDINATOR_LIMITS, totalExecutions: 20 });
+    const root = beginChief(w);
+    reworkOnEveryResume(w, root, 400);
+    ok(enqueueFrom(w, root, workFor("dev", "Build")));
+    w.rt.end(root.id, { ok: true, text: "" });
+    await settleAll(w);
+
+    expect(w.runner.runs()).toHaveLength(19);
+    expect(get(w, root.id).budgets?.total).toBe(20);
+    expect(get(w, root.id)).toMatchObject({ status: "failed", outcome: "budget", outcomeDetail: "20 turns in all, the most one request may take" });
+    expect(w.runner.reports(root.id)).toHaveLength(1);
+    invariants(w);
+  });
+
+  it("at the absolute limit a new hand-off is refused as budget", () => {
+    const w = world({ totalExecutions: 1 });
+    const root = beginChief(w);
+    const over = refused(enqueueFrom(w, root, workFor("dev", "Build")));
+    expect(over).toMatchObject({ outcome: "budget", reason: "Request budget exhausted: 1 turns in all" });
+  });
+});

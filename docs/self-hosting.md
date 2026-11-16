@@ -1534,6 +1534,10 @@ off by default, also tells the bot:
   until something is ready (`curl -f` against a server that is still starting)
   counts as a failing command, which is why the stop is not on by default.
 
+A turn nobody is watching (a routine's, a webhook's) has the guard on and is
+stopped at 20 identical failures in a row, whatever is set here: see "Keeping
+unattended bots from spending on failures".
+
 The note needs an engine that accepts a message in the middle of a turn
 (Claude Code, Codex, Pi, Muse Code). ACP agents cannot take one, so they get
 only the stop, and only if you set it. The note and the stop do not cover bots
@@ -1619,6 +1623,31 @@ the server's environment and restart it.
 
 A turn with a person waiting in the chat keeps the limits described under
 "A turn that goes silent".
+
+A turn nobody is watching is one a routine, a webhook or an app event started,
+or work a bot handed on from such a turn. Past any of these it is stopped, and
+its thread (and a routine's run row) gets one line saying which:
+
+| Setting | Default | What it bounds |
+| --- | --- | --- |
+| `OMB_UNATTENDED_TURN_MAX_MS` | `14400000` (4 hours) | The time one such turn may work. Time it waits on a person or a computer is not counted. From `60000`. |
+| `OMB_UNATTENDED_TURN_MAX_REQUESTS` | `400` | The requests one such turn may make to its AI, counted from the engine's usage report for each call, or from its tool calls when that is the larger number. |
+| `OMB_UNATTENDED_TURN_MAX_DENIALS` | `5` | The permission requests of one such turn that may be denied or go unanswered (each unanswered one waits 15 minutes first). One a person denies is not counted. |
+| `loopGuard.unattendedStopAt`, or `OMB_LOOP_GUARD_UNATTENDED_STOP_AT` | `20` | The times in a row one shell command may fail the same way. For such a turn the loop guard (see "A bot stuck on a failing command") is on whatever `loopGuard.enabled` says, with its note at `loopGuard.steerAt` and its stop here, or at `loopGuard.stopAt` if that is lower. `2`-`1000`. |
+| `OMB_HANDOFF_MAX_FAILURES` | `5` | Work one request handed to other bots that may fail in a row, with none completing between. At that many the request is stopped with a line naming the last failure. |
+| `OMB_HANDOFF_MAX_TURNS` | `300` | The turns one request may start in all, across every bot it hands work to. Nothing renews it. |
+
+The three `OMB_UNATTENDED_TURN_*` settings and
+`OMB_LOOP_GUARD_UNATTENDED_STOP_AT` also take `off`; `loopGuard.unattended:
+false` in `config.json` does the same for the loop guard. Any other value that
+is not a whole number in range leaves the default. Set them in the server's
+environment and restart it.
+
+Work that fails no longer renews a request's hand-off limits (64 hand-offs, 96
+turns and 48 wake-ups since any work last completed): only work that completes
+does. When handed-off work failed because of this server (it could not start a
+process, its disk is full, a tool server is down, an AI is signed out), the bot
+that asked for it is told so and is not told to send it again.
 
 ### Pausing every bot
 

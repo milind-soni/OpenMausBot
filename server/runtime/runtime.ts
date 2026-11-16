@@ -152,7 +152,7 @@ export class Runtime {
       id, rootId: id, depth: 0, origin: req.origin, requester: req.requester, assignee: req.assignee,
       mode: "work", reply: req.reply ?? "resume", brief: clip(req.brief, BRIEF_MAX), status: "running",
       level: req.level, levelSource: "own", executions: 1, restarts: 0, createdAt: now, startedAt: now, lastActivityAt: now,
-      result: "", rework: false, budgets: { since: now, requests: 0, executions: 1, wakes: 0 }, version: 1,
+      result: "", rework: false, budgets: { since: now, requests: 0, executions: 1, wakes: 0, total: 1 }, version: 1,
       ...(req.goalRunId ? { goalRunId: req.goalRunId } : {}),
     };
     this.store.transaction(() => {
@@ -225,6 +225,10 @@ export class Runtime {
       if (existing && !(req.rework && isTerminal(existing))) return { ok: true, assignment: existing, duplicate: true };
       if (parent.depth + 1 > this.limits.depth) return refuse(`Assignment depth limit reached (${this.limits.depth})`);
       sameCall = req.fanOut !== undefined && siblings.some(c => c.fanOut === req.fanOut);
+      if (!sameCall && root?.budgets && (root.budgets.total ?? 0) >= this.limits.totalExecutions) {
+        this.store.update(root, { kind: "budget", at: now, detail: `turns: ${root.budgets.total} in all` });
+        return refuse(`Request budget exhausted: ${this.limits.totalExecutions} turns in all`, "budget");
+      }
       if (!sameCall && root?.budgets && root.budgets.requests + 1 > this.limits.requests) {
         this.store.update(root, { kind: "budget", at: now, detail: `requests: ${root.budgets.requests} since last progress` });
         return refuse(`Request budget exhausted: ${this.limits.requests} requests without progress`, "budget");
@@ -381,8 +385,12 @@ export class Runtime {
       const rerun = n.restart === "rerun";
       if (rerun && this.clock.monotonic() < this.nextRerunAt) { this.held(n.id, RERUN_HELD); busyThreads.add(thread); continue; }
       const resumed = n.status === "resume";
+      const root = n.parentId ? this.store.get(n.rootId) : n;
+      if (root?.budgets && (root.budgets.total ?? 0) + 1 > this.limits.totalExecutions) {
+        this.cancelTree(root, `${this.limits.totalExecutions} turns in all, the most one request may take`, "failed", "budget");
+        continue;
+      }
       if (!resumed) {
-        const root = n.parentId ? this.store.get(n.rootId) : n;
         if (root?.budgets && root.budgets.executions + 1 > this.limits.executions) {
           this.cancelTree(n, `${this.limits.executions} turns without progress`, "failed", "budget");
           continue;
@@ -451,7 +459,7 @@ export class Runtime {
     delete n.continuation; delete n.cards;
     if (carrying.length) n.carrying = carrying; else delete n.carrying;
     if (root.id !== n.id) root.lastActivityAt = now;
-    if (root.budgets) root.budgets.executions += 1;
+    if (root.budgets) { root.budgets.executions += 1; root.budgets.total = (root.budgets.total ?? 0) + 1; }
     try {
       this.store.transaction(() => {
         this.store.update(n, { kind: "admitted", at: now, detail: "admitted" });
@@ -558,7 +566,7 @@ export class Runtime {
     const outstanding = unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
     if (outstanding) {
       n.status = "waiting"; n.lastActivityAt = now;
-      if (root) this.renew(root, now);
+      if (root) root.lastActivityAt = now;
       this.store.transaction(() => {
         this.store.update(n, { kind: "waiting", at: now, detail: result.kind === "failed" ? `waiting: turn ${result.outcome}` : "waiting" });
         if (root && root.id !== n.id) this.store.update(root);
@@ -733,12 +741,20 @@ export class Runtime {
     if (detail !== undefined) n.outcomeDetail = clip(detail, DETAIL_MAX); else delete n.outcomeDetail;
     if (status !== "completed" && detail !== undefined && n.result === "") n.result = clip(detail, RESULT_MAX);
     if (outcome === "refused" && detail !== undefined) { n.result = clip(detail, RESULT_MAX); delete n.evidence; }
+    if (outcome === "budget" && detail !== undefined && detail !== STOPPED_WITH_REQUEST) n.result = clip(detail, RESULT_MAX);
     delete n.question; delete n.decide; delete n.answer; delete n.answeredBy; delete n.restart; delete n.carrying;
     const kind: EventKind = status === "cancelled" ? "cancelled" : outcome === "refused" ? "refused" : "settled";
     const root = n.parentId ? this.store.get(n.rootId) : n;
     this.store.transaction(() => {
       this.store.update(n, { kind, at: now, detail: `${status}: ${outcome}${detail ? ` — ${clip(detail, DETAIL_MAX)}` : ""}` });
-      if (root && root.id !== n.id && !isTerminal(root)) { this.renew(root, now); this.store.update(root); }
+      if (root && root.id !== n.id && !isTerminal(root)) {
+        if (status === "completed") this.renew(root, now);
+        else {
+          root.lastActivityAt = now;
+          if (status === "failed" && outcome !== "budget" && outcome !== "stopped" && detail !== STOPPED_WITH_REQUEST && root.budgets) root.budgets.failed = (root.budgets.failed ?? 0) + 1;
+        }
+        this.store.update(root);
+      }
     });
     this.turns.get(n.id)?.controller.abort();
     this.turns.delete(n.id);
@@ -746,6 +762,11 @@ export class Runtime {
     if (root?.id === n.id) this.rootActivity.delete(n.id);
     this.touch(n, ...root && root.id !== n.id ? [root] : []);
     this.report(n, ownTurn);
+    const failed = root && root.id !== n.id ? this.store.get(root.id)?.budgets?.failed ?? 0 : 0;
+    if (failed >= this.limits.failedInARow) {
+      const last = n.outcomeDetail ?? n.result;
+      this.cancelTree(this.store.get(root!.id)!, `${failed} hand-offs in a row failed, so this request was stopped${last ? `. The last one: ${clip(last, DETAIL_MAX / 2)}` : ""}`, "failed", "budget");
+    }
   }
 
   private report(n: Assignment, ownTurn: boolean): void {
@@ -789,7 +810,7 @@ export class Runtime {
 
   private renew(root: Assignment, now: number): void {
     root.lastActivityAt = now;
-    if (root.budgets) root.budgets = { since: now, requests: 0, executions: 0, wakes: 0 };
+    if (root.budgets) root.budgets = { since: now, requests: 0, executions: 0, wakes: 0, ...(root.budgets.total === undefined ? {} : { total: root.budgets.total }) };
   }
 
   private since(at: number): number {

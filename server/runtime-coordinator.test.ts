@@ -1982,3 +1982,40 @@ describe("pace: how soon the host must tick", () => {
     expect(w.coordinator.pace()).toBe("idle");
   });
 });
+
+describe("a teammate that cannot start", () => {
+  const CANNOT_START = "spawn /usr/local/bin/claude EAGAIN";
+
+  it("resumes its requester told that the fault is the server's, with no suggestion to send the work again", async () => {
+    const w = world((node) => node.botId === "builder" ? { ok: false, text: CANNOT_START } : undefined);
+    send(w, chief, "gen-1", undefined, builder, "Build it");
+    ended(w, "gen-1");
+    w.coordinator.tick();
+    await flush();
+    w.coordinator.tick();
+    const resume = w.host.runs.find(run => run.resumed)!;
+    expect(resume.text).toContain("Work that failed here did not fail on the work itself: this server could not start another process.");
+    expect(resume.text).toContain("do not hand it out again, with rework or otherwise");
+    expect(resume.text).not.toContain("rework=true");
+  });
+
+  it("a requester that sends the work again on every resume is stopped at the fifth failure: 4 resumed turns", async () => {
+    const w = world();
+    let reworks = 0;
+    w.host.script = (node) => {
+      if (node.botId === "builder") return { ok: false, text: CANNOT_START };
+      reworks += 1;
+      send(w, chief, "gen-1", undefined, builder, "Build it", { rework: true });
+      return { ok: true, text: "sent again" };
+    };
+    send(w, chief, "gen-1", undefined, builder, "Build it");
+    ended(w, "gen-1");
+    for (let i = 0; i < 200; i++) { w.coordinator.tick(); await flush(); }
+
+    expect(w.host.runs.filter(run => run.node.botId === "chief")).toHaveLength(4);
+    expect(reworks).toBe(4);
+    expect(w.coordinator.node("gen-1")).toMatchObject({ status: "failed", outcome: "budget",
+      result: `5 hand-offs in a row failed, so this request was stopped. The last one: ${CANNOT_START}` });
+    expect(w.host.reports.filter(report => report.child.id === "gen-1")).toHaveLength(1);
+  });
+});

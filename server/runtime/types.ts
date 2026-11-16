@@ -138,7 +138,9 @@ export interface Assignment {
   /** Who gave `answer` when the person did not: a bot that passed one on or decided it, or nobody (the default). */
   answeredBy?: Answerer;
   /** On a root only: the budget window since its last durable progress. */
-  budgets?: { since: number; requests: number; executions: number; wakes: number };
+  /** `total`: every turn the root's tree has started, which no progress resets. `failed`: handed-off work that failed
+   * since any last completed. The rest count since the root's last progress. */
+  budgets?: { since: number; requests: number; executions: number; wakes: number; total?: number; failed?: number };
   /** While parked on the person's cards (a root): the ids of the cards the
    * turn left open; the answer arrives when the person acts on them. */
   cards?: string[];
@@ -345,6 +347,10 @@ export interface Limits {
   requests: number;
   executions: number;
   wakes: number;
+  /** Turns one root's tree may start in all; progress does not renew it. */
+  totalExecutions: number;
+  /** Handed-off work that may fail in a row, with none completing between, before the root's tree is stopped. */
+  failedInARow: number;
   /** A queued assignment that never started within this is expired. */
   queueMs: number;
   /** No durable progress on a root for this long fails the tree. */
@@ -365,6 +371,8 @@ export const DEFAULT_LIMITS: Limits = {
   requests: 24,
   executions: 48,
   wakes: 48,
+  totalExecutions: 300,
+  failedInARow: 5,
   queueMs: 24 * 60 * 60_000,
   stallMs: 4 * 60 * 60_000,
   turnStallMs: 20 * 60_000,
