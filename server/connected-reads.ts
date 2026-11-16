@@ -400,6 +400,8 @@ export interface ConnectedReadDeps {
   /** The account to read for each app with several connected (Composio refuses a read that names none then); an app
    *  with one is left out, and its reads name no account. Asked once per session, with the bot the session reads for. */
   accounts?(botId?: string): Promise<AppAccounts>;
+  /** The accounts a read names while that lookup is failing, for a bot limited to some accounts. */
+  fallbackAccounts?(botId?: string): AppAccounts;
   relay(payload: unknown, transportSessionId: string | undefined, signal: AbortSignal): Promise<{ status: number; bytes: Uint8Array; transportSessionId?: string }>;
   readTimeoutMs?: number;
 }
@@ -470,10 +472,11 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
           throw error;
         });
         const transport = await opened;
-        // A failed lookup reads as no account named and is asked again on the next read, not kept for the session.
+        // A failed lookup reads as the fallback (no account named, unless the bot is limited to some) and is asked again
+        // on the next read, not kept for the session.
         accounts ??= deps.accounts?.(botId).catch((): AppAccounts => {
           accounts = undefined;
-          return {};
+          return deps.fallbackAccounts?.(botId) ?? {};
         }) ?? Promise.resolve({});
         // The lookup counts toward this read's time limit; one that runs out is dropped so the next read asks again.
         const lookup = accounts;

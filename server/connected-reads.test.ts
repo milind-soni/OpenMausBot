@@ -190,6 +190,26 @@ describe("a check's reads", () => {
     expect(error).toMatchObject({ app: "gmail", severalAccounts: false });
   });
 
+  it("names the fallback account while the lookup fails, and still asks again on the next read", async () => {
+    const { deps, frames } = relay({
+      GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "old@x.test" } }),
+      GOOGLECALENDAR_LIST_CALENDARS: () => ({ successful: true, data: { items: [] } }),
+      GOOGLECALENDAR_EVENTS_LIST: () => ({ successful: true, data: { items: [] } }),
+    });
+    let asked = 0;
+    const accounts = async () => {
+      asked += 1;
+      if (asked === 1) throw new Error("inventory down");
+      return { gmail: "ca_older", googlecalendar: "ca_cal_newest" };
+    };
+    const session = createConnectedReads({ ...deps, accounts, fallbackAccounts: () => ({ gmail: "ca_older" }) }).session("bot-1");
+    expect(await session.address()).toBe("old@x.test");
+    await session.events(0, 1);
+    expect(asked).toBe(2);
+    expect(frames.filter((one) => one.slug === "GMAIL_GET_PROFILE").map((one) => one.item!.account)).toEqual(["ca_older"]);
+    for (const frame of frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_"))) expect(frame.item!.account).toBe("ca_cal_newest");
+  });
+
   it("gives up on an account lookup that outlasts the read's time limit, and asks again on the next read", async () => {
     const { deps, frames } = relay({ GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }) });
     let asked = 0;

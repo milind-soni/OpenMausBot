@@ -150,6 +150,23 @@ describe("the watch's checks", () => {
     expect(new Set(gmail)).toEqual(new Set(["ca_older"]));
   });
 
+  it("ask for the accounts again after a failed lookup instead of keeping its fallback for the session", async () => {
+    let calls = 0;
+    const s = setup({ connectedServices: async () => {
+      if (++calls === 2) throw new Error("composio down");
+      return {
+        gmail: { connected: true, accounts: [{ id: "ca_newest", status: "ACTIVE" }, { id: "ca_older", status: "ACTIVE" }] },
+        googlecalendar: { connected: true, accounts: [{ id: "ca_cal_newest", status: "ACTIVE" }, { id: "ca_cal_older", status: "ACTIVE" }] },
+      };
+    } });
+    const limited: ConnectorScopes = { apps: { gmail: "read", googlecalendar: "read" }, accounts: { gmail: ["ca_older"] } };
+    s.store.patchBot(s.chief.id, { connectorScopes: limited });
+    await s.proactive.checks.check(s.proactive.ensureWatch()!, { manual: true });
+    const named = (prefix: string) => s.reads.flatMap((slug, index) => (slug.startsWith(prefix) ? [s.accounts[index]] : []));
+    expect(new Set(named("GMAIL_"))).toEqual(new Set(["ca_older"]));
+    expect(named("GOOGLECALENDAR_")).toContain("ca_cal_newest");
+  });
+
   it("belong to the main agent only: a briefing routine of another bot reads nothing", async () => {
     const s = setup();
     const other = s.store.createBot({ name: "Scout" });

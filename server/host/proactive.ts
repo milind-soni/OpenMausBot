@@ -100,18 +100,22 @@ export function createProactive(deps: ProactiveDeps) {
     },
     // Several accounts of one app: read the newest active one, as Composio refuses a read that names none. A bot limited
     // to some accounts reads one of those, named even when it is the app's only one; with none of them active the read
-    // names the first anyway, so it is refused rather than run as another account, also when the lookup fails.
+    // names the first anyway, so it is refused rather than run as another account, also while the lookup fails.
     accounts: async (botId) => {
       const scopes = botId ? store.bot(botId)?.connectorScopes : undefined;
-      const services = await composio.connectedServices(cfg).catch((error: unknown) => {
-        if (!READ_APPS.some((app) => accountLimit(scopes, app))) throw error;
-        return {} as Awaited<ReturnType<typeof composio.connectedServices>>;
-      });
+      const services = await composio.connectedServices(cfg);
       return Object.fromEntries(READ_APPS.flatMap((app) => {
         const active = (services[app]?.accounts ?? []).filter((one) => /^active$/i.test(one.status)).map((one) => one.id);
         const allowed = accountLimit(scopes, app);
         if (allowed) return [[app, active.find((id) => allowed.includes(id)) ?? allowed[0]!]];
         return active.length > 1 ? [[app, active[0]!]] : [];
+      }));
+    },
+    fallbackAccounts: (botId) => {
+      const scopes = botId ? store.bot(botId)?.connectorScopes : undefined;
+      return Object.fromEntries(READ_APPS.flatMap((app) => {
+        const allowed = accountLimit(scopes, app);
+        return allowed ? [[app, allowed[0]!]] : [];
       }));
     },
     relay: (payload, session, signal) => composio.relayMcp(cfg, payload as never, session, undefined, signal),
