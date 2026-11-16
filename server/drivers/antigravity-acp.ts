@@ -20,7 +20,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { resolveAccountProxy } from "./antigravity-proxy.ts";
+import type { GeminiCredentialsWatcher } from "./antigravity-credentials-watcher.ts";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
@@ -61,6 +63,8 @@ export interface AntigravityProfile {
   tokenPath: string;
   environment: NodeJS.ProcessEnv;
   tempDirectory?: string;
+  assignedProxy?: string;
+  activeEmail?: string;
 }
 
 const REMOVED_ENVIRONMENT_KEYS = new Set([
@@ -234,6 +238,9 @@ export async function prepareAntigravityProfile(input: {
   profileDirectory?: string;
   tempDirectory?: string;
   platform?: NodeJS.Platform;
+  activeEmail?: string;
+  toolsDir?: string;
+  geminiDir?: string;
 }): Promise<AntigravityProfile> {
   const directory = resolve(input.profileDirectory ?? antigravityProfileDirectory(input.instanceId, input.baseDir));
   const acpDirectory = join(directory, "antigravity-acp");
@@ -274,6 +281,23 @@ export async function prepareAntigravityProfile(input: {
     PYTHONUNBUFFERED: "1",
     ELECTRON_RUN_AS_NODE: "1",
   });
+  let activeEmail = input.activeEmail;
+  if (!activeEmail) {
+    try {
+      const geminiDir = input.geminiDir ?? join(homedir(), ".gemini");
+      const accContent = await readFile(join(geminiDir, "google_accounts.json"), "utf8");
+      const acc = JSON.parse(accContent);
+      activeEmail = typeof acc?.active === "string" ? acc.active : undefined;
+    } catch {}
+  }
+  const assignedProxy = await resolveAccountProxy(activeEmail, input.toolsDir);
+  if (assignedProxy) {
+    Object.assign(environment, {
+      HTTP_PROXY: assignedProxy,
+      HTTPS_PROXY: assignedProxy,
+      ALL_PROXY: assignedProxy,
+    });
+  }
   // On Windows the runtime unpacks 0.34-1.26 GB into TEMP per launch: one OMB folder per instance,
   // stable so the pooled spawn contract (which hashes this env) holds.
   let tempDirectory: string | undefined;
@@ -287,6 +311,8 @@ export async function prepareAntigravityProfile(input: {
     tokenPath: join(acpDirectory, "acp_token.json"),
     environment,
     ...(tempDirectory ? { tempDirectory } : {}),
+    ...(assignedProxy ? { assignedProxy } : {}),
+    ...(activeEmail ? { activeEmail } : {}),
   };
 }
 
@@ -312,6 +338,11 @@ interface PendingRpc {
 
 export class AntigravityAcpClient {
   readonly child: ChildProcess;
+  public credentialsWatcher?: GeminiCredentialsWatcher;
+
+  async handleQuotaExhausted(timeoutMs = 3000): Promise<boolean> {
+    return handleQuotaExhaustedWithAutoSwitch(this.credentialsWatcher, timeoutMs);
+  }
   private nextId = 1;
   private pending = new Map<number, PendingRpc>();
   private buffer = "";
@@ -803,4 +834,29 @@ export async function validateAntigravityRuntime(runtime: AntigravityRuntime, ex
     }
   }
   if (failed) throw failure;
+}
+
+export async function triggerAntigravityAccountSwitch(
+  toolsApiUrl = "http://127.0.0.1:8045/api/accounts/switch_next",
+): Promise<boolean> {
+  try {
+    const res = await fetch(toolsApiUrl, { method: "POST", signal: AbortSignal.timeout(2000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function handleQuotaExhaustedWithAutoSwitch(
+  watcher?: { waitForNewToken: (timeoutMs?: number) => Promise<boolean> },
+  timeoutMs = 3000,
+  toolsApiUrl?: string,
+): Promise<boolean> {
+  try {
+    await triggerAntigravityAccountSwitch(toolsApiUrl);
+  } catch {}
+  if (watcher) {
+    return await watcher.waitForNewToken(timeoutMs);
+  }
+  return false;
 }

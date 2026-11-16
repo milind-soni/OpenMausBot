@@ -20,6 +20,7 @@ import {
   antigravitySessionSetup,
   antigravityTokenPath,
   authorizationUrlFromLine,
+  handleQuotaExhaustedWithAutoSwitch,
   noteAntigravitySignedIn,
   noteAntigravitySignInRequired,
   prepareAntigravityProfile,
@@ -34,6 +35,8 @@ import {
   antigravityManagedInstallAvailable,
   installAntigravityRuntime,
   resolveAntigravityRuntime,
+  startAntigravityWatcher,
+  stopAntigravityWatcher,
 } from "./antigravity-runtime.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { AntigravityProcesses } from "./antigravity-processes.ts";
@@ -199,6 +202,12 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     const base = await AcpAntigravityDriver.create(input);
     scheduleAntigravityTempSweep(input.instanceId);
     scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
+    const activeTurns = new Map<string, { turn: SendTurnInput; retried: boolean }>();
+    const watcher = startAntigravityWatcher(input.instanceId, async () => {
+      noteAntigravitySignedIn(antigravityTokenPath(input.instanceId));
+      await base.adapter.stopAll().catch(() => {});
+      void base.refreshModels?.();
+    });
     const auth = new AntigravityAuthController(() => {
       noteAntigravitySignedIn(antigravityTokenPath(input.instanceId));
       void base.refreshModels?.();
@@ -220,7 +229,34 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       ...base,
       adapter: {
         ...base.adapter,
-        sendTurn: async (turn) => base.adapter.sendTurn(stageAntigravitySkills(turn, antigravityProfileDirectory(input.instanceId))),
+        sendTurn: async (turn) => {
+          const staged = stageAntigravitySkills(turn, antigravityProfileDirectory(input.instanceId));
+          activeTurns.set(turn.threadId, { turn: staged, retried: false });
+          return base.adapter.sendTurn(staged);
+        },
+        onEvent: (listener) => {
+          return base.adapter.onEvent(async (event) => {
+            const isQuotaError =
+              (event.type === "runtime.error" && ((event as any).acpUsageLimit === true || (event as any).error === "quota")) ||
+              (event.type === "turn.completed" && event.stopReason === "quota");
+            if (isQuotaError) {
+              const threadId = event.threadId;
+              const tracked = activeTurns.get(threadId);
+              if (tracked && !tracked.retried) {
+                tracked.retried = true;
+                const switched = await handleQuotaExhaustedWithAutoSwitch(watcher);
+                if (switched) {
+                  await base.adapter.stopAll().catch(() => {});
+                  void base.adapter.sendTurn(tracked.turn);
+                  return;
+                }
+              }
+            } else if (event.type === "turn.completed" && event.ok) {
+              activeTurns.delete(event.threadId);
+            }
+            listener(event);
+          });
+        },
       },
       get models() {
         return base.models;
@@ -262,6 +298,8 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       // sign-in is removed at once, and once more when those processes are gone. A new sign-in waits for that.
       signOut: async () => {
         auth.cancel();
+        stopAntigravityWatcher(input.instanceId);
+        activeTurns.clear();
         await base.adapter.stopAll();
         await removeAntigravitySignIn(input.instanceId);
         if (!runtimeProcesses.count(input.instanceId)) return;
@@ -271,6 +309,8 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       },
       dispose: async () => {
         auth.cancel();
+        stopAntigravityWatcher(input.instanceId);
+        activeTurns.clear();
         await base.dispose();
       },
     };
