@@ -38,6 +38,19 @@ const planSchema = z.object({
   ])).min(1).max(MAX_SETUP_BOTS, `Review at most ${MAX_SETUP_BOTS} bots in one setup`),
 }).strict();
 
+function takenKeys(path: readonly PropertyKey[]): string {
+  const last = path.at(-1);
+  if (last === "fields") return Object.keys(fieldsSchema.shape).join(", ");
+  if (last === "modelSelection") return "instanceId, model, effort, variant";
+  return path.length ? "action, key (create) or botId (update), fields" : Object.keys(planSchema.shape).join(", ");
+}
+
+function planProblem(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (issue?.code !== "unrecognized_keys") return issue?.message ?? "Invalid team setup";
+  return `${issue.path.length ? `${issue.path.map(String).join(".")}: ` : ""}${issue.message}. It takes ${takenKeys(issue.path)}.`;
+}
+
 export class TeamSetupError extends Error {
   readonly status: number;
   readonly code?: string;
@@ -199,7 +212,7 @@ export class TeamSetupRequestService {
 
   private prepare(args: SetupArgs) {
     const parsed = planSchema.safeParse(args.plan);
-    if (!parsed.success) throw new TeamSetupError(parsed.error.issues[0]?.message ?? "Invalid team setup");
+    if (!parsed.success) throw new TeamSetupError(planProblem(parsed.error));
     const chief = this.chief(args.botId);
     const combined = new Map<string, typeof parsed.data.operations[number]>();
     for (const operation of parsed.data.operations) {

@@ -207,6 +207,13 @@ describe("reviewed Chief team setup", () => {
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { [field]: true } }])).toThrow();
     expect(h.messages).toHaveLength(0);
   });
+  it("names where an unknown key is and what that level takes", () => {
+    const h = harness();
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { model: "gpt" } }]))
+      .toThrow(/^operations\.0\.fields: Unrecognized key: "model"\. It takes chiefOfStaff, name, title, description, soul, soulAppend, cwd, section, modelSelection\.$/);
+    expect(() => h.service.propose({ botId: h.chief.id, threadId: h.chief.threadId, plan: { reason: "Requested", operations: [{ action: "update", botId: h.peer.id, fields: { title: "Lead" } }], teams: [] } }))
+      .toThrow(/^Unrecognized key: "teams"\. It takes reason, newTeams, operations\.$/);
+  });
   it("rejects unknown models, foreign teams, missing specialists and duplicate names", () => {
     const h = harness();
     expect(() => h.propose([specialist("Mira", "Engineering", { instanceId: "codex", model: "made-up" })])).toThrow(/catalog/);

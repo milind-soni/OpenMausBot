@@ -123,6 +123,39 @@ writes down its own setup.
 
 **Move another Bot** goes round again; each Bot exports itself.
 
+### Connect Grok Bot
+
+In the desktop app, on the computer running OpenMausBot, the dialog can also take
+every Bot in one go. **Get the link** gives an address to add in Grok Bot as a
+custom connector (Connect apps → Add a custom connector → Server URL). The
+[MausBot bot in Grok Bot](https://x.ai/bot/3i4Tvjckmdk05UwntFeNo) then sends each
+Bot's export through it, and the dialog lists the Bots as they arrive. They go
+through the same preview as a file, and nothing is imported until you choose
+Import.
+
+Grok Bot runs connectors from its own cloud computer, which cannot reach yours.
+So for as long as the link is open the app runs two things:
+
+- A second listener on `127.0.0.1`, on a random port, that answers only
+  `POST /mcp/move/<key>` and serves an MCP server with two tools: `move_status`
+  and `send_export`. The key is 32 random bytes. The app's own API is not on this
+  listener.
+- The `cloudflared` the app ships with, as a Cloudflare quick tunnel
+  (`https://<words>.trycloudflare.com`) to that listener. It needs no Cloudflare
+  account and reads no `cloudflared` configuration of yours.
+
+The link works while the app stays open and stops after an hour, when you finish
+the import, or when the app quits. A new link has a new address, so it has to be
+pasted into Grok Bot again. Requests pass through Cloudflare on their way to your
+computer. What arrives is held in the app's memory until you import it or the app
+quits; nothing is stored on a server of ours or anywhere else off your computer.
+
+Whoever holds the link can send exports to the dialog and read how many Bots have
+arrived, and nothing else: there is no tool that reads an export back. A sent
+document goes through the same checks as a pasted one before it is kept, and a
+link holds at most 100 documents and 16 MB. `server/grok-move-mcp.ts` is the MCP
+server and `server/grok-move-tunnel.ts` the listener and tunnel.
+
 Everyone who can add a bot also sees a popup once, after the welcome on a new
 install and at the next launch otherwise: the two marks, **Let's start**, which
 opens this dialog, and **Not now**. It goes first in the queue of once-only

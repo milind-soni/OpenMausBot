@@ -4,7 +4,7 @@ import { openLiveSocket, relayedProvider } from "./live-call-controller.ts";
 import { createLiveSession, liveAttachUrl, type LiveBot, type LiveEndpoint, type LiveHistoryMessage } from "./live-call.ts";
 import { elevenLabsLiveCallRefusal, fishLiveCallRefusal, geminiLiveCallRefusal } from "./live-access.ts";
 import type { LiveConfig } from "./live-config.ts";
-import { createFishLiveSession, endFishLiveSession, fishKeyPrint, FishRelays, setUpFishAgent } from "./live-fish.ts";
+import { createFishLiveSession, endFishLiveSession, fishKeyPrint, FishRelays, fishSpeakingLanguage, setFishAgentLanguage, setUpFishAgent } from "./live-fish.ts";
 import { createElevenLabsLiveSession, setUpElevenLabsAgent } from "./live-elevenlabs.ts";
 import { createGeminiLiveSession } from "./live-gemini.ts";
 import type { LiveRouteDeps } from "./routes/live.ts";
@@ -15,7 +15,11 @@ export interface LiveSessionWiringInput {
   cloudHome: boolean;
   othersOnLoopback(): boolean;
   /** Saves the Fish Audio or ElevenLabs agent the harness set up, with the account it belongs to. */
-  saveAgent(agent: Required<Pick<LiveConfig, "fishAgentId" | "fishAgentFor">> | Required<Pick<LiveConfig, "elevenlabsAgentId" | "elevenlabsAgentFor">>): void;
+  saveAgent(agent: Required<Pick<LiveConfig, "fishAgentId" | "fishAgentFor" | "fishAgentLanguage">> | Required<Pick<LiveConfig, "elevenlabsAgentId" | "elevenlabsAgentFor">>): void;
+  /** The app's language, which a Fish Audio agent speaks; English when unset. */
+  language?(): string | undefined;
+  /** The language the saved Fish Audio agent was last set to speak (`LiveConfig.fishAgentLanguage`). */
+  fishAgentLanguage?(): string | undefined;
   /** The name a person reads, which names the agent on their account; the brand's own by default. */
   productName?(): string;
   env?: NodeJS.ProcessEnv;
@@ -33,22 +37,43 @@ export function liveSessionWiring(input: LiveSessionWiringInput): {
   const env = input.env ?? process.env;
   const fetchImpl = input.fetchImpl ?? fetch;
 
-  const setUpAgent = async (key: string, endpoint: LiveEndpoint): Promise<LiveEndpoint> => {
-    const fishAgentId = await setUpFishAgent(key, endpoint, (input.productName ?? productName)(), fetchImpl);
-    input.saveAgent({ fishAgentId, fishAgentFor: fishKeyPrint(key) });
+  const operatorAgent = () => Boolean(env.OMB_FISH_LIVE_AGENT_ID?.trim());
+
+  const setUpAgent = async (key: string, endpoint: LiveEndpoint, language: string): Promise<LiveEndpoint> => {
+    const fishAgentId = await setUpFishAgent(key, endpoint, (input.productName ?? productName)(), language, fetchImpl);
+    input.saveAgent({ fishAgentId, fishAgentFor: fishKeyPrint(key), fishAgentLanguage: language });
     return { ...endpoint, model: fishAgentId };
+  };
+
+  // Moves the saved agent the harness set up to the app's language; if Fish refuses, the call goes ahead in the old one.
+  // One change at a time, even past a cancelled call start, so a slower earlier start never saves over a later one.
+  let languageChange: Promise<void> = Promise.resolve();
+  const speakLanguage = (key: string, endpoint: LiveEndpoint, language: string): Promise<void> => {
+    const change = languageChange.then(async () => {
+      if (operatorAgent() || (input.fishAgentLanguage?.() ?? "en") === language) return;
+      try {
+        await setFishAgentLanguage(key, endpoint, endpoint.model, language, fetchImpl);
+      } catch {
+        return;
+      }
+      input.saveAgent({ fishAgentId: endpoint.model, fishAgentFor: fishKeyPrint(key), fishAgentLanguage: language });
+    });
+    languageChange = change.catch(() => undefined);
+    return change;
   };
 
   const startFish = async (key: string, endpoint: LiveEndpoint, botId: string, threadId: string) => {
     const session = { key, bot: input.bot(botId), history: input.history(threadId), cloudHome: input.cloudHome, fetchImpl };
-    let agent = endpoint.model ? endpoint : await setUpAgent(key, endpoint);
+    const language = fishSpeakingLanguage(input.language?.());
+    if (endpoint.model) await speakLanguage(key, endpoint, language);
+    let agent = endpoint.model ? endpoint : await setUpAgent(key, endpoint, language);
     try {
       return { agent, token: await createFishLiveSession({ ...session, endpoint: agent }) };
     } catch (error) {
       // An agent removed on Fish Audio is set up again, unless the operator chose it.
-      const gone = (error as { fishStatus?: number }).fishStatus === 404 && endpoint.model !== "" && !env.OMB_FISH_LIVE_AGENT_ID?.trim();
+      const gone = (error as { fishStatus?: number }).fishStatus === 404 && endpoint.model !== "" && !operatorAgent();
       if (!gone) throw error;
-      agent = await setUpAgent(key, endpoint);
+      agent = await setUpAgent(key, endpoint, language);
       return { agent, token: await createFishLiveSession({ ...session, endpoint: agent }) };
     }
   };

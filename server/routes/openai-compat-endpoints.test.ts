@@ -115,6 +115,17 @@ describe("added OpenAI-compatible servers", () => {
     expect(used.cfg.instances).toHaveProperty("openai-compat-used");
   });
 
+  it("refuses a second local server at an address already added, even when the first add just finished", async () => {
+    const { cfg, call } = await serve();
+    const local = { displayName: "LM Studio", url: "http://127.0.0.1:1234/v1", key: "lm-studio", catalog: "lmstudio" };
+    const [first, second] = await Promise.all([call("POST", "/api/instances/openai-compat", local), call("POST", "/api/instances/openai-compat", local)]);
+    expect([first.status, second.status].sort()).toEqual([201, 409]);
+    const again = await call("POST", "/api/instances/openai-compat", { ...local, url: "http://127.0.0.1:1234/v1/" });
+    expect(again.status, again.text).toBe(409);
+    expect(again.body.error).toMatch(/already an engine/);
+    expect(Object.keys(cfg.instances ?? {}).filter((id) => id.startsWith("openai-compat-"))).toHaveLength(1);
+  });
+
   it("is read-only on a hosted server", async () => {
     const { cfg, call } = await serve({ hosted: true });
     expect((await call("POST", "/api/instances/openai-compat", add)).status).toBe(403);

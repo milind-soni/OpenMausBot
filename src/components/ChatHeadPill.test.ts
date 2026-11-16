@@ -28,3 +28,9 @@ it("names it too from another conversation's list, in the person's language", ()
   const away = { ...bot("main"), mainThreadId: "elsewhere", tasks: [...bot("main").tasks!, { threadId: "elsewhere", title: "Other", createdAt: 3 }] } as Bot;
   expect(pill(away, { kind: "shared", team: "Acme" })).toContain("Shared chat");
 });
+
+it("keeps the chevron hidden until the pill is hovered or focused", () => {
+  const chevron = pill(bot("main"), null).match(/<span[^>]*data-chathead-chevron[^>]*>/)![0];
+  const classes = chevron.match(/class="([^"]*)"/)![1]!.split(" ");
+  expect(classes).toEqual(expect.arrayContaining(["w-0", "opacity-0", "group-hover:opacity-100", "group-focus-visible:opacity-100"]));
+});

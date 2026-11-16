@@ -5,6 +5,7 @@ import {
   LIVE_FISH_NEEDS_APP, LIVE_ELEVENLABS_NEEDS_APP, LIVE_GEMINI_NEEDS_APP, LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
 } from "./live-call-controller.ts";
 import { LIVE_COPY } from "../shared/live-approval.ts";
+import { LIVE_CUSTOM_REFUSAL } from "./live-access.ts";
 import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, LiveSessionError, type LiveEndpoint } from "./live-call.ts";
 import { FishRelays, FISH_AGENT_VOICE } from "./live-fish.ts";
 import type { LiveElevenLabsSession, LiveFishSessionToken, LiveGeminiSession } from "../shared/wire.ts";
@@ -91,6 +92,23 @@ describe("LiveCallController lifecycle", () => {
     t.socket().open();
     expect(t.controller.current()?.status).toBe("live");
     expect(t.frames.map((f) => f?.status)).toEqual(["connecting", "live"]);
+  });
+
+  it("speaks in the called bot's own Live voice; a bot without one keeps the app's", async () => {
+    const voices: Record<string, string> = { bot1: "cedar" };
+    const own = setup({ botVoice: (botId) => voices[botId] });
+    const started = await own.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });
+    expect(own.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot1", voice: "cedar" }));
+    expect(started.call.voice).toBe("cedar");
+    const other = setup({ botVoice: (botId) => voices[botId] });
+    await other.controller.start({ auth: owner, ...BOT, botId: "bot2", client: "desktop", sdp: "a" });
+    expect(other.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot2", voice: "sol" }));
+  });
+
+  it("uses the app's voice when the bot's own is not a GPT-Live voice", async () => {
+    const t = setup({ botVoice: () => "Kore" });
+    await t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });
+    expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ voice: "sol" }));
   });
 
   it("refuses a second call while one is active, before creating a session", async () => {
@@ -190,6 +208,28 @@ describe("LiveCallController lifecycle", () => {
       await expect(second).rejects.not.toBeInstanceOf(LiveCallBusyError);
     });
 
+  });
+
+  describe("with a custom endpoint chosen", () => {
+    const CUSTOM: LiveEndpoint = { provider: "custom", apiBase: "https://gateway.example.com/v1", model: "gpt-live-1" };
+    const member: RequestAuth = { kind: "loopback", scopes: ["client"], trust: "service" };
+    const custom = (overrides: Partial<LiveCallDeps> = {}) => {
+      const t = setup(overrides);
+      t.settings.endpoint = CUSTOM;
+      t.settings.provider = "custom";
+      return t;
+    };
+
+    it("holds the call to Azure's limit, in the custom endpoint's own words, and starts it like OpenAI when allowed", async () => {
+      const refused = custom({ azureRefusal: () => "Azure's words" });
+      await expect(refused.controller.start({ auth: member, ...BOT, client: "web", sdp: "a" })).rejects.toMatchObject({ status: 403, message: LIVE_CUSTOM_REFUSAL });
+      expect(refused.deps.createSession).not.toHaveBeenCalled();
+      const t = custom();
+      await t.controller.start({ auth: owner, ...BOT, client: "web", sdp: "a" });
+      expect(t.deps.azureRefusal).toHaveBeenCalledWith(owner);
+      expect(t.deps.fishRefusal).not.toHaveBeenCalled();
+      expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ endpoint: CUSTOM }));
+    });
   });
 
   describe("with Fish Audio chosen", () => {
@@ -515,6 +555,18 @@ describe("LiveCallController lifecycle", () => {
       Object.assign(plain.settings, { voice: "cedar" });
       await plain.controller.start({ auth: owner, ...BOT, client: "web" });
       expect(plain.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ voice: "Puck" }));
+    });
+
+    it("speaks in the called bot's own Gemini voice, and the app's when the bot's is GPT-Live's", async () => {
+      const voices: Record<string, string> = { bot1: "Kore", bot2: "cedar" };
+      const t = gemini({ botVoice: (botId) => voices[botId] });
+      Object.assign(t.settings, { geminiVoice: "Charon" });
+      await t.controller.start({ auth: owner, ...BOT, client: "web" });
+      expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ voice: "Kore" }));
+      const other = gemini({ botVoice: (botId) => voices[botId] });
+      Object.assign(other.settings, { geminiVoice: "Charon" });
+      await other.controller.start({ auth: owner, ...BOT, botId: "bot2", client: "web" });
+      expect(other.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ voice: "Charon" }));
     });
 
     it("refuses with the reason as a 403 before any session is taken", async () => {

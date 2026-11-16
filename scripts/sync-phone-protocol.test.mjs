@@ -44,7 +44,11 @@ describe("sync-phone-protocol", () => {
     expect(readFileSync(join(out, "SOURCE"), "utf8")).toBe(`${head}\n`);
     const sources = git("ls-tree", "-r", "--name-only", "HEAD", "--", "packages/phone-protocol/src").split("\n")
       .filter((path) => !path.endsWith(".test.ts"));
-    for (const name of ["wire", "app-rpc", "cursor-face-data", "failed-turn", "mention-boundary", "upload-limits"]) {
+    for (const name of [
+      "wire", "responses", "pairing-code", "app-rpc", "cursor-face-data", "failed-turn", "mention-boundary", "upload-limits",
+      "markdown-plain-paths", "bot-limit", "codex-usage-limit", "cloud-hints", "waits",
+      "phone-jobs", "phone-secret-envelope", "live-call", "cron-label", "plain-time-zone",
+    ]) {
       expect(sources).toContain(`packages/phone-protocol/src/${name}.ts`);
     }
     expect(Object.keys(tree(out)).sort()).toEqual([

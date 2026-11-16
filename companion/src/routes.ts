@@ -217,6 +217,13 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "DELETE", path: /^\/api\/phones\/self$/ },
   { method: "GET", path: /^\/api\/phones\/self\/jobs$/ },
   { method: "POST", path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
+  // The phone's closed-app alert registration: its own device token, never another phone's.
+  { method: "PUT", path: /^\/api\/push\/device$/ },
+  { method: "GET", path: /^\/api\/push\/device$/ },
+  { method: "DELETE", path: /^\/api\/push\/device$/ },
+  { method: "PUT", path: /^\/api\/push\/activity$/ },
+  { method: "GET", path: /^\/api\/push\/activity$/ },
+  { method: "DELETE", path: /^\/api\/push\/activity$/ },
 
   // The harness records only the owner's activation; a guest's is answered and
   // dropped.

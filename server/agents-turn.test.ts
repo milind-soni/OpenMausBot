@@ -85,6 +85,23 @@ describe("one conversation's agents tools", () => {
     expect(await names({ ...CHAT, bot: { ...CHAT.bot, xResearch: false } })).toEqual([]);
   });
 
+  it("leaves out the tool groups the bot's person turned off, on every kind of turn, and only for that bot", async () => {
+    const off = { ...CHAT, host: { ...HOST, meetings: true, imageGeneration: true }, bot: { ...CHAT.bot, toolsOff: ["meetings", "pages"] } };
+    const turns = await everyTurn(off);
+    for (const { kind, env, wire } of turns) {
+      expect(env.OMB_TOOLS_OFF, kind).toBe("meetings,pages");
+      expect(wire, kind).toBe(turns[0]!.wire);
+    }
+    const names = (wire: string) => (JSON.parse(wire) as { tools: Array<{ name: string }> }).tools.map((tool) => tool.name);
+    const kept = names(turns[0]!.wire), everything = names((await everyTurn({ ...off, bot: CHAT.bot }))[0]!.wire);
+    for (const tool of ["join_meeting", "show_html", "publish_page"]) {
+      expect(everything).toContain(tool);
+      expect(kept).not.toContain(tool);
+    }
+    expect(kept).toContain("generate_image");
+    expect((await everyTurn(CHAT))[0]!.env.OMB_TOOLS_OFF).toBe("");
+  });
+
   it("leaves select_computer out only where the conversation can never pick a computer", async () => {
     const selects = async (conversation: AgentsConversation) => (await everyTurn(conversation))[0]!.wire.includes('"name":"select_computer"');
     expect(await selects({ ...CHAT, bot: { ...CHAT.bot, computer: "off" } })).toBe(false);

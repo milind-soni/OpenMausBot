@@ -12,6 +12,17 @@ deleted) and turning off `remote.wifi`, `remote.relay` or `remote.tailscale`. Wh
 read `safe`, except for those.
 The browser SOCKS5 proxy (`desktops.browserProxy`) is `safe` too; it reads only as set or not set.
 
+**Added Nov 16: settings cards (`show_card`).** For a setting a bot must not change, the bot can ask the app to show
+the setting's own control in the chat: `app_settings` action `show_card` with a `card` id from a fixed list
+(`SETTINGS_CARD_IDS`, first id `other-computers`). The server posts a text row carrying `settingsCard: { id }` and fixed
+English words; the window draws the same component the Settings page uses and talks to the app itself. The bot hears
+one fixed status (shown, and on or off) and never the code, link or address the control shows; the row replays to the
+engine as the app's own records block with the fixed words only. It shows only in the owner's own turn and counts
+against the turn's change budget. On a server that is not the desktop app's own (a Cloud, a headless server) no card is
+posted and the bot is told where the setting lives; a window that is not on that computer draws one line saying the
+same. A new card is one id in `SETTINGS_CARD_IDS`, one entry in `server/app-settings/cards.ts` and one entry in
+`src/components/SettingsCard.tsx`.
+
 ## Goal
 
 A bot can find, explain and change MausBot's own settings from chat: add an AI provider, reorder bots, group them into sidebar sections, switch the theme, change thread limits, and answer "where do I change X?" for every setting. Settings stop being a page the user has to learn.

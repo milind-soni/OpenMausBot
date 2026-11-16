@@ -217,6 +217,19 @@ describe("mcp_server", () => {
   });
 });
 
+describe("skill_manage", () => {
+  it("names the arguments it takes when the action is wrong, and shows a SKILL.md when one is missing, before anything is sent", async () => {
+    const sent: unknown[] = [];
+    const ctx = context({ client: { api: async (path) => { sent.push(path); return {}; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
+    expect(await callTool("skill_manage", { action: "save" }, ctx)).toEqual({
+      text: 'skill_manage action must be "create", "update", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source.',
+      isError: true,
+    });
+    expect((await callTool("skill_manage", { action: "create", source: "conversation" }, ctx)).text).toContain("---\\nname: file-expense\\ndescription:");
+    expect(sent).toEqual([]);
+  });
+});
+
 describe("app_settings", () => {
   it("posts the action, id and value and returns the route's text or refusal", async () => {
     const calls: Array<{ path: string; method?: string; body: unknown }> = [];
@@ -516,6 +529,18 @@ describe("coordinate_bots", () => {
     }));
     return { result, calls };
   }
+
+  it("passes files on as given, and refuses a files value that is not a short list of paths", async () => {
+    const { result, calls } = await coordinate({ ...BASE, files: ["report.pdf", "/home/cua/workspace/chart.png"] });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0]!.body).toEqual({ botIds: ["bot-scout"], message: "Review the draft.", files: ["report.pdf", "/home/cua/workspace/chart.png"] });
+    for (const blank of [[], [""], null, ""]) expect((await coordinate({ ...BASE, files: blank })).calls[0]!.body, JSON.stringify(blank)).not.toHaveProperty("files");
+    for (const files of ["report.pdf", [1], ["a", "b", "c", "d", "e", "f"]]) {
+      const refused = await coordinate({ ...BASE, files });
+      expect(refused.result.isError, JSON.stringify(files)).toBe(true);
+      expect(refused.calls).toEqual([]);
+    }
+  });
 
   it("drops an empty-string group_id instead of posting it", async () => {
     const { result, calls } = await coordinate({ ...BASE, group_id: "" });

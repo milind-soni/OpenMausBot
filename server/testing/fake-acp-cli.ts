@@ -30,6 +30,7 @@
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
 //   FAKE_ACP_DUMP  path for {argv, env}; with FAKE_ACP_MODES or FAKE_ACP_MODELS also <dump>.prompts.jsonl
+//     and <dump>.initialize.json for the initialize params
 //   FAKE_ACP_LAUNCH_COUNT_FILE  process counter incremented at startup
 //   FAKE_ACP_VERSION  what `--version` prints (default "fake-acp 1.0.0"); a CLI the driver checks the shape of needs its own
 //   FAKE_ACP_RPC_DUMP  this process's method list, rewritten after every request
@@ -74,6 +75,9 @@
 //   FAKE_ACP_CANCEL_STOP_REASON  the stopReason a cancelled hanging prompt answers (default cancelled; OpenCode answers end_turn)
 //   FAKE_ACP_HANG_ONCE_FILE  with FAKE_ACP_HANG_ON, only the first matching prompt hangs; it writes this file
 //   FAKE_ACP_HOLD_FILE  while this file exists, a session/prompt waits before it is answered
+//   FAKE_ACP_AGY_STEPS_FILE  JSON [[stepType, text], …] re-read per prompt and appended to the session's log under
+//     GEMINI_HOME (antigravity-acp/conversations/<session>.db, a folder made at startup), as agy_acp_server 1.4.5
+//     writes its trajectory
 //   FAKE_ACP_MODE=hermes-steer  hermes-agent's ACP `/steer`: sessions advertise `steer`; a prompt says "working. ", waits for
 //     FAKE_ACP_GATE_FILE, then says "done" and every steer it took; `/steer <text>` during it answers "⏩ Steer queued for
 //     the active turn: …" (FAKE_ACP_STEER_FAIL=1: "⚠️ Steer failed: …"; =rpc: a JSON-RPC error), and with no prompt running it runs <text>
@@ -605,6 +609,24 @@ function failRpc(msg: { method: string; id: unknown }): boolean {
   return true;
 }
 
+const antigravityConversations = process.env.FAKE_ACP_AGY_STEPS_FILE && process.env.GEMINI_HOME
+  ? `${process.env.GEMINI_HOME}/antigravity-acp/conversations` : null;
+if (antigravityConversations) mkdirSync(antigravityConversations, { recursive: true });
+
+function appendAntigravitySteps(sessionId: unknown): void {
+  const file = process.env.FAKE_ACP_AGY_STEPS_FILE, directory = antigravityConversations;
+  if (!file || !directory || typeof sessionId !== "string" || !existsSync(file)) return;
+  const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
+  const database = new DatabaseSync(`${directory}/${sessionId}.db`);
+  try {
+    database.exec("CREATE TABLE IF NOT EXISTS steps (idx INTEGER PRIMARY KEY, step_type INTEGER, step_payload BLOB)");
+    const insert = database.prepare("INSERT INTO steps (step_type, step_payload) VALUES (?, ?)");
+    for (const [type, text] of JSON.parse(readFileSync(file, "utf8")) as Array<[number, string]>) insert.run(type, Buffer.from(text));
+  } finally {
+    database.close();
+  }
+}
+
 function driveMcp(entry: McpEntry, calls: Array<{ name: string | (() => string); args: (prev: string) => object }>, strict = false): Promise<string> {
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
@@ -797,6 +819,7 @@ function handle(msg: any) {
 
   switch (msg.method) {
     case "initialize": {
+      if (process.env.FAKE_ACP_DUMP) writeFileSync(`${process.env.FAKE_ACP_DUMP}.initialize.json`, JSON.stringify(msg.params));
       if (failRpc(msg)) break;
       if (mode === "hang-initialize") {
         setInterval(() => {}, 1_000);
@@ -1056,6 +1079,7 @@ function handle(msg: any) {
       if (process.env.FAKE_ACP_DUMP && process.env.FAKE_ACP_DUMP_PROMPT === "1") {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.prompt.json`, JSON.stringify(msg.params?.prompt ?? null, null, 2));
       }
+      appendAntigravitySteps(msg.params?.sessionId);
       if (failRpc(msg)) return;
       if (mode === "hermes-steer") {
         hermesPrompt(msg);

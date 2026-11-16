@@ -30,7 +30,7 @@ export function stayedConnectors(servers: Record<string, unknown> | undefined, p
     const remote = isRemoteMcpServer(server);
     const program = remote ? "" : launcherOf(server.command);
     const why: StayedWhy = isMailConnector(server) ? { kind: "mail" } : !remote && !/[\\/]/u.test(server.command) && !programs.includes(program) ? { kind: "program", program } : { kind: "here" };
-    return [{ name, computer: server.runsOn!.label, runsOn: server.runsOn!, why, ...(!remote && server.bot ? { bot: server.bot } : {}) }];
+    return [{ name, computer: server.runsOn!.label, runsOn: server.runsOn!, why, ...(server.bot ? { bot: server.bot } : {}) }];
   });
 }
 

@@ -160,15 +160,39 @@ const SCHEMA = `
 
 type Row = Record<string, unknown>;
 
+/** A parsed row is remembered by its JSON text: the parse is a pure function of that text, so a changed
+ * row (different text) can never hit a stale entry. Callers get a clone, so none can alter another's copy. */
+const ASSIGNMENT_MEMO_LIMIT = 8_192;
+/** Rows hold briefs and results of any length, and every update leaves its old text behind, so the memo is also capped
+ * by the row text it holds, least recently read first. */
+const ASSIGNMENT_MEMO_CHARS = 8_000_000;
+const assignmentMemo = new Map<string, Assignment>();
+let assignmentMemoChars = 0;
+
 function readAssignment(row: Row): Assignment {
+  const memoKey = String(row.json);
+  const memo = assignmentMemo.get(memoKey);
+  if (memo !== undefined) {
+    assignmentMemo.delete(memoKey);
+    assignmentMemo.set(memoKey, memo);
+    return structuredClone(memo);
+  }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(String(row.json));
+    parsed = JSON.parse(memoKey);
   } catch (error) {
     throw new Error(`runtime.db: assignment ${String(row.id)} holds invalid JSON (${String(error)})`);
   }
   const result = assignmentSchema.safeParse(parsed);
   if (!result.success) throw new Error(`runtime.db: assignment ${String(row.id)} does not match the record schema: ${result.error.message}`);
+  if (memoKey.length > ASSIGNMENT_MEMO_CHARS / 64) return result.data;
+  assignmentMemo.set(memoKey, structuredClone(result.data));
+  assignmentMemoChars += memoKey.length;
+  for (const oldest of assignmentMemo.keys()) {
+    if (assignmentMemo.size <= ASSIGNMENT_MEMO_LIMIT && assignmentMemoChars <= ASSIGNMENT_MEMO_CHARS) break;
+    assignmentMemo.delete(oldest);
+    assignmentMemoChars -= oldest.length;
+  }
   return result.data;
 }
 

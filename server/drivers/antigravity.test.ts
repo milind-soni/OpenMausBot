@@ -16,7 +16,6 @@ import * as managedRuntime from "./antigravity-runtime.ts";
 import {
   ANTIGRAVITY_AUTH_PREFIX,
   AntigravityAcpClient,
-  AntigravityAuthController,
   antigravityProfileAuthenticated,
   antigravityProfileDirectory,
   authorizationUrlFromLine,
@@ -28,6 +27,7 @@ import {
   validateAntigravityCallbackUrl,
   validateAntigravityRuntime,
 } from "./antigravity-acp.ts";
+import { AntigravityAuthController } from "./antigravity-auth.ts";
 import {
   ANTIGRAVITY_RELEASE_VERSION,
   resolveAntigravityReleaseAsset,

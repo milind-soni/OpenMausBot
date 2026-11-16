@@ -21,6 +21,10 @@ export interface ControlPlaneStub {
   connectorToken: string;
   /** "METHOD /path", in order. */
   calls: string[];
+  /** The bodies of the push relay's calls, in order (`/v1/installations/self/push/*`). */
+  pushes: Array<{ path: string; body: Record<string, unknown> }>;
+  /** The next push-relay answers, used in order; then 200/202/204 as the real relay answers. */
+  pushAnswers: Array<{ status: number; error?: string }>;
   installations: Map<string, StubInstallation>;
   /** An installation the control plane already knows (as a fleet creates one): returns its credential. */
   seedInstallation(name?: string): string;
@@ -49,6 +53,9 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
   const accountTokens = new Set<string>();
   const installations = new Map<string, StubInstallation>();
   const calls: string[] = [];
+  const pushes: ControlPlaneStub["pushes"] = [];
+  const pushAnswers: ControlPlaneStub["pushAnswers"] = [];
+  const pushDevices = new Map<string, Set<string>>();
   const publicView = (inst: StubInstallation) => ({
     id: inst.id,
     clientInstanceId: inst.clientInstanceId,
@@ -142,6 +149,21 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
       }
       if (method === "DELETE") return send(204);
     }
+    const push = /^\/v1\/installations\/self\/push\/(register|unregister|send|activity)$/.exec(path);
+    if (push && method === "POST") {
+      const inst = byCredential();
+      if (!inst) return send(401, { error: "unauthorized" });
+      const body = await readJson(req);
+      pushes.push({ path, body });
+      const answer = pushAnswers.shift();
+      if (answer) return send(answer.status, answer.error ? { error: answer.error } : undefined);
+      const tokens = pushDevices.get(inst.id) ?? new Set<string>();
+      pushDevices.set(inst.id, tokens);
+      const token = String(body.token ?? "");
+      if (push[1] === "register") { tokens.add(token); return send(200, { registered: true }); }
+      if (push[1] === "unregister") { tokens.delete(token); return send(204); }
+      return tokens.has(token) ? send(202, { sent: true }) : send(404, { error: "push_device_unknown" });
+    }
     const one = /^\/v1\/installations\/([^/]+)$/.exec(path);
     if (one && method === "DELETE") {
       if (!account) return send(401, { error: "unauthorized" });
@@ -159,6 +181,8 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
     endpointUrl,
     connectorToken,
     calls,
+    pushes,
+    pushAnswers,
     installations,
     seedInstallation: (name = "fleet box") => {
       const inst: StubInstallation = { id: randomUUID(), clientInstanceId: randomUUID(), name, platform: "linux", appVersion: null, credential: newCredential() };

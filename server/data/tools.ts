@@ -19,6 +19,7 @@ import {
 } from "../../shared/data-surface.ts";
 import { compileToolSchema, schemaProblems } from "../mcp-schema-validator.ts";
 import { tableIdentifierParts } from "./identifiers.ts";
+import { queryRelation, singleStatement, type Token } from "./sql-statements.ts";
 import type { DataSheetStore } from "./sheet.ts";
 import { DataFailure, type BotDatabase, type ChartCompiler, type ChartRenderer, type DataConnection, type DataExtension, type RunOptions, type RunResult, type VegaLiteValidator } from "./types.ts";
 
@@ -137,103 +138,6 @@ export const resultRelation = (name: string) => `${DATA_RESULTS_SCHEMA}.${quoteI
 const fail = (code: DataErrorCode, message: string, extra: Partial<DataError> = {}): DataFailure =>
   new DataFailure({ code, message, ...extra });
 
-type Token = { kind: "word" | "ident" | "punct" | "block"; text: string; raw: string };
-
-/** Top-level tokens, each parenthesised group one block; strings, comments and quoted identifiers never leak a keyword. */
-function topLevelTokens(sql: string): { tokens: Token[]; statements: number } {
-  const tokens: Token[] = [];
-  let statements = 1;
-  let ended = false;
-  let depth = 0;
-  let i = 0;
-  const n = sql.length;
-  const push = (kind: Token["kind"], raw: string, text = raw) => { if (depth === 0) tokens.push({ kind, text, raw }); };
-  while (i < n) {
-    const ch = sql[i]!;
-    const next = sql[i + 1];
-    if (ch === "-" && next === "-") { const end = sql.slice(i).search(/[\n\r]/); i = end === -1 ? n : i + end + 1; continue; }
-    if (ch === "/" && next === "*") { i = blockCommentEnd(sql, i); continue; }
-    if (ch === ";") { ended = true; i++; continue; }
-    if (ended && /\S/.test(ch)) { statements++; ended = false; }
-    if (ch === "'") {
-      push("word", "'…'");
-      i = stringEnd(sql, i); continue;
-    }
-    if (ch === "$") {
-      const delimiter = /\$(?:[A-Za-z_\u0080-\uffff][\w\u0080-\uffff]*)?\$/y;
-      delimiter.lastIndex = i;
-      const open = delimiter.exec(sql)?.[0];
-      if (open) {
-        const end = sql.indexOf(open, i + open.length);
-        if (end === -1) throw fail("invalid_input", "Unterminated dollar-quoted string.");
-        push("word", "'…'");
-        i = end + open.length; continue;
-      }
-    }
-    if (ch === '"') {
-      let j = i + 1;
-      for (;;) {
-        const q = sql.indexOf('"', j);
-        if (q === -1) throw fail("invalid_input", "Unterminated quoted identifier.");
-        if (sql[q + 1] === '"') { j = q + 2; continue; }
-        j = q + 1; break;
-      }
-      push("ident", sql.slice(i, j));
-      i = j; continue;
-    }
-    if (ch === "(") { push("block", "(…)"); depth++; i++; continue; }
-    if (ch === ")") { depth = Math.max(0, depth - 1); i++; continue; }
-    if (/[A-Za-z_\u0080-\uffff]/.test(ch)) {
-      let j = i + 1;
-      while (j < n && /[A-Za-z0-9_$.\u0080-\uffff]/.test(sql[j]!)) j++;
-      push("word", sql.slice(i, j), sql.slice(i, j).toUpperCase());
-      i = j; continue;
-    }
-    if (ch === ",") { push("punct", ","); i++; continue; }
-    i++;
-  }
-  return { tokens, statements };
-}
-
-/** DuckDB 1.5 nests block comments: `/* a /* b *\/ c *\/` is one comment. */
-function blockCommentEnd(sql: string, start: number): number {
-  let depth = 0;
-  for (let i = start; i < sql.length - 1;) {
-    if (sql[i] === "/" && sql[i + 1] === "*") { depth++; i += 2; continue; }
-    if (sql[i] === "*" && sql[i + 1] === "/") { depth--; i += 2; if (!depth) return i; continue; }
-    i++;
-  }
-  throw fail("invalid_input", "Unterminated comment.");
-}
-
-/**
- * DuckDB 1.5 reads backslash escapes in E'…' unless the E ends an identifier. After a digit the E may
- * end a number (`1E'…'`), so a literal the two readings end in different places is refused.
- */
-function stringEnd(sql: string, quote: number): number {
-  if (!/[eE]/.test(sql[quote - 1] ?? "")) return literalEnd(sql, quote, false);
-  const before = sql[quote - 2] ?? "";
-  if (!/[0-9]/.test(before)) return literalEnd(sql, quote, !/[A-Za-z_$\u0080-\uffff]/.test(before));
-  const end = literalEnd(sql, quote, false);
-  if (end !== literalEnd(sql, quote, true)) throw fail("invalid_input", "Put a space before E'…' so the string reads one way.");
-  return end;
-}
-
-/** DuckDB 1.5 joins 'a' and 'b' separated by a line break into one literal that keeps the first one's escapes. */
-const STRING_CONTINUES = /[ \t\f]*(?:--[^\n\r]*)?[\n\r](?:[ \t\n\r\f]|--[^\n\r]*[\n\r])*'/y;
-
-function literalEnd(sql: string, quote: number, escapes: boolean): number {
-  for (let j = quote + 1; j < sql.length; j++) {
-    if (escapes && sql[j] === "\\") { j++; continue; }
-    if (sql[j] !== "'") continue;
-    if (sql[j + 1] === "'") { j++; continue; }
-    STRING_CONTINUES.lastIndex = j + 1;
-    if (!STRING_CONTINUES.test(sql)) return j + 1;
-    j = STRING_CONTINUES.lastIndex - 1;
-  }
-  throw fail("invalid_input", "Unterminated string literal.");
-}
-
 const READ_VERBS = new Set(["SELECT", "WITH", "FROM", "PIVOT", "UNPIVOT", "VALUES", "SUMMARIZE", "DESCRIBE", "EXPLAIN", "SHOW"]);
 const MATERIALISABLE = new Set(["SELECT", "WITH", "FROM", "PIVOT", "UNPIVOT", "VALUES"]);
 
@@ -248,8 +152,7 @@ const REPARSED_SPACES = /[\u00a0\u2000-\u200b\u202f\u205f\u2060\u3000\ufeff]/;
 
 export function classifySql(sql: string): SqlClass {
   if (REPARSED_SPACES.test(sql)) throw fail("invalid_input", "Replace non-ASCII spaces with plain spaces.", { hint: "In a string, write chr(160) and similar instead." });
-  const { tokens, statements } = topLevelTokens(sql);
-  if (statements > 1) throw fail("invalid_input", "One statement per call.", { hint: "Send each statement in its own data_sql call." });
+  const { tokens } = singleStatement(sql);
   if (!tokens.length || tokens[0]!.kind !== "word") throw fail("invalid_input", "The statement is empty.");
   return classifyTokens(tokens);
 }
@@ -326,7 +229,11 @@ const CELL_CHARS_MAX = 2000;
 
 export function boundRows(rows: RunResult["rows"], maxRows: number, maxBytes: number): { rows: RunResult["rows"]; truncated: boolean } {
   let truncated = rows.length > maxRows;
-  let kept = rows.slice(0, maxRows).map((row) => row.map((cell) => (typeof cell === "string" && cell.length > CELL_CHARS_MAX ? `${cell.slice(0, CELL_CHARS_MAX)}…` : cell)));
+  let kept = rows.slice(0, maxRows).map((row) => row.map((cell) => {
+    if (typeof cell !== "string" || cell.length <= CELL_CHARS_MAX) return cell;
+    truncated = true;
+    return `${cell.slice(0, CELL_CHARS_MAX)}…`;
+  }));
   while (kept.length && Buffer.byteLength(JSON.stringify(kept)) > maxBytes) {
     kept = kept.slice(0, Math.max(0, kept.length - Math.max(1, Math.ceil(kept.length / 10))));
     truncated = true;
@@ -554,14 +461,14 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const plans = planLoad(input);
   const replace = input.replace !== false;
   const existing = new Set((await ctx.database.listTables()).map((table) => table.name.toLowerCase()));
+  const tables: LoadedTable[] = [];
   const unique = (base: string): string => {
     const stem = tableNameFrom(base);
     let name = stem;
-    for (let n = 2; !replace && existing.has(name.toLowerCase()); n++) name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
-    existing.add(name.toLowerCase());
+    for (let n = 2; tables.some((table) => table.name === name) || (!replace && existing.has(name)); n++) name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
+    existing.add(name);
     return name;
   };
-  const tables: LoadedTable[] = [];
   const warnings: string[] = [];
   const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>) => {
     const sql = `CREATE ${replace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${relation}`;
@@ -628,7 +535,7 @@ export async function describeTarget(ctx: DataContext, target: string): Promise<
     const kind = gateSql(target);
     if (kind.kind !== "read" || !kind.materialisable) throw fail("invalid_input", "Describe takes a table name or a SELECT.", { sql: target });
     sql = target;
-    relation = `(${target})`;
+    relation = queryRelation(target);
   }
   const described = await ctx.database.describe(relation, runOptions(ctx));
   const { columns, truncated } = boundColumns(described.columns, DATA_LIMITS.describeBytesMax);
@@ -680,7 +587,8 @@ export async function runSql(ctx: DataContext, input: SqlInput): Promise<SqlOutp
   if (kind.kind === "create") {
     await ctx.database.run(input.sql, runOptions(ctx));
     const described = await ctx.database.describe(kind.target, runOptions(ctx));
-    return { table: kind.target, columns: boundColumns(described.columns, DATA_LIMITS.describeBytesMax).columns, rowCount: described.rowCount, rows: [], truncated: false, elapsedMs: Date.now() - started };
+    const bounded = boundColumns(described.columns, DATA_LIMITS.describeBytesMax);
+    return { table: kind.target, columns: bounded.columns, rowCount: described.rowCount, rows: [], truncated: bounded.truncated, elapsedMs: Date.now() - started };
   }
   if (!kind.materialisable) {
     const result = await ctx.database.run(input.sql, runOptions(ctx, { maxRows: limit + 1 }));
@@ -772,7 +680,7 @@ export async function showCard(context: DataContext, input: ShowInput, onCardRea
     if (input.sql) {
       const kind = gateSql(input.sql);
       if (kind.kind !== "read" || !kind.materialisable) throw fail("invalid_input", "A card shows a SELECT's result.", { sql: input.sql });
-      from = `(${input.sql})`;
+      from = queryRelation(input.sql);
     } else {
       from = await ctx.database.resolveTable(input.table!);
       cardSql = `SELECT * FROM ${from}`;
@@ -936,7 +844,7 @@ export async function exportData(ctx: DataContext, input: ExportInput): Promise<
   let stem: string;
   if (card) {
     if (card.result) relation = resultRelation(card.result);
-    else if (card.sql) relation = `(${card.sql})`;
+    else if (card.sql) relation = queryRelation(card.sql);
     else throw fail("invalid_input", `${card.id} has no data to export.`);
     stem = card.title;
   } else if (input.table) {
@@ -945,7 +853,7 @@ export async function exportData(ctx: DataContext, input: ExportInput): Promise<
   } else {
     const kind = gateSql(input.sql!);
     if (kind.kind !== "read" || !kind.materialisable) throw fail("invalid_input", "Export takes a SELECT.", { sql: input.sql });
-    relation = `(${input.sql})`;
+    relation = queryRelation(input.sql!);
     stem = "query";
   }
   const format = input.format === "csv" ? "FORMAT csv, HEADER true" : input.format === "xlsx" ? "FORMAT xlsx, HEADER true" : "FORMAT parquet";

@@ -109,7 +109,8 @@ export interface Assignment {
   restart?: "rerun" | "cut" | "teammates";
   createdAt: number;
   startedAt?: number;
-  /** Last durable progress: a dispatch, a settlement, a child's settlement. */
+  /** Last durable progress: a dispatch, a settlement, a child's settlement — and, while a turn
+   * runs, activity the host reports through progress(), written on a coarse cadence. */
   lastActivityAt: number;
   finishedAt?: number;
   /** What the assignee last said or how it ended (at most 12 000 characters). */

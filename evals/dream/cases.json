@@ -1,0 +1,89 @@
+[
+  {
+    "id": "short-replies-across-chats",
+    "why": "A reply preference the person shows in three chats is learned once.",
+    "today": "2026-11-14",
+    "notebook": "",
+    "conversations": [
+      { "title": "Email to landlord", "lines": [
+        { "by": "person", "text": "Can you make this email shorter? It's way too long." },
+        { "by": "bot", "text": "Here is a shorter version in four sentences." }
+      ] },
+      { "title": "Team update", "lines": [
+        { "by": "person", "text": "Too wordy again, keep it under 100 words please." },
+        { "by": "bot", "text": "Done, it is 82 words now." }
+      ] },
+      { "title": "Thank-you note", "lines": [
+        { "by": "person", "text": "Thanks, short like that is perfect." }
+      ] }
+    ],
+    "expect": {
+      "learned": [{ "anyOf": ["short", "brief", "concise", "100 words"] }],
+      "outdated": [],
+      "never": []
+    }
+  },
+  {
+    "id": "one-chat-is-not-a-pattern",
+    "why": "A fact said in one chat only is left to capture: a dream keeps nothing a single chat could have told it.",
+    "today": "2026-11-14",
+    "notebook": "",
+    "conversations": [
+      { "title": "Dinner", "lines": [
+        { "by": "person", "text": "I'm allergic to peanuts, keep that in mind for the recipe." },
+        { "by": "bot", "text": "Noted, here is a peanut-free stir fry." }
+      ] },
+      { "title": "Cat names", "lines": [
+        { "by": "person", "text": "What's a good name for a grey cat?" },
+        { "by": "bot", "text": "Smokey, Ash or Pebble." }
+      ] }
+    ],
+    "expect": {
+      "learned": [],
+      "outdated": [],
+      "never": ["peanut"]
+    }
+  },
+  {
+    "id": "a-task-is-not-a-fact",
+    "why": "Work the person asks for twice says what they work on, never who they are.",
+    "today": "2026-11-14",
+    "notebook": "",
+    "conversations": [
+      { "title": "Launch plan", "lines": [
+        { "by": "person", "text": "Write a launch plan for a vegan bakery opening in March." },
+        { "by": "bot", "text": "Here is a three-phase launch plan." }
+      ] },
+      { "title": "Bio", "lines": [
+        { "by": "person", "text": "Now draft the vegan bakery's Instagram bio." },
+        { "by": "bot", "text": "Fresh, plant-based, baked daily." }
+      ] }
+    ],
+    "expect": {
+      "learned": [],
+      "outdated": [],
+      "never": ["person is vegan", "is a vegan", "follows a vegan", "eats vegan"]
+    }
+  },
+  {
+    "id": "outdated-note-after-a-move",
+    "why": "A note a chat says has changed is updated, quoting the chat that says so.",
+    "today": "2026-11-14",
+    "notebook": "- 2026-09-01 · The person lives in Pune\n",
+    "conversations": [
+      { "title": "Weather", "lines": [
+        { "by": "person", "text": "I moved to Bangalore last month, so use Bangalore for the weather from now on." },
+        { "by": "bot", "text": "Got it, Bangalore it is." }
+      ] },
+      { "title": "Weekend", "lines": [
+        { "by": "person", "text": "What's on in Bangalore this weekend?" },
+        { "by": "bot", "text": "A food festival in Indiranagar and a jazz night." }
+      ] }
+    ],
+    "expect": {
+      "learned": [],
+      "outdated": [{ "line": 0, "anyOf": ["bangalore"] }],
+      "never": ["lives in pune"]
+    }
+  }
+]

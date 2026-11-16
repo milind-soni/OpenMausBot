@@ -84,7 +84,7 @@ it("adds independent accounts, switches a bot between their models, and preserve
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const id = created.body.instanceId as string; ids.push(id);
     const instance = created.body.instances.find((row: any) => row.instanceId === id);
-    expect(instance).toMatchObject({ displayName: displayName.trim(), driverKind: "antigravityAgent", cli, snapshot: { authenticated: false } });
+    expect(instance).toMatchObject({ displayName: displayName.trim(), driverKind: "antigravityAgent", cli, snapshot: { authenticated: false }, authentication: { method: "callback-url" } });
     expect(existsSync(tokenPath(id))).toBe(false);
     expect(JSON.stringify(instance)).not.toMatch(/synthetic-do-not-copy|refresh_token|client_secret/);
   }

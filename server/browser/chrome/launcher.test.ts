@@ -6,6 +6,8 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import type { ChromeIdentity } from "./identity.ts";
 import { chromeForTestingExecutable, chromeForTestingPin, type installChromeForTesting } from "./install.ts";
+import { BrowserHostError, hostSetupOf } from "./host-setup.ts";
+import { ChromeLaunchError } from "./launch.ts";
 import { ChromeLauncher, runsLauncher } from "./launcher.ts";
 import { chromeHost } from "./resolve.ts";
 import type { IdentitySidecars } from "./sidecar.ts";
@@ -214,6 +216,48 @@ describe("the Chrome launcher", () => {
     expect(chrome.env()).toEqual({});
     expect(chrome.describe()).toContain("Chrome could not be started");
     expect(existsSync(chrome.path)).toBe(false);
+  });
+
+  it("counts a failed Chrome download as the engine's own shell, but not when an installed Google Chrome is what the engine uses", async () => {
+    const bare = launcher(mac({ chrome: false }));
+    expect(bare.runsShellForWantOfChrome()).toBe(false);
+    await bare.prepare();
+    expect(bare.env()).toEqual({});
+    expect(bare.runsShellForWantOfChrome()).toBe(true);
+    const machine = mac();
+    const managed = launcher({ ...machine, host: { ...machine.host, exists: (path: string) => path.endsWith("com.google.Chrome.plist") || machine.host.exists(path) } });
+    await managed.prepare();
+    expect(managed.env()).toEqual({});
+    expect(managed.runsShellForWantOfChrome()).toBe(false);
+  });
+
+  it("counts a downloaded Chrome that then fails its checks as the engine's own shell", async () => {
+    const install = vi.fn(async (options: Parameters<typeof installChromeForTesting>[0]) => {
+      const path = chromeForTestingExecutable(options.dataDir, options.pin);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, "#!/bin/sh\n", { mode: 0o755 });
+      return path;
+    });
+    const cached = launcher(mac({ chrome: false }), { install, calibrate: async () => { throw new Error("the browser exited (1) before it answered"); } });
+    await cached.prepare();
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(cached.plan()).toMatchObject({ kind: "chrome", chrome: { source: "downloaded" } });
+    expect(cached.env()).toEqual({});
+    expect(cached.runsShellForWantOfChrome()).toBe(true);
+  });
+
+  it("keeps what the host needs behind the error a viewer gets, when Chrome cannot start there", async () => {
+    const named = mkdtempSync(join(tmpdir(), "omb-named-"));
+    folders.push(named);
+    writeFileSync(join(named, "chrome"), "#!/bin/sh\n", { mode: 0o755 });
+    const host = new BrowserHostError("container");
+    const chrome = launcher(mac({ env: { OMB_CHROME_PATH: join(named, "chrome") } }), {
+      calibrate: async () => { throw new ChromeLaunchError(host.message, "Running as root without --no-sandbox is not supported.", host); },
+    });
+    const failure = await chrome.binary().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("OMB_BROWSER_SANDBOX=0");
+    expect(hostSetupOf(failure)).toBe(host);
   });
 
   it("keeps a working launcher when reading a newer binary fails, rather than switch browsers mid-session", async () => {

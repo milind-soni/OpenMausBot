@@ -47,6 +47,22 @@ describe("theme routes", () => {
     expect(await callRoute(routes, { method: "GET", path: "/api/themes", auth: guest })).toMatchObject({ status: 403 });
   });
 
+  it("lists a person's look changes and goes back to one, telling their windows", async () => {
+    const { routes, store, changed } = fixture();
+    await callRoute(routes, { method: "PUT", path: "/api/themes/neon", body: { theme: { name: "Neon", accent: "#ff2bd6" } }, auth: ann });
+    await callRoute(routes, { method: "PUT", path: "/api/themes/active", body: { id: "neon" }, auth: ann });
+    await callRoute(routes, { method: "PUT", path: "/api/themes/neon", body: { theme: { name: "Neon", accent: "#00ff88" } }, auth: ann });
+    await callRoute(routes, { method: "PUT", path: "/api/themes/active", body: { id: null, skin: "system" }, auth: ann });
+    const listed = await callRoute(routes, { method: "GET", path: "/api/themes/history", auth: ann });
+    expect((listed.body as { items: Array<{ index: number; kind: string }> }).items.map((item) => `${item.index} ${item.kind}`)).toEqual(["1 default", "2 edited", "3 wore", "4 made"]);
+    expect(await callRoute(routes, { method: "POST", path: "/api/themes/history", body: { index: 3 }, auth: ann })).toMatchObject({ status: 200 });
+    expect(store.list("p_ann").active).toBe("neon");
+    expect(store.read("p_ann", "neon")?.accent).toBe("#ff2bd6");
+    expect(changed.at(-1)).toEqual({ person: "p_ann", skin: "system" });
+    expect(await callRoute(routes, { method: "POST", path: "/api/themes/history", body: { index: 9 }, auth: ann })).toMatchObject({ status: 400 });
+    expect(await callRoute(routes, { method: "GET", path: "/api/themes/history", auth: bob })).toEqual({ status: 200, body: { items: [] } });
+  });
+
   it("refuses CSS that loads from elsewhere before saving it", async () => {
     const { routes, store } = fixture();
     const refused = await callRoute(routes, { method: "PUT", path: "/api/themes/leak", body: { theme: { name: "Leak", css: "@import url(https://example.com/x.css);" } }, auth: ann });

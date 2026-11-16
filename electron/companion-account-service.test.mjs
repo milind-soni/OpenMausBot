@@ -144,6 +144,11 @@ describe("Companion account service", () => {
     });
   });
 
+  it("tells a build with no control plane apart from one that can't reach it", async () => {
+    const { service } = serviceFixture({ client: null });
+    await expect(service.state()).resolves.toMatchObject({ available: false, status: "signed-out", problem: "unconfigured" });
+  });
+
   it("hides account onboarding until the configured control plane is healthy", async () => {
     const client = readyClient({
       health: vi.fn(async () => {
@@ -176,6 +181,7 @@ describe("Companion account service", () => {
       email: "ada@example.com",
       endpoint: ENDPOINT,
       message: "Secure access is not available right now. Local pairing still works.",
+      problem: "unreachable",
     });
     expect(store.writes).toHaveLength(0);
   });
@@ -309,6 +315,7 @@ describe("Companion account service", () => {
       email: "ada@example.com",
     });
     expect(JSON.stringify(await service.state())).not.toContain("invalid_otp");
+    expect((await service.state()).problem).toBe("sign_in");
   });
 
   it("handles an expired account session without deleting recovery credentials", async () => {

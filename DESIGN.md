@@ -110,6 +110,7 @@ and never add fonts.
 | Menu item (`MENU_ITEM`) | 14 / 18px | 400 | `ink` |
 | Body, rows, menu rows (`MENU_ROW`) | 13 / 18px | 400 | `ink` or `ink-secondary` |
 | Names in lists | 13 / 18px | 500 | `ink` |
+| Speaker names in transcripts (people and bots) | 13px | 600 | bot colour, else `ink-secondary` |
 | Meta, hints, group labels | 12 / 16px | 400 (group labels 500) | `ink-tertiary` |
 | Keycaps (`ShortcutHint`), tiny badges | 11px | 400 | `ink-secondary` or `ink-tertiary` |
 
@@ -118,8 +119,8 @@ Rules:
 - **Buttons size their own labels.** `.ui-button` and its variants set the
   size and weight; don't add text classes to them.
 - **Stick to the table.** No 16px or 18px body text, and no new text under 11px.
-- **Three weights:** 400 for text, 500 for names and labels, 600 for titles.
-  No 700.
+- **Three weights:** 400 for text, 500 for names and labels, 600 for titles
+  and for speaker names in transcripts. No 700.
 - **Sentence case everywhere.** Titles, buttons, menu items and labels.
   No ALL CAPS labels and no Title Case.
 - **One line for titles and rows.** Truncate with `truncate` and keep the

@@ -126,8 +126,21 @@ export function withAuthenticatedAccount(
   return next;
 }
 
-export function publicState({ available, status, email, endpoint, message, paused, tunnelRetired }) {
+const PROBLEMS = new Set(["unconfigured", "unreachable", "sign_in", "busy", "limit", "update", "address", "failed"]);
+const PROBLEM_OF = {
+  control_plane_unavailable: "unreachable", network_unavailable: "unreachable",
+  unauthorized: "sign_in", forbidden: "sign_in", signed_out: "sign_in", invalid_otp: "sign_in", otp_expired: "sign_in", invalid_email: "sign_in",
+  rate_limited: "busy", credential_rotation_rate_limited: "busy", endpoint_rate_limited: "busy", endpoint_busy: "busy", endpoint_capacity: "busy",
+  installation_limit_reached: "limit", update_required: "update",
+};
+
+/** A control-plane error code as one of the renderer's few problem words; the code itself stays in the main process. */
+export const accountProblem = (code) => PROBLEM_OF[code] ?? "failed";
+
+/** `problem` is one fixed word for the renderer's diagnosis, never a message or a control-plane code. */
+export function publicState({ available, status, email, endpoint, message, paused, tunnelRetired, problem }) {
   const state = { available: Boolean(available), status };
+  if (PROBLEMS.has(problem)) state.problem = problem;
   if (paused === true) state.paused = true;
   if (tunnelRetired === true) state.tunnelRetired = true;
   const normalizedEmail = normalizeAccountEmail(email);

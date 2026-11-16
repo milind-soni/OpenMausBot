@@ -39,6 +39,8 @@ const BRIEF_MAX = 12_000;
 const RESULT_MAX = 12_000;
 const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
 const DETAIL_MAX = 400;
+/** progress() runs once per runtime event; lastActivityAt catches up at this cadence, not per event. */
+export const PROGRESS_WRITE_MS = 10_000;
 
 const defaultClock: Clock = { now: () => Date.now(), monotonic: () => performance.now() };
 
@@ -533,16 +535,32 @@ export class Runtime {
     this.store.update(n, { kind: "held", at: this.clock.now(), detail: clip(why, DETAIL_MAX) });
   }
 
-  /** The host saw activity on this running turn: its stall window restarts. */
+  /** The host saw activity on this running turn: its stall window restarts, and lastActivityAt
+   * catches up on the PROGRESS_WRITE_MS cadence so the stored row reads as live, not frozen at dispatch. */
   progress(id: string): void {
+    const now = this.clock.now();
     const turn = this.turns.get(id);
     if (turn) {
       turn.activeAt = this.clock.monotonic();
-      this.rootActivity.set(turn.rootId, this.clock.now());
-      return;
+      this.rootActivity.set(turn.rootId, now);
     }
-    const n = this.store.get(id);
-    if (n?.status === "running") this.rootActivity.set(n.rootId, this.clock.now());
+    try {
+      const n = this.store.get(id);
+      if (!turn && n?.status === "running") this.rootActivity.set(n.rootId, now);
+      if (!n || n.status !== "running" || now - n.lastActivityAt < PROGRESS_WRITE_MS) return;
+      n.lastActivityAt = now;
+      const root = n.rootId === n.id ? undefined : this.store.get(n.rootId);
+      this.store.transaction(() => {
+        this.store.update(n);
+        if (root && !isTerminal(root) && now - root.lastActivityAt >= PROGRESS_WRITE_MS) {
+          root.lastActivityAt = now;
+          this.store.update(root);
+        }
+      });
+    } catch (error) {
+      // Bookkeeping only: a failed read or stamp never ends the turn or the caller that reported progress.
+      this.log(`progress(${id}) failed: ${String(error)}`);
+    }
   }
 
   /** A parked question is answered, by the person unless `by` says otherwise; the next turn carries it. */
