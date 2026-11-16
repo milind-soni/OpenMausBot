@@ -2271,6 +2271,7 @@
   "sidebar.noMatch": "Nothing matches “{query}”",
   "sidebar.preview.waiting": "Waiting for you…",
   "sidebar.preview.waitingOnTeammate": "Waiting on a teammate…",
+  "sidebar.preview.failed": "Ran into a problem",
   "sidebar.preview.working": "Working…",
   "sidebar.preview.botWorking": "{name} is working…",
   "sidebar.preview.botWorkingQueued": "{name} is working… · {count} queued",
