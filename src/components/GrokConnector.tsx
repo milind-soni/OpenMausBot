@@ -2,7 +2,7 @@ import { Check, Copy, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useCopyFeedback } from "@/lib/copy-text";
-import { grokConnector, type GrokConnector, type GrokHandoff } from "@/lib/grok-move";
+import { grokConnector, NO_ARRIVALS, type GrokConnector, type GrokHandoff } from "@/lib/grok-move";
 import { t } from "@/lib/i18n";
 import { localSetupImport } from "@/lib/setup-import";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -13,8 +13,6 @@ import { SettingRow, SettingsMark } from "./SettingsPrimitives";
 
 const LINE = "text-[13px] leading-relaxed text-ink-secondary";
 const POLL_MS = 3_000;
-/** This part shows no arrivals, so its looks ask for none. */
-const NO_ARRIVALS = Number.MAX_SAFE_INTEGER;
 const STATE: Record<GrokHandoff["state"], LocaleKey> = {
   working: "grokMove.connector.working",
   needs_you: "grokMove.connector.needsYou",
@@ -77,8 +75,8 @@ export function GrokConnectorPart() {
         {url ? (
           <button type="button" data-grok-connector-off className="ui-button" onClick={turnOff}>{t("grokMove.connector.turnOff")}</button>
         ) : (
-          <button type="button" data-grok-connector-on className="ui-button gap-1.5" disabled={busy} onClick={() => void turnOn()}>
-            {busy && <Loader2 size={14} className="animate-spin motion-reduce:animate-none" />}{t("grokMove.connect.start")}
+          <button type="button" data-grok-connector-on className="ui-button gap-1.5" disabled={busy || connector.opening} onClick={() => void turnOn()}>
+            {(busy || connector.opening) && <Loader2 size={14} className="animate-spin motion-reduce:animate-none" />}{t("grokMove.connect.start")}
           </button>
         )}
       </SettingRow>

@@ -214,7 +214,7 @@ describe("Move from Grok Bot", () => {
     await act(async () => { vi.advanceTimersByTime(3_000); });
     await tick();
     expect(shown()).toContain("Arrived from Grok Bot: Job Search");
-    expect(shown()).toContain("The link works while MausBot is open, until you turn it off in Settings.");
+    expect(shown()).toContain("The link stays on until you turn it off in Settings, and changes when MausBot restarts or updates.");
     expect(shown()).not.toMatch(/an hour/);
     await act(async () => { vi.advanceTimersByTime(3_000); });
     await tick();

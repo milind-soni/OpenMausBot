@@ -66,7 +66,7 @@ describe("Settings → Import: the Grok Bot connector", () => {
     expect(host.querySelector('input[aria-label="Link for Grok Bot"]')).toBeNull();
     await act(async () => button("Get the link")!.click());
     await tick();
-    expect(shown()).toContain("On while MausBot is open.");
+    expect(shown()).toContain("On. The link changes when MausBot restarts or updates, so add the new one in Grok Bot then.");
     expect(host.querySelector<HTMLInputElement>('input[aria-label="Link for Grok Bot"]')!.value).toBe(LINK);
     expect(button("Copy the link")).toBeDefined();
     expect(shown()).toContain("paste this as the Server URL");
@@ -96,6 +96,12 @@ describe("Settings → Import: the Grok Bot connector", () => {
     await render();
     expect(host.querySelector("[data-grok-move-stopped]")?.textContent).toBe("The link stopped working. Get a new one and paste it into Grok Bot in place of the old one.");
     expect(button("Get the link")).toBeDefined();
+  });
+
+  it("waits while the link comes back on as the app starts", async () => {
+    f.api.mockImplementation(async () => ({ available: true, opening: true, arrived: [], handoffs: [] }));
+    await render();
+    expect(button("Get the link")!.disabled).toBe(true);
   });
 
   it("says so when the link cannot be made", async () => {

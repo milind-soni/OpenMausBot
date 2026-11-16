@@ -14,8 +14,9 @@ import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, clou
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstChatQuiet, firstReplyPending } from "@/lib/corner-popup";
-import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, GROK_LINK_NOTICE, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { useTwoPlaces } from "@/lib/two-places";
+import { localSetupImport } from "@/lib/setup-import";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useAdvancedBackDue, useNewLookDue } from "@/lib/new-look";
 import { useAdvancedMode } from "@/lib/interface-mode";
@@ -34,6 +35,7 @@ import { CLOUD_NOTICE_CARD, cloudNoticeStep, CloudNoticeCard } from "./CloudNoti
 import { CloudTrialIntroCard } from "./CloudTrialIntro";
 import { useMoveQuiet } from "./CloudSendStrip";
 import { CloudTrialNoticeCard, useCloudPlanSnapshot } from "./CloudTrialNotice";
+import { GrokLinkChangedCard, useChangedGrokLink } from "./GrokLinkNotice";
 import { GrokMovePopup, reportGrokMovePopup, type GrokMovePopupAction } from "./GrokMovePopup";
 import { GrokMoveDialog } from "./lazy-screens";
 import { LinkButton, NoticeCard, NoticeToast, NotNowButton } from "./NoticeCard";
@@ -110,6 +112,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const twoFact = !local || two.suggest === null ? false : two.suggest === undefined ? null : true;
   // Phones whose older app lost its way in: this computer's own page only, never a Cloud, a server's page or client mode.
   const linkPhones = useRetiredLinkPhones(!remote && local);
+  // The Grok Bot link that came back on at a new address: the desktop app's own window only.
+  const grokLink = useChangedGrokLink(localSetupImport(state.config?.cloudHome === true), state.connected);
   useEffect(() => {
     if (!bridge) return;
     let active = true, updated = false;
@@ -233,12 +237,15 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const retiredPhones = phonesToTell(linkPhones, record);
   const phoneNow = retiredPhones?.length === 0 ? false
     : retiredPhones === undefined || !viewer || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") ? null : true;
+  const linkNow = grokLink.url === null ? false
+    : grokLink.url === undefined || !viewer || mausBotFirst || (state.liveCall && state.liveCall.status !== "ended") ? null : true;
   const launch = launchNotice();
-  // After a closed popup only the product-updates question and ModelGo's card may follow in this launch (nextNotice's
-  // FOLLOWERS); nothing else does.
+  // After a closed popup only nextNotice's FOLLOWERS may follow in this launch (the word that the Grok Bot link changed, the
+  // product-updates question, ModelGo's card and an announcement card); nothing else does.
   const notice = waits ? null
     : firstChatQuiet(state) ? (grokNow === true && (launch === null || launch === GROK_MOVE_NOTICE) ? GROK_MOVE_NOTICE : null)
-    : cards || whatsNewHere || consentHere || simpleDue || boatHere || modelgoHere || announcementNow !== false || twoFact !== false || grokNow !== false || phoneNow !== false ? nextNotice({
+    : cards || whatsNewHere || consentHere || simpleDue || boatHere || modelgoHere || announcementNow !== false || twoFact !== false || grokNow !== false || phoneNow !== false || linkNow !== false ? nextNotice({
+    [GROK_LINK_NOTICE]: linkNow,
     [GROK_MOVE_NOTICE]: grokNow,
     [PHONE_UPDATE_NOTICE]: phoneNow,
     // As the What's new popup: never in the launch whose welcome just finished, nor over MausBot's first-launch card.
@@ -305,6 +312,12 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   if (grokOpen) return <GrokMoveDialog onClose={() => setGrokOpen(false)} />;
   if (toast) return <NoticeToast text={toast} onDone={() => setToast(null)} />;
   if (!notice) return null;
+
+  if (notice === GROK_LINK_NOTICE && grokLink.url) {
+    const done = () => { close(); grokLink.seen(); };
+    return <GrokLinkChangedCard url={grokLink.url} onClose={done} onCopied={() => { done(); setToast(t("grokMove.linkChanged.copied")); }}
+      onSettings={() => { done(); dispatch({ type: "toggleAppSettings", open: true, section: "import" }); }} />;
+  }
 
   if (notice === GROK_MOVE_NOTICE) {
     const done = (action: GrokMovePopupAction) => {
