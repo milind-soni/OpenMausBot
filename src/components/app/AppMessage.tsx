@@ -235,6 +235,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
     message.text ? <div dir="auto" className={cn("line-clamp-6 whitespace-pre-wrap text-[13px] leading-[18px] text-ink-secondary", compact ? "px-4 pt-3" : bordered ? "px-4 pb-3" : "pb-2")}>{message.text}</div> : null
   ) : (
     <div data-app-box className={cn("relative w-full", compact && "overflow-hidden", bordered && !compact && "border-t border-ink/[0.08]", point.pointing && "ring-2 ring-inset ring-accent/60")}
+      // The whole card opens the page, so the keyboard must not reach what the preview shows underneath it.
+      inert={(compact && Boolean(current) && !point.pointing) || undefined}
       style={{ height: boxHeight }}>
       {current ? (
         <AppFrame
