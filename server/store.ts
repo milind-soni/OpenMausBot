@@ -35,7 +35,7 @@ import type {
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
 import { movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
-import { parseConnectorTools } from "./connector-tools.ts"; import { recoveredGrants } from "./always-allow.ts";
+import { parseConnectorTools } from "./connector-tools.ts"; import { recoverThreadGrantsOnce, rewriteGrantLists, type GrantRewrite } from "./always-allow.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sharedAsMaker, sharedUnlessRestricted, type NewBotSharingRule } from "./new-bot-sharing.ts";
@@ -436,17 +436,7 @@ export class Store {
       delete b.approvePeerComms;
       botsMigrated = true;
     }
-    // Recover only app-issued provider-tool grants into bot defaults, never task/session grants such as shell commands.
-    for (const b of this.bots) {
-      const taskProviderGrants = (b.tasks ?? []).flatMap((task) =>
-        (task.alwaysAllow ?? []).filter((key) => key.startsWith("provider-tool:")),
-      );
-      if (!taskProviderGrants.length) continue;
-      const migrated = recoveredGrants(b.alwaysAllow, taskProviderGrants, b.id);
-      if (JSON.stringify(migrated) === JSON.stringify(b.alwaysAllow ?? [])) continue;
-      b.alwaysAllow = migrated;
-      botsMigrated = true;
-    }
+    if (recoverThreadGrantsOnce(DATA_DIR, this.bots)) botsMigrated = true;
     const botIds = new Set(this.bots.map((b) => b.id));
     for (const g of this.groups) {
       g.busyBotId = null;
@@ -2141,6 +2131,14 @@ export class Store {
     Object.assign(bot, patch, { approvalGrant: undefined });
     this.emit({ type: "bot", botId });
     return bot;
+  }
+
+  /** Rewrites the bot's own "Always allow" list and each of its threads' in one save (always-allow.ts). */
+  rewriteGrants(botId: string, rewrite: GrantRewrite, removal = false): boolean {
+    const bot = this.bot(botId);
+    if (!bot || !rewriteGrantLists(bot, rewrite, () => this.saveBots(), removal)) return false;
+    this.emit({ type: "bot", botId });
+    return true;
   }
 
   /** An uncommitted grant is ignored, so a refresh cannot copy the temporary Ask mask. */

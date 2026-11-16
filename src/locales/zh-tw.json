@@ -1105,7 +1105,6 @@
   "approval.action.deny": "拒絕",
   "approval.action.stopAsking": "不再詢問 {name} 關於 {key} 的事",
   "approval.action.alwaysAllow": "一律允許",
-  "approval.action.alwaysAllowSession": "本次工作階段一律允許",
   "approval.action.allowSession": "本次工作階段允許",
   "approval.action.alwaysAllowSessionHint": "在工作階段結束前，供應商不會再詢問這個動作。",
   "approval.action.alwaysAllowCommand": "一律允許這個指令",

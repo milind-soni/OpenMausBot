@@ -9389,7 +9389,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("keeps an always-allowed MCP read after its server is restarted, for that tool on that server only", async () => {
+  it("keeps an always-allowed MCP read after its server is restarted, for that tool on that server only, until it is removed in Settings", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Wren" })).body.bot;
     const conns: Socket[] = [];
     try {
@@ -9447,6 +9447,16 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: sendCard.requestId, behavior: "deny" })).status).toBe(200);
       await expect(send).resolves.toMatchObject({ behavior: "deny" });
       expect((await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id).alwaysAllow).toEqual([asked.allowKey]);
+
+      // Removed in Settings → Access: the thread it was given in and the turn now running stop allowing it too.
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { alwaysAllow: [] })).status).toBe(200);
+      const saved = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect([saved.alwaysAllow, ...saved.tasks.map((task: { alwaysAllow?: string[] }) => task.alwaysAllow ?? [])].flat()).toEqual([]);
+      const afterRemoval = raise("ask-entries-3", "list entries once removed", "mcp__ledger__list_entries");
+      const askedAgain = await card("list entries once removed");
+      expect(askedAgain.allowKey).toBe(asked.allowKey);
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: askedAgain.requestId, behavior: "deny" })).status).toBe(200);
+      await expect(afterRemoval).resolves.toMatchObject({ behavior: "deny" });
     } finally {
       for (const conn of conns) conn.destroy();
       await api("POST", `/api/bots/${bot.id}/interrupt`);

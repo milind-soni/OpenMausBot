@@ -903,7 +903,6 @@
   "approval.action.deny": "Отклонить",
   "approval.action.stopAsking": "Больше не спрашивать {name} про {key}",
   "approval.action.alwaysAllow": "Всегда разрешать",
-  "approval.action.alwaysAllowSession": "Всегда разрешать в этом сеансе",
   "approval.action.allowSession": "Разрешить в этом сеансе",
   "approval.action.alwaysAllowSessionHint": "Провайдер перестанет запрашивать подтверждение этого действия до конца сеанса",
   "approval.action.alwaysAllowCommand": "Всегда разрешать эту команду",

@@ -890,7 +890,6 @@
   "approval.action.deny": "Rifiuta",
   "approval.action.stopAsking": "Smetti di chiedere a {name} riguardo a {key}",
   "approval.action.alwaysAllow": "Consenti sempre",
-  "approval.action.alwaysAllowSession": "Consenti sempre in questa sessione",
   "approval.action.allowSession": "Consenti in questa sessione",
   "approval.action.alwaysAllowSessionHint": "Il fornitore smette di chiedere di questa azione fino alla fine della sessione",
   "approval.action.alwaysAllowCommand": "Consenti sempre questo comando",

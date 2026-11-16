@@ -897,7 +897,6 @@
   "approval.action.deny": "Odrzuć",
   "approval.action.stopAsking": "Niech {name} nie dostaje już pytań o {key}",
   "approval.action.alwaysAllow": "Zawsze zezwalaj",
-  "approval.action.alwaysAllowSession": "Zawsze zezwalaj w tej sesji",
   "approval.action.allowSession": "Zezwól w tej sesji",
   "approval.action.alwaysAllowSessionHint": "Dostawca przestaje pytać o tę akcję do końca sesji",
   "approval.action.alwaysAllowCommand": "Zawsze zezwalaj na tę komendę",

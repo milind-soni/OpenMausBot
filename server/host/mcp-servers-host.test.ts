@@ -204,8 +204,9 @@ it("ties a saved grant to the server as config.json holds it: a restart or a new
   const host = createMcpServersHost({
     dataDir: data, cfg: () => cfg, persist: (next) => { cfg.mcpServers = next; }, bots: () => [IRIS, PAUL], startsServers: () => true, boxed: () => false, policy: (servers) => servers,
     tell: () => {}, keys, start: async () => ({ ok: true }),
-    moveGrants: (bot, move) => { const next = move(saved.get(bot.id) ?? []); if (next) saved.set(bot.id, next); },
+    moveGrants: (bot, move) => { goneOver.push(bot.id); const next = move(saved.get(bot.id) ?? []); if (next) saved.set(bot.id, next); },
   });
+  const goneOver: string[] = [];
   const key = (bot: typeof IRIS, server = "stripe", tool = "list_charges") => providerToolAllowKey("claude", `mcp__${server}__${tool}`, host.grantSpecs(host.mounted(bot))[server]);
   /** What earlier versions saved: the fingerprint of the server as started, key value and restart count included. */
   const earlier = (bot: typeof IRIS) => `provider-tool:claude:stripe:list_charges:${createHash("sha256").update(JSON.stringify(host.mounted(bot).stripe)).digest("hex").slice(0, 16)}`;
@@ -242,6 +243,18 @@ it("ties a saved grant to the server as config.json holds it: a restart or a new
   expect(saved.get(IRIS.id)).toEqual([first, "Bash:git status"]);
   expect(saved.get(PAUL.id)).toEqual([beforeRestart]);
   expect(JSON.stringify([...saved])).not.toContain("sk_fake");
+  // A turn whose servers are as they were at the bot's last one goes over nothing: no hashing of its keys, no save.
+  const before = goneOver.length;
+  await host.prepare(IRIS);
+  await host.prepare(IRIS);
+  expect(goneOver.length).toBe(before);
+  host.health.changed("stripe");
+  await host.prepare(IRIS);
+  expect(goneOver.slice(before), "servers changed: once more, for that bot").toEqual([IRIS.id]);
+  await host.prepare(PAUL);
+  await host.prepare(PAUL);
+  expect(goneOver.slice(before)).toEqual([IRIS.id, PAUL.id]);
+  expect(saved.get(PAUL.id), "and Paul's own turn moves Paul's").toEqual([first]);
 
   (cfg.mcpServers!.stripe as { args: string[] }).args = ["stripe-mcp", "--live"];
   expect(key(IRIS), "changed arguments are another server").not.toBe(first);
@@ -265,6 +278,8 @@ it("keeps a turn starting when its bot's grants cannot be saved in their new for
   const logged = vi.spyOn(console, "error").mockImplementation(() => {});
   await expect(host.prepare(IRIS)).resolves.toBeUndefined();
   expect(logged).toHaveBeenCalledExactlyOnceWith("[mcp] Could not move this bot's saved tool permissions to their new form.");
+  await host.prepare(IRIS);
+  expect(logged, "a failed move is tried again at the next turn").toHaveBeenCalledTimes(2);
   logged.mockRestore();
 });
 

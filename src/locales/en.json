@@ -1181,7 +1181,6 @@
   "approval.action.deny": "Deny",
   "approval.action.stopAsking": "Stop asking {name} about {key}",
   "approval.action.alwaysAllow": "Always allow",
-  "approval.action.alwaysAllowSession": "Always allow this session",
   "approval.action.allowSession": "Allow for this session",
   "approval.action.alwaysAllowSessionHint": "The provider stops asking about this action until the session ends",
   "approval.action.alwaysAllowCommand": "Always allow this command",

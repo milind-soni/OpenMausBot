@@ -9,7 +9,7 @@ import { customMcpServers } from "../config.ts";
 import type { McpServerSpec, StdioMcpSpec } from "../contracts.ts";
 import { addBotMcpServer, claimBotMcpServers, keepForBot, withoutBotMcpServers, type BotKept, type BotMcpServerAdd } from "../mcp-bot-servers.ts";
 import { MCP_RESTART_ENV } from "../mcp-app-catalog.ts";
-import { movedGrantKeys, storedGrantSpec, type GrantServer } from "../mcp-grant-spec.ts";
+import { grantMover, grantServersMark, storedGrantSpec, type GrantServer } from "../mcp-grant-spec.ts";
 import { createMcpHealth, nameList, toolLabel, type McpHealthDeps } from "../mcp-health.ts";
 import { probeMcpServer } from "../mcp-probe.ts";
 import { isRemoteMcpServer, parseStoredMcpServer, type StoredStdioMcpServer } from "../mcp-registry.ts";
@@ -128,14 +128,19 @@ export function createMcpServersHost(deps: McpServersHostDeps) {
     const stored = deps.cfg().mcpServers ?? {};
     return Object.fromEntries(Object.entries(servers).map(([name, server]) => [name, storedGrantSpec(name, stored[name]) ?? server]));
   };
-  /** Grants an earlier version tied to a key's value or a restart count move to the server as it is named now. A failed
-   * save changes nothing: the next turn tries again, and until then those tools ask as they did. */
+  /** Grants an earlier version tied to a key's value or a restart count move to the server as it is named now: once for
+   * a bot's servers as they are, so a turn whose servers have not changed since does none of this. A failed save changes
+   * nothing: the next turn tries again, and until then those tools ask as they did. */
+  const movedFor = new Map<string, string>();
   const moveGrants = (bot: Bot): void => {
     if (!deps.moveGrants) return;
     const started = mounted(bot), names = grantSpecs(started);
     const servers: Record<string, GrantServer> = Object.fromEntries(Object.keys(started).map((name) => [name, { names: names[name]!, started: started[name]! }]));
+    const mark = grantServersMark(servers);
+    if (movedFor.get(bot.id) === mark) return;
     try {
-      deps.moveGrants(bot, (keys) => movedGrantKeys(keys, servers));
+      deps.moveGrants(bot, grantMover(servers));
+      movedFor.set(bot.id, mark);
     } catch {
       console.error("[mcp] Could not move this bot's saved tool permissions to their new form.");
     }

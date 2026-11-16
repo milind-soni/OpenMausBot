@@ -1222,7 +1222,6 @@
   "approval.action.deny": "拒绝",
   "approval.action.stopAsking": "不再就 {key} 询问 {name}",
   "approval.action.alwaysAllow": "始终允许",
-  "approval.action.alwaysAllowSession": "本次会话一律允许",
   "approval.action.allowSession": "本次会话允许",
   "approval.action.alwaysAllowSessionHint": "在会话结束前，提供方不会再询问这个动作。",
   "approval.action.alwaysAllowCommand": "始终允许此命令",

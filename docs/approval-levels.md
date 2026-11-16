@@ -218,7 +218,8 @@ tools, computer control, a sandbox change, an unconfigured server, or a guest's
 turn. A custom MCP server controls its own tool names, so only remember tools
 from a server you trust. The grant applies to the bot's current and future
 conversations, including newly delegated work. Saved entries are visible and
-revocable in the bot's Access settings.
+revocable in the bot's Access settings; removing one there takes it from every
+conversation of the bot at once, a running turn included.
 
 The harness's own agents tools (coordinating teammates, threads, memory) never
 ask on Claude, Codex or API models: OpenMausBot authorizes each of those
