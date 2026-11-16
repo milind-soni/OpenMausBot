@@ -726,3 +726,18 @@ describe("a Stop that wins against a provider dispatch", () => {
     expect(r.dog.watching("t1")).toBe(false);
   });
 });
+
+describe("a turn the crash guard stops", () => {
+  it("is stopped at once as a stall with the server-error reason, once, and only while it is watched", () => {
+    const stalls: Array<[string, StallReason]> = [];
+    const dog = new TurnWatchdog({ stallMs: 60_000, toolStallMs: 60_000, parkedStallMs: 60_000, engineExitStallMs: 60_000, checkMs: 60_000,
+      onStall: (turn, _silentMs, reason) => stalls.push([turn.threadId, reason]), now: () => 0 });
+    dog.watch("t1", "b1");
+    dog.watch("t2", "b1");
+    expect(dog.fail("t1")).toBe(true);
+    expect(dog.fail("t1")).toBe(false);
+    expect(dog.fail("never")).toBe(false);
+    expect(stalls).toEqual([["t1", "server-error"]]);
+    expect(dog.watching("t2")).toBe(true);
+  });
+});

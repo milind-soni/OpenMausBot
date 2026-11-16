@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import englishCatalog from "../src/locales/en.json" with { type: "json" };
 import {
   browserIsThePlace,
   chosenPin,
@@ -7,7 +8,9 @@ import {
   computerSkippedNote,
   computerToolsRefusal,
   handoffUsesOwnCloud,
+  failedOnHostPath,
   isHandedWork,
+  namesHostPath,
   openBrowserBeside,
   ownCloudStateWithin,
   parseSurface,
@@ -16,6 +19,8 @@ import {
   resolveSurface,
   surfaceOfComputerKind,
   surfacePrompt,
+  thisComputerSwitch,
+  whereWorksControl,
 } from "./surface.ts";
 
 describe("browserIsThePlace", () => {
@@ -490,5 +495,110 @@ describe("a connected app before any screen", () => {
   });
   it("is not said where nothing on a screen can be done", () => {
     expect(surfacePrompt({ computer: null, browser: false })).not.toContain(RULE);
+  });
+});
+
+// A bot on an API model working on its Private desktop was asked to write into the person's OneDrive folder and sent them
+// to a "Settings → Computers" screen that does not exist, instead of switching itself to This computer.
+describe("files on this computer while the bot works elsewhere", () => {
+  const ON_PRIVATE_DESKTOP = { thisComputer: { bot: "Ada", platform: "win32" as const } };
+
+  it("names the real control, in the words the app shows", () => {
+    const catalog = englishCatalog as Record<string, string>;
+    const control = whereWorksControl("Ada");
+    expect(control).toContain(catalog["chat.botScreen"]);
+    expect(control).toContain(catalog["computer.simple.whereWorks"]!.replace("{name}", "Ada"));
+    expect(control).toContain(catalog["vm.dest.local"]);
+    expect(thisComputerSwitch({ place: "vm", bot: "Ada", canSelect: false })).toContain(catalog["vm.dest.vm"]);
+  });
+
+  it("tells a bot that can switch to offer it in one line and call select_computer, with the person's own way if that is refused", () => {
+    const text = thisComputerSwitch({ place: "vm", bot: "Ada", canSelect: true });
+    expect(text).toBe("This bot works on its Private desktop, not on this computer. To use files on this computer, switch it to This computer: "
+      + "say so in one line, call select_computer with surface \"local\", then end your turn; the request continues on this computer by itself, "
+      + "and the person allows it with one tap unless they gave you Full access. "
+      + "If select_computer refuses, ask the person to open Bot's screen in this chat and choose This computer under “Where Ada works”. "
+      + "No other setting or menu does this, so never name one.");
+  });
+
+  it("lets a person's own request keep This computer as the bot's Works on through the settings it changes from chat", () => {
+    const text = thisComputerSwitch({ place: "vm", bot: "Ada", canSelect: true, botId: "bot-7" });
+    expect(text).toContain("When the person asks you to keep using this computer, also keep it there: "
+      + "app_settings set, id \"bots.settings\", value {\"botId\":\"bot-7\",\"computer\":\"local\"}; it applies at once with Undo.");
+    // An allow-once tap is for one request; a turn that is not the person's own line never hears of a lasting move.
+    expect(text).not.toContain("says yes");
+    expect(thisComputerSwitch({ place: "vm", bot: "Ada", canSelect: false, botId: "bot-7" })).not.toContain("app_settings");
+    expect(surfacePrompt({ computer: "vm", browser: true }, { canSelect: false, thisComputer: { bot: "Ada", botId: "bot-7", platform: "win32" } }))
+      .not.toContain("app_settings");
+  });
+
+  it("gives a bot that cannot switch only the person's control, never a tool it lacks", () => {
+    const text = thisComputerSwitch({ place: "cloud", bot: "Ada", canSelect: false });
+    expect(text).toContain("This bot works on its Cloud desktop, not on this computer.");
+    expect(text).toContain("switch it to This computer: ask the person to open Bot's screen in this chat and choose This computer under “Where Ada works”.");
+    expect(text).not.toContain("select_computer");
+    expect(thisComputerSwitch({ place: null, bot: "Ada", canSelect: false })).toMatch(/^This bot does not work on this computer this turn\./);
+  });
+
+  it("offers the switch in the prompt of a bot on its Private desktop, for any engine", () => {
+    const text = surfacePrompt({ computer: "vm", browser: true }, { canSelect: true, ...ON_PRIVATE_DESKTOP });
+    expect(text).toContain("A file or folder on the person's own computer (a path such as C:\\Users\\…, their Desktop, Documents, Downloads or OneDrive, or \"my PC\") is on this computer, which the Local VM cannot reach");
+    expect(text).toContain("call select_computer with surface \"local\", then end your turn");
+    expect(text).toContain("“Where Ada works”");
+    expect(surfacePrompt({ computer: "vm", browser: true }, { canSelect: true, thisComputer: { bot: "Ada", botId: "bot-7", platform: "win32" } }))
+      .toContain("{\"botId\":\"bot-7\",\"computer\":\"local\"}");
+    expect(text).not.toMatch(/Settings →/);
+    const browserOnly = surfacePrompt({ computer: null, browser: true }, { canSelect: false, thisComputer: { bot: "Ada", platform: "darwin" } });
+    expect(browserOnly).toContain("a path such as /Users/…");
+    expect(browserOnly).toContain("ask the person to open Bot's screen in this chat and choose This computer under “Where Ada works”");
+    expect(browserOnly).not.toContain("select_computer with surface");
+  });
+
+  it("says nothing of it on this computer, on a Cloud home, to a bot only bots drive, or where This computer is not offered", () => {
+    const sentence = "A file or folder on the person's own computer";
+    expect(surfacePrompt({ computer: "local", browser: true }, { canSelect: true, ...ON_PRIVATE_DESKTOP })).not.toContain(sentence);
+    expect(surfacePrompt({ computer: "cloud", browser: true }, { canSelect: true, cloudHome: true, ...ON_PRIVATE_DESKTOP })).not.toContain(sentence);
+    expect(surfacePrompt({ computer: "vm", browser: false }, { botOpened: true, ...ON_PRIVATE_DESKTOP })).not.toContain(sentence);
+    expect(surfacePrompt({ computer: "vm", browser: true }, { canSelect: true })).not.toContain(sentence);
+  });
+
+  it("recognises a path only this computer's own disk has, by the platform it runs on", () => {
+    for (const command of [
+      "mkdir -p \"C:\\Users\\ana\\OneDrive\\Reports\"", "cp report.pdf C:/Users/ana/Desktop/", "dir %USERPROFILE%\\Documents",
+      "type %OneDriveConsumer%\\notes.txt", "copy a.txt \\\\nas\\share\\a.txt",
+    ]) expect(namesHostPath(command, "win32"), command).toBe(true);
+    for (const command of [
+      "ls /home/cua/workspace", "curl -s https://example.com/a:b", "echo \"ratio 3:1\"", "python3 make_report.py",
+    ]) expect(namesHostPath(command, "win32"), command).toBe(false);
+    expect(namesHostPath("cat '/Users/ana/Library/Mobile Documents/notes.txt'", "darwin")).toBe(true);
+    expect(namesHostPath("ls /home/cua/Users/x", "darwin")).toBe(false);
+    expect(namesHostPath("ls /home/ana/Documents", "linux")).toBe(true);
+    for (const command of ["ls /home/cua/workspace && ls /home/cua", "cd /home/cua&&ls", "cd /home/cua;ls", "(cd /home/cua)", "PATH=/home/cua:/usr/bin make", "ls /home/*"]) {
+      expect(namesHostPath(command, "linux"), command).toBe(false);
+    }
+    expect(namesHostPath("cat /home/cua.backup/x", "linux")).toBe(true);
+    expect(namesHostPath(undefined, "win32")).toBe(false);
+  });
+});
+
+describe("a vm_exec command that names this computer's own paths", () => {
+  const failed = { exitCode: 1, timedOut: false };
+  const ran = { exitCode: 0, timedOut: false };
+
+  it("runs as written when it only mentions one, so writing or passing such a path along is never refused", () => {
+    for (const [command, platform] of [
+      ["echo 'C:\\Users\\x' > notes.txt", "win32"], ["docker -v d:/data:/data alpine true", "win32"], ["printf a:/b", "win32"],
+      ["cat <<'EOF' > readme.md\nCopy it to /Users/you/Desktop\nEOF", "darwin"],
+    ] as const) {
+      expect(failedOnHostPath(command, ran, platform), command).toBe(false);
+    }
+  });
+
+  it("carries the switch only when the command failed and named such a path", () => {
+    expect(failedOnHostPath("mkdir \"C:\\Users\\ana\\OneDrive\\Reports\"", failed, "win32")).toBe(true);
+    expect(failedOnHostPath("ls /Users/ana/Desktop", { exitCode: 2 }, "darwin")).toBe(true);
+    expect(failedOnHostPath("ls /Users/ana/Desktop", { exitCode: 124, timedOut: true }, "darwin")).toBe(false);
+    expect(failedOnHostPath("ls /nope", failed, "darwin")).toBe(false);
+    expect(failedOnHostPath("ls /Users/ana/Desktop", failed, "linux")).toBe(false);
   });
 });

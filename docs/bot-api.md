@@ -80,6 +80,57 @@ here means its instructions and memory, through its replies. A bot whose AI can'
 confined (Claude, Codex and the API-key AIs can) answers `403`. A key goes when the
 teammate who made it leaves.
 
+## A key that acts as you
+
+Off by default. For a server you run yourself, with bots doing work for you
+unattended, the owner can mark a bot's key **Acts as me** on its Bot API card
+(or `POST /api/bots/<botId>/bot-api/acts-as-owner` with `{"enabled": true}`).
+A thread that key opens then runs as the owner's own work, like a routine they
+wrote:
+
+- at the bot's own access level, with its saved allowances (saved commands and
+  tools answer as they would for the owner), unconfined, with the bot's tools;
+- the message is the owner's request through the API, not information from a
+  stranger, and the thread is not marked as outside work;
+- the never-list (safety floor), the holds the bot's level puts on sends and
+  other outbound actions, and the computer rules still apply: at Ask, an
+  approval still waits for the owner in the app and the call answers
+  `needs_approval`.
+
+The risk, once: **anyone holding a marked key can make the bot do anything its
+level allows.** The bot can also hand work to its teammates, which act at their
+own access level, not this bot's. Treat it like the owner's own password.
+
+Who and where:
+
+- Only the owner marks a key: on a server one person uses (no members on its
+  sign-in list and at most one admin, named by address), the app on that
+  computer or the one admin's session; on a personal Cloud, its owner. If a
+  second admin or a whole-domain admin is added later, the key stops acting as
+  the owner at once.
+  Anyone who may manage the key can take the mark off.
+- Never on a team's Cloud or a shared or hosted workspace (one with members on
+  its sign-in list), except a hosted workspace whose operator set the
+  dedicated policy `OMB_SHARED_WORKSPACE_FULL_ACCESS=1`, where an admin may.
+- Never for guest links or webhooks: only a Bot API key carries it.
+- **New key** starts without the mark, and switching the API off forgets it.
+  Marking and unmarking, including the mark a new key or switching the API off
+  clears, are **Bot API** rows in Settings → Activity, a call
+  taken this way shows "as you" among the card's calls, and every viewer of
+  the card sees whether the key acts as the owner.
+
+The mark is read on every call. A thread keeps what it was opened as: one
+opened before the mark stays confined, and one opened with it can't be
+continued through the API once the key no longer acts as the owner (the mark
+taken off, a new key, or the server no longer allowing it), which answers `403`;
+until then the person's own messages there run as in any thread of theirs, and
+a person writing in it after that works confined, as in any API thread. Taking
+the mark off doesn't stop a turn already running; it finishes as it started
+(stop it from the thread in the app if needed).
+
+A key without the mark keeps every rule above: confined, at Ask, no saved
+allowances, no tools.
+
 Each call is kept with the bot's API settings and shown on the card (count, last
 call, recent calls) to those who can manage the key. Refused calls roll up into
 one row per burst. Neither ever holds the key.

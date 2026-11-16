@@ -21,7 +21,7 @@ function harness() {
 describe("a bot's API key", () => {
   it("is off by default, random, shown once and kept hashed only", () => {
     const { manager, file, reopen } = harness();
-    expect(manager.status("b1")).toEqual({ enabled: false, callCount: 0 });
+    expect(manager.status("b1")).toEqual({ enabled: false, actsAsOwner: false, callCount: 0 });
     expect(manager.enabled("b1")).toBe(false);
     const { key } = manager.enable("b1");
     expect(key).toMatch(/^bak_[A-Za-z0-9_-]{43}$/);
@@ -31,6 +31,18 @@ describe("a bot's API key", () => {
     expect(saved).toContain(hashBotApiKey(key));
     expect(reopen().authorize("b1", key)).toBe(true);
     expect(manager.status("b1")).toMatchObject({ enabled: true, callCount: 0 });
+  });
+
+  it("acts as the owner only once marked, keeps that across a restart, and a new key starts without it", () => {
+    const { manager, reopen } = harness();
+    expect(manager.setActsAsOwner("b1", true)).toBe(false);
+    manager.enable("b1");
+    expect(manager.actsAsOwner("b1")).toBe(false);
+    expect(manager.setActsAsOwner("b1", true)).toBe(true);
+    expect(reopen().status("b1")).toMatchObject({ enabled: true, actsAsOwner: true });
+    manager.enable("b1");
+    expect(manager.actsAsOwner("b1")).toBe(false);
+    expect(reopen().actsAsOwner("b1")).toBe(false);
   });
 
   it("takes only its own key, and a new key retires the old one", () => {
@@ -53,7 +65,7 @@ describe("a bot's API key", () => {
     expect(manager.disable("b1")).toBe(true);
     expect(manager.disable("b1")).toBe(false);
     expect(manager.authorize("b1", key)).toBe(false);
-    expect(manager.status("b1")).toEqual({ enabled: false, callCount: 0 });
+    expect(manager.status("b1")).toEqual({ enabled: false, actsAsOwner: false, callCount: 0 });
     expect(manager.listAttempts("b1")).toHaveLength(1);
     manager.removeForBot("b1");
     expect(reopen().listAttempts("b1")).toEqual([]);

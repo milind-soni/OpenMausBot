@@ -45,6 +45,7 @@ function setup(over = {}) {
 
 test("the switch starts off, and off reads nothing, keeps nothing and starts no timer", async () => {
   const f = setup({ saved: null });
+  f.together.linkChanged();
   assert.equal(parseTogether(null), false);
   assert.equal(parseTogether({ v: 1, on: "yes" }), false);
   assert.deepEqual(f.together.state("computer"), { v: 1, available: true, on: false, here: "computer", other: null });
@@ -69,6 +70,28 @@ test("on: this computer's page lists My Cloud's bots, asked as background work w
   const [, url, init] = f.asked[1];
   assert.deepEqual([url, init.headers["x-omb-background"], init.credentials, init.redirect], [`${CLOUD}/api/bots?messages=0`, "1", "include", "error"]);
   assert.equal(f.changes, 1);
+});
+
+test("a row carries the address the link gives its bot, worked out as it is handed over; with no link the list is as whole and has none", async () => {
+  let linked = true;
+  const f = setup({ deps: { address: (home, id) => (linked ? `link-0a1b2c3d-${home}-${id}` : null) } });
+  await f.together.refresh("cloud");
+  assert.deepEqual(f.together.state("computer").other.bots.map((row) => [row.home, row.id, row.address]), [["cloud", "scout", "link-0a1b2c3d-cloud-scout"], ["cloud", "nova", "link-0a1b2c3d-cloud-nova"]]);
+  const asked = f.asked.length;
+  linked = false;
+  const rows = f.together.state("computer").other.bots;
+  assert.deepEqual(rows.map((row) => [row.id, "address" in row]), [["scout", false], ["nova", false]], "the link went: the same rows, no address");
+  assert.equal(f.asked.length, asked, "an address asks no place anything");
+  assert.equal(f.together.open("computer", "nova"), true, "a row opens by its own id, linked or not");
+  const told = f.changes;
+  f.together.linkChanged();
+  assert.equal(f.changes, told + 1, "the page is told to ask again when the link changes");
+});
+
+test("an address that cannot be worked out leaves the row as it is", async () => {
+  const f = setup({ deps: { address: () => { throw new Error("no"); } } });
+  await f.together.refresh("cloud");
+  assert.deepEqual(f.together.state("computer").other.bots.map((row) => row.id), ["scout", "nova"]);
 });
 
 test("My Cloud's page lists this computer's bots the same way", async () => {

@@ -14,6 +14,7 @@ import { RelayTimeout, relay, relayCommand, relayInput } from "../browser-relay.
 import { browserSteps } from "../browser-steps.ts";
 import { BrowserLive } from "../browser-live.ts";
 import { browserEgress, type EgressSetup } from "../browser/egress/registry.ts";
+import { releaseEndedGates } from "../browser/egress/release-ended.ts";
 import {
   agentBrowserIntegration,
   BUILT_IN_BROWSER_SYSTEM_PROMPT,
@@ -28,6 +29,7 @@ import {
   noteBrowserEngineUnavailable,
   setBrowserViewport,
 } from "../browser-engine.ts";
+import { BrowserRoom, defaultBrowserRoomSize, spareForRoom } from "../browser-room.ts";
 import { BrowserSweep, browserIdleMs, type BrowserCleanupWireRequest } from "../browser-lifecycle-cleanup.ts";
 import { AudienceBrowsers, audienceBrowserSuffix } from "../browser/audience.ts";
 import type { BrowserSitesTarget } from "../browser-sites.ts";
@@ -82,6 +84,8 @@ export interface BrowserHostDeps {
   audienceOf?(threadId: string): Audience;
   /** The box every Chrome of the bots' browsers runs in (a Team Cloud's), or none. */
   browserBox?(seccompFd: number, ro: readonly string[]): LauncherBox | null;
+  /** How many agent-browser browsers run at once; sized by this server's limits without it. */
+  browsersAtOnce?(): number;
 }
 
 /** The lent computer's connection for a browser's pages, under the rule for everything it lends: only while the last
@@ -105,10 +109,25 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const store: Pick<Store, "bots" | "bot" | "botByThread"> = { get bots() { return deps.store().bots; }, bot: (id: string) => deps.store().bot(id),
     botByThread: (threadId: string) => deps.store().botByThread(threadId) };
 
+  // Only a bot waiting for a slot closes a browser a running turn holds; the idle sweep below never does.
+  const browserRoom = new BrowserRoom({
+    max: deps.browsersAtOnce ?? (() => defaultBrowserRoomSize()),
+    spare: (session) => spareForRoom(agentBrowserRuntime.spare(session), { holds: !turnResources.free(`browser:${session}`), idleMs: idleMs() }),
+    close: (session) => agentBrowserRuntime.closeIfIdle(session, 1),
+  });
   const agentBrowserRuntime = new BrowserRuntime({
     closeBrowser: (session, spec) => closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })),
     applyViewport: (spec, size) => setBrowserViewport(spec.command, spec.env, size),
-    launch: chromeLauncher,
+    // A browser a person's view started counts toward the limit too. It is not refused, so a bot's next new one waits.
+    launch: {
+      ready: (spec) => chromeLauncher.ready(spec),
+      started: (session, spec) => {
+        if (!attachesToChrome(spec.env ?? {})) browserRoom.entered(session);
+        return chromeLauncher.started(session, spec);
+      },
+      stopped: (session) => chromeLauncher.stopped(session),
+    },
+    room: browserRoom,
     relayCommand: (spec, session, command, timeoutMs) => relayCommand(spec, session, command, timeoutMs).catch((error: unknown) => {
       throw error instanceof RelayTimeout ? new TransportError(error.message) : error;
     }),
@@ -230,13 +249,23 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     held: (session) => !turnResources.free(`browser:${session}`),
     closeIdle: (session) => browserRuntime.closeIfIdle(session, idleMs(), usedBrowserSessions.get(session)),
   });
+  // A browser that has ended keeps no loopback listener: its gate opens again with it, on the same port where it can, and
+  // the session's launch settings are worked out again then.
+  const releaseGates = () => releaseEndedGates({ sessions: () => browserEgress.sessions(), release: async (session) => { usedBrowserSessions.delete(session); await browserEgress.release(session); },
+    env: (session) => { const spec = usedBrowserSessions.get(session); return spec && !chromeTarget(session, spec) ? spec.env : null; },
+    running: (session) => browserRunning(session, usedBrowserSessions.get(session)),
+    inUse: (session) => !turnResources.free(`browser:${session}`) || agentBrowserRuntime.working(session) });
+  let gateTimer: ReturnType<typeof setInterval> | undefined;
   const browserSweep = {
     start() {
+      gateTimer = setInterval(() => void releaseGates().catch(() => undefined), 60_000);
+      gateTimer.unref?.();
       agentBrowserSweep.start();
       chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
       return browserSweep;
     },
     closeAll: () => {
+      clearInterval(gateTimer);
       doors?.close();
       doorUrls.clear();
       leftovers.clear();
@@ -561,7 +590,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
 
   return {
-    browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions, browserIdleMs: idleMs,
+    browserRuntime, browserLive, browserRoom, usedBrowserSessions, browserSweep, temporaryBrowserSessions, browserIdleMs: idleMs,
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, lentChromeSummary, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,

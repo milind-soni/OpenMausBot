@@ -18,7 +18,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
-function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string } = {}) {
+function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; window?: boolean; pictureRefusal?: string; patchRefusal?: string; automated?: boolean } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "app-settings-"));
   dirs.push(dataDir);
   const bots: BotRecord[] = [
@@ -86,6 +86,7 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
     store: store as never, dataDir, entries,
     turnOwner: () => (options.owner === false ? null : "owner"),
     guestDriven: () => options.guest === true,
+    automated: () => options.automated === true,
     requestCredential: async (_bot, _threadId, body) => { credentialCards.push(body); return { status: 201, body: { messageId: "secret-1", label: "OpenAI API key" } }; },
     connectorThread: () => ({ group: options.group ? { id: "g", name: "Room" } as never : undefined }),
     language: () => undefined,
@@ -491,6 +492,19 @@ describe("every other setting applies at once with Undo, Full access or not", ()
     expect(fx.cards()[0]!.card.subtitle).toBe("Kiwi: memory off; computer use this computer's own desktop, as you");
     expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
     expect(fx.botPatches).toEqual([{ botId: "kiwi", body: { memoryEnabled: false, computer: "local" } }, { botId: "kiwi", body: { memoryEnabled: true, computer: null } }]);
+  });
+
+  it("never keeps a bot on this computer from a routine or other automation, the owner's own included", async () => {
+    const fx = fixture({ automated: true });
+    const refused = await fx.set("bots.settings", JSON.stringify({ botId: "kiwi", computer: "local" }));
+    expect(refused.status).toBe(403);
+    expect(String(refused.body.error)).toContain("A routine or automation can't keep a bot on this computer. Nothing changed");
+    expect(String(refused.body.error)).toContain("This computer under “Where Kiwi works” in Bot's screen");
+    expect(fx.botPatches).toEqual([]);
+    expect(fx.cards()).toEqual([]);
+    // Other settings, and another place, still change from an automation as before.
+    expect((await fx.set("bots.settings", JSON.stringify({ botId: "kiwi", computer: "vm" }))).status).toBe(200);
+    expect(fx.botPatches).toEqual([{ botId: "kiwi", body: { computer: "vm" } }]);
   });
 
   it("turns one bot's tool groups off and on by name, keeps the rest as they were, and Undo puts the list back", async () => {

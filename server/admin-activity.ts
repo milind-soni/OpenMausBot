@@ -195,6 +195,7 @@ const pick = (source: unknown, paths: readonly string[]) =>
 const CONFIG_CATEGORY: Record<string, AdminActivityCategory> = {
   signIn: "people",
   budgets: "budget",
+  usageCaps: "budget",
   billing: "budget",
   mcpServers: "mcp",
   instances: "engine",

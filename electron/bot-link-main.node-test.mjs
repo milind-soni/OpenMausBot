@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { linkedAddress } from "./bot-link-address.mjs";
 import { createBotLinkMain, OUTDATED_RETRY_MS, RETRY_MS } from "./bot-link-main.mjs";
 
 const CLOUD = "https://omb-u-1.fly.dev";
 
-function harness({ origin = CLOUD, pairStatus = 200, on = false, putFails = false } = {}) {
+function harness({ origin = CLOUD, pairStatus = 200, on = false, putFails = false, watchMs = 3_600_000 } = {}) {
   const cloudCalls = [], localCalls = [];
   let server = { on: false };
   const the = { switch: on, asleep: false, origin, account: "account-1", signedOut: false, clock: 1_000_000, unreadable: false, putFails };
@@ -31,7 +32,8 @@ function harness({ origin = CLOUD, pairStatus = 200, on = false, putFails = fals
     },
     cloud: () => ({ origin: the.origin, account: the.account, asleep: the.asleep, signedOut: the.signedOut }),
     cloudName: () => "My Cloud",
-    watchMs: 3_600_000,
+    watchMs,
+    changed: () => { the.changes = (the.changes ?? 0) + 1; },
     now: () => the.clock,
   });
   const pairs = () => cloudCalls.filter((call) => call.method === "POST").length;
@@ -45,6 +47,57 @@ test("switch off: My Cloud is never asked and this computer's server is only rea
   await h.link.look();
   assert.deepEqual(h.cloudCalls, []);
   assert.equal(h.localCalls.every((call) => call.method === "GET"), true);
+});
+
+test("switch off and nothing linked: after one look the timer asks this computer's server nothing more, until something changes", async (t) => {
+  const h = harness({ watchMs: 5 });
+  t.after(() => h.link.close());
+  await h.link.look();
+  const looked = h.localCalls.length;
+  await new Promise((done) => setTimeout(done, 60));
+  assert.equal(h.localCalls.length, looked, "the timer is idle");
+  assert.equal(h.link.address("cloud", "scout"), null);
+  h.the.switch = true;
+  await h.link.look();
+  assert.equal(h.server.on, true, "a change looks again, and pairs");
+});
+
+test("a link that ended while its Cloud could not be told keeps the timer looking", async (t) => {
+  const h = harness({ watchMs: 5 });
+  t.after(() => h.link.close());
+  await h.link.look();
+  h.server = { on: false, ended: [CLOUD] };
+  h.the.asleep = true;
+  await h.link.look();
+  const looked = h.localCalls.length;
+  await new Promise((done) => setTimeout(done, 60));
+  assert.equal(h.localCalls.length > looked, true);
+});
+
+test("the address of a bot of the other place is the link's own, only while the link is this Cloud's and this account's", async (t) => {
+  const h = harness({ on: true });
+  t.after(() => h.link.close());
+  assert.equal(h.link.address("cloud", "scout"), null, "not linked yet");
+  await h.link.look();
+  // sha256("cloud-1") and sha256 of this computer's id, cut to eight: server/bot-link/address.test.ts holds both sides to it.
+  assert.equal(h.link.address("cloud", "scout"), linkedAddress("cloud-1", "scout"));
+  assert.equal(h.link.address("computer", "scout"), linkedAddress("11111111-1111-4111-8111-111111111111", "scout"));
+  assert.match(h.link.address("cloud", "scout"), /^link-[0-9a-f]{8}-scout$/);
+  assert.equal(h.the.changes >= 1, true, "the sidebar is told the addresses came");
+  h.the.account = "account-2";
+  assert.equal(h.link.address("cloud", "scout"), null, "another account: none, before the next look");
+  h.the.account = "account-1";
+  h.the.origin = "https://omb-u-2.fly.dev";
+  assert.equal(h.link.address("cloud", "scout"), null, "another Cloud: none");
+  h.the.origin = CLOUD;
+  h.the.signedOut = true;
+  assert.equal(h.link.address("computer", "scout"), null, "signed out: none");
+  h.the.signedOut = false;
+  h.the.switch = false;
+  const before = h.the.changes;
+  await h.link.look();
+  assert.equal(h.link.address("cloud", "scout"), null, "turned off: none");
+  assert.equal(h.the.changes > before, true);
 });
 
 test("switch on: pairs in the background over the person's own sign-in and hands the link's sign-in, bound to this Cloud and account, to this computer's server", async (t) => {
