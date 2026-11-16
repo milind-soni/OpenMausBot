@@ -32,6 +32,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
 import { runSentinelCli } from "./sentinel/cli.ts";
+import { runConfigCli } from "./config-cli.ts";
 import { runFleetCommand, type FleetInput } from "./fleet-cli.ts";
 import { startFleetAgent } from "./fleet-agent.ts";
 import { fleetLayout } from "./fleet.ts";
@@ -975,6 +976,7 @@ export async function runOnboardingCommand(
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv[0] === "sentinel") return runSentinelCli(argv.slice(1));
+  if (argv[0] === "config") return runConfigCli(argv.slice(1));
   if (HEADLESS_VERB_NAMES.has(argv[0] ?? "") || (argv[0] === "help" && HEADLESS_VERB_NAMES.has(argv[1] ?? ""))) return (await import("./headless/main.ts")).runHeadless(argv);
   const options = parseArgs(argv);
   if ("error" in options) {
