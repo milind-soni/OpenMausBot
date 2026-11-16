@@ -14,9 +14,13 @@ import { PageCitationButton } from "../CitationUI";
 import { appendDraftAttachments } from "@/lib/drafts";
 import { useCanWriteIn } from "@/lib/cloud-guest";
 import { closePage, onPageOpened, openPage, openPageFor } from "@/lib/open-page";
+import { pageOpensWithHeading } from "./page-heading";
 import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePin, usePagePoint, usePageSave, usePageShare, usePageVersion } from "./PageTools";
 
 const WIDTH = "max-w-[760px]";
+const CARD_WIDTH = "max-w-[560px]";
+const CARD_TITLE = "truncate px-5 pt-5 text-[17px] font-semibold leading-6 text-ink";
+const CARD_TITLE_HEIGHT = 44;
 const DOC_REUSE_MS = 60_000;
 
 const heights = new Map<string, number>();
@@ -223,8 +227,11 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const state = collapsed ? "collapsed" : current ? "live" : noPage ? "unavailable" : slot.live ? "loading" : "idle";
   const infoId = `${uid}-info`;
 
+  const srcdoc = compact ? current?.srcdoc : undefined;
+  const titled = useMemo(() => srcdoc !== undefined && !pageOpensWithHeading(srcdoc), [srcdoc]);
   // The compact card clips the page at its natural size, so it reads as a preview of the real thing.
-  const boxHeight = compact ? Math.min(height, PAGE_PREVIEW_HEIGHT) : height;
+  const previewHeight = height + (titled ? CARD_TITLE_HEIGHT : 0);
+  const boxHeight = compact ? Math.min(previewHeight, PAGE_PREVIEW_HEIGHT) : height;
   const body = collapsed ? null : fullScreen && current ? (
     <div data-app-box className={cn("relative w-full", bordered && !compact && "border-t border-ink/[0.08]")} style={{ height: boxHeight }}>
       {compact
@@ -238,6 +245,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       // The whole card opens the page, so the keyboard must not reach what the preview shows underneath it.
       inert={(compact && Boolean(current) && !point.pointing) || undefined}
       style={{ height: boxHeight }}>
+      {titled && <div data-page-title title={payload.title} className={CARD_TITLE}><bdi dir="auto">{payload.title}</bdi></div>}
       {current ? (
         <AppFrame
           key={loaded!.key}
@@ -255,6 +263,9 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
         />
       ) : (
         <AppPlaceholder height={boxHeight} loading={slot.live} open={slot.live ? undefined : reloadNow} />
+      )}
+      {compact && current && previewHeight > PAGE_PREVIEW_HEIGHT && (
+        <div data-page-fade aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-composer to-transparent" />
       )}
     </div>
   );
@@ -276,7 +287,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
       data-app-source={payload.source}
       {...(page ? { "data-app-rev": rev } : {})}
       {...(room ? { "data-app-room": "" } : {})}
-      className={cn("w-full text-start", WIDTH)}
+      className={cn("w-full text-start", compact ? CARD_WIDTH : WIDTH)}
     >
       {compact ? (
         <div className={APP_SURFACE}>

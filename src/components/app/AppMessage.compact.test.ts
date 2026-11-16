@@ -9,6 +9,7 @@ import { botHtmlDocument } from "../../../shared/app-frame/document";
 import { createAppPool } from "./app-pool";
 import { AppMessage, forgetAppRows } from "./AppMessage";
 import { PAGE_PREVIEW_HEIGHT, PagePaneContext } from "./PageTools";
+import portuguese from "@/locales/pt-br.json";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -35,8 +36,11 @@ const card = () => host.querySelector<HTMLElement>("[data-app=a1]")!;
 const opener = () => card().querySelector<HTMLButtonElement>("[data-page-open]")!;
 const press = (element: HTMLElement) => act(async () => { element.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 
+let html: string;
+
 beforeEach(() => {
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(botHtmlDocument({ messageId: "a1", rev: 0, html: "<p>page</p>" })),
+  html = "<p>page</p>";
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(botHtmlDocument({ messageId: "a1", rev: 0, html })),
     { status: 200, headers: { "content-type": "application/json" } })));
   vi.stubGlobal("IntersectionObserver", undefined);
   forgetAppRows();
@@ -74,10 +78,53 @@ describe("a bot's page as a compact card", () => {
     expect(Array.from(card().querySelectorAll("button"), (button) => button.getAttribute("aria-label"))).toEqual(["About this app", "Reload app", "Open page"]);
   });
 
-  it("leaves the preview bare and parts it from the footer with a rule", async () => {
+  it("is narrower than a full page, start-aligned in the message column", async () => {
     await render(row(payload()));
-    expect(card().querySelector("[data-app-box]")!.children).toHaveLength(1);
+    expect(card().className).toContain("max-w-[560px]");
+    expect(card().className).not.toContain("max-w-[760px]");
+  });
+
+  it("puts the title above a page that has no heading of its own", async () => {
+    await render(row(payload()));
+    const box = card().querySelector<HTMLElement>("[data-app-box]")!;
+    expect(box.firstElementChild!.matches("[data-page-title]")).toBe(true);
+    expect(box.firstElementChild!.textContent).toBe("Pricing");
+    expect(box.querySelector("[data-page-title] ~ [data-app-frame-box]")).not.toBeNull();
+  });
+
+  it("leaves the top of the preview to a page that opens with its own heading", async () => {
+    html = "<h1>Pricing</h1><p>page</p>";
+    await render(row(payload()));
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+    expect(card().querySelector("[data-app-box]")!.firstElementChild!.matches("[data-app-frame-box]")).toBe(true);
+    expect(card().querySelector("[data-page-footer]")!.textContent).toBe("PricingPage");
+  });
+
+  it("fades the foot of a clipped preview with a plain gradient and parts it from the footer with a rule", async () => {
+    await render(row(payload()));
+    const fade = card().querySelector<HTMLElement>("[data-app-box] > [data-page-fade]")!;
+    expect(fade.className).toContain("bg-gradient-to-t from-composer to-transparent");
+    expect(fade.className).toContain("h-8");
+    expect(fade.className).not.toMatch(/blur|mask|backdrop/);
     expect(card().querySelector("[data-page-footer]")!.className).toContain("border-t");
+  });
+
+  it("shows a short page whole, with nothing over its foot", async () => {
+    await render(row(payload({ height: 120 })));
+    expect(card().querySelector<HTMLElement>("[data-app-box]")!.style.height).toBe("164px");
+    expect(card().querySelector("[data-page-fade]")).toBeNull();
+  });
+
+  it("gives the footer the page's icon on a tile, the title and what it is", async () => {
+    await render(row(payload()));
+    const footer = card().querySelector<HTMLElement>("[data-page-footer]")!;
+    expect(footer.className).toContain("min-h-18");
+    expect(footer.firstElementChild!.matches("[data-page-icon]")).toBe(true);
+    expect(footer.querySelector("[data-page-icon] svg")!.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("has a Brazilian Portuguese word for what the card is", () => {
+    expect((portuguese as Record<string, string>)["chat.preview.kind"]).toBe("Página");
   });
 
   it("names the version once the page has been updated", async () => {

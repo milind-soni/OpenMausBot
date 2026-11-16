@@ -7723,6 +7723,7 @@
   "chat.preview.exitFullScreen": "Sair da tela cheia",
   "chat.preview.openPage": "Abrir página",
   "chat.preview.closePage": "Fechar página",
+  "chat.preview.kind": "Página",
   "chat.preview.pointedPart": "uma parte da página",
   "chat.preview.removePoint": "Remover {label}",
   "chat.preview.notePoint": "Escrever uma nota sobre {label}",

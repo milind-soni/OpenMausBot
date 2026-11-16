@@ -81,11 +81,13 @@ export function PageCardFooter({ title, detail, updated, infoId, infoOpen, onInf
   reloading?: boolean;
 }) {
   return (
-    <div data-page-footer className="flex items-center gap-3 border-t border-ink/[0.08] px-4 py-3">
-      <AppWindow aria-hidden="true" size={16} className="shrink-0 text-ink-tertiary" />
+    <div data-page-footer className="flex min-h-18 items-center gap-3 border-t border-ink/[0.08] px-5 py-4">
+      <span data-page-icon className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-inset text-ink-secondary">
+        <AppWindow aria-hidden="true" size={16} />
+      </span>
       <div className="min-w-0 flex-1">
-        <div title={title} className="truncate text-[13px] font-medium leading-[18px] text-ink"><bdi dir="auto">{title}</bdi></div>
-        <div className="truncate text-xs leading-4 text-ink-tertiary">{detail}</div>
+        <div title={title} className="truncate text-sm font-medium leading-[18px] text-ink"><bdi dir="auto">{title}</bdi></div>
+        <div className="truncate text-[13px] leading-[18px] text-ink-secondary">{detail}</div>
       </div>
       {updated && <span role="status" data-page-updated className="shrink-0 rounded-full bg-accent/15 px-2 py-px text-[13px] font-medium text-accent-text">{t("chat.preview.updated")}</span>}
       <div className={cn(
