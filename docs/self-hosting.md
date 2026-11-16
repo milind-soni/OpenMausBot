@@ -1201,6 +1201,19 @@ curl -H "Authorization: Bearer $TOKEN" -o usage.csv \
 Dates are inclusive, UTC, at most a year apart; without them you get the
 current month to date.
 
+### Usage caps
+
+By default nothing limits what the bots use. The owner can cap a day's and a
+month's usage, for the whole server and for each bot, in estimated dollars
+and in tokens, under **Settings → Usage → Usage caps**, in `config.json`, or
+for the server's own caps in the environment
+(`OMB_USAGE_CAP_DAILY_USD`, `OMB_USAGE_CAP_MONTHLY_USD`,
+`OMB_USAGE_CAP_DAILY_TOKENS`, `OMB_USAGE_CAP_MONTHLY_TOKENS`,
+`OMB_USAGE_CAP_STOPS`). A reached cap stops new unattended work (routines,
+webhooks, app events, Bot API calls, hand-offs nobody is waiting on) until
+the day or month rolls over, and cuts nothing off mid-turn.
+[Usage caps](usage-caps.md) has every setting and what a person sees.
+
 ### When an engine runs out
 
 When a turn ends on a usage limit (a subscription's 5-hour or weekly limit,

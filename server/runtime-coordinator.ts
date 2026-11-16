@@ -273,7 +273,7 @@ export class RuntimeCoordinator implements Coordinator {
     const existing = siblings.findLast(c => c.assignee.botId === target.botId && c.assignee.destination.groupId === target.groupId && c.brief === brief && c.mode === mode
       && (!own || c.assignee.destination.threadId === target.threadId));
     if (existing && !(rework && isTerminal(existing))) return { node: view(existing, parent), duplicate: true };
-    const limited = this.handoffLimit?.refusal(target.botId, () => this.live().filter(a => a.parentId !== undefined).length);
+    const limited = this.handoffLimit?.refusal(target.botId, () => this.live().filter(a => a.parentId !== undefined).length, parent.origin.kind === "person" ? "user" : "outside");
     if (limited) throw new Error(limited);
     if (mode === "work" && !rework && !own && siblings.some(c => c.mode === "work" && kindOf(c.assignee.destination.groupId, parent) === kind &&
       c.assignee.destination.groupId === target.groupId && c.assignee.botId === target.botId && c.status === "completed")) throw new Error(ALREADY_COMPLETED);

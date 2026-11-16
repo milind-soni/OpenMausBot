@@ -4122,6 +4122,59 @@ describe("turning a schedule back on, and a deleted bot's schedules", () => {
   });
 });
 
+describe("a reached usage cap", () => {
+  const start = Date.parse("2026-09-13T08:00:00Z"), HOUR = 3_600_000;
+  const line = (count: number) => ({ text: count === 1 ? "Skipped: the cap is reached" : `Skipped ${count} runs: the cap is reached`, codes: {} });
+
+  it("counts the scheduled runs it skips on one row, leaves the routine on, lets a hand-started run go, and runs again once it lifts", async () => {
+    const h = harness(start);
+    let capped = true;
+    h.options.capSkip = () => (capped ? { behind: "cap:server:day:usd:2026-09-13", words: line } : null);
+    h.options.capText = (_botId, trigger) => (capped && trigger !== "manual" ? "Not started: the cap is reached" : null);
+    const routine = h.manager.create({ name: "Hourly check", prompt: "Check", botId: "maus-1", schedule: { type: "interval", everyMinutes: 60, anchorAt: start + HOUR } });
+    for (let hour = 1; hour <= 3; hour += 1) {
+      h.setNow(start + hour * HOUR);
+      await h.manager.tick();
+    }
+    const rows = h.manager.listRuns();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "missed", error: "Skipped 3 runs: the cap is reached", skipped: { count: 3, firstAt: start + HOUR, lastAt: start + 3 * HOUR, behind: "cap:server:day:usd:2026-09-13" } });
+    expect(rows[0]!.seenAt).toBeDefined();
+    expect(h.manager.listRoutines()[0]).toMatchObject({ id: routine.id, enabled: true, nextRunAt: start + 4 * HOUR });
+    expect(h.manager.listRoutines()[0]!.skippedRuns ?? 0).toBe(0);
+    expect([h.started, h.failed, h.taskTitles]).toEqual([[], [], []]);
+
+    // A webhook's run that was already queued is let go with the line, quietly; one started by hand runs.
+    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId: "d1", receivedAt: start + 3 * HOUR });
+    await h.manager.tick();
+    expect(h.manager.listRuns().find((run) => run.webhookId === "hook")).toMatchObject({ status: "cancelled", error: "Not started: the cap is reached" });
+    expect([h.started, h.failed]).toEqual([[], []]);
+    h.manager.runNow(routine.id);
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    h.manager.handleRuntimeEvent({ eventId: "done", provider: "fake", threadId: h.started[0]!.threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok: true });
+
+    // The next day is a new period: its row would be a new one, and with the cap lifted the schedule simply runs.
+    capped = false;
+    h.setNow(start + 4 * HOUR);
+    await h.manager.tick();
+    expect(h.started).toHaveLength(2);
+    expect(h.manager.listRuns().filter((run) => run.skipped)).toHaveLength(1);
+  });
+
+  it("applies to a routine whose bot is not paused only: a paused bot keeps its own line", async () => {
+    const h = harness(start);
+    h.options.pausedText = () => "Ada is paused, so it takes no new work.";
+    h.options.held = () => true;
+    h.options.capSkip = () => ({ behind: "cap:server:day:usd:2026-09-13", words: line });
+    h.manager.create({ name: "Hourly check", prompt: "Check", botId: "maus-1", schedule: { type: "interval", everyMinutes: 60, anchorAt: start + HOUR } });
+    h.setNow(start + HOUR);
+    await h.manager.tick();
+    await h.manager.tick();
+    expect(h.manager.listRuns().map((run) => [run.status, run.error])).toEqual([["cancelled", "Ada is paused, so it takes no new work."]]);
+  });
+});
+
 describe("runs that report into a chat", () => {
   const input = () => ({ name: "Inbox brief", prompt: "Brief me", botId: "maus-1", enabled: false,
     schedule: { type: "interval" as const, everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
