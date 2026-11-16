@@ -72,6 +72,10 @@ describe("managed Composio desktop registration", () => {
       OMB_COMPOSIO_BROKER_URL: "http://[::1]:8787",
       OMB_COMPOSIO_BROKER_TOKEN: TOKEN,
     });
+    expect(
+      managedComposioChildEnvironment("https://broker.example", {}, { PATH: "/usr/bin", OMB_COMPOSIO_BROKER_TOKEN: "attacker-controlled" }),
+      "the URL alone, for the Grok Bot link, which needs no installation",
+    ).toEqual({ PATH: "/usr/bin", OMB_COMPOSIO_BROKER_URL: "https://broker.example" });
   });
 
   it("registers a new installation and persists it", async () => {

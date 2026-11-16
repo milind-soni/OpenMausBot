@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { claudeUserMcpEnabled, DATA_DIR, type AppConfig } from "../config.ts";
 import { lookForGrokBot, removeOldCursorSignIn } from "../grok-local.ts";
-import { createGrokMove, GROK_CONNECTOR_KEY_FILE, type GrokMove, type GrokMoveHost } from "../grok-move-tunnel.ts";
+import { createGrokMove, GROK_CONNECTOR_KEY_FILE, type GrokMove, type GrokMoveHost } from "../grok-link.ts";
 import { applySetupImport, detectSetup, thisMachine, type SetupHost, type SetupMachine } from "../setup-import.ts";
 import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -32,10 +32,10 @@ export const GROK_CONNECTOR_PATH = "/api/setup-import/grok/connector";
 const LOCAL_ONLY = "Only the desktop app on the computer running OpenMausBot can bring in that computer's skills and tools.";
 const requestSchema = z.object({ skills: z.boolean().optional(), tools: z.boolean().optional() }).strict();
 
-/** GET finds what is new here; POST brings in the chosen kinds. The Grok Bot connector: POST opens the link (a quick
- * tunnel to a listener that serves only the move MCP), with `taken` lets go of what the person imported, or with `seen`
- * ends the notice that the link changed; GET reads what arrived and the last handoffs; DELETE turns it off. On the
- * desktop app's own server a link left on comes back on as the server starts. Only the owner's own
+/** GET finds what is new here; POST brings in the chosen kinds. The Grok Bot connector: POST turns the link on (its
+ * address is on the connected-apps service, which relays each call to this server over a socket this server opens) or,
+ * with `taken`, lets go of what the person imported; GET reads the link, what arrived and the last handoffs; DELETE
+ * turns it off. On the desktop app's own server a link left on comes back on as the server starts. Only the owner's own
  * loopback, never a paired device, a browser elsewhere, a bot's shell on a service server, a Cloud home or a hosted server. */
 export function createSetupImportRoutes(deps: SetupImportRouteDeps): RouteHandler {
   removeOldCursorSignIn(deps.dataDir ?? DATA_DIR);
@@ -67,10 +67,8 @@ export function createSetupImportRoutes(deps: SetupImportRouteDeps): RouteHandle
       const after = Number(url.searchParams.get("after") ?? "0");
       if (!Number.isSafeInteger(after) || after < 0) return json(res, 400, { error: "after must be a number" });
       try {
-        if (method !== "POST") return json(res, 200, method === "DELETE" ? grokMove.end() : grokMove.look(after));
-        const body = await readBody(req, 4_096) as { taken?: unknown; seen?: unknown } | null;
-        if (body?.seen === true) return json(res, 200, grokMove.seen());
-        const taken = body?.taken;
+        if (method !== "POST") return json(res, 200, method === "DELETE" ? await grokMove.end() : grokMove.look(after));
+        const taken = (await readBody(req, 4_096) as { taken?: unknown } | null)?.taken;
         if (taken === undefined) return json(res, 200, await grokMove.connect());
         if (!Number.isSafeInteger(taken) || (taken as number) < 0) return json(res, 400, { error: "taken must be a number" });
         return json(res, 200, grokMove.taken(taken as number));

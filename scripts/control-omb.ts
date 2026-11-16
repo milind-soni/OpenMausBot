@@ -193,11 +193,12 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   // deletes sites there, never on Netlify.
   const netlifyUrl = parentEnv.OMB_NETLIFY_API_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}\/api\/v1$/.test(netlifyUrl)) childEnv.OMB_NETLIFY_API_URL = netlifyUrl;
-  // A loopback connected-apps service only (server/testing/broker-fake.ts): its token never reaches the real one.
+  // A loopback connected-apps service only (server/testing/broker-fake.ts): its token never reaches the real one. The
+  // URL crosses without a token too, as the desktop app hands it over: the Grok Bot link needs no installation.
   const brokerUrl = parentEnv.OMB_COMPOSIO_BROKER_URL?.trim() ?? "";
-  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(brokerUrl) && parentEnv.OMB_COMPOSIO_BROKER_TOKEN) {
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(brokerUrl)) {
     childEnv.OMB_COMPOSIO_BROKER_URL = brokerUrl;
-    childEnv.OMB_COMPOSIO_BROKER_TOKEN = parentEnv.OMB_COMPOSIO_BROKER_TOKEN;
+    if (parentEnv.OMB_COMPOSIO_BROKER_TOKEN) childEnv.OMB_COMPOSIO_BROKER_TOKEN = parentEnv.OMB_COMPOSIO_BROKER_TOKEN;
   }
   // Research against loopback stubs only (server/x-research.e2e.test.ts): the relay token crosses only with its stub,
   // and a treg stand-in replaces treg.to, so no test reaches a real relay or treg.
@@ -245,8 +246,6 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   for (const knob of ["OMB_ACP_QUIET_NOTICE_MS", "OMB_ACP_QUIET_TICK_MS"] as const) {
     if (/^\d{1,7}$/.test(parentEnv[knob] ?? "")) childEnv[knob] = parentEnv[knob];
   }
-  // The Grok Bot connector's cloudflared, which the fixture's PATH of node alone cannot find.
-  if (parentEnv.OMB_CLOUDFLARED_PATH) childEnv.OMB_CLOUDFLARED_PATH = parentEnv.OMB_CLOUDFLARED_PATH;
   // The UI checks drive this fixture from a real browser, as `pnpm dev` does; OMB_DEV_TRUST_LOCAL_BROWSER=0 tests the sign-in.
   if (parentEnv.OMB_DEV_TRUST_LOCAL_BROWSER !== "0") childEnv.OMB_DEV_TRUST_LOCAL_BROWSER = "1";
   // Desktop mode: the owner capability the app would hand the server.

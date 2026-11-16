@@ -11,7 +11,7 @@ import { isStoppedTurnName } from "../../shared/client-cancel.ts";
 import { defaultBotPerson } from "../../shared/default-bot.ts";
 import type { Coordinator } from "../coordinator.ts";
 import { HandoffRefused, type HandoffAsk, type HandoffState, type HandoffStatus } from "../grok-move-mcp.ts";
-import type { GrokHandoff, GrokMoveHost } from "../grok-move-tunnel.ts";
+import type { GrokHandoff, GrokMoveHost } from "../grok-link.ts";
 import type { JobView } from "../job-view.ts";
 import { OUTSIDE, type WorkOrigin } from "../peer-provenance.ts";
 import { AUTHORITY, fromNoteWith } from "../provenance-label.ts";
