@@ -97,6 +97,26 @@ describe("a bot's page as a compact card", () => {
     expect(pane.querySelector("[data-page-pane]")).toBeNull();
   });
 
+  it("turns Point off when the open page asks to be closed, so the card opens it again", async () => {
+    for (const room of [false, true]) {
+      await render(row(payload()), room);
+      await press(opener());
+      const opened = document.querySelector<HTMLElement>("[data-page-fullscreen=a1]")!;
+      const view = opened.querySelector("iframe")!.contentWindow!;
+      vi.spyOn(view, "postMessage").mockImplementation(() => {});
+      const point = Array.from(opened.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Point")!;
+      await press(point);
+      expect(point.getAttribute("aria-pressed")).toBe("true");
+      for (const data of [{ id: "init", method: "ui/initialize" }, { method: "ui/notifications/initialized" }, { method: "ui/notifications/request-teardown" }]) {
+        await act(async () => { window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", params: {}, ...data }, source: view as unknown as MessageEventSource })); });
+      }
+      await settle();
+      expect(document.querySelector("[data-page-fullscreen]")).toBeNull();
+      expect(opener().getAttribute("aria-pressed")).toBe("false");
+      expect(card().querySelector("[data-app-box]")!.hasAttribute("inert")).toBe(true);
+    }
+  });
+
   it("keeps the card's own tools working without opening the page", async () => {
     await render(row(payload()));
     await press(card().querySelector<HTMLButtonElement>("[aria-label='About this app']")!);

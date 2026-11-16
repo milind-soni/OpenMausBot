@@ -333,7 +333,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
         />
       )}
       {page && fullScreen && current && (
-        <PageFullScreen {...tools} title={payload.title} doc={current} botId={botId} threadId={threadId} handle={wide} close={() => setFullScreen(false)} pane={pane}
+        <PageFullScreen {...tools} title={payload.title} doc={current} botId={botId} threadId={threadId} handle={wide} close={() => { point.stop(); setFullScreen(false); }} pane={pane}
           {...(!room ? { onSelection: setSelection } : {})} />
       )}
     </div>
