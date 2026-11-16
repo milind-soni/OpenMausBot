@@ -262,6 +262,18 @@ describe("a Team Cloud member's own secrets", () => {
     expect(store.listSecrets({ person: ADA, team: false }).map((one) => one.id)).toEqual([ada.id]);
   });
 
+  it("win over the team's secret of the same name in that person's turns, saved in the same millisecond or before it", () => {
+    let at = 5;
+    const store = new VaultStore({ dataDir: dir, now: () => at });
+    const team = store.saveSecret({ name: "Stripe secret key", value: "sk_test_fake-team", source: "settings", bots: ["pepper"] });
+    const ada = own(store);
+    expect(store.usableSecret("Stripe secret key", "pepper", "ref", { person: ADA, team: true })?.id).toBe(ada.id);
+    at = 6;
+    store.updateSecret(team.id, { value: "sk_test_fake-team-2" });
+    expect(store.usableSecret("Stripe secret key", "pepper", "ref", { person: ADA, team: true })?.id).toBe(ada.id);
+    expect(store.usableSecret("Stripe secret key", "pepper", "ref", { person: BEN, team: true })?.id).toBe(team.id);
+  });
+
   it("are another secret than the team's or another member's of the same name, and are never replaced from elsewhere", () => {
     const store = new VaultStore({ dataDir: dir });
     const team = store.saveSecret({ name: "Stripe secret key", value: "fake-team", source: "card", bots: ["pepper"], refOnly: true });

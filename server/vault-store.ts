@@ -345,13 +345,15 @@ export class VaultStore {
     return (this.read().secrets ?? []).filter((secret) => secretReadable(secret, reader)).map(summarizeSecret).sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** The secret `botId` may use by this name, as a ref or a file, in a turn `reader` names: one kept to some bots before
-   * one for every bot, then the newest. */
+  /** The secret `botId` may use by this name, as a ref or a file, in a turn `reader` names: the person's own before the
+   * team's of the same name, whichever was saved later; then one kept to some bots before one for every bot; then the
+   * newest. */
   usableSecret(name: string, botId: string, delivery: "ref" | "file", reader: VaultReader): StoredSecret | null {
     const key = vaultNameKey(name);
     const matches = (this.read().secrets ?? []).filter((secret) => vaultNameKey(secret.name) === key && loginUsableBy(secret, botId) &&
       secretReadable(secret, reader) && (delivery === "ref" || !secret.refOnly));
-    return matches.sort((a, b) => Number(b.bots !== "all") - Number(a.bots !== "all") || b.updatedAt - a.updatedAt)[0] ?? null;
+    return matches.sort((a, b) => Number(Boolean(b.person)) - Number(Boolean(a.person)) || Number(b.bots !== "all") - Number(a.bots !== "all") ||
+      b.updatedAt - a.updatedAt)[0] ?? null;
   }
 
   secretNamesFor(botId: string, reader: VaultReader): Array<{ name: string; refOnly?: true }> {
