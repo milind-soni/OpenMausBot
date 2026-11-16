@@ -141,15 +141,17 @@ async function closeOnce(binaryPath: string, env: NodeJS.ProcessEnv, session: st
   const closeEnv = daemonControlEnv(env);
   if (!closeEnv) return false;
   const deadline = Date.now() + timeoutMs;
-  // `close` to a stopped session starts a daemon only to stop it again and leaves its .config file behind.
-  const running = await runningBrowserSessions(binaryPath, closeEnv, deadline);
-  if (!running) return false;
-  if (!running.includes(session)) return true;
   const pidFile = browserDaemonFile(env, ".pid");
   const daemonPid = () => { try { return readFileSync(pidFile, "utf8").trim(); } catch { return null; } };
+  // `close` to a stopped session starts a daemon only to stop it again and leaves its .config file behind.
+  const running = await runningBrowserSessions(binaryPath, closeEnv, deadline);
+  if (running && !running.includes(session)) return true;
   const closing = daemonPid();
   // Read first: once the daemon exits, its Chrome is re-parented and can no longer be found under it.
   const tree = closing === null ? null : await browserProcessTree(binaryPath, Number(closing), session).catch(() => null);
+  // The list could not be read: on a box out of processes, every agent-browser command fails to start, so the daemon
+  // the pid file names (checked to be this session's own, from /proc where there is one) is stopped directly.
+  if (!running) return tree ? stopBrowserProcesses(tree) : false;
   if ((await runBrowserCommand(binaryPath, closeEnv, ["close"], deadline)).ok) {
     // Native close answers before the daemon exits, and Chrome's helper processes can outlive the answer.
     while (Date.now() < deadline) {

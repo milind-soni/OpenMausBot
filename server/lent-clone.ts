@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
+import { OWN_GROUP, stopGroup } from "./group-exec.ts";
 import { botBox } from "./bot-box/box.ts";
 
 export const lentGit = z.object({
@@ -43,10 +44,11 @@ export function runGit(args: string[], timeoutMs = CLONE_MS): Promise<void> {
   return new Promise((resolve, reject) => {
     // The address is always https://github.com/<owner>/<name>.git (lentGit's repo), never one a computer sent.
     const run = gitInvocation(args);
-    const child = spawn("git", run.args, { stdio: ["ignore", "ignore", "pipe"], env: run.env });
+    // Its own group, so a timeout also ends git-remote-https and any credential helper it started.
+    const child = spawn("git", run.args, { stdio: ["ignore", "ignore", "pipe"], env: run.env, ...OWN_GROUP });
     let error = "";
     child.stderr.on("data", (chunk) => { if (error.length < 4_000) error += chunk; });
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    const timer = setTimeout(() => stopGroup(child, 0), timeoutMs);
     child.once("error", (cause) => { clearTimeout(timer); reject(cause); });
     child.once("close", (code) => { clearTimeout(timer); if (code === 0) resolve(); else reject(new Error(error.trim().split("\n").at(-1) || `git exited ${code}`)); });
   });
