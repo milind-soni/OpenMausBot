@@ -106,8 +106,8 @@ interface RuntimeOptions<Config> {
   refreshModels?: () => Promise<void>;
   generateModel?: () => string;
   reasoning?: boolean;
-  /** Cerebras rejects `reasoning_content` and takes `reasoning`. */
-  reasoningReplayField?: "reasoning_content" | "reasoning";
+  /** Cerebras rejects `reasoning_content` and takes `reasoning`. */ reasoningReplayField?: "reasoning_content" | "reasoning";
+  /** Sent on reasoning-off by a provider with no `reasoning_effort: "none"`: its own switch, or `{}`. Unset sends "none". */ reasoningOffBody?: (model: string) => Record<string, unknown>;
   contentText?: (content: unknown) => string;
   billing?: "metered";
   includeUsageInCompleted?: boolean;
@@ -285,7 +285,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort: options.requestBody(served, messages, stream, variant).reasoning_effort })
         : {
           ...options.requestBody(served, messages, stream, variant, threadId),
-          ...(route === "chat-reasoning-off" ? { reasoning_effort: "none" } : {}),
+          ...(route === "chat-reasoning-off" ? (options.reasoningOffBody?.(served) ?? { reasoning_effort: "none" }) : {}),
           ...(tools.length ? { tools } : {}),
         });
       const send = options.timeoutMs > FETCH_LIMIT_MS ? fetchPastLimit : fetch;
@@ -609,7 +609,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const scope = parsed.scope;
         const toolsOff = options.tools === false || options.toolUse?.(model) === false;
         tools = await mountChatTools(toolsOff ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
-          toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText, chatToolLimitFor(options.apiUrl, model));
+          toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText, chatToolLimitFor(options.apiUrl, model), { conversation: turn.threadId, notice: ({ message, text }) => emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message), text }) });
         noteToolBudget(turn.botId, tools.budget);
         for (const message of chatToolNotices(tools)) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
         const questionAllowed = !toolsOff && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });

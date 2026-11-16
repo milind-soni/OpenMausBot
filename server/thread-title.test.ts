@@ -1,7 +1,48 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { createJobSlots } from "./job-slots.ts";
 import type { Message } from "./store.ts";
 import { callTitleExcerpt, threadTitlePrompt, titleConversationExcerpt, titleFromMessage, TITLE_INPUT_MAX_CHARS, UNTITLED_TASK } from "./thread-title.ts";
+import { generateThreadTitle, THREAD_TITLE_TIMEOUT_MS } from "./thread-title-generate.ts";
+
+describe("a generated title and the background slots", () => {
+  it("answers null after 10 s, but keeps its slot until the engine call has really ended", async () => {
+    vi.useFakeTimers();
+    try {
+      const slots = createJobSlots(1);
+      let end!: (text: string) => void;
+      let aborted = false;
+      const provider = { generateText: (_prompt: string, options?: { signal?: AbortSignal }) => {
+        options?.signal?.addEventListener("abort", () => { aborted = true; });
+        return new Promise<string>((resolve) => { end = resolve; });
+      } };
+      const title = generateThreadTitle(provider, "plan the trip", "first-message", slots);
+      await vi.advanceTimersByTimeAsync(THREAD_TITLE_TIMEOUT_MS);
+      expect(await title).toBeNull();
+      expect(aborted).toBe(true);
+      expect(slots.running).toBe(1);
+      end("Trip plan");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(slots.running).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits ahead of background upkeep for a free slot", async () => {
+    const slots = createJobSlots(1);
+    let free!: () => void;
+    const busy = slots.run(() => new Promise<void>((resolve) => { free = resolve; }));
+    const order: string[] = [];
+    const upkeep = slots.run(async () => { order.push("upkeep"); });
+    const title = generateThreadTitle({ generateText: async () => { order.push("title"); return "Trip plan"; } }, "plan the trip", "first-message", slots);
+    await vi.waitFor(() => expect(free).toBeTypeOf("function"));
+    free();
+    await Promise.all([busy, upkeep]);
+    expect(await title).toBe("Trip plan");
+    expect(order).toEqual(["title", "upkeep"]);
+  });
+});
 
 let next = 0;
 const message = (role: Message["role"], text: string, extra: Partial<Message> = {}): Message => ({

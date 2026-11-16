@@ -15,8 +15,8 @@ export const YOUR_COMPUTER_WORDS = {
   "approval.yourComputer.browser": "I need to use your {app} where you're signed in. Allow once?",
   "approval.yourComputer.site": "I need to use your browser where you're signed in to {site}. Allow once?",
   "approval.yourComputer.app": "I need to use {app} on your computer. Allow once?",
-  "approval.yourComputer.screen": "I need to use your computer's screen for this. Allow once?",
-  "approval.yourComputer.detail": "{name} would see your screen and click and type on it, for this request only.",
+  "approval.yourComputer.screen": "I need to use your files and apps on this computer for this. Allow once?",
+  "approval.yourComputer.detail": "{name} can use your files and apps here: it sees your screen and clicks and types on it, for this request only.",
 } as const;
 
 export type YourComputerKey = keyof typeof YOUR_COMPUTER_WORDS;

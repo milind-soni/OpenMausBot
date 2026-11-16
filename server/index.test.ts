@@ -10929,7 +10929,7 @@ describe("harness HTTP API", () => {
 
   it.each([
     { testedMode: "shared", refusal: expect.not.stringMatching(/take control|pool mode|per-bot Local VM/i) },
-    { testedMode: "pool", refusal: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Computers." },
+    { testedMode: "pool", refusal: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Desktops & browser." },
   ])("answers Local VM phone joins in $testedMode mode for direct and companion callers past the mode check only when it is not pool", async ({ testedMode, refusal }) => {
     const { mode, maxInstances } = (await api("GET", "/api/config")).body.localVm;
     const previous = { mode, maxInstances };

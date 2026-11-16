@@ -159,7 +159,7 @@ export interface Message extends Pick<import("../../shared/wire").WireMessage, "
 
 export type GroupDefaultResponder = import("../../shared/wire").GroupDefaultResponder;
 
-export interface Group extends Pick<WireGroup, "memberContext" | "queue" | "chiefAbsent"> {
+export interface Group extends Pick<WireGroup, "memberContext" | "queue" | "chiefAbsent" | "farMembers"> {
   usage?: GroupThreadUsage | null;
   id: string;
   threadId: string;
