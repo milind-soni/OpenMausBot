@@ -335,7 +335,8 @@ describe("the link between a computer and its Cloud", () => {
     expect(cloud.coordinator.pace()).toBe("parked");
 
     await cloud.restart({ limits: { queueMs: 80, stallMs: 1_500 } });
-    await computer.restart({ limits: { queueMs: 80, stallMs: 1_500 } });
+    // Only the Cloud holds work here, so only its clocks are short: the computer starts its work with its usual ones.
+    await computer.restart();
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(cloud.coordinator.node(receipts[0]!.requestId!)?.status).toBe("queued");
     expect(computer.runs).toEqual([]);
