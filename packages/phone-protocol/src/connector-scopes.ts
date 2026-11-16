@@ -80,6 +80,11 @@ function toolkitFor(slug: string, toolkits: readonly string[]): string {
     .sort((a, b) => b.length - a.length)[0] ?? toolkitOf(slug);
 }
 
+/** The connected-account ids a bot may use in `toolkit`, or undefined when that app has no account limit. */
+export function accountLimit(scopes: ConnectorScopes | undefined, toolkit: string): string[] | undefined {
+  return scopes?.accounts && Object.hasOwn(scopes.accounts, toolkit) ? scopes.accounts[toolkit] : undefined;
+}
+
 export type ConnectorAccess =
   | { ok: true }
   | { ok: false; slug: string; toolkit: string; reason: "app" | "write" | "account"; allowed?: string[] };
@@ -96,7 +101,7 @@ export function connectorAccessDecision(scopes: ConnectorScopes | undefined, cal
     const scope = call.slug === "COMPOSIO_PROXY_EXECUTE" || !Object.hasOwn(scopes.apps, toolkit) ? undefined : scopes.apps[toolkit];
     if (!scope) return { ok: false, slug: call.slug, toolkit, reason: "app" };
     if (scope === "read" && !isReadOnlyAction(call.slug, toolkit)) return { ok: false, slug: call.slug, toolkit, reason: "write" };
-    const allowed = scopes.accounts && Object.hasOwn(scopes.accounts, toolkit) ? scopes.accounts[toolkit] : undefined;
+    const allowed = accountLimit(scopes, toolkit);
     if (allowed && (!call.account || !allowed.includes(call.account))) return { ok: false, slug: call.slug, toolkit, reason: "account", allowed };
   }
   return { ok: true };

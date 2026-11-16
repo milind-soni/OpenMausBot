@@ -895,7 +895,7 @@ export function AccessSection({
   );
 }
 
-function ConnectorScopesControl({ connectedSlugs, labels = {}, accounts = {}, scopes, onChange }: {
+export function ConnectorScopesControl({ connectedSlugs, labels = {}, accounts = {}, scopes, onChange }: {
   connectedSlugs: string[];
   /** display names by slug; a slug without one shows as itself */
   labels?: Record<string, string>;
@@ -918,15 +918,13 @@ function ConnectorScopesControl({ connectedSlugs, labels = {}, accounts = {}, sc
     }
     emit(apps, limits);
   };
-  // No limit means every account; ticking the last one back drops the limit again. Ids no longer connected are dropped.
+  // No limit means every account, also ones connected later; once a box is changed the ticked ids stay a limit, so a
+  // later account is allowed only when it is ticked too. Ids no longer connected are dropped.
   const connectedIds = (slug: string) => (accounts[slug] ?? []).map((account) => account.id);
   const allowedIds = (slug: string) => scopes?.accounts?.[slug]?.filter((id) => connectedIds(slug).includes(id)) ?? connectedIds(slug);
   const setAccount = (slug: string, id: string, on: boolean) => {
     const ids = allowedIds(slug).filter((one) => one !== id).concat(on ? [id] : []);
-    const limits = { ...scopes?.accounts };
-    if (connectedIds(slug).every((one) => ids.includes(one))) delete limits[slug];
-    else limits[slug] = ids;
-    emit({ ...scopes?.apps }, limits);
+    emit({ ...scopes?.apps }, { ...scopes?.accounts, [slug]: ids });
   };
   return <div className="mt-3">
     <div className="flex items-center justify-between gap-4">

@@ -398,8 +398,10 @@ export interface ConnectedReadDeps {
   /** Null when connected apps are not set up here; else which of the two apps are connected. */
   connected(): Promise<Record<ReadApp, boolean> | null>;
   /** The account to read for each app with several connected (Composio refuses a read that names none then); an app
-   *  with one is left out, and its reads name no account. Asked once per session. */
-  accounts?(): Promise<AppAccounts>;
+   *  with one is left out, and its reads name no account. Asked once per session, with the bot the session reads for. */
+  accounts?(botId?: string): Promise<AppAccounts>;
+  /** The accounts a read names while that lookup is failing, for a bot limited to some accounts. */
+  fallbackAccounts?(botId?: string): AppAccounts;
   relay(payload: unknown, transportSessionId: string | undefined, signal: AbortSignal): Promise<{ status: number; bytes: Uint8Array; transportSessionId?: string }>;
   readTimeoutMs?: number;
 }
@@ -427,7 +429,8 @@ export interface MailBodySession extends ReadSession {
 
 export interface ConnectedReads {
   connected(): Promise<Record<ReadApp, boolean> | null>;
-  session(): ReadSession;
+  /** `botId`: the bot the reads are for, so an account limit of its own picks the account. */
+  session(botId?: string): ReadSession;
 }
 
 // A 50-email page is past the connected-apps service's size limit and comes back shortened; 20 fits, and a page that
@@ -438,10 +441,10 @@ const GMAIL_PAGES = 6;
 
 const appOf = (slug: string): ReadApp | "outlook" => (slug.startsWith("GMAIL_") ? "gmail" : slug.startsWith("OUTLOOK_") ? "outlook" : "googlecalendar");
 
-export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedReads, "session"> & { session(): MailBodySession } {
+export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedReads, "session"> & { session(botId?: string): MailBodySession } {
   const readTimeoutMs = deps.readTimeoutMs ?? READ_TIMEOUT_MS;
 
-  function session(): MailBodySession {
+  function session(botId?: string): MailBodySession {
     let opened: Promise<string | undefined> | undefined;
     let accounts: Promise<AppAccounts> | undefined;
 
@@ -469,10 +472,11 @@ export function createConnectedReads(deps: ConnectedReadDeps): Omit<ConnectedRea
           throw error;
         });
         const transport = await opened;
-        // A failed lookup reads as no account named and is asked again on the next read, not kept for the session.
-        accounts ??= deps.accounts?.().catch((): AppAccounts => {
+        // A failed lookup reads as the fallback (no account named, unless the bot is limited to some) and is asked again
+        // on the next read, not kept for the session.
+        accounts ??= deps.accounts?.(botId).catch((): AppAccounts => {
           accounts = undefined;
-          return {};
+          return deps.fallbackAccounts?.(botId) ?? {};
         }) ?? Promise.resolve({});
         // The lookup counts toward this read's time limit; one that runs out is dropped so the next read asks again.
         const lookup = accounts;
