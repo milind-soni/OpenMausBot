@@ -1,0 +1,52 @@
+[
+  {
+    "id": "<id-7>",
+    "threadId": "<id-8>",
+    "name": "Ada and Ben",
+    "memberIds": [
+      "<id-3>",
+      "<id-1>"
+    ],
+    "defaultResponder": {
+      "kind": "mentions"
+    },
+    "bulletin": "",
+    "unread": false,
+    "createdAt": 1794819604000,
+    "dm": true
+  },
+  {
+    "id": "<id-9>",
+    "threadId": "<id-10>",
+    "name": "Launch",
+    "memberIds": [
+      "<id-3>",
+      "<id-1>"
+    ],
+    "defaultResponder": {
+      "kind": "member",
+      "botId": "<id-3>"
+    },
+    "bulletin": "Ship on Friday.",
+    "unread": false,
+    "createdAt": 1794819604000,
+    "section": "Engineering",
+    "tasks": [
+      {
+        "threadId": "<id-11>",
+        "title": "Room follow-up",
+        "createdAt": 1794819604000,
+        "updatedAt": 1794819604000,
+        "pinned": true
+      },
+      {
+        "threadId": "<id-10>",
+        "title": "New task",
+        "createdAt": 1794819604000,
+        "updatedAt": 1794819604000
+      }
+    ],
+    "setupCompletedAt": null,
+    "setupSkippedAt": null
+  }
+]
