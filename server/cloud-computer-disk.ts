@@ -4,16 +4,17 @@
 // Security, at 85% (caches only): apt's downloaded packages, journal logs beyond 50 MB, docker's build cache, and the
 // npm, pip, yarn and pnpm cache folders under the home folder. No docker image, container or volume, nothing in /tmp.
 // Security, at capacity (95% after the caches are gone, or a write that still fails for lack of space), in this order
-// and only until the root filesystem is back under 80%: the caches again; docker containers created over 24 hours ago
-// that are not running, and docker images no container uses; then whole top-level entries of /tmp, stalest first,
-// that are the user's own, hold nothing modified in the last 6 hours, and are not the folder, or above the folder or
-// an open file, of any running process or a running container's mount. An unused image or an old /tmp entry that
-// someone still wanted is lost by this. Neither tier ever removes a docker volume, a running container or its image,
-// or any file under the home folder outside the four cache folders.
+// and only until the root filesystem is back under 80%: the caches again; docker containers that ended over 24 hours
+// ago, then docker images no container uses; then whole top-level entries of /tmp, stalest first, under the rules
+// written out at tmpSweep. An unused image or an old /tmp entry that someone still wanted is lost by this. Neither
+// tier ever removes a docker volume, a running or recently stopped container or its image, anything reached through
+// a mount point, or any file under the home folder outside the four cache folders.
 // Every command is one of the fixed strings below; none takes a path or a name from the computer, the bot or the
 // person, and the only values put into one are whole numbers this server worked out. Names read back from the
 // computer reach the bot only as quoted data.
-// Docker: `container prune --filter until=24h` goes by when a container was created, not when it stopped.
+// Docker: `container prune --filter until=` goes by when a container was created, so containers are removed one by
+// one by `.State.FinishedAt` instead. Linux: a bind mount on the same filesystem has the same device number, so
+// neither `find -xdev` nor `rm --one-file-system` stops at it; /proc/self/mountinfo is what is checked.
 // Unverified against a real computer: every command here, and what an upload to a full disk answers.
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -41,9 +42,13 @@ export const DISK = {
   stampTimeoutMs: 10_000,
   cleanupLimitSeconds: 300,
   cleanupFollowMs: 330_000,
-  /** The longest an unattended run waits, before it starts, for space to be freed: a late run is better than one
-   * that fails on its first write. */
-  runWaitMs: 5 * 60_000,
+  /** The longest an unattended run waits, before it starts, for the computer to have no command running, so that space
+   * can be freed on it: a late run is better than one that fails on its first write. */
+  runQuietWaitMs: 5 * 60_000,
+  runQuietPollMs: 5_000,
+  /** Once freeing has started an unattended run waits for it to end, so it never starts while a script is still
+   * deleting: two surveys, both scripts as long as they are followed, the stamp, and four readings. */
+  runWaitMs: 2 * (15_000 + 330_000) + 10_000 + 4 * 3_000,
   /** The capacity tier stops removing as soon as the root filesystem is under this. */
   capacityTargetPercent: 80,
   capacityEveryMs: 60 * 60_000,
@@ -203,85 +208,133 @@ const dockerFor = (found: ReadonlySet<DiskTool>): string | null => (found.has("d
 /** Stops the capacity tier: true once the root filesystem is under the target, and also when it cannot be read. */
 const ENOUGH = `enough() { p=$(df -P / 2>/dev/null | awk 'NR==2 { sub("%", "", $5); print $5 }'); case "$p" in ''|*[!0-9]*) return 0;; esac; [ "$p" -lt ${DISK.capacityTargetPercent} ]; }`;
 const FINISHED = "omb-disk:end";
+const BELOW_MARK = "omb-disk:below";
+
+/** The two levels the capacity tier may be started at; the script checks its own first reading against the one it was given. */
+export type CapacityTrigger = typeof DISK.writesFailAtPercent | typeof DISK.cleanAtPercent;
+
+const UNDER_ENTRY = `E="$e" awk 'BEGIN { e = ENVIRON["E"] } $0 == e || index($0, e "/") == 1 { hit = 1 } END { exit !hit }'`;
 
 /** Removes whole top-level entries of /tmp, stalest first by the newest modification anywhere inside each, one at a
- * time, until `enough`. An entry is moved aside in one rename and then deleted, so it goes whole or stays whole.
- * Kept: dot entries, links, entries of other users, entries holding another user's file, a socket or a pipe, entries
- * with anything modified in the last 6 hours, and entries that are, or lie above, the folder or an open file of a
- * running process or a running container's mount. Does nothing where /tmp is not on the root filesystem, where find
- * is not GNU find, or where the running containers' mounts cannot be read. Prints "<kB><tab><name>" per entry removed. */
-function tmpSweep(found: ReadonlySet<DiskTool>, tmp: string): string {
+ * time, until `enough`. An entry is moved aside in one rename, made writable and deleted, and is reported only once
+ * it is gone; one that cannot be deleted is put back and ends the stage.
+ * Kept: dot entries; links; names with a space or any character outside A-Z a-z 0-9 . _ + = , @ : -; entries of
+ * other users; entries holding another user's file, a socket or a pipe; entries with anything modified in the last
+ * 6 hours; entries with a mount point at or below them; and entries that are, or lie above, the folder, root,
+ * program, open file or mapped file of any running process, or a running container's mount.
+ * The whole stage does nothing unless every process can be read (root, or sudo without a password), and nothing where
+ * /tmp is a link or not on the root filesystem, where find is not GNU find, where the mount table cannot be read,
+ * where docker is installed but its running containers' mounts cannot be read, or where a running container mounts
+ * /tmp or a folder above it. A process list that reads as empty counts as "in use".
+ * It stops when the first three removals did not lower the root filesystem's use, and after 200 removals.
+ * Prints "<kB><tab><name>" for each entry removed. */
+function tmpSweep(found: ReadonlySet<DiskTool>, tmp: string): string[] {
+  if (!found.has("root") && !found.has("sudo")) return [];
   const docker = dockerFor(found);
+  const sudo = sudoFor(found);
+  const usedKb = "df -Pk / 2>/dev/null | awk 'NR==2 { print $3 }'";
   return [
-    `if [ "$(stat -c %d ${tmp} 2>/dev/null)" = "$(stat -c %d / 2>/dev/null)" ] && find /proc/self/cwd -maxdepth 0 -lname '*' -printf '' 2>/dev/null; then`,
-    `  u=$(id -u); g=${tmp}/.omb-disk-removing; tab=$(printf '\\t'); mounts=; sure=1`,
+    `t=${tmp}`,
+    `if [ ! -L "$t" ] && t=$(realpath "$t" 2>/dev/null) && [ -n "$t" ] && [ "$t" != / ] && [ "$(stat -c %d "$t" 2>/dev/null)" = "$(stat -c %d / 2>/dev/null)" ] && find /proc/self/cwd -maxdepth 0 -lname '*' -printf '' 2>/dev/null; then`,
+    `  u=$(id -u); tab=$(printf '\\t'); mounts=; sure=1`,
+    "  points=$(awk '{ print $5 }' /proc/self/mountinfo 2>/dev/null) || sure=",
+    '  [ -n "$points" ] || sure=',
     ...(docker ? [
       `  c=$(${docker} ps -q 2>/dev/null) || sure=`,
       `  mounts=$(printf '%s\\n' "$c" | xargs -r ${docker} inspect --format '{{range .Mounts}}{{println .Source}}{{end}}' 2>/dev/null) || sure=`,
-    ] : []),
-    '  rm -rf --one-file-system -- "$g" 2>/dev/null',
-    '  if [ -n "$sure" ] && mkdir "$g" 2>/dev/null; then',
-    `    for e in ${tmp}/*; do`,
+      `  printf '%s\\n' "$mounts" | T="$t" awk 'BEGIN { t = ENVIRON["T"] "/" } $0 == "/" || ($0 != "" && index(t, $0 "/") == 1) { all = 1 } END { exit !all }' && sure=`,
+    ] : [
+      "  if command -v docker >/dev/null 2>&1 || [ -S /var/run/docker.sock ] || [ -S /run/docker.sock ]; then sure=; fi",
+    ]),
+    '  for old in "$t"/.omb-disk-removing.*; do [ -d "$old" ] && [ ! -L "$old" ] && { chmod -R u+w "$old" 2>/dev/null; rm -rf --one-file-system -- "$old" 2>/dev/null; }; done',
+    '  g=$(mktemp -d "$t/.omb-disk-removing.XXXXXX" 2>/dev/null) || sure=',
+    '  [ -n "$g" ] && [ -d "$g" ] || sure=',
+    '  if [ -n "$sure" ]; then',
+    `    u0=$(${usedKb})`,
+    '    for e in "$t"/*; do',
     '      [ -L "$e" ] && continue',
     '      [ -e "$e" ] || continue',
-    '      case "$e" in *[[:cntrl:]]*) continue;; esac',
+    '      case "${e##*/}" in *[!A-Za-z0-9._+=,@:-]*) continue;; esac',
     '      [ "$(stat -c %u "$e" 2>/dev/null)" = "$u" ] || continue',
     `      [ -z "$(find "$e" -xdev \\( -mmin -${DISK.tmpQuietMinutes} -o ! -user "$u" -o -type s -o -type p \\) -print -quit 2>&1)" ] || continue`,
     `      m=$(find "$e" -xdev -printf '%T@\\n' 2>/dev/null | sort -rn | head -n 1)`,
     `      [ -n "$m" ] && printf '%s\\t%s\\n' "\${m%%.*}" "$e"`,
-    '    done | sort -n | while IFS="$tab" read -r m e; do',
+    '    done | sort -n | { n=0; while IFS="$tab" read -r m e; do',
     "      enough && break",
     `      [ -z "$(find "$e" -xdev -mmin -${DISK.tmpQuietMinutes} -print -quit 2>&1)" ] || continue`,
-    `      { ${sudoFor(found)}find /proc/[0-9]*/cwd /proc/[0-9]*/fd -maxdepth 1 -type l -lname '${tmp}/*' -printf '%l\\n' 2>/dev/null; printf '%s\\n' "$mounts"; } | E="$e" awk 'BEGIN { e = ENVIRON["E"] } $0 == e || index($0, e "/") == 1 { hit = 1 } END { exit !hit }' && continue`,
+    `      used=$( { ${sudo}find /proc/[0-9]*/cwd /proc/[0-9]*/exe /proc/[0-9]*/root /proc/[0-9]*/fd -maxdepth 1 -type l -printf '%l\\n' 2>/dev/null; ${sudo}cat /proc/[0-9]*/maps 2>/dev/null | awk '{ i = index($0, "/"); if (i) print substr($0, i) }'; } | sort -u )`,
+    '      case "$used" in */*) ;; *) continue;; esac',
+    `      { printf '%s\\n' "$used"; printf '%s\\n' "$mounts"; awk '{ print $5 }' /proc/self/mountinfo 2>/dev/null || echo "$e"; } | ${UNDER_ENTRY} && continue`,
     '      k=$(du -sxk "$e" 2>/dev/null | cut -f1)',
-    '      mv -- "$e" "$g/" 2>/dev/null || continue',
-    '      rm -rf --one-file-system -- "$g" 2>/dev/null; mkdir "$g" 2>/dev/null',
-    `      printf '%s\\t%s\\n' "\${k:-0}" "\${e#${tmp}/}"`,
-    "    done | head -n 200",
-    '    rm -rf --one-file-system -- "$g" 2>/dev/null',
+    '      held="$g/${e##*/}"',
+    '      mv -- "$e" "$held" 2>/dev/null || continue',
+    '      chmod -R u+w "$held" 2>/dev/null; rm -rf --one-file-system -- "$held" 2>/dev/null',
+    '      if [ -e "$held" ] || [ -L "$held" ]; then mv -- "$held" "$e" 2>/dev/null; break; fi',
+    `      printf '%s\\t%s\\n' "\${k:-0}" "\${e##*/}"`,
+    "      n=$((n + 1))",
+    '      [ "$n" -lt 200 ] || break',
+    `      if [ "$n" -eq 3 ]; then u1=$(${usedKb}); case "$u0" in ''|*[!0-9]*) break;; esac; case "$u1" in ''|*[!0-9]*) break;; esac; [ "$u1" -lt "$u0" ] || break; fi`,
+    "    done; }",
     "  fi",
+    '  [ -z "$g" ] || rmdir -- "$g" 2>/dev/null',
     "fi",
-  ].join("\n");
+  ];
 }
 
-/** The capacity tier as one shell under the same time limit: each stage runs only while the root filesystem is still
- * at or over the target, and nothing runs when the stamp file says this tier started on this computer within the
- * hour. `tmp` is /tmp; a test may point it at a folder of its own. */
-export function capacityCommand(found: ReadonlySet<DiskTool>, full: Record<DiskSide, boolean>, tmp = "/tmp"): string {
+/** Removes containers that are not running and ended over 24 hours ago, by when each one ended, then the images no
+ * container uses: a container that stopped a moment ago, such as a database the full disk brought down, stays, and so
+ * does its image. `docker rm` without -f refuses a running container and leaves volumes alone. Prints each name removed. */
+const dockerStage = (docker: string): string[] => [
+  "echo omb-disk:containers; now=$(date +%s)",
+  `for c in $(${docker} ps -aq --no-trunc --filter status=exited --filter status=dead 2>/dev/null </dev/null); do`,
+  `  f=$(${docker} inspect --format '{{.State.FinishedAt}}' "$c" 2>/dev/null </dev/null) || continue`,
+  '  s=$(date -d "$f" +%s 2>/dev/null) || continue',
+  `  case "$s" in ''|*[!0-9]*) continue;; esac`,
+  `  [ "$((now - s))" -gt ${DISK.containerAgeHours * 3600} ] || continue`,
+  `  name=$(${docker} inspect --format '{{.Name}}' "$c" 2>/dev/null </dev/null)`,
+  `  ${docker} rm "$c" >/dev/null 2>&1 </dev/null && printf '%s\\n' "\${name#/}"`,
+  "done",
+  `echo omb-disk:images; ${docker} image prune -a -f 2>/dev/null </dev/null | grep -E '^untagged: ' | grep -v '@sha256:' | head -n 40`,
+];
+
+/** The capacity tier as one shell under the same time limit. It does nothing when its own first reading of the root
+ * filesystem is under `trigger`, or when the stamp file says this tier started on this computer within the hour; each
+ * stage then runs only while the root filesystem is still at or over the target. `tmp` is /tmp; a test may point it
+ * at a folder of its own. */
+export function capacityCommand(found: ReadonlySet<DiskTool>, full: Record<DiskSide, boolean>, trigger: CapacityTrigger, tmp = "/tmp"): string {
   const docker = dockerFor(found);
   const stop = `enough && { echo ${FINISHED}; exit 0; }`;
   const body = [
+    `p=$(df -P / 2>/dev/null | awk 'NR==2 { sub("%", "", $5); print $5 }'); case "$p" in ''|*[!0-9]*) echo ${BELOW_MARK}; exit 0;; esac`,
+    `[ "$p" -ge ${trigger} ] || { echo ${BELOW_MARK}; exit 0; }`,
     `if [ -n "$(find ${CAPACITY_STAMP} -mmin -60 2>/dev/null)" ]; then echo ${RECENT_MARK}; exit 0; fi`,
     `mkdir -p ${STAMP_DIR} 2>/dev/null; date +%s > ${CAPACITY_STAMP} 2>/dev/null`,
     ENOUGH,
-    stop,
     ...cleanupSteps(found, full).map((step) => `( ${step}\n) >/dev/null 2>&1 </dev/null`),
     stop,
-    ...(docker ? [
-      `echo omb-disk:containers; ${docker} container prune -f --filter until=${DISK.containerAgeHours}h 2>/dev/null </dev/null | grep -cE '^[0-9a-f]{64}$'`,
-      `echo omb-disk:images; ${docker} image prune -a -f 2>/dev/null </dev/null | grep -E '^untagged: ' | grep -v '@sha256:' | head -n 40`,
-      stop,
-    ] : []),
+    ...(docker ? [...dockerStage(docker), stop] : []),
     "echo omb-disk:tmp",
-    tmpSweep(found, tmp),
+    ...tmpSweep(found, tmp),
     `echo ${FINISHED}`,
   ].join("\n");
   return `timeout -k 10 ${DISK.cleanupLimitSeconds} /bin/sh -c ${quote(body)}; true`;
 }
 
-export interface DiskRemoved { images: string[]; containers: number; items: DiskFolder[] }
+export interface DiskRemoved { images: string[]; containers: string[]; items: DiskFolder[] }
 
 const shownName = (raw: string): string => raw.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "").slice(0, DISK.folderNameChars);
 
-/** What the capacity tier printed: null when the computer said the tier already ran within the hour. */
+/** What the capacity tier printed: null when the computer said the tier already ran within the hour, or that its
+ * disk is under the level the tier was started for. */
 export function parseCapacityReport(output: string): DiskRemoved | null {
-  const removed: DiskRemoved = { images: [], containers: 0, items: [] };
+  const removed: DiskRemoved = { images: [], containers: [], items: [] };
   let section = "";
   for (const line of String(output ?? "").split(/\r?\n/)) {
-    if (line.trim() === RECENT_MARK) return null;
+    if (line.trim() === RECENT_MARK || line.trim() === BELOW_MARK) return null;
     const mark = /^omb-disk:(containers|images|tmp|end)\s*$/.exec(line)?.[1];
     if (mark) { section = mark; continue; }
-    if (section === "containers" && /^\d{1,6}$/.test(line.trim())) removed.containers = Number(line.trim());
+    const container = section === "containers" ? /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.exec(line.trim())?.[0] : undefined;
+    if (container && removed.containers.length < 200) removed.containers.push(container);
     const image = section === "images" ? /^untagged: ([A-Za-z0-9][A-Za-z0-9._/:-]{0,127})$/.exec(line.trim())?.[1] : undefined;
     if (image && !removed.images.includes(image)) removed.images.push(image);
     const item = section === "tmp" ? /^(\d{1,15})\t([^/]+)$/.exec(line) : null;
@@ -355,7 +408,9 @@ export function removedText(removed: DiskRemoved): string {
   if (removed.images.length) {
     parts.push(`${some(removed.images.length, "unused Docker image", "unused Docker images")} (${listed(removed.images.slice(0, DISK.removedShown).map((name) => JSON.stringify(name)), removed.images.length)})`);
   }
-  if (removed.containers) parts.push(some(removed.containers, "stopped Docker container", "stopped Docker containers"));
+  if (removed.containers.length) {
+    parts.push(`${some(removed.containers.length, "stopped Docker container", "stopped Docker containers")} (${listed(removed.containers.slice(0, DISK.removedShown).map((name) => JSON.stringify(name)), removed.containers.length)})`);
+  }
   if (removed.items.length) {
     const largest = [...removed.items].sort((a, b) => b.kb - a.kb).slice(0, DISK.removedShown).map((item) => `${JSON.stringify(item.name)} ${sized(item.kb)}`);
     parts.push(`${some(removed.items.length, "old item", "old items")} in /tmp: ${listed(largest, removed.items.length)}`);
@@ -532,40 +587,47 @@ export function createCloudComputerDisk<C>(deps: DiskDeps<C>) {
   const cleanDue = (entry: Known): boolean => percent(entry) >= DISK.cleanAtPercent && deps.now() >= entry.nextCleanAt;
 
   /** At capacity: the caches have been dealt with and the root filesystem is still at 95%, or a call failed for lack
-   * of space after that with the root filesystem at 85% or more. */
-  function capacityDue(entry: Known): boolean {
+   * of space after that, with a reading taken then that showed the root filesystem at 85% or more. Null otherwise. */
+  function capacityTrigger(entry: Known): CapacityTrigger | null {
     const root = entry.reading?.root?.percent ?? 0;
-    if (cleanDue(entry) || entry.cachesDoneAt === NEVER || deps.now() < entry.nextCapacityAt) return false;
-    return root >= DISK.writesFailAtPercent || (root >= DISK.cleanAtPercent && entry.writeFailedAt >= entry.cachesDoneAt);
+    if (cleanDue(entry) || entry.cachesDoneAt === NEVER || deps.now() < entry.nextCapacityAt) return null;
+    if (root >= DISK.writesFailAtPercent) return DISK.writesFailAtPercent;
+    return root >= DISK.cleanAtPercent && entry.writeFailedAt >= entry.cachesDoneAt ? DISK.cleanAtPercent : null;
   }
+  const capacityDue = (entry: Known): boolean => capacityTrigger(entry) !== null;
 
   const quiet = (entry: Known, boxId: string): boolean => entry.calls === 0 && !deps.commandsRunning(boxId);
 
-  async function capacity(cfg: C, boxId: string, entry: Known, before: DiskReading): Promise<void> {
+  /** Decides on a reading taken now, not on the one that brought it here. */
+  async function capacity(cfg: C, boxId: string, entry: Known): Promise<void> {
+    const before = await measure(cfg, boxId);
+    const trigger = capacityTrigger(entry);
+    if (!before?.root || trigger === null || !quiet(entry, boxId)) return;
     const startedAt = deps.now();
     entry.nextCapacityAt = startedAt + DISK.capacityEveryMs;
+    entry.writeFailedAt = NEVER;
     const asked = await within(run(cfg, boxId, isolatedRemoteCommand(DISK_SURVEY_COMMAND), { timeoutMs: DISK.surveyTimeoutMs }), DISK.surveyTimeoutMs);
     if (!asked?.ok) {
       entry.nextCapacityAt = startedAt;
       return;
     }
     const found = parseSurvey(asked.stdout).found;
-    const root = before.root!;
+    const root = before.root;
     const homeOnRoot = before.home?.mount === root.mount;
     entry.cleaning = true;
     let ran: DiskCommandResult | null;
     try {
-      const command = isolatedRemoteCommand(capacityCommand(found, { root: true, home: homeOnRoot }));
+      const command = isolatedRemoteCommand(capacityCommand(found, { root: true, home: homeOnRoot }, trigger));
       ran = await within(run(cfg, boxId, command, { timeoutMs: DISK.cleanupFollowMs, long: true }), DISK.cleanupFollowMs);
     } finally {
       entry.cleaning = false;
     }
-    const removed = ran ? parseCapacityReport(ran.stdout) : { images: [], containers: 0, items: [] };
+    const removed = ran ? parseCapacityReport(ran.stdout) : { images: [], containers: [], items: [] };
     if (!removed) return;
     const now = (await measure(cfg, boxId))?.root ?? null;
     entry.capacity = { ...removed, at: deps.now(), before: root.percent, after: now?.percent ?? null };
     entry.capacityTold = false;
-    deps.log(`cloud computer ${boxId}: disk was ${root.percent}% full; removed ${removed.images.length} unused docker images, ${removed.containers} stopped containers and ${removed.items.length} old /tmp entries, now ${now ? `${now.percent}%` : "unknown"}`);
+    deps.log(`cloud computer ${boxId}: disk was ${root.percent}% full; removed ${removed.images.length} unused docker images, ${removed.containers.length} stopped containers and ${removed.items.length} old /tmp entries, now ${now ? `${now.percent}%` : "unknown"}`);
   }
 
   /** Starts whatever the latest reading calls for, one piece of work per computer at a time, and only while no
@@ -579,7 +641,7 @@ export function createCloudComputerDisk<C>(deps: DiskDeps<C>) {
     const caches = cleanDue(entry);
     const cleaning = caches || capacityDue(entry) ? (async () => {
       if (caches) await clean(cfg, boxId, entry, reading);
-      if (entry.reading?.root && capacityDue(entry) && quiet(entry, boxId)) await capacity(cfg, boxId, entry, entry.reading);
+      if (capacityDue(entry) && quiet(entry, boxId)) await capacity(cfg, boxId, entry);
     })().catch(() => undefined).finally(() => { entry.cleanWork = null; }) : null;
     if (!cleaning && !foldersDue()) return;
     entry.cleanWork = cleaning;
@@ -639,27 +701,33 @@ export function createCloudComputerDisk<C>(deps: DiskDeps<C>) {
     async after(cfg: C, boxId: string, texts: readonly string[], failed = false): Promise<string | null> {
       try {
         const entry = known(boxId);
-        const reported = failed && texts.some(isNoSpaceError);
-        if (reported) entry.writeFailedAt = deps.now();
-        const noSpace = reported && deps.now() - entry.noSpaceAt >= DISK.noSpaceGapMs;
+        const noSpace = failed && texts.some(isNoSpaceError) && deps.now() - entry.noSpaceAt >= DISK.noSpaceGapMs;
         if (noSpace) {
           entry.noSpaceAt = deps.now();
-          await measure(cfg, boxId);
+          const reading = await measure(cfg, boxId);
+          if ((reading?.root?.percent ?? 0) >= DISK.cleanAtPercent) entry.writeFailedAt = deps.now();
         }
         return notice(boxId, noSpace);
       } catch {
         return null;
       }
     },
-    /** Before an unattended run's first command: reads the disk, frees what the reading calls for, and waits for
-     * that, DISK.checkTimeoutMs + DISK.runWaitMs at most and no longer than `signal` allows. It never waits for the
-     * folder listing and never rejects. Resolves with the percentage when the disk is still at the level where
-     * writes may fail, so the run can be started with that said; the run is started either way. */
+    /** Before an unattended run's first command: reads the disk and frees what the reading calls for. While another
+     * command runs on the computer it waits, DISK.runQuietWaitMs at most, for that to end before freeing anything;
+     * once freeing has started it waits for it to end, DISK.runWaitMs at most. No wait outlasts `signal`. It never
+     * waits for the folder listing and never rejects. Resolves with the percentage when the disk is still at the
+     * level where writes may fail, so the run can be started with that said; the run is started either way. */
     async beforeRun(cfg: C, boxId: string, signal?: AbortSignal): Promise<number | null> {
       try {
         if (signal?.aborted) return null;
         const entry = known(boxId);
-        if (await within(measure(cfg, boxId), DISK.checkTimeoutMs, signal)) act(cfg, boxId);
+        if (await within(measure(cfg, boxId), DISK.checkTimeoutMs, signal)) {
+          const giveUpAt = deps.now() + DISK.runQuietWaitMs;
+          while (!signal?.aborted && !entry.working && (cleanDue(entry) || capacityDue(entry)) && !quiet(entry, boxId) && deps.now() < giveUpAt) {
+            await within(deps.sleep(DISK.runQuietPollMs), DISK.runQuietPollMs, signal);
+          }
+          act(cfg, boxId);
+        }
         if (entry.cleanWork && !signal?.aborted) await within(entry.cleanWork, DISK.runWaitMs, signal);
         if (!entry.reading || percent(entry) < DISK.writesFailAtPercent) return null;
         // The run is a new turn: its bot is told the disk is full on its first computer call, whatever an earlier turn was told.

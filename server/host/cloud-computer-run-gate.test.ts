@@ -7,7 +7,7 @@ import { createRunComputerGate, RUN_COMPUTER_WAIT_MS } from "./cloud-computer-ru
 
 const RUN = { routineId: "routine-1", botId: "bot-1", target: "bot", runOn: "cloud" };
 
-function harness(over: { state?: string; answers?: (wait: number) => boolean; wakes?: boolean; disk?: (boxId: string, signal?: AbortSignal) => Promise<number | null | void> } = {}) {
+function harness(over: { state?: string; answers?: (wait: number) => boolean; wakes?: boolean; disk?: (boxId: string, signal?: AbortSignal) => Promise<number | null | void>; remember?: { load(): string[]; save(ids: string[]): void } } = {}) {
   let at = 0;
   const seen = { finds: 0, wakes: 0, waits: [] as boolean[], signals: [] as Array<AbortSignal | undefined>, used: 0 };
   const world = { verdict: null as RecoveryVerdict | null, verdictAt: 0, routine: "routine-1" as string | null, recovery: null as CloudComputerRecoveryState | null, machine: { id: "bx_23456789", state: over.state ?? "idle" } as { id: string; state: string } | null };
@@ -23,7 +23,7 @@ function harness(over: { state?: string; answers?: (wait: number) => boolean; wa
       return { ok: false, phase: "waking", waitedMs: 90_000 };
     },
     verdict: (_owner, since) => (world.verdict && world.verdictAt >= since ? world.verdict : null), recoveryState: () => world.recovery,
-    used: () => { seen.used++; }, routineOf: () => world.routine, log: () => {}, now: () => at, ...(over.disk ? { disk: over.disk } : {}),
+    used: () => { seen.used++; }, routineOf: () => world.routine, log: () => {}, now: () => at, ...(over.disk ? { disk: over.disk } : {}), ...(over.remember ? { remember: over.remember } : {}),
   });
   return { gate, seen, world, used: () => gate.callSettled("bot-1", "thread-1", true), now: () => at, advance: (ms: number) => { at += ms; } };
 }
@@ -55,6 +55,31 @@ describe("an unattended run and its cloud computer", () => {
     cleaned();
     await starting;
     expect(order).toEqual(["disk bx_23456789", "start null"]);
+  });
+
+  it("holds a routine's first run after a restart too, and checks its disk, when an earlier server saw it use the computer", async () => {
+    const saved: string[][] = [];
+    let checked = 0;
+    const before = harness({ remember: { load: () => [], save: (ids) => { saved.push(ids); } } });
+    expect(before.gate.prepare(RUN)).toBeNull();
+    before.used();
+    before.used();
+    expect(saved).toEqual([["routine-1"]]);
+
+    const restarted = harness({ remember: { load: () => saved.at(-1)!, save: () => {} }, disk: async () => { checked++; } });
+    await expect(restarted.gate.prepare(RUN)).resolves.toBeNull();
+    expect(restarted.seen.waits).toEqual([false]);
+    expect(checked).toBe(1);
+    expect(restarted.gate.prepare({ ...RUN, routineId: "routine-never-used-it" })).toBeNull();
+  });
+
+  it("remembers a bounded number of routines, dropping the one that used the computer longest ago", async () => {
+    let saved: string[] = [];
+    const h = harness({ remember: { load: () => Array.from({ length: 500 }, (_unused, index) => `old-${index}`), save: (ids) => { saved = ids; } } });
+    h.used();
+    expect(saved).toHaveLength(500);
+    expect(saved[0]).toBe("old-1");
+    expect(saved.at(-1)).toBe("routine-1");
   });
 
   it("hands the disk step the run's own stop signal", async () => {

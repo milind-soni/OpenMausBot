@@ -5,7 +5,7 @@
 // what it already did (a message sent, a pull request opened). Only a run nobody started by hand is held.
 //
 // Waking costs computer time, and many routines never touch the bot's cloud computer, so only a routine whose earlier
-// run used the computer is woken for; the first run after a server start is not, and waits at its first computer call.
+// run used the computer is woken for. Which routines those are is remembered across restarts where `remember` is given.
 import { RUN_COMPUTER_LINES, type CloudComputerRecoveryState } from "../../shared/cloud-computer-recovery.ts";
 import type { BoatAnswer } from "../boat-ready.ts";
 import type { RecoveryVerdict } from "../boat-recovery.ts";
@@ -34,6 +34,8 @@ export interface RunComputerGateDeps {
   /** Reads the computer's disk and frees space on it when it is nearly full; resolves when the run may start or `signal`
    * aborts. A number: the disk is still that many percent full, and the run starts all the same. */
   disk?(boxId: string, signal?: AbortSignal): Promise<number | null | void>;
+  /** Where the routines whose runs used the cloud computer are kept across restarts, so the first run after one is held too. */
+  remember?: { load(): string[]; save(ids: string[]): void };
   /** Restarts the owner's idle window, so the wait itself does not put the computer to sleep. */
   used(owner: string): void;
   /** The routine whose run is active in this bot's thread, if one is. */
@@ -49,8 +51,8 @@ const VERDICT_LINE: Record<RecoveryVerdict, string> = {
 
 export function createRunComputerGate(deps: RunComputerGateDeps) {
   const now = deps.now ?? Date.now;
-  /** Routines whose runs have used the cloud computer since the server started. */
-  const usesComputer = new Set<string>();
+  /** Routines whose runs have used the cloud computer. */
+  const usesComputer = new Set<string>(deps.remember?.load().slice(-MAX_ROUTINES) ?? []);
   /** Threads whose latest computer call got no answer, with the bot whose turn it was. */
   const silent = new Map<string, string>();
   /** Routines whose run started with the disk still almost full, then the threads of those runs once they use the computer. */
@@ -116,8 +118,9 @@ export function createRunComputerGate(deps: RunComputerGateDeps) {
         fullThreads.add(threadId);
       }
       if (!routineId || usesComputer.has(routineId)) return;
-      if (usesComputer.size >= MAX_ROUTINES) usesComputer.clear();
+      if (usesComputer.size >= MAX_ROUTINES) usesComputer.delete(usesComputer.values().next().value!);
       usesComputer.add(routineId);
+      deps.remember?.save([...usesComputer]);
     },
     /** When a turn ends: the note for an unattended run that ended well although its last computer call got no answer,
      * and for one that used a computer whose disk was still almost full when it started, however it ended.

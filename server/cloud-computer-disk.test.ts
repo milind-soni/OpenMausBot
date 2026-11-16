@@ -1,5 +1,5 @@
 // No computer and no shell: a fake command runner answers the fixed commands, and a clock that only moves when told.
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,6 +102,7 @@ function harness(over: Partial<World> = {}, shared?: { world: World; clock: { at
       if (!command.includes(`timeout -k 10 ${DISK.cleanupLimitSeconds} /bin/sh -c`)) throw new Error(`a command nothing here should send: ${command}`);
       if (command.includes("last-capacity")) {
         if (world.capacity === "hang") return hang();
+        if (world.percent < Number(/\[ "\$p" -ge (\d+) \]/.exec(command)![1])) return { ok: true, stdout: "omb-disk:below\n" };
         if (clock.at - world.capacityAtMs < HOUR) return { ok: true, stdout: "omb-disk:recent\n" };
         world.capacityAtMs = clock.at;
         if (world.capacityTo !== null) world.percent = world.capacityTo;
@@ -784,7 +785,7 @@ describe("before an unattended run", () => {
     expect(h.disk.percent(BOX)).toBe(60);
   });
 
-  it("starts the run after a bounded wait when the cleanup does not end, and at once when the reading fails", async () => {
+  it("waits for a cleanup that does not answer for exactly as long as the cleanup is followed, and starts at once when the reading fails", async () => {
     const h = harness({ percent: 93, cleansTo: 86 });
     await h.use();
     await h.advance(DISK.cleanEveryMs);
@@ -792,7 +793,7 @@ describe("before an unattended run", () => {
     let started = false;
     void h.disk.beforeRun(null, BOX).then(() => { started = true; });
     await h.flush();
-    await h.advance(DISK.runWaitMs - 1);
+    await h.advance(DISK.cleanupFollowMs - 1);
     expect(started).toBe(false);
     await h.advance(1);
     expect(started).toBe(true);
@@ -857,13 +858,46 @@ describe("before an unattended run", () => {
     expect([h.count("cleanup"), h.count("folders"), started]).toEqual([2, 2, true]);
   });
 
-  it("starts no cleanup, and does not wait, while another bot's call is under way on the computer", async () => {
-    const h = harness({ percent: 93, cleansTo: 86 });
-    await h.use();
-    await h.advance(DISK.cleanEveryMs);
+  it("waits for another bot's call on the computer to end, then frees space before the run starts", async () => {
+    const h = harness({ percent: 93, cleansTo: 70 });
     h.disk.began(null, BOX);
-    await h.disk.beforeRun(null, BOX);
-    expect(h.count("cleanup")).toBe(1);
+    let result: number | null | undefined;
+    void h.disk.beforeRun(null, BOX).then((value) => { result = value; });
+    await h.flush();
+    await h.advance(3 * DISK.runQuietPollMs);
+    expect([h.count("cleanup"), result]).toEqual([0, undefined]);
+    h.disk.ended(null, BOX);
+    await h.settle();
+    await h.advance(DISK.runQuietPollMs);
+    expect([h.count("cleanup"), result, h.disk.percent(BOX)]).toEqual([1, null, 70]);
+  });
+
+  it("gives up waiting for a quiet computer after five minutes, frees nothing beside the running command, and starts the run", async () => {
+    const h = harness({ percent: 97, commands: true });
+    let result: number | null | undefined;
+    void h.disk.beforeRun(null, BOX).then((value) => { result = value; });
+    await h.flush();
+    await h.advance(DISK.runQuietWaitMs - DISK.runQuietPollMs);
+    expect(result).toBeUndefined();
+    await h.advance(DISK.runQuietPollMs);
+    expect(result).toBe(97);
+    expect([h.count("survey"), h.count("cleanup"), h.count("capacity")]).toEqual([0, 0, 0]);
+    expect(DISK.runQuietWaitMs).toBe(5 * MINUTE);
+
+    const cancelled = harness({ percent: 97, commands: true });
+    const stop = new AbortController();
+    let done = false;
+    void cancelled.disk.beforeRun(null, BOX, stop.signal).then(() => { done = true; });
+    await cancelled.flush();
+    expect(done).toBe(false);
+    stop.abort();
+    await cancelled.flush();
+    expect(done).toBe(true);
+  });
+
+  it("does not wait for quiet when the disk has room", async () => {
+    const h = harness({ percent: 60, commands: true });
+    expect(await h.disk.beforeRun(null, BOX)).toBeNull();
   });
 });
 
@@ -896,140 +930,188 @@ describe("the panel's disk figure", () => {
 describe("the capacity tier's command", () => {
   const ENOUGH = `enough() { p=$(df -P / 2>/dev/null | awk 'NR==2 { sub("%", "", $5); print $5 }'); case "$p" in ''|*[!0-9]*) return 0;; esac; [ "$p" -lt 80 ]; }`;
   const STOP = "enough && { echo omb-disk:end; exit 0; }";
-  const HEAD = [
+  const head = (trigger: number) => [
+    `p=$(df -P / 2>/dev/null | awk 'NR==2 { sub("%", "", $5); print $5 }'); case "$p" in ''|*[!0-9]*) echo omb-disk:below; exit 0;; esac`,
+    `[ "$p" -ge ${trigger} ] || { echo omb-disk:below; exit 0; }`,
     'if [ -n "$(find "$HOME/.cache/omb-disk/last-capacity" -mmin -60 2>/dev/null)" ]; then echo omb-disk:recent; exit 0; fi',
     'mkdir -p "$HOME/.cache/omb-disk" 2>/dev/null; date +%s > "$HOME/.cache/omb-disk/last-capacity" 2>/dev/null',
     ENOUGH,
-    STOP,
   ];
-  /** The /tmp stage, written out: `find` is what reads /proc, `docker` what lists the running containers' mounts. */
-  const sweep = (find: string, docker: string | null) => [
-    `if [ "$(stat -c %d /tmp 2>/dev/null)" = "$(stat -c %d / 2>/dev/null)" ] && find /proc/self/cwd -maxdepth 0 -lname '*' -printf '' 2>/dev/null; then`,
-    "  u=$(id -u); g=/tmp/.omb-disk-removing; tab=$(printf '\\t'); mounts=; sure=1",
+  const containers = (docker: string) => [
+    "echo omb-disk:containers; now=$(date +%s)",
+    `for c in $(${docker} ps -aq --no-trunc --filter status=exited --filter status=dead 2>/dev/null </dev/null); do`,
+    `  f=$(${docker} inspect --format '{{.State.FinishedAt}}' "$c" 2>/dev/null </dev/null) || continue`,
+    '  s=$(date -d "$f" +%s 2>/dev/null) || continue',
+    "  case \"$s\" in ''|*[!0-9]*) continue;; esac",
+    '  [ "$((now - s))" -gt 86400 ] || continue',
+    `  name=$(${docker} inspect --format '{{.Name}}' "$c" 2>/dev/null </dev/null)`,
+    `  ${docker} rm "$c" >/dev/null 2>&1 </dev/null && printf '%s\\n' "\${name#/}"`,
+    "done",
+    `echo omb-disk:images; ${docker} image prune -a -f 2>/dev/null </dev/null | grep -E '^untagged: ' | grep -v '@sha256:' | head -n 40`,
+  ];
+  /** The /tmp stage, written out: `sudo` is put before what reads every process, `docker` lists the running containers' mounts. */
+  const sweep = (sudo: string, docker: string | null) => [
+    "t=/tmp",
+    `if [ ! -L "$t" ] && t=$(realpath "$t" 2>/dev/null) && [ -n "$t" ] && [ "$t" != / ] && [ "$(stat -c %d "$t" 2>/dev/null)" = "$(stat -c %d / 2>/dev/null)" ] && find /proc/self/cwd -maxdepth 0 -lname '*' -printf '' 2>/dev/null; then`,
+    "  u=$(id -u); tab=$(printf '\\t'); mounts=; sure=1",
+    "  points=$(awk '{ print $5 }' /proc/self/mountinfo 2>/dev/null) || sure=",
+    '  [ -n "$points" ] || sure=',
     ...(docker ? [
       `  c=$(${docker} ps -q 2>/dev/null) || sure=`,
       `  mounts=$(printf '%s\\n' "$c" | xargs -r ${docker} inspect --format '{{range .Mounts}}{{println .Source}}{{end}}' 2>/dev/null) || sure=`,
-    ] : []),
-    '  rm -rf --one-file-system -- "$g" 2>/dev/null',
-    '  if [ -n "$sure" ] && mkdir "$g" 2>/dev/null; then',
-    "    for e in /tmp/*; do",
+      `  printf '%s\\n' "$mounts" | T="$t" awk 'BEGIN { t = ENVIRON["T"] "/" } $0 == "/" || ($0 != "" && index(t, $0 "/") == 1) { all = 1 } END { exit !all }' && sure=`,
+    ] : [
+      "  if command -v docker >/dev/null 2>&1 || [ -S /var/run/docker.sock ] || [ -S /run/docker.sock ]; then sure=; fi",
+    ]),
+    '  for old in "$t"/.omb-disk-removing.*; do [ -d "$old" ] && [ ! -L "$old" ] && { chmod -R u+w "$old" 2>/dev/null; rm -rf --one-file-system -- "$old" 2>/dev/null; }; done',
+    '  g=$(mktemp -d "$t/.omb-disk-removing.XXXXXX" 2>/dev/null) || sure=',
+    '  [ -n "$g" ] && [ -d "$g" ] || sure=',
+    '  if [ -n "$sure" ]; then',
+    "    u0=$(df -Pk / 2>/dev/null | awk 'NR==2 { print $3 }')",
+    '    for e in "$t"/*; do',
     '      [ -L "$e" ] && continue',
     '      [ -e "$e" ] || continue',
-    '      case "$e" in *[[:cntrl:]]*) continue;; esac',
+    '      case "${e##*/}" in *[!A-Za-z0-9._+=,@:-]*) continue;; esac',
     '      [ "$(stat -c %u "$e" 2>/dev/null)" = "$u" ] || continue',
     '      [ -z "$(find "$e" -xdev \\( -mmin -360 -o ! -user "$u" -o -type s -o -type p \\) -print -quit 2>&1)" ] || continue',
     "      m=$(find \"$e\" -xdev -printf '%T@\\n' 2>/dev/null | sort -rn | head -n 1)",
     "      [ -n \"$m\" ] && printf '%s\\t%s\\n' \"${m%%.*}\" \"$e\"",
-    '    done | sort -n | while IFS="$tab" read -r m e; do',
+    '    done | sort -n | { n=0; while IFS="$tab" read -r m e; do',
     "      enough && break",
     '      [ -z "$(find "$e" -xdev -mmin -360 -print -quit 2>&1)" ] || continue',
-    `      { ${find} /proc/[0-9]*/cwd /proc/[0-9]*/fd -maxdepth 1 -type l -lname '/tmp/*' -printf '%l\\n' 2>/dev/null; printf '%s\\n' "$mounts"; } | E="$e" awk 'BEGIN { e = ENVIRON["E"] } $0 == e || index($0, e "/") == 1 { hit = 1 } END { exit !hit }' && continue`,
+    `      used=$( { ${sudo}find /proc/[0-9]*/cwd /proc/[0-9]*/exe /proc/[0-9]*/root /proc/[0-9]*/fd -maxdepth 1 -type l -printf '%l\\n' 2>/dev/null; ${sudo}cat /proc/[0-9]*/maps 2>/dev/null | awk '{ i = index($0, "/"); if (i) print substr($0, i) }'; } | sort -u )`,
+    '      case "$used" in */*) ;; *) continue;; esac',
+    `      { printf '%s\\n' "$used"; printf '%s\\n' "$mounts"; awk '{ print $5 }' /proc/self/mountinfo 2>/dev/null || echo "$e"; } | E="$e" awk 'BEGIN { e = ENVIRON["E"] } $0 == e || index($0, e "/") == 1 { hit = 1 } END { exit !hit }' && continue`,
     '      k=$(du -sxk "$e" 2>/dev/null | cut -f1)',
-    '      mv -- "$e" "$g/" 2>/dev/null || continue',
-    '      rm -rf --one-file-system -- "$g" 2>/dev/null; mkdir "$g" 2>/dev/null',
-    "      printf '%s\\t%s\\n' \"${k:-0}\" \"${e#/tmp/}\"",
-    "    done | head -n 200",
-    '    rm -rf --one-file-system -- "$g" 2>/dev/null',
+    '      held="$g/${e##*/}"',
+    '      mv -- "$e" "$held" 2>/dev/null || continue',
+    '      chmod -R u+w "$held" 2>/dev/null; rm -rf --one-file-system -- "$held" 2>/dev/null',
+    '      if [ -e "$held" ] || [ -L "$held" ]; then mv -- "$held" "$e" 2>/dev/null; break; fi',
+    "      printf '%s\\t%s\\n' \"${k:-0}\" \"${e##*/}\"",
+    "      n=$((n + 1))",
+    '      [ "$n" -lt 200 ] || break',
+    "      if [ \"$n\" -eq 3 ]; then u1=$(df -Pk / 2>/dev/null | awk 'NR==2 { print $3 }'); case \"$u0\" in ''|*[!0-9]*) break;; esac; case \"$u1\" in ''|*[!0-9]*) break;; esac; [ \"$u1\" -lt \"$u0\" ] || break; fi",
+    "    done; }",
     "  fi",
+    '  [ -z "$g" ] || rmdir -- "$g" 2>/dev/null',
     "fi",
   ];
   const wrapped = (lines: string[]) => `timeout -k 10 300 /bin/sh -c '${lines.join("\n").replace(/'/g, "'\\''")}'; true`;
 
-  it("is the caches, then docker, then /tmp, with a stop between the stages, on a computer that has docker and sudo", () => {
-    expect(capacityCommand(new Set<DiskTool>(["sudo", "apt-get", "docker", "pgrep", "pip-cache"]), BOTH)).toBe(wrapped([
-      ...HEAD,
+  it("checks its own first reading, then is the caches, docker and /tmp with a stop between the stages, on a computer that has docker and sudo", () => {
+    expect(capacityCommand(new Set<DiskTool>(["sudo", "apt-get", "docker", "pgrep", "pip-cache"]), BOTH, 95)).toBe(wrapped([
+      ...head(95),
       "( sudo -n apt-get clean\n) >/dev/null 2>&1 </dev/null",
       "( docker builder prune -f\n) >/dev/null 2>&1 </dev/null",
       `( ${GUARD}rm -rf -- "$HOME/.cache/pip"\n) >/dev/null 2>&1 </dev/null`,
       STOP,
-      "echo omb-disk:containers; docker container prune -f --filter until=24h 2>/dev/null </dev/null | grep -cE '^[0-9a-f]{64}$'",
-      "echo omb-disk:images; docker image prune -a -f 2>/dev/null </dev/null | grep -E '^untagged: ' | grep -v '@sha256:' | head -n 40",
+      ...containers("docker"),
       STOP,
       "echo omb-disk:tmp",
-      ...sweep("sudo -n find", "docker"),
+      ...sweep("sudo -n ", "docker"),
       "echo omb-disk:end",
     ]));
   });
 
-  it("is only the /tmp stage on a computer with no tools, and leaves the home folder's caches when the home folder has its own disk", () => {
-    expect(capacityCommand(new Set(), BOTH)).toBe(wrapped([...HEAD, STOP, "echo omb-disk:tmp", ...sweep("find", null), "echo omb-disk:end"]));
-    expect(capacityCommand(new Set<DiskTool>(["root", "docker-sudo", "pgrep", "npm-cache"]), { root: true, home: false })).toBe(wrapped([
-      ...HEAD,
+  it("has no /tmp stage where not every process can be read, and leaves the home folder's caches when the home folder has its own disk", () => {
+    expect(capacityCommand(new Set(), BOTH, 95)).toBe(wrapped([...head(95), STOP, "echo omb-disk:tmp", "echo omb-disk:end"]));
+    expect(capacityCommand(new Set<DiskTool>(["docker", "pgrep", "npm-cache"]), BOTH, 95)).not.toContain("/proc");
+    expect(capacityCommand(new Set<DiskTool>(["root", "docker-sudo", "pgrep", "npm-cache"]), { root: true, home: false }, 85)).toBe(wrapped([
+      ...head(85),
       "( sudo -n docker builder prune -f\n) >/dev/null 2>&1 </dev/null",
       STOP,
-      "echo omb-disk:containers; sudo -n docker container prune -f --filter until=24h 2>/dev/null </dev/null | grep -cE '^[0-9a-f]{64}$'",
-      "echo omb-disk:images; sudo -n docker image prune -a -f 2>/dev/null </dev/null | grep -E '^untagged: ' | grep -v '@sha256:' | head -n 40",
+      ...containers("sudo -n docker"),
       STOP,
       "echo omb-disk:tmp",
-      ...sweep("find", "sudo -n docker"),
+      ...sweep("", "sudo -n docker"),
       "echo omb-disk:end",
     ]));
+    expect(capacityCommand(new Set<DiskTool>(["root"]), { root: true, home: false }, 95)).toBe(wrapped([...head(95), STOP, "echo omb-disk:tmp", ...sweep("", null), "echo omb-disk:end"]));
   });
 
   it("names nothing outside /tmp, /proc, the four cache folders and its own stamp, whatever the computer has", () => {
     for (let mask = 0; mask < 2 ** ALL_TOOLS.length; mask++) {
-      const command = capacityCommand(new Set(ALL_TOOLS.filter((_tool, bit) => mask & (1 << bit))), BOTH);
+      const command = capacityCommand(new Set(ALL_TOOLS.filter((_tool, bit) => mask & (1 << bit))), BOTH, 95);
       const removals = [...command.matchAll(/\brm -rf (.*?)(?: 2>|\n|;)/g)].map((match) => match[1]);
-      expect(new Set(removals).size).toBeLessThanOrEqual(5);
       for (const target of removals) {
-        expect(['--one-file-system -- "$g"', '-- "$HOME/.npm/_cacache"', '-- "$HOME/.cache/pip"', '-- "$HOME/.cache/yarn"', '-- "$HOME/.cache/pnpm"'], target).toContain(target);
+        expect(['--one-file-system -- "$old"', '--one-file-system -- "$held"', '-- "$HOME/.npm/_cacache"', '-- "$HOME/.cache/pip"', '-- "$HOME/.cache/yarn"', '-- "$HOME/.cache/pnpm"'], target).toContain(target);
       }
-      expect(command.match(/\bmv\b.*/g)).toEqual(['mv -- "$e" "$g/" 2>/dev/null || continue']);
-      expect(command).toContain("g=/tmp/.omb-disk-removing;");
-      expect(command).toContain("for e in /tmp/*; do");
+      if (command.includes("/proc")) {
+        expect(command.match(/\bmv\b[^;\n]*/g)).toEqual(['mv -- "$e" "$held" 2>/dev/null || continue', 'mv -- "$held" "$e" 2>/dev/null']);
+        expect(command).toContain('held="$g/${e##*/}"');
+        expect(command).toContain('g=$(mktemp -d "$t/.omb-disk-removing.XXXXXX" 2>/dev/null) || sure=');
+        expect(command).toContain('[ -n "$g" ] && [ -d "$g" ] || sure=');
+        expect(command).toContain('for old in "$t"/.omb-disk-removing.*; do [ -d "$old" ] && [ ! -L "$old" ] &&');
+        expect(command).toContain("t=/tmp\n");
+      } else {
+        expect(command).not.toMatch(/\bmv\b|mktemp|\/tmp/);
+      }
       const paths = [...command.matchAll(/(?<![\w$"{.*@])\/[A-Za-z.][\w.*\-/[\]]*/g)].map((match) => match[0]);
-      for (const path of paths) expect(path, path).toMatch(/^\/(tmp|proc|bin\/sh|dev\/null)(\/|$)/);
-      for (const banned of ["volume", "system prune", "network", "--force", "rmi", "docker rm ", "docker kill", "docker stop", "$1", "$@", "eval", "git ", "node_modules"]) expect(command, banned).not.toContain(banned);
+      for (const path of paths) expect(path, path).toMatch(/^\/(tmp|proc|bin\/sh|dev\/null|var\/run\/docker\.sock|run\/docker\.sock)(\/|$)/);
+      for (const banned of ["volume", "system prune", "container prune", "network", "--force", "rmi", "rm -f", "rm -v", "docker kill", "docker stop", "$1", "$@", "eval", "git ", "node_modules"]) expect(command, banned).not.toContain(banned);
       expect(new RegExp(INSTALLER_RUNNING).test(command)).toBe(false);
       expect(new RegExp(INSTALLER_RUNNING).test(isolatedRemoteCommand(command))).toBe(false);
     }
   });
 
-  it("removes only images no container uses and containers that are not running, never by force", () => {
-    const command = capacityCommand(new Set<DiskTool>(["docker"]), BOTH);
-    expect(command.match(/docker (?:container|image|builder|ps|inspect)[^|\n]*/g)!.map((part) => part.trim())).toEqual([
+  it("removes a container only by when it ended, without force, and prunes images only after that", () => {
+    const command = capacityCommand(new Set<DiskTool>(["root", "docker"]), BOTH, 95);
+    expect(command.match(/docker [a-z]+(?: [a-z-]+)*(?: "\$c")?/g)).toEqual([
       "docker builder prune -f",
-      "docker container prune -f --filter until=24h 2>/dev/null </dev/null",
-      "docker image prune -a -f 2>/dev/null </dev/null",
-      "docker ps -q 2>/dev/null)",
-      "docker inspect --format '\\''{{range .Mounts}}{{println .Source}}{{end}}'\\'' 2>/dev/null)",
+      "docker ps -aq --no-trunc --filter status",
+      "docker inspect --format",
+      "docker inspect --format",
+      'docker rm "$c"',
+      "docker image prune -a -f",
+      "docker ps -q",
+      "docker inspect --format",
     ]);
+    expect(command).toContain("--filter status=exited --filter status=dead ");
+    expect(command).toContain("{{.State.FinishedAt}}");
+    expect(command).toContain('[ "$((now - s))" -gt 86400 ] || continue');
+    expect(command.indexOf("docker rm ")).toBeLessThan(command.indexOf("docker image prune -a -f"));
   });
 });
 
 describe("what the capacity tier reports", () => {
-  it("is read back as counts and names, and nothing else it printed", () => {
+  it("is read back as names, and nothing else it printed", () => {
     const report = [
-      "omb-disk:containers", "2",
+      "omb-disk:containers", "old-db", "web_1", "bad name; rm -rf /", "$(reboot)",
       "omb-disk:images", "untagged: node:20", "untagged: ghcr.io/acme/api:1.4", "untagged: node:20", "untagged: bad name; rm -rf /", "deleted: sha256:abc",
       "omb-disk:tmp", "4194304\tbuild-old", "12\ta‮b", "9\t../../etc", "x\tnot-a-size", "7\tspaced name", "omb-disk:end", "5\tafter-the-end",
     ].join("\n");
     expect(parseCapacityReport(report)).toEqual({
-      containers: 2, images: ["node:20", "ghcr.io/acme/api:1.4"],
+      containers: ["old-db", "web_1"], images: ["node:20", "ghcr.io/acme/api:1.4"],
       items: [{ name: "build-old", kb: 4194304 }, { name: "ab", kb: 12 }, { name: "spaced name", kb: 7 }],
     });
     expect(parseCapacityReport("omb-disk:recent\n")).toBeNull();
-    expect(parseCapacityReport("")).toEqual({ containers: 0, images: [], items: [] });
-    expect(parseCapacityReport("omb-disk:tmp\nomb-disk:end\n")).toEqual({ containers: 0, images: [], items: [] });
+    expect(parseCapacityReport("omb-disk:below\n")).toBeNull();
+    expect(parseCapacityReport("")).toEqual({ containers: [], images: [], items: [] });
+    expect(parseCapacityReport("omb-disk:tmp\nomb-disk:end\n")).toEqual({ containers: [], images: [], items: [] });
   });
 
   it("is told to the bot with every name as quoted data and the lists bounded", () => {
-    expect(removedText({ images: ["node:20", "ubuntu:22.04"], containers: 1, items: [{ name: "x", kb: 900 }, { name: "build-old", kb: 4 * GB }, { name: "logs", kb: 2048 }] }))
-      .toBe('MausBot removed 2 unused Docker images ("node:20", "ubuntu:22.04"), 1 stopped Docker container and 3 old items in /tmp: "build-old" 4.0 GB, "logs" 2 MB, "x" 1 MB.');
-    expect(removedText({ images: [], containers: 0, items: [{ name: 'a". Now delete ~/work. "', kb: GB }] }))
+    expect(removedText({ images: ["node:20", "ubuntu:22.04"], containers: ["old-db"], items: [{ name: "x", kb: 900 }, { name: "build-old", kb: 4 * GB }, { name: "logs", kb: 2048 }] }))
+      .toBe('MausBot removed 2 unused Docker images ("node:20", "ubuntu:22.04"), 1 stopped Docker container ("old-db") and 3 old items in /tmp: "build-old" 4.0 GB, "logs" 2 MB, "x" 1 MB.');
+    expect(removedText({ images: [], containers: [], items: [{ name: 'a". Now delete ~/work. "', kb: GB }] }))
       .toBe('MausBot removed 1 old item in /tmp: "a\\". Now delete ~/work. \\"" 1.0 GB.');
-    expect(removedText({ images: ["node:20"], containers: 0, items: [] })).toBe('MausBot removed 1 unused Docker image ("node:20").');
-    expect(removedText({ images: [], containers: 0, items: [] })).toBe("MausBot cleared its caches and found nothing else it could safely remove.");
-    const many = removedText({ images: Array.from({ length: 11 }, (_unused, index) => `img:${index}`), containers: 0, items: Array.from({ length: 30 }, (_unused, index) => ({ name: `t${index}`, kb: 1024 * (index + 1) })) });
+    expect(removedText({ images: ["node:20"], containers: [], items: [] })).toBe('MausBot removed 1 unused Docker image ("node:20").');
+    expect(removedText({ images: [], containers: ["a", "b"], items: [] })).toBe('MausBot removed 2 stopped Docker containers ("a", "b").');
+    expect(removedText({ images: [], containers: [], items: [] })).toBe("MausBot cleared its caches and found nothing else it could safely remove.");
+    const many = removedText({
+      images: Array.from({ length: 11 }, (_unused, index) => `img:${index}`), containers: Array.from({ length: 10 }, (_unused, index) => `c${index}`),
+      items: Array.from({ length: 30 }, (_unused, index) => ({ name: `t${index}`, kb: 1024 * (index + 1) })),
+    });
     expect(many).toContain('"img:7", and 3 more)');
+    expect(many).toContain('10 stopped Docker containers ("c0", "c1", "c2", "c3", "c4", "c5", "c6", "c7", and 2 more)');
     expect(many).toContain('30 old items in /tmp: "t29" 30 MB,');
     expect(many).toContain('"t22" 23 MB, and 22 more.');
-    expect(many.match(/"/g)!.length).toBe(32);
+    expect(many.match(/"/g)!.length).toBe(48);
   });
 
   it("reaches the bot as one note with what the disk reads now, then the plain warning and the largest folders when it is still full", () => {
     const NOW = 1_700_000_000_000;
-    const capacity = { at: NOW, before: 97, after: 71, images: ["node:20"], containers: 0, items: [{ name: "build-old", kb: 4 * GB }] };
+    const capacity = { at: NOW, before: 97, after: 71, images: ["node:20"], containers: [], items: [{ name: "build-old", kb: 4 * GB }] };
     const facts: DiskFacts = { percent: 71, cleaning: false, cleanup: { at: NOW, before: 97, after: 97, freedKb: 0 }, cleanupTold: false, capacity, folders: null };
     expect(diskNotice(facts, NOW)).toBe('Disk note: this cloud computer\'s disk was 97% full; MausBot removed 1 unused Docker image ("node:20") and 1 old item in /tmp: "build-old" 4.0 GB. Now 71%.');
     expect(diskNotice({ ...facts, percent: 96, capacity: { ...capacity, after: 96, images: [], items: [] }, folders: [{ name: "data", kb: 60 * GB }] }, NOW)).toBe(
@@ -1039,7 +1121,7 @@ describe("what the capacity tier reports", () => {
 });
 
 describe("the capacity tier", () => {
-  const REPORT = "omb-disk:containers\n1\nomb-disk:images\nuntagged: node:20\nomb-disk:tmp\n4194304\tbuild-old\n1024\tscratch\nomb-disk:end\n";
+  const REPORT = "omb-disk:containers\nold-db\nomb-disk:images\nuntagged: node:20\nomb-disk:tmp\n4194304\tbuild-old\n1024\tscratch\nomb-disk:end\n";
 
   it("never runs under 95%, however often the disk is read", async () => {
     const h = harness({ percent: 94 });
@@ -1059,23 +1141,51 @@ describe("the capacity tier", () => {
     expect([unasked.count("cleanup"), unasked.count("capacity")]).toEqual([0, 0]);
   });
 
-  it("runs right after the caches when the disk is still at 95%, and tells the bot exactly what went", async () => {
+  it("runs right after the caches when the disk is still at 95%, on a reading taken just before, and tells the bot exactly what went", async () => {
     const h = harness({ percent: 97, cleansTo: 96, capacityTo: 71, capacityReport: REPORT, tools: ["sudo", "apt-get", "docker"] });
     await h.use();
-    expect([h.count("cleanup"), h.count("capacity"), h.count("folders")]).toEqual([1, 1, 0]);
-    expect(h.capacities()).toEqual([isolatedRemoteCommand(capacityCommand(new Set<DiskTool>(["sudo", "apt-get", "docker"]), BOTH))]);
+    expect([h.count("check"), h.count("cleanup"), h.count("capacity"), h.count("folders")]).toEqual([4, 1, 1, 0]);
+    expect(h.capacities()).toEqual([isolatedRemoteCommand(capacityCommand(new Set<DiskTool>(["sudo", "apt-get", "docker"]), BOTH, 95))]);
+    const order = h.sent.map(({ command }) => (command === DISK_CHECK_COMMAND ? "check" : command.includes("last-capacity") ? "capacity" : "other"));
+    expect(order[order.indexOf("capacity") - 2]).toBe("check");
     expect(h.sent.filter(({ long }) => long)).toHaveLength(2);
     expect(await h.disk.after(null, BOX, ["captured"])).toBe(
-      'Disk note: this cloud computer\'s disk was 96% full; MausBot removed 1 unused Docker image ("node:20"), 1 stopped Docker container and 2 old items in /tmp: "build-old" 4.0 GB, "scratch" 1 MB. Now 71%.');
+      'Disk note: this cloud computer\'s disk was 96% full; MausBot removed 1 unused Docker image ("node:20"), 1 stopped Docker container ("old-db") and 2 old items in /tmp: "build-old" 4.0 GB, "scratch" 1 MB. Now 71%.');
     expect(await h.disk.after(null, BOX, ["captured"])).toBeNull();
     expect(h.disk.panel(BOX)).toEqual({ percent: 71, spaceClearedAt: h.now() });
     expect(h.logs.at(-1)).toBe(`cloud computer ${BOX}: disk was 96% full; removed 1 unused docker images, 1 stopped containers and 2 old /tmp entries, now 71%`);
   });
 
+  it("does not start when the fresh reading shows the disk has dropped since the reading that called for it", async () => {
+    const h = harness({ percent: 97 });
+    await h.use();
+    expect(h.count("capacity")).toBe(1);
+    await h.advance(HOUR);
+    h.disk.began(null, BOX);
+    await h.flush();
+    expect(h.disk.percent(BOX)).toBe(97);
+    h.world.percent = 90;
+    h.disk.ended(null, BOX);
+    await h.settle();
+    expect(h.count("capacity")).toBe(1);
+    expect(h.disk.percent(BOX)).toBe(90);
+  });
+
+  it("records nothing when the script's own first reading is under the level it was started for", async () => {
+    const h = harness({ percent: 97 });
+    const real = h.world;
+    let reads = 0;
+    Object.defineProperty(real, "percent", { get: () => (h.count("capacity") > 0 && reads++ === 0 ? 60 : 97), set: () => {}, configurable: true });
+    await h.use();
+    expect(h.count("capacity")).toBe(1);
+    expect(h.logs.filter((line) => line.includes("removed"))).toEqual([]);
+    expect(h.disk.panel(BOX)?.spaceClearedAt).toBeUndefined();
+  });
+
   it("leaves the home folder's caches out when the home folder is on a disk of its own", async () => {
     const h = harness({ percent: 97, homePercent: 50, tools: ["pgrep", "npm-cache"] });
     await h.use();
-    expect(h.capacities()).toEqual([isolatedRemoteCommand(capacityCommand(new Set<DiskTool>(["pgrep", "npm-cache"]), { root: true, home: false }))]);
+    expect(h.capacities()).toEqual([isolatedRemoteCommand(capacityCommand(new Set<DiskTool>(["pgrep", "npm-cache"]), { root: true, home: false }, 95))]);
   });
 
   it("does not run for a home folder's own disk being full: docker and /tmp are not on it", async () => {
@@ -1084,7 +1194,7 @@ describe("the capacity tier", () => {
     expect([h.count("cleanup"), h.count("capacity")]).toEqual([1, 0]);
   });
 
-  it("runs under 95% only when a call failed for lack of space after the caches were cleared, with the disk at 85% or more", async () => {
+  it("runs under 95% only when a call failed for lack of space after the caches were cleared and a reading taken then shows 85% or more", async () => {
     const h = harness({ percent: 88 });
     await h.use();
     expect([h.count("cleanup"), h.count("capacity")]).toEqual([1, 0]);
@@ -1100,7 +1210,7 @@ describe("the capacity tier", () => {
     expect(h.count("capacity")).toBe(0);
     h.disk.ended(null, BOX);
     await h.settle();
-    expect(h.count("capacity")).toBe(1);
+    expect(h.capacities()).toEqual([isolatedRemoteCommand(capacityCommand(new Set<DiskTool>(["sudo", "apt-get"]), BOTH, 85))]);
 
     const roomy = harness({ percent: 60 });
     await roomy.use();
@@ -1109,6 +1219,31 @@ describe("the capacity tier", () => {
     roomy.disk.ended(null, BOX);
     await roomy.settle();
     expect([roomy.count("cleanup"), roomy.count("capacity")]).toEqual([0, 0]);
+
+    const unread = harness({ percent: 88 });
+    await unread.use();
+    await unread.advance(MINUTE);
+    unread.world.df = "hang";
+    unread.disk.began(null, BOX);
+    void unread.disk.after(null, BOX, ["cp: No space left on device"], true);
+    await unread.advance(DISK.checkTimeoutMs);
+    unread.world.df = "ok";
+    unread.disk.ended(null, BOX);
+    await unread.settle();
+    expect(unread.count("capacity")).toBe(0);
+  });
+
+  it("does not run again every hour on one failed write: the failure is spent when the tier starts", async () => {
+    const h = harness({ percent: 88 });
+    await h.use();
+    await h.advance(MINUTE);
+    h.disk.began(null, BOX);
+    await h.disk.after(null, BOX, ["cp: No space left on device"], true);
+    h.disk.ended(null, BOX);
+    await h.settle();
+    expect(h.count("capacity")).toBe(1);
+    for (let hour = 0; hour < 30; hour++) { await h.advance(HOUR); await h.use(); }
+    expect(h.count("capacity")).toBe(1);
   });
 
   it("runs at most once an hour, and records nothing when the computer says another app just ran it", async () => {
@@ -1162,10 +1297,10 @@ describe("an unattended run and a disk at capacity", () => {
   it("waits for both tiers before its first command and starts with room", async () => {
     const h = harness({ percent: 99, cleansTo: 97, capacityTo: 70 });
     expect(await h.disk.beforeRun(null, BOX)).toBeNull();
-    expect([h.count("check"), h.count("cleanup"), h.count("capacity"), h.disk.percent(BOX)]).toEqual([3, 1, 1, 70]);
+    expect([h.count("cleanup"), h.count("capacity"), h.disk.percent(BOX)]).toEqual([1, 1, 70]);
   });
 
-  it("is started all the same when the disk is still full, with the figure to say so", async () => {
+  it("is started all the same when the disk is still full, with the figure to say so, and its bot is told on its first call", async () => {
     const h = harness({ percent: 99 });
     expect(await h.disk.beforeRun(null, BOX)).toBe(99);
     expect(h.count("capacity")).toBe(1);
@@ -1179,18 +1314,33 @@ describe("an unattended run and a disk at capacity", () => {
     expect(await h.disk.after(null, BOX, ["captured"])).toBe("Disk note: this cloud computer's disk is 99% full; its caches were cleared 10 min ago. Writes may fail until space is freed.");
   });
 
-  it("waits five minutes at most for a capacity cleanup that does not end, and stops waiting when cancelled", async () => {
+  it("never starts while a script may still be deleting: it waits as long as the script is followed, which is longer than the script may run", async () => {
     const h = harness({ percent: 99, capacity: "hang" });
     let result: number | null | undefined;
     void h.disk.beforeRun(null, BOX).then((value) => { result = value; });
     await h.flush();
     expect(h.count("capacity")).toBe(1);
-    await h.advance(DISK.runWaitMs - 1);
+    await h.advance(DISK.cleanupFollowMs - 1);
     expect(result).toBeUndefined();
     await h.advance(1);
+    await h.advance(DISK.checkTimeoutMs);
     expect(result).toBe(99);
-    expect(DISK.runWaitMs).toBe(5 * MINUTE);
+    expect(DISK.cleanupFollowMs).toBeGreaterThan((DISK.cleanupLimitSeconds + 10) * 1000);
+    expect(DISK.runWaitMs).toBe(2 * (DISK.surveyTimeoutMs + DISK.cleanupFollowMs) + DISK.stampTimeoutMs + 4 * DISK.checkTimeoutMs);
 
+    const slow = harness({ percent: 99, cleanup: "hang", capacity: "hang" });
+    let started = false;
+    void slow.disk.beforeRun(null, BOX).then(() => { started = true; });
+    await slow.flush();
+    await slow.advance(DISK.cleanupFollowMs);
+    await slow.flush();
+    expect([slow.count("capacity"), started]).toEqual([1, false]);
+    await slow.advance(DISK.cleanupFollowMs);
+    await slow.advance(DISK.checkTimeoutMs);
+    expect(started).toBe(true);
+  });
+
+  it("stops waiting when the run is cancelled", async () => {
     const cancelled = harness({ percent: 99, capacity: "hang" });
     const stop = new AbortController();
     let done = false;
@@ -1203,18 +1353,35 @@ describe("an unattended run and a disk at capacity", () => {
   });
 });
 
-const sameDisk = (() => { try { return process.platform === "linux" && statSync(tmpdir()).dev === statSync("/").dev; } catch { return false; } })();
+const realShell = (() => {
+  try {
+    if (process.platform !== "linux" || statSync(tmpdir()).dev !== statSync("/").dev) return null;
+    if (process.getuid?.() === 0) return "root" as const;
+    execFileSync("sudo", ["-n", "true"], { stdio: "ignore", timeout: 5_000 });
+    return "sudo" as const;
+  } catch {
+    return null;
+  }
+})();
 
-describe.skipIf(!sameDisk)("the /tmp stage in a real shell (Linux, with the temp folder on the root disk)", () => {
+describe.skipIf(!realShell)("the /tmp stage in a real shell (Linux, as root or with sudo, with the temp folder on the root disk)", () => {
   const DAY = 24 * 3_600_000;
 
-  /** A stand-in /tmp with entries of known ages, and a `df` whose figure is `base` plus nine points per entry left. */
-  function scene(base: number) {
+  /** A stand-in /tmp with entries of known ages; a `df` whose figure is `base` plus nine points per entry left (and
+   * whose used space follows it unless `flat`); and a `docker` that answers with no containers, or with one whose mount is `mount`. */
+  function scene(base: number, options: { flat?: boolean; mount?: (tmp: string) => string } = {}) {
     const top = mkdtempSync(join(tmpdir(), "omb-disk-"));
     const tmp = join(top, "tmp"), bin = join(top, "bin"), home = join(top, "home");
     for (const dir of [tmp, bin, home]) mkdirSync(dir);
-    writeFileSync(join(bin, "df"), `#!/bin/sh\nn=$(ls '${tmp}' | wc -l)\necho 'Filesystem 1024-blocks Used Available Capacity Mounted on'\necho "overlay 1000 500 500 $(( ${base} + 9 * n ))% /"\n`);
-    chmodSync(join(bin, "df"), 0o755);
+    writeFileSync(join(bin, "df"), [
+      "#!/bin/sh", `n=$(ls '${tmp}' | wc -l)`, `p=$(( ${base} + 9 * n ))`, `u=${options.flat ? "5000" : "$(( p * 10 ))"}`,
+      "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'", 'echo "overlay 10000 $u 100 ${p}% /"', "",
+    ].join("\n"));
+    writeFileSync(join(bin, "docker"), [
+      "#!/bin/sh", 'case "$*" in', options.mount ? '  "ps -q") echo abc;;' : '  "ps -q") :;;',
+      `  "inspect --format {{range .Mounts}}{{println .Source}}{{end}} abc") echo '${options.mount?.(tmp) ?? ""}';;`, "  *) :;;", "esac", "",
+    ].join("\n"));
+    for (const tool of ["df", "docker"]) chmodSync(join(bin, tool), 0o755);
     const aged = (path: string, days: number) => { const at = new Date(Date.now() - days * DAY); utimesSync(path, at, at); };
     const entry = (name: string, days: number, files: string[] = ["f"]) => {
       const dir = join(tmp, name);
@@ -1223,8 +1390,10 @@ describe.skipIf(!sameDisk)("the /tmp stage in a real shell (Linux, with the temp
       for (const path of [...files.flatMap((file) => { const parts = file.split("/"); return parts.map((_part, index) => join(dir, ...parts.slice(0, index + 1))); }), dir]) aged(path, days);
       return dir;
     };
-    const run = () => execFileSync("/bin/sh", ["-c", capacityCommand(new Set(), { root: true, home: false }, tmp)], { env: { PATH: `${bin}:${process.env.PATH}`, HOME: home }, encoding: "utf8", timeout: 60_000 });
-    return { top, tmp, entry, aged, run, left: () => readdirSync(tmp).sort() };
+    const run = (found: DiskTool[] = [realShell!, "docker"], at = tmp) =>
+      execFileSync("/bin/sh", ["-c", capacityCommand(new Set(found), { root: false, home: false }, 95, at)], { env: { PATH: `${bin}:${process.env.PATH}`, HOME: home }, encoding: "utf8", timeout: 60_000 });
+    const removed = (output: string) => parseCapacityReport(output)!.items.map((item) => item.name);
+    return { top, tmp, home, entry, aged, run, removed, left: () => readdirSync(tmp).sort(), done: () => { spawnSync("chmod", ["-R", "u+w", top]); rmSync(top, { recursive: true, force: true }); } };
   }
 
   it("removes the stalest entries first and stops as soon as the disk is under the target", () => {
@@ -1235,38 +1404,140 @@ describe.skipIf(!sameDisk)("the /tmp stage in a real shell (Linux, with the temp
       s.entry("old-c", 2);
       s.entry("old-d", 1);
       s.entry("fresh", 0);
-      expect(parseCapacityReport(s.run())!.items.map((item) => item.name)).toEqual(["old-a", "old-b"]);
+      expect(s.removed(s.run())).toEqual(["old-a", "old-b"]);
       expect(s.left()).toEqual(["fresh", "old-c", "old-d"]);
     } finally {
-      rmSync(s.top, { recursive: true, force: true });
+      s.done();
     }
   });
 
-  it("keeps an entry with one recent file deep inside, an entry a process is working in, links, dot entries and pipes, and removes the rest whole", async () => {
-    const s = scene(60);
+  it("does nothing when its own first reading is under the level it was started for, and leaves no stamp", () => {
+    const s = scene(30);
+    try {
+      s.entry("old-a", 10);
+      expect(s.run().trim()).toBe("omb-disk:below");
+      expect(s.left()).toEqual(["old-a"]);
+      expect(existsSync(join(s.home, ".cache"))).toBe(false);
+    } finally {
+      s.done();
+    }
+  });
+
+  it("keeps what is recent or in use: a recent file deep inside, a working folder, a program running from it, links, dot entries, pipes and odd names", async () => {
+    const s = scene(75);
     const busy = s.entry("in-use", 9);
     const worker = spawn("sleep", ["30"], { cwd: busy, stdio: "ignore" });
+    const app = s.entry("app", 9);
+    execFileSync("cp", ["/bin/sleep", join(app, "sleep")]);
+    s.aged(join(app, "sleep"), 9);
+    s.aged(app, 9);
+    const program = spawn(join(app, "sleep"), ["30"], { stdio: "ignore" });
     try {
       s.entry("old-a", 10, ["deep/er/f", "g"]);
       const recent = s.entry("recent-deep", 9, ["a/b/new", "old-sibling"]);
       writeFileSync(join(recent, "a/b/new"), "y");
       s.aged(join(recent, "a/b"), 9);
       s.entry(".hidden", 9);
+      s.entry("with space", 9);
       const piped = s.entry("with-pipe", 9);
       execFileSync("mkfifo", [join(piped, "pipe")]);
       s.aged(join(piped, "pipe"), 9);
       s.aged(piped, 9);
       symlinkSync("/etc", join(s.tmp, "link"));
       await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(parseCapacityReport(s.run())!.items.map((item) => item.name)).toEqual(["old-a"]);
-      expect(s.left()).toEqual([".hidden", "in-use", "link", "recent-deep", "with-pipe"]);
+      expect(s.removed(s.run())).toEqual(["old-a"]);
+      expect(s.left()).toEqual([".hidden", "app", "in-use", "link", "recent-deep", "with space", "with-pipe"]);
       expect(existsSync(join(recent, "old-sibling"))).toBe(true);
       expect(existsSync(join(busy, "f"))).toBe(true);
-      expect(existsSync("/etc/hostname") || existsSync("/etc/passwd")).toBe(true);
+      expect(existsSync(join(app, "sleep"))).toBe(true);
+      expect(existsSync("/etc/passwd")).toBe(true);
       expect(s.run().trim()).toBe("omb-disk:recent");
     } finally {
       worker.kill();
-      rmSync(s.top, { recursive: true, force: true });
+      program.kill();
+      s.done();
+    }
+  });
+
+  it("removes an entry with a read-only folder inside whole, reports it only once it is gone, and leaves no holding folder behind", () => {
+    const s = scene(75);
+    try {
+      const locked = s.entry("ro", 9, ["locked/deeper/f"]);
+      chmodSync(join(locked, "locked/deeper"), 0o555);
+      chmodSync(join(locked, "locked"), 0o555);
+      s.entry("old-a", 10);
+      s.entry("newer", 8);
+      mkdirSync(join(s.tmp, ".omb-disk-removing.zzz/x/locked"), { recursive: true });
+      writeFileSync(join(s.tmp, ".omb-disk-removing.zzz/x/locked/f"), "x");
+      chmodSync(join(s.tmp, ".omb-disk-removing.zzz/x/locked"), 0o555);
+      expect(s.removed(s.run())).toEqual(["old-a", "ro", "newer"]);
+      expect(readdirSync(s.tmp)).toEqual([]);
+    } finally {
+      s.done();
+    }
+  });
+
+  it("does nothing when the temp folder is a link", () => {
+    const s = scene(75);
+    try {
+      s.entry("old-a", 10);
+      s.entry("old-b", 9);
+      s.entry("old-c", 8);
+      const link = join(s.top, "tmp-link");
+      symlinkSync(s.tmp, link);
+      expect(s.removed(s.run(undefined, link))).toEqual([]);
+      expect(s.left()).toEqual(["old-a", "old-b", "old-c"]);
+    } finally {
+      s.done();
+    }
+  });
+
+  it("does nothing when a running container mounts the temp folder or a folder above it, and keeps an entry a container mounts part of", () => {
+    for (const mount of [(tmp: string) => tmp, (tmp: string) => join(tmp, ".."), () => "/"]) {
+      const s = scene(75, { mount });
+      try {
+        s.entry("old-a", 10);
+        s.entry("old-b", 9);
+        s.entry("old-c", 8);
+        expect(s.removed(s.run())).toEqual([]);
+        expect(s.left()).toEqual(["old-a", "old-b", "old-c"]);
+      } finally {
+        s.done();
+      }
+    }
+    const part = scene(75, { mount: (tmp) => join(tmp, "old-a", "data") });
+    try {
+      part.entry("old-a", 10);
+      part.entry("old-b", 9);
+      part.entry("old-c", 8);
+      expect(part.removed(part.run())).toEqual(["old-b", "old-c"]);
+      expect(part.left()).toEqual(["old-a"]);
+    } finally {
+      part.done();
+    }
+  });
+
+  it("has no /tmp stage for a user who cannot read every process", () => {
+    const s = scene(75);
+    try {
+      s.entry("old-a", 10);
+      s.entry("old-b", 9);
+      s.entry("old-c", 8);
+      expect(s.removed(s.run(["docker"]))).toEqual([]);
+      expect(s.left()).toEqual(["old-a", "old-b", "old-c"]);
+    } finally {
+      s.done();
+    }
+  });
+
+  it("stops after three removals that did not lower the disk's use, and reports every one it made", () => {
+    const s = scene(75, { flat: true });
+    try {
+      for (const [name, days] of [["old-a", 10], ["old-b", 9], ["old-c", 8], ["old-d", 7], ["old-e", 6]] as const) s.entry(name, days);
+      expect(s.removed(s.run())).toEqual(["old-a", "old-b", "old-c"]);
+      expect(s.left()).toEqual(["old-d", "old-e"]);
+    } finally {
+      s.done();
     }
   });
 });
