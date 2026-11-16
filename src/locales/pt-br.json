@@ -2506,6 +2506,7 @@
   "chat.unpinHint": "Desafixar esta mensagem",
   "chat.unpin": "Desafixar",
   "chat.pinnedJump": "Ir para a mensagem fixada",
+  "chat.pinnedMessages": "Mensagens fixadas",
   "chat.you": "Você",
   "chat.peer.asked": "perguntou via ask_bot",
   "chat.peer.handedTask": "repassou uma tarefa",
