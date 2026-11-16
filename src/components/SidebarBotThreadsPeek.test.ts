@@ -8,18 +8,26 @@ const task = (threadId: string, extra: Partial<Task> = {}): Task => ({ threadId,
 const bot = (tasks: Task[], threadId = "main") => ({ threadId, mainThreadId: "main", tasks: [task("main"), ...tasks] });
 
 describe("peekThreads", () => {
-  it("is empty for a bot with only the conversation its row opens", () => {
-    expect(peekThreads(bot([]))).toEqual([]);
+  const ids = (listed: Task[]) => listed.map((entry) => entry.threadId);
+  const four = [task("a", { updatedAt: 10 }), task("b", { updatedAt: 40 }), task("c", { updatedAt: 30 }), task("d", { updatedAt: 20 })];
+
+  it("is only the main conversation for a bot with nothing else open", () => {
+    expect(ids(peekThreads(bot([])))).toEqual(["main"]);
   });
 
-  it("lists the newest open conversations, capped, without the main one", () => {
-    const listed = peekThreads(bot([task("a", { updatedAt: 10 }), task("b", { updatedAt: 40 }), task("c", { updatedAt: 30 }), task("d", { updatedAt: 20 })]));
-    expect(listed.map((entry) => entry.threadId)).toEqual(["b", "c", "d"]);
-    expect(listed).toHaveLength(PEEK_LIMIT);
+  it("lists the main conversation first, then the newest open ones up to the limit", () => {
+    const listed = peekThreads(bot([task("new", { updatedAt: 50 }), ...four]));
+    expect(ids(listed)).toEqual(["main", "new", "b", "c"]);
+    expect(listed).toHaveLength(PEEK_LIMIT + 1);
   });
 
-  it("keeps the conversation on screen when it is not the main one", () => {
-    expect(peekThreads(bot([task("a")], "a")).map((entry) => entry.threadId)).toEqual(["a"]);
+  it("lists the main conversation first while another one is on screen", () => {
+    expect(ids(peekThreads(bot([task("a", { updatedAt: 10 })], "a"), "a"))).toEqual(["main", "a"]);
+  });
+
+  it("keeps the conversation on screen when newer ones fill the limit", () => {
+    expect(ids(peekThreads(bot(four, "a"), "a"))).toEqual(["main", "b", "c", "d", "a"]);
+    expect(ids(peekThreads(bot(four, "a")))).toEqual(["main", "b", "c", "d"]);
   });
 
   it("leaves out routine runs, burst helpers and closed, archived or snoozed conversations", () => {
@@ -30,11 +38,11 @@ describe("peekThreads", () => {
       task("archived", { archivedAt: 5 }),
       task("snoozed", { snoozedUntil: Date.now() + 60_000 }),
     ];
-    expect(peekThreads(bot([...closed, task("open")])).map((entry) => entry.threadId)).toEqual(["open"]);
+    expect(ids(peekThreads(bot([...closed, task("open")])))).toEqual(["main", "open"]);
   });
 
-  it("excludes the conversation in view for a bot without a main one", () => {
-    expect(peekThreads({ threadId: "a", tasks: [task("a"), task("b")] }).map((entry) => entry.threadId)).toEqual(["b"]);
+  it("leads with the conversation in view for a bot without a main one", () => {
+    expect(ids(peekThreads({ threadId: "a", tasks: [task("a"), task("b")] }))).toEqual(["a", "b"]);
   });
 });
 

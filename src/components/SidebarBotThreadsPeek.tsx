@@ -1,4 +1,4 @@
-import { Archive, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { Archive, Check, ChevronRight, Plus, Star, Trash2 } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
@@ -11,20 +11,23 @@ import { botOpensTo } from "@/state/thread-navigation";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { MENU_GUTTER, MENU_ICON, MENU_META, MENU_ROW, MENU_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 import { useHeldMenuMotion } from "./MenuMotion";
-import { isArchived, isSnoozed, isWorking, threadRecency, threadRowActions, threadUpdatedLabel } from "./SidebarThreadRow";
+import { isArchived, isSnoozed, isWorking, nextSnoozeExpiry, threadRecency, threadRowActions, threadUpdatedLabel, useSnoozeExpiry } from "./SidebarThreadRow";
 
 export const PEEK_LIMIT = 3;
 const SHEET_WIDTH = 240;
 const EDGE = 8;
 
-type PeekBot = Pick<Bot, "id" | "name" | "threadId" | "mainThreadId" | "tasks">;
+type PeekBot = Pick<Bot, "id" | "name" | "threadId" | "switchingTo" | "mainThreadId" | "tasks">;
 
-export function peekThreads(bot: Pick<PeekBot, "threadId" | "mainThreadId" | "tasks">): Task[] {
-  const rowThread = botOpensTo(bot, false);
-  return (bot.tasks ?? [])
-    .filter((task) => task.threadId !== rowThread && !task.routineRunId && !task.openedBy?.burstId && !task.closedBy && !isArchived(task) && !isSnoozed(task))
-    .sort((a, b) => threadRecency(b) - threadRecency(a))
-    .slice(0, PEEK_LIMIT);
+export function peekThreads(bot: Pick<PeekBot, "threadId" | "mainThreadId" | "tasks">, current?: string): Task[] {
+  const main = botOpensTo(bot, false);
+  const others = (bot.tasks ?? [])
+    .filter((task) => task.threadId !== main && !task.routineRunId && !task.openedBy?.burstId && !task.closedBy && !isArchived(task) && !isSnoozed(task))
+    .sort((a, b) => threadRecency(b) - threadRecency(a));
+  return [
+    ...(bot.tasks ?? []).filter((task) => task.threadId === main),
+    ...others.filter((task, index) => index < PEEK_LIMIT || task.threadId === current),
+  ];
 }
 
 type Place = { left: number; top: number };
@@ -42,10 +45,17 @@ const SLOT = "pointer-events-none absolute end-[30px] top-1.5 flex size-6 items-
 
 const ROW_ACTIONS = "pointer-events-none absolute end-2 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover/peek:pointer-events-auto group-hover/peek:opacity-100 group-focus-within/peek:pointer-events-auto group-focus-within/peek:opacity-100 touch:pointer-events-auto touch:opacity-100 motion-reduce:transition-none";
 const ROW_ACTION = "flex size-6 items-center justify-center rounded-md text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:bg-ink/[0.06] focus-visible:text-ink active:bg-ink/[0.08] disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-ink-secondary touch:size-10";
-const ROW_TIME = "min-w-13 text-end tabular-nums transition-opacity group-hover/peek:opacity-0 group-focus-within/peek:opacity-0 touch:min-w-21 touch:opacity-0 motion-reduce:transition-none";
+const ROW_TIME = "min-w-13 text-end tabular-nums";
+const ROW_TIME_YIELDS = "transition-opacity group-hover/peek:opacity-0 group-focus-within/peek:opacity-0 touch:min-w-21 touch:opacity-0 motion-reduce:transition-none";
 
-export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatch: Dispatch<Action> }) {
-  const threads = useMemo(() => peekThreads(bot), [bot.tasks, bot.mainThreadId, bot.threadId]);
+export function SidebarBotThreadsPeek({ bot, onScreen = false, dispatch }: { bot: PeekBot; onScreen?: boolean; dispatch: Dispatch<Action> }) {
+  const main = botOpensTo(bot, false), current = onScreen ? bot.switchingTo ?? bot.threadId : undefined;
+  const tasks = bot.tasks ?? [];
+  useSnoozeExpiry(tasks);
+  // A snooze ends by the clock alone, so the nearest deadline still ahead stands in for it.
+  const wake = nextSnoozeExpiry(tasks);
+  const threads = useMemo(() => peekThreads(bot, current), [bot.tasks, bot.mainThreadId, bot.threadId, current, wake]);
+  const others = threads.filter((task) => task.threadId !== main).length;
   const [place, setPlace] = useState<Place | null>(null);
   const motion = useHeldMenuMotion(place);
   const anchor = useRef<HTMLButtonElement>(null);
@@ -56,7 +66,7 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const deleting = deletingId ? bot.tasks?.find((task) => task.threadId === deletingId) : undefined;
   const labels = useId();
-  const has = threads.length > 0;
+  const has = others > 0;
   const open = place !== null;
 
   // Opened by a click on the chevron only: resting the pointer on a row opens nothing.
@@ -75,10 +85,18 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
   }, [has]);
   // Rows are taller on a touch screen, so the sheet's own height decides how far up it has to sit.
   useLayoutEffect(() => {
-    const height = sheet.current?.offsetHeight;
-    if (!place || !height) return;
-    const top = Math.max(EDGE, Math.min(place.top, window.innerHeight - height - EDGE));
-    if (top !== place.top) setPlace({ ...place, top });
+    const menu = sheet.current;
+    if (!place || !menu) return;
+    const fit = () => {
+      const height = menu.offsetHeight;
+      if (!height) return;
+      const top = Math.max(EDGE, Math.min(place.top, window.innerHeight - height - EDGE));
+      if (top !== place.top) setPlace({ ...place, top });
+    };
+    fit();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
+    observer?.observe(menu);
+    return () => observer?.disconnect();
   }, [place, threads.length]);
   useEffect(() => {
     if (!open) return;
@@ -106,7 +124,7 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
   const pick = (action: Action) => { close(); dispatch(action); };
   const archive = (task: Task, event: ReactMouseEvent) => {
     if (event.detail === 0) {
-      if (threads.length === 1) focusAnchor.current = true;
+      if (others === 1) focusAnchor.current = true;
       else sheet.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
     }
     actions.onArchive(task, Date.now());
@@ -160,22 +178,27 @@ export function SidebarBotThreadsPeek({ bot, dispatch }: { bot: PeekBot; dispatc
           {threads.map((task) => {
             const waiting = task.activity === "waiting-on-you";
             const mark = waiting ? t("sidebar.preview.waiting") : task.unread ? t("task.unread") : undefined;
+            const isMain = task.threadId === main, isCurrent = task.threadId === current;
             const working = isWorking(task);
             const titleId = `${labels}${task.threadId}`;
             return (
               <div key={task.threadId} role="none" data-peek-row="" className="group/peek relative shrink-0 rounded-md hover:bg-ink/[0.06] focus-within:bg-ink/[0.06]">
-                <button type="button" role="menuitem" data-peek-thread={task.threadId} aria-current={task.threadId === bot.threadId ? "page" : undefined}
+                <button type="button" role="menuitem" data-peek-thread={task.threadId} aria-current={isCurrent ? "page" : undefined}
                   className={cn(MENU_ROW, "hover:bg-transparent focus:bg-transparent")} onClick={() => pick({ type: "switchTask", botId: bot.id, threadId: task.threadId })}>
-                  <span className={MENU_GUTTER}>{mark && <span role="img" aria-label={mark} title={mark} className={cn("size-1.5 rounded-full", waiting ? "bg-warning" : "bg-accent")} />}</span>
+                  <span className={MENU_GUTTER}>
+                    {isCurrent ? <Check size={14} className="text-accent" aria-hidden="true" />
+                      : mark ? <span role="img" aria-label={mark} title={mark} className={cn("size-1.5 rounded-full", waiting ? "bg-warning" : "bg-accent")} />
+                      : isMain && <span role="img" aria-label={t("sidebar.bot.simple.mainThread")} title={t("sidebar.bot.simple.mainThread")}><Star size={14} className={MENU_ICON} aria-hidden="true" /></span>}
+                  </span>
                   <span id={titleId} className="min-w-0 flex-1 truncate">{localizedTaskTitle(task.title) || t("task.untitledConversation")}</span>
-                  <span className={cn(MENU_META, ROW_TIME)}>{threadUpdatedLabel(threadRecency(task), now)}</span>
+                  <span className={cn(MENU_META, ROW_TIME, !isMain && ROW_TIME_YIELDS)}>{threadUpdatedLabel(threadRecency(task), now)}</span>
                 </button>
-                <span className={ROW_ACTIONS}>
+                {!isMain && <span className={ROW_ACTIONS}>
                   <button type="button" role="menuitem" data-peek-action="archive" id={`${titleId}a`} aria-label={t("task.archive")} aria-labelledby={`${titleId}a ${titleId}`} title={t("task.archive")}
                     disabled={working} className={ROW_ACTION} onClick={(event) => archive(task, event)}><Archive size={14} aria-hidden="true" /></button>
                   <button type="button" role="menuitem" data-peek-action="delete" id={`${titleId}d`} aria-label={t("task.deleteAria")} aria-labelledby={`${titleId}d ${titleId}`} title={t("task.deleteAria")}
                     disabled={working} className={cn(ROW_ACTION, "hover:text-danger focus-visible:text-danger")} onClick={() => { close(); setDeletingId(task.threadId); }}><Trash2 size={14} aria-hidden="true" /></button>
-                </span>
+                </span>}
               </div>
             );
           })}
