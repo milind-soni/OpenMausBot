@@ -52,7 +52,7 @@ import { RoomMemberLock } from "./room-member-lock.ts";
 import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
-import { providerMcpTool, providerToolAllowKey } from "./provider-tool-allow.ts";
+import { providerMcpTool, providerToolAllowKey, providerToolConfig, legacyProviderToolAllowKey, rememberedProviderTool } from "./provider-tool-allow.ts";
 import type { CommandAllowlistCandidate, CommandAllowlistResponse } from "../shared/command-allowlist.ts";
 import { claudeAccountInfo } from "./claude-accounts.ts";
 import {
@@ -6516,15 +6516,16 @@ bus.subscribe((event: RuntimeEvent) => {
       const providerTool = permission && asker && event.requestId && !event.requiresExplicitApproval && !guestDriven
         ? providerMcpTool(event.tool)
         : null;
-      const configuredMcp = providerTool && asker ? engineMcpServers(asker)[providerTool.server] : undefined;
+      const configuredMcp = providerTool && asker ? providerToolConfig(providerTool.server, engineMcpServers(asker)) : undefined;
       const toolAllowKey = configuredMcp === undefined
         ? null
         : providerToolAllowKey(providerInstanceId, event.tool, configuredMcp);
+      const legacyToolAllowKey = configuredMcp === undefined ? null : legacyProviderToolAllowKey(providerInstanceId, event.tool, configuredMcp);
       const verdict = permission && asker && event.requestId
         ? heldAtSafetyFloor(event, autoVerdict(effectiveApprovalMode, event.tool, {
           requiresExplicitApproval: event.requiresExplicitApproval,
           commandAllowed: Boolean(command && commandAllowlist.matches(asker.id, command)),
-          toolAllowed: Boolean(toolAllowKey && asker.alwaysAllow?.includes(toolAllowKey)), ownFilesRead: !guestDriven && readsOwnFiles(DATA_DIR, asker.id, event), // never in a guest's turn: the folder holds its owner's memory
+          toolAllowed: rememberedProviderTool(store.bot(asker.id)?.alwaysAllow, toolAllowKey, legacyToolAllowKey) || rememberedProviderTool(asker.alwaysAllow, toolAllowKey, legacyToolAllowKey), ownFilesRead: !guestDriven && readsOwnFiles(DATA_DIR, asker.id, event), // never in a guest's turn: the folder holds its owner's memory
         }))
         : null;
       // Claude accepts --permission-mode auto for any model but silently starts in Manual where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it).

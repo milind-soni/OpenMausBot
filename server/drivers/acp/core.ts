@@ -712,7 +712,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               return send({ jsonrpc: "2.0", id: msg.id, result: { outcome: { outcome: "selected", optionId: allow } } });
             }
           }
-          const tool = kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool";
+          const mcpTitle = typeof toolCall.title === "string" && /^mcp__[^\s]+__[^\s]+$/.test(toolCall.title) ? toolCall.title : undefined;
+          const tool = !isQuestion && mcpTitle ? mcpTitle : kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool";
           const isShellCommand = !isQuestion && kind === "execute" && !/^mcp(?:__|[.:])/i.test(String(toolCall.title ?? ""));
           const rawSummary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool);
           const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200);

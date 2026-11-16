@@ -1528,6 +1528,17 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: true });
   });
 
+  it.each(["mcp__brain-project__recall", "mcp__composio__gmail_search_emails"])("preserves MCP identity on ACP permission requests: %s", async (name) => {
+    process.env.FAKE_ACP_PERMISSION_TOOL_CALL = JSON.stringify({ kind: "other", title: name, rawInput: {} });
+    await create(GrokAgentDriver, "permission");
+    await instance.adapter.sendTurn({ threadId: "t-mcp-identity", text: "go", cwd: scratch });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ tool: name, requestType: "permission" });
+    expect(opened).toHaveProperty("command", undefined);
+    await instance.adapter.respondToRequest("t-mcp-identity", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+  });
+
   it.each([
     { name: "full raw command", toolCall: { kind: "execute", rawInput: { command: `printf '  ${"complete input ".repeat(30)}'\n  pwd  ` } }, descriptor: true },
     { name: "title without raw input", toolCall: { kind: "execute", title: "echo display only" }, descriptor: false },
