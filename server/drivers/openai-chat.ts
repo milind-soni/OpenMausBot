@@ -108,6 +108,10 @@ interface RuntimeOptions<Config> {
   reasoning?: boolean;
   /** Cerebras rejects `reasoning_content` and takes `reasoning`. */
   reasoningReplayField?: "reasoning_content" | "reasoning";
+  /** What to send when a turn drops to reasoning-off, for a provider whose API has no
+   * `reasoning_effort: "none"`: its own switch, or `{}` to leave the model thinking as it is.
+   * Unset keeps OpenAI's default. */
+  reasoningOffBody?: (model: string) => Record<string, unknown>;
   contentText?: (content: unknown) => string;
   billing?: "metered";
   includeUsageInCompleted?: boolean;
@@ -285,7 +289,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort: options.requestBody(served, messages, stream, variant).reasoning_effort })
         : {
           ...options.requestBody(served, messages, stream, variant, threadId),
-          ...(route === "chat-reasoning-off" ? { reasoning_effort: "none" } : {}),
+          ...(route === "chat-reasoning-off" ? (options.reasoningOffBody?.(served) ?? { reasoning_effort: "none" }) : {}),
           ...(tools.length ? { tools } : {}),
         });
       const send = options.timeoutMs > FETCH_LIMIT_MS ? fetchPastLimit : fetch;
