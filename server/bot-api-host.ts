@@ -334,8 +334,11 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       if (match[2] === "new-key") {
         if (!included()) return answer(res, 403, { error: BOT_API_UPGRADE, upgrade: true });
         if (!manager.enabled(botId)) return answer(res, 409, { error: "The Bot API is off for this bot" });
+        const wasOwner = manager.actsAsOwner(botId);
         const minted = manager.enable(botId, minter(auth));
         deps.record?.(auth, { category: "bot-api", action: "bot-api.new-key", target });
+        // A new key starts without the mark: say so in Activity, as switching it off by hand would.
+        if (wasOwner) deps.record?.(auth, { category: "bot-api", action: "bot-api.acts-as-owner.off", target });
         return answer(res, 200, { key: minted.key, ...view(botId, auth) });
       }
       const parsed = switchSchema.safeParse(await readBody(req));
@@ -348,7 +351,11 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         deps.record?.(auth, { category: "bot-api", action: "bot-api.on", target });
         return answer(res, 200, { key: minted.key, ...view(botId, auth) });
       }
-      if (manager.disable(botId)) deps.record?.(auth, { category: "bot-api", action: "bot-api.off", target });
+      const wasOwner = manager.actsAsOwner(botId);
+      if (manager.disable(botId)) {
+        deps.record?.(auth, { category: "bot-api", action: "bot-api.off", target });
+        if (wasOwner) deps.record?.(auth, { category: "bot-api", action: "bot-api.acts-as-owner.off", target });
+      }
       return answer(res, 200, view(botId, auth));
     } catch (error) {
       return answer(res, statusOf(error), { error: error instanceof Error ? error.message : String(error) });

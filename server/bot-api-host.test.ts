@@ -478,11 +478,23 @@ describe("a key that acts as the owner", () => {
     expect(h.fake.bots.get("b1")!.tasks.at(-1)).toMatchObject({ approvalMode: "ask", outside: true });
     allowed = true;
 
-    // A new key starts without it, and switching it off is recorded too.
+    // A new key starts without it, and switching it off is recorded too: by hand, by a new key, or by switching the API off.
     expect((await h.app("POST", "/api/bots/b1/bot-api/new-key")).body.actsAsOwner).toBe(false);
     await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: true });
     expect((await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: false })).body.actsAsOwner).toBe(false);
-    expect(h.recorded.map((row) => (row as { action: string }).action)).toEqual(["bot-api.on", "bot-api.acts-as-owner.on", "bot-api.new-key", "bot-api.acts-as-owner.on", "bot-api.acts-as-owner.off"]);
+    await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: true });
+    expect((await h.app("POST", "/api/bots/b1/bot-api", { enabled: false })).body.actsAsOwner).toBe(false);
+    // A key that never had the mark: a new key and switching off add no such row.
+    await h.app("POST", "/api/bots/b1/bot-api", { enabled: true });
+    await h.app("POST", "/api/bots/b1/bot-api/new-key");
+    await h.app("POST", "/api/bots/b1/bot-api", { enabled: false });
+    expect(h.recorded.map((row) => (row as { action: string }).action)).toEqual([
+      "bot-api.on", "bot-api.acts-as-owner.on",
+      "bot-api.new-key", "bot-api.acts-as-owner.off",
+      "bot-api.acts-as-owner.on", "bot-api.acts-as-owner.off",
+      "bot-api.acts-as-owner.on", "bot-api.off", "bot-api.acts-as-owner.off",
+      "bot-api.on", "bot-api.new-key", "bot-api.off",
+    ]);
   });
 
   it("takes a call on a bot whose AI can't be confined only while the key acts as the owner", async () => {

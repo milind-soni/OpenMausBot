@@ -160,7 +160,7 @@ describe("the Bot API card", () => {
     Object.assign(fixture.view!, { enabled: true, mayActAsOwner: true, actsAsOwner: false });
     await mount();
     expect(find("bot-api-as-owner")!.textContent).toContain("Acts as me");
-    expect(find("bot-api-as-owner")!.textContent).toContain("Whoever holds the key can make Scout do anything that level allows.");
+    expect(find("bot-api-as-owner")!.textContent).toContain("Whoever holds the key can make Scout do anything that level allows, and Scout can hand work to its teammates, which act at their own access level.");
     await click("bot-api-as-owner-switch");
     expect(fixture.sent.at(-1)).toEqual({ path: "/api/bots/b1/bot-api/acts-as-owner", body: { enabled: true } });
     expect(find("bot-api-as-owner-switch")!.getAttribute("aria-checked")).toBe("true");

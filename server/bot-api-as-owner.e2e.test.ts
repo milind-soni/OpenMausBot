@@ -1,6 +1,6 @@
 // A Bot API key the owner marked as acting for them, on a real server with the scripted engine: the thread it opens runs
 // at the bot's own level, unconfined and with OpenMausBot's tools, as the owner's request; the never-list still denies
-// what it names; and once the mark is taken off the key can't go on in that thread.
+// what it names; once the mark is taken off the key can't go on in that thread; and a second admin switches it off.
 import { randomUUID } from "node:crypto";
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { connect, type Socket } from "node:net";
@@ -92,4 +92,17 @@ it("runs a marked key's thread at the bot's level as the owner's work, keeps the
   const activity = readdirSync(join(dataDir, "admin-activity")).map((name) => readFileSync(join(dataDir, "admin-activity", name), "utf8")).join("\n");
   expect(activity).toContain("bot-api.acts-as-owner.on");
   expect(activity).toContain("bot-api.acts-as-owner.off");
+
+  // Only on one person's server, read live: a second admin, or a whole domain as admin, switches the mark off at once,
+  // and it is back when the server is one person's again.
+  expect(await api("POST", `/api/bots/${bot.id}/bot-api/acts-as-owner`, { enabled: true })).toMatchObject({ actsAsOwner: true });
+  const status = async () => (await api("GET", `/api/bots/${bot.id}/bot-api`)) as { actsAsOwner: boolean; mayActAsOwner: boolean };
+  await api("PUT", "/api/config", { signIn: { admins: ["one@example.test"] } });
+  expect(await status()).toMatchObject({ actsAsOwner: true });
+  await api("PUT", "/api/config", { signIn: { admins: ["one@example.test", "two@example.test"] } });
+  expect(await status()).toMatchObject({ actsAsOwner: false, mayActAsOwner: false });
+  await api("PUT", "/api/config", { signIn: { admins: ["@example.test"] } });
+  expect(await status()).toMatchObject({ actsAsOwner: false, mayActAsOwner: false });
+  await api("PUT", "/api/config", { signIn: { admins: [] } });
+  expect(await status()).toMatchObject({ actsAsOwner: true });
 }, hostTimeout(120_000));

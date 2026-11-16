@@ -98,19 +98,24 @@ wrote:
   `needs_approval`.
 
 The risk, once: **anyone holding a marked key can make the bot do anything its
-level allows.** Treat it like the owner's own password.
+level allows.** The bot can also hand work to its teammates, which act at their
+own access level, not this bot's. Treat it like the owner's own password.
 
 Who and where:
 
-- Only the owner marks a key: on a server one person uses, the app on that
-  computer or the one admin's session; on a personal Cloud, its owner.
+- Only the owner marks a key: on a server one person uses (no members on its
+  sign-in list and at most one admin, named by address), the app on that
+  computer or the one admin's session; on a personal Cloud, its owner. If a
+  second admin or a whole-domain admin is added later, the key stops acting as
+  the owner at once.
   Anyone who may manage the key can take the mark off.
 - Never on a team's Cloud or a shared or hosted workspace (one with members on
   its sign-in list), except a hosted workspace whose operator set the
   dedicated policy `OMB_SHARED_WORKSPACE_FULL_ACCESS=1`, where an admin may.
 - Never for guest links or webhooks: only a Bot API key carries it.
 - **New key** starts without the mark, and switching the API off forgets it.
-  Marking and unmarking are **Bot API** rows in Settings → Activity, a call
+  Marking and unmarking, including the mark a new key or switching the API off
+  clears, are **Bot API** rows in Settings → Activity, a call
   taken this way shows "as you" among the card's calls, and every viewer of
   the card sees whether the key acts as the owner.
 
@@ -119,7 +124,9 @@ opened before the mark stays confined, and one opened with it can't be
 continued through the API once the key no longer acts as the owner (the mark
 taken off, a new key, or the server no longer allowing it), which answers `403`;
 until then the person's own messages there run as in any thread of theirs, and
-a person writing in it after that works confined, as in any API thread.
+a person writing in it after that works confined, as in any API thread. Taking
+the mark off doesn't stop a turn already running; it finishes as it started
+(stop it from the thread in the app if needed).
 
 A key without the mark keeps every rule above: confined, at Ask, no saved
 allowances, no tools.
