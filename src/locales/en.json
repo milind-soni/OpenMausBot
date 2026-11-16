@@ -2745,6 +2745,7 @@
   "contextWarning.roomHint": "Its next turn here starts fresh with the room's recent messages. Nothing in the room is deleted.",
   "contextWarning.roomRequested": "Compacts before its next turn.",
   "contextMenu.title": "Context",
+  "contextMenu.button": "Context {percent}%",
   "contextMenu.roomTitle": "Context of each bot in this room",
   "contextMenu.used": "{percent}% used",
   "contextMenu.tokensOfWindow": "{tokens} of {window} tokens",

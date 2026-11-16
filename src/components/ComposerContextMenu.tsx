@@ -208,7 +208,7 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
   const fullest = group
     ? roomContextReadings(group, members ?? []).map((entry) => entry.reading).sort((a, b) => (b.percent ?? 0) - (a.percent ?? 0))[0]
     : contextReading(breakdown?.tokens, breakdown?.window) ?? contextReading(context?.tokens, context?.window);
-  const name = fullest?.percent === undefined ? t("contextMenu.title") : t("contextWarning.short", { percent: fullest.percent });
+  const name = fullest?.percent === undefined ? t("contextMenu.title") : t("contextMenu.button", { percent: fullest.percent });
   return (
     <span ref={root} data-composer-context className="relative flex shrink-0">
       <button ref={trigger} type="button" aria-label={name} title={name} aria-haspopup="dialog" aria-expanded={open}
