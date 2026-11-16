@@ -178,11 +178,27 @@ export function continueNote(cause: RoutineRetryCause): string {
     "and are not repeated here. Check what the first start already did (files, messages sent, anything started) so nothing is done twice; then finish the routine.]";
 }
 
+/** Whether the conversation a second start continues still holds the first start's message (`prompt`) for its engine:
+ * a session it resumes does, and a replayed one only while that message and all after it fit the replay's budget. */
+export function sessionHolds(input: { resumes: boolean; messages: ReadonlyArray<{ role: string; text?: string }>; prompt: string; budgetBytes: number; maxMessages?: number }): boolean {
+  const at = input.messages.findLastIndex((message) => message.role === "user" && message.text === input.prompt);
+  if (at < 0) return false;
+  if (input.resumes) return true;
+  const replayed = input.messages.slice(at);
+  return replayed.length <= (input.maxMessages ?? 40) && replayed.reduce((bytes, message) => bytes + Buffer.byteLength(message.text ?? ""), 0) <= input.budgetBytes;
+}
+
+/** A second start whose engine session will not hold the first start's message: one moved to a backup AI or waiting out a
+ * usage limit, or a routine that calls a /command, which is only expanded where it is sent. */
+const startsAfresh = (run: Pick<RoutineRun, "retried" | "attentionCode">, prompt: string): boolean =>
+  run.retried === "usage_limit" || run.attentionCode === "routines.server.backupSignedOut" || run.attentionCode === "routines.server.backupAi"
+  || /(?:^|\s)\/[A-Za-z][\w:-]*/.test(prompt);
+
 /** What a run's start sends: `first`, what its first start sent, alone; for the one second start, the short note when the
- * conversation already holds `first` (`said`), else `first` again with the note. */
-export function startPrompt(retried: RoutineRetryCause | undefined, first: string, said: (first: string) => boolean): string {
-  if (!retried) return first;
-  return said(first) ? continueNote(retried) : `${first}\n\n${retryNote(retried)}`;
+ * engine resumes a session that already holds `first` (`said`), else `first` again with the note. */
+export function startPrompt(run: Pick<RoutineRun, "retried" | "attentionCode">, prompt: string, first: string, said: (first: string) => boolean): string {
+  if (!run.retried) return first;
+  return !startsAfresh(run, prompt) && said(first) ? continueNote(run.retried) : `${first}\n\n${retryNote(run.retried)}`;
 }
 
 function firstNotice(notices: RoutineOwnerNotice[], botId: string, cause: RoutineOwnerCause, at: number): boolean {

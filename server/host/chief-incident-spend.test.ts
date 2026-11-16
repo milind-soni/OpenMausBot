@@ -22,7 +22,7 @@ afterEach(() => {
 
 /** A dead tool server as the engine reports it: the same failure, with a new process id and time each run. */
 const deadTool = (at: number) => `MCP server "crm" could not start (pid ${4000 + (at / MINUTE) % 997}) at ${new Date(at).toISOString()}; check its command and installation`;
-const spawnRefused = (at: number) => `spawn /usr/local/bin/claude EAGAIN (attempt ${at % 1000})`;
+const spawnRefused = (at: number) => `spawn /usr/local/bin/claude EAGAIN (pid ${30000 + Math.floor(at / MINUTE) % 997})`;
 
 function world(botCount: number, failure: (at: number) => string, refuseStart = false) {
   const dir = mkdtempSync(join(tmpdir(), "omb-chief-incident-spend-"));
@@ -58,9 +58,9 @@ function world(botCount: number, failure: (at: number) => string, refuseStart = 
     messagesFor: (threadId: string) => lines.get(threadId) ?? [],
     activePath: (threadId: string) => lines.get(threadId) ?? [],
   };
-  const chiefTurns: string[] = [];
+  const chiefTurns: string[] = [], notified: string[] = [];
   const notices = createChiefNotices({
-    store: store as never, notify: () => {}, threadBusy: () => false, botAtThreadCapacity: () => false, groupTurnActive: () => false,
+    store: store as never, notify: (notification) => { if (notification) notified.push(notification.threadId ?? ""); }, threadBusy: () => false, botAtThreadCapacity: () => false, groupTurnActive: () => false,
     startTurn: async (botId, text, opts) => { if (botId === "chief") chiefTurns.push(text); store.appendMessage(opts.threadId, { role: "user", kind: "text", text }); },
     assignerOf: () => undefined, schedule: (run) => run(), now: () => now,
   });
@@ -85,7 +85,7 @@ function world(botCount: number, failure: (at: number) => string, refuseStart = 
   for (const bot of bots.slice(1)) manager.create({ name: `Sync for ${bot.name}`, prompt: "Read new leads from the CRM and file them", botId: bot.id, schedule: { type: "interval", everyMinutes: 5, anchorAt: START } });
   const running = () => manager.listRuns().filter((run: RoutineRun) => run.status === "running");
   return {
-    routineTurns, chiefTurns, lines,
+    routineTurns, chiefTurns, lines, notified, report: notices.reportIncident, bot: (id: string) => store.bot(id), task: (botId: string, title: string) => store.createTask(botId, title),
     /** A scheduler pass every minute up to `to`; each turn the pass before left running fails. */
     async passTo(to: number) {
       while (now < to) {
@@ -101,10 +101,17 @@ function world(botCount: number, failure: (at: number) => string, refuseStart = 
 describe("a failure's words, without what changes from run to run", () => {
   it("read the same for two runs that fail for one reason, and differently for another reason", () => {
     expect(failureShape(deadTool(START))).toBe(failureShape(deadTool(START + 5 * MINUTE)));
-    expect(failureShape(spawnRefused(START + 1))).toBe(failureShape(spawnRefused(START + 2)));
+    expect(failureShape(spawnRefused(START))).toBe(failureShape(spawnRefused(START + 5 * MINUTE)));
     expect(failureShape("Request req_011CUa7xYz9 to /v1/messages failed: 529 overloaded")).toBe(failureShape("Request req_022ABb1qWe3 to /v1/messages failed: 529 overloaded"));
-    expect(failureShape("Error in /home/omb/data/bots/7f3e9c2a-1b4d-4e8f-9a6b-2c1d3e4f5a6b/run.log line 12")).toBe(failureShape("Error in /home/omb/data/bots/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/run.log line 98"));
+    expect(failureShape("Error in /home/omb/data/bots/7f3e9c2a-1b4d-4e8f-9a6b-2c1d3e4f5a6b/run.log line 12")).toBe(failureShape("Error in /home/omb/data/bots/0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d/run.log line 12"));
     expect(failureShape(deadTool(START))).not.toBe(failureShape("Claude is overloaded right now. Wait a minute, then run it again."));
+  });
+
+  it("keep exit codes, HTTP statuses and models apart", () => {
+    expect(failureShape("claude exited 1 before result")).not.toBe(failureShape("claude exited 137 before result"));
+    expect(failureShape("API Error: 503 Service Unavailable")).not.toBe(failureShape("API Error: 401 Unauthorized"));
+    expect(failureShape("model not found: claude-sonnet-4-5-20250929")).not.toBe(failureShape("model not found: claude-opus-4-1-20250805"));
+    expect(failureShape("model not found: gpt-5.1")).not.toBe(failureShape("model not found: gpt-5.2"));
   });
 });
 
@@ -114,6 +121,13 @@ describe("a Chief told of a failure a retry cannot fix", () => {
     expect(text).toContain("A retry cannot fix this: one of its tool servers is not running or not signed in");
     expect(text).toContain("Do not call retry_thread");
     expect(text).not.toContain("call retry_thread with");
+  });
+
+  it("is never told so by a routine's name", () => {
+    const text = incidentText({ kind: "routine-failed", bot: { id: "bot-0", name: "Bot 0" }, threadId: "t", detail: "Rebalance my 401(k): The AI stopped before it answered",
+      failure: { text: "The AI stopped before it answered" } }, { count: 1, mayRetry: true, muted: false });
+    expect(text).not.toContain("A retry cannot fix this");
+    expect(text).toContain('call retry_thread with bot_id "bot-0"');
   });
 
   it("is still told how to retry one a retry may fix", () => {
@@ -151,11 +165,29 @@ describe("twenty bots under one Chief whose routines all fail at once", () => {
       await w.passTo(START + INCIDENT_WINDOW_MS - MINUTE);
       console.log(`Chief turns in the first hour with 20 failing routines: ${w.chiefTurns.length}`);
       expect(w.chiefTurns).toHaveLength(6);
-      const notices = [...w.lines.entries()].find(([, rows]) => rows.some((row) => (row.tool as { name?: string } | undefined)?.name?.startsWith("Clive is asked about only so many problems an hour")));
-      expect(notices).toBeDefined();
-      const folded = notices![1].filter((row) => (row.tool as { name?: string } | undefined)?.name?.startsWith("Clive is asked about only so many"));
+      const folded = [...w.lines.values()].flat().filter((row) => (row.tool as { name?: string } | undefined)?.name?.startsWith("Clive is asked about only so many"));
       expect(folded).toHaveLength(1);
-      expect((folded[0]!.tool as { name: string }).name).toMatch(/^Clive is asked about only so many problems an hour, so \d+ more this hour were not sent to it\. The newest: Bot \d+ hit a problem/);
+      expect((folded[0]!.tool as { name: string }).name).toMatch(/^Clive is asked about only so many problems an hour, so \d+ more this hour were not sent to it\. From: Bot \d+ · Sync for Bot \d+/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe("eight teammates' runs that stall within the hour, past a Chief's share of 6", () => {
+  it("tell the person of the 2 the Chief is not started for, and list and link them on its one line", () => {
+    vi.stubEnv("OMB_CHIEF_INCIDENT_TURNS_PER_HOUR", "6");
+    try {
+      const w = world(8, () => "");
+      for (let i = 0; i < 8; i++) {
+        const { threadId } = w.task(`bot-${i}`, `Job ${i}`);
+        w.report({ kind: "stalled", bot: w.bot(`bot-${i}`) as never, threadId, detail: "no activity for 20 minutes" });
+      }
+      expect(w.chiefTurns).toHaveLength(6);
+      expect(w.notified).toHaveLength(2);
+      const [line] = [...w.lines.values()].flat().filter((row) => (row.tool as { name?: string } | undefined)?.name?.startsWith("Clive is asked about only so many"));
+      expect((line!.tool as { name: string }).name).toBe("Clive is asked about only so many problems an hour, so 2 more this hour were not sent to it. From: Bot 6 · Job 6; Bot 7 · Job 7");
+      expect(line!.threadRef).toMatchObject({ botId: "bot-7", title: "Job 7" });
     } finally {
       vi.unstubAllEnvs();
     }

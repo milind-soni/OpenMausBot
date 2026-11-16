@@ -59,6 +59,8 @@ export interface ChiefNoticeDeps {
 
 /** How long a run stopped for memory waits before it starts again; the memory gate then holds it until there is room. */
 export const MEMORY_RETRY_MS = 30_000;
+/** The chats a Chief's line for the problems it was not started for names; its count covers the rest. */
+export const FOLDED_LISTED = 5;
 export const MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run was stopped to free memory on this Cloud. "
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
@@ -67,7 +69,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
   const incidentLedger = new IncidentLedger();
   const chiefBudget = new ChiefIncidentBudget({ now: deps.now, limit: deps.chiefTurnsPerHour });
   /** Each Chief's line that counts the problems it was not started for, while its hour's share is spent. */
-  const folded = new Map<string, { threadId: string; messageId: string; count: number; until: number }>();
+  const folded = new Map<string, { threadId: string; messageId: string; count: number; until: number; chats: Array<{ botId: string; threadId: string; title: string; name: string }> }>();
   const schedule = deps.schedule ?? ((run: () => void) => { setTimeout(run, 0).unref?.(); });
   const later = deps.later ?? ((run: () => void, ms: number) => { setTimeout(run, ms).unref?.(); });
   /** Each thread's last request a run stopped for memory was started again for: once a request. */
@@ -144,16 +146,19 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     }
   }
 
-  /** Past its hour's share a Chief is not started again: the problem is counted on one line in its notices chat instead,
-   * which names the newest. */
-  function fold(chief: BotRecord, threadId: string, until: number, chip: string): void {
+  /** Past its hour's share a Chief is not started again: the problems are counted on one line in its notices chat, which
+   * lists the chats they came from (the first FOLDED_LISTED) and links the newest. */
+  function fold(chief: BotRecord, threadId: string, until: number, from: { botId: string; threadId: string; title: string; name: string }): void {
     const open = folded.get(chief.id), now = deps.now?.() ?? Date.now();
     const same = open && open.threadId === threadId && open.until > now ? open : null;
     const count = (same?.count ?? 0) + 1;
-    const name = serverLine(deps.threadLanguage?.(threadId), "server.incidents.folded", { count, chief: chief.name, newest: chip });
-    const line = same && store.patchMessage?.(threadId, same.messageId, { tool: { name, ok: false } })
-      || store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name, ok: false } });
-    folded.set(chief.id, { threadId, messageId: line.id, count, until: Math.max(until, same?.until ?? 0) });
+    const chats = same?.chats.some((chat) => chat.threadId === from.threadId) ? same.chats : [...(same?.chats ?? []), from];
+    const list = chats.slice(0, FOLDED_LISTED).map((chat) => chat.name).join("; ");
+    const name = serverLine(deps.threadLanguage?.(threadId), "server.incidents.folded", { count, chief: chief.name, list });
+    const threadRef = { botId: from.botId, threadId: from.threadId, title: from.title };
+    const line = same && store.patchMessage?.(threadId, same.messageId, { tool: { name, ok: false }, threadRef })
+      || store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name, ok: false }, threadRef });
+    folded.set(chief.id, { threadId, messageId: line.id, count, chats, until: Math.max(until, same?.until ?? 0) });
   }
 
   function deliver(input: {
@@ -181,7 +186,12 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     if (!notices || notices.threadId === threadId) return tellThePerson();
     if (routing && person && routing.startedBy(notices.threadId) === undefined) routing.open(notices.threadId, person);
     const spent = chiefBudget.take(chief.id);
-    if (spent) { fold(chief, notices.threadId, spent.until, input.chip); return "chief"; }
+    if (spent) {
+      const title = task?.title ?? (group ? group.name : `${bot.name}'s conversation`);
+      fold(chief, notices.threadId, spent.until, { botId: bot.id, threadId, title, name: `${bot.name} · ${title}` });
+      tellThePerson();
+      return "chief";
+    }
     store.appendMessage(notices.threadId, {
       role: "bot",
       kind: "activity",
@@ -209,7 +219,8 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
    * Never retried: a stall the turn watchdog stopped (kind "stalled"), a stop, a refusal or a cap (retriesTeammateThread,
    * from the failure's words and `facts`), a run that answered a retry, and a thread whose asks are not the Chief's person's. */
   /** `notified`: the person already heard of it another way (a usage limit's own notice), so only the Chief is told. */
-  function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string; facts?: RoutineFailureFacts; notified?: boolean }): void {
+  /** `failure`: the failure's own words when `detail` adds a name to them; only those are read for the kind of failure. */
+  function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string; failure?: string; facts?: RoutineFailureFacts; notified?: boolean }): void {
     const { bot, threadId } = input;
     if (deps.quietThread?.(bot.id, threadId)) return;
     const task = store.taskByThread(bot.id, threadId);
@@ -222,6 +233,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       title: task?.title ?? null,
       room: group?.name ?? null,
       detail: redactSecretsInText(input.detail),
+      failure: { text: input.failure ?? input.detail, stopReason: input.facts?.stopReason },
       ...incidentContext(deps.store.messagesFor(threadId)),
     };
     const count = incidentLedger.note(threadId);

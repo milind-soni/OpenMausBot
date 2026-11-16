@@ -27,6 +27,9 @@ export interface Incident {
   title?: string | null;
   room?: string | null;
   detail: string;
+  /** The failure's own words and stop reason, when `detail` adds anything to them (a routine's name): only these are
+   * read for what kind of failure it was. */
+  failure?: { text: string; stopReason?: string | null };
   lastRequest?: string | null;
   lastReply?: string | null;
 }
@@ -200,7 +203,7 @@ export function incidentText(incident: Incident, count: IncidentCount, retry?: I
   if (count.count > 1) lines.push(`This is the ${ordinal(count.count)} incident on that thread within the hour.`);
   if (retry && "retried" in retry) lines.push("OpenMausBot already retried this run once by itself; the failure above is how that retry ended.");
   else if (retry) lines.push(`OpenMausBot did not retry it: ${retry.notRetried}.`);
-  const fault = hostFaultOf(incident.detail);
+  const fault = hostFaultOf(incident.failure?.text ?? incident.detail, incident.failure?.stopReason);
   lines.push(fault && retryCannotFix(fault)
     ? `A retry cannot fix this: ${HOST_FAULT_WHY[fault]}, and starting the run again would meet the same fault. Do not call retry_thread or hand the work on again. Say in one or two plain sentences what is blocking and what the person should do, then stop.`
     : count.mayRetry

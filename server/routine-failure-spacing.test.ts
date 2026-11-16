@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FAILURE_FIRST_SPACING_MS, FAILURE_SPACING_MS, failedRuns, failureSpacing, failureSpacingAlert, failureSpacingLimits, runSpacing } from "./routine-failure-spacing.ts";
+import { sessionHolds, startPrompt } from "./routine-recovery.ts";
 import { RoutineManager, type RoutineManagerOptions, type RoutineRun } from "./routines.ts";
 
 const MINUTE = 60_000, HOUR = 60 * MINUTE;
@@ -40,11 +41,19 @@ describe("failed runs in a row", () => {
     expect(failureSpacing({ id: "other", updatedAt: 0 }, three)).toBeNull();
   });
 
-  it("do not count a run that never started work, or one only the owner's AI account could let through", () => {
-    const rows = [failed("a", 100), failed("b", 200), failed("paused", 300, { startedAt: undefined }), failed("signed-out", 400, { ownerCause: "signed_out" }), failed("limit", 500, { ownerCause: "usage_limit" })];
+  it("do not count a run that never started work", () => {
+    const rows = [failed("a", 100), failed("b", 200), failed("paused", 300, { startedAt: undefined })];
     expect(failedRuns(routine, rows).map((run) => run.id)).toEqual(["b", "a"]);
-    expect(failureSpacing(routine, rows)).toBeNull();
     expect(failureSpacing(routine, [...rows, failed("c", 600)])).toMatchObject({ streak: 3, last: { id: "c" } });
+  });
+
+  it("end at a run only the owner's AI account stopped, and so does a spacing already begun", () => {
+    const three = [failed("a", 100), failed("b", 200), failed("c", 300)];
+    expect(failureSpacing(routine, three)).not.toBeNull();
+    expect(failureSpacing(routine, [...three, failed("signed-out", 400, { ownerCause: "signed_out" })])).toBeNull();
+    const after = [...three, failed("limit", 400, { ownerCause: "usage_limit" }), failed("d", 500), failed("e", 600)];
+    expect(failedRuns(routine, after).map((run) => run.id)).toEqual(["e", "d"]);
+    expect(failureSpacing(routine, after)).toBeNull();
   });
 
   it("tell the owner once, at the failure that begins the spacing", () => {
@@ -170,5 +179,22 @@ describe("a run's one second start", () => {
     expect(second!.prompt).toContain("this run's first start failed on a temporary AI error before it finished");
     expect(second!.prompt).toContain("so nothing is done twice");
     console.log(`second start: ${second!.prompt.length} characters sent instead of ${first!.prompt.length + second!.prompt.length}`);
+  });
+
+  it("sends the routine's instructions again when the engine will not hold them: a backup AI, a usage-limit wait, a /command", () => {
+    const said = () => true;
+    expect(startPrompt({ retried: "provider" }, "Sync the CRM", "FIRST", said)).not.toContain("FIRST");
+    expect(startPrompt({ retried: "usage_limit" }, "Sync the CRM", "FIRST", said)).toMatch(/^FIRST\n\n/);
+    expect(startPrompt({ retried: "failed", attentionCode: "routines.server.backupSignedOut" }, "Sync the CRM", "FIRST", said)).toMatch(/^FIRST\n\n/);
+    expect(startPrompt({ retried: "provider" }, "/weekly-report for the CRM", "FIRST", said)).toMatch(/^FIRST\n\n/);
+    expect(startPrompt({ retried: "provider" }, "Sync the CRM", "FIRST", () => false)).toMatch(/^FIRST\n\n/);
+  });
+
+  it("counts the conversation as holding them only while a resumed session has them, or a replay's budget still reaches them", () => {
+    const messages = [{ role: "user", text: "older" }, { role: "user", text: "FIRST" }, { role: "bot", text: "x".repeat(10_000) }];
+    expect(sessionHolds({ resumes: true, messages, prompt: "FIRST", budgetBytes: 24_000 })).toBe(true);
+    expect(sessionHolds({ resumes: false, messages, prompt: "FIRST", budgetBytes: 24_000 })).toBe(true);
+    expect(sessionHolds({ resumes: false, messages: [...messages, { role: "bot", text: "y".repeat(20_000) }], prompt: "FIRST", budgetBytes: 24_000 })).toBe(false);
+    expect(sessionHolds({ resumes: true, messages, prompt: "missing", budgetBytes: 24_000 })).toBe(false);
   });
 });

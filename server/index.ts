@@ -239,7 +239,7 @@ import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./dri
 import { forgetNotificationReader, liveAppRows, openCardRows, readMessageText, recallMessages, recentMessages, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing, logNotification, lastRowAt, threadsWithCardsSince } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
-import { createChiefNotices } from "./host/chief-notices.ts"; import { dismissLeftoverPeerCards } from "./host/leftover-peer-cards.ts";
+import { createChiefNotices } from "./host/chief-notices.ts"; import { sessionHolds } from "./routine-recovery.ts"; import { dismissLeftoverPeerCards } from "./host/leftover-peer-cards.ts";
 import { createHandoffTicks } from "./handoff-ticks.ts"; import { IDLE_HTTP_SERVER } from "./due-timer.ts";
 
 const SESSION_READ_MAX_CHARS = 8_000;
@@ -8868,7 +8868,7 @@ routines = new RoutineManager({
     }
   },
   interruptGoal: interruptRoutineGroupGoal,
-  onRunChanged: (run) => { syncRoutineRunToSource(run); }, promptSaid: (threadId, prompt) => store.messagesFor(threadId).some((line) => line.role === "user" && line.text === prompt), moveFrozen: () => moveFreeze.frozen(), restartsToReload: () => { if (!CLOUD_HOME) return false; restartRequested = true; gracefulShutdown(); return true; }, onReadable: routinesReadable,
+  onRunChanged: (run) => { syncRoutineRunToSource(run); }, promptSaid: (threadId, prompt) => { const bot = store.botByThread(threadId), task = bot && store.taskByThread(bot.id, threadId), engine = bot && turnSelection(bot.id, threadId)?.instanceId; return sessionHolds({ resumes: Boolean(task && engine && task.lastInstanceId === engine && task.resumeCursors[engine] !== undefined), messages: store.activePath(threadId), prompt, budgetBytes: cfg.context?.rebuildBytes ?? DEFAULT_REBUILD_BYTES }); }, moveFrozen: () => moveFreeze.frozen(), restartsToReload: () => { if (!CLOUD_HOME) return false; restartRequested = true; gracefulShutdown(); return true; }, onReadable: routinesReadable,
   onRunCut: (run) => run.groupId ? coordinator.cancelRoom(run.groupId, run.threadId!, ROUTINE_RESTARTED) : coordinator.cancelDirect(run.threadId!, ROUTINE_RESTARTED),
   onRunFailed: (run, alert) => {
     const bot = store.bot(run.botId);
@@ -8877,7 +8877,7 @@ routines = new RoutineManager({
     automationReports.runFailed(run, said ?? "");
     const notificationBot = routineSourceOwner(run)?.bot ?? bot;
     notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
-    reportIncident({ kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail });
+    reportIncident({ kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail, failure: run.error ?? "" });
   },
   onRunDeferred: (run, alert) => {
     const bot = store.bot(run.botId);

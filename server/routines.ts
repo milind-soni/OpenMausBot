@@ -271,7 +271,7 @@ export interface RoutineManagerOptions {
     outcome?: { status: "stopped" | "limit-reached"; detail: string },
   ) => Promise<void>;
   onRunChanged?: (run: RoutineRun) => void;
-  /** The thread already holds this message as one of its own, so a second start need not send it again. */ promptSaid?: (threadId: string, prompt: string) => boolean;
+  /** The thread's engine session will resume holding this message, so a second start need not send it again. */ promptSaid?: (threadId: string, prompt: string) => boolean;
   onRunFailed?: (run: RoutineRun, alert?: RoutineAlert | null) => void;
   onRunDeferred?: (run: RoutineRun, alert?: RoutineAlert) => void;
   /** A run a restart cut off, before it starts again or fails: its old turn's work must not resume as well. */
@@ -1183,7 +1183,7 @@ export class RoutineManager {
             await this.options.startTurn(
               run.botId,
               task.threadId,
-              startPrompt(run.retried, composeExecutionPrompt({ id: run.routineId, name: run.routineName, trigger: triggerSource, runOn: run.runOn ?? "maus" }, prompt, run.attachments, continuityCarry(run, this.routines, this.runs)), (first) => this.options.promptSaid?.(task.threadId, first) === true),
+              startPrompt(run, prompt, composeExecutionPrompt({ id: run.routineId, name: run.routineName, trigger: triggerSource, runOn: run.runOn ?? "maus" }, prompt, run.attachments, continuityCarry(run, this.routines, this.runs)), (first) => this.options.promptSaid?.(task.threadId, first) === true),
               run.runOn ?? "maus",
               triggerSource,
               (message) => this.failThread(task.threadId, message, { cause: "refused" }),
