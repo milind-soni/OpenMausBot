@@ -1,4 +1,4 @@
-// Grok Bot hands this place a task (the connector's hand_off_task, grok-move-mcp.ts): it opens a conversation of its
+// Grok Bot hands this place a task with the connector's hand_off_task: it opens a conversation of its
 // own on the main bot, and that bot does the work or hands it to a teammate.
 // Security invariant: a handoff is an outside event, never the person. Its conversation is marked as outside-driven
 // before its turn starts and the turn starts as a webhook's does, so the task is information only: it approves
@@ -34,7 +34,7 @@ const EVERY_THREAD = { thread: () => true };
 export interface GrokHandoffDeps {
   store: Pick<Store, "bots" | "bot" | "botByThread" | "groupByThread" | "taskByThread" | "groupTaskByThread" | "onChange" | "createTask" | "deleteTask" | "activePath">;
   coordinator: Pick<Coordinator, "job">;
-  /** The conversation's lasting record that outside work drove it (host/outside-lineage.ts). */
+  /** The conversation's lasting record that outside work drove it. */
   markOutside(threadId: string): void;
   startTurn(botId: string, text: string, opts: { threadId: string; automationSource: "webhook"; unattended: true; origin: WorkOrigin }): Promise<unknown>;
   now?: () => number;
@@ -75,7 +75,7 @@ const asksPerson = (message: Message): boolean =>
 
 /** How the work in a conversation that is no longer running ended, from what its turns left there. */
 function ended(lines: readonly Message[], handed: Handed): { state: HandoffState; detail?: string } {
-  // As the companion's wait reads a turn that left no reply: only a terminal receipt or an engine error is a failure.
+  // Only a terminal receipt or an engine error is a failure: a turn may end with no reply.
   const last = lines.findLast((line) => line.turnSucceeded !== undefined || (line.kind === "activity"
     && (isStoppedTurnName(line.tool?.name ?? "") || (line.tool?.ok === false && (line.tool.terminal === true || /^error:/i.test(line.tool.name.trim()))))));
   if (last?.kind === "activity" && isStoppedTurnName(last.tool?.name ?? "")) return { state: "stopped" };

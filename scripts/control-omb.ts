@@ -245,7 +245,7 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   for (const knob of ["OMB_ACP_QUIET_NOTICE_MS", "OMB_ACP_QUIET_TICK_MS"] as const) {
     if (/^\d{1,7}$/.test(parentEnv[knob] ?? "")) childEnv[knob] = parentEnv[knob];
   }
-  // The Grok Bot connector's cloudflared (server/grok-move-tunnel.ts), which the fixture's PATH of node alone cannot find.
+  // The Grok Bot connector's cloudflared, which the fixture's PATH of node alone cannot find.
   if (parentEnv.OMB_CLOUDFLARED_PATH) childEnv.OMB_CLOUDFLARED_PATH = parentEnv.OMB_CLOUDFLARED_PATH;
   // The UI checks drive this fixture from a real browser, as `pnpm dev` does; OMB_DEV_TRUST_LOCAL_BROWSER=0 tests the sign-in.
   if (parentEnv.OMB_DEV_TRUST_LOCAL_BROWSER !== "0") childEnv.OMB_DEV_TRUST_LOCAL_BROWSER = "1";

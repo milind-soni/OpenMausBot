@@ -137,23 +137,40 @@ Grok Bot runs connectors from its own cloud computer, which cannot reach yours.
 So for as long as the link is open the app runs two things:
 
 - A second listener on `127.0.0.1`, on a random port, that answers only
-  `POST /mcp/move/<key>` and serves an MCP server with two tools: `move_status`
-  and `send_export`. The key is 32 random bytes. The app's own API is not on this
+  `POST /mcp/move/<key>` and serves an MCP server with four tools: `move_status`,
+  `send_export`, `hand_off_task` and `task_status`. The key is 32 random bytes. The app's own API is not on this
   listener.
 - The `cloudflared` the app ships with, as a Cloudflare quick tunnel
   (`https://<words>.trycloudflare.com`) to that listener. It needs no Cloudflare
   account and reads no `cloudflared` configuration of yours.
 
-The link works while the app stays open and stops after an hour, when you finish
-the import, or when the app quits. A new link has a new address, so it has to be
-pasted into Grok Bot again. Requests pass through Cloudflare on their way to your
-computer. What arrives is held in the app's memory until you import it or the app
-quits; nothing is stored on a server of ours or anywhere else off your computer.
+The link stays up while the app is open, until you turn it off (**Grok Bot
+connector → Turn off**, under Move from Grok Bot) or the app quits. Importing what
+arrived does not end it; the link only stops offering what you imported. If
+`cloudflared` exits, the link stops and the app offers a new one. A new link has a
+new address, so it has to be pasted into Grok Bot again. Requests pass through
+Cloudflare on their way to your computer. What arrives is held in the app's memory
+until you import it, turn the link off or the app quits; nothing is stored on a
+server of ours or anywhere else off your computer.
 
-Whoever holds the link can send exports to the dialog and read how many Bots have
-arrived, and nothing else: there is no tool that reads an export back. A sent
-document goes through the same checks as a pasted one before it is kept, and a
-link holds at most 100 documents and 16 MB. `server/grok-move-mcp.ts` is the MCP
+Whoever holds the link can send exports, read how many Bots have arrived and the
+names and one-line jobs of your bots, and hand your main bot a task and read that
+task back. No tool reads an export back, and a link reads only the tasks it handed
+off, at most 30 an hour. A sent document goes through the same checks as a pasted
+one before it is kept, and a link holds at most 100 documents and 16 MB.
+
+### Handing MausBot a task from Grok Bot
+
+With the link added, a Bot in Grok Bot can hand MausBot a task (`hand_off_task`).
+It opens a new conversation on your main bot, titled "From Grok Bot: …", and the
+main bot does it or hands it to the right teammate. The task arrives as an outside
+event, the way a webhook's task does: it is labelled as coming from Grok Bot and is
+information only. It approves nothing, hands no level down and never gets an
+automation's address, and anything that needs your approval or answer is asked of
+you in MausBot. `task_status` tells Grok Bot whether the task is being worked on,
+needs you, is done (with the main bot's last reply), failed or was stopped. The
+Grok Bot connector part in Settings lists the last five tasks; click one to open
+its conversation. `server/grok-move-mcp.ts` is the MCP
 server and `server/grok-move-tunnel.ts` the listener and tunnel.
 
 Everyone who can add a bot also sees a popup once, after the welcome on a new

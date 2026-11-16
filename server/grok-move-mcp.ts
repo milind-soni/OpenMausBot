@@ -4,8 +4,7 @@
 // reads it: refused whole when it holds credential-looking fields, token-shaped text redacted, anything the importer
 // does not read dropped. Nothing is written to disk, and nothing is imported until the person chooses to.
 // A caller can also hand the main bot a task and read that task back, and no other: the task reaches the bot as an
-// outside event (host/grok-handoff.ts), never as the person, and the names and one-line jobs of the bots are all it
-// learns of this place.
+// outside event, never as the person, and the names and one-line jobs of the bots are all it learns of this place.
 import { z } from "zod";
 
 import { GROK_EXPORT_FORMAT, GrokImportError, grokExportDocument, parseGrokExport, type GrokBot } from "../shared/grok-import.ts";
@@ -75,7 +74,6 @@ export interface HandoffAsk { task: string; toBot?: string; context?: string }
 /** A refusal whose message the caller reads as it is. */
 export class HandoffRefused extends Error {}
 
-/** What this place does for a link. */
 export interface MoveHost {
   bots(): Array<{ name: string; job?: string }>;
   /** Starts the task on the main bot. Throws HandoffRefused, with the fix, when it cannot. */
