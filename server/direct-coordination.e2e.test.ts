@@ -888,7 +888,7 @@ it("withholds direct results when the sender's peers list cuts the teammate off 
   f.plan[f.lead.id] = { readyFile: ready, gateFile: gate, reply: "PRIVATE_ENGINEERING_RESULT" };
   await f.start();
   await expect.poll(() => existsSync(ready), { timeout: 15_000 }).toBe(true);
-  await f.api(`/api/bots/${f.chief.id}`, { visibility: "admins" }, "PATCH");
+  await f.api(`/api/bots/${f.lead.id}`, { visibility: "admins" }, "PATCH");
   writeFileSync(gate, "finish the private work after the teammate was cut off");
   expect((await f.wait()).status).toBe("settled");
   const resumed = f.evidence().find((turn: any) => turn.botId === f.chief.id && turn.resumed);
@@ -913,7 +913,7 @@ it("retains returned direct reports for follow-up turns but rechecks reach befor
   await f.api(`/api/bots/${f.chief.id}/messages/${followup.id}/edit`, { threadId: f.chief.activeTaskId, text: "Check the earlier engineering report" });
   expect((await f.wait()).status).toBe("settled");
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id).at(-1).prompt.message.content).toContain("PRIVATE_ENGINEERING_FACT_8347");
-  await f.api(`/api/bots/${f.chief.id}`, { visibility: "admins" }, "PATCH");
+  await f.api(`/api/bots/${f.lead.id}`, { visibility: "admins" }, "PATCH");
   f.plan[f.chief.id] = { reply: "Access removed", expectContextIncludes: ["Teammate result withheld"] };
   f.save();
   const edited = (await f.messages(f.chief.activeTaskId)).findLast((message: any) => message.role === "user");
