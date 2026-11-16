@@ -429,6 +429,28 @@ describe("PATCH /api/bots/:id connectorScopes", () => {
     expect(widened.status).toBe(409);
     expect(store.bot(bot.id)?.connectorScopes).toEqual(firstOnly);
   });
+
+  it("refuses a local-API narrowing that became a widening after another change while the computer change was stopping this one", async () => {
+    let otherBotId = "";
+    let botId = "";
+    const secondOnly: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["second"] } };
+    const { store, bot, patch } = fixture({
+      interruptAllDirectThreads: async () => {
+        store.patchBot(botId, { connectorScopes: secondOnly });
+        store.patchBot(otherBotId, { busy: true });
+      },
+      routines: () => ({ activeBotRunForBot: () => null }),
+    } as unknown as Partial<BotPatchRouteDeps>);
+    botId = bot.id;
+    otherBotId = store.createBot({ name: "Other worker" }).id;
+    const firstAndSecond: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["first", "second"] } };
+    store.patchBot(bot.id, { computer: "local", connectorScopes: firstAndSecond });
+
+    const stale = await patch(bot.id, { computer: "off", connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["first"] } } });
+
+    expect(stale.status).toBe(409);
+    expect(store.bot(bot.id)?.connectorScopes).toEqual(secondOnly);
+  });
 });
 
 describe("PATCH /api/bots/:id mainThreadChoice", () => {
