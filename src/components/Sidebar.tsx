@@ -8,7 +8,6 @@ import { approvalModeFor } from "../../shared/approval-mode";
 import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep"; import { FadeLine } from "./FadeLine";
 import { openBotRow } from "@/state/thread-navigation";
-import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
 import { BotAvatar } from "./Avatar";
 import { BotEngineMark, BotModelBadge, botTooltip } from "./BotModelBadge"; import { SidebarBotRole } from "./BotRole";
@@ -22,7 +21,7 @@ import { activeLocale, t } from "@/lib/i18n"; import { isBotHeld } from "@/lib/b
 import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
+import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, retitleThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
  
 import { RoomMark, StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
@@ -74,7 +73,7 @@ import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher, endCloudHowTo } from "./DesktopWorkspaceSwitcher"; import { PlaceTint } from "./PlaceTint"; import { ChromeRailToggle } from "./ChromeRailToggle";
-import { useCloudOwner } from "./CloudOwner"; import { OtherPlaceBots, OwnBotHomeMark } from "./OtherPlaceBots";
+import { useCloudOwner } from "./CloudOwner"; import { OtherPlaceBots, OwnBotHomeMark } from "./OtherPlaceBots"; import { NewBotOtherPlaceItem, useNewBotHereLabel } from "./NewBotPlaceItems";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { NeedsYouButton, OwnerPickerHost } from "./TeamOwner"; import { SidebarPeople } from "./SidebarPeople"; import { SidebarInboxRow } from "./SidebarInboxRow"; import { TeamSideSwitch, useTeamSideLists } from "./TeamSideSwitch"; import { SidebarActiveThreads } from "./SidebarActiveThreads"; import { setAttentionPinned, useAttentionPinned } from "./inbox/attention-pinned"; import { useInboxSupport } from "@/state/inbox";
 import { TeamMenuItems } from "./SidebarTeamMenu";
@@ -451,7 +450,7 @@ export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | un
 
 const NO_FOLDERS: BotProject[] = [];
 
-export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns, reveal, locale, generatedTitles, dispatch, activityLabel, hidden = false }: BotRowProps & {
+export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns, reveal, locale, dispatch, activityLabel, hidden = false }: BotRowProps & {
   activityLabel?: string;
   hidden?: boolean;
 }) {
@@ -501,7 +500,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns
       if (task.threadId !== latest.current.threadId) dispatch({ type: "switchTask", botId, threadId: task.threadId });
       else dispatch({ type: "select", id: botId });
     },
-    ...threadRowActions(botId, dispatch, generatedTitles),
+    ...threadRowActions(botId, dispatch),
     onRefreshPermissions: (task: { threadId: string }) => {
       const current = latest.current;
       const mode = approvalModeFor(current);
@@ -512,7 +511,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns
       }
       dispatch({ type: "refreshTaskPermissions", botId, threadId: task.threadId });
     },
-  }), [botId, dispatch, generatedTitles]);
+  }), [botId, dispatch]);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
     return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && task.threadId === bot.threadId} folders={projects}
@@ -629,7 +628,8 @@ export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns
       {ungrouped.map(renderThread)}
       <HelperThreadGroup tasks={orderedThreadList(helpers)} renderThread={renderThread} />
       <ThreadListFooter bulk={bulk} rows={shownRows} selected={selection} total={ownTasks.length} canShowAll={!query && !showAll && ownTasks.length > visibleTasks.length} canSelect={tasks.length > 1}
-        onShowAll={() => setShowAll(true)} onShowFewer={showAll && !query && !bulk.active && visibleSidebarThreads(ownTasks, bot.threadId, query, projects, false, routineRuns).length < ownTasks.length ? () => setShowAll(false) : undefined} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)} />
+        onShowAll={() => setShowAll(true)} onShowFewer={showAll && !query && !bulk.active && visibleSidebarThreads(ownTasks, bot.threadId, query, projects, false, routineRuns).length < ownTasks.length ? () => setShowAll(false) : undefined} freshConversation onDelete={(threadIds) => deleteThreadsInBulk({ botId: bot.id }, threadIds, dispatch)}
+        onRetitle={(threadIds) => retitleThreadsInBulk(bot.id, threadIds)} />
       <LocalComputerAutoWarning
         open={permissionRefresh?.kind === "local-auto"}
         onCancel={() => setPermissionRefresh(null)}
@@ -655,7 +655,7 @@ export interface BotRowProps {
   instances: InstanceInfo[];
   liveCall: AppState["liveCall"];
   locale: string;
-  generatedTitles: boolean; /** Paused by the person, by itself or with its department: it takes no new work. */ held?: boolean;
+  /** Paused by the person, by itself or with its department: it takes no new work. */ held?: boolean;
   density: SidebarDensity;
   query: string;
   dispatch: Dispatch<Action>;
@@ -685,7 +685,7 @@ export function botRowProps<State extends Pick<AppState, "activeView" | "selecte
     instances: state.instances,
     liveCall: state.liveCall,
     locale: activeLocale(),
-    generatedTitles: llmThreadTitlesEnabled(state.config), held: isBotHeld(state.config, bot.id),
+    held: isBotHeld(state.config, bot.id),
     dispatch,
   };
 }
@@ -1144,7 +1144,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
     setSearchOpen(true);
     toggleCollapsed();
   };
-  const plusItem = cn(MENU_ITEM, "text-ink hover:bg-menu-hover"), plusBot = state.activeView === "chat" ? state.bots.find((candidate) => candidate.id === state.selectedId) : undefined;
+  const plusItem = cn(MENU_ITEM, "text-ink hover:bg-menu-hover"), plusBot = state.activeView === "chat" ? state.bots.find((candidate) => candidate.id === state.selectedId) : undefined, newBotHere = useNewBotHereLabel();
   const plusControl = (
     <div ref={plusMenuRef} className="contents">
     <button
@@ -1184,9 +1184,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             className={plusItem}
           >
             <BotIcon size={16} className="text-ink-secondary" />
-            <span className="flex-1">{advanced ? t("sidebar.newBot") : t("sidebar.newBotSimple")}</span>
+            <span className="flex-1">{newBotHere ?? (advanced ? t("sidebar.newBot") : t("sidebar.newBotSimple"))}</span>
             {advanced && <ShortcutHint id="new-bot" />}
-          </button>}
+          </button>}{(teamSettingsAllowed !== false || state.config?.team) && newBotHere && <NewBotOtherPlaceItem itemClass={plusItem} onClose={() => setPlusOpen(false)} />}
           <button
             onClick={() => {
               setPlusOpen(false);

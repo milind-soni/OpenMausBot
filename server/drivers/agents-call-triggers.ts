@@ -15,7 +15,7 @@ export const TRIGGER_TOOL_NAMES: ReadonlySet<string> = new Set(["trigger_info", 
 const LIST_ROUTE = "/api/internal/triggers";
 const EVENTS_ROUTE = "/api/internal/trigger-events";
 const APP_ONLY = ["app", "event", "account"] as const;
-const SAME_CONVERSATION_ONLY = "same_conversation applies only to when=app_event or when=webhook.";
+const SAME_CONVERSATION_ONLY = "same_conversation applies only to when=app_event, when=webhook or when=schedule.";
 const REQUEST_ROUTE = "/api/internal/trigger-requests";
 const TAKES = () => ` trigger takes ${argumentNames(fullInputSchema("trigger"))}.`;
 const SCHEDULE_ONLY = ["schedule", "timeout_minutes", "timeoutMinutes", "clear_timeout", "continuity", "overlap", "run_on_startup", "runOnStartup"] as const;
@@ -460,7 +460,7 @@ async function createTrigger(args: Json, forBotId: string | undefined, context: 
     const appOnly = [...APP_ONLY, "filter", "event_config"].find((key) => args[key] !== undefined && args[key] !== null);
     if (appOnly) return { text: `${appOnly} applies only to when=app_event.`, isError: true };
   }
-  if (fields.sameConversation !== undefined && when !== "app_event" && when !== "webhook") return { text: SAME_CONVERSATION_ONLY, isError: true };
+  if (fields.sameConversation !== undefined && when === "limit_reset") return { text: SAME_CONVERSATION_ONLY, isError: true };
   if (when === "app_event") {
     const misplaced = [...SCHEDULE_ONLY, "webhook_event_types", "webhook_payload_filter"].find((key) => args[key] !== undefined && args[key] !== null);
     if (misplaced) return { text: `An app-event trigger fires when the app's event happens, so it takes no ${misplaced}.`, isError: true };

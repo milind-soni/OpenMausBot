@@ -1,6 +1,6 @@
 // This computer and My Cloud together (electron/places-together.mjs), as a page sees it: the other place's bots, listed
 // beside its own. Every row carries its `home`, and ids are unique only within a place, so rows are keyed by home and id.
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import type { BotHome, PlaceBotRow, PlacesTogetherState } from "../../electron/places-together.mjs";
 
 export type { BotHome, PlaceBotRow, PlacesTogetherState };
@@ -61,4 +61,47 @@ export function openOtherPlaceBot(id: string): void {
 export function resetPlacesTogetherForTest(): void {
   known = null;
   listeners.clear();
+}
+
+export type NewBotChoice = import("../../electron/places-together.mjs").NewBotChoice;
+
+/** What differs about making a bot in the other place, as facts: it sleeps, no AI is ready there, or which AIs are
+ * ready on one side only. Nothing when the two sides match or the other place could not be asked. */
+export function newBotDifference(hereAis: readonly string[], choice: (Pick<NewBotChoice, "home" | "state"> & { ais: readonly string[] | null }) | null):
+  { kind: "asleep" } | { kind: "noAi" } | { kind: "ais"; onlyThere: string[]; onlyHere: string[] } | null {
+  if (!choice) return null;
+  if (choice.home === "cloud" && (choice.state === "asleep" || choice.state === "waking")) return { kind: "asleep" };
+  if (!choice.ais) return null;
+  if (!choice.ais.length) return { kind: "noAi" };
+  const fold = (name: string) => name.trim().toLowerCase();
+  const here = new Set(hereAis.map(fold)), there = new Set(choice.ais.map(fold));
+  const onlyThere = [...choice.ais].filter((name) => !here.has(fold(name))), onlyHere = hereAis.filter((name) => !there.has(fold(name)));
+  return onlyThere.length || onlyHere.length ? { kind: "ais", onlyThere, onlyHere } : null;
+}
+
+/** An AI's name for a line the person reads: the name they gave it, or its engine's name when that name holds an
+ * email address, which is never shown beside another place. */
+export function aiLabel(name: string, kind: string, engineName: (kind: string) => string): string {
+  return /\S@\S/.test(name) ? engineName(kind) : name;
+}
+
+/** The other place as the ＋ shows it, asked each time the menu opens. */
+export function readNewBotChoice(): Promise<NewBotChoice | null> {
+  return bridge()?.newBotChoice?.().catch(() => null) ?? Promise.resolve(null);
+}
+
+/** Makes the new bot in the other place: main opens it, and that place makes the bot. */
+export function newBotInOtherPlace(): void {
+  void bridge()?.newBot?.().catch(() => {});
+}
+
+/** The other place asked for a new bot here: `make` runs once this page is ready for it. */
+export function useNewBotFromOtherPlace(ready: boolean, make: () => void): void {
+  const [asked, setAsked] = useState(false);
+  useEffect(() => bridge()?.onNewBot?.(() => setAsked(true)), []);
+  useEffect(() => {
+    if (!asked || !ready) return;
+    setAsked(false);
+    make();
+  }, [asked, ready, make]);
 }

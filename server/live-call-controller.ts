@@ -9,6 +9,7 @@ import { signInWaits } from "../shared/sign-in-request.ts";
 import type { LiveCallRecord, LiveCallState, LiveClient, LiveElevenLabsTransport, LiveEndReason, LiveFishTransport, LiveGeminiTransport, LiveProvider } from "../shared/wire.ts";
 import { FISH_AGENT_VOICE } from "./live-fish.ts";
 import { LIVE_NEEDS_KEY, liveAuthHeaders, liveCallSummaryLine, liveProviderName, LiveSessionError, liveVoice, spokenHangUp, type LiveEndpoint } from "./live-call.ts";
+import { LIVE_CUSTOM_REFUSAL } from "./live-access.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -186,17 +187,20 @@ export class LiveCallController {
     // First: someone refused here is not told about a running call, or sent to set Azure or a relayed service up.
     // The chosen relayed service comes before a key's endpoint, so its refusal and its mismatch check apply.
     const relayedChoice = relayedProvider(settings.provider);
+    // A custom endpoint is held to Azure's limit (LIVE_DATA_CHANNEL), with its own words.
     const limited = settings.provider === "azure" || settings.endpoint?.provider === "azure" ? "azure"
+      : settings.provider === "custom" || settings.endpoint?.provider === "custom" ? "custom"
       : relayedChoice ?? relayedProvider(settings.endpoint?.provider);
     if (limited) {
-      const refusal = limited === "azure" ? this.deps.azureRefusal(input.auth) : limited === "fish" ? this.deps.fishRefusal(input.auth)
+      const refusal = limited === "azure" ? this.deps.azureRefusal(input.auth) : limited === "custom" ? this.deps.azureRefusal(input.auth) && LIVE_CUSTOM_REFUSAL
+        : limited === "fish" ? this.deps.fishRefusal(input.auth)
         : limited === "gemini" ? this.deps.geminiRefusal(input.auth) : this.deps.elevenlabsRefusal(input.auth);
       if (refusal) {
         this.deps.log(`[live] call refused bot=${input.botId} client=${input.client} provider=${limited}`);
         throw new LiveSessionError(refusal, 403);
       }
     }
-    const relayed = limited === "azure" ? null : limited;
+    const relayed = limited === "azure" || limited === "custom" ? null : limited;
     if (relayed && (input.client === "ios" || input.client === "android")) throw new LiveSessionError(relayed === "fish" ? LIVE_FISH_NEEDS_APP : relayed === "gemini" ? LIVE_GEMINI_NEEDS_APP : LIVE_ELEVENLABS_NEEDS_APP, 400);
     if (!relayed && !input.sdp) throw new LiveSessionError("The call request was not valid.", 400);
     if (this.call && this.call.state.status !== "ended") throw new LiveCallBusyError({ ...this.call.state });

@@ -7862,6 +7862,9 @@
   "server.routines.held.noConnections": "你的例行任务已暂停：所有已连接的应用和 MCP 服务都被移除了。连接一个之后它们会恢复，你也可以在“例行任务”中重新打开一个。",
   "server.routines.turnedBackOn": "已重新开启：{names}。之前的版本在它的云端桌面未能启动后把它关闭了。",
   "server.routines.turnedBackOnMany": "已重新开启：{names}。之前的版本在它们的云端桌面未能启动后把它们关闭了。",
+  "server.routines.card.conversationKept": "每次执行都会接着上次执行的对话继续",
+  "server.routines.card.sessionContinues": "每次执行都会接着上次执行的对话继续",
+  "server.routines.card.onceContinues": "将执行一次；每次执行都会接着上次执行的对话继续。",
   "mcp.request.change": "更改",
   "mcp.request.remove": "移除",
   "secretCard.greenference.description": "用你自己的密钥运行 Greenference 模型。",
@@ -10241,5 +10244,12 @@
   "together.switch.title": "这台电脑和 My Cloud 合在一起",
   "together.switch.line": "默认关闭。Cloud 上的机器人和这台电脑上的机器人显示在同一个列表中，各自在所在的位置打开。",
   "together.switch.failed": "未能保存。请重试。",
-  "together.state.signin": "打开一次 My Cloud 以登录。"
+  "together.state.signin": "打开一次 My Cloud 以登录。",
+  "sidebar.newBotOn.computer": "在这台电脑上新建机器人",
+  "sidebar.newBotOn.cloud": "在 My Cloud 上新建机器人",
+  "sidebar.newBotOn.asleep": "My Cloud 已休眠。这会唤醒它。",
+  "sidebar.newBotOn.noAi": "那里还没有登录任何 AI。",
+  "sidebar.newBotOn.onlyThere": "只在那里登录：{ais}。",
+  "sidebar.newBotOn.onlyHere": "只在这里登录：{ais}。",
+  "sidebar.newBotOn.needsUpdate": "My Cloud 需要下一次更新才能这样做。"
 }

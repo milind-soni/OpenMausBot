@@ -9,6 +9,9 @@ import { Select } from "./Select";
 import { WorkersAiKeyCard } from "./WorkersAiKeyCard";
 import { openKeySettings } from "./keys/key-focus";
 
+type CustomApi = "systemone" | "decisions" | "chat";
+const customApiOf = (api: string | undefined): CustomApi => (api === "decisions" || api === "chat" ? api : "systemone");
+
 const KEY_URL = { jev: "https://typesafe.ai", openrouter: "https://openrouter.ai/keys" } as const;
 const KEY_SLOT = {
   jev: { credential: "jevApiKey", field: "key" },
@@ -150,12 +153,14 @@ function SavedText({ saved, onSave, disabled, label, placeholder, testId }: {
 export function DecisionModelSettings() {
   const { state, dispatch } = useStore();
   const decider = state.config?.decider;
-  const provider = asProvider(decider?.provider);
+  const provider = asProvider(decider?.chosen ?? decider?.provider);
   const openrouter = provider === "openrouter";
   const custom = provider === "custom";
   const configured = decider?.configured ?? false;
   const included = configured && decider?.included === true;
-  const usingShared = openrouter && configured && decider?.keySource === "shared";
+  // The shared OpenRouter key decides, whether OpenRouter is chosen or it stands in for a chosen Jev with no key yet.
+  const usingShared = configured && decider?.keySource === "shared";
+  const sharedOpenRouter = openrouter && usingShared;
   const sharedKey = openrouter && decider?.sharedKey === true;
   const ownKey = configured && !included && !usingShared;
   const enabled = decider?.enabled ?? false;
@@ -205,7 +210,7 @@ export function DecisionModelSettings() {
     return () => { cancelled = true; };
   }, [openrouter, models]);
 
-  const choose = (decision: { provider: Provider } | { openrouterModel: string; openrouterApi: "chat" | "decisions" } | { customApi: "systemone" | "decisions" }) => {
+  const choose = (decision: { provider: Provider } | { openrouterModel: string; openrouterApi: "chat" | "decisions" } | { customApi: CustomApi }) => {
     setValue("");
     setVerdict(null);
     void patch(decision);
@@ -241,14 +246,14 @@ export function DecisionModelSettings() {
       setVerdict(result.ok
         ? {
           ok: true,
-          text: openrouter || custom
+          text: openrouter || custom || testingShared
             ? [
               t(custom ? "decider.custom.test.ok" : testingShared ? "decider.openrouter.test.okShared" : "decider.openrouter.test.ok", { ms: String(result.latencyMs) }),
               ...(result.latencyMs > ROOM_BUDGET_MS ? [t("decider.test.slow")] : []),
             ].join(" ")
             : t("decider.test.ok", { ms: String(result.latencyMs) }),
         }
-        : { ok: false, text: deciderFailureText(result, testingIncluded, provider) });
+        : { ok: false, text: deciderFailureText(result, testingIncluded, testingShared ? "openrouter" : provider) });
     } catch (cause) {
       setVerdict({ ok: false, text: cause instanceof Error ? cause.message : String(cause) });
     } finally {
@@ -317,13 +322,14 @@ export function DecisionModelSettings() {
               <SettingRow title={t("decider.custom.api")}>
                 <Select
                   data-testid="decider-custom-api"
-                  value={decider?.api === "decisions" ? "decisions" : "systemone"}
-                  onChange={(event) => choose({ customApi: event.target.value === "decisions" ? "decisions" : "systemone" })}
+                  value={customApiOf(decider?.api)}
+                  onChange={(event) => choose({ customApi: customApiOf(event.target.value) })}
                   disabled={switching}
                   aria-label={t("decider.custom.api")}
                 >
                   <option value="systemone">{t("decider.custom.api.systemone")}</option>
                   <option value="decisions">{t("decider.custom.api.decisions")}</option>
+                  <option value="chat">{t("decider.custom.api.chat")}</option>
                 </Select>
               </SettingRow>
             </>
@@ -362,7 +368,7 @@ export function DecisionModelSettings() {
                 onChange={(event) => { setVerdict(null); setError(null); setValue(event.target.value); }}
                 onKeyDown={(event) => event.key === "Enter" && void save()}
                 disabled={saving}
-                placeholder={ownKey ? t("keys.replace") : t(usingShared ? "decider.openrouter.key.overridePlaceholder" : COPY[provider].placeholder)}
+                placeholder={ownKey ? t("keys.replace") : t(sharedOpenRouter ? "decider.openrouter.key.overridePlaceholder" : COPY[provider].placeholder)}
                 aria-label={keyLabel}
                 autoComplete="off"
                 spellCheck={false}
@@ -375,7 +381,7 @@ export function DecisionModelSettings() {
                 <><button type="button" data-testid="decider-manage-keys" onClick={() => dispatch(openKeySettings("openrouter"))}
                   className="cursor-pointer text-accent-text hover:underline">{t("decider.openrouter.key.manageLink")}</button>{" "}</>
               )}
-              {!usingShared && provider !== "custom" && (
+              {!sharedOpenRouter && provider !== "custom" && (
                 <a href={KEY_URL[provider]} target="_blank" rel="noopener noreferrer" className="cursor-pointer text-accent-text hover:underline focus-visible:underline">
                   {t(openrouter ? "decider.openrouter.key.getKey" : "decider.key.getKey")}
                 </a>

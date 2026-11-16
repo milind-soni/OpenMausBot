@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { openPersonWait, personWait, restingOnPerson } from "./person-wait.ts";
+import { openPersonWait, personWait, restingOnPerson, staysInView } from "./person-wait.ts";
 import type { WireMessage } from "./wire.ts";
 
 const row = (fields: Partial<WireMessage>): WireMessage => ({ id: "m", role: "bot", kind: "text", at: 5, ...fields }) as WireMessage;
@@ -62,6 +62,18 @@ describe("a conversation's visible branch", () => {
     expect(openPersonWait([password, approval])?.messageId).toBe("approval");
     expect(restingOnPerson([password, approval])?.messageId).toBe("password");
     expect(restingOnPerson([approval])).toBeUndefined();
+  });
+});
+
+describe("cards that stay in view", () => {
+  it("are an open key or app to connect, not a question, sign-in, or a settled or first-hour card", () => {
+    expect(staysInView(secret())).toBe(true);
+    expect(staysInView(connector())).toBe(true);
+    expect(staysInView(secret({ dismissed: true }))).toBe(false);
+    expect(staysInView(connector({ resumeKey: "first-hour-gmail" }))).toBe(false);
+    expect(staysInView(signIn())).toBe(false);
+    expect(staysInView(options({ subtitle: "Which day?" }))).toBe(false);
+    expect(staysInView(row({}))).toBe(false);
   });
 });
 

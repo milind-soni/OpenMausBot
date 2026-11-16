@@ -47,6 +47,7 @@ function render() {
     job: byTestId("decider-job-roomRouting")[0]!,
     provider: byTestId("decider-provider")[0],
     model: byTestId("decider-model")[0],
+    customApi: byTestId("decider-custom-api")[0],
     save: byTestId("decider-save")[0]!,
     test: byTestId("decider-test")[0]!,
     manage: byTestId("decider-manage-keys")[0],
@@ -128,6 +129,18 @@ describe("DecisionModelSettings", () => {
     expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { customKey: "gw-key" } }) });
     expect(deciderFailureText({ reason: "malformed" }, false, "custom")).toContain("Check the protocol and model ID.");
     expect(deciderFailureText({ reason: "http_error", status: 500 }, false, "custom")).toBe("Your endpoint sent back an error (500).");
+  });
+
+  it("offers OpenAI-compatible chat as a custom endpoint protocol and saves it", async () => {
+    fixture.config = status({ provider: "custom", model: "gemini-2.5-flash", api: "chat", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", configured: true, enabled: true, jobs: { roomRouting: true } });
+    const view = render();
+    expect(optionsOf(view.customApi!)).toEqual(["systemone", "decisions", "chat"]);
+    expect(view.customApi!.props.value).toBe("chat");
+    expect(view.html).toContain("OpenAI-compatible chat");
+    fixture.api.mockResolvedValue(fixture.config);
+    change(view.customApi!, "chat");
+    await flush();
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { customApi: "chat" } }) });
   });
 
   it("lists only the jobs that work: no coming-soon rows", () => {
@@ -397,6 +410,24 @@ describe("DecisionModelSettings", () => {
         click(view.master);
         await flush();
         expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { enabled: true } }) });
+      });
+
+      it("keeps a chosen Jev selected with Jev's key field, and saves a pasted Jev key in Jev's slot", async () => {
+        fixture.config = openrouter({ ...SHARED, chosen: "jev", enabled: true });
+        const view = render();
+        expect(view.provider!.props.value).toBe("jev");
+        expect(view.model).toBeUndefined();
+        expect(view.input.props["aria-label"]).toBe("Jev API key");
+        expect(view.input.props.placeholder).toBe("Paste your TypeSafe API key");
+        expect(view.html).toContain("Using your OpenRouter API key");
+        expect(view.html).toContain("https://typesafe.ai");
+        expect(view.html).not.toContain("Clear");
+        fixture.api.mockResolvedValueOnce(status({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } }));
+        type(view.input, KEY);
+        click(render().save);
+        await flush();
+        expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { key: KEY } }) });
+        expect(render().provider!.props.value).toBe("jev");
       });
 
       it("links to where the key is managed", () => {
