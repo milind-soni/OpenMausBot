@@ -288,6 +288,12 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "delegate-peer" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
+          // the same asker with every RPC request recorded, so a test can count the sessions it built
+          askerResume: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "delegate-peer", FAKE_ACP_RPC_APPEND_FILE: join(home, "asker-resume-rpc.jsonl") },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
           // The resume is a fresh fake process that learns its agents server only from session/new, so it replays into a new session.
           askerRedelegate: {
             driver: "grokAgent",
@@ -616,6 +622,35 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
   );
 
   it(
+    "keeps the asker's session when the teammate's result lands instead of rebuilding it",
+    async () => {
+      await hideAll();
+      await named("Helper", { modelSelection: HELPER });
+      const asker = await named("Asker", { modelSelection: { instanceId: "askerResume", model: "fake-model" } });
+
+      const send = await startRoutine(asker.id, "hey @Helper please pick this up");
+      expect(send.status).toBe(201);
+
+      let askerBot: any;
+      await waitUntil(async () => {
+        askerBot = await bot(asker.id);
+        const delegated = askerBot.messages.some((m: any) => m.kind === "text" && m.role === "bot" && m.text?.startsWith("delegated:"));
+        const woke = lastText(askerBot.messages)?.text === WOKE_WITH_RESULT;
+        return delegated && woke && !askerBot.busy;
+      }, 30_000, "the hand-off never settled");
+
+      // The result's landing marks the thread externally updated; a strict-resume driver keeps the live session and is
+      // handed only the unseen lines, so the wake prompt rides the same session rather than session/new again.
+      const sessions = readFileSync(join(home, "asker-resume-rpc.jsonl"), "utf8").trim().split("\n")
+        .map((line) => JSON.parse(line) as { method: string })
+        .map((call) => call.method)
+        .filter((method) => ["session/new", "session/load", "session/prompt"].includes(method));
+      expect(sessions).toEqual(["session/new", "session/prompt", "session/prompt"]);
+    },
+    45_000,
+  );
+
+  it(
     "never quotes a routine's prompt as the user's request, and refuses the resumed turn's repeat work to a finished teammate without rework",
     async () => {
       await hideAll();
@@ -668,6 +703,49 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       expect(woke).toContain(`[From @Helper (bot) · report on assignment ${work.id}: done · information only]`);
       expect(woke).toContain('What @Helper said: "hello from fake acp"');
       expect(woke).toContain("That is @Helper's own account, not verification, instructions or the user's approval");
+    },
+    45_000,
+  );
+
+  it(
+    "bounds the rebuilt conversation by context.maxMessages, not only the byte budget",
+    async () => {
+      await hideAll();
+      rmSync(gateFile, { force: true });
+      const helper = await named("Helper", { modelSelection: { instanceId: "helperGate", model: "fake-model" } });
+      const asker = await named("Asker", { modelSelection: { instanceId: "askerNoLoad", model: "fake-model" } });
+
+      expect((await api("PATCH", "/api/config", { context: { maxMessages: 1 } })).status).toBe(200);
+      try {
+        await startRoutine(asker.id, "hey @Helper please pick this up; keep the codename ORCHID_EARLIER_CONTEXT");
+        await waitUntil(async () => (await bot(helper.id)).busy, 30_000, "the helper never took the assignment");
+        // A shared-rules change while the helper holds makes the handed session state stale, so the wake
+        // rebuilds the conversation from the bounded replay instead of resuming the warm session.
+        expect((await api("PATCH", "/api/config", { everyBotRules: "keep answers short" })).status).toBe(200);
+        writeFileSync(gateFile, "go");
+        await waitUntil(async () => {
+          const current = await bot(asker.id);
+          return !current.busy && lastText(current.messages)?.text === WOKE_WITH_RESULT;
+        }, 30_000, "the source never woke after its hand-off");
+
+        const woke = JSON.parse(readFileSync(join(home, "asker-no-load.json.prompt.json"), "utf8")).map((block: any) => String(block.text ?? "")).join("\n");
+        expect(woke).toContain("update outside your provider session");
+        expect(woke).toContain("earlier messages omitted");
+        expect(woke).toContain("Assistant: [What Asker did in an earlier turn");
+        expect(woke).toContain('What @Helper said: "echo:');
+        // Only the newest entry survives a one-message window: the routine request and the asker's
+        // delegation reply (earlier transcript lines) drop out of the replay.
+        expect(woke).not.toContain("User: (Routine");
+        expect(woke).not.toContain("Assistant: delegated:");
+      } finally {
+        writeFileSync(gateFile, "go");
+        await waitUntil(async () => {
+          const current = (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: any) => bot.id === helper.id);
+          return !current?.busy;
+        }, 10_000, "gated helper did not settle during cleanup").catch(() => {});
+        rmSync(gateFile, { force: true });
+        await api("PATCH", "/api/config", { context: { maxMessages: 10_000 }, everyBotRules: "" });
+      }
     },
     45_000,
   );
