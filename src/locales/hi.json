@@ -1256,6 +1256,8 @@
   "engineSetup.finishedSignIn": "मैंने साइन-इन पूरा कर लिया",
   "engineSetup.otherComputer": "किसी दूसरे कंप्यूटर से साइन इन कर रहे हैं?",
   "engineSetup.otherComputerHint": "जब Google किसी ऐसे पेज पर भेजे जो लोड न हो, तो उस पेज का पूरा URL यहाँ पेस्ट करें।",
+  "engineSetup.cloudPasteSummary": "Google का पेज लोड नहीं हुआ? उसका पता यहाँ पेस्ट करें",
+  "engineSetup.cloudPasteHint": "साइन इन के बाद Google एक ऐसा पेज खोलता है जो लोड नहीं होता। उसका पता कॉपी करें और नीचे पेस्ट करें।",
   "engineSetup.sending": "भेजा जा रहा है…",
   "engineSetup.sendRedirect": "रीडायरेक्ट भेजें",
   "engineSetup.googleNoLink": "Google साइन-इन ने कोई लिंक नहीं दिया।",

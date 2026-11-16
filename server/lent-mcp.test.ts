@@ -49,10 +49,10 @@ function fixture(options: { keys?: LentMcpDeps["keys"]; online?: Partial<Online>
 
 const rpc = (method: string, params: unknown = {}, id = 1) => ({ jsonrpc: "2.0", id, method, params });
 
-async function route(lent: ReturnType<typeof createLentMcp>, path: string, body: unknown, method = "POST") {
+async function route(lent: ReturnType<typeof createLentMcp>, path: string, body: unknown, method = "POST", turn = TURN) {
   const json = vi.fn();
   const res = Object.assign(new EventEmitter(), { writeHead: vi.fn(function (this: unknown) { return this; }), end: vi.fn() }) as unknown as ServerResponse & { writeHead: ReturnType<typeof vi.fn> };
-  const out = await lent.route({ method, path, req: {} as IncomingMessage, res, turn: TURN, readBody: async () => body, json });
+  const out = await lent.route({ method, path, req: {} as IncomingMessage, res, turn, readBody: async () => body, json });
   return { out, json, res };
 }
 
@@ -169,8 +169,10 @@ describe("the MCP endpoint a turn's engine reaches", () => {
     expect(called.json).toHaveBeenCalledWith(expect.anything(), 200, { jsonrpc: "2.0", id: 2, result: { content: [{ type: "text", text: "found it" }] } });
     expect(requests).toEqual([
       { principal: "cloud-home", operation: { computer_id: "mac-1", action: "mcp_tools", server: { name: "local", url: "http://127.0.0.1:19501/mcp", type: "http", headers: { Authorization: "Bearer saved-header" } } } },
-      { principal: "cloud-home", operation: { computer_id: "mac-1", action: "mcp_call", server: { name: "local", url: "http://127.0.0.1:19501/mcp", type: "http", headers: { Authorization: "Bearer saved-header" } }, tool_name: "search", arguments: { q: "plan" } } },
+      { principal: "cloud-home", operation: { computer_id: "mac-1", action: "mcp_call", server: { name: "local", url: "http://127.0.0.1:19501/mcp", type: "http", headers: { Authorization: "Bearer saved-header" } }, tool_name: "search", arguments: { q: "plan" }, caller: { botId: "kiwi", threadId: "t-1" } } },
     ]);
+    await route(lent, `${LENT_MCP_PATH}local`, rpc("tools/call", { name: "search", arguments: {} }, 3), "POST", { ...TURN, threadId: "t".repeat(129) });
+    expect(requests.at(-1)!.operation, "an id the desktop wouldn't take: the call goes without its caller").not.toHaveProperty("caller");
     expect((await route(lent, `${LENT_MCP_PATH}local`, rpc("tools/list"))).json, "listed again within ten minutes: kept").toHaveBeenCalled();
     expect(requests.filter((request) => request.operation.action === "mcp_tools")).toHaveLength(1);
   });

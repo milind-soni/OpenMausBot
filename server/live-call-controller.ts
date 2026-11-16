@@ -4,7 +4,7 @@ import { spokenConsent } from "../shared/call-consent.ts";
 import {
   LIVE_COPY, liveCardKind, liveStepLabel, spokenApprovalPrompt, spokenConnectorPrompt, spokenQuestionPrompt, spokenReviewPrompt, spokenSecretPrompt, spokenSignInPrompt,
 } from "../shared/live-approval.ts";
-import { clampAppend, commentaryChunks, geminiLiveVoice, LiveTranscript } from "../shared/live-call.ts";
+import { botCallVoice, clampAppend, commentaryChunks, geminiLiveVoice, LiveTranscript } from "../shared/live-call.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
 import type { LiveCallRecord, LiveCallState, LiveClient, LiveElevenLabsTransport, LiveEndReason, LiveFishTransport, LiveGeminiTransport, LiveProvider } from "../shared/wire.ts";
 import { FISH_AGENT_VOICE } from "./live-fish.ts";
@@ -70,6 +70,8 @@ export interface LiveCallDeps {
   broadcast(frame: { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }): void;
   /** `endpoint` null, or a `setupProblem`, refuses the call with that message (409). */
   settings(): { key: string; endpoint: LiveEndpoint | null; setupProblem?: string | null; provider?: LiveProvider; voice: string; geminiVoice?: string; readTypedReplies: boolean; idleMinutes: number };
+  /** The called bot's own Live call voice, used over the app's when it is the call provider's. */
+  botVoice?(botId: string): string | undefined;
   /** Why this caller may not hold a call through Azure OpenAI; null when they may. Required, so no wiring can leave it out. */
   azureRefusal(auth: RequestAuth): string | null;
   /** The same for the relayed providers, where the harness hears the call only through its client's reports. Required too. */
@@ -207,7 +209,9 @@ export class LiveCallController {
     const endpoint = settings.endpoint;
     if (settings.setupProblem || !key || !endpoint) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
     if (relayed !== relayedProvider(endpoint.provider)) throw new LiveSessionError(settings.setupProblem || LIVE_NEEDS_KEY, 409);
-    const voice = relayed === "gemini" ? geminiLiveVoice(settings.geminiVoice) : relayed ? FISH_AGENT_VOICE : liveVoice(settings.voice);
+    const botVoice = this.deps.botVoice?.(input.botId);
+    const voice = relayed === "gemini" ? geminiLiveVoice(botCallVoice(botVoice, settings.geminiVoice, true))
+      : relayed ? FISH_AGENT_VOICE : liveVoice(botCallVoice(botVoice, settings.voice, false));
     const call = this.newCall(input, key, endpoint, voice);
     // Taken before the first await: a second start in the same tick is refused.
     this.call = call;

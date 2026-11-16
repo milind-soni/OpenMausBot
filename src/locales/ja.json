@@ -3240,6 +3240,8 @@
   "engineSetup.finishedSignIn": "サインインを完了しました",
   "engineSetup.otherComputer": "別のコンピューターからサインインしますか？",
   "engineSetup.otherComputerHint": "Google が読み込めないページにリダイレクトしたら、そのページの完全な URL をここに貼り付けてください。",
+  "engineSetup.cloudPasteSummary": "Google のページが読み込めませんか？ そのアドレスをここに貼り付けてください",
+  "engineSetup.cloudPasteHint": "サインイン後、Google は読み込めないページを開きます。そのアドレスをコピーして、下に貼り付けてください。",
   "engineSetup.otherComputerUrl": "別のコンピューターに表示されたページのアドレス",
   "engineSetup.sending": "送信中…",
   "engineSetup.sendRedirect": "リダイレクトを送る",

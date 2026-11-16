@@ -1355,6 +1355,8 @@
   "engineSetup.finishedSignIn": "Ich bin fertig mit der Anmeldung",
   "engineSetup.otherComputer": "Meldest du dich von einem anderen Rechner an?",
   "engineSetup.otherComputerHint": "Wenn Google auf eine Seite weiterleitet, die nicht lädt, füge hier deren vollständige URL ein.",
+  "engineSetup.cloudPasteSummary": "Googles Seite lädt nicht? Füge ihre Adresse hier ein",
+  "engineSetup.cloudPasteHint": "Nach der Anmeldung öffnet Google eine Seite, die nicht lädt. Kopiere ihre Adresse und füge sie unten ein.",
   "engineSetup.sending": "Wird gesendet…",
   "engineSetup.sendRedirect": "Weiterleitung senden",
   "engineSetup.googleNoLink": "Die Google-Anmeldung hat keinen Link zurückgegeben.",

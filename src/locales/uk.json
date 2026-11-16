@@ -1430,6 +1430,8 @@
   "engineSetup.finishedSignIn": "Я завершив вхід",
   "engineSetup.otherComputer": "Входите з іншого комп'ютера?",
   "engineSetup.otherComputerHint": "Після того як Google перенаправить на сторінку, що не завантажується, вставте повну URL-адресу тієї сторінки сюди.",
+  "engineSetup.cloudPasteSummary": "Сторінка Google не завантажилася? Вставте її адресу сюди",
+  "engineSetup.cloudPasteHint": "Після входу Google відкриє сторінку, що не завантажується. Скопіюйте її адресу та вставте нижче.",
   "engineSetup.sending": "Надсилаємо…",
   "engineSetup.sendRedirect": "Надіслати редирект",
   "engineSetup.googleNoLink": "Вхід Google не повернув посилання.",
