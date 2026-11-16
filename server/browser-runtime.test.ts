@@ -560,7 +560,9 @@ describe("server-owned browser MCP runtime", () => {
     expect(responses.map((r) => r.pid)).toEqual([list.pid, list.pid]);
     expect(responses[0].content[0].text).toContain("first");
     expect(responses[1].content[0].text).toContain("second");
-    const other = await value.agentRpc("two", spec(), "tools/list", {}) as { pid: number };
+    // Another session's list is the same answer and starts no engine process of its own; its calls get their own client.
+    expect(await value.agentRpc("two", spec(), "tools/list", {})).toEqual(list);
+    const other = await value.agentRpc("two", spec(), "tools/call", { name: "echo", arguments: { text: "other" } }) as { pid: number };
     expect(other.pid).not.toBe(list.pid);
     await value.take("one", "owner");
     await expect(value.agentRpc("one", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/paused/);
@@ -991,23 +993,24 @@ describe("server-owned browser MCP runtime", () => {
     expect(value.canControl("s", "owner")).toBe(true);
   });
 
-  it("bounds concurrent requests without queuing more work behind a hung action", async () => {
+  it("queues no more work behind a hung action: the tool list answers from the one already read", async () => {
     const value = runtime({ maxPending: 1, requestTimeoutMs: 250 });
-    await value.agentRpc("s", spec(), "tools/list", {});
+    const list = await value.agentRpc("s", spec(), "tools/list", {});
     const pending = value.agentRpc("s", spec(), "tools/call", { name: "hang" });
     const observed = expect(pending).resolves.toMatchObject({ isError: true });
     await new Promise((resolve) => setTimeout(resolve, 20)); // the hang reaches the engine
-    await expect(value.agentRpc("s", spec(), "tools/list", {})).rejects.toThrow(/Too many pending/);
+    await expect(value.agentRpc("s", spec(), "tools/list", {})).resolves.toEqual(list);
     await observed;
   });
 
   it("evicts idle transports without dropping a human hold", async () => {
     const value = runtime({ idleMs: 30 });
-    const before = await value.agentRpc("s", spec(), "tools/list", {}) as { pid: number };
+    const before = await value.agentRpc("s", spec(), "tools/call", { name: "echo" }) as { pid: number };
     await value.take("s", "owner");
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(value.heldBy("s")).toBe("owner");
-    const after = await value.agentRpc("s", spec(), "tools/list", {}) as { pid: number };
+    value.release("s", "owner");
+    const after = await value.agentRpc("s", spec(), "tools/call", { name: "echo" }) as { pid: number };
     expect(after.pid).not.toBe(before.pid);
   });
 
