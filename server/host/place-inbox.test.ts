@@ -46,10 +46,12 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
     },
     patchTask: () => undefined, patchGroup: () => undefined,
     messagesFor: (threadId: string) => said.get(threadId) ?? [],
+    activePath: (threadId: string) => said.get(threadId) ?? [],
     onChange: (listener: (change: { type: string; threadId: string }) => void) => { listeners.push(listener); return () => undefined; },
   };
   const inbox = createPlaceInbox({
     dataDir, store: store as unknown as PlaceInboxDeps["store"], openCards: () => cards,
+    live: () => false,
     viewer: (auth) => viewers.get(auth)!,
     sees: () => true,
     mayAnswer: (auth) => auth === OWNER,
@@ -155,6 +157,16 @@ describe("the inbox of a place that is no team's", () => {
     f.cards.length = 0;
     expect(f.inbox.count(OWNER)).toBe(0);
     expect(f.inbox.view(OWNER).rows).toEqual([]);
+  });
+
+  it("drops a question the person wrote past, unless a running turn still waits on it", () => {
+    const live = new Set<string>();
+    const f = setup({ live: (_threadId, requestId) => live.has(requestId) });
+    const row = f.ask("eli-main", "q");
+    f.said.set("eli-main", [{ ...row, role: "bot", kind: "options", card: JSON.parse(row.card!) } as Said, { id: "said", at: 2_000, role: "user", text: "Do the report instead" }]);
+    expect(f.inbox.count(OWNER)).toBe(0);
+    live.add("q");
+    expect(f.inbox.view(OWNER).rows.map((one) => one.id)).toEqual(["card-q"]);
   });
 
   it("leaves out offers and receipts, and a card somebody already settled", () => {
