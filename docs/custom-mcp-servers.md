@@ -125,6 +125,23 @@ key named **MCP Client** under **Settings → API Keys**, where revoking it ends
 the connection. The key lasts one year, then the card asks you to sign in
 again. See [BubblaV's OpenMausBot guide](https://docs.bubblav.com/user-guide/integrations/openmausbot).
 
+### Levea
+
+In Plugins, find **Levea** and click **Connect**. The card uses Levea's
+official hosted MCP endpoint, `https://api.livecore.ai/api/v1/misc/mcp`, and
+opens Levea's browser sign-in (OAuth 2.1 with PKCE). Sign in or create a free
+account at [livecore.ai](https://www.livecore.ai); no API key is needed. After
+sign-in and tool discovery it enables the connection, and **Disconnect** and
+**Bot access** work as they do for Whop and BubblaV.
+
+A bot that can use Levea can inspect projects, assets, brand kits and 60+
+built-in caption templates, run autonomous natural-language edits
+(`autonomous_edit`, `queue_edit`) for viral clips, captions, 9:16 speaker
+reframing, silence cleanup, B-roll, voiceover and cloud MP4 exports, and
+delete projects, assets, brand kits or saved templates. Rendering and exports
+use your Levea account's plan allowance, so choose which bots get it under
+**Bot access**. See the [Levea MCP documentation](https://github.com/brajendrak00068/agentic-ai-video-production/blob/main/mcp-server/README.md).
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser
