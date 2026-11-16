@@ -31,8 +31,10 @@ export interface FakeNetlify {
   rootContentType: string;
   /** How many status reads a new deploy answers "processing" before it is ready; a new site's first deploy is slow. */
   processingPolls: number;
-  /** A team that enforces its protection: turning `sso_login` off is refused with 403. */
-  refusePublic: boolean;
+  /** Non-zero: turning `sso_login` off is refused with this status (403 is a team that enforces its protection). */
+  refusePublicWith: number;
+  /** Sites also have a password: turning `sso_login` off is accepted, and they keep answering 401. */
+  passwordProtected: boolean;
   stop(): Promise<void>;
 }
 
@@ -45,7 +47,8 @@ export async function startFakeNetlify(token: string, { teamLogin = false }: { t
     failNext: (status, body) => { failure = { status, body }; },
     rootContentType: "text/html; charset=UTF-8",
     processingPolls: 0,
-    refusePublic: false,
+    refusePublicWith: 0,
+    passwordProtected: false,
   };
   const origin = () => `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const deployView = (deploy: FakeDeploy) => ({
@@ -111,9 +114,10 @@ export async function startFakeNetlify(token: string, { teamLogin = false }: { t
         return res.end();
       }
       if (req.method === "PATCH" && changed) {
-        if (fake.refusePublic) return send(403, { code: 403, message: "Your team's settings don't allow changing site protection" });
-        if ((JSON.parse(body.toString()) as { sso_login?: boolean }).sso_login === false) changed.teamLogin = false;
-        return send(200, { id: change[1], name: changed.name, sso_login: changed.teamLogin });
+        if (fake.refusePublicWith) return send(fake.refusePublicWith, { code: fake.refusePublicWith, message: "Your team's settings don't allow changing site protection" });
+        const off = (JSON.parse(body.toString()) as { sso_login?: boolean }).sso_login === false;
+        if (off && !fake.passwordProtected) changed.teamLogin = false;
+        return send(200, { id: change[1], name: changed.name, sso_login: off ? false : changed.teamLogin });
       }
       const create = /^\/api\/v1\/sites\/([\w-]+)\/deploys$/.exec(path);
       if (req.method === "POST" && create) {

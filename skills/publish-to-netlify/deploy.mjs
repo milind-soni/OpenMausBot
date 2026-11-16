@@ -189,7 +189,7 @@ function readSiteRecord(file) {
   return record;
 }
 
-const RECORD_KEYS = ["version", "siteId", "name", "url", "adminUrl", "title", "botId", "botName", "createdAt", "publishedAt", "deployId", "deployState", "access"];
+const RECORD_KEYS = ["version", "siteId", "name", "url", "adminUrl", "title", "botId", "botName", "createdAt", "publishedAt", "deployId", "deployState", "access", "privateReason", "keepPrivate"];
 const oneLine = (value, max) => String(value).replace(/[\p{Cc}\s]+/gu, " ").trim().slice(0, max);
 
 /** `.netlify-site.json`, a contract other code reads: known keys only, in a fixed order, and never the token. */
@@ -200,14 +200,18 @@ export function siteRecord(fields) {
 }
 
 /** Answers to the PATCH that mean the team keeps its sites private (Netlify 2026-11: a team can enforce its default). */
-const PUBLIC_REFUSED = new Set([400, 403, 422]);
+const PUBLIC_REFUSED = new Set([403, 422]);
 // Netlify's docs (2026-11): the site's own setting is under Project configuration > General > Visitor access; the
 // team default is under Team settings > General > Visitor access, or Team settings > Access & security > Visitor
 // access on Enterprise and older plans.
 const TEAM_KEEPS_PRIVATE = "The site is deployed, but the Netlify team's settings keep it private: only people signed in to that team can open the link. "
   + "To open it to anyone with the link, open the site in Netlify and change Project configuration > General > Visitor access. "
   + "To make new sites public, a team owner changes the default in Team settings > General > Visitor access (Team settings > Access & security > Visitor access on some plans).";
+const STILL_ASKS_LOGIN = "Netlify accepted making the site public, but the link still asks for a login: the site may have password protection or "
+  + "another Visitor access setting. The person can check Project configuration > General > Visitor access for this site in Netlify.";
 const PRIVATE_ON_CHECK = "The link asks for a Netlify login. Unless the person asked for a private site, run again with --make-public.";
+const DRAFT_ASKS_LOGIN = "This draft asks for a Netlify login: a draft never changes who can open the site. A publish without --draft makes the site public, unless the person asked for a private one.";
+const PRIVATE_MESSAGES = { team: TEAM_KEEPS_PRIVATE, protected: STILL_ASKS_LOGIN, unknown: PRIVATE_ON_CHECK };
 
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 
@@ -254,25 +258,36 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
       site = siteRecord({ ...site, ...changes });
       writeFileSync(siteFile, `${JSON.stringify(site, null, 2)}\n`);
     };
-    const makePublic = () => api("Making the site public", "PATCH", `/sites/${site.siteId}`, { sso_login: false });
-    /** Sites are public unless the person asked for a private one. A team that enforces its protection refuses the
-     * change (or keeps `sso_login` on): that is not a failed publish, the answer says the site stays private. */
+    /** Opens the site to anyone with the link: "opened", "refused" when the team keeps its sites private (it refuses the
+     * change or keeps `sso_login` on), or what went wrong. The deploy is live by then, so nothing here fails it. */
     const openToAll = async () => {
       try {
-        return (await makePublic())?.sso_login !== true;
+        const changed = await api("Making the site public", "PATCH", `/sites/${site.siteId}`, { sso_login: false });
+        return changed?.sso_login === true ? "refused" : "opened";
       } catch (error) {
-        if (error instanceof NetlifyError && PUBLIC_REFUSED.has(error.status)) return false;
-        throw error;
+        return error instanceof NetlifyError && PUBLIC_REFUSED.has(error.status) ? "refused" : scrub(error.message);
       }
     };
-
-    /** Waits for Netlify to finish a deploy, then for its link. A deploy still being processed at the deadline is
-     * neither a success nor a failure: the answer says so and `--check` picks it up. */
-    const linkAnswer = async (url, expectPublic) => {
-      const link = await checkLink(url, env, { pollMs, waitMs: linkWaitMs, privateAfterMs, expectPublic });
-      return link.access === "private" && !args.keepPrivate ? { ...link, message: args.dir || args.public ? TEAM_KEEPS_PRIVATE : PRIVATE_ON_CHECK } : link;
+    /** The person's choice, kept in the record so a later publish honours it until they ask for the site to be public. */
+    const wantPrivate = args.keepPrivate || (site?.keepPrivate === true && !args.public);
+    /** Opens the site unless the person wants it private (a draft never changes it), then checks the link. A private
+     * answer says why: the `person` asked for it, the `team` refused the change, the site is still `protected` some
+     * other way, or nothing was changed this time (`unknown`). */
+    const lookAt = async (url, { draft, open }) => {
+      const opened = draft || wantPrivate || !open ? null : await openToAll();
+      const link = await checkLink(url, env, { pollMs, waitMs: linkWaitMs, privateAfterMs, expectPublic: opened === "opened" });
+      if (link.access !== "private") return { link, record: { access: link.access, privateReason: undefined } };
+      if (draft) return { link: wantPrivate ? link : { ...link, message: DRAFT_ASKS_LOGIN }, record: {} };
+      if (opened !== null && opened !== "opened" && opened !== "refused") {
+        return { link: { ...link, message: `${opened}. The site is deployed; run again with --make-public in a minute.` }, record: { access: "private", privateReason: "unknown" } };
+      }
+      const reason = wantPrivate ? "person" : opened === "refused" ? "team" : opened === "opened" ? "protected" : site.privateReason ?? "unknown";
+      return { link: { ...link, privateReason: reason, ...(reason === "person" ? {} : { message: PRIVATE_MESSAGES[reason] }) }, record: { access: "private", privateReason: reason } };
     };
-    const finish = async (deploy, { draft, expectPublic, firstLook }) => {
+    /** Waits for Netlify to finish a deploy, then for its link. A deploy still being processed at the deadline is
+     * neither a success nor a failure: the answer says so and `--check` picks it up. Only a ready production deploy
+     * opens the site, so a failed or draft one never changes who can see it. */
+    const finish = async (deploy, { draft, firstLook }) => {
       const deadline = Date.now() + waitMs;
       while (deploy.state !== "ready" && deploy.state !== "error" && Date.now() < deadline) {
         await wait(pollMs);
@@ -289,8 +304,8 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
         if (!draft) save({ deployState: state });
         return { ...common, pending: true, live: false, message: `Netlify is still processing this deploy (${state}). It is not live yet and has not failed. Run again with --check in a minute.` };
       }
-      const link = await linkAnswer(url, expectPublic);
-      if (!draft) save({ url, deployState: state, ...(link.access ? { access: link.access } : {}), ...(firstLook ? { publishedAt: now().toISOString() } : {}) });
+      const { link, record } = await lookAt(url, { draft, open: firstLook || args.public });
+      if (!draft) save({ url, deployState: state, ...(link.access ? record : {}), ...(firstLook ? { publishedAt: now().toISOString() } : {}) });
       return { ...common, ...link };
     };
 
@@ -308,10 +323,14 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
 
     if (!dir) {
       if (!site) throw new Error(`${siteFile} is missing; publish the site first`);
-      const opened = args.public && await openToAll();
-      if (!site.deployId) return { ok: true, draft: false, siteId: site.siteId, name: site.name, url: site.url, adminUrl: site.adminUrl, ...(await linkAnswer(site.url, opened)) };
+      if (args.public) save({ keepPrivate: undefined });
+      if (!site.deployId) {
+        const { link, record } = await lookAt(site.url, { draft: false, open: args.public });
+        if (link.access) save(record);
+        return { ok: true, draft: false, siteId: site.siteId, name: site.name, url: site.url, adminUrl: site.adminUrl, ...link };
+      }
       const deploy = await api("Checking the deploy", "GET", `/sites/${site.siteId}/deploys/${site.deployId}`);
-      return await finish(deploy, { draft: false, expectPublic: opened, firstLook: site.deployState !== "ready" || !site.publishedAt });
+      return await finish(deploy, { draft: false, firstLook: site.deployState !== "ready" || !site.publishedAt });
     }
 
     const { files, skipped } = collectFiles(dir);
@@ -332,7 +351,7 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
     } else if (Object.keys(labels).length && !args.draft) {
       save(labels);
     }
-    const opened = !args.keepPrivate && await openToAll();
+    if (!args.draft && (args.keepPrivate || args.public)) save({ keepPrivate: args.keepPrivate || undefined });
 
     let deploy = await api("Starting the deploy", "POST", `/sites/${site.siteId}/deploys`, {
       files: digest,
@@ -366,7 +385,7 @@ export async function publish(argv, env = process.env, { pollMs = 2000, waitMs =
     }));
 
     return {
-      ...(await finish(deploy, { draft: args.draft, expectPublic: opened, firstLook: true })), created,
+      ...(await finish(deploy, { draft: args.draft, firstLook: !args.draft })), created,
       files: files.length, uploaded: required.length, alreadyOnNetlify: new Set(Object.values(digest)).size - required.length,
       bytes: files.reduce((sum, file) => sum + file.size, 0), skipped,
     };

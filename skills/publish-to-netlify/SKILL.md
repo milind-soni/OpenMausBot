@@ -21,8 +21,8 @@ Publish only when the person asks. If they only asked you to build something, sh
 
 ## Before anything goes out
 
-- A published link is public: anyone who has it can open it, and there is no sign-in for visitors. Say so the first
-  time you publish for a person.
+- A published link is public: anyone who has it can open it, with no sign-in. Say so the first time you publish for a
+  person. A site is private only when they ask for that, or when their Netlify team won't let it be opened.
 - Never publish secrets, keys, private files, memory or notes, anything from another person's chat, or a team's
   private data. A page's code is readable by every visitor, so nothing secret goes in it either.
 - If the content looks personal or internal (names with contact details, customer lists, money, health, staff or
@@ -128,9 +128,9 @@ Give the call an 8-minute `timeout`: a new site's first deploy can take Netlify 
   Netlify, so it may be taken. Without it Netlify picks a name.
 - `--project <folder>` when the project folder is not the current one. `--draft` publishes a preview at its own
   address and leaves the live site as it is.
-- Sites are public by default: every run opens the site to anyone with the link, even where the person's Netlify team
-  keeps new sites private. Pass `--keep-private` only when the person asks for a private site; then only people
-  signed in to their Netlify team can open it, if their team protects sites at all (`access` says which).
+- Sites are public by default: once a deploy is ready, the site is opened to anyone with the link, even where their
+  Netlify team keeps new sites private (a draft never changes it). Pass `--keep-private` only when the person asks for
+  a private site: it is remembered for later runs, and `--make-public` alone undoes it when they ask.
 - It never uploads dotfiles and dot folders (`.env`, `.git`, `.openmausbot-secrets`, the site record),
   `node_modules`, env files, keys or certificates, or links to files elsewhere, and it stops if any file contains the
   token. The answer lists what it left out under `skipped`.
@@ -141,9 +141,9 @@ It prints one line of JSON:
 
 - `"ok": true`, `"state": "ready"`, `"live": true`: Netlify processed the deploy and the link answered. Reply with the
   link (`url`), what you published in one or two lines, and that the link is public.
-- `"access": "private"` with a `message`: the site is deployed, but their Netlify team's settings keep it private
-  and Netlify refused to open it. This is not a failure. Give the link, say only people signed in to their Netlify
-  team can open it, and pass on where the `message` says the setting is. Don't change anything else on their account.
+- `"access": "private"`: deployed, not a failure; only people signed in to their Netlify team can open it.
+  `privateReason` `person`: as they asked. Otherwise pass on the `message` (`team`: their team's setting keeps it
+  private; `protected`: it may have a password) and where it says the setting is. Change nothing else on their account.
 - `live` false with `"liveStatus": 200`: the link answers, but not as a web page (`contentType` is not `text/html`),
   so a browser would show the page's source. Say so; don't call it published.
 - `"pending": true` (`state` is `processing` or similar): Netlify is still working on it. It is not live yet and it

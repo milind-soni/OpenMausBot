@@ -82,7 +82,7 @@ describe("publish-to-netlify skill guide", () => {
     expect(guide).toContain("deploy.mjs");
     expect(guide).toContain(helper.SITE_FILE);
     expect(guide).toMatch(/link is public/);
-    expect(guide).toMatch(/no sign-in for visitors/);
+    expect(guide).toMatch(/anyone who has it can open it, with no sign-in/);
     expect(guide).toMatch(/token never goes to the cloud computer/);
     expect(guide).toContain('"access": "private"');
     expect(guide).toContain("contentType");
@@ -93,8 +93,9 @@ describe("publish-to-netlify skill guide", () => {
     expect(guide).toMatch(/only after they confirm/);
     expect(guide).toMatch(/link will stop working for everyone/);
     expect(guide).toMatch(/public by default/);
-    expect(guide).toMatch(/--keep-private[^.]*only when the person asks for a private site/);
-    expect(guide).not.toMatch(/--make-public/);
+    expect(guide).toMatch(/--keep-private[^.]*only when the person asks for\s+a private site/);
+    expect(guide).toMatch(/a draft never changes it/);
+    expect(guide).toMatch(/`--make-public` alone undoes it when they ask/);
     expect(guide).toMatch(/Early Access/);
     expect(guide).toMatch(/Never promise that it is always on/);
   });
@@ -322,13 +323,13 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
     const wrong = join(project, ".openmausbot-secrets", "thread1", "card2");
     writeFileSync(wrong, "nfp_RevokedTokenNeverReal", { mode: 0o600 });
     const denied = await run(["--dir", "dist", "--token-file", wrong]);
-    expect(denied).toMatchObject({ code: 1, json: { ok: false, error: "Making the site public: Netlify answered 401: Access Denied" } });
+    expect(denied).toMatchObject({ code: 1, json: { ok: false, error: "Starting the deploy: Netlify answered 401: Access Denied" } });
     expect(denied.stdout).not.toContain("nfp_Revoked");
     rmSync(wrong);
 
-    fake.failNext(429, { code: 429, message: "Too many requests" });
+    fake.failNext(429, { code: 429, message: "Too many deploys" });
     const limited = await run(["--dir", "dist", "--token-file", tokenFile]);
-    expect(limited.json).toMatchObject({ ok: false, error: "Making the site public: Netlify answered 429: Too many requests" });
+    expect(limited.json).toMatchObject({ ok: false, error: "Starting the deploy: Netlify answered 429: Too many deploys" });
 
     const elsewhere = join(home, "workspace", "taken");
     mkdirSync(elsewhere, { recursive: true });
@@ -343,7 +344,7 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
     mkdirSync(elsewhere, { recursive: true });
     writeFileSync(join(elsewhere, helper.SITE_FILE), JSON.stringify({ siteId: "deleted-site", url: "https://gone.netlify.app" }));
     const gone = await run(["--dir", join(project, "dist"), "--token-file", tokenFile, "--project", elsewhere]);
-    expect(gone.json).toMatchObject({ ok: false, error: "Making the site public: Netlify answered 404: Not Found" });
+    expect(gone.json).toMatchObject({ ok: false, error: "Starting the deploy: Netlify answered 404: Not Found" });
 
     writeFileSync(join(elsewhere, helper.SITE_FILE), JSON.stringify({ url: "https://gone.netlify.app" }));
     const broken = await run(["--dir", join(project, "dist"), "--token-file", tokenFile, "--project", elsewhere]);
@@ -386,84 +387,140 @@ describe("publish-to-netlify helper, end to end against a stand-in on loopback",
   describe("a Netlify team that protects new sites", () => {
     let guarded: FakeNetlify;
     const patches = () => guarded.requests.filter((request) => request.startsWith("PATCH "));
-    const runGuarded = (folder: string, extra: string[]) => {
-      mkdirSync(join(home, "workspace", folder), { recursive: true });
-      return run([...extra, "--token-file", tokenFile, "--project", join(home, "workspace", folder)], { OMB_NETLIFY_API_URL: guarded.url });
-    };
+    const patchOf = (siteId: unknown) => `PATCH /api/v1/sites/${String(siteId)}`;
+    const recordIn = (folder: string) => JSON.parse(readFileSync(join(home, "workspace", folder, helper.SITE_FILE), "utf8")) as Record<string, unknown>;
     /** In process, with short waits: a private link is only called private after a few seconds of 401s. */
-    const publishGuarded = (folder: string, extra: string[]) => {
+    const publishIn = (folder: string, extra: string[], waits: { waitMs?: number } = {}) => {
       mkdirSync(join(home, "workspace", folder), { recursive: true });
       return helper.publish([...extra, "--token-file", tokenFile, "--project", join(home, "workspace", folder)], { OMB_NETLIFY_API_URL: guarded.url },
-        { pollMs: 5, waitMs: 2000, linkWaitMs: 2000, privateAfterMs: 50 });
+        { pollMs: 5, waitMs: 2000, linkWaitMs: 2000, privateAfterMs: 50, ...waits });
     };
+    let dist: string[];
     beforeAll(async () => {
       guarded = await startFakeNetlify(TOKEN, { teamLogin: true });
+      dist = ["--dir", join(project, "dist")];
     });
     afterAll(async () => {
       await guarded.stop();
     });
 
-    it("makes a new site public by default, and again on every publish", async () => {
-      const first = await runGuarded("guarded", ["--dir", join(project, "dist")]);
+    it("makes a new site public once its deploy is ready, and again on every publish", async () => {
+      mkdirSync(join(home, "workspace", "guarded"), { recursive: true });
+      const first = await run([...dist, "--token-file", tokenFile, "--project", join(home, "workspace", "guarded")], { OMB_NETLIFY_API_URL: guarded.url });
       expect(first).toMatchObject({ code: 0, json: { ok: true, created: true, state: "ready", live: true, access: "public", liveStatus: 200 } });
       expect(first.json).not.toHaveProperty("message");
-      const site = `PATCH /api/v1/sites/${String(first.json.siteId)}`;
+      const site = patchOf(first.json.siteId);
       expect(patches()).toEqual([site]);
-      expect(guarded.requests.indexOf(site)).toBeLessThan(guarded.requests.findIndex((request) => /^POST .*\/deploys$/.test(request)));
+      const deployRead = guarded.requests.lastIndexOf(`GET /api/v1/sites/${String(first.json.siteId)}/deploys/${String(first.json.deployId)}`);
+      const started = guarded.requests.indexOf(`POST /api/v1/sites/${String(first.json.siteId)}/deploys`);
+      expect(guarded.requests.indexOf(site)).toBeGreaterThan(Math.max(deployRead, started));
       expect(await (await fetch(String(first.json.url))).text()).toBe("<h1>Bakery</h1>");
 
       guarded.sites.get(String(first.json.siteId))!.teamLogin = true;
-      const again = await runGuarded("guarded", ["--dir", join(project, "dist")]);
-      expect(again.json).toMatchObject({ ok: true, created: false, live: true, access: "public", siteId: first.json.siteId });
+      const again = await publishIn("guarded", dist);
+      expect(again).toMatchObject({ ok: true, created: false, live: true, access: "public", siteId: first.json.siteId });
       expect(patches()).toEqual([site, site]);
-      expect(JSON.parse(readFileSync(join(home, "workspace", "guarded", helper.SITE_FILE), "utf8"))).toMatchObject({ access: "public" });
+      expect(recordIn("guarded")).toMatchObject({ access: "public" });
+      expect(recordIn("guarded")).not.toHaveProperty("privateReason");
     });
 
-    it("leaves a site private with --keep-private, and says so without a warning", async () => {
+    it("does not open a site whose deploy is not ready yet, and opens it when --check finds it ready", async () => {
       const before = patches().length;
-      const kept = await publishGuarded("kept-private", ["--dir", join(project, "dist"), "--keep-private"]);
-      expect(kept).toMatchObject({ ok: true, created: true, state: "ready", live: false, access: "private", liveStatus: 401 });
+      guarded.processingPolls = 1_000_000;
+      let pending: Record<string, unknown>;
+      try {
+        pending = await publishIn("slow-guarded", dist, { waitMs: 100 });
+      } finally {
+        guarded.processingPolls = 0;
+      }
+      expect(pending).toMatchObject({ ok: true, pending: true, live: false });
+      expect(patches()).toHaveLength(before);
+      expect((await fetch(String(pending.url))).status).toBe(401);
+
+      guarded.deploys.get(String(pending.deployId))!.pollsLeft = 1;
+      const ready = await publishIn("slow-guarded", ["--check"]);
+      expect(ready).toMatchObject({ ok: true, state: "ready", live: true, access: "public" });
+      expect(patches()).toEqual([...patches().slice(0, before), patchOf(pending.siteId)]);
+      const checkedAgain = await publishIn("slow-guarded", ["--check"]);
+      expect(checkedAgain).toMatchObject({ access: "public" });
+      expect(patches()).toHaveLength(before + 1);
+    });
+
+    it("keeps a site private with --keep-private, remembers that, and never opens it with a draft", async () => {
+      const before = patches().length;
+      const kept = await publishIn("kept-private", [...dist, "--keep-private"]);
+      expect(kept).toMatchObject({ ok: true, created: true, state: "ready", live: false, access: "private", liveStatus: 401, privateReason: "person" });
       expect(kept).not.toHaveProperty("message");
-      expect(patches()).toHaveLength(before);
+      expect(recordIn("kept-private")).toMatchObject({ access: "private", privateReason: "person", keepPrivate: true });
+
+      const draft = await publishIn("kept-private", [...dist, "--draft"]);
+      expect(draft).toMatchObject({ ok: true, draft: true, access: "private", liveStatus: 401 });
       expect((await fetch(String(kept.url))).status).toBe(401);
-      expect(JSON.parse(readFileSync(join(home, "workspace", "kept-private", helper.SITE_FILE), "utf8"))).toMatchObject({ access: "private" });
 
-      const checked = await publishGuarded("kept-private", ["--check", "--keep-private"]);
-      expect(checked).toMatchObject({ ok: true, access: "private" });
-      expect(checked).not.toHaveProperty("message");
+      const later = await publishIn("kept-private", dist);
+      expect(later).toMatchObject({ ok: true, created: false, access: "private", privateReason: "person" });
+      expect(later).not.toHaveProperty("message");
+      const checked = await publishIn("kept-private", ["--check"]);
+      expect(checked).toMatchObject({ ok: true, access: "private", privateReason: "person" });
       expect(patches()).toHaveLength(before);
 
-      const opened = await publishGuarded("kept-private", ["--make-public"]);
+      const opened = await publishIn("kept-private", ["--make-public"]);
       expect(opened).toMatchObject({ ok: true, live: true, access: "public", siteId: kept.siteId, url: kept.url });
-      expect(patches()).toEqual([...patches().slice(0, before), `PATCH /api/v1/sites/${String(kept.siteId)}`]);
-      expect(guarded.requests.filter((request) => request === `POST /api/v1/sites/${String(kept.siteId)}/deploys`)).toHaveLength(1);
+      expect(patches()).toEqual([...patches().slice(0, before), patchOf(kept.siteId)]);
+      expect(recordIn("kept-private")).not.toHaveProperty("keepPrivate");
+      expect(recordIn("kept-private")).not.toHaveProperty("privateReason");
+      expect(guarded.requests.filter((request) => request === `POST /api/v1/sites/${String(kept.siteId)}/deploys`)).toHaveLength(3);
 
-      await expect(publishGuarded("kept-private", ["--make-public", "--keep-private"])).rejects.toThrow(/--make-public and --keep-private ask for opposite things/);
+      await expect(publishIn("kept-private", ["--make-public", "--keep-private"])).rejects.toThrow(/--make-public and --keep-private ask for opposite things/);
       const nothing = await run(["--make-public", "--token-file", tokenFile, "--project", join(home, "workspace")], { OMB_NETLIFY_API_URL: guarded.url });
       expect(String(nothing.json.error)).toMatch(/\.netlify-site\.json is missing; publish the site first/);
     });
 
+    it("leaves a new site as the team made it when only a draft is published", async () => {
+      const before = patches().length;
+      const draft = await publishIn("draft-only", [...dist, "--draft"]);
+      expect(draft).toMatchObject({ ok: true, draft: true, access: "private", liveStatus: 401 });
+      expect(String(draft.message)).toMatch(/a draft never changes who can open the site/);
+      expect(patches()).toHaveLength(before);
+    });
+
     it("still publishes when the team refuses to open the site, and says where the setting is", async () => {
-      guarded.refusePublic = true;
+      guarded.refusePublicWith = 403;
       try {
-        const refused = await publishGuarded("enforced", ["--dir", join(project, "dist")]);
-        expect(refused).toMatchObject({ ok: true, created: true, state: "ready", live: false, access: "private", liveStatus: 401 });
-        expect(patches()).toContain(`PATCH /api/v1/sites/${String(refused.siteId)}`);
+        const refused = await publishIn("enforced", dist);
+        expect(refused).toMatchObject({ ok: true, created: true, state: "ready", live: false, access: "private", liveStatus: 401, privateReason: "team" });
+        expect(patches()).toContain(patchOf(refused.siteId));
         const message = String(refused.message);
         expect(message).toMatch(/Netlify team's settings keep it private/);
         expect(message).toContain("Project configuration > General > Visitor access");
         expect(message).toContain("Team settings > General > Visitor access");
         expect(message).toContain("Team settings > Access & security > Visitor access");
-        expect(JSON.parse(readFileSync(join(home, "workspace", "enforced", helper.SITE_FILE), "utf8"))).toMatchObject({ access: "private", deployState: "ready" });
+        expect(recordIn("enforced")).toMatchObject({ access: "private", privateReason: "team", deployState: "ready" });
+        expect(recordIn("enforced")).not.toHaveProperty("keepPrivate");
 
-        const asked = await publishGuarded("enforced", ["--make-public"]);
-        expect(asked).toMatchObject({ ok: true, access: "private" });
-        expect(String(asked.message)).toContain("Visitor access");
+        const checked = await publishIn("enforced", ["--check"]);
+        expect(checked).toMatchObject({ access: "private", privateReason: "team" });
+        expect(String(checked.message)).toMatch(/team's settings keep it private/);
 
-        const checked = await publishGuarded("enforced", ["--check"]);
-        expect(String(checked.message)).toMatch(/Unless the person asked for a private site, run again with --make-public/);
+        guarded.refusePublicWith = 400;
+        const failed = await publishIn("enforced", dist);
+        expect(failed).toMatchObject({ ok: true, state: "ready", access: "private" });
+        expect(String(failed.message)).toMatch(/^Making the site public: Netlify answered 400: .*The site is deployed; run again with --make-public in a minute\.$/);
       } finally {
-        guarded.refusePublic = false;
+        guarded.refusePublicWith = 0;
+      }
+    });
+
+    it("says a site may have a password when it still asks for a login after being opened", async () => {
+      guarded.passwordProtected = true;
+      try {
+        const still = await publishIn("password", dist);
+        expect(still).toMatchObject({ ok: true, access: "private", privateReason: "protected" });
+        expect(String(still.message)).toMatch(/Netlify accepted making the site public, but the link still asks for a login: the site may have password protection/);
+        expect(String(still.message)).not.toMatch(/team's settings/);
+        expect(recordIn("password")).toMatchObject({ access: "private", privateReason: "protected" });
+      } finally {
+        guarded.passwordProtected = false;
       }
     });
   });
