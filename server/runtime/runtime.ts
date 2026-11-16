@@ -240,9 +240,10 @@ export class Runtime {
    * assignment, a report to send); "parked" while live assignments only wait on a person, a teammate or a time limit. */
   pace(): "busy" | "parked" | "idle" {
     if (!this.opened) this.open();
-    if (this.turns.size > 0 || this.reportDue.size > 0) return "busy";
+    if (this.reportDue.size > 0) return "busy";
     const live = this.store.all({ nonTerminal: true });
-    if (live.some(n => n.status === "queued" || n.status === "resume" || n.status === "running")) return "busy";
+    if (live.some(n => n.status === "resume" || ((n.status === "queued" || n.status === "running") && !this.away(n)))) return "busy";
+    if ([...this.turns.keys()].some(id => !live.some(n => n.id === id))) return "busy";
     return live.length > 0 ? "parked" : "idle";
   }
 
@@ -258,21 +259,42 @@ export class Runtime {
     }
   }
 
+  /** When each node was last seen held for a place that could not be reached, queued for it or running there, or first
+   * seen with that place back: no window counts time up to then. */
+  private readonly heldAway = new Map<string, number>();
+  /** The nodes whose place was away when last asked. */
+  private readonly awayNow = new Set<string>();
+
+  private away(n: Assignment): boolean {
+    if ((n.status !== "queued" && n.status !== "running") || this.runner.away === undefined) return false;
+    if (this.safe("away", () => this.runner.away!(n)) !== true) {
+      // The place is back: its windows start when that is first seen, not when it was last seen away. However long this
+      // look took to come (a slow disk, a busy host), the node is not expired by the look that finds its place again.
+      if (this.awayNow.delete(n.id)) this.heldAway.set(n.id, this.clock.now());
+      return false;
+    }
+    this.heldAway.set(n.id, this.clock.now());
+    this.awayNow.add(n.id);
+    return true;
+  }
+
   private tickBody(): void {
     const now = this.clock.now();
     const mono = this.clock.monotonic();
     const live = this.store.all({ nonTerminal: true });
+    if (this.heldAway.size > 0) { const ids = new Set(live.map(n => n.id)); for (const id of this.heldAway.keys()) if (!ids.has(id)) { this.heldAway.delete(id); this.awayNow.delete(id); } }
     // Deepest first, so each node fails with its own reason.
     for (const snapshot of [...live].sort((a, b) => b.depth - a.depth)) {
       const n = this.store.get(snapshot.id);
       if (!n || isTerminal(n)) continue;
-      if (n.status === "queued" && !n.continuation && now - this.since(n.lastActivityAt) > this.limits.queueMs) {
+      if (n.status === "queued" && !n.continuation && !this.away(n) && now - Math.max(this.since(n.lastActivityAt), this.heldAway.get(n.id) ?? 0) > this.limits.queueMs) {
         this.cancelTree(n, n.executions > 0 ? "not resumed" : "never started", "failed", "expired");
       } else if (n.status === "needs_input" && this.inputExpires(n)) {
         this.chaseParked(n, now);
       } else if (n.status === "running") {
         const turn = this.turns.get(n.id);
-        if (turn && mono - turn.activeAt > this.limits.turnStallMs) {
+        if (turn && this.away(n)) turn.activeAt = mono;
+        else if (turn && mono - turn.activeAt > this.limits.turnStallMs) {
           this.cancelTree(n, `no activity for ${duration(this.limits.turnStallMs)}`, "failed", "stalled");
         }
       }
@@ -292,7 +314,8 @@ export class Runtime {
       const anchor = Math.max(this.since(root.lastActivityAt), this.rootActivity.get(rootId) ?? 0);
       if (now - anchor <= this.limits.stallMs) continue;
       const tree = this.store.all({ rootId });
-      if (tree.some(n => n.status === "needs_input" || (n.status === "queued" && n.continuation !== undefined))) continue;
+      if (tree.some(n => n.status === "needs_input" || (n.status === "queued" && (n.continuation !== undefined || this.away(n))) || (n.status === "running" && this.away(n)))) continue;
+      if (now - Math.max(anchor, ...tree.map(n => this.heldAway.get(n.id) ?? 0)) <= this.limits.stallMs) continue;
       this.store.update(root, { kind: "stalled", at: now, detail: `no progress for ${duration(now - anchor)}` });
       this.cancelTree(root, `no progress for ${duration(this.limits.stallMs)}`, "failed", "stalled");
     }

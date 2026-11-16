@@ -162,6 +162,8 @@ export interface CoordinatorHost {
   chiefOf(address: RoomAddress): boolean;
   /** What the cut turn already did outward (sent, posted, paid): a turn that acted outward is not run again. */
   outward?(node: HandoffView): string[];
+  /** The node's bot lives in a place that cannot be reached now: its queued work waits without a clock (runtime `away`). */
+  away?(node: HandoffView): boolean;
   /** Whether `joiner`'s requester may read the answer `first` gives its own (the same people see both conversations),
    * so the same request from two teammates is answered once. Absent: never. */
   shareAnswer?(first: HandoffView, joiner: HandoffView): boolean;
