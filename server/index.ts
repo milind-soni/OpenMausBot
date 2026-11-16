@@ -12352,8 +12352,8 @@ const persistAnnouncedMcpServers = (next: Record<string, unknown>) => { persistM
 const sweepRoutineExecutions = createRoutineRetention({ paused: () => workspaceMaintenance.active || moveFreeze.frozen(),
   retentionDays: () => cfg.routineExecutionRetentionDays ?? undefined, routines: () => routines, store,
   botWaits, neededByChecks: proactive.needsRun, threadBusy, settlingTurns, coordinator, phoneSecretSubmissions,
-  hasQueuedSteeredMessages, openPersonCard, deleteTasks: taskRoutes.deleteTasks,
-});
+  unreadForAnyone: (task) => teamOwners.people?.list().some(({ email }) => personRooms.taskForPerson(task, personKey({ id: "", email })).unread) ?? false,
+  hasQueuedSteeredMessages, openPersonCard, deleteTasks: taskRoutes.deleteTasks });
 const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persistAnnouncedMcpServers, mcpConfigBusy: mcpConfig.busy, mcpPolicyRefusal, appCatalog: chatAppsMcp, team: teamConnections, loopback: !CLOUD_HOME && !HOSTED_WORKSPACE }); const configRoutes = createConfigRoutes({
   store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
   sharedComputers, sharedComputerControl, closeBrowser, browserEngineSwitched,

@@ -34,6 +34,7 @@ describe("scheduled execution retention", () => {
         phoneSecretSubmissions: { hasThread: () => false },
         hasQueuedSteeredMessages: () => false,
         openPersonCard: () => null,
+        unreadForAnyone: () => false,
         deleteTasks: () => ({ deleted: [] }),
       });
       expect(sweep).not.toThrow();
@@ -59,6 +60,7 @@ describe("scheduled execution retention", () => {
       phoneSecretSubmissions: { hasThread: () => false },
       hasQueuedSteeredMessages: () => false,
       openPersonCard: () => null,
+      unreadForAnyone: () => false,
       deleteTasks,
     });
     await maintenance.run(async () => {
@@ -80,7 +82,7 @@ describe("scheduled execution retention", () => {
       makeRun("safe"), makeRun("missing"), makeRun("pinned"), makeRun("busy"), makeRun("referenced"),
       makeRun("needs-input", { output: "NEEDS INPUT: Approve this?" }), makeRun("needs-check"),
       makeRun("output-file", { output: "Saved /tmp/report.md" }), makeRun("attachment"), makeRun("published"),
-      makeRun("execution-file"), makeRun("execution-plain-file"),
+      makeRun("execution-file"), makeRun("execution-plain-file"), makeRun("person-unread"),
       makeRun("pending", { report: { state: "pending" } }), makeRun("failed", { status: "failed" }),
       makeRun("brief", { deliver: "brief" }), makeRun("webhook", { triggerSource: "webhook", sameConversation: true }),
       makeRun("question", { report: { state: "posted", threadId: "result", messageId: "question" } }),
@@ -96,7 +98,7 @@ describe("scheduled execution retention", () => {
       ...(run.id === "shared" ? { shared: true } : {}), ...(run.id === "asked" ? { askedAt: old } : {}),
       ...(run.id === "custom-link" ? { link: "https://example.com" } : {}),
     } as TaskRecord);
-    for (const id of ["orphan-safe", "orphan-webhook", "orphan-file", "orphan-execution-file", "orphan-recent"]) tasks.set(`t-${id}`, {
+    for (const id of ["orphan-safe", "orphan-webhook", "orphan-file", "orphan-execution-file", "orphan-person-unread", "orphan-recent"]) tasks.set(`t-${id}`, {
       threadId: `t-${id}`, routineRunId: id, createdAt: old, updatedAt: old,
     } as TaskRecord);
     const bot = { id: "b", threadId: "result", tasks: [...tasks.values()] } as BotRecord;
@@ -104,7 +106,7 @@ describe("scheduled execution retention", () => {
       { id: "question", text: "Please answer", automation: { runId: "question", needsYou: true } },
       { id: "file", text: "[Report](report.md)", automation: { runId: "file" } },
       { id: "plain-file", text: "See /tmp/report.md", automation: { runId: "plain-file" } },
-      ...["orphan-safe", "orphan-webhook", "orphan-file", "orphan-execution-file", "orphan-recent"].map((id) => ({
+      ...["orphan-safe", "orphan-webhook", "orphan-file", "orphan-execution-file", "orphan-person-unread", "orphan-recent"].map((id) => ({
         id, role: "bot", kind: "text", at: id === "orphan-recent" ? NOW : old, text: id === "orphan-file" ? "[file](out.md)" : "Result",
         automation: { runId: id, trigger: id === "orphan-webhook" ? "webhook" : "schedule", executionThreadId: `t-${id}` },
       })),
@@ -125,14 +127,15 @@ describe("scheduled execution retention", () => {
     const deleteTasks = vi.fn((_bot: string, ids: string[]) => ({ deleted: ids }));
     const result = sweepRoutineExecutions({ retentionDays: 7, now: NOW, store,
       routines: { attachmentPaths: () => [], listRuns: () => [...latest, ...cases], listRoutines: () => [], compactScheduledRuns },
-      referencedThreads: new Set(["t-referenced"]), neededByChecks: (run) => run.id === "needs-check", busy: (_bot, thread) => thread === "t-busy", deleteTasks });
+      referencedThreads: new Set(["t-referenced"]), neededByChecks: (run) => run.id === "needs-check", busy: (_bot, thread) => thread === "t-busy",
+      unreadForAnyone: (task) => ["t-person-unread", "t-orphan-person-unread"].includes(task.threadId), deleteTasks });
     expect(deleteTasks).toHaveBeenCalledOnce();
     expect(deleteTasks).toHaveBeenCalledWith("b", ["t-safe", "t-orphan-safe"]);
     expect(compactScheduledRuns).toHaveBeenCalledWith(new Set(["safe", "missing"]), new Set(["t-safe", "t-missing"]));
     expect(result).toEqual({ deleted: 2, compacted: 2 });
     const unreadable = sweepRoutineExecutions({ retentionDays: 7, now: NOW, store,
       routines: { attachmentPaths: () => null, listRuns: () => [], listRoutines: () => [], compactScheduledRuns },
-      referencedThreads: new Set(), neededByChecks: () => false, busy: () => false, deleteTasks });
+      referencedThreads: new Set(), neededByChecks: () => false, busy: () => false, unreadForAnyone: () => false, deleteTasks });
     expect(unreadable).toEqual({ deleted: 0, compacted: 0 });
     expect(deleteTasks).toHaveBeenCalledOnce();
   });

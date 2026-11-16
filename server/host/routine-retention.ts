@@ -20,6 +20,7 @@ export function createRoutineRetention(deps: {
   phoneSecretSubmissions: { hasThread(threadId: string): boolean };
   hasQueuedSteeredMessages: (botId: string, threadId: string) => boolean;
   openPersonCard: (threadId: string) => unknown;
+  unreadForAnyone: (task: TaskRecord) => boolean;
   deleteTasks: (botId: string, threadIds: string[]) => { deleted: string[] } | null;
 }) {
   return () => {
@@ -35,6 +36,7 @@ export function createRoutineRetention(deps: {
           deps.coordinator.activeDirect(threadId) || deps.coordinator.awaitingAnswer(threadId) || awaitingTeammates.has(threadId) ||
           deps.phoneSecretSubmissions.hasThread(threadId) || deps.hasQueuedSteeredMessages(botId, threadId) || Boolean(deps.openPersonCard(threadId)),
         deleteTasks: deps.deleteTasks,
+        unreadForAnyone: deps.unreadForAnyone,
       });
       if (result.deleted || result.compacted) {
         console.log(`[routine retention] removed ${result.deleted} execution thread(s), compacted ${result.compacted} run(s)`);
@@ -52,6 +54,7 @@ export function sweepRoutineExecutions(deps: {
   referencedThreads: ReadonlySet<string>;
   neededByChecks: (run: RoutineRun, routines: readonly Routine[]) => boolean;
   busy: (botId: string, threadId: string) => boolean;
+  unreadForAnyone: (task: TaskRecord) => boolean;
   deleteTasks: (botId: string, threadIds: string[]) => { deleted: string[] } | null;
   now?: number;
 }): { deleted: number; compacted: number } {
@@ -108,7 +111,7 @@ export function sweepRoutineExecutions(deps: {
     return bot.threadId !== threadId && bot.mainThreadChoice !== threadId && !task.pinned && !task.pinnedMessageId &&
       !task.shared && !task.sharedChat && !task.archivedAt && !task.rewound && !task.askedAt && !task.setupRequest &&
       !(task.link && !task.linkAuto) && !(task.surface && task.surfaceSource !== "auto") &&
-      !task.unread && !task.busy && !task.waitingForTeammates && !task.openAsks &&
+      !task.unread && !deps.unreadForAnyone(task) && !task.busy && !task.waitingForTeammates && !task.openAsks &&
       (task.updatedAt ?? task.createdAt) < cutoff && !deps.busy(bot.id, threadId) &&
       !deps.store.messagesFor(threadId).some((message) => liveCardKind(message.card) || waitingCardText(message) ||
         message.publishedPage?.state === "live" || message.attachments?.some((file) => file.kind !== "image" || !file.fromTool) ||

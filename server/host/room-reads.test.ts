@@ -102,6 +102,12 @@ it("reads a bot's shared chat per person, leaves a private chat's one mark alone
   expect(frames, "told to Ada's streams alone").toEqual([{ person: adaKey }]);
   expect(rooms.personMarkThread!(ada, "main", true)).toBe(true);
   expect(rooms.taskForPerson(main, adaKey)).toEqual({ threadId: "main", unread: true, lastReadMessageId: "m3" });
+  const execution = { threadId: "main", routineRunId: "run", unread: false };
+  const cleo = { kind: "session", session: { id: "s2", email: "cleo@acme.test" } } as never;
+  expect(rooms.personMarkThread!(cleo, "main", false)).toBe(true);
+  expect(rooms.taskForPerson(execution, cleoKey).unread).toBe(false);
+  expect(rooms.taskForPerson(execution, adaKey).unread).toBe(true);
+  expect(execution.unread).toBe(false);
   const own = { threadId: "mine", unread: true, lastReadMessageId: "m2" };
   expect(rooms.personMarkThread!(ada, "mine", false), "a private chat keeps its one mark").toBe(false);
   expect(rooms.taskForPerson(own, adaKey)).toBe(own);
