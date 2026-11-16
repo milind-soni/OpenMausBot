@@ -1,10 +1,12 @@
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { Resolver } from "node:dns/promises";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
+import { launchVerificationServer, verificationServerArgs, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
+import { waitForExit } from "./testing/cleanup.ts";
 
 // OMB_CLOUDFLARED_PATH names a real cloudflared, and the check then goes through Cloudflare. Without it a stand-in names
 // the link's own loopback port as its address, and the check calls that port: everything but the Cloudflare hop is real.
@@ -63,16 +65,18 @@ describe.skipIf(process.platform === "win32" && !REAL)("a task Grok Bot hands Ma
     return { text: answer.result?.content[0]?.text ?? "", isError: answer.result?.isError === true };
   };
 
+  const launchEnv = {
+    ...process.env,
+    OMB_TEST_DESKTOP_OWNER_TOKEN: owner,
+    OMB_CLOUDFLARED_PATH: REAL || STAND_IN,
+    FAKE_CLAUDE_TOOL_CALLS: "[]",
+    FAKE_CLAUDE_REPLIES: JSON.stringify([REPLY]),
+  };
+
   beforeAll(async () => {
     globalThis.fetch = (input, init = {}) => realFetch(input, String(input).includes("/mcp/move/") ? init
       : { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": owner } });
-    fixture = await launchVerificationServer({
-      ...process.env,
-      OMB_TEST_DESKTOP_OWNER_TOKEN: owner,
-      OMB_CLOUDFLARED_PATH: REAL || STAND_IN,
-      FAKE_CLAUDE_TOOL_CALLS: "[]",
-      FAKE_CLAUDE_REPLIES: JSON.stringify([REPLY]),
-    });
+    fixture = await launchVerificationServer(launchEnv);
   });
   afterAll(async () => {
     if (fixture) await app("DELETE", "/api/setup-import/grok/connector").catch(() => {});
@@ -117,5 +121,29 @@ describe.skipIf(process.platform === "win32" && !REAL)("a task Grok Bot hands Ma
     expect(bots.find((bot) => bot.id === handoff!.botId)?.tasks).toContainEqual(expect.objectContaining({ threadId: handoff!.threadId, title: `From Grok Bot: ${TASK}` }));
 
     expect((await call("task_status", { task_id: "task_madeUpAndNeverGivenOut" })).isError).toBe(true);
+  });
+
+  it("comes back on by itself with the same key at a new address when the app starts again, and says the link changed", { timeout: 180_000 }, async () => {
+    const key = new URL(link).pathname;
+    const env = verificationServerEnvironment(launchEnv, fixture.info.dataDir, Number(new URL(fixture.info.url).port));
+    await waitForExit(fixture.child, { signal: "SIGTERM" });
+    const again = spawn(process.execPath, verificationServerArgs(env), { cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: "ignore" });
+    try {
+      let state: Record<string, unknown> = {};
+      for (let tries = 0; tries < 300 && !state.connectorUrl; tries += 1) {
+        await new Promise((later) => setTimeout(later, 200));
+        state = await app("GET", "/api/setup-import/grok/connector").then((answer) => answer.body, () => ({}));
+      }
+      expect(state).toMatchObject({ connectorUrl: expect.stringMatching(/^https:\/\/[a-z0-9-]+\.trycloudflare\.com\/mcp\/move\/[\w-]{43}$/), changed: true });
+      expect(new URL(String(state.connectorUrl)).pathname, "the same key").toBe(key);
+      expect(state.connectorUrl, "a new address").not.toBe(link);
+      link = String(state.connectorUrl);
+      if (REAL) await published(new URL(link).hostname);
+      expect((await call("move_status", {})).text).toContain("its address changes when MausBot restarts or updates");
+      expect((await app("POST", "/api/setup-import/grok/connector", { seen: true })).body.changed).toBeUndefined();
+    } finally {
+      await app("DELETE", "/api/setup-import/grok/connector").catch(() => {});
+      await waitForExit(again, { signal: "SIGTERM" });
+    }
   });
 });
