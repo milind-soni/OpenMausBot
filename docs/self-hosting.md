@@ -442,15 +442,41 @@ hold. The server image (`ghcr.io/milind-soni/openmausbot`) is built for that:
   limit is reached, and then nothing new can start: bots fail with
   `spawn EAGAIN`. Keep the image's entrypoint when you set a start command.
   If your platform replaces it, the server says so in one line at start and
-  runs itself under the image's tini; an init of the platform's own on top
-  (`docker run --init`, Compose's `init: true`) does no harm.
+  starts itself again under the image's tini, which then stays process 1; an
+  init of the platform's own on top (`docker run --init`, Compose's
+  `init: true`) does no harm. A command you give the container runs as
+  written, so start it with `openmausbot …` or `node …`
+  (`docker run --rm ghcr.io/milind-soni/openmausbot openmausbot --version`):
+  a bare `--version` or `dist-server/openmausbot.js`, which older images
+  passed on to Node, no longer starts.
 - **Chrome does not need a larger `/dev/shm`.** Where `/dev/shm` is under
   512 MB the bots' browser keeps its shared memory in `/tmp`, so there is
-  nothing to set.
+  nothing to set. `/tmp` is slower, and where it is itself in memory (Cloud
+  Run) it counts against the container's memory limit; a 512 MB `/dev/shm`,
+  where your platform lets you set one, avoids both.
 - **Mount a volume at `/data`.** Engine sign-ins and all of OpenMausBot's
-  state live there. The server listens on `127.0.0.1` inside the container;
-  put the platform's proxy, or Caddy as in
-  [the Compose setup](#docker-with-https-on-your-own-domain), in front of it.
+  state live there.
+- **Give the platform a way in.** The server listens on `127.0.0.1` inside
+  the container, which a proxy outside the container cannot reach. Any one
+  of these works:
+  - `OMB_LAN=1`: the server listens on every IPv4 address, on `OMB_PORT`
+    (8799 unless you set it; point the platform there). It still drops any
+    connection whose either end is not a private address (10/8, 172.16/12,
+    192.168/16, 100.64/10, link-local), so it answers a proxy that reaches
+    the container over a private network, such as an ingress controller
+    inside a Kubernetes cluster, and refuses one that arrives from a public
+    address: check which your platform's does. Every request through it is
+    a remote one and has to pair.
+  - A proxy next to the server (a sidecar in the same Kubernetes pod or
+    Cloud Run service): share an in-memory volume between the two, set
+    `OMB_TUNNEL_SOCKET` to a socket in it, and point the proxy at that
+    socket, as [the Compose setup](#docker-with-https-on-your-own-domain)'s
+    Caddy does. A sidecar can reach `127.0.0.1:8799` too, but then it must
+    add `X-Forwarded-For` to every request (Caddy does): a loopback request
+    with no forwarding header and a loopback `Host` is taken to be the
+    server's owner.
+  - A tunnel that dials out, so nothing has to reach the container:
+    `openmausbot serve --tunnel` as the start command ([`--tunnel`](#ways-in-in-detail)).
 
 **How many processes and how much memory.** A container's process limit
 (`pids.max`; Docker's `--pids-limit`, Kubernetes' `podPidsLimit`) counts

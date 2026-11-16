@@ -244,7 +244,8 @@ Docker compose files and the Podman one still set `init: true` and
 `shm_size: 512m`, as OpenMausBot's desktop containers do
 (`--shm-size 512m`); an init on top of the image's own is harmless. A
 server whose entrypoint was replaced, so that it is process 1 itself, says
-so in one line at start and runs under the image's tini anyway.
+so in one line at start and starts itself again under the image's tini,
+which then stays process 1 for the life of the container.
 agent-browser 0.37.0 itself adds `--no-sandbox` and
 `--disable-dev-shm-usage` when it sees `/.dockerenv` or
 `/run/.containerenv`, runs as root or under CI, or finds docker, kubepods
