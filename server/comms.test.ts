@@ -708,49 +708,6 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
   );
 
   it(
-    "bounds the rebuilt conversation by context.maxMessages, not only the byte budget",
-    async () => {
-      await hideAll();
-      rmSync(gateFile, { force: true });
-      const helper = await named("Helper", { modelSelection: { instanceId: "helperGate", model: "fake-model" } });
-      const asker = await named("Asker", { modelSelection: { instanceId: "askerNoLoad", model: "fake-model" } });
-
-      expect((await api("PATCH", "/api/config", { context: { maxMessages: 1 } })).status).toBe(200);
-      try {
-        await startRoutine(asker.id, "hey @Helper please pick this up; keep the codename ORCHID_EARLIER_CONTEXT");
-        await waitUntil(async () => (await bot(helper.id)).busy, 30_000, "the helper never took the assignment");
-        // A shared-rules change while the helper holds makes the handed session state stale, so the wake
-        // rebuilds the conversation from the bounded replay instead of resuming the warm session.
-        expect((await api("PATCH", "/api/config", { everyBotRules: "keep answers short" })).status).toBe(200);
-        writeFileSync(gateFile, "go");
-        await waitUntil(async () => {
-          const current = await bot(asker.id);
-          return !current.busy && lastText(current.messages)?.text === WOKE_WITH_RESULT;
-        }, 30_000, "the source never woke after its hand-off");
-
-        const woke = JSON.parse(readFileSync(join(home, "asker-no-load.json.prompt.json"), "utf8")).map((block: any) => String(block.text ?? "")).join("\n");
-        expect(woke).toContain("update outside your provider session");
-        expect(woke).toContain("earlier messages omitted");
-        expect(woke).toContain("Assistant: [What Asker did in an earlier turn");
-        expect(woke).toContain('What @Helper said: "echo:');
-        // Only the newest entry survives a one-message window: the routine request and the asker's
-        // delegation reply (earlier transcript lines) drop out of the replay.
-        expect(woke).not.toContain("User: (Routine");
-        expect(woke).not.toContain("Assistant: delegated:");
-      } finally {
-        writeFileSync(gateFile, "go");
-        await waitUntil(async () => {
-          const current = (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: any) => bot.id === helper.id);
-          return !current?.busy;
-        }, 10_000, "gated helper did not settle during cleanup").catch(() => {});
-        rmSync(gateFile, { force: true });
-        await api("PATCH", "/api/config", { context: { maxMessages: 10_000 }, everyBotRules: "" });
-      }
-    },
-    45_000,
-  );
-
-  it(
     "keeps a Chief available while its delegated teammate is still working",
     async () => {
       await hideAll();

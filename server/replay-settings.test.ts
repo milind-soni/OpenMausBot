@@ -8,11 +8,11 @@ describe("replaySettings", () => {
   // as server/config.ts takes them: added to the `context` group
   const context = z.object({ compactAt: z.number().optional() }).extend(replaySettings);
 
-  it("is the replay's three settings, each optional, beside whatever else the group holds", () => {
-    expect(Object.keys(replaySettings).sort()).toEqual(["maxMessages", "rebuildBytes", "replayToolHistory"]);
+  it("is the replay's two settings, each optional, beside whatever else the group holds", () => {
+    expect(Object.keys(replaySettings).sort()).toEqual(["rebuildBytes", "replayToolHistory"]);
     expect(context.parse({})).toEqual({});
-    expect(context.parse({ compactAt: 0.7, rebuildBytes: 32_000, maxMessages: 200, replayToolHistory: true }))
-      .toEqual({ compactAt: 0.7, rebuildBytes: 32_000, maxMessages: 200, replayToolHistory: true });
+    expect(context.parse({ compactAt: 0.7, rebuildBytes: 32_000, replayToolHistory: true }))
+      .toEqual({ compactAt: 0.7, rebuildBytes: 32_000, replayToolHistory: true });
   });
 
   it("bounds rebuildBytes, with the floor selectReplay itself refuses to go under", () => {
@@ -21,14 +21,6 @@ describe("replaySettings", () => {
     // a budget this lets through never makes the replay throw, and the first one it refuses would
     expect(() => selectReplay([], { budgetBytes: 1_024 })).not.toThrow();
     expect(() => selectReplay([], { budgetBytes: 1_023 })).toThrow("invalid context");
-  });
-
-  it("bounds maxMessages, with the floor selectReplay itself refuses to go under", () => {
-    for (const value of [1, 40, 10_000]) expect(context.parse({ maxMessages: value })).toEqual({ maxMessages: value });
-    for (const value of [0, -1, 1.5, 10_001, "40", null]) expect(() => context.parse({ maxMessages: value })).toThrow();
-    // a count this lets through never makes the replay throw, and the first one it refuses would
-    expect(() => selectReplay([], { maxMessages: 1 })).not.toThrow();
-    expect(() => selectReplay([], { maxMessages: 0 })).toThrow("invalid context");
   });
 
   it("takes replayToolHistory as a boolean only", () => {
