@@ -1,3 +1,4 @@
+import type { PreviewTestingSession } from "@/lib/previewTesting";
 // The narrow bridge the Electron preload exposes. Absent in the browser.
 export {};
 
@@ -6,6 +7,13 @@ declare global {
     gbs?: {
       background?: { get(): Promise<boolean>; set(enabled: boolean): Promise<boolean> };
       platform: string;
+      previewTesting?: {
+        start(): Promise<PreviewTestingSession[]>;
+        register(input: { sessionId: string; webContentsId: number }): Promise<{ ok: boolean }>;
+        control(input: { sessionId: string; action: "pause" | "resume" | "close" }): Promise<void>;
+        onActive(cb: (id: string) => void): () => void;
+        onSessions(cb: (sessions: PreviewTestingSession[]) => void): () => void;
+      };
       screenFrame(): Promise<string | null>;
       /** Screenshots the mobile preview <webview>. fullPage captures beyond
        * the visible viewport (via the CDP debugger); otherwise just the

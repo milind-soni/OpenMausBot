@@ -43,6 +43,9 @@ export interface PreviewFrameHandle {
 }
 
 export interface PreviewFrameProps {
+  testingSessionId?: string;
+  testingActive?: boolean;
+  onTestingError?: (message: string) => void;
   source: PreviewSource | null;
   width: number;
   height: number;
@@ -75,6 +78,9 @@ function dataUrlByteSize(dataUrl: string): number {
 export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(function PreviewFrame(
   {
     source,
+    testingSessionId,
+    testingActive = true,
+    onTestingError,
     width,
     height,
     scale = 1,
@@ -387,6 +393,20 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     };
   }, [clearTimers, live, pendingConfirmUrl, reloadNonce, source, updateStatus]);
 
+  useEffect(() => {
+    const el = webviewRef.current as any;
+    if (!el || !testingActive || !testingSessionId || !window.gbs?.previewTesting) return;
+    let registered = false;
+    const ready = () => {
+      if (registered) return;
+      registered = true;
+      void window.gbs!.previewTesting!.register({ sessionId: testingSessionId, webContentsId: el.getWebContentsId() })
+        .catch((error: Error) => onTestingError?.(error.message));
+    };
+    el.addEventListener("dom-ready", ready);
+    return () => el.removeEventListener("dom-ready", ready);
+  }, [testingSessionId, testingActive, reloadNonce, onTestingError]);
+
   // Attach Electron <webview> lifecycle listeners
   useEffect(() => {
     const el = webviewRef.current as any;
@@ -550,6 +570,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
         className={
           fileViewer || fill ? "relative h-full w-full overflow-hidden bg-panel" : showDeviceBezel
             ? "relative overflow-hidden rounded-[22px] border-[3px] border-hairline bg-panel shadow-xl"
+            : testingSessionId ? "relative overflow-hidden bg-panel"
             : "relative overflow-hidden rounded-xl border border-hairline bg-panel shadow-lg"
         }
       >

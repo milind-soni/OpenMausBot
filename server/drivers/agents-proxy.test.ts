@@ -60,6 +60,10 @@ beforeAll(async () => {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: "unauthorized" }));
     }
+    if (req.url?.startsWith("/api/internal/preview-testing/")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ sessionId: "test-session", image: "aW1hZ2U=", artifactPath: "/project/evidence.png" }));
+    }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/agents")) {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(
@@ -136,8 +140,16 @@ describe("agents-proxy MCP surface", () => {
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      "preview_status", "preview_open", "preview_snapshot", "preview_screenshot", "preview_diagnostics", "preview_close", "preview_action",
       "list_schedules", "cancel_schedule", "create_schedule", "list_bots", "ask_bot", "list_tasks", "create_task", "claim_task", "update_task", "delegate_task", "delete_task",
     ]);
+  });
+
+  it("returns screenshot image content without putting base64 into its text result", async () => {
+    const res = await callTool("preview_screenshot", { session_id: "test-session" });
+    expect(res.result.content[0].text).toContain("/project/evidence.png");
+    expect(res.result.content[0].text).not.toContain("aW1hZ2U=");
+    expect(res.result.content[1]).toEqual({ type: "image", data: "aW1hZ2U=", mimeType: "image/png" });
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {

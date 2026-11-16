@@ -3,6 +3,7 @@
 // one bot talk to another, routed back through the harness so the harness
 // stays the single owner of turns, permissions, and recursion limits:
 //
+//   preview_*             → owned, visible desktop testing sessions
 //   list_bots()            → the other bots in this workspace + their status
 //   ask_bot(bot_id, msg)   → send msg to that bot, wait, return its reply
 //   list/create/claim/update/delegate_task → shared task-board operations
@@ -22,6 +23,10 @@ const TOKEN = process.env.GBS_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.GBS_TURN_DEPTH ?? "0") || 0;
 
 const TOOLS = [
+  { name: "preview_status", description: "Check desktop Preview testing availability and your sessions. Prefer Preview over Chrome for project website testing.", inputSchema: { type: "object", properties: {} } },
+  { name: "preview_open", description: "Open an owned, visible testing session in Studio Preview. Supports website URLs and registered project HTML. Returns actual page state. Desktop required; max six sessions. Supply project_id for project-scoped screenshot evidence.", inputSchema: { type: "object", properties: { url: { type: "string" }, project_id: { type: "string" }, path: { type: "string" }, name: { type: "string" }, preset: { type: "string", enum: ["phone", "tablet", "desktop", "responsive"] }, width: { type: "integer" }, height: { type: "integer" } } } },
+  ...["snapshot", "screenshot", "diagnostics", "close"].map(operation => ({ name: `preview_${operation}`, description: `${operation} your Studio Preview session. Snapshot returns visible DOM controls with element references (take a new snapshot after navigation). Screenshot returns a real PNG image and artifact path. Close releases the session.`, inputSchema: { type: "object", properties: { session_id: { type: "string" }, full_page: { type: "boolean" } }, required: ["session_id"] } })),
+  { name: "preview_action", description: "Interact with your actual Preview page: click/fill/select by a snapshot ref, press a key, scroll, wait for text/ref, navigate, reload, back/forward or resize. A user-stopped session must be resumed by the user. Input and page effects are real. Take a new snapshot after navigation.", inputSchema: { type: "object", properties: { session_id: { type: "string" }, action: { type: "string", enum: ["click", "fill", "select", "press", "scroll", "wait", "navigate", "reload", "back", "forward", "resize"] }, ref: { type: "string" }, text: { type: "string" }, value: { type: "string" }, key: { type: "string" }, x: { type: "number" }, y: { type: "number" }, timeout_ms: { type: "integer" }, url: { type: "string" }, preset: { type: "string", enum: ["phone", "tablet", "desktop", "responsive"] }, width: { type: "integer" }, height: { type: "integer" } }, required: ["session_id", "action"] } },
   { name: "list_schedules", description: "List scheduled work in your chat and rooms, including room IDs. All schedules are visible and cancellable by the user.", inputSchema: { type: "object", properties: {} } },
   { name: "cancel_schedule", description: "Cancel a schedule you created in your own chat or a room you belong to.", inputSchema: { type: "object", properties: { schedule_id: { type: "string" } }, required: ["schedule_id"] } },
   { name: "create_schedule", description: "Schedule instructions for your own chat or a room you belong to. Up to 20 active schedules per bot. Use an IANA timezone and an ISO timestamp with offset for a one-time run.", inputSchema: { type: "object", properties: {
@@ -154,6 +159,7 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
       "content-type": "application/json",
       authorization: `Bearer ${TOKEN}`,
       "x-gbs-bot-id": BOT_ID,
+      ...(path.startsWith("/api/internal/preview-testing/") ? { "x-gbs-preview-token": process.env.GBS_PREVIEW_TOKEN ?? "" } : {}),
       ...(init?.headers ?? {}),
     },
   });
@@ -195,7 +201,15 @@ function renderTask(task: Json): string {
   return lines.join("\n");
 }
 
-async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
+async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean; image?: string }> {
+  if (name.startsWith("preview_")) {
+    const operation = name.slice("preview_".length);
+    const result = await api(`/api/internal/preview-testing/${operation}`, operation === "status" ? undefined : { method: "POST", body: JSON.stringify(args) });
+    const image = typeof result.image === "string" ? result.image : undefined;
+    delete result.image;
+    return { text: JSON.stringify(result, null, 2), image };
+  }
+
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
     const bots = (r.bots as Array<Json>) ?? [];
@@ -313,8 +327,9 @@ async function handle(msg: Json) {
       const name = params.name as string;
       if (!TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
       try {
-        const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);
-        textResult(id, text, isError);
+        const { text, isError, image } = await callTool(name, (params.arguments ?? {}) as Json);
+        if (image) ok(id, { content: [{ type: "text", text }, { type: "image", data: image, mimeType: "image/png" }], isError: Boolean(isError) });
+        else textResult(id, text, isError);
       } catch (e) {
         textResult(id, (e as Error).message, true);
       }

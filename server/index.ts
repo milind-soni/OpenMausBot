@@ -1,3 +1,6 @@
+import { PreviewTestingBroker, testingViewport, validateTestingURL, testingError } from "./preview-testing.ts";
+import { saveTestingScreenshot } from "./preview-testing-files.ts";
+import { writeJsonAtomic } from "./json-file.ts";
 import { ScheduleStore, Scheduler, canManageSchedule, validateSchedule } from "./schedules.ts";
 import type { ScheduleInput, ScheduleDelivery, ResumeContext } from "./schedule-types.ts";
 import { canUseBackup, turnSelection } from "./backup-model.ts";
@@ -82,9 +85,19 @@ bus.attach(registry.instances());
 // A shared secret guards the localhost-only /api/internal endpoints the
 // agents-proxy calls; regenerated each boot (the proxy gets it via env).
 const COMMS_TOKEN = randomBytes(24).toString("hex");
+// Desktop-only credential stays in an owner-only file; never exposed through config or renderer IPC.
+const previewToolTokens = new Map<string, string>();
+const PREVIEW_BRIDGE_TOKEN = randomBytes(32).toString("hex");
+writeJsonAtomic(join(DATA_DIR, "preview-testing-bridge.json"), { token: PREVIEW_BRIDGE_TOKEN, url: `http://127.0.0.1:${PORT}`, pid: process.pid });
+const previewTesting = new PreviewTestingBroker();
+const testingProjects = new Map<string, string>();
+let testingEvidenceBytes = 0;
+const testingBlockedOrigins = [`http://127.0.0.1:${PORT}`, process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199"];
+
 // Cap message chains: depth 0 = a user-initiated turn (may ask a peer);
-// a peer invoked via ask_bot runs at depth 1 and gets NO agents tool, so
-// A→B is allowed but B→C (and A→B→A loops) never start.
+// A peer invoked via ask_bot runs at depth 1: its proxy retains Preview,
+// task and schedule tools, but filters peer discovery/messaging. The internal
+// endpoint also enforces depth, so B→C (and A→B→A loops) never start.
 const MAX_COMMS_DEPTH = 1;
 // proxy entry: .ts in dev (node type-strips), .js in the packaged dist-server
 const agentsProxyPath = (() => {
@@ -95,6 +108,7 @@ const agentsProxyPath = (() => {
 const AGENTS_NODE_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
 function agentsIntegration(botId: string, depth: number) {
+  if (!previewToolTokens.has(botId)) previewToolTokens.set(botId, randomBytes(32).toString("hex"));
   return {
     command: process.execPath,
     args: [agentsProxyPath],
@@ -104,6 +118,7 @@ function agentsIntegration(botId: string, depth: number) {
       GBS_BOT_ID: botId,
       GBS_COMMS_TOKEN: COMMS_TOKEN,
       GBS_TURN_DEPTH: String(depth),
+      GBS_PREVIEW_TOKEN: previewToolTokens.get(botId)!,
     },
   };
 }
@@ -688,15 +703,15 @@ async function startTurn(
       const integrations = await computerAndAppIntegrations(bot);
       const computerHint = computerPromptHint(integrations);
       // peer-agent comms: give a user-initiated turn the list_bots/ask_bot
-      // tools. A comms-invoked turn (depth ≥ cap) gets none — hard recursion
-      // stop, so the user's tokens can't be burned by a bot-to-bot loop.
+      // tools. Delegated turns retain the proxy for Preview/task/schedule
+      // work; the proxy filters peer calls and the endpoint enforces depth.
       // Only drivers that mount the tools get the integration (and, via the
       // integrations.agents gate below, the prompt hint) — a bot on a driver
       // without it must not be told about tools it cannot call. Any bot can
       // still be the TARGET of ask_bot regardless of its driver.
       const canMessagePeers =
         commsDepth < MAX_COMMS_DEPTH && store.bots.some((candidate) => candidate.id !== bot.id && !candidate.hidden);
-      if (commsDepth < MAX_COMMS_DEPTH && instance.adapter.capabilities.agentsMcp === true) {
+      if (instance.adapter.capabilities.agentsMcp === true) {
         integrations.agents = agentsIntegration(bot.id, commsDepth);
       }
       // @mentions in the user's message (the composer's tagging UI) become
@@ -728,7 +743,7 @@ async function startTurn(
           composioPrompt +
           (computerHint ? ` ${computerHint}` : "") +
           (integrations.agents
-            ? ` You can create_schedule, list_schedules, and cancel_schedule for your own conversation or rooms you belong to. Schedules remain visible to the user and are capped at 20 active schedules per bot. You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
+            ? ` You can test websites in the app with preview_status, preview_open, preview_snapshot, preview_action, preview_screenshot, preview_diagnostics and preview_close. Prefer these tools over launching Chrome for project testing. Call preview_status first; full automation requires the desktop app. Sessions belong to you; a user-stopped session cannot be resumed by a bot. Use project_id when available to save screenshot evidence in the project. You can create_schedule, list_schedules, and cancel_schedule for your own conversation or rooms you belong to. Schedules remain visible to the user and are capped at 20 active schedules per bot. You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
             : "") +
           (tagged.length
             ? ` The user tagged ${tagged
@@ -875,6 +890,7 @@ async function runGroupMemberTurn(
     .find((message) => message.role === "user" && message.kind === "text");
   const latestUserText = latestUserMessage?.text ?? "";
   const integrations = await computerAndAppIntegrations(bot);
+  if (instance.adapter.capabilities.agentsMcp === true) integrations.agents = agentsIntegration(bot.id, MAX_COMMS_DEPTH);
 
   const attPrompt = formatAttachmentContext(latestUserMessage?.attachments);
   const projectContext = resolveProjectContext([latestUserText, group.bulletin, bot.description]);
@@ -890,6 +906,7 @@ async function runGroupMemberTurn(
     taskContext.system,
     composioPrompt.trim(),
     computerPromptHint(integrations),
+    integrations.agents && "Use preview_status, preview_open, preview_snapshot, preview_action, preview_screenshot, preview_diagnostics and preview_close to test project websites directly in Studio Preview. Prefer these over Chrome when desktop Preview is available. Use only your owned sessions; a user-stopped session needs user resumption.",
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     CHAT_FORMATTING_HINT,
   ]
@@ -1208,14 +1225,14 @@ function httpError(status: number, message: string) {
   return Object.assign(new Error(message), { status });
 }
 
-function readBody(req: IncomingMessage): Promise<any> {
+function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
   return new Promise((resolve, reject) => {
     let data = "";
     let tooLarge = false;
     req.on("data", (c) => {
       if (tooLarge) return;
       data += c;
-      if (data.length > 1_000_000) {
+      if (data.length > limit) {
         tooLarge = true;
         reject(httpError(413, "body too large"));
         // stop buffering; the 413 is written before the socket goes away
@@ -1247,12 +1264,83 @@ const server = createServer(async (req, res) => {
       );
       if (refused) return json(res, 403, { error: refused });
     }
+    // Desktop companion only. Normal app pages and website guests never receive this token.
+    if (path === "/api/preview-testing/bridge") {
+      res.setHeader("cache-control", "no-store");
+      if (req.headers.authorization !== `Bearer ${PREVIEW_BRIDGE_TOKEN}`) return json(res, 401, { error: "unauthorized" });
+      if (method === "GET") return json(res, 200, previewTesting.poll());
+      if (method === "POST") {
+        const body = await readBody(req, 12_000_000);
+        if (body.control) {
+          const action = body.control;
+          if (!["pause", "resume", "close"].includes(action)) throw testingError("Invalid session control.");
+          previewTesting.control(String(body.sessionId), action, typeof body.reason === "string" ? body.reason.slice(0, 200) : undefined);
+          return json(res, 200, { ok: true });
+        }
+        if (body.disconnected) { previewTesting.disconnect(); return json(res, 200, { ok: true }); }
+        const pendingSession = previewTesting.pendingSession(body.id);
+        if (!pendingSession) return json(res, 200, { accepted: false });
+        if (body.result?.image) {
+          if (testingEvidenceBytes > 64 * 1024 * 1024) throw testingError("Preview evidence budget reached for this app run.", 413);
+          const project = testingProjects.get(pendingSession);
+          try {
+            const artifact = saveTestingScreenshot(body.result.image, DATA_DIR, project);
+            testingEvidenceBytes += artifact.bytes;
+            Object.assign(body.result, artifact);
+          } catch (error) { body.error = (error as Error).message; body.result = undefined; }
+        }
+        return json(res, 200, { accepted: previewTesting.finish(body.id, body.result, body.error) });
+      }
+      return json(res, 405, { error: "method not allowed" });
+    }
     // ── internal peer-agent comms (localhost + shared token only) ──────
     // The agents-proxy (spawned inside a bot's agent process) calls these to
     // discover peers and hand a message to one. Not part of the public API.
     if (path.startsWith("/api/internal/")) {
       if (req.headers.authorization !== `Bearer ${COMMS_TOKEN}`) {
         return json(res, 401, { error: "unauthorized" });
+      }
+      if (path.startsWith("/api/internal/preview-testing/")) {
+        res.setHeader("cache-control", "no-store");
+        const botId = String(req.headers["x-gbs-bot-id"] ?? "");
+        if (!previewToolTokens.has(botId) || req.headers["x-gbs-preview-token"] !== previewToolTokens.get(botId)) return json(res, 401, { error: "Preview caller authentication failed" });
+        const bot = store.bot(botId);
+        if (!bot || bot.hidden) return json(res, 404, { error: "no such bot" });
+        const operation = path.slice("/api/internal/preview-testing/".length);
+        if (operation === "status" && method === "GET") return json(res, 200, previewTesting.status(botId));
+        if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+        const body = await readBody(req);
+        if (operation === "open") {
+          const viewport = testingViewport(body);
+          let source: import("./preview-testing.ts").TestingSession["source"];
+          let targetURL: string;
+          let projectPath: string | undefined;
+          if (body.project_id) {
+            const project = (await allRegisteredProjects()).find(p => p.id === body.project_id);
+            if (!project) throw testingError("No such registered project.", 404);
+            if (body.path) {
+              const resolved = resolvePreviewFile([project], String(body.project_id), String(body.path));
+              if (resolved.kind !== "html") throw testingError("Interactive testing supports project HTML files.");
+              source = { kind: "file", projectId: String(body.project_id), filePath: String(body.path), fileType: "html" };
+              targetURL = `http://127.0.0.1:${PORT}/api/preview/file/${encodeURIComponent(String(body.project_id))}/${String(body.path).split("/").map(encodeURIComponent).join("/")}`;
+            } else { targetURL = validateTestingURL(body.url, testingBlockedOrigins); source = { kind: "url", url: targetURL, raw: targetURL, isLocalOrPrivate: false }; }
+            projectPath = project.path;
+          } else { targetURL = validateTestingURL(body.url, testingBlockedOrigins); source = { kind: "url", url: targetURL, raw: targetURL, isLocalOrPrivate: false }; }
+          const pending = previewTesting.open({ botId, botName: bot.name, name: typeof body.name === "string" ? body.name.slice(0, 100) : `${bot.name}'s test`, url: targetURL, source, ...viewport }, id => { if (projectPath) testingProjects.set(id, projectPath); });
+          return json(res, 200, await pending);
+        }
+        const session = previewTesting.owned(body.session_id, botId);
+        if (operation === "close") { testingProjects.delete(session.id); previewTesting.control(session.id, "close"); return json(res, 200, { closed: true }); }
+        if (!["snapshot", "action", "screenshot", "diagnostics"].includes(operation)) throw testingError("Unknown Preview operation.");
+        let action = operation;
+        if (operation === "action") {
+          action = String(body.action);
+          if (!["click", "fill", "select", "press", "scroll", "wait", "navigate", "reload", "back", "forward", "resize"].includes(action)) throw testingError("Unknown Preview action.");
+          if (action === "resize") Object.assign(body, testingViewport(body));
+          if (action === "navigate") body.url = validateTestingURL(body.url, testingBlockedOrigins);
+          if (typeof body.text === "string" && body.text.length > 20_000) throw testingError("Input text is too long.");
+        }
+        return json(res, 200, await previewTesting.execute(session, action, body));
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const self = url.searchParams.get("self");
@@ -1563,6 +1651,7 @@ const server = createServer(async (req, res) => {
       const group = store.group(m[1]);
       if (!group) return json(res, 404, { error: "no such room" });
       const busy = group.busyBotId ? store.bot(group.busyBotId) : undefined;
+      if (busy) previewTesting.stopOwner(busy.id);
       const instance = busy ? registry.get((activeSelections.get(group.threadId) ?? busy.modelSelection).instanceId) : undefined;
       stoppedConversations.add(group.threadId); schedules.cancelResume(group.threadId);
       groupQueueEpoch.set(group.id, (groupQueueEpoch.get(group.id) ?? 0) + 1);
@@ -1669,6 +1758,7 @@ const server = createServer(async (req, res) => {
       if (!bot) return json(res, 404, { error: "no such bot" });
       // a running turn dies with its bot
       await registry.get((activeSelections.get(bot.threadId) ?? bot.modelSelection).instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
+      previewTesting.stopOwner(bot.id, "Bot deleted");
       store.deleteBot(bot.id);
       deleteThreadLogs(bot.threadId);
       broadcast({ kind: "bot.deleted", botId: bot.id });
@@ -1797,6 +1887,7 @@ const server = createServer(async (req, res) => {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const instance = registry.get((activeSelections.get(bot.threadId) ?? bot.modelSelection).instanceId);
+      previewTesting.stopOwner(bot.id);
       stoppedConversations.add(bot.threadId); schedules.cancelResume(bot.threadId); turnContexts.delete(bot.threadId);
       if (!instance?.adapter.hasSession(bot.threadId)) { activeSelections.delete(bot.threadId); store.patchBot(bot.id, { busy: false }); publishBot(bot.id); void scheduler.wake(); }
       await instance?.adapter.interruptTurn(bot.threadId);

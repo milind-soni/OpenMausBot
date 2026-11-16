@@ -5,6 +5,21 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("gbs", {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
+  previewTesting: {
+    start: () => ipcRenderer.invoke("preview-testing:start"),
+    register: (input) => ipcRenderer.invoke("preview-testing:register", input),
+    control: (input) => ipcRenderer.invoke("preview-testing:control", input),
+    onActive: (cb) => {
+      const handler = (_event, id) => cb(id);
+      ipcRenderer.on("preview-testing:active", handler);
+      return () => ipcRenderer.removeListener("preview-testing:active", handler);
+    },
+    onSessions: (cb) => {
+      const handler = (_event, sessions) => cb(sessions);
+      ipcRenderer.on("preview-testing:sessions", handler);
+      return () => ipcRenderer.removeListener("preview-testing:sessions", handler);
+    },
+  },
   background: { get: () => ipcRenderer.invoke("background:get"), set: (enabled) => ipcRenderer.invoke("background:set", enabled) },
   /** One frame of this Mac's screen as a data: URL (Screen Recording TCC). */
   screenFrame: () => ipcRenderer.invoke("screen:frame"),

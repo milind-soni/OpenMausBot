@@ -1,6 +1,6 @@
 # Bot-controlled testing inside Preview
 
-Status: proposed — awaiting explicit user approval
+Status: approved — user requested solo implementation on 2026-11-16
 Date: 2026-11-16
 Owner: Yv
 

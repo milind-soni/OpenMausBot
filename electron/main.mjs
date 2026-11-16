@@ -1,3 +1,5 @@
+import { createPreviewTestingBridge } from "./preview-testing.mjs";
+import { capturePreviewPNG } from "./preview-browser.mjs";
 import { createBackgroundMode } from "./background.mjs";
 import { startScheduleNotifications } from "./schedule-notifications.mjs";
 import { app, Tray, Menu, nativeImage, Notification, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences, utilityProcess, webContents } from "electron";
@@ -151,6 +153,7 @@ function openExternalSafely(url) {
 // webContents ids of the mobile-preview <webview> guests — the only ones the
 // renderer may ask to screenshot
 const previewGuestIds = new Set();
+let previewTestingBridge = null;
 
 async function loadDevUrl(win, url) {
   for (let i = 0; i < 40; i++) {
@@ -194,6 +197,7 @@ function createWindow() {
   });
 
   backgroundMode?.attach(win);
+  previewTestingBridge?.attachWindow(win);
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternalSafely(url);
     return { action: "deny" };
@@ -261,27 +265,7 @@ ipcMain.handle("webview:screenshot", async (_event, { webContentsId, fullPage })
   if (!previewGuestIds.has(webContentsId)) return null;
   const wc = webContents.fromId(webContentsId);
   if (!wc) return null;
-  if (!fullPage) {
-    const image = await wc.capturePage();
-    return image.toDataURL();
-  }
-  const dbg = wc.debugger;
-  const wasAttached = dbg.isAttached();
-  try {
-    if (!wasAttached) dbg.attach("1.3");
-    const metrics = await dbg.sendCommand("Page.getLayoutMetrics");
-    const size = metrics.cssContentSize ?? metrics.contentSize;
-    const width = Math.ceil(size.width);
-    const height = Math.ceil(size.height);
-    const { data } = await dbg.sendCommand("Page.captureScreenshot", {
-      format: "png",
-      captureBeyondViewport: true,
-      clip: { x: 0, y: 0, width, height, scale: 1 },
-    });
-    return `data:image/png;base64,${data}`;
-  } finally {
-    if (!wasAttached && dbg.isAttached()) dbg.detach();
-  }
+  return `data:image/png;base64,${await capturePreviewPNG(wc, Boolean(fullPage))}`;
 });
 
 // Onboarding permission checks. Status reads are free; the mic request
@@ -368,6 +352,7 @@ app.whenReady().then(async () => {
   if (app.isPackaged) serverReady = await startServerPackaged();
   backgroundMode = createBackgroundMode({ app, ipcMain, Tray, Menu, nativeImage, iconPath: APP_ICON, getWindows: () => BrowserWindow.getAllWindows(), openWindow: createWindow });
   stopScheduleNotifications = startScheduleNotifications(app.isPackaged ? `http://127.0.0.1:${SERVER_PORT}` : new URL(DEV_URL).origin, Notification);
+  previewTestingBridge = createPreviewTestingBridge({ ipcMain, webContents, guestIds: previewGuestIds, dataDir: process.env.GBS_DATA_DIR ?? path.join(app.getPath("home"), ".gbs") });
   const win = createWindow();
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
   // the user's click, installs on "Restart to update"
@@ -406,6 +391,7 @@ function stopServer() {
 
 let cuaCleanedUp = false;
 app.on("before-quit", (e) => {
+  void previewTestingBridge?.dispose();
   if (cuaCleanedUp) return;
   stopScheduleNotifications();
   e.preventDefault();

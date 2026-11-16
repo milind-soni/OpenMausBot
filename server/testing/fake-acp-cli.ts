@@ -179,7 +179,7 @@ function handle(msg: any) {
         complete();
         return;
       }
-      if (mode === "ask-peer" && agentsMcp) {
+      if (mode === "ask-peer" && agentsMcp && Number(agentsMcp.env?.find(e => e.name === "GBS_TURN_DEPTH")?.value ?? "0") < 1) {
         // the comms e2e: reach a peer bot through the injected agents proxy
         // and reply with whatever it said (the peer's fake runs plain happy
         // — its depth-1 turn gets no agents server, so no recursion)
