@@ -346,4 +346,24 @@ suite("the v2 stream on real Chrome", () => {
     });
     await client.close();
   }, hostTimeout(90_000));
+  it("captures an inspected element over the controlling viewer stream", async () => {
+    await opened("/element-picker", '<!doctype html><title>element picker</title><style>body{margin:0}h1{position:absolute;left:40px;top:50px;width:240px;height:64px;margin:0;background:#cdf}</style><h1 id="public" onclick="document.title=String.fromCharCode(99,108,105,99,107,101,100)">Public heading</h1>');
+    const client = await connect("width=1280&height=800&maxWidth=2560&maxHeight=1600");
+    await takeControl(client);
+    client.send({ type: "ombElementInspect", requestId: "real-hover", x: 50, y: 60, capture: false });
+    const hover = await client.next<{ type: string; requestId: string; error?: string; element: { document: string; rect: { width: number; height: number } } }>("ombElementInspection");
+    expect(hover.error).toBeUndefined();
+    expect(hover.requestId).toBe("real-hover");
+    const after = client.messages.length;
+    client.send({ type: "ombElementInspect", requestId: "real-capture", x: 50, y: 60, capture: true, document: hover.element.document });
+    const capture = await client.next<{ type: string; requestId: string; error?: string; image: string; mime: string; element: { selector: string; tag: string; rect: { width: number; height: number } } }>("ombElementInspection", after);
+    expect(capture.error).toBeUndefined();
+    expect(capture).toMatchObject({ requestId: "real-capture", mime: "image/png", element: { selector: "h1#public", tag: "h1", rect: { width: 240, height: 64 } } });
+    const png = Buffer.from(capture.image, "base64"), dpr = await real.peek<number>(target, "devicePixelRatio");
+    expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([240 * dpr, 64 * dpr]);
+    expect(await real.peek<string>(target, "document.title")).toBe("element picker");
+    await client.close();
+  }, hostTimeout(90_000));
+
 });
