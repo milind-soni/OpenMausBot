@@ -230,6 +230,15 @@ export function noteAntigravitySignedIn(tokenPath: string): void {
 
 /** An isolated Google profile per instance; foreign Google credentials are stripped so the account
  * and billing never change silently. */
+export const PROXY_ENV_KEYS = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+] as const;
+
 export async function prepareAntigravityProfile(input: {
   instanceId: string;
   runtime: AntigravityRuntime;
@@ -292,11 +301,13 @@ export async function prepareAntigravityProfile(input: {
   }
   const assignedProxy = await resolveAccountProxy(activeEmail, input.toolsDir);
   if (assignedProxy) {
-    Object.assign(environment, {
-      HTTP_PROXY: assignedProxy,
-      HTTPS_PROXY: assignedProxy,
-      ALL_PROXY: assignedProxy,
-    });
+    for (const key of PROXY_ENV_KEYS) {
+      environment[key] = assignedProxy;
+    }
+  } else {
+    for (const key of PROXY_ENV_KEYS) {
+      delete environment[key];
+    }
   }
   // On Windows the runtime unpacks 0.34-1.26 GB into TEMP per launch: one OMB folder per instance,
   // stable so the pooled spawn contract (which hashes this env) holds.

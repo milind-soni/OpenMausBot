@@ -1,6 +1,6 @@
 ﻿import { existsSync, watch, type FSWatcher } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { writeFileAtomic } from "../atomic.ts";
 import { antigravityTokenPath } from "./antigravity-acp.ts";
@@ -160,6 +160,7 @@ export class GeminiCredentialsWatcher {
     };
 
     try {
+      await mkdir(dirname(this.targetTokenPath), { recursive: true });
       writeFileAtomic(this.targetTokenPath, JSON.stringify(updatedToken, null, 2), { mode: 0o600 });
     } catch (writeErr) {
       console.warn(`[GeminiCredentialsWatcher] Failed to write token file ${this.targetTokenPath}:`, writeErr);

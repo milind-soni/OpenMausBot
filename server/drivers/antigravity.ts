@@ -10,6 +10,7 @@ import type {
   ProviderDriver,
   ProviderInstance,
   ProviderSnapshot,
+  RuntimeEvent,
   SendTurnInput,
 } from "../contracts.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./acp/core.ts";
@@ -194,7 +195,15 @@ const support: AcpSupport = {
   },
 };
 
-const AcpAntigravityDriver = createAcpDriver(support);
+export const AcpAntigravityDriver = createAcpDriver(support);
+
+interface TrackedTurn {
+  originalTurnId: string;
+  turn: SendTurnInput;
+  retrying: boolean;
+  retried: boolean;
+  suppressedEvents: RuntimeEvent[];
+}
 
 export const AntigravityDriver: ProviderDriver<AcpConfig> = {
   ...AcpAntigravityDriver,
@@ -202,7 +211,8 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     const base = await AcpAntigravityDriver.create(input);
     scheduleAntigravityTempSweep(input.instanceId);
     scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
-    const activeTurns = new Map<string, { turn: SendTurnInput; retried: boolean }>();
+    const activeTurns = new Map<string, TrackedTurn>();
+    const turnIdRemap = new Map<string, string>();
     const watcher = startAntigravityWatcher(input.instanceId, async () => {
       noteAntigravitySignedIn(antigravityTokenPath(input.instanceId));
       await base.adapter.stopAll().catch(() => {});
@@ -231,30 +241,97 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         ...base.adapter,
         sendTurn: async (turn) => {
           const staged = stageAntigravitySkills(turn, antigravityProfileDirectory(input.instanceId));
-          activeTurns.set(turn.threadId, { turn: staged, retried: false });
-          return base.adapter.sendTurn(staged);
+          const result = await base.adapter.sendTurn(staged);
+          activeTurns.set(turn.threadId, {
+            originalTurnId: result.turnId,
+            turn: staged,
+            retrying: false,
+            retried: false,
+            suppressedEvents: [],
+          });
+          return result;
+        },
+        interruptTurn: async (threadId, turnId) => {
+          let targetTurnId = turnId;
+          if (turnId) {
+            for (const [newId, origId] of turnIdRemap.entries()) {
+              if (origId === turnId) {
+                targetTurnId = newId;
+                break;
+              }
+            }
+          }
+          return base.adapter.interruptTurn(threadId, targetTurnId);
         },
         onEvent: (listener) => {
           return base.adapter.onEvent(async (event) => {
+            let outgoing = event;
+            if (event.turnId && turnIdRemap.has(event.turnId)) {
+              outgoing = { ...event, turnId: turnIdRemap.get(event.turnId)! };
+            }
+
+            const threadId = event.threadId;
+            const tracked = activeTurns.get(threadId);
+
+            if (tracked?.retrying) {
+              tracked.suppressedEvents.push(outgoing);
+              return;
+            }
+
             const isQuotaError =
               (event.type === "runtime.error" && ((event as any).acpUsageLimit === true || (event as any).error === "quota")) ||
               (event.type === "turn.completed" && event.stopReason === "quota");
-            if (isQuotaError) {
-              const threadId = event.threadId;
-              const tracked = activeTurns.get(threadId);
-              if (tracked && !tracked.retried) {
-                tracked.retried = true;
-                const switched = await handleQuotaExhaustedWithAutoSwitch(watcher);
-                if (switched) {
-                  await base.adapter.stopAll().catch(() => {});
-                  void base.adapter.sendTurn(tracked.turn);
-                  return;
+
+            if (isQuotaError && tracked && !tracked.retried) {
+              tracked.retried = true;
+              tracked.retrying = true;
+              tracked.suppressedEvents.push(outgoing);
+
+              void (async () => {
+                try {
+                  const switched = await handleQuotaExhaustedWithAutoSwitch(watcher);
+                  if (switched) {
+                    await base.adapter.stopAll().catch(() => {});
+                    const retriedAck = await base.adapter.sendTurn(tracked.turn);
+                    turnIdRemap.set(retriedAck.turnId, tracked.originalTurnId);
+                    tracked.retrying = false;
+                    tracked.suppressedEvents = [];
+                    return;
+                  }
+                } catch (switchErr) {
+                  console.warn("[AntigravityDriver] Error during quota auto-switch and retry:", switchErr);
                 }
-              }
-            } else if (event.type === "turn.completed" && event.ok) {
-              activeTurns.delete(event.threadId);
+
+                tracked.retrying = false;
+                activeTurns.delete(threadId);
+                const hasCompletion = tracked.suppressedEvents.some((e) => e.type === "turn.completed");
+                if (!hasCompletion) {
+                  tracked.suppressedEvents.push({
+                    type: "turn.completed",
+                    threadId,
+                    turnId: tracked.originalTurnId,
+                    createdAt: new Date().toISOString(),
+                    ok: false,
+                    stopReason: "error",
+                    error: "Quota auto-switch failed",
+                  } as any);
+                }
+                for (const suppressed of tracked.suppressedEvents) {
+                  listener(suppressed);
+                }
+                tracked.suppressedEvents = [];
+              })();
+              return;
             }
-            listener(event);
+
+            if (outgoing.type === "turn.completed") {
+              activeTurns.delete(threadId);
+              if (event.turnId && turnIdRemap.has(event.turnId)) {
+                turnIdRemap.delete(event.turnId);
+              }
+            }
+
+            listener(outgoing);
           });
         },
       },
@@ -300,6 +377,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         auth.cancel();
         stopAntigravityWatcher(input.instanceId);
         activeTurns.clear();
+        turnIdRemap.clear();
         await base.adapter.stopAll();
         await removeAntigravitySignIn(input.instanceId);
         if (!runtimeProcesses.count(input.instanceId)) return;
@@ -311,6 +389,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         auth.cancel();
         stopAntigravityWatcher(input.instanceId);
         activeTurns.clear();
+        turnIdRemap.clear();
         await base.dispose();
       },
     };
