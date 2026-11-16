@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { BrowserService } from "../service.ts";
@@ -605,3 +605,45 @@ describe("what the panel shows besides the page", () => {
   });
 });
 
+
+it.each([false, true])("does not inspect a webpage for a non-controlling viewer (another holder: %s)", async anotherHolder => {
+  const { watch, chrome } = await setup();
+  const observer = await watch({ owner: "observer" });
+  if (anotherHolder) {
+    const holder = await watch({ owner: "holder" });
+    await holder.viewer.input({ type: "takeControl" });
+  }
+  const inspections = () => chrome().sent.filter(command => command.method === "Runtime.evaluate" && String(command.params.expression).includes("inspectElementAt"));
+  const before = inspections().length;
+  await observer.viewer.input({ type: "ombElementInspect", requestId: "denied-inspection", x: 10, y: 12, capture: true });
+  expect(inspections()).toHaveLength(before);
+  expect(observer.outputs.some(output => (output as { type: string }).type === "ombElementInspection")).toBe(false);
+});
+
+it("routes an authorized element inspection and returns an unavailable-element response", async () => {
+  const { watch, chrome } = await setup();
+  const holder = await watch();
+  await holder.viewer.input({ type: "takeControl" });
+  await holder.viewer.input({ type: "ombElementInspect", requestId: "authorized-inspection", x: 10, y: 12, capture: false });
+  expect(chrome().sent.some(command => command.method === "Runtime.evaluate" && String(command.params.expression).includes("inspectElementAt"))).toBe(true);
+  expect(holder.outputs).toContainEqual(expect.objectContaining({ type: "ombElementInspection", requestId: "authorized-inspection", error: "The webpage element is no longer available." }));
+});
+
+
+it("pauses live viewers while an element clip captures, then restores their screencasts", async () => {
+  const { service, target, watch, chrome } = await setup();
+  const holder = await watch();
+  await holder.viewer.input({ type: "takeControl" });
+  const tab = service.profiles().find(profile => profile.key === target.key)!.active()!;
+  const original = tab.page.evaluate.bind(tab.page);
+  const element = { document: "synthetic-document", rect: { x: 10, y: 12, width: 20, height: 30 }, clip: { x: 10, y: 12, width: 20, height: 30 } };
+  const evaluation = vi.spyOn(tab.page, "evaluate").mockImplementation((expression, options) => String(expression).includes("inspectElementAt") ? Promise.resolve(element) : original(expression, options));
+  try {
+    const before = chrome().sent.length;
+    await holder.viewer.input({ type: "ombElementInspect", requestId: "capture-stream", x: 10, y: 12, capture: true });
+    const order = chrome().sent.slice(before).map(command => command.method);
+    expect(order.indexOf("Page.stopScreencast")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("Page.stopScreencast")).toBeLessThan(order.indexOf("Page.captureScreenshot"));
+    expect(order.lastIndexOf("Page.startScreencast")).toBeGreaterThan(order.indexOf("Page.captureScreenshot"));
+  } finally { evaluation.mockRestore(); }
+});

@@ -1,3 +1,4 @@
+import { registerDraft } from "@/lib/browser-picker-draft";
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
@@ -503,6 +504,9 @@ export function Composer({
     refocusInput();
   };
 
+  const pickerDraft = useRef({ draftId, recording, allowImages: engineSupportsImages, imageSlots: imageSlotsLeft(attachments), imageBytes: imageBytesLeft(attachments), onFiles: pickFiles, onText: editText, getText: () => text });
+  pickerDraft.current = { draftId, recording, allowImages: engineSupportsImages, imageSlots: imageSlotsLeft(attachments), imageBytes: imageBytesLeft(attachments), onFiles: pickFiles, onText: editText, getText: () => text };
+  useEffect(() => registerDraft(() => pickerDraft.current), []);
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
   const onCall = useOnCall();
   const media = useLiveMedia();

@@ -50,6 +50,7 @@ const PILL_TEXT: Record<PillState, (bot: string) => string> = {
 };
 
 export const ChromeRow = forwardRef<HTMLInputElement, {
+  picker?: import("react").ReactNode;
   botName: string;
   tabs: BrowserTab[];
   nav: BrowserNav;
@@ -109,6 +110,7 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
           <span className="truncate">{PILL_TEXT[pill](botName)}</span>
           {pill === "bot" || pill === "watching" ? <span className="shrink-0 text-ink">· {t("browser.control.take")}</span> : handsBack ? <span className="shrink-0">· {t("browser.control.handBack")}</span> : null}
         </button>
+        {props.picker}
         <button className={button} title={t(props.maximized ? "browser.panel.restore" : "browser.panel.maximizeHint")} aria-label={t(props.maximized ? "browser.panel.restore" : "browser.panel.maximize")} onClick={props.onMaximize}>{props.maximized ? <Shrink size={15} /> : <AppWindow size={15} />}</button>
         <button className={button} title={t(props.fullscreen ? "browser.panel.exitFullscreen" : "browser.panel.fullscreenHint")} aria-label={t(props.fullscreen ? "browser.panel.exitFullscreen" : "browser.panel.fullscreen")} onClick={props.onFullscreen}>{props.fullscreen ? <Minimize size={15} /> : <Maximize size={15} />}</button>
         <button className={`${button} rounded-xl bg-inset p-1.5`} title={t("browser.panel.profileTitle", { name: props.profileName })} aria-label={t("browser.panel.profiles")} onClick={props.onProfiles}><UserRound size={15} /></button>
