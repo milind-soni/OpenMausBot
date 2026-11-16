@@ -20,10 +20,11 @@
 # ...) and OpenMausBot's own state (~/.openmausbot) persist across container
 # restarts.
 #
-# A plain `docker run` of either image wants `--init --shm-size=512m`, as the
-# compose files set: the bots' browsers leave exited processes for an init to
-# collect, and Chrome needs shared memory (docs/browser-packaging.md, "Process
-# hygiene"). On Fly Machines (the Cloud home) Fly's own init is PID 1.
+# The bots' browsers leave exited processes for an init to collect, and Chrome
+# needs shared memory (docs/browser-packaging.md, "Process hygiene"). The
+# server image starts under tini, so a host with no `--init` switch (Railway,
+# for one) still collects them; a plain `docker run` wants `--shm-size=512m`.
+# On Fly Machines (the Cloud home) Fly's own init is PID 1.
 
 FROM caddy:2.10.2 AS edge
 # Official Caddy carries a privileged-port file capability. The Cloud home's
@@ -74,9 +75,10 @@ RUN arch=x64 && if [ "$TARGETARCH" = arm64 ]; then arch=arm64; fi \
 FROM node:24-bookworm-slim AS runtime
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
 # invokes sudo even as root, and this image deliberately does not ship sudo.
-# git + curl: agent CLIs shell out to git; curl backs the healthcheck
+# git + curl: agent CLIs shell out to git; curl backs the healthcheck. tini: the
+# server image's init, for hosts that add none
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git \
+  && apt-get install -y --no-install-recommends ca-certificates curl git tini \
     libxcb-shm0 libx11-xcb1 libx11-6 libxcb1 libxext6 libxrandr2 \
     libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libgtk-3-0 \
     libpangocairo-1.0-0 libpango-1.0-0 libatk1.0-0 libcairo-gobject2 \
@@ -251,6 +253,9 @@ VOLUME ["/data"]
 USER maus
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot || exit 1
+# -s: under a runtime's own init (compose's `init: true`) tini is not PID 1,
+# and as a subreaper it still collects what the server's children leave.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 # The launcher runs dist-server/index.js and starts it again when it asks to
 # (a copied workspace committing, server/restart.ts), so the container, and a
 # Caddy sharing its network, stays up through that restart.
