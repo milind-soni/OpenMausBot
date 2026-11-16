@@ -417,7 +417,7 @@ function windowsProcessListed(pid) {
 /** tasklist ships with every Windows and lists every running process, whatever account or session owns it. */
 function tasklistHasPid(pid) {
   try {
-    const output = windowsOutput("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], 5_000);
+    const output = commandOutput("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], 5_000);
     return output.split(/\r?\n/).some((line) => line.startsWith('"'));
   } catch {
     return null;
@@ -427,7 +427,7 @@ function tasklistHasPid(pid) {
 function cimHasPid(pid) {
   const powershell = join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   try {
-    const output = windowsOutput(powershell, [
+    const output = commandOutput(powershell, [
       "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
       `if (Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction Stop) { '1' }`,
     ], 15_000);

@@ -157,13 +157,19 @@ describe("a routine every minute by cron whose tool server is dead", () => {
 });
 
 describe("a routine every 5 minutes on a server whose engines cannot start", () => {
-  it("tries 9 starts in its first day instead of two at every occurrence, and never a second start on the same full server", async () => {
+  // Since #6179 a refused spawn is the server's own shortage: the run waits on its own thread as for a busy bot, trying
+  // again behind the same wait (nothing reaches the AI), and fails after an hour. Those failures space the routine out.
+  it("runs 7 times in its first day, each waiting on its own thread for an hour, never a second start of a run", async () => {
     const h = harness(async () => { throw new Error(SPAWN_REFUSED); });
     await h.passTo(START + 24 * HOUR, () => {});
-    console.log(`engine starts tried in 24 hours on a server that cannot start one: ${h.started.length}`);
-    expect(h.started).toHaveLength(9);
+    const runs = new Set(h.started.map((start) => start.threadId));
+    console.log(`runs started in 24 hours on a server that cannot start an engine: ${runs.size} (${h.started.length} tries)`);
+    expect(runs.size).toBe(7);
     expect(h.routine()).toMatchObject({ enabled: true });
-    expect(h.rows().filter((run) => run.status === "failed").every((run) => run.retried === undefined && run.error === SPAWN_REFUSED)).toBe(true);
+    const failures = h.rows().filter((run) => run.status === "failed");
+    expect(failures).toHaveLength(7);
+    expect(failures.every((run) => run.retried === undefined && run.error!.startsWith("Did not start: still busy after 60 minutes (spawn /usr/local/bin/claude EAGAIN"))).toBe(true);
+    expect(h.alerts.filter((alert) => alert !== null && alert !== undefined)).toEqual([{ detail: expect.stringContaining("3 runs in a row failed. It stays on") }]);
   });
 });
 

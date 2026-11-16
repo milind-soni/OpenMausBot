@@ -796,7 +796,7 @@ describe("the link between a computer and its Cloud", () => {
     expect(turns).toHaveLength(1);
     expect(turns[0]!.text).toContain("Sam: @Analyst how many orders this week?\nSam: @Analyst and split them by country.");
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(computer.said(room.id).filter((line) => line.startsWith("Analyst: "))).toHaveLength(1);
+    expect(computer.said(room.id).filter((line) => line.startsWith("Analyst: ")), JSON.stringify(computer.said(room.id))).toHaveLength(1);
     expect(cloud.runs.filter((run) => run.botId === "cloud-analyst")).toHaveLength(1);
   });
 

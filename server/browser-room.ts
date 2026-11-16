@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join } from "node:path/posix";
 import { boxMemory } from "./box-memory.ts";
 
 /** One open browser with one page in the server image (Chromium 156, agent-browser 0.37.0): 13 processes, about 160

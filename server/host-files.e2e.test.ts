@@ -189,16 +189,17 @@ describe("file tools on this computer, through its bridge", () => {
     const gate = await controlServer();
     const controller = new AbortController();
     const sessions: ChatToolSession[] = [];
-    const mount = async (env: Record<string, string>) => {
+    // The first start may wait its full budget (#6208 waits `startupMs` before showing a stand-in); a later one only 300 ms.
+    const mount = async (env: Record<string, string>, startupMs = 300) => {
       const turn = withHostFileTools({ localComputer: gatedLocalComputer(driver(env), gate.control) });
       const localComputer = { ...turn!.localComputer!, env: { ...turn!.localComputer!.env, HOME: home, USERPROFILE: home } };
-      const session = await mountChatTools({ localComputer }, controller.signal, true, undefined, undefined, undefined, undefined, undefined, undefined, { startupMs: 300, hostComputerMs: 20_000 });
+      const session = await mountChatTools({ localComputer }, controller.signal, true, undefined, undefined, undefined, undefined, undefined, undefined, { startupMs, hostComputerMs: 20_000 });
       sessions.push(session);
       return session;
     };
     const names = (session: ChatToolSession) => session.definitions.map((definition) => definition.function.name);
     try {
-      const cold = await mount({});
+      const cold = await mount({}, 20_000);
       expect(names(cold)).toEqual(["computer_screenshot", ...FILE_TOOLS.map((name) => `computer_${name}`)]);
       const asked = Date.now();
       const warm = await mount({ FAKE_DELAY_MS: "2500" });

@@ -1356,7 +1356,10 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       const agents = seen.mcpConfig.mcpServers.agents;
       expect(agents).toMatchObject({ type: "http", alwaysLoad: true, url: "http://127.0.0.1:1/api/internal/mcp-http/agents", headers: { authorization: "Bearer tok" } });
       expect(JSON.parse(Buffer.from(agents.headers["x-omb-agents-env"], "base64url").toString("utf8"))).toMatchObject({ OMB_BOT_ID: "b1", [DEFER_TOOLS_ENV]: "1" });
-      for (const name of ["NO_PROXY", "no_proxy"]) expect(seen.env[name].split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
+      // Windows has one case-insensitive variable for both spellings, so the dump holds a single key there.
+      const noProxy = Object.keys(seen.env).filter((name) => name.toLowerCase() === "no_proxy");
+      expect(noProxy).toHaveLength(process.platform === "win32" ? 1 : 2);
+      for (const name of noProxy) expect(seen.env[name].split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
     } else {
       expect(seen.mcpConfig.mcpServers.agents).toMatchObject({
         alwaysLoad: true,
@@ -3743,7 +3746,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // A tool call leaves a process behind in the engine's group, as a dev server or an MCP server does.
     process.env.FAKE_CLAUDE_RUN_BASH = "1";
     process.env.FAKE_CLAUDE_TOOL_CALLS = JSON.stringify([{ name: "Bash", input: { command: `"${process.execPath}" -e "setTimeout(() => {}, 60000)" >/dev/null 2>&1 & echo $! > "${marker}"` } }]);
-    const alive = (value: number) => { try { process.kill(value, 0); return true; } catch { return false; } };
+    // A stopped process nobody has reaped yet still answers signal 0; Linux shows it as a zombie, which counts as stopped (#6179).
+    const zombie = (value: number) => { try { return /^\S+ \(.*\) Z /.test(readFileSync(`/proc/${value}/stat`, "utf8")); } catch { return false; } };
+    const alive = (value: number) => { try { process.kill(value, 0); } catch { return false; } return !zombie(value); };
     let left = 0;
     try {
       await create();
