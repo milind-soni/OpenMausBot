@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { boxMemory, heapSizeArgs, type BoxMemory } from "./box-memory.ts";
+import { containerInit } from "./container-init.ts";
 import { clearRecordsFromEarlierRunOfThisContainer } from "./data-dir-lease.ts";
 import { restartPolicy } from "./restart.ts";
 
@@ -60,5 +61,8 @@ if (isEntry()) {
     console.warn(`The data folder's lease could not be checked: ${error instanceof Error ? error.message : String(error)}`);
   }
   const server = serverCommand(dirname(fileURLToPath(import.meta.url)), process.env);
-  void superviseServer(() => spawn(process.execPath, server.args, { stdio: "inherit", env: server.env })).then((code) => { process.exitCode = code; });
+  const init = containerInit();
+  if (init.line) console.warn(init.line);
+  const [command, ...args] = [...init.prefix, process.execPath, ...server.args];
+  void superviseServer(() => spawn(command!, args, { stdio: "inherit", env: server.env })).then((code) => { process.exitCode = code; });
 }
