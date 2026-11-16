@@ -123,26 +123,28 @@ describe("owner tool selection status", () => {
     expect(markup).toContain("will stop before sending a prompt");
   });
 
-  it("keeps the selection editor disabled while a task is active", () => {
+  it("keeps the selection editor open while a task is active and says when a change applies", () => {
     const markup = render(makeBot({ busy: true }));
-    expect(markup).toContain('aria-label="Tool selection" disabled=""');
-    expect(markup).toContain("Wait until this bot finishes all active tasks before changing its tool selection.");
+    expect(markup).not.toContain('aria-label="Tool selection" disabled=""');
+    expect(markup).toContain("This bot is working. Added access applies from its next turn; removed access may stop sooner.");
+    expect(render(makeBot())).not.toContain("Added access applies from its next turn");
   });
 });
 
 describe("AccessSection always-allowed list", () => {
-  it("keeps per-bot MCP changes disabled while any task is active", () => {
+  it("keeps per-bot MCP changes open while a task is active and says when they apply", () => {
     fixture.servers = [{ name: "notes", enabled: true }, { name: "offline", enabled: false }];
     const markup = render(makeBot({ busy: true, mcpServers: ["notes"] }));
-    expect(markup).toContain('disabled="" aria-label="Let this bot use notes"');
+    expect(markup).not.toContain('disabled="" aria-label="Let this bot use notes"');
     expect(markup).toContain('disabled="" aria-label="Let this bot use offline"');
-    expect(markup).toMatch(/<button type="button" disabled=""[^>]*>Use every enabled server<\/button>/);
-    expect(markup).toContain("finishes all active tasks");
+    expect(markup).not.toMatch(/<button type="button" disabled=""[^>]*>Use every enabled server<\/button>/);
+    expect(markup).toContain(">Use every enabled server</button>");
+    expect(markup).toContain("Added access applies from its next turn");
     expect(markup).toContain("Individual tool approvals depend on the model provider and approval mode.");
     const idle = render(makeBot({ mcpServers: ["notes"] }));
     expect(idle).not.toContain('disabled="" aria-label="Let this bot use notes"');
     expect(idle).toContain('disabled="" aria-label="Let this bot use offline"');
-    expect(idle).not.toContain("finishes all active tasks");
+    expect(idle).not.toContain("Added access applies from its next turn");
   });
 
   it("opens the established app connection flow without authorizing a second way", () => {

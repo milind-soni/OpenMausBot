@@ -353,6 +353,33 @@ describe("PATCH /api/bots/:id phoneApps", () => {
   });
 });
 
+describe("PATCH /api/bots/:id while the bot works", () => {
+  const owner = { headers: { origin: "http://localhost:5173" } };
+
+  it("saves MCP servers and tool selection for the next turn", async () => {
+    const { store, bot, patch } = fixture();
+    store.patchBot(bot.id, { mcpServers: ["notes"], busy: true });
+
+    const added = await patch(bot.id, { mcpServers: ["notes", "docs"] }, owner);
+    const narrowed = await patch(bot.id, { mcpServers: ["docs"] });
+    const scoped = await patch(bot.id, { toolScope: { deny: ["mcp:docs:delete"] } });
+
+    expect([added.status, narrowed.status, scoped.status]).toEqual([200, 200, 200]);
+    expect(store.bot(bot.id)?.mcpServers).toEqual(["docs"]);
+    expect(store.bot(bot.id)?.toolScope).toEqual({ deny: ["mcp:docs:delete"] });
+  });
+
+  it("still refuses a local script that widens MCP servers while any bot works", async () => {
+    const { store, bot, patch } = fixture();
+    store.patchBot(bot.id, { mcpServers: ["notes"], busy: true });
+
+    const widened = await patch(bot.id, { mcpServers: ["notes", "docs"] });
+
+    expect(widened.status).toBe(409);
+    expect(store.bot(bot.id)?.mcpServers).toEqual(["notes"]);
+  });
+});
+
 describe("PATCH /api/bots/:id mainThreadChoice", () => {
   it("stores the conversation the person chose, clears it with null, and refuses a routine run or another bot's thread", async () => {
     const { store, bot, patch } = fixture();

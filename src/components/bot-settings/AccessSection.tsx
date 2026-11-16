@@ -136,7 +136,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
   const usesAll = bot.mcpServers == null;
 
   const toggle = (name: string) => {
-    if (!servers || bot.busy || error) return;
+    if (!servers || error) return;
     patch({ mcpServers: mcpSwitch(servers, bot.mcpServers, name) });
   };
   const openPlugins = () => {
@@ -175,7 +175,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
               </div>
               <Switch
                 checked={mounted.has(server.name)}
-                disabled={!server.enabled || !!bot.busy || error}
+                disabled={!server.enabled || error}
                 aria-label={t("botAccess.mcpAllow", { name: server.name })}
                 onClick={() => toggle(server.name)}
                 className="disabled:cursor-not-allowed"
@@ -190,12 +190,12 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
           <Plus size={14} /> {t("botAccess.mcpAdd")}
         </button>
         {!usesAll && servers && servers.length > 0 && (
-          <button type="button" disabled={!!bot.busy || error} onClick={() => { if (!bot.busy && !error) patch({ mcpServers: null }); }} className="rounded-lg px-2 py-2 text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50">
+          <button type="button" disabled={error} onClick={() => { if (!error) patch({ mcpServers: null }); }} className="rounded-lg px-2 py-2 text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50">
             {t("botAccess.mcpUseAll")}
           </button>
         )}
       </div>
-      {bot.busy && <p className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.mcpBusy")}</p>}
+      {bot.busy && <p className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.nextTurn")}</p>}
     </div>
   );
 }
