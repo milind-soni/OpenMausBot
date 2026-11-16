@@ -45,7 +45,10 @@ describe("the server as a container's process 1", () => {
       const plain = join(dir, "tini"), program = join(dir, "program");
       writeFileSync(plain, "", { mode: 0o644 });
       writeFileSync(program, "#!/bin/sh\n", { mode: 0o755 });
-      for (const file of [plain, dir, "/dev/null", join(dir, "missing")]) expect(canRun(file), file).toBe(false);
+      // Windows has no execute bit (X_OK checks only that the file exists), so a 0644 file counts there; the server
+      // only ever execs tini on Linux, where the bit is what Node 24's execve would trip on.
+      const refused = process.platform === "win32" ? [dir, "/dev/null", join(dir, "missing")] : [plain, dir, "/dev/null", join(dir, "missing")];
+      for (const file of refused) expect(canRun(file), file).toBe(false);
       expect(canRun(program)).toBe(true);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
