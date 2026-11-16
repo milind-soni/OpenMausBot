@@ -3997,10 +3997,15 @@
       "together.switch.line": "f1da9a3fe37ffcb0273f52889240d8e3d13709220eca9c08b5b923f9def19409",
       "together.switch.failed": "ad8287436402edb5c91ee0cc4bfe88f3301bac459a7d49e4cd2c564fa20aa1b8",
       "server.rooms.linkedAway": "015d3b80112be3f88333b361fb631d562fadeb17de17e2a534c1086560693f5e",
-      "server.rooms.linkedGone": "ff9797127fda5bd03d482d7b6129e110c31a54c03334aa3efa8e160d7e33ccad",
+      "server.rooms.linkedGone": "ed936f187bb453bf357fe8a9a76247ace6b4be4f1d483663ffd13ea386247cb0",
       "server.rooms.linkedNotSent": "2a7a449dfde6117164372825181d8f4a316f206fc247d15aa19408b0e5667f15",
       "server.rooms.linkedNoAnswer": "e84a8f83812d4c90e838cb280452b27886f69f6b3fee7d151419407bee121095",
-      "server.rooms.linkedFailed": "f2e5123cd9e1fcc6f0d3f6a304455efc779f5fb95c6dd7abb01820b3ab3205d5"
+      "server.rooms.linkedFailed": "f2e5123cd9e1fcc6f0d3f6a304455efc779f5fb95c6dd7abb01820b3ab3205d5",
+      "server.rooms.linkedMissing": "e292003a2513e05bc0f69df1ef52d9c9164537a35fa9255146183d3b66418ada",
+      "server.rooms.linkedEnded": "bbeb2baa902dec0cdc4a381486fb238d8085d6a1fb7d1ad7a7b74fe982b3b20c",
+      "room.members.far.place": "312a77edd15104f65401f8127c68968eb1586a75e13c44bc3bc5d28ea4f5125d",
+      "room.members.far.off": "5c7291cc0bc0f48f169607324939b4b2bb308c5246d10cda4ad7501ba4883beb",
+      "room.members.far.missing": "4bc7f76d36ade5ee27902c91e3d7918641737b2387f846623c3f986a574177fa"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37063,10 +37068,15 @@
       "sidebar.newBotOn.onlyHere": "5fa107188d3ebf59545c5522c3540371a95d16a3625a4f57e84f093849baabc4",
       "sidebar.newBotOn.needsUpdate": "2fe10ee88189ee8ef942992b455e968fed8af782c1e7353b5a1ac4c54365c1b0",
       "server.rooms.linkedAway": "015d3b80112be3f88333b361fb631d562fadeb17de17e2a534c1086560693f5e",
-      "server.rooms.linkedGone": "ff9797127fda5bd03d482d7b6129e110c31a54c03334aa3efa8e160d7e33ccad",
+      "server.rooms.linkedGone": "ed936f187bb453bf357fe8a9a76247ace6b4be4f1d483663ffd13ea386247cb0",
       "server.rooms.linkedNotSent": "2a7a449dfde6117164372825181d8f4a316f206fc247d15aa19408b0e5667f15",
       "server.rooms.linkedNoAnswer": "e84a8f83812d4c90e838cb280452b27886f69f6b3fee7d151419407bee121095",
-      "server.rooms.linkedFailed": "f2e5123cd9e1fcc6f0d3f6a304455efc779f5fb95c6dd7abb01820b3ab3205d5"
+      "server.rooms.linkedFailed": "f2e5123cd9e1fcc6f0d3f6a304455efc779f5fb95c6dd7abb01820b3ab3205d5",
+      "server.rooms.linkedMissing": "e292003a2513e05bc0f69df1ef52d9c9164537a35fa9255146183d3b66418ada",
+      "server.rooms.linkedEnded": "bbeb2baa902dec0cdc4a381486fb238d8085d6a1fb7d1ad7a7b74fe982b3b20c",
+      "room.members.far.place": "312a77edd15104f65401f8127c68968eb1586a75e13c44bc3bc5d28ea4f5125d",
+      "room.members.far.off": "5c7291cc0bc0f48f169607324939b4b2bb308c5246d10cda4ad7501ba4883beb",
+      "room.members.far.missing": "4bc7f76d36ade5ee27902c91e3d7918641737b2387f846623c3f986a574177fa"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47309,10 +47319,15 @@
       "sidebar.newBotOn.onlyHere": "5fa107188d3ebf59545c5522c3540371a95d16a3625a4f57e84f093849baabc4",
       "sidebar.newBotOn.needsUpdate": "2fe10ee88189ee8ef942992b455e968fed8af782c1e7353b5a1ac4c54365c1b0",
       "server.rooms.linkedAway": "015d3b80112be3f88333b361fb631d562fadeb17de17e2a534c1086560693f5e",
-      "server.rooms.linkedGone": "ff9797127fda5bd03d482d7b6129e110c31a54c03334aa3efa8e160d7e33ccad",
+      "server.rooms.linkedGone": "ed936f187bb453bf357fe8a9a76247ace6b4be4f1d483663ffd13ea386247cb0",
       "server.rooms.linkedNotSent": "2a7a449dfde6117164372825181d8f4a316f206fc247d15aa19408b0e5667f15",
       "server.rooms.linkedNoAnswer": "e84a8f83812d4c90e838cb280452b27886f69f6b3fee7d151419407bee121095",
-      "server.rooms.linkedFailed": "f2e5123cd9e1fcc6f0d3f6a304455efc779f5fb95c6dd7abb01820b3ab3205d5"
+      "server.rooms.linkedFailed": "f2e5123cd9e1fcc6f0d3f6a304455efc779f5fb95c6dd7abb01820b3ab3205d5",
+      "server.rooms.linkedMissing": "e292003a2513e05bc0f69df1ef52d9c9164537a35fa9255146183d3b66418ada",
+      "server.rooms.linkedEnded": "bbeb2baa902dec0cdc4a381486fb238d8085d6a1fb7d1ad7a7b74fe982b3b20c",
+      "room.members.far.place": "312a77edd15104f65401f8127c68968eb1586a75e13c44bc3bc5d28ea4f5125d",
+      "room.members.far.off": "5c7291cc0bc0f48f169607324939b4b2bb308c5246d10cda4ad7501ba4883beb",
+      "room.members.far.missing": "4bc7f76d36ade5ee27902c91e3d7918641737b2387f846623c3f986a574177fa"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",

@@ -144,6 +144,8 @@ export interface BotLinkDeps {
     reply(child: HandoffView, parent: HandoffView | undefined, name: string): boolean;
     /** Whether that bot of another place is a member of this room. */
     member(groupId: string, linked: string): boolean;
+    /** On the Cloud: a computer's link ended for good, because it did not connect for the link's whole term. */
+    expired?(peer: string, placeName: string): void;
   };
   /** The coordinator should look again: a place came back, or went. */
   kick(): void;
@@ -563,6 +565,7 @@ export function createBotLink(deps: BotLinkDeps) {
       if (isOnline(peer) || now() - known.seenAt <= LINK_EXPIRES_MS) continue;
       log(`bot link: ${known.place.name} has not connected for ${Math.round(LINK_EXPIRES_MS / DAY_MS)} days; its link ended`);
       dropPeer(peer, `${known.place.name} has not connected for ${Math.round(LINK_EXPIRES_MS / DAY_MS)} days, so the link to it ended and this was not done.`);
+      deps.rooms?.expired?.(peer, known.place.name);
     }
   }
 
@@ -699,7 +702,9 @@ export function createBotLink(deps: BotLinkDeps) {
         if (left) return left;
         return remoteOf(node.botId) ? undefined : "That bot's place is no longer linked, or the bot is no longer there.";
       },
-      busy: (node) => (awayNode(node) ? !isOnline(peerOf(node)) : inner.busy(node)),
+      // A node that only stands for who asked (a room, another place's requester) has no parent and runs nothing: it is
+      // never busy, so it ends as soon as the work under it has ended, whether or not any place is connected.
+      busy: (node) => (awayNode(node) ? Boolean(node.parentId) && !isOnline(peerOf(node)) : inner.busy(node)),
       holdReason: (node) => (awayNode(node) ? offlineNote(peerOf(node)) : inner.holdReason?.(node) as string),
       // Work for a place that cannot be reached, waiting to go or already running there, is held by no clock.
       away: (node) => (awayNode(node) ? Boolean(state) && Boolean(node.parentId) && !isOnline(peerOf(node)) : inner.away?.(node) ?? false),

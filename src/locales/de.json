@@ -3998,8 +3998,13 @@
   "together.switch.line": "Standardmäßig aus. Die Bots der Cloud und die Bots dieses Computers stehen in einer Liste, und jeder öffnet sich dort, wo er läuft.",
   "together.switch.failed": "Das konnte nicht gespeichert werden. Versuch es noch einmal.",
   "server.rooms.linkedAway": "{bot} läuft auf {place}, das gerade aus ist oder schläft. Die Antwort kommt hier, sobald {place} wieder da ist.",
-  "server.rooms.linkedGone": "{bot} läuft auf {place}, das nicht mehr mit diesem Ort verbunden ist, und kann hier deshalb nicht antworten.",
+  "server.rooms.linkedGone": "{bot} läuft auf {place}. Die Verbindung zu {place} ist gerade aus; eine Antwort kommt hier erst, wenn sie zurück ist.",
   "server.rooms.linkedNotSent": "{bot} konnte auf {place} nicht an die Reihe kommen. Erwähne {bot} noch einmal, um es erneut zu versuchen.",
   "server.rooms.linkedNoAnswer": "{bot} ist auf {place} fertig geworden, ohne eine Antwort für diesen Raum.",
-  "server.rooms.linkedFailed": "{bot} konnte von {place} aus nicht antworten."
+  "server.rooms.linkedFailed": "{bot} konnte von {place} aus nicht antworten.",
+  "server.rooms.linkedMissing": "{bot} gibt es auf {place} nicht mehr und kann hier deshalb nicht antworten. Entferne diesen Bot aus den Mitgliedern dieses Raums.",
+  "server.rooms.linkedEnded": "{place} hat sich 30 Tage lang nicht verbunden, deshalb wurde die Verbindung dorthin beendet. Nicht mehr in diesem Raum: {bots}.",
+  "room.members.far.place": "auf {place}",
+  "room.members.far.off": "Verbindung ist aus",
+  "room.members.far.missing": "Nicht mehr verfügbar"
 }

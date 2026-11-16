@@ -200,10 +200,24 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     // Off on the computer: the server is told, and neither keeps the link.
     expect(await computer.api("PUT", "/api/bot-link", { on: false })).toEqual({ on: false });
     await expect.poll(() => existsSync(join(home.dataDir, "bot-link.json")), { timeout: 10_000 }).toBe(false);
-    await computer.api("GET", `/api/bots/${standIn.id}`, undefined, { status: 404 });
     expect((await computer.api("GET", "/api/bot-link/bots")).bots).toEqual([]);
-    // Its bots left the rooms here with it.
-    expect(JSON.parse(readFileSync(join(computer.dataDir, "groups.json"), "utf8")).find((group: any) => group.id === launch.id).memberIds).toEqual([writer.id]);
+    // Turning the link off removes nobody from a room: the far member stays, named, marked as out of reach, and takes no turn.
+    const savedMembers = () => JSON.parse(readFileSync(join(computer.dataDir, "groups.json"), "utf8")).find((group: any) => group.id === launch.id).memberIds;
+    expect(savedMembers()).toEqual([writer.id, standIn.id]);
+    // Saving the members again, with an address no record answers to among them, is not refused: that address is left out.
+    const resaved = (await computer.api("PATCH", `/api/groups/${launch.id}`, { memberIds: [writer.id, standIn.id, "link-0000abcd-nobody"] })).group;
+    expect(resaved.memberIds).toEqual([writer.id, standIn.id]);
+    expect(resaved.farMembers).toEqual([{ id: standIn.id, name: "Atlas", place: "My server", state: "off" }]);
+    await computer.cli("send-channel", "--channel", launch.id, "--text", "@Atlas are you there?");
+    await expect.poll(async () => (await computer.messages(launch.activeTaskId)).some((message) => message.kind === "activity" && /The link to My server is off now/u.test(message.tool?.name ?? "")), { timeout: 20_000 }).toBe(true);
+    expect(atlasTurns()).toBe(turnsBefore + 1);
+    // The person removes it: then nothing of it is left here.
+    const without = (await computer.api("PATCH", `/api/groups/${launch.id}`, { memberIds: [writer.id] })).group;
+    expect(without.memberIds).toEqual([writer.id]);
+    expect(without.farMembers).toBeUndefined();
+    expect(savedMembers()).toEqual([writer.id]);
+    await computer.api("GET", `/api/bots/${standIn.id}`, undefined, { status: 404 });
+    expect(existsSync(join(computer.dataDir, "bot-link-rooms.json"))).toBe(false);
     await home.api("POST", "/api/bot-link/sync", { ack: 0, frames: [], wait: 0 }, { token: paired.token, status: 401 });
   } finally {
     await Promise.all(fixtures.map((fixture) => fixture.close()));
