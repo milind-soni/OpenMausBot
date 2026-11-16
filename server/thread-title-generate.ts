@@ -1,6 +1,7 @@
 // Generated thread titles: automatic ones only when features.llmThreadTitles is on, "Regenerate title" whenever the person
-// asks. The engine's one-shot text call, given 10 seconds, its reply cleaned to a title or null.
+// asks. The engine's one-shot text call, given 10 seconds once it starts, its reply cleaned to a title or null.
 import type { AppConfig } from "./config.ts";
+import { backgroundTextSlots, type JobSlots } from "./job-slots.ts";
 import { titleFromLlm } from "./store.ts";
 import { threadTitlePrompt, type ThreadTitleSource } from "./thread-title.ts";
 
@@ -12,24 +13,29 @@ export async function generateThreadTitle(
   provider: { generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string> },
   text: string,
   source: ThreadTitleSource = "first-message",
+  slots: JobSlots = backgroundTextSlots,
 ): Promise<string | null> {
   const prompt = threadTitlePrompt(text, source);
-  const expiry = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const reply = await Promise.race([
-      provider.generateText!(prompt, { signal: expiry.signal }),
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => {
-          expiry.abort();
-          reject(new Error("thread title timed out"));
-        }, 10_000);
-      }),
-    ]);
-    return titleFromLlm(reply);
+    return await slots.run(async () => {
+      const expiry = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const reply = await Promise.race([
+          provider.generateText!(prompt, { signal: expiry.signal }),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              expiry.abort();
+              reject(new Error("thread title timed out"));
+            }, 10_000);
+          }),
+        ]);
+        return titleFromLlm(reply);
+      } finally {
+        clearTimeout(timer);
+      }
+    });
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }

@@ -43,12 +43,17 @@ export function heavyPrompt(sections: readonly PromptSection[]): boolean {
 // at the computer, or not there) and what its words switched on.
 // Two per-turn sections stay stable on purpose: "setup" sits right after the standing instructions it overrides,
 // and "webhook" keeps its untrusted-data rule in the system prompt, out of reach of the payload it guards.
-const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "long-waits", "recent", "availability", "active-routines",
+const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "long-waits", "recent", "availability", "roster", "active-routines",
   "plan", "assignment", "routine-execution", "skill-instructions", "playbooks", "device-place", "files"]);
 
 /** Its id is what puts it in the volatile half. */
 export function teamAvailabilityPart(team: readonly RosterMember[]): PromptPart {
   return { id: "availability", label: "Team availability", text: teammateAvailabilityPrompt(team) };
+}
+
+/** Follows the "coordination" part, whose rules say how to read it. */
+export function teamRosterPart(roster: string): PromptPart {
+  return { id: "roster", label: "Team roster", text: roster ? `\n${roster}` : "" };
 }
 
 /** One standing rule for a bridged turn, so every tool name the prompt, a description or a result gives

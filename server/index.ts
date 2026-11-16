@@ -118,7 +118,7 @@ import { vpsLeftBehindNotice } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { appSandboxRule, connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { signInCardText } from "./connector-card-text.ts";
-import { BOT_HELD_CODE, BOT_PAUSED_CODE } from "../shared/bot-limit.ts"; import { createBotHolds } from "./host/bot-holds.ts"; import { createBotHoldRoutes } from "./routes/bot-holds.ts"; import { createStarterAwake } from "./host/starter-awake.ts"; import { createStarterCaps } from "./host/starter-caps.ts"; import { createStarterAwakeRoutes } from "./routes/starter-awake.ts"; import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { coordinateTooLong } from "./too-long.ts"; import { chiefAbsentFrom, createChiefRooms } from "./host/chief-rooms.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
+import { BOT_HELD_CODE, BOT_PAUSED_CODE } from "../shared/bot-limit.ts"; import { createBotHolds } from "./host/bot-holds.ts"; import { createBotHoldRoutes } from "./routes/bot-holds.ts"; import { createStarterAwake } from "./host/starter-awake.ts"; import { createStarterCaps } from "./host/starter-caps.ts"; import { createStarterAwakeRoutes } from "./routes/starter-awake.ts"; import { chiefOfStaffPrompt, chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { coordinateTooLong } from "./too-long.ts"; import { chiefAbsentFrom, createChiefRooms } from "./host/chief-rooms.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
 import { buildRecall, recallRooms, recallThreadIds, withRecalled } from "./recall.ts";
 import { hostTimeZone, takesTurnClock, turnClockLine, withTurnClock } from "./turn-clock.ts";
 import { createMemoryUpkeep, dreamConversations, upkeepEnabled } from "./memory-upkeep.ts";
@@ -128,7 +128,7 @@ import { createSideJobs, helperSelection } from "./side-jobs.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { createAboutMe } from "./about-me.ts"; import { createPersonPreference } from "./host/person-preference.ts";
 import { botMemoryUpdate, ownersOwnAsk } from "./memory-forget.ts";
-import { canManage, canReach, departmentRefusal, hasTeamAuthority, inChargeOfEvery, livePeerRoster, livePeerRosterBlock, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
+import { canManage, canReach, departmentRefusal, hasTeamAuthority, inChargeOfEvery, livePeerRoster, livePeerRosterBlock, peerName, peerRosterPrompt, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
 import {
   containerComputerAction,
   containerComputerFrame,
@@ -416,7 +416,7 @@ import {
   WEBHOOK_PROMPT, BOT_API_PROMPT, BOT_API_OWNER_PROMPT, AUTOMATION_REPLY_PROMPT,
   resolveComputerPromptKind,
   savedLoginsPrompt, savedSecretsPrompt, heavyPrompt,
-  teamAvailabilityPart,
+  teamAvailabilityPart, teamRosterPart,
 } from "./system-prompt.ts";
 import { shellTimeoutHookResult } from "./shell-timeout-hint.ts";
 import { spillToolResult } from "./tool-result-spill.ts";
@@ -8273,11 +8273,11 @@ async function beginTurn(
         ? mentionedBots(withoutPersonTags(providerText, [...personTagNames(cfg.profile?.name), ...teamMessages.people().flatMap((one) => one.tags)],
           store.bots.filter((one) => !one.hidden).map((one) => one.name)), sectionPeers, opts?.mentions)
         : [];
-      const coordinationPrompt = (chiefLevel(bot)
-        ? chiefOfStaffSystemPrompt(bot.id, store.bots, Boolean(integrations.agents), (peer) => personalReach.listed(bot, peer, threadId), store.sections)
+      const teamPrompt = chiefLevel(bot)
+        ? chiefOfStaffPrompt(bot.id, store.bots, Boolean(integrations.agents), (peer) => personalReach.listed(bot, peer, threadId), store.sections)
         : integrations.agents && sectionPeers.length > 0
-          ? peerRosterSystemPrompt(sectionPeers, bot)
-          : "") + (integrations.agents ? personalReach.prompt(bot, threadId, sectionPeers) : "");
+          ? peerRosterPrompt(sectionPeers, bot)
+          : { rules: "", roster: "" }; const coordinationPrompt = teamPrompt.rules + (integrations.agents ? personalReach.prompt(bot, threadId, sectionPeers) : "");
       const credentialPrompt = integrations.agents ? CREDENTIAL_PROMPT + savedSecretsPrompt(botLogins.secretNamesFor(bot.id, vaultReaders.turn(threadId))) + THREADS_PROMPT + WIDGET_PROMPT : "";
       const routinePrompt = integrations.agents ? TRIGGER_PROMPT : "";
       const profilePrompt = integrations.agents ? PROFILE_PROMPT : "";
@@ -8381,7 +8381,7 @@ async function beginTurn(
           mounted: Boolean(integrations.device), offered: instance.adapter.capabilities.deviceMcp === true, turn: { botId: bot.id, threadId, generation: dispatchClaimId },
           place: phones.place(threadId, !(commsDepth > 0 || opts?.automationSource !== undefined || opts?.unattended || opts?.peerAsk || opts?.coordination)),
         }),
-        { id: "coordination", label: "Team and who is speaking", text: PROVENANCE_PROMPT + (coordinationPrompt && !apiFenced ? ` ${coordinationPrompt}` : "") },
+        { id: "coordination", label: "Team and who is speaking", text: PROVENANCE_PROMPT + (coordinationPrompt && !apiFenced ? ` ${coordinationPrompt}` : "") }, teamRosterPart(coordinationPrompt && !apiFenced ? teamPrompt.roster : ""),
         { id: "assignment", label: "Teammate task", text: coordinationNode?.parentId ? `\n${coordinationSystemInstructions()}` : "" },
         { id: "outstanding", label: "Outstanding teammate work", text: teammatePrompts.outstanding(threadId) },
         { id: "teammate-questions", label: "Teammates' questions to the person", text: teammatePrompts.questions(liveBot ?? bot, threadId) },

@@ -16,6 +16,7 @@ import { isAbsolute, join, parse, resolve } from "node:path";
 
 import { DATA_DIR } from "./config.ts";
 import { execFileInGroup } from "./group-exec.ts";
+import { checkpointGitSlots } from "./job-slots.ts";
 
 export const CHECKPOINTS_DIR = join(DATA_DIR, "checkpoints");
 
@@ -208,6 +209,10 @@ function gitFailure(command: string, err: Error & { killed?: boolean }, stderr: 
 }
 
 function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal, input?: string): Promise<string> {
+  return checkpointGitSlots.run(() => startGit(args, cwd, env, signal, input), signal);
+}
+
+function startGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal, input?: string): Promise<string> {
   return new Promise((resolvePromise, rejectPromise) => {
     signal?.throwIfAborted();
     // Its own group: a timeout or a stop also ends what git started (hooks are off, but pack and gc helpers run).
