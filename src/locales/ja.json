@@ -8102,5 +8102,8 @@
   "devices.computers.pairButton": "コンピュータをペアリング",
   "devices.computers.title": "お使いの他のコンピューター",
   "devices.computers.pairTitle": "別のコンピュータをペアリング",
-  "remote.tailscale.needsApproval": "このコンピューターは Tailscale ネットワークでの承認を待っています。Tailscale の管理コンソールで承認してから、もう一度お試しください。"
+  "remote.tailscale.needsApproval": "このコンピューターは Tailscale ネットワークでの承認を待っています。Tailscale の管理コンソールで承認してから、もう一度お試しください。",
+  "together.switch.title": "このコンピューターと My Cloud をまとめる",
+  "together.switch.line": "既定ではオフです。Cloud のボットとこのコンピューターのボットを 1 つの一覧に表示し、それぞれがある場所で開きます。",
+  "together.switch.failed": "保存できませんでした。もう一度お試しください。"
 }

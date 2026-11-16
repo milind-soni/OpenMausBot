@@ -248,3 +248,9 @@ export type CloudPower = ReturnType<typeof createCloudPower>;
 let registered: Pick<CloudPower, "sleeping" | "sleepSignal" | "sleptUntil"> | null = null;
 export function registerCloudPower(power: Pick<CloudPower, "sleeping" | "sleepSignal" | "sleptUntil"> | null) { registered = power; }
 export const cloudPowerNow = () => registered;
+
+/** A read the client marked as background, on a home that agreed to sleep: it gets `answerAsleep` and nothing more, so a
+ * list kept fresh in the background never holds the home awake or finds it half asleep. A person's own request never does. */
+export function backgroundWhileAsleep(path: string, headers: Record<string, string | string[] | undefined>): boolean {
+  return Boolean(registered?.sleeping()) && !countsAsActivity(path, headers);
+}

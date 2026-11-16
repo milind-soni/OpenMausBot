@@ -6011,5 +6011,8 @@
   "devices.computers.pairButton": "Bilgisayar eşle",
   "devices.computers.title": "Diğer bilgisayarlarınız",
   "devices.computers.pairTitle": "Başka bir bilgisayar eşle",
-  "remote.tailscale.needsApproval": "Bu bilgisayar Tailscale ağınızda onay bekliyor. Tailscale yönetici konsolunda onaylayın, ardından tekrar deneyin."
+  "remote.tailscale.needsApproval": "Bu bilgisayar Tailscale ağınızda onay bekliyor. Tailscale yönetici konsolunda onaylayın, ardından tekrar deneyin.",
+  "together.switch.title": "Bu bilgisayar ve Cloud'um birlikte",
+  "together.switch.line": "Varsayılan olarak kapalı. Cloud'daki botlar ile bu bilgisayardaki botlar tek listede görünür ve her biri bulunduğu yerde açılır.",
+  "together.switch.failed": "Kaydedilemedi. Yeniden deneyin."
 }

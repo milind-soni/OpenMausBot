@@ -7272,5 +7272,8 @@
   "devices.computers.pairButton": "Sparuj komputer",
   "devices.computers.title": "Twoje inne komputery",
   "devices.computers.pairTitle": "Sparuj inny komputer",
-  "remote.tailscale.needsApproval": "Ten komputer czeka na zatwierdzenie w Twojej sieci Tailscale. Zatwierdź go w konsoli administracyjnej Tailscale, a potem spróbuj ponownie."
+  "remote.tailscale.needsApproval": "Ten komputer czeka na zatwierdzenie w Twojej sieci Tailscale. Zatwierdź go w konsoli administracyjnej Tailscale, a potem spróbuj ponownie.",
+  "together.switch.title": "Ten komputer i My Cloud razem",
+  "together.switch.line": "Domyślnie wyłączone. Boty z Cloud i boty z tego komputera są na jednej liście, a każdy otwiera się tam, gdzie działa.",
+  "together.switch.failed": "Nie udało się zapisać. Spróbuj ponownie."
 }
