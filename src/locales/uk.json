@@ -447,6 +447,7 @@
   "approval.action.stopAsking": "Не питати {name} про {key}",
   "approval.action.alwaysAllow": "Завжди дозволяти",
   "approval.action.alwaysAllowSession": "Завжди дозволяти в цій сесії",
+  "approval.action.allowSession": "Дозволити в цій сесії",
   "approval.action.alwaysAllowSessionHint": "Провайдер перестане питати про цю дію до завершення сесії",
   "approval.action.update": "Оновити",
   "approval.action.enable": "Увімкнути",

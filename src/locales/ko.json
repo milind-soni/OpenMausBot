@@ -953,6 +953,7 @@
   "approval.action.stopAsking": "{key}에 대해 {name}에게 더 묻지 않기",
   "approval.action.alwaysAllow": "항상 허용",
   "approval.action.alwaysAllowSession": "이 세션 동안 항상 허용",
+  "approval.action.allowSession": "이 세션 동안 허용",
   "approval.action.alwaysAllowSessionHint": "세션이 끝날 때까지 제공자가 이 작업에 대해 묻지 않아요",
   "approval.action.alwaysAllowCommand": "이 명령 항상 허용",
   "approval.action.alwaysAllowCommandHint": "{cwd}에서 이 봇과 제공자에 대해 정확히 이 명령을 기억해요. 같은 폴더를 쓰는 다른 스레드에도 적용돼요",

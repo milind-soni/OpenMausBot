@@ -1237,6 +1237,25 @@ describe("Store", () => {
     );
   });
 
+  it("says how many grants it kept when a bot's threads hold more than its list has room for, and drops none of the bot's own", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const own = Array.from({ length: 195 }, (_, i) => `provider-tool:claude:linear:own_${i}:config-one`);
+    const inThread = Array.from({ length: 12 }, (_, i) => `provider-tool:claude:linear:thread_${i}:config-one`);
+    store.patchBot(bot.id, { alwaysAllow: own });
+    store.patchTask(bot.id, bot.threadId, { alwaysAllow: [...inThread, "Bash:git status"] });
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const reloaded = new Store(selection);
+      expect(reloaded.bot(bot.id)?.alwaysAllow).toEqual([...own, ...inThread.slice(0, 5)]);
+      expect(reloaded.taskByThread(bot.id, bot.threadId)?.alwaysAllow, "the thread keeps all of its own").toEqual([...inThread, "Bash:git status"]);
+      const lines = warned.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith("[always-allow]"));
+      expect(lines).toEqual([`[always-allow] bot ${bot.id}: kept 200 of 207 always-allowed tools (the limit is 200); the other 7 ask again.`]);
+    } finally {
+      warned.mockRestore();
+    }
+  });
+
   it("persists a bot's effort level across a restart, defaulting to unset", () => {
     const store = new Store(selection);
     const bot = store.createBot();

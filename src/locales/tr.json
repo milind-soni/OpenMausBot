@@ -608,6 +608,7 @@
   "approval.action.stopAsking": "{key} hakkında {name} adlı bota sormayı durdur",
   "approval.action.alwaysAllow": "Her zaman izin ver",
   "approval.action.alwaysAllowSession": "Bu oturumda her zaman izin ver",
+  "approval.action.allowSession": "Bu oturumda izin ver",
   "approval.action.alwaysAllowSessionHint": "Sağlayıcı, oturum sona erene kadar bu eylem hakkında sormayı durdurur",
   "approval.action.alwaysAllowCommand": "Bu komuta her zaman izin ver",
   "approval.action.alwaysAllowCommandHint": "Bu klasörü kullanan diğer iş parçacıkları da dahil olmak üzere, {cwd} içindeki bu bot ve sağlayıcı için bu komutu tam olarak hatırla",

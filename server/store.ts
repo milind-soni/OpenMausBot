@@ -35,7 +35,7 @@ import type {
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
 import { movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
-import { parseConnectorTools } from "./connector-tools.ts";
+import { parseConnectorTools } from "./connector-tools.ts"; import { recoveredGrants } from "./always-allow.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sharedAsMaker, sharedUnlessRestricted, type NewBotSharingRule } from "./new-bot-sharing.ts";
@@ -442,7 +442,7 @@ export class Store {
         (task.alwaysAllow ?? []).filter((key) => key.startsWith("provider-tool:")),
       );
       if (!taskProviderGrants.length) continue;
-      const migrated = [...new Set([...(b.alwaysAllow ?? []), ...taskProviderGrants])].slice(0, 200);
+      const migrated = recoveredGrants(b.alwaysAllow, taskProviderGrants, b.id);
       if (JSON.stringify(migrated) === JSON.stringify(b.alwaysAllow ?? [])) continue;
       b.alwaysAllow = migrated;
       botsMigrated = true;
@@ -2133,7 +2133,7 @@ export class Store {
   setAllThreadApprovalMode(botId: string, mode: Exclude<ApprovalMode, "custom">): BotRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
-    const patch = { approvalMode: mode, autoApprove: mode === "auto", ...(mode === "full" ? { alwaysAllow: [] } : {}) };
+    const patch = { approvalMode: mode, autoApprove: mode === "auto" }; // saved grants stay through Full access, unused there, so a later Ask keeps them
     const tasks = (bot.tasks ?? []).map(task => ({ ...task, ...patch }));
     const next = { ...bot, ...patch, approvalGrant: undefined, tasks };
     this.saveBots(this.bots.map(candidate => candidate === bot ? next : candidate));

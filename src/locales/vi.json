@@ -608,6 +608,7 @@
   "approval.action.stopAsking": "Không hỏi lại {name} về {key}",
   "approval.action.alwaysAllow": "Luôn cho phép",
   "approval.action.alwaysAllowSession": "Luôn cho phép trong phiên này",
+  "approval.action.allowSession": "Cho phép trong phiên này",
   "approval.action.alwaysAllowSessionHint": "Nhà cung cấp sẽ ngừng hỏi về hành động này cho đến khi phiên kết thúc",
   "approval.action.alwaysAllowCommand": "Luôn cho phép lệnh này",
   "approval.action.alwaysAllowCommandHint": "Ghi nhớ đúng lệnh này cho bot và nhà cung cấp này trong {cwd}, bao gồm các luồng khác dùng thư mục đó",

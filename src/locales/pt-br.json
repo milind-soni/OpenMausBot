@@ -1144,6 +1144,7 @@
   "approval.action.stopAsking": "Não perguntar mais a {name} sobre {key}",
   "approval.action.alwaysAllow": "Sempre permitir",
   "approval.action.alwaysAllowSession": "Sempre permitir nesta sessão",
+  "approval.action.allowSession": "Permitir nesta sessão",
   "approval.action.alwaysAllowSessionHint": "O provedor deixa de pedir aprovação para esta ação até a sessão terminar",
   "approval.action.alwaysAllowCommand": "Sempre permitir este comando",
   "approval.action.alwaysAllowCommandHint": "Lembrar este comando exato para este bot e provedor em {cwd}, inclusive em outras conversas que usam essa pasta",

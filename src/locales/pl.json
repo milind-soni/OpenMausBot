@@ -898,6 +898,7 @@
   "approval.action.stopAsking": "Niech {name} nie dostaje już pytań o {key}",
   "approval.action.alwaysAllow": "Zawsze zezwalaj",
   "approval.action.alwaysAllowSession": "Zawsze zezwalaj w tej sesji",
+  "approval.action.allowSession": "Zezwól w tej sesji",
   "approval.action.alwaysAllowSessionHint": "Dostawca przestaje pytać o tę akcję do końca sesji",
   "approval.action.alwaysAllowCommand": "Zawsze zezwalaj na tę komendę",
   "approval.action.alwaysAllowCommandHint": "Zapamiętaj tę dokładną komendę dla tego bota i dostawcy w {cwd}, także w innych wątkach korzystających z tego folderu",
