@@ -346,7 +346,8 @@ those at the top level. A URL inside a command is left as the command ran.
 
 `context` settings in config.json are optional. `autoCompact: false` disables
 automatic folding, `compactAt` is a fraction below 1 or a token count, and
-`rebuildBytes` controls replay size (default 24,000 bytes). Context-only settings
+`rebuildBytes` controls replay size in bytes (default 24,000) and `maxMessages`
+bounds it by count (default 40). Context-only settings
 do not reload provider processes. The default threshold is 80% of the known
 model window; a real latest-prompt measurement wins over a transcript estimate,
 except an ACP agent's own reading, which is shown and does not time compaction.
