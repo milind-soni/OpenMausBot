@@ -144,14 +144,24 @@ So for as long as the link is open the app runs two things:
   (`https://<words>.trycloudflare.com`) to that listener. It needs no Cloudflare
   account and reads no `cloudflared` configuration of yours.
 
-The link stays up while the app is open, until you turn it off (**Grok Bot
-connector → Turn off**, under Move from Grok Bot) or the app quits. Importing what
-arrived does not end it; the link only stops offering what you imported. If
-`cloudflared` exits, the link stops and the app offers a new one. A new link has a
-new address, so it has to be pasted into Grok Bot again. Requests pass through
+The link stays on until you turn it off (**Grok Bot connector → Turn off**, under
+Move from Grok Bot). Importing what arrived does not end it; the link only stops
+offering what you imported. While it is on, its key is kept in the data folder
+(`grok-connector-key`, readable only by you), which backups and Cloud sends leave
+out. When the app starts again, after a restart or an update, the link comes back
+on by itself with the same key, but a quick tunnel's address is new each time, so
+the link Grok Bot has stops working. The app then shows **Your Grok Bot link
+changed** with the new link: in Grok Bot, remove the MausBot connector and add the
+new link (Grok Bot can't edit a connector's address). Copying the link, opening
+Settings from the notice or closing it ends the notice until the next change. If
+the link can't come back on, or `cloudflared` exits, the link stops and the app
+offers a new one, which also has to be added in Grok Bot again. Turning the link
+off forgets the key; turning it on again makes a new one. Requests pass through
 Cloudflare on their way to your computer. What arrives is held in the app's memory
 until you import it, turn the link off or the app quits; nothing is stored on a
-server of ours or anywhere else off your computer.
+server of ours or anywhere else off your computer. Tasks handed off before a
+restart can no longer be read back with `task_status`; their conversations stay in
+MausBot.
 
 Whoever holds the link can send exports, read how many Bots have arrived and the
 names and one-line jobs of your bots, and hand your main bot a task and read that
