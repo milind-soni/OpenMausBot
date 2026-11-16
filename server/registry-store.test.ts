@@ -2,7 +2,7 @@ import { mkdirSync, rmSync, statSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
-import { BOTS_FILE, JsonRegistry, persistedBots } from "./registry-store.ts";
+import { BOTS_FILE, JsonRegistry, persistedBots, type RegistryStore } from "./registry-store.ts";
 import { flushLaterSaves } from "./save-batch.ts";
 import type { BotRecord } from "./store.ts";
 
@@ -62,5 +62,12 @@ describe("the JSON registry: today's bots.json and groups.json behind the regist
     registry.writeBots([bot("b")], true);
     flushLaterSaves();
     expect(waiting).not.toHaveBeenCalled();
+  });
+
+  it("has no deferrable save for a room: nothing of a room may wait, and no room save would supersede it", () => {
+    const roomLater = (registry: RegistryStore) =>
+      // @ts-expect-error "later" is for bots only
+      registry.upsertThread({ kind: "group", id: "g" }, undefined, "later", () => {});
+    expect(roomLater).toBeTypeOf("function"); // never called: the check is the typecheck's
   });
 });

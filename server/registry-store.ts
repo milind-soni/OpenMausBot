@@ -23,7 +23,8 @@ export type RegistryOwner = { kind: "bot" | "group"; id: string };
  * - "pass": when the running batch ends (`batch`, server/save-batch.ts batchSaves), at once outside one. A turn's
  *   bookkeeping that must survive a crash: an engine session, which engine has the thread, what was handed to it.
  * - "later": within SAVE_LATER_MAX_MS (server/save-batch.ts saveLater). Only what server/registry-save.ts
- *   DEFERRABLE_FIELDS allows, and a thread's usage: harmless to lose in a crash.
+ *   DEFERRABLE_FIELDS allows, and a thread's usage: harmless to lose in a crash. Bots only: nothing of a room waits,
+ *   and no room save supersedes a waiting write, so the types refuse "later" for a room.
  */
 export type RegistryDurability = "now" | "pass" | "later";
 
@@ -42,7 +43,8 @@ export interface RegistryStore {
    * own save of the whole list (what rollback and tests hook); it runs when `durability` says, and it throws for "now".
    * A row layout narrows that save to the one thread; this one writes the whole file.
    */
-  upsertThread(owner: RegistryOwner, threadId: string | undefined, durability: RegistryDurability, write: () => void): void;
+  upsertThread(owner: RegistryOwner & { kind: "bot" }, threadId: string | undefined, durability: RegistryDurability, write: () => void): void;
+  upsertThread(owner: RegistryOwner & { kind: "group" }, threadId: string | undefined, durability: Exclude<RegistryDurability, "later">, write: () => void): void;
   /** An owner and all its threads leave the registry; `write` saves the list without it, synced, before it returns. */
   deleteOwner(owner: RegistryOwner, write: () => void): void;
   /** Saves asked for with "pass" while `run` runs are written once when it returns: one transaction in a row layout. */
@@ -106,9 +108,8 @@ export class JsonRegistry implements RegistryStore {
   }
 
   upsertThread(owner: RegistryOwner, _threadId: string | undefined, durability: RegistryDurability, write: () => void): void {
-    const file = owner.kind === "bot" ? this.botsFile : this.groupsFile;
-    if (durability === "pass") saveSoon(file, write);
-    else if (durability === "later") saveLater(file.path, write);
+    if (durability === "pass") saveSoon(owner.kind === "bot" ? this.botsFile : this.groupsFile, write);
+    else if (durability === "later") saveLater(BOTS_FILE, write); // bots only (see RegistryDurability)
     else write();
   }
 
