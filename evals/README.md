@@ -99,3 +99,9 @@ The skill bench measures one fixture skill against its own prompts through the s
     node --experimental-strip-types evals/runners/run-skill-bench.ts [--fixture bench-triage-handoff] [--replicates 2]
 
 The alpha report gives per-arm pass rates, duration and estimated tokens (chars/4 over evidence turns; the scripted provider makes no API calls) with mean and standard deviation, a delta-per-assertion table, and two flags: non-discriminating assertions (identical verdicts in both arms — controls, not effects) and high-variance assertions (verdicts that flip across replicates of the same prompt and arm, assessable from two replicates on). `evals/skill-bench/fixtures/` holds bench fixtures; `evals/skill-bench/triggers/` holds the trigger-eval sets (should-trigger / should-not-trigger with train and held-out splits, plus near misses) that a later router slice validates against — data only, no router code.
+
+## Turn routing — which turns can a quick model take
+
+`evals/turn-routing` runs `classifyTurn` (`server/turn-route.ts`) over labelled messages. Each case says the tier a person would pick: `simple` when a quick model answers as well as the full one. A miss is `cautious` (the full model for a simple turn, which costs only money) or `eager` (the quick model for a turn that needed the full one, which costs the answer). The cases lean towards the hard ones: short weighty decisions, tool requests whose verb is not in the action list, and other languages. So the counts are a baseline for a router to beat, not an accuracy rate. The test pins today's misses; a router change updates them in the same PR.
+
+    npx vitest run --config evals/vitest.config.ts evals/turn-routing
