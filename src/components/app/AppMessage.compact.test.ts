@@ -181,6 +181,25 @@ describe("a bot's page as a compact card", () => {
     expect(card().querySelector("[data-page-title]")).toBeNull();
   });
 
+  it("does not take the previous version's answer for an updated page still on its way", async () => {
+    await render(row(payload()));
+    await pageSays(true);
+    const answer = vi.mocked(fetch).getMockImplementation()!;
+    let arrive = () => {};
+    vi.mocked(fetch).mockImplementationOnce((...args) => new Promise((resolve) => { arrive = () => resolve(answer(...args)); }));
+    await render(row(payload({ rev: 1, doc: "d1", history: ["d0"] })));
+    await pageSays(false);
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+    await act(async () => { arrive(); });
+    await settle();
+    await pageSays(null);
+    expect(card().querySelector("[data-page-settling]")).not.toBeNull();
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+    await pageSays(true);
+    expect(card().querySelector("[data-page-settling]")).toBeNull();
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+  });
+
   it("keeps waiting for a page that says it is still drawing itself", async () => {
     await render(row(payload()));
     await pageSays(null);
