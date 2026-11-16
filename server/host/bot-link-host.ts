@@ -17,7 +17,7 @@ import { sentRow, teammateResultRow } from "./handoff-sent.ts";
 export interface BotLinkHostDeps {
   dataDir: string;
   environmentId: string;
-  store: Pick<Store, "bots" | "bot" | "createTask" | "taskByThread" | "appendMessage" | "patchTask" | "onChange">;
+  store: Pick<Store, "bots" | "bot" | "createTask" | "taskByThread" | "appendMessage" | "patchTask" | "onChange" | "group" | "groupTaskByThread" | "markGroupThreadUnread">;
   coordinator(): Coordinator;
   kick(): void;
   level(bot: BotRecord): Level;
@@ -56,17 +56,20 @@ export function createBotLinkHost(deps: BotLinkHostDeps) {
         return stored;
       },
     },
-    sentRow: ({ sender, threadId, recipient, workThreadId, nodeId, reason, doneWhen }) => {
-      store.appendMessage(threadId, sentRow({ sender: { id: sender.id, name: sender.name, color: sender.color ?? "blue" }, recipient: { ...recipient, color: "blue" }, threadId: workThreadId, via: "direct", language: deps.language(threadId),
+    sentRow: ({ sender, threadId, recipient, workThreadId, nodeId, reason, doneWhen, roomId }) => {
+      const room = roomId ? store.group(roomId) : undefined;
+      store.appendMessage(threadId, sentRow({ sender: { id: sender.id, name: sender.name, color: sender.color ?? "blue" }, recipient: { ...recipient, color: "blue" }, threadId: workThreadId, via: "direct", language: deps.language(threadId), ...(room ? { room: { id: room.id, name: room.name, here: true } } : {}),
         ...(reason ? { reason } : {}), ...(doneWhen ? { doneWhen: redactSecretsInText(doneWhen) } : {}), ...deps.files.sentWith(nodeId) }));
     },
     resultRow: (parent: HandoffView, child: HandoffView, name: string) => {
-      if (!store.taskByThread(parent.botId, parent.threadId)) return;
+      const room = parent.groupId ? store.group(parent.groupId) : undefined;
+      if (parent.groupId ? !room || !store.groupTaskByThread(room.id, parent.threadId) : !store.taskByThread(parent.botId, parent.threadId)) return;
       const done = child.status === "completed";
       store.appendMessage(parent.threadId, { role: "bot", kind: "activity", roomRequest: { id: child.id, phase: "result" }, ...deps.files.returnedWith(child, parent),
         tool: { name: teammateResultRow(deps.language(parent.threadId), child, name, undefined, undefined), ok: done,
           ...(done && child.result.trim() ? { output: redactSecretsInText(child.result.trim()).slice(0, 2_000) } : {}) } });
-      if (!parent.parentId && parent.reply !== "poll") store.patchTask(parent.botId, parent.threadId, { unread: true });
+      if (room) store.markGroupThreadUnread(room.id, parent.threadId, true);
+      else if (!parent.parentId && parent.reply !== "poll") store.patchTask(parent.botId, parent.threadId, { unread: true });
     },
   });
   const dialer = createDialer({ link, log: deps.log });
