@@ -11,6 +11,17 @@ afterEach(() => {
 });
 
 describe("start-up upkeep", () => {
+  it("runs routine cleanup at startup and daily", async () => {
+    vi.useFakeTimers();
+    const sweep = vi.fn();
+    startUpkeep({ bots: () => [], retentionDays: () => null, busy: () => false,
+      openDirectHandoff: () => false, cleanupPartials: () => 0, sweepRoutineExecutions: sweep });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sweep).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(THREAD_LOG_RETENTION_SWEEP_MS);
+    expect(sweep).toHaveBeenCalledTimes(2);
+  });
+
   it("runs its first pass once the server answers, not before, then the logs' sweep once a day", async () => {
     vi.useFakeTimers();
     const calls: string[] = [];

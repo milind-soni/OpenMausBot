@@ -181,6 +181,17 @@ describe("a routine's checks", () => {
     expect(s.reports[1]!.runs).toEqual([]);
   });
 
+  it("keeps another routine's result until the check advances past it", async () => {
+    const s = setup();
+    const watcher = s.routine({ checks: ["runs"] });
+    const other = { ...run("x", "completed"), routineId: "other", checkKey: undefined, finishedAt: s.now() - MINUTE, output: "Done." };
+    s.runs.push(other);
+    expect(s.checks.needsRun(other, [watcher])).toBe(true);
+    expect(s.checks.needsRun(other, [s.routine({ checks: ["mail"] })])).toBe(false);
+    await s.checks.check(watcher, { manual: false });
+    expect(s.checks.needsRun(other, [watcher])).toBe(false);
+  });
+
   it("counts the emails a run sorted only once its answer is kept, and never a run that failed", async () => {
     const s = setup();
     s.mail("a", 5);

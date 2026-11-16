@@ -12,6 +12,7 @@ export interface StartUpkeepDeps {
   retentionDays: () => number | null;
   busy: (botId: string, threadId: string) => boolean;
   openDirectHandoff: (threadId: string) => boolean;
+  sweepRoutineExecutions?: () => void;
   cleanupPartials?: () => number;
   sweepLogs?: typeof sweepThreadEventLogs;
 }
@@ -33,6 +34,10 @@ export function startUpkeep(deps: StartUpkeepDeps): void {
     const swept = (deps.sweepLogs ?? sweepThreadEventLogs)(candidates, retentionDays);
     if (swept > 0) console.log(`[retention] removed event logs for ${swept} idle thread(s) past ${retentionDays} day(s)`);
   };
+  const sweepRoutinesNow = () => {
+    try { deps.sweepRoutineExecutions?.(); }
+    catch (error) { console.warn(`routine retention sweep failed: ${reason(error)}`); }
+  };
   setImmediate(() => {
     try {
       const reclaimed = (deps.cleanupPartials ?? cleanupStaleAttachmentPartials)();
@@ -45,6 +50,8 @@ export function startUpkeep(deps: StartUpkeepDeps): void {
     } catch (error) {
       console.warn(`thread event log retention sweep failed: ${reason(error)}`);
     }
+    sweepRoutinesNow();
   });
   setInterval(sweepLogsNow, THREAD_LOG_RETENTION_SWEEP_MS).unref();
+  if (deps.sweepRoutineExecutions) setInterval(sweepRoutinesNow, THREAD_LOG_RETENTION_SWEEP_MS).unref();
 }

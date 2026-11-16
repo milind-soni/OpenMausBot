@@ -78,7 +78,7 @@ export interface ConfigStatus {
   heldBots?: string[];
   /** The server cannot read its saved routines, so none runs until it can. */
   routinesUnreadable?: true;
-  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
+  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number; routineExecutionRetentionSupported?: true; routineExecutionRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
   cacheKeepWarm?: { enabled: boolean; windowMinutes: number };

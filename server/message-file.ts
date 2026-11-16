@@ -194,8 +194,8 @@ function renderedMarkdownTargets(markdown: string, plainPaths = false): string[]
   return links;
 }
 
-export function messageFileTargets(text: string): string[] {
-  return [...new Set(renderedMarkdownTargets(text))].filter((target) =>
+export function messageFileTargets(text: string, plainPaths = false): string[] {
+  return [...new Set(renderedMarkdownTargets(text, plainPaths))].filter((target) =>
     !target.startsWith("#") && !target.startsWith("//") &&
     (/^[a-z]:[\\/]/i.test(target) || /^file:/i.test(target) || !/^[a-z][a-z\d+.-]*:/i.test(target)));
 }

@@ -191,6 +191,13 @@ describe("configuration boundaries", () => {
     }
   });
 
+  it("opts into scheduled execution retention with a minimum seven-day window", () => {
+    expect(parseStoredConfig({}).routineExecutionRetentionDays).toBeUndefined();
+    expect(parseConfigPatch({ routineExecutionRetentionDays: 7 })).toEqual({ routineExecutionRetentionDays: 7 });
+    expect(parseConfigPatch({ routineExecutionRetentionDays: null })).toEqual({ routineExecutionRetentionDays: null });
+    for (const value of [0, 6, 7.5, 3651, "7"]) expect(() => parseConfigPatch({ routineExecutionRetentionDays: value })).toThrow();
+  });
+
   it("keeps avatar providers and credentials separate, normalizing a router endpoint", () => {
     const parsed = parseConfigPatch({ imageGen: {
       provider: "custom", key: "openai-kept", customApiKey: "router-only",

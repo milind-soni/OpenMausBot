@@ -33,6 +33,25 @@ webhook's address stops working at once. Automations left behind by a bot
 deleted in an earlier version are removed the next time OpenMausBot starts, and
 never run meanwhile.
 
+## Scheduled execution retention
+
+Retention is off by default. In advanced Settings → Data, turn on scheduled
+execution cleanup to keep seven days. An operator can also set a different
+window with an authenticated `PATCH /api/config`, for example
+`{"routineExecutionRetentionDays":30}`. The value must be 7–3650
+days; set it to `null` to turn retention off.
+
+When enabled, at startup and then daily, the server removes eligible completed scheduled
+execution conversations past that age. It keeps the five newest runs of each
+routine, run statuses and the latest output needed to continue each routine's
+context. Older run prompts, attachments and outputs can be permanently removed;
+there is no archive. Results already delivered to the visible conversation stay
+there. Runs still waiting for delivery, event-triggered and brief runs, and
+conversations that are active, pinned, shared, used by a person, referenced or
+needed by a result's file link are excluded. When a run record has already been
+evicted, its old execution is removed only if a matching scheduled result can
+still be found. Execution conversations without that evidence remain.
+
 ## Advanced cron
 
 Cron uses five fields: **minute hour day-of-month month day-of-week**.

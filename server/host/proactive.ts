@@ -251,6 +251,7 @@ export function createProactive(deps: ProactiveDeps) {
   let timer: ReturnType<typeof setInterval> | null = null;
   return {
     checks: routineChecks, fence, brief,
+    needsRun: checks.needsRun,
     /** The brief is on: the proactive bot's briefing routine is. */
     briefOn: watching,
     /** Only the owner dreams, and only while its brief is on: at most one model call a night, with no switch of its own. */

@@ -48,7 +48,9 @@ where they belong instead of adding new places.
   Settings. Don't add a second home for the same setting.
 - **No new settings.** No new global settings, toggles or hidden flags. Make
   the behaviour automatic with a good default. An optional field on something
-  the person sets up is fine.
+  the person sets up is fine. Deleting stored routine conversations is an
+  exception: it needs an explicit opt-in in Settings → Data, in Advanced mode,
+  because the deletion cannot be undone. Keep this cleanup off by default.
 - **No new asks.** No new permission asks, approval cards, confirm dialogs,
   nags or waits that interrupt the person, and no default below Full access.
   A bot gets on with the work; a change that needs undoing gets **Undo**.

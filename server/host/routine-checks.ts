@@ -123,6 +123,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
   /** The emails and meetings a run was handed, while it holds them. */
   items(key: string): { mail: EmailHeader[]; prep: Array<{ key: string; event: CalendarEvent }> } | null;
   pendingKeys(): string[];
+  needsRun(run: RoutineRun, routines: readonly Routine[]): boolean;
   forget(routineId: string): void;
   /** The person's own Gmail address, once a check has read it. */
   address(): string | undefined;
@@ -362,6 +363,8 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     items: (key) => handed.get(key) ?? null,
     address: () => Object.values(state.routines).find((entry) => entry.address)?.address,
     pendingKeys: () => Object.values(state.routines).flatMap((entry) => Object.keys(entry.pending ?? {})),
+    needsRun: (run, routines) => run.finishedAt !== undefined && routines.some((routine) => routine.id !== run.routineId &&
+      routine.checks?.includes("runs") && run.finishedAt! > (state.routines[routine.id]?.runsCursor ?? routine.createdAt)),
     forget(routineId) {
       if (!state.routines[routineId]) return;
       delete state.routines[routineId];

@@ -10,7 +10,9 @@ import type { ImageGenerationConfig } from "../shared/image-generation.ts";
 import { imageGenConfigSchema, imageGenPatchSchema, keepKeysOutOfImageModels, type ImageGenCredentialPatch } from "./image-generation-config.ts";
 import { botAvatarUrlSchema } from "../shared/bot-avatar.ts";
 import { writeFileAtomic } from "./atomic.ts";
-import { defaultBotThreads, MAX_CONCURRENT_BOT_THREADS } from "./bot-thread-limits.ts";
+import { defaultBotThreads } from "./bot-thread-limits.ts";
+import { threadsConfigSchema, threadsPatchSchema, type ThreadsConfig } from "./thread-config.ts";
+export { MIN_THREAD_EVENT_LOG_BYTES, MAX_THREAD_EVENT_LOG_BYTES, threadEventLogMaxBytes, threadEventLogRetentionDays } from "./thread-config.ts";
 import { anthropicKeyEnv } from "./anthropic-key-env.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
 import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
@@ -49,9 +51,6 @@ export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
 export const DEFAULT_MCP_CALL_TIMEOUT_MINUTES = 10;
 export const MIN_MCP_CALL_TIMEOUT_MINUTES = 1;
 export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
-/** The floor keeps a log tail large enough for the event inspector's recent-line window. */
-export const MIN_THREAD_EVENT_LOG_BYTES = 256 * 1024;
-export const MAX_THREAD_EVENT_LOG_BYTES = 4 * 1024 * 1024 * 1024;
 
 export function isValidSshAlias(value: unknown): value is string {
   return typeof value === "string" && SSH_ALIAS.test(value);
@@ -284,13 +283,6 @@ const cacheKeepWarmSchema = z.object({
   enabled: z.boolean(),
   windowMinutes: z.number().int().min(15).max(MAX_WINDOW_MINUTES).optional(),
 }).strict();
-const threadsConfigSchema = z.object({
-  maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS),
-  /** Byte cap for each thread's events/ and native/ log; absent means unbounded. */
-  eventLogMaxBytes: z.number().int().min(MIN_THREAD_EVENT_LOG_BYTES).max(MAX_THREAD_EVENT_LOG_BYTES).optional(),
-  /** Days a closed or archived thread's event logs survive; absent keeps them forever. */
-  eventLogRetentionDays: z.number().int().min(1).max(3650).optional(),
-}).strict();
 const newBotsConfigSchema = z.object({
   /** Effort for a new bot whose model selection names none. */
   effort: z.enum(EFFORT_LEVELS).optional(),
@@ -298,11 +290,6 @@ const newBotsConfigSchema = z.object({
 const newBotsPatchSchema = z.object({
   effort: newBotsConfigSchema.shape.effort.nullable(),
 }).strict();
-const threadsPatchSchema = threadsConfigSchema.extend({
-  maxConcurrentPerBot: threadsConfigSchema.shape.maxConcurrentPerBot.optional(),
-  eventLogMaxBytes: threadsConfigSchema.shape.eventLogMaxBytes.nullable(),
-  eventLogRetentionDays: threadsConfigSchema.shape.eventLogRetentionDays.nullable(),
-});
 const appConfigSchema = z.object({
   /** Set only by the verified domain endpoint, never by a config patch. */
   customDomain: z.string().optional(),
@@ -402,6 +389,8 @@ const appConfigSchema = z.object({
     /** Local hour (0-23) after which the nightly tidy-up runs. */
     tidyHour: z.number().int().min(0).max(23).optional(),
   }).strict().optional(),
+  /** Days completed scheduled execution conversations survive; absent or null disables deletion. */
+  routineExecutionRetentionDays: z.number().int().min(7).max(3650).nullable().optional(),
   threads: threadsConfigSchema.optional(), /** Burst mode on an open-source install; a Cloud's plan sets it instead. `maxParallel`: burst threads running at once (default 10). */ burst: z.object({ maxParallel: z.number().int().min(1).max(100).optional() }).strict().optional(),
   /** Minimum days of decision-log month files kept; OMB_DECISION_RETENTION_DAYS wins. */
   decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
@@ -431,6 +420,8 @@ const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers:
 const jsonObjectSchema = z.record(z.string(), z.json());
 
 export interface AppConfig extends HelperConfig {
+  /** Days completed scheduled execution conversations survive; absent or null disables deletion. */
+  routineExecutionRetentionDays?: number | null;
   customDomain?: string;
   signIn?: { admins?: string[]; members?: string[] };
   /** Preferred selection for newly created bots; existing bots keep theirs. */
@@ -479,7 +470,7 @@ export interface AppConfig extends HelperConfig {
   profile?: { name?: string; email?: string; aboutMe?: string; avatarUrl?: string }; everyBotRules?: string;
   rooms?: { turnTimeoutMinutes: number };
   mcp?: { callTimeoutMinutes?: number };
-  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number }; burst?: { maxParallel?: number };
+  threads?: ThreadsConfig; burst?: { maxParallel?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
   localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; memoryGb?: number; cpus?: number };
@@ -601,15 +592,6 @@ export function mcpCallTimeoutMinutes(cfg: AppConfig): number {
 
 export function cacheKeepWarmSettings(cfg: AppConfig): { enabled: boolean; windowMinutes: number } {
   return { enabled: cfg.cacheKeepWarm?.enabled === true, windowMinutes: cfg.cacheKeepWarm?.windowMinutes ?? DEFAULT_WINDOW_MINUTES };
-}
-
-export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
-  const cap = cfg.threads?.eventLogMaxBytes;
-  return typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? cap : null;
-}
-
-export function threadEventLogRetentionDays(cfg: AppConfig): number | null {
-  return cfg.threads?.eventLogRetentionDays ?? null;
 }
 
 export function skillAuthoringEnabled(cfg: AppConfig): boolean {
@@ -922,7 +904,7 @@ export function saveConfig(
   }
   keepImageModels();
   if (checkedPatch.vps !== undefined) disk.vps = normalizeVpsConfig(checkedPatch.vps);
-  for (const key of ["language", "computerName", "everyBotRules"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
+  for (const key of ["language", "computerName", "everyBotRules", "routineExecutionRetentionDays"] as const) if (checkedPatch[key] !== undefined) disk[key] = checkedPatch[key];
   if (checkedPatch.customDomain !== undefined) disk.customDomain = checkedPatch.customDomain;
   if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
   // Replace the section so clearing a backup cannot revive the old selection.
