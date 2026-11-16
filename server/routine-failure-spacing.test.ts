@@ -157,7 +157,7 @@ describe("a routine every minute by cron whose tool server is dead", () => {
 });
 
 describe("a routine every 5 minutes on a server whose engines cannot start", () => {
-  // Since #6179 a refused spawn is the server's own shortage: the run waits on its own thread as for a busy bot, trying
+  // A refused spawn is the server's own shortage: the run waits on its own thread as for a busy bot, trying
   // again behind the same wait (nothing reaches the AI), and fails after an hour. Those failures space the routine out.
   it("runs 7 times in its first day, each waiting on its own thread for an hour, never a second start of a run", async () => {
     const h = harness(async () => { throw new Error(SPAWN_REFUSED); });

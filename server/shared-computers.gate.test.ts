@@ -189,7 +189,7 @@ it("features.sharedComputers true brings the whole surface back, for every paire
 
   const listed = await internal("GET", "/api/internal/shared-computers");
   expect(listed.status).toBe(200);
-  // A desktop bot off This computer also hears that this computer is never in the list (#6203).
+  // A desktop bot off This computer also hears that this computer is never in the list.
   expect(listed.body).toEqual({ computers: [], thisComputer: expect.stringMatching(/^This computer itself is never in this list/) });
   expect(await api("GET", "/api/shared-computers")).toEqual({ status: 200, body: { computers: [], known: [] } });
 

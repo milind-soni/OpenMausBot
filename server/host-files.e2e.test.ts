@@ -189,7 +189,7 @@ describe("file tools on this computer, through its bridge", () => {
     const gate = await controlServer();
     const controller = new AbortController();
     const sessions: ChatToolSession[] = [];
-    // The first start may wait its full budget (#6208 waits `startupMs` before showing a stand-in); a later one only 300 ms.
+    // The first start may wait its full budget (a turn waits `startupMs` before showing a stand-in); a later one only 300 ms.
     const mount = async (env: Record<string, string>, startupMs = 300) => {
       const turn = withHostFileTools({ localComputer: gatedLocalComputer(driver(env), gate.control) });
       const localComputer = { ...turn!.localComputer!, env: { ...turn!.localComputer!.env, HOME: home, USERPROFILE: home } };

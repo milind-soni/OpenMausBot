@@ -3746,7 +3746,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // A tool call leaves a process behind in the engine's group, as a dev server or an MCP server does.
     process.env.FAKE_CLAUDE_RUN_BASH = "1";
     process.env.FAKE_CLAUDE_TOOL_CALLS = JSON.stringify([{ name: "Bash", input: { command: `"${process.execPath}" -e "setTimeout(() => {}, 60000)" >/dev/null 2>&1 & echo $! > "${marker}"` } }]);
-    // A stopped process nobody has reaped yet still answers signal 0; Linux shows it as a zombie, which counts as stopped (#6179).
+    // A stopped process nobody has reaped yet still answers signal 0; Linux shows it as a zombie, which counts as stopped.
     const zombie = (value: number) => { try { return /^\S+ \(.*\) Z /.test(readFileSync(`/proc/${value}/stat`, "utf8")); } catch { return false; } };
     const alive = (value: number) => { try { process.kill(value, 0); } catch { return false; } return !zombie(value); };
     let left = 0;
