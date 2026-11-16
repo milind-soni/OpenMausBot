@@ -23,6 +23,8 @@ describe("the one-time question before a bot uses the person's own computer", ()
     expect(ask({ site: "www.opentable.com" })).toBe("I need to use your browser where you're signed in to opentable.com. Allow once?");
     expect(ask({ app: "Keynote" })).toBe("I need to use Keynote on your computer. Allow once?");
     expect(ask({})).toBe("I need to use your files and apps on this computer for this. Allow once?");
+    expect(ask({ files: true })).toBe("I need to read and save files in your folders on this computer. Allow once?");
+    expect(ask({ files: true, app: "Chrome" })).toBe("I need to read and save files in your folders on this computer. Allow once?");
     expect(ask(undefined)).toBe("I need to use your files and apps on this computer for this. Allow once?");
   });
 

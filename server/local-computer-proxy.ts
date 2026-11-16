@@ -1,6 +1,9 @@
 // The descriptor and turn token travel in environment variables, never argv or logs.
+import { homedir } from "node:os";
 import { runMcpBridge } from "./mcp-bridge.ts";
 import { augmentedPath } from "./env-path.ts";
+import { HOST_FILE_TOOLS, hostFileRelay } from "./host-file-tools.ts";
+import { hostFilesSetting, hostFolders } from "./host-files.ts";
 import { localComputerCallQuery, localComputerRelay, localComputerResultLine } from "./local-computer-guidance.ts";
 import { journalUrl } from "./saved-steps/journal-tap.ts";
 import { COMPUTER_HELPER_STOPPED } from "../shared/your-computer.ts";
@@ -12,6 +15,7 @@ const {
   OMB_CONTROL_URL: url,
   OMB_CONTROL_TOKEN: token,
   OMB_COMPUTER_JOURNAL: journal,
+  OMB_HOST_FILES: hostFiles,
   ...childEnv
 } = process.env;
 
@@ -31,6 +35,10 @@ try {
   process.exit(2);
 }
 
+const screenRelay = localComputerRelay(platform ?? process.platform);
+const files = hostFilesSetting(hostFiles, platform);
+const fileRelay = files && hostFileRelay(() => hostFolders({ platform: files.platform, home: homedir(), env: process.env, appData: files.appData }));
+
 runMcpBridge({
   command: command!,
   args,
@@ -39,6 +47,7 @@ runMcpBridge({
   gate: { url: url!, token: token!, describe: localComputerCallQuery },
   ...(journal === "1" ? { journal: { url: journalUrl(url!), token: token! } } : {}),
   rewriteResponse: localComputerResultLine,
-  relay: localComputerRelay(platform ?? process.platform),
+  relay: fileRelay ? (call, child) => fileRelay(call) ?? screenRelay(call, child) : screenRelay,
+  ...(fileRelay ? { ownTools: HOST_FILE_TOOLS } : {}),
   respawn: { stopped: COMPUTER_HELPER_STOPPED },
 });
