@@ -251,7 +251,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
     const timer = setTimeout(() => setHeading({ key, opens: false }), drawing ? HEADING_DRAWING_MS : HEADING_WAIT_MS);
     return () => clearTimeout(timer);
   }, [undecided, drawing, frameKey, message.id, rev]);
-  const titled = compact && Boolean(current) && opens === false;
+  // The title stays while the frame is away (the pool took its slot), so the card keeps its height.
+  const titled = compact && opens === false;
   // The compact card clips the page at its natural size, so it reads as a preview of the real thing.
   const previewHeight = height + (titled ? CARD_TITLE_HEIGHT : 0);
   const boxHeight = compact ? Math.min(previewHeight, PAGE_PREVIEW_HEIGHT) : height;
@@ -286,7 +287,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
           {...(!room ? { onSelection: setSelection } : {})}
         />
       ) : (
-        <AppPlaceholder height={boxHeight} loading={slot.live} open={slot.live ? undefined : reloadNow} />
+        <AppPlaceholder height={boxHeight - (titled ? CARD_TITLE_HEIGHT : 0)} loading={slot.live} open={slot.live ? undefined : reloadNow} />
       )}
       {undecided && (
         <div data-page-settling className="absolute inset-0 bg-composer">

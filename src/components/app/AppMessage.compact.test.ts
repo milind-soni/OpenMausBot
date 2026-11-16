@@ -127,6 +127,14 @@ describe("a bot's page as a compact card", () => {
     expect(card().querySelector("[data-page-title]")).toBeNull();
   });
 
+  it("keeps the title and the card's height while the page is loaded again", async () => {
+    await render(row(payload({ height: 120 })));
+    await pageSays(false);
+    await press(card().querySelector<HTMLButtonElement>("[aria-label='Reload app']")!);
+    expect(card().querySelector("[data-page-title]")!.textContent).toBe("Pricing");
+    expect(card().querySelector<HTMLElement>("[data-app-box]")!.style.height).toBe("164px");
+  });
+
   it("shows the preview with the title after a while when the page never says", async () => {
     await render(row(payload()));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_600)); });
@@ -162,7 +170,7 @@ describe("a bot's page as a compact card", () => {
     expect(card().querySelector("[data-page-fade]")).toBeNull();
   });
 
-  it("gives the footer the page's icon on a tile, the title and what it is", async () => {
+  it("gives the footer the page's icon, the title and what it is", async () => {
     await render(row(payload()));
     const footer = card().querySelector<HTMLElement>("[data-page-footer]")!;
     expect(footer.className).toContain("min-h-18");
