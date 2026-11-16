@@ -138,11 +138,14 @@ describe("a routine every 5 minutes whose tool server is dead", () => {
   });
 
   it("with the spacing set out of reach by OMB_ROUTINE_FAILURES_BEFORE_SPACING, starts one turn at every occurrence", async () => {
+    // Six hours, not the day: the defaults would have spaced it out within the first. The clock is the harness's, so
+    // nothing waits; the cost is real work per pass and per run, and a day of 288 runs took a Windows runner past 40 s.
     vi.stubEnv("OMB_ROUTINE_FAILURES_BEFORE_SPACING", "100000");
     const h = harness();
-    await h.passTo(START + 24 * HOUR, h.fail(DEAD_TOOL));
-    console.log(`turns started in 24 hours with a dead tool server and no spacing: ${h.started.length}`);
-    expect(h.started).toHaveLength(24 * 12);
+    await h.passTo(START + 6 * HOUR, h.fail(DEAD_TOOL));
+    console.log(`turns started in 6 hours with a dead tool server and no spacing: ${h.started.length}`);
+    expect(h.started).toHaveLength(6 * 12);
+    expect(h.rows().filter((run) => run.skipped)).toEqual([]);
   });
 });
 
@@ -157,11 +160,15 @@ describe("a routine every minute by cron whose tool server is dead", () => {
 });
 
 describe("a routine every 5 minutes on a server whose engines cannot start", () => {
-  it("tries 9 starts in its first day instead of two at every occurrence, and never a second start on the same full server", async () => {
+  // Each of the 9 runs waits once for room and then fails with the refusal, instead of a spawn every 30 s for an hour.
+  it("tries 9 runs in its first day, each started once more 30 s later for room and no more, never its retry", async () => {
     const h = harness(async () => { throw new Error(SPAWN_REFUSED); });
     await h.passTo(START + 24 * HOUR, () => {});
     console.log(`engine starts tried in 24 hours on a server that cannot start one: ${h.started.length}`);
-    expect(h.started).toHaveLength(9);
+    expect(h.started).toHaveLength(18);
+    const perThread = new Map<string, number>();
+    for (const turn of h.started) perThread.set(turn.threadId, (perThread.get(turn.threadId) ?? 0) + 1);
+    expect([...perThread.values()]).toEqual(Array(9).fill(2));
     expect(h.routine()).toMatchObject({ enabled: true });
     expect(h.rows().filter((run) => run.status === "failed").every((run) => run.retried === undefined && run.error === SPAWN_REFUSED)).toBe(true);
   });

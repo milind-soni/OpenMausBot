@@ -165,6 +165,6 @@ describe("spend notices", () => {
       body: "$81.50 of $100.00 spent this month (2026-09). New turns stop when the limit is reached.",
     });
     expect(spendAlertText("cap", state({ spentUsd: 100.004, percent: 100, exceeded: true })).body)
-      .toBe("$100.00 of $100.00 spent this month (2026-09). New turns are refused until an admin raises the limit under Settings → Usage.");
+      .toBe("$100.00 of $100.00 spent this month (2026-09). New turns are refused until an admin raises the limit under Settings → Spending.");
   });
 });

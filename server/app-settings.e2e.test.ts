@@ -154,7 +154,7 @@ it("a Full-access bot adds an AI engine at once with a saved key it never sees, 
   const [listed, refused] = results(await finished("ENGINE-REMOVE"));
   expect(JSON.parse(listed.text).value).toContain(`${engineId}: Gateway at https://gw.example.test/v1`);
   expect(listed.text).not.toContain(routerKey);
-  expect(refused).toMatchObject({ isError: true, text: "Removing an AI engine is changed only by the person, in Settings → AI. Tell them where in one line; do not try another way." });
+  expect(refused).toMatchObject({ isError: true, text: "Removing an AI engine is changed only by the person, in Settings → AI → Providers. Tell them where in one line; do not try another way." });
   expect(engines()).toHaveLength(1);
 
   const card = (await settingCards(bot.threadId)).find((one) => one.card.appSettingRequest.settingId === "engines");

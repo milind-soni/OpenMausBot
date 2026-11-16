@@ -1,11 +1,11 @@
-import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
-import { parseBotPackage } from "./bot-package.ts";
 
-it("transfers only selected skills disabled, preserves originals, and rolls back failed installation", async () => {
+it("a bot template carries its skills, which arrive disabled; originals stay; a failed install rolls back", async () => {
   const fixture = await launchVerificationServer();
   console.log(JSON.stringify({ fixture: fixture.info }));
   const url = fixture.info.url;
@@ -51,27 +51,21 @@ it("transfers only selected skills disabled, preserves originals, and rolls back
     await request(`/api/bots/${source.id}/skills/source-check`, {
       method: "PATCH", body: JSON.stringify({ enabled: true }),
     }, url);
-    for (const skillIds of [undefined, []]) {
-      const exported = await post("/api/teams/export", { format: "package", skillIds });
-      expect(exported.markdown).not.toContain("SKILL_FIXTURE_MARKER");
-      expect(parseBotPackage(exported.markdown).package.skills).toBeUndefined();
+    const card = await post("/api/share/export", { botId: source.id });
+    expect(card).toMatchObject({ scope: "bot", status: "draft", counts: { bots: 1, skills: 2 } });
+    const savedTo = mkdtempSync(join(tmpdir(), "omb-skill-template-"));
+    let copied;
+    try {
+      const saved = await post(`/api/share/${card.id}/save`, { path: savedTo });
+      expect(readFileSync(join(saved.path, "skills", "source-check", "SKILL.md"), "utf8")).toBe(sharedText);
+      copied = await post("/api/share/import", { path: saved.path });
+    } finally {
+      rmSync(savedTo, { recursive: true, force: true });
     }
-    for (const skillIds of [["missing"], ["source-check", "source-check"], ["../private"], Array(21).fill("source-check")]) {
-      await expect(post("/api/teams/export", { format: "package", skillIds })).rejects.toThrow();
-    }
-    const exported = await post("/api/teams/export", { format: "package", skillIds: ["source-check"] });
-    expect(exported.markdown).toContain("SHARED_SKILL_FIXTURE_MARKER");
-    expect(exported.markdown).not.toContain("PRIVATE_SKILL_FIXTURE_MARKER");
-    const parsed = parseBotPackage(exported.markdown);
-    expect(parsed.package.skills?.entries).toEqual([{
-      name: "source-check", description: "Fixture instructions.", source: "package:fixture", instructions: sharedText,
-    }]);
-    const copied = await post("/api/teams/import", exported.markdown);
     const target = copied.bots.find((bot: { name: string }) => bot.name === "Package skill probe 2");
     expect(target).toBeDefined();
-    expect((await request(`/api/bots/${target.id}/skills`, {}, url)).skills).toMatchObject([
-      { name: "source-check", enabled: false },
-    ]);
+    expect((await request(`/api/bots/${target.id}/skills`, {}, url)).skills.map((skill: { name: string; enabled: boolean }) => [skill.name, skill.enabled]).sort())
+      .toEqual([["private-notes", false], ["source-check", false]]);
     await command("send", "--bot", target.id, "--text", "Confirm this isolated copy is ready.");
     expect(await command("wait", "--bot", target.id, "--timeout", "30")).toMatchObject({ status: "settled" });
     const messages = await command("messages", "--bot", target.id, "--limit", "10");
@@ -81,10 +75,10 @@ it("transfers only selected skills disabled, preserves originals, and rolls back
     // The main Chief is in charge of every department, so each imported one became its too; nothing else changed.
     expect(before.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff)).toHaveLength(1);
     for (const bot of before.bots) expect(after.bots.find((value: { id: string }) => value.id === bot.id))
-      .toEqual(bot.chiefOfStaff ? { ...bot, managedSections: [...(bot.managedSections ?? []), imported.section, copied.section] } : bot);
+      .toEqual(bot.chiefOfStaff ? { ...bot, managedSections: [...(bot.managedSections ?? []), imported.section] } : bot);
     const backup = await post("/api/teams/export", { format: "backup" });
     expect(JSON.stringify(backup)).not.toContain("SKILL_FIXTURE_MARKER");
-    console.log(JSON.stringify({ ok: true, rollback: true, explicitSelection: true, importedSkillsDisabled: true, messages, logPath: fixture.info.logPath }));
+    console.log(JSON.stringify({ ok: true, rollback: true, importedSkillsDisabled: true, messages, logPath: fixture.info.logPath }));
   } finally {
     await fixture.close();
   }

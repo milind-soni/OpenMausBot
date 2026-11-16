@@ -14,7 +14,7 @@ import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQu
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
-import { ChatToolSessionError, chatToolNotices, mountChatTools, refitChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
+import { ChatToolSessionError, chatToolNotices, mountChatTools, refitChatTools, withHostFileTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
 import { noteToolBudget } from "../tool-budgets.ts";
 import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
@@ -608,7 +608,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
         const toolsOff = options.tools === false || options.toolUse?.(model) === false;
-        tools = await mountChatTools(toolsOff ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
+        tools = await mountChatTools(toolsOff ? undefined : withHostFileTools(turn.integrations), abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
           toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText, chatToolLimitFor(options.apiUrl, model), { conversation: turn.threadId, notice: ({ message, text }) => emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message), text }) });
         noteToolBudget(turn.botId, tools.budget);
         for (const message of chatToolNotices(tools)) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });

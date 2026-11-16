@@ -83,6 +83,8 @@ describe("this desktop's own computer in a chat turn", () => {
     expect(one.env.OMB_CONTROL_TOKEN).not.toBe(two.env.OMB_CONTROL_TOKEN);
     expect(hostComputerKey(one)).toBe(hostComputerKey(two));
     expect(hostComputerKey(one)).not.toBe(hostComputerKey({ ...one, env: { ...one.env, OMB_CUA_ARGS: '["mcp","--embedded"]' } }));
+    // A list remembered with the file tools is never offered by a bridge without them, nor the other way round.
+    expect(hostComputerKey(one)).not.toBe(hostComputerKey({ ...one, env: { ...one.env, OMB_HOST_FILES: "1" } }));
   });
 
   it("is not skipped when slow, and the next turn lists its last tools after a short wait and its first call waits for the start", async () => {

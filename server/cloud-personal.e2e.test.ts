@@ -272,7 +272,7 @@ afterAll(async () => {
 
 it("boots without anyone else's session: the chat-only device is signed out, and only the owner's devices are listed", async () => {
   expect(log).toContain("cloud home: revoked 1 session that was not the owner's own device");
-  expect(log).toContain("Review Settings → Remote access → Paired devices");
+  expect(log).toContain("Review Settings → Phone & devices → Paired");
   for (const path of ["/api/auth/session", "/api/bots", `/api/threads/${before.theirs}/messages`]) {
     expect((await api("GET", path, { token: before.chatOnly })).status, path).toBe(401);
   }
