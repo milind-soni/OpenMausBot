@@ -7932,6 +7932,7 @@
   "chat.preview.pointedAt": "Pointed at {parts}",
   "chat.helperSuggestion.text": "Want me to sort your email for free? Add a Cloudflare Workers AI key (free tier) or a Jev key.",
   "chat.helperSuggestion.from": "Tip from {app}",
+  "chat.settingsCard.elsewhere": "This is set on the computer itself: open MausBot there, then Settings → Phone & devices → Your other computers.",
   "chat.helperSuggestion.about": "A helper key lets a small model sort your mail without using your main AI. Jev (typesafe.ai) and Cloudflare Workers AI both offer one.",
   "chat.helperSuggestion.addKey": "Add key",
   "chat.helperSuggestion.notNow": "Not now",
