@@ -38,11 +38,7 @@ function readBootSession() {
       return normalizeBootId(readFileSync("/proc/sys/kernel/random/boot_id", "utf8"));
     }
     if (process.platform === "darwin") {
-      return normalizeBootId(execFileSync("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"], {
-        encoding: "utf8",
-        timeout: 5_000,
-        stdio: ["ignore", "pipe", "ignore"],
-      }));
+      return normalizeBootId(commandOutput("/usr/sbin/sysctl", ["-n", "kern.bootsessionuuid"]));
     }
   } catch {
   }
@@ -146,8 +142,9 @@ function ownerIsAlive(owner) {
  */
 let cachedMachineId;
 
-function commandOutput(file, args) {
-  return execFileSync(file, args, { encoding: "utf8", timeout: 5_000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+/** A probe's stdout, its window hidden on Windows; throws when it fails or runs past `timeout`. */
+function commandOutput(file, args, timeout = 5_000) {
+  return execFileSync(file, args, { encoding: "utf8", timeout, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
 }
 
 function linuxInstallHasOwnMachineId() {
@@ -372,14 +369,9 @@ function processCreationTimeMs(pid) {
   return wmicCreationTimeMs(pid) ?? cimCreationTimeMs(pid);
 }
 
-/** A Windows probe's stdout, its window hidden; throws when it fails or runs past `timeout`. */
-function windowsOutput(file, args, timeout) {
-  return execFileSync(file, args, { encoding: "utf8", timeout, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-}
-
 function wmicCreationTimeMs(pid) {
   try {
-    const output = windowsOutput("wmic", ["process", "where", `ProcessId=${pid}`, "get", "CreationDate", "/format:csv"], 5_000);
+    const output = commandOutput("wmic", ["process", "where", `ProcessId=${pid}`, "get", "CreationDate", "/format:csv"], 5_000);
     for (const line of output.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -402,7 +394,7 @@ function wmicCreationTimeMs(pid) {
 function cimCreationTimeMs(pid) {
   const powershell = join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   try {
-    const output = windowsOutput(powershell, [
+    const output = commandOutput(powershell, [
       "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
       `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if ($p) { ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds() }`,
     ], 15_000);
