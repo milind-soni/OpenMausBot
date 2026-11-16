@@ -36,6 +36,13 @@ describe("whether a page opens with a heading of its own", () => {
     expect(opensWithHeading(open("<header hidden><h1>Hidden</h1></header><p>body</p>"))).toBe(false);
   });
 
+  it("does not count text the page shows at no opacity", () => {
+    expect(opensWithHeading(open("<h1 style=\"opacity:0\">Hidden</h1><p>body</p>"))).toBe(false);
+    expect(opensWithHeading(open("<header class=\"clear\"><h1>Hidden</h1></header><p>body</p>", "<style>.clear{opacity:0}</style>"))).toBe(false);
+    expect(opensWithHeading(open("<p style=\"opacity:0\">Hidden</p><h1>Title</h1>"))).toBe(true);
+    expect(opensWithHeading(open("<h1 style=\"opacity:0.4\">Faint</h1><p>body</p>"))).toBe(true);
+  });
+
   it("looks past hidden text that comes before a heading", () => {
     expect(opensWithHeading(open("<p style=\"display:none\">Hidden</p><h1>Title</h1>"))).toBe(true);
     expect(opensWithHeading(open("<p class=\"gone\">Hidden</p><h1>Title</h1>", "<style>.gone{display:none}</style>"))).toBe(true);
@@ -67,7 +74,7 @@ describe("the page helper's heading report", () => {
     Object.defineProperty(page.document, "readyState", { configurable: true, get: () => "complete" });
     new Function("window", "document", "MutationObserver", "ResizeObserver", "requestAnimationFrame", APP_HELPER_SOURCE)(
       frame, page.document, page.MutationObserver, undefined, (callback: () => void) => setTimeout(callback, 0));
-    return { page, reports };
+    return { page, frame, reports };
   }
 
   it("says once whether the page opens with a heading", async () => {
@@ -101,6 +108,23 @@ describe("the page helper's heading report", () => {
     page.document.querySelector("h1")!.setAttribute("style", "display:none");
     page.document.body.append(Object.assign(page.document.createElement("p"), { textContent: "body" }) as never);
     await expect.poll(() => reports).toEqual([false, true, false]);
+  });
+
+  it("looks again when a fade the page runs has ended", async () => {
+    const { page, frame, reports } = boot("<h1>Fading in</h1><p>body</p>");
+    // an animation moves no attribute, so nothing but its end tells the helper
+    const real = frame.getComputedStyle;
+    let clear = true;
+    frame.getComputedStyle = (element) => {
+      const style = real(element);
+      return clear && (element as { tagName?: string }).tagName === "H1" ? { display: "block", visibility: "visible", opacity: "0" } as never : style;
+    };
+    await expect.poll(() => reports).toEqual([false]);
+    clear = false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(reports).toEqual([false]);
+    page.document.querySelector("h1")!.dispatchEvent(new page.Event("animationend", { bubbles: true }) as never);
+    await expect.poll(() => reports).toEqual([false, true]);
   });
 
   it("settles on no heading for a page that never shows any text", async () => {

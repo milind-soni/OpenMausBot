@@ -45,7 +45,7 @@ const HEADING_WAIT_MS = 600;
 const HEADING_DRAWING_MS = 8_000;
 
 /** `(window, document) => true | false | null`: whether the first text the page shows sits in a heading near its top;
- * null while it shows no text at all. Text counts when no ancestor is `display: none` or `hidden`, it is not
+ * null while it shows no text at all. Text counts when no ancestor is `display: none`, `hidden` or at no opacity, it is not
  * `visibility: hidden`, and, where there is a layout to ask, its element is more than a pixel in size. */
 export const APP_OPENS_WITH_HEADING_SOURCE = `function (window, document) {
   var body = document.body;
@@ -56,7 +56,7 @@ export const APP_OPENS_WITH_HEADING_SOURCE = `function (window, document) {
   var first = function (element) {
     if (skipped[element.tagName] || element.hasAttribute("hidden")) return null;
     var style = window.getComputedStyle(element);
-    if (style.display === "none") return null;
+    if (style.display === "none" || parseFloat(style.opacity) === 0) return null;
     var shown = style.visibility !== "hidden" && style.visibility !== "collapse";
     for (var child = element.firstChild; child; child = child.nextSibling) {
       if ((budget -= 1) < 0) return null;
@@ -233,6 +233,9 @@ const helperSource = (room: boolean) => `(function () {
     }
     window.addEventListener("load", look);
     window.addEventListener("resize", look);
+    // A fade moves no attribute: only its end says the text is there now.
+    document.addEventListener("animationend", look, true);
+    document.addEventListener("transitionend", look, true);
     look();
   };
   // What the person selects, and where it ends, so the host can offer to cite it as chat does. Not in a room.
