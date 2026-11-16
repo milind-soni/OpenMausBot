@@ -12,7 +12,11 @@
 //   - apps/server/src/provider/acp/AntigravityAcpSupport.ts:55-79, 108-121
 //     (the session setup for releases that write a workflow skill file);
 //   - apps/server/src/provider/acp/AntigravityAcpSupport.ts:89-90, 123-129
-//     at b732621b51 (the client name by runtime version).
+//     at b732621b51 (the client name by runtime version);
+//   - apps/server/src/provider/antigravityAuthSupport.ts:467-477,
+//     apps/server/src/provider/acp/AntigravityAcpSupport.ts:186-193 and
+//     apps/server/src/provider/AntigravityInstallation.ts:501-503 at
+//     b732621b51 (the native CLI's launch, its session mode and its name).
 // The temp folder stays one per instance, the redirect can go through a relay into a boxed runtime, and startup waits
 // while a Windows unpack is still growing.
 import { execFile } from "node:child_process";
@@ -269,7 +273,7 @@ export async function prepareAntigravityProfile(input: {
     ...(caBundle ? { SSL_CERT_FILE: caBundle } : {}),
     GEMINI_HOME: directory,
     AGY_ACP_FORCE_FILE_STORAGE: "1",
-    ANTIGRAVITY_HARNESS_PATH: input.runtime.harnessPath,
+    ...(input.runtime.harnessPath === null ? {} : { ANTIGRAVITY_HARNESS_PATH: input.runtime.harnessPath }),
     BROWSER: browserCommand,
     PYTHONUNBUFFERED: "1",
     ELECTRON_RUN_AS_NODE: "1",
@@ -342,7 +346,7 @@ export class AntigravityAcpClient {
     this.runtimeVersion = runtime.version;
     this.child = spawnCli(
       runtime.executablePath,
-      process.platform === "linux" ? ["--uid="] : [],
+      antigravityLaunchArgs(runtime, profile.directory),
       { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"], box: { ro: [join(profile.directory, "omb-skills")], ...(relay ? { relay: relay.socketPath } : {}) } },
       "bot",
     );
@@ -727,13 +731,27 @@ export function antigravitySessionSetup(initialized: any): { _meta?: { antigravi
   return patch >= 2 && patch <= 5 ? { _meta: { antigravity: { disabledTools: ["run_workflow"] } } } : {};
 }
 
+/** The agy CLI has no harness sibling and serves ACP through its `acp` subcommand. It joins `--app-data-dir` beneath
+ * `--gemini-dir`, including when the value is absolute. */
+export function antigravityLaunchArgs(runtime: Pick<AntigravityRuntime, "harnessPath">, profileDirectory: string, platform: NodeJS.Platform = process.platform): string[] {
+  if (runtime.harnessPath === null) return ["acp", "--gemini-dir", profileDirectory, "--app-data-dir", "antigravity-acp"];
+  return platform === "linux" ? ["--uid="] : [];
+}
+
+/** The agy CLI rejects the pinned runtime's `yolo` and `auto_edit`. It stays in `default`, where it asks before acting
+ * and the app answers by the turn's own approval level. */
+export function antigravityCliSessionMode(mode: string): string {
+  return mode === "yolo" || mode === "auto_edit" ? "default" : mode;
+}
+
 export function isValidAntigravityInitializeResult(
   initialized: any,
   expectedVersion: string,
+  nativeCli = false,
 ): boolean {
   if (!initialized || initialized.protocolVersion !== 1) return false;
   const name = initialized.agentInfo?.name;
-  if (name !== "antigravity-acp" && name !== "Google Antigravity") return false;
+  if (nativeCli ? name !== "Antigravity ACP Server" : name !== "antigravity-acp" && name !== "Google Antigravity") return false;
   const actualVersion = initialized.agentInfo?.version;
   if (typeof actualVersion !== "string") return false;
   const normalizedActual = runtimeVersion(actualVersion);
@@ -771,7 +789,7 @@ export async function validateAntigravityRuntime(runtime: AntigravityRuntime, ex
     tempDirectory = profile.tempDirectory;
     client = new AntigravityAcpClient(runtime, profile, profileDirectory);
     const initialized = await client.initialize();
-    if (!isValidAntigravityInitializeResult(initialized, expectedVersion)) {
+    if (!isValidAntigravityInitializeResult(initialized, expectedVersion, runtime.harnessPath === null)) {
       throw new Error("The download did not identify as the expected Google Antigravity ACP release.");
     }
   } catch (error) {

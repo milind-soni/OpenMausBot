@@ -1,3 +1,11 @@
+// Finding the Antigravity runtime to start, and installing Google's releases of it.
+//
+// Adapted from pingdotgg/t3code@b732621b51, MIT License, Copyright (c) 2026
+// T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified:
+//   - apps/server/src/provider/AntigravityInstallation.ts:57, 311-345, 922-966,
+//     985-999 (a CLI needs no harness sibling, the hourly look at the channel,
+//     and keeping an installed CLI that is newer than the channel's).
+// The pinned runtime stays first for a computer that already has it, and a saved `agy` path is never started.
 import { createHash, randomUUID } from "node:crypto";
 import {
   access,
@@ -16,7 +24,10 @@ import {
 import { constants } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 
+import { execFile } from "node:child_process";
+
 import { DATA_DIR } from "../config.ts";
+import { outsideBoxOptions } from "../procs.ts";
 import { antigravityRuntimesRoot } from "../engine-roots.ts";
 import { extractZipMember, readZipDirectory } from "../zip-archive.ts";
 import { augmentedPath } from "../env-path.ts";
@@ -24,6 +35,9 @@ import {
   resolveAntigravityReleaseAsset,
   type AntigravityReleaseAsset,
 } from "./antigravity-release.ts";
+import { parseVersionTriple, versionAtLeast } from "./acp/version-probe.ts";
+import { ANTIGRAVITY_NATIVE_CLI, activeAntigravityCli, installAntigravityCli, isAntigravityCliName } from "./antigravity-cli-install.ts";
+import { antigravityCliTarget, latestAntigravityCliRelease, type AntigravityCliReleaseAsset } from "./antigravity-cli-release.ts";
 
 const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 45 * 60_000;
@@ -61,9 +75,13 @@ export async function retryOnWindowsFileLock<T>(step: () => Promise<T>, options:
 
 const INSTALL_RECORD = ".install-complete.json";
 
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+const CLI_VERSION_PROBE_MS = 5_000;
+
 export interface AntigravityRuntime {
   executablePath: string;
-  harnessPath: string;
+  /** Null for the native CLI, which embeds the harness and runs as `agy acp`. */
+  harnessPath: string | null;
   source: "managed" | "override" | "path";
   version: string | null;
 }
@@ -86,7 +104,12 @@ interface InstallRecord {
 
 export interface AntigravityInstallOptions {
   baseDir?: string;
+  /** Naming a pinned release installs exactly that one, with no look at the native CLI's channel. */
   asset?: AntigravityReleaseAsset | null;
+  /** The engine's CLI path asks for the native CLI: install it or fail, with no pinned runtime in its place. */
+  native?: boolean;
+  /** The native CLI release to install, instead of asking Google's channel. */
+  cliRelease?: AntigravityCliReleaseAsset | null;
   fetchImpl?: typeof fetch;
   validate?: (runtime: AntigravityRuntime, expectedVersion: string) => Promise<void>;
 }
@@ -147,12 +170,41 @@ function pathCandidates(binary: string, env: NodeJS.ProcessEnv): string[] {
     .map((part) => resolve(part, binary));
 }
 
-async function externalRuntime(candidate: string, source: "override" | "path"): Promise<AntigravityRuntime | null> {
+const cliVersions = new Map<string, { stamp: string; version: string | null }>();
+
+/** The version a custom `antigravity` executable reports, when it is 1.5.0 or newer: only those serve ACP themselves. */
+async function nativeCliVersion(executablePath: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+  const info = await stat(executablePath);
+  const stamp = `${info.size}:${info.mtimeMs}`;
+  const known = cliVersions.get(executablePath);
+  if (known?.stamp === stamp) return known.version;
+  // Security: the probe runs outside the bot box, so the program-trust rule decides whether it may run at all.
+  const options = outsideBoxOptions(executablePath, { env, timeout: CLI_VERSION_PROBE_MS, killSignal: "SIGKILL" as const, maxBuffer: 64 * 1024, windowsHide: true, encoding: "utf8" as const });
+  const output = await new Promise<string>((done) => {
+    execFile(executablePath, ["--version"], options, (error, stdout, stderr) => done(error ? "" : `${stdout}\n${stderr}`));
+  });
+  const triple = parseVersionTriple(output);
+  const version = triple && versionAtLeast(triple, [1, 5, 0]) ? triple.join(".") : null;
+  if (cliVersions.size >= 32) cliVersions.delete(cliVersions.keys().next().value!);
+  cliVersions.set(executablePath, { stamp, version });
+  return version;
+}
+
+async function externalRuntime(candidate: string, source: "override" | "path", env?: NodeJS.ProcessEnv): Promise<AntigravityRuntime | null> {
   const names = executableNames();
   const executablePath = resolve(candidate);
+  if (!(await executableFile(executablePath))) return null;
   const harnessPath = join(dirname(executablePath), names.harness);
-  if (!(await executableFile(executablePath)) || !(await executableFile(harnessPath))) return null;
-  return { executablePath, harnessPath, source, version: null };
+  if (await executableFile(harnessPath)) return { executablePath, harnessPath, source, version: null };
+  if (!ANTIGRAVITY_NATIVE_CLI || env === undefined || !isAntigravityCliName(executablePath)) return null;
+  const version = await nativeCliVersion(executablePath, env);
+  return version === null ? null : { executablePath, harnessPath: null, source, version };
+}
+
+/** Whether the engine's CLI path asks for the native CLI this app installs: the bare name, as the CLI itself is named. */
+export function isAntigravityNativeAlias(cli: string | undefined): boolean {
+  const name = cli?.trim() ?? "";
+  return ANTIGRAVITY_NATIVE_CLI && !/[\\/]/u.test(name) && isAntigravityCliName(name);
 }
 
 /** Legacy `agy` commands (saved absolute paths, Windows shims) migrate without editing user config. */
@@ -163,29 +215,36 @@ export async function resolveAntigravityRuntime(
 ): Promise<AntigravityRuntime> {
   const override = binaryPath?.trim();
   const legacyCli = override !== undefined && /(?:^|[\\/])agy(?:\.(?:cmd|bat|exe|ps1))?$/iu.test(override);
-  if (override && override !== "agy") {
+  const native = isAntigravityNativeAlias(override);
+  if (override && override !== "agy" && !native) {
     for (const candidate of pathCandidates(override, env)) {
-      const found = await externalRuntime(candidate, "override");
+      const found = await externalRuntime(candidate, "override", env);
       if (found) return found;
     }
     if (!legacyCli) {
       throw new AntigravitySetupError(
-        "The custom Antigravity ACP executable or its localharness_external sibling is missing.",
+        "The custom Antigravity ACP executable or its localharness_external sibling is missing. The native CLI from 1.5.0 on, under its name antigravity, needs no sibling.",
       );
     }
   }
 
+  const installedCli = ANTIGRAVITY_NATIVE_CLI ? await activeAntigravityCli(runtimeRoot(baseDir)) : null;
+  if (native) {
+    if (installedCli) return installedCli;
+    throw new AntigravitySetupError("Antigravity's native CLI is not installed. Install the official Google runtime to continue, or set the CLI path back to agy.");
+  }
   const asset = resolveAntigravityReleaseAsset();
   if (asset) {
     const managed = await completedRelease(join(runtimeRoot(baseDir), "versions", asset.sha256), asset);
     if (managed) return managed;
   }
+  if (installedCli) return installedCli;
   const names = executableNames();
   for (const candidate of pathCandidates(names.executable, env)) {
     const found = await externalRuntime(candidate, "path");
     if (found) return found;
   }
-  if (!asset) {
+  if (!antigravityManagedInstallAvailable()) {
     throw new AntigravitySetupError(
       `Google does not publish an Antigravity runtime for ${process.platform}-${process.arch}. Set a custom executable path.`,
     );
@@ -220,10 +279,41 @@ async function extractPinnedArchive(
   if (seen.size !== 2) throw new Error("The archive is missing an expected file.");
 }
 
+/** A computer the app already put a pinned runtime on keeps it: only a new install, one that already runs the native
+ * CLI, or a CLI path that asks for it takes the CLI. Null when the pinned runtime is the one to install: the CLI's own
+ * failure is thrown unless this is a new install the pinned runtime can stand in for. */
+async function installNativeCli(options: AntigravityInstallOptions, root: string): Promise<AntigravityRuntime | null> {
+  if (!ANTIGRAVITY_NATIVE_CLI || options.asset !== undefined) return null;
+  const pinned = resolveAntigravityReleaseAsset();
+  const active = await activeAntigravityCli(root);
+  if (!options.native && !active && pinned
+    && ((await completedRelease(join(root, "versions", pinned.sha256), pinned)) || (await antigravityOlderRuntime(options.baseDir, pinned)) !== null)) return null;
+  try {
+    const release = options.cliRelease !== undefined ? options.cliRelease : await latestAntigravityCliRelease({ fetchImpl: options.fetchImpl });
+    if (!release) throw new Error("Could not find a native Antigravity CLI release. Check the network connection and try again.");
+    if (active?.version && isNewer(active.version, release.version)) {
+      await options.validate?.(active, active.version);
+      return active;
+    }
+    return await installAntigravityCli(release, { root, fetchImpl: options.fetchImpl, validate: options.validate, retry: retryOnWindowsFileLock });
+  } catch (error) {
+    if (options.native || !pinned || active) throw error;
+    console.warn(`antigravity: the native CLI could not be installed (${error instanceof Error ? error.message : String(error)}); installing the pinned runtime instead`);
+    return null;
+  }
+}
+
+function isNewer(version: string, than: string): boolean {
+  const left = parseVersionTriple(version), right = parseVersionTriple(than);
+  return left !== null && right !== null && versionAtLeast(left, right) && left.join(".") !== right.join(".");
+}
+
 async function installOnce(options: AntigravityInstallOptions): Promise<AntigravityRuntime> {
+  const root = runtimeRoot(options.baseDir);
+  const cli = await installNativeCli(options, root);
+  if (cli) return cli;
   const asset = options.asset === undefined ? resolveAntigravityReleaseAsset() : options.asset;
   if (!asset) throw new Error(`Google does not publish an Antigravity runtime for ${process.platform}-${process.arch}.`);
-  const root = runtimeRoot(options.baseDir);
   const versions = join(root, "versions");
   const destination = join(versions, asset.sha256);
   await mkdir(versions, { recursive: true, mode: 0o700 });
@@ -336,12 +426,39 @@ async function installOnce(options: AntigravityInstallOptions): Promise<Antigrav
 }
 
 export function installAntigravityRuntime(options: AntigravityInstallOptions = {}): Promise<AntigravityRuntime> {
-  const key = runtimeRoot(options.baseDir);
+  const key = `${runtimeRoot(options.baseDir)}\0${options.asset !== undefined ? "pinned" : options.native ? "native" : "default"}`;
   const existing = installs.get(key);
   if (existing) return existing;
   const running = installOnce(options).finally(() => installs.delete(key));
   installs.set(key, running);
   return running;
+}
+
+let channelAnswer: { at: number; version: string } | undefined;
+
+/** The native CLI's version when an account here runs it and Google's channel has a newer one. An account runs it
+ * when its CLI path asks for it, or when no pinned runtime is installed to go first. The channel's answer is kept for
+ * an hour, so an update found while the engine is busy is still there on the next look; a channel that did not answer
+ * is asked again. */
+export async function antigravityCliUpdate(options: {
+  baseDir?: string; now?: number; latest?: () => Promise<AntigravityCliReleaseAsset | null>; asset?: AntigravityReleaseAsset | null;
+  /** Every engine's configured CLI path. */
+  configuredClis?: readonly string[];
+} = {}): Promise<string | null> {
+  if (!ANTIGRAVITY_NATIVE_CLI) return null;
+  const root = runtimeRoot(options.baseDir);
+  const active = await activeAntigravityCli(root);
+  if (!active?.version) return null;
+  const pinned = options.asset === undefined ? resolveAntigravityReleaseAsset() : options.asset;
+  const pinnedFirst = pinned ? (await completedRelease(join(root, "versions", pinned.sha256), pinned)) !== null : false;
+  if (pinnedFirst && !(options.configuredClis ?? []).some(isAntigravityNativeAlias)) return null;
+  const now = options.now ?? Date.now();
+  if (channelAnswer === undefined || now - channelAnswer.at >= UPDATE_CHECK_INTERVAL_MS || now < channelAnswer.at) {
+    const latest = await (options.latest ?? latestAntigravityCliRelease)();
+    if (!latest) return null;
+    channelAnswer = { at: now, version: latest.version };
+  }
+  return isNewer(channelAnswer.version, active.version) ? active.version : null;
 }
 
 /** The newest runtime the app installed here, when it is not the pinned one; null when the pinned one is installed or none is. */
@@ -360,5 +477,5 @@ export async function antigravityOlderRuntime(baseDir = DATA_DIR, asset = resolv
 }
 
 export function antigravityManagedInstallAvailable(): boolean {
-  return resolveAntigravityReleaseAsset() !== null;
+  return resolveAntigravityReleaseAsset() !== null || (ANTIGRAVITY_NATIVE_CLI && antigravityCliTarget(process.platform, process.arch) !== null);
 }

@@ -14,7 +14,9 @@ import type {
 } from "../contracts.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./acp/core.ts";
 import {
+  antigravityCliSessionMode,
   antigravityClientInfo,
+  antigravityLaunchArgs,
   antigravityProfileAuthenticated,
   antigravityProfileDirectory,
   antigravitySessionSetup,
@@ -32,9 +34,12 @@ import { antigravityLimitFacts, watchAntigravityPromptOutcome } from "./antigrav
 import { AntigravityAuthController } from "./antigravity-auth.ts";
 import {
   antigravityManagedInstallAvailable,
+  isAntigravityNativeAlias,
   installAntigravityRuntime,
   resolveAntigravityRuntime,
 } from "./antigravity-runtime.ts";
+import { ANTIGRAVITY_NATIVE_CLI } from "./antigravity-cli-install.ts";
+import { acpFileEditWithin } from "./permission-command.ts";
 import { resolveAntigravityReleaseAsset } from "./antigravity-release.ts";
 import { AntigravityProcesses } from "./antigravity-processes.ts";
 import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravity-temp.ts";
@@ -75,8 +80,8 @@ const managedAsset = resolveAntigravityReleaseAsset();
 const runtimeProcesses = new AntigravityProcesses();
 /** Every model id an account here has been offered, beside the bundled catalog's. */
 const offeredModels = new Set<string>();
-/** The version of the runtime each instance's turns were last started on, known before it answers initialize. */
-const launchedVersions = new Map<string, string | null>();
+/** The runtime each instance's turns were last started on, known before it answers initialize. */
+const launched = new Map<string, { version: string | null; nativeCli: boolean }>();
 
 const support: AcpSupport = {
   driverKind: "antigravityAgent",
@@ -88,8 +93,9 @@ const support: AcpSupport = {
   loginNote: "Antigravity needs a Google account — choose Sign in with Google in engine setup",
   install: {
     docsUrl: "https://github.com/agentclientprotocol/registry/tree/main/antigravity-acp",
-    ...(managedAsset
-      ? { managed: { label: "Install official Antigravity", downloadBytes: managedAsset.archiveBytes } }
+    ...(antigravityManagedInstallAvailable()
+      // A client from before the native CLI shows this size whatever else is sent: the pinned archive's, or none.
+      ? { managed: { label: "Install official Antigravity", downloadBytes: managedAsset?.archiveBytes ?? 0, ...(ANTIGRAVITY_NATIVE_CLI ? { sizeUnknown: true as const } : {}) } }
       : {}),
   },
   images: true,
@@ -108,12 +114,12 @@ const support: AcpSupport = {
 
   resolveCommand: async (env, config, instanceId) => {
     const runtime = await resolveAntigravityRuntime(config.cli, env);
-    launchedVersions.set(instanceId, runtime.version);
+    launched.set(instanceId, { version: runtime.version, nativeCli: runtime.harnessPath === null });
     const profile = await prepareAntigravityProfile({ instanceId, runtime, baseEnv: env });
     if (profile.tempDirectory) scheduleAntigravityTempSweep(instanceId);
     return {
       command: runtime.executablePath,
-      args: process.platform === "linux" ? ["--uid="] : [],
+      args: antigravityLaunchArgs(runtime, profile.directory),
       env: profile.environment,
       ro: [join(profile.directory, "omb-skills")],
     };
@@ -147,7 +153,10 @@ const support: AcpSupport = {
   sessionSetupParams: antigravitySessionSetup,
   // One model family's quota is not the account's: Gemini and the models that share another allowance keep running.
   limitFacts: (_text, model) => antigravityLimitFacts(model, [...support.models.options.map((option) => option.id), ...offeredModels]),
-  clientInfo: (instanceId) => antigravityClientInfo(launchedVersions.get(instanceId)),
+  clientInfo: (instanceId) => antigravityClientInfo(launched.get(instanceId)?.version),
+  // In `default` the native CLI asks before every edit; Auto-accept edits answers those, as `auto_edit` did.
+  // Security: only a file edit inside the turn's folder is answered; one that names a command or another place is asked.
+  allowsAlone: (instanceId, turn, toolCall) => launched.get(instanceId)?.nativeCli === true && turn.approvalMode === "edits" && acpFileEditWithin(toolCall, turn.cwd),
   promptOutcome: (instanceId, sessionId) => watchAntigravityPromptOutcome(support.displayName, antigravityProfileDirectory(instanceId), sessionId),
   requireAuthenticationBeforeSpawn: true,
   isAuthenticated: async (env, config, instanceId) => {
@@ -174,11 +183,15 @@ const support: AcpSupport = {
     }
   },
 
-  configureSession: async ({ request, sessionId, config, turn, configOptions }) => {
+  configureSession: async ({ request, sessionId, instanceId, config, turn, configOptions }) => {
+    const nativeCli = launched.get(instanceId)?.nativeCli === true;
     if (!Array.isArray(configOptions) || !configOptions.some(option => option?.id === "mode")) {
+      // The native CLI answers by the turn's level only in `default`; with no mode to confirm, nothing says it is there.
+      if (nativeCli) throw new Error("Antigravity did not report its permission mode.");
       return;
     }
-    const wanted = antigravityPermissionMode(config.fullAuto, turn.approvalMode);
+    const level = antigravityPermissionMode(config.fullAuto, turn.approvalMode);
+    const wanted = nativeCli ? antigravityCliSessionMode(level) : level;
     const result = await request("session/set_config_option", {
       sessionId,
       configId: "mode",
@@ -240,7 +253,7 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
             installRuntime: async () => {
               installFailure = undefined;
               try {
-                await installAntigravityRuntime({ validate: validateAntigravityRuntime });
+                await installAntigravityRuntime({ validate: validateAntigravityRuntime, native: isAntigravityNativeAlias(input.config.cli) });
               } catch (error) {
                 installFailure = error instanceof Error ? error.message : String(error);
                 throw error;
