@@ -2,6 +2,8 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { listConfigBackups, restoreConfigBackup } from "./config-backup.ts";
+import { parseStoredConfig } from "./config.ts";
+import { parseJson } from "./schema.ts";
 
 export const CONFIG_USAGE = `openmausbot config backups [--data-dir DIR] [--json]
 openmausbot config restore NAME [--data-dir DIR] [--dry-run] [--json]
@@ -21,7 +23,7 @@ restore   put a copy back, by name or "latest"; the file it replaces is kept,
 --json           print the result as JSON`;
 
 export interface ConfigCliArgs {
-  command: "backups" | "restore";
+  command: "backups" | "restore" | "help";
   dataDir: string;
   name: string | undefined;
   json: boolean;
@@ -34,6 +36,17 @@ export interface ConfigCliError {
   json: boolean;
 }
 
+/** A copy is only put back when it is a settings file the server can read: a file the loader would reject would
+ * change the settings without saying so. */
+function settingsProblem(text: string): string | null {
+  try {
+    parseStoredConfig(parseJson(text));
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : "it does not match the settings format";
+  }
+}
+
 export function parseConfigArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ConfigCliArgs | ConfigCliError {
   const json = argv.includes("--json");
   const help = argv.includes("--help") || argv.includes("-h");
@@ -44,6 +57,8 @@ export function parseConfigArgs(argv: string[], env: NodeJS.ProcessEnv = process
   const words = argv.filter((arg) => arg !== "--json" && arg !== "--help" && arg !== "-h" && arg !== "--dry-run");
   const command = words[0];
   if (command !== "backups" && command !== "restore") {
+    // A request for the help is answered with the help, whatever else it says.
+    if (help) return { command: "help", dataDir, name: undefined, json, help, dryRun };
     return fail(command ? `unknown command "${command}"; say "backups" or "restore"` : "say what to do: \"backups\" or \"restore\"");
   }
   for (let index = 1; index < words.length; index += 1) {
@@ -56,7 +71,8 @@ export function parseConfigArgs(argv: string[], env: NodeJS.ProcessEnv = process
     } else if (command === "restore" && name === undefined && !arg.startsWith("-")) name = arg;
     else return fail(`unknown argument "${arg}"; see openmausbot config --help`);
   }
-  if (command === "restore" && name === undefined) return fail("restore needs the name of a copy, or \"latest\"; run openmausbot config backups to see them");
+  // The help comes before the name is asked for: "config restore --help" is a question, not a request.
+  if (command === "restore" && name === undefined && !help) return fail("restore needs the name of a copy, or \"latest\"; run openmausbot config backups to see them");
   return { command, dataDir, name, json, help, dryRun };
 }
 
@@ -88,7 +104,7 @@ export function runConfigCli(
     else io.error(`config: there is no dated copy to put back in ${args.dataDir}; a copy is taken at every save`);
     return 1;
   }
-  const restored = restoreConfigBackup(args.dataDir, name, { dryRun: args.dryRun });
+  const restored = restoreConfigBackup(args.dataDir, name, { dryRun: args.dryRun, check: settingsProblem });
   if (!restored.ok) {
     if (args.json) io.log(JSON.stringify({ ok: false, error: restored.error }));
     else io.error(`config: ${restored.error}`);

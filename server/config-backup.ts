@@ -15,7 +15,7 @@ export const CONFIG_BACKUP_PREFIX = "config.json.bak.";
 /** How many dated copies are kept; the oldest go first. */
 export const CONFIG_BACKUP_KEEP = 10;
 
-const BACKUP_NAME = /^config\.json\.bak\.(\d{8})-(\d{6})(?:-\d+)?$/;
+const BACKUP_NAME = /^config\.json\.bak\.(\d{8})-(\d{6})(?:-(\d+))?$/;
 
 export interface ConfigBackup {
   /** The file name, which carries the moment the copy was taken. */
@@ -31,6 +31,12 @@ export type ConfigFileRead =
   | { state: "ok"; value: JsonObject; text: string }
   | { state: "unreadable"; reason: string }
   | { state: "invalid"; reason: string };
+
+/** The moment a copy carries, and the number it was given inside that second. */
+function backupOrder(name: string): { stamp: string; order: number } {
+  const match = BACKUP_NAME.exec(name)!;
+  return { stamp: `${match[1]}-${match[2]}`, order: match[3] ? Number(match[3]) : 0 };
+}
 
 /** The settings file as it is on disk. A file that is there but cannot be understood is never taken for an empty
  * one: it is reported, so a save can refuse to replace it. */
@@ -63,6 +69,15 @@ export function configSaveRefusal(read: { state: "unreadable" | "invalid"; reaso
   );
 }
 
+/** The error a save refuses with when its dated copy could not be written: without that copy the file would be
+ * replaced with nothing to go back to. */
+export function configBackupRefusal(path: string): Error {
+  return Object.assign(
+    new Error(`The settings file ${path} was left as it is because its dated copy could not be written, so nothing was saved.`),
+    { status: 503 },
+  );
+}
+
 function stampOf(now: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}-${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
@@ -73,8 +88,14 @@ function stampOf(now: Date): string {
 export function writeConfigBackup(path: string, text: string, now: Date = new Date(), skip?: string): string | null {
   const dir = dirname(path);
   const base = CONFIG_BACKUP_PREFIX + stampOf(now);
-  for (let taken = 0; taken < 100; taken += 1) {
+  // The number continues above the ones already there, so a name that retention removed is never used again.
+  let taken = 0;
+  for (const copy of listConfigBackups(dir)) {
+    if (copy.name.startsWith(base)) taken = Math.max(taken, backupOrder(copy.name).order + 1);
+  }
+  for (let attempt = 0; attempt < 100; attempt += 1) {
     const name = taken === 0 ? base : `${base}-${taken}`;
+    taken += 1;
     if (name === skip) continue;
     const target = join(dir, name);
     if (existsSync(target)) continue;
@@ -89,7 +110,8 @@ export function writeConfigBackup(path: string, text: string, now: Date = new Da
   return null;
 }
 
-/** The dated copies kept beside the settings file, oldest first. */
+/** The dated copies kept beside the settings file, oldest first. Copies taken in the same second are ordered by the
+ * number they carry, not by their name, so the tenth of a second comes after the ninth. */
 export function listConfigBackups(dir: string): ConfigBackup[] {
   let names: string[];
   try {
@@ -97,16 +119,23 @@ export function listConfigBackups(dir: string): ConfigBackup[] {
   } catch {
     return [];
   }
-  return names.filter((name) => BACKUP_NAME.test(name)).sort().map((name) => {
-    const path = join(dir, name);
-    let bytes = 0;
-    try {
-      bytes = statSync(path).size;
-    } catch {
-    }
-    const stamp = BACKUP_NAME.exec(name)!;
-    return { name, path, stamp: `${stamp[1]}-${stamp[2]}`, bytes };
-  });
+  return names
+    .filter((name) => BACKUP_NAME.test(name))
+    .sort((one, two) => {
+      const first = backupOrder(one);
+      const second = backupOrder(two);
+      if (first.stamp !== second.stamp) return first.stamp < second.stamp ? -1 : 1;
+      return first.order - second.order;
+    })
+    .map((name) => {
+      const path = join(dir, name);
+      let bytes = 0;
+      try {
+        bytes = statSync(path).size;
+      } catch {
+      }
+      return { name, path, stamp: backupOrder(name).stamp, bytes };
+    });
 }
 
 function pruneConfigBackups(dir: string): void {
@@ -121,9 +150,13 @@ function pruneConfigBackups(dir: string): void {
 
 export type ConfigRestore = { ok: true; name: string; kept: string | null; restored: boolean } | { ok: false; error: string };
 
+/** Checks that a copy is a settings file the server can read: it returns the reason it is not, or null when it is. */
+export type ConfigBackupCheck = (text: string) => string | null;
+
 /** Puts a dated copy back as the settings file. The file it replaces is kept, so the restore is itself reversible.
- * A dry run reports what it would do and changes nothing. */
-export function restoreConfigBackup(dir: string, name: string, options: { dryRun?: boolean } = {}): ConfigRestore {
+ * A dry run reports what it would do and changes nothing. Nothing is put back over a file that cannot be read or
+ * kept: a restore never loses what it finds. */
+export function restoreConfigBackup(dir: string, name: string, options: { dryRun?: boolean; check?: ConfigBackupCheck } = {}): ConfigRestore {
   if (!BACKUP_NAME.test(name)) return { ok: false, error: `${name} is not a dated copy of the settings file; run openmausbot config backups to see the copies` };
   const source = join(dir, name);
   let text: string;
@@ -138,14 +171,22 @@ export function restoreConfigBackup(dir: string, name: string, options: { dryRun
   } catch {
     return { ok: false, error: `The copy ${name} is not valid JSON, so it was not put back` };
   }
+  const problem = options.check?.(text);
+  if (problem) return { ok: false, error: `The copy ${name} is not a settings file (${problem}), so it was not put back` };
   const target = join(dir, "config.json");
   const current = readConfigFile(target);
+  if (current.state === "unreadable") return { ok: false, error: `The file ${target} could not be read, so it was left as it is and nothing was put back` };
   if (options.dryRun) return { ok: true, name, kept: null, restored: false };
   let kept: string | null = null;
   if (current.state === "ok") {
     const copy = writeConfigBackup(target, current.text, new Date(), name);
-    kept = copy ? join(dir, copy) : null;
-  } else if (current.state === "invalid") kept = keepUnreadableAside(target);
+    if (!copy) return { ok: false, error: `The file ${target} could not be kept as a dated copy, so it was left as it is and nothing was put back` };
+    kept = join(dir, copy);
+  } else if (current.state === "invalid") {
+    const aside = keepUnreadableAside(target);
+    if (!aside) return { ok: false, error: `The file ${target} could not be kept as a copy, so it was left as it is and nothing was put back` };
+    kept = aside;
+  }
   writeFileAtomic(target, text, { mode: 0o600 });
   return { ok: true, name, kept, restored: true };
 }

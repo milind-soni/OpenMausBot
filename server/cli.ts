@@ -271,9 +271,7 @@ async function serverUp(port: number, pid?: number): Promise<boolean> {
   try {
     const { status, body } = await api(port, "/api/health");
     return status === 200 && body?.app === "openmausbot" && (pid === undefined || body.pid === pid);
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 /** Never attach to another workspace just because it listens on the requested port. */

@@ -44,7 +44,8 @@ describe("a save that cannot read the file", () => {
     writeFileSync(configPath(dir), "{ not json");
     const read = readConfigFile(configPath(dir));
     expect(read.state).toBe("invalid");
-    const error = configSaveRefusal(read as { state: string; reason: string }, configPath(dir));
+    if (read.state !== "invalid") throw new Error(`expected an invalid settings file, got ${read.state}`);
+    const error = configSaveRefusal(read, configPath(dir));
     expect((error as { status?: number }).status).toBe(503);
     expect(error.message).toContain(configPath(dir));
     expect(error.message).toContain("openmausbot config restore");
@@ -54,7 +55,8 @@ describe("a save that cannot read the file", () => {
     const dir = tempDir();
     writeFileSync(configPath(dir), "{ not json");
     const read = readConfigFile(configPath(dir));
-    configSaveRefusal(read as { state: string; reason: string }, configPath(dir));
+    if (read.state !== "invalid") throw new Error(`expected an invalid settings file, got ${read.state}`);
+    configSaveRefusal(read, configPath(dir));
     const aside = readdirSync(dir).filter((name) => name.startsWith("config.json.unreadable-"));
     expect(aside).toHaveLength(1);
     expect(readFileSync(join(dir, aside[0]!), "utf8")).toBe("{ not json");
@@ -67,7 +69,7 @@ describe("the dated copies", () => {
     const name = writeConfigBackup(configPath(dir), "{\"a\":1}", new Date("2026-11-16T00:30:00Z"));
     expect(name).toBe("config.json.bak.20261116-003000");
     expect(readFileSync(join(dir, name!), "utf8")).toBe("{\"a\":1}");
-    expect(statSync(join(dir, name!)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(join(dir, name!)).mode & 0o777).toBe(0o600);
   });
 
   it("do not overwrite each other within a second", () => {
@@ -92,6 +94,24 @@ describe("the dated copies", () => {
     writeConfigBackup(configPath(dir), "a", new Date("2026-11-16T00:00:00Z"));
     writeConfigBackup(configPath(dir), "b", new Date("2026-11-16T01:00:00Z"));
     expect(listConfigBackups(dir).map((copy) => copy.stamp)).toEqual(["20261116-000000", "20261116-010000"]);
+  });
+
+  it("keep the order of the copies taken in the same second", () => {
+    const dir = tempDir();
+    const now = new Date("2026-11-16T00:30:00Z");
+    for (let index = 0; index < CONFIG_BACKUP_KEEP + 1; index += 1) writeConfigBackup(configPath(dir), `copy ${index}`, now);
+    const names = listConfigBackups(dir).map((copy) => copy.name);
+    expect(names).toEqual(Array.from({ length: CONFIG_BACKUP_KEEP }, (_, index) => `config.json.bak.20261116-003000-${index + 1}`));
+  });
+
+  it("never use again a name that retention removed", () => {
+    const dir = tempDir();
+    const now = new Date("2026-11-16T00:30:00Z");
+    for (let index = 0; index < CONFIG_BACKUP_KEEP + 1; index += 1) writeConfigBackup(configPath(dir), `copy ${index}`, now);
+    const name = writeConfigBackup(configPath(dir), "the last one", now);
+    expect(name).not.toBe("config.json.bak.20261116-003000");
+    expect(readFileSync(join(dir, name!), "utf8")).toBe("the last one");
+    expect(listConfigBackups(dir).some((copy) => copy.name === name)).toBe(true);
   });
 });
 
@@ -151,5 +171,33 @@ describe("putting a copy back", () => {
     expect(restoreConfigBackup(dir, "config.json.bak.20261116-003000").ok).toBe(false);
     expect(restoreConfigBackup(dir, "../secret").ok).toBe(false);
     expect(restoreConfigBackup(dir, "/etc/passwd").ok).toBe(false);
+  });
+
+  it("refuses a copy the server would not read as a settings file", () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, "config.json.bak.20261116-003000"), JSON.stringify({ threads: { maxConcurrentPerBot: "broken" } }));
+    writeFileSync(configPath(dir), JSON.stringify({ new: true }));
+    const restored = restoreConfigBackup(dir, "config.json.bak.20261116-003000", { check: () => "threads.maxConcurrentPerBot: expected number" });
+    expect(restored.ok).toBe(false);
+    expect(readFileSync(configPath(dir), "utf8")).toBe(JSON.stringify({ new: true }));
+  });
+
+  it("never puts a copy back over a file it cannot read", () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, "config.json.bak.20261116-003000"), JSON.stringify({ old: true }));
+    mkdirSync(configPath(dir));
+    expect(restoreConfigBackup(dir, "config.json.bak.20261116-003000").ok).toBe(false);
+    expect(restoreConfigBackup(dir, "config.json.bak.20261116-003000", { dryRun: true }).ok).toBe(false);
+    expect(statSync(configPath(dir)).isDirectory()).toBe(true);
+  });
+
+  it("never puts a copy back when the file it replaces cannot be kept", () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, "config.json.bak.20261116-003000"), JSON.stringify({ old: true }));
+    writeFileSync(configPath(dir), "{ not json");
+    for (let index = 0; index < 5; index += 1) writeFileSync(join(dir, `config.json.unreadable-${String(index).padStart(12, "0")}`), "kept");
+    const restored = restoreConfigBackup(dir, "config.json.bak.20261116-003000");
+    expect(restored.ok).toBe(false);
+    expect(readFileSync(configPath(dir), "utf8")).toBe("{ not json");
   });
 });
