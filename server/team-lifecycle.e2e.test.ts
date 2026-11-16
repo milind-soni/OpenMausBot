@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 it("retains empty teams, moves existing bots, and keeps legacy imports additive through restart", async () => {
   const fixture = await launchVerificationServer();
@@ -116,14 +117,14 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
     expect(await control("wait", "--channel", room.id, "--timeout", "30")).toMatchObject({ status: "settled" });
     const roomMessages = (await control("messages", "--channel", room.id, "--limit", "10") as any).messages;
     await waitForExit(restarted, { signal: "SIGTERM" });
-    const legacyBots = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"));
-    const legacyGroups = JSON.parse(readFileSync(join(dataDir, "groups.json"), "utf8"));
+    const legacyBots = readRegistry(dataDir).bots;
+    const legacyGroups = readRegistry(dataDir).rooms;
     const legacyBot = legacyBots.find((bot: any) => bot.id === a.id);
     const legacyGroup = legacyGroups.find((group: any) => group.id === room.id);
     delete legacyBot.tasks; delete legacyBot.soulHash; legacyBot.section = "Recovered bot team";
     delete legacyGroup.tasks; delete legacyGroup.defaultResponder; legacyGroup.section = "Recovered group team";
-    writeFileSync(join(dataDir, "bots.json"), JSON.stringify(legacyBots));
-    writeFileSync(join(dataDir, "groups.json"), JSON.stringify(legacyGroups));
+    writeRegistry(dataDir, { bots: legacyBots });
+    writeRegistry(dataDir, { rooms: legacyGroups });
     const malformed = '{"version":1,"contexts":';
     const registryFile = join(dataDir, "section-contexts.json");
     writeFileSync(registryFile, malformed);
@@ -133,8 +134,8 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
     expect(recovered.groups.find((group: any) => group.id === room.id)).toMatchObject({ section: "Recovered group team", defaultResponder: { kind: "member", botId: a.id } });
     expect(await messages()).toEqual(transcript);
     expect((await control("messages", "--channel", room.id, "--limit", "10") as any).messages).toEqual(roomMessages);
-    expect(JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8")).find((bot: any) => bot.id === a.id).tasks).toHaveLength(1);
-    expect(JSON.parse(readFileSync(join(dataDir, "groups.json"), "utf8")).find((group: any) => group.id === room.id).tasks).toHaveLength(1);
+    expect(readRegistry(dataDir).bots.find((bot: any) => bot.id === a.id).tasks).toHaveLength(1);
+    expect(readRegistry(dataDir).rooms.find((group: any) => group.id === room.id).tasks).toHaveLength(1);
     await api("/api/sidebar-sections", "POST", { name: "Must not overwrite recovery data" }, 500);
     await api("/api/section-context?section=Recovered%20bot%20team", "PUT", { text: "Must not replace the damaged file" }, 500);
     expect(readFileSync(registryFile, "utf8")).toBe(malformed);

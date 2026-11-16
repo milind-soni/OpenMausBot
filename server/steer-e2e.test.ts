@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { splitLaunchNote } from "./testing/launch-note.ts";
 import { withoutTurnClock } from "./testing/turn-clock-text.ts";
 import { workerPort } from "./testing/worker-port.ts";
+import { readRegistry } from "./testing/registry.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
@@ -38,7 +39,7 @@ posixOnly("mid-turn steering e2e", () => {
     return { status: res.status, body: await res.json() };
   };
   const getBot = async (id: string) => (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === id);
-  const askedAt = (botId: string, threadId: string) => (JSON.parse(readFileSync(join(home, ".openmausbot", "bots.json"), "utf8")) as any[])
+  const askedAt = (botId: string, threadId: string) => (readRegistry(join(home, ".openmausbot")).bots as any[])
     .find((bot) => bot.id === botId).tasks.find((task: any) => task.threadId === threadId).askedAt;
   const PAIRED = { name: "Safari on Mac", id: expect.stringMatching(/^p_[\w-]{22}$/) };
   const asPairedPerson = async () => {

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchVerificationServer, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const key = "isolated-trust-capability";
 let fixture: VerificationServer;
@@ -117,8 +118,7 @@ beforeAll(async () => {
   expect(sandboxCreated.status).toBe(201);
   sandboxBot = (await sandboxCreated.json() as any).bot;
   await waitForExit(fixture.child, { signal: "SIGTERM" });
-  const botsFile = join(fixture.info.dataDir, "bots.json");
-  const bots = JSON.parse(readFileSync(botsFile, "utf8"));
+  const bots = readRegistry(fixture.info.dataDir).bots;
   const saved = bots.find((row: any) => row.id === fullBot.id);
   for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot, noRuleBot, sandboxBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
     full.approvalMode = "full";
@@ -127,7 +127,7 @@ beforeAll(async () => {
   }
   // Full access asks only for a bot someone set a sending rule on. These rules carry the daily cap older apps stored.
   for (const bot of [fullBot, draftBot, draftHelper, outboundPolicyBot]) bots.find((row: any) => row.id === bot.id).outbound = { policy: "ask", dailyCap: 100 };
-  writeFileSync(botsFile, JSON.stringify(bots));
+  writeRegistry(fixture.info.dataDir, { bots });
   const configFile = join(fixture.info.dataDir, "config.json");
   const config = JSON.parse(readFileSync(configFile, "utf8"));
   config.signIn = { admins: ["admin@fixture.test"], members: ["member@fixture.test"] };

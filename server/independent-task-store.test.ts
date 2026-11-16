@@ -7,10 +7,11 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { isProjectEmoji, Store, type BotRecord, type GroupRecord, type TaskPatch } from "./store.ts";
 import { ensureTaskWorkspace } from "./workspace.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "default" });
-const savedBots = (): BotRecord[] => JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
-const savedGroups = (): GroupRecord[] => JSON.parse(readFileSync(join(DATA_DIR, "groups.json"), "utf8"));
+const savedBots = (): BotRecord[] => readRegistry(DATA_DIR).bots;
+const savedGroups = (): GroupRecord[] => readRegistry(DATA_DIR).rooms;
 
 describe("independent bot task state", () => {
   // The shared Vitest setup gives this file its own disposable home.
@@ -146,7 +147,7 @@ describe("independent bot task state", () => {
     const hidden = saved.tasks!.find((task) => task.threadId === execution.threadId)!;
     hidden.unread = true;
     saved.unread = true;
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(raw));
+    writeRegistry(DATA_DIR, { bots: raw });
     const reloaded = new Store(selection);
     expect(reloaded.taskByThread(bot.id, execution.threadId)).toMatchObject({ routineRunId: "run-1", unread: false });
     expect(reloaded.bot(bot.id)?.unread).toBe(false);
@@ -424,7 +425,7 @@ describe("independent bot task state", () => {
     raw.rewound = true;
     raw.pinnedMessageId = "legacy-pin";
     raw.unread = true;
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(legacy));
+    writeRegistry(DATA_DIR, { bots: legacy });
     const migrated = new Store(selection);
     expect(migrated.tasks(bot.id)).toHaveLength(2);
     expect(migrated.projectBotForTask(bot.id, first)).toMatchObject({
@@ -566,7 +567,7 @@ describe("independent bot task state", () => {
     expect(store.patchProject(sibling.id, project.id, { name: "Wrong owner" })).toBeNull();
     const saved = savedBots();
     Object.assign(saved.find((entry) => entry.id === bot.id)!.projects![0], { modelSelection: { instanceId: "codex", model: "removed-folder-default" } });
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(saved));
+    writeRegistry(DATA_DIR, { bots: saved });
     const reloaded = new Store(selection);
     expect(reloaded.project(bot.id, project.id)).toEqual({ id: project.id, name: "General", emoji: "⭐" });
     expect(reloaded.taskByThread(bot.id, bot.threadId)?.modelSelection).toEqual({ instanceId: "codex", model: "existing-thread" });
