@@ -374,6 +374,9 @@ describe("BotListItem", () => {
     const teammate = renderRow(bot({ messages: failedTurn, waitingForTeammates: true }));
     expect(teammate).toContain('data-testid="failed-dot"');
     expect(teammate).not.toContain('data-testid="teammate-wait-dot"');
+    // The preview follows the dot: the failed turn's line, not the teammate wait.
+    expect(teammate).not.toContain("Waiting on a teammate");
+    expect(teammate).toContain("The site did not answer.");
     const waiting = renderRow(bot({ messages: failedTurn, activity: "waiting-on-you" }));
     expect(waiting).toContain('data-testid="waiting-dot"');
     expect(waiting).not.toContain('data-testid="failed-dot"');
