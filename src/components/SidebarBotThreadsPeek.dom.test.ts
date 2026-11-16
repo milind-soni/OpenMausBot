@@ -16,18 +16,18 @@ let chat: HTMLElement;
 let root: Root;
 const dispatch = vi.fn<(action: Action) => void>();
 
-const show = async (tasks: Task[]) => {
+const show = async (tasks: Task[], shown: { threadId?: string; onScreen?: boolean } = {}) => {
   await act(async () => {
     root.render(createElement("div", { "data-row": "" },
-      createElement(SidebarBotThreadsPeek, { bot: { id: "atlas", name: "Atlas", threadId: "main", mainThreadId: "main", tasks: [task("main"), ...tasks] }, dispatch })));
+      createElement(SidebarBotThreadsPeek, { bot: { id: "atlas", name: "Atlas", threadId: shown.threadId ?? "main", mainThreadId: "main", tasks: [task("main"), ...tasks] }, onScreen: shown.onScreen, dispatch })));
   });
 };
-const mount = async (tasks: Task[]) => {
+const mount = async (tasks: Task[], shown: { threadId?: string; onScreen?: boolean } = {}) => {
   scroller = document.createElement("div");
   chat = document.createElement("div");
   document.body.append(scroller, chat);
   root = createRoot(scroller);
-  await show(tasks);
+  await show(tasks, shown);
   row = scroller.querySelector<HTMLElement>("[data-row]")!;
 };
 const chevron = () => row.querySelector<HTMLButtonElement>("[data-bot-threads-peek]")!;
@@ -94,6 +94,36 @@ describe("the hover sheet of a bot's other conversations", () => {
     expect(chevron().getAttribute("aria-expanded")).toBe("true");
     await act(async () => { scroller.dispatchEvent(new Event("scroll")); });
     expect(chevron().getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("lists the main conversation first, with no way to archive or delete it, and opens it", async () => {
+    await mount([task("a")], { threadId: "a", onScreen: true });
+    await open();
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>("[data-peek-thread]")];
+    expect(rows.map((entry) => entry.dataset.peekThread)).toEqual(["main", "a"]);
+    expect(rows[0].querySelector("[role=img]")?.getAttribute("aria-label")).toBe("Main thread");
+    expect(rows[0].parentElement!.querySelector("[data-peek-action]")).toBeNull();
+    await act(async () => { rows[0].click(); });
+    expect(dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: "atlas", threadId: "main" }]]);
+  });
+
+  it("marks the conversation on screen, and none for a bot that is not on screen", async () => {
+    const marked = () => [...sheet()!.querySelectorAll<HTMLElement>("[data-peek-thread]")].filter((entry) => entry.getAttribute("aria-current") === "page" && entry.querySelector("svg.lucide-check")).map((entry) => entry.dataset.peekThread);
+    await mount([task("a"), task("b")], { threadId: "a", onScreen: true });
+    await open();
+    expect(marked()).toEqual(["a"]);
+    expect(sheet()!.querySelectorAll("svg.lucide-check")).toHaveLength(1);
+    await act(async () => { root.unmount(); });
+    await mount([task("a"), task("b")], { threadId: "a" });
+    await open();
+    expect(sheet()!.querySelector("[aria-current], svg.lucide-check")).toBeNull();
+  });
+
+  it("keeps the conversation on screen in the list when newer ones fill it", async () => {
+    await mount([task("old", { updatedAt: 1 }), task("b", { updatedAt: 4 }), task("c", { updatedAt: 3 }), task("d", { updatedAt: 2 })], { threadId: "old", onScreen: true });
+    await open();
+    expect([...sheet()!.querySelectorAll<HTMLElement>("[data-peek-thread]")].map((entry) => entry.dataset.peekThread)).toEqual(["main", "b", "c", "d", "old"]);
+    expect(sheet()!.querySelector('[data-peek-thread="old"]')!.getAttribute("aria-current")).toBe("page");
   });
 
   it("archives a conversation from its row without opening it or closing the sheet", async () => {

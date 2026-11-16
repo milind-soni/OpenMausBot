@@ -2243,6 +2243,7 @@
   "sidebar.bot.simple.viewThreads": "Ver conversas",
   "sidebar.bot.simple.setMainThread": "Definir como conversa principal",
   "sidebar.bot.simple.isMainThread": "Esta já é a conversa principal",
+  "sidebar.bot.simple.mainThread": "Conversa principal",
   "sidebar.bot.duplicate": "Duplicar",
   "sidebar.bot.archive": "Arquivar",
   "sidebar.bot.archiveAria": "Arquivar {name}",
