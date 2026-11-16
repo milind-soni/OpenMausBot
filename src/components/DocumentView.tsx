@@ -10,6 +10,7 @@ import remarkGfm from "remark-gfm";
 import { AlertTriangle, BookOpen, Check, Loader2, Pencil } from "lucide-react";
 import { CodeBlock } from "@/components/ChatMarkdown";
 import { remarkObsidian, splitFrontmatter, toggleTaskLine } from "@/lib/obsidianMarkdown";
+import { scrollToFragment } from "@/lib/chatLinks";
 import { cn } from "@/lib/cn";
 
 const AUTOSAVE_MS = 800;
@@ -47,6 +48,9 @@ const ObsidianReading = memo(function ObsidianReading({ source, onToggleTask }: 
             return <CodeBlock code={flat(child?.props?.children).replace(/\n$/, "")} lang={lang} streaming={false} />;
           },
           a({ href, children }: { href?: string; children?: ReactNode }) {
+            if (href?.startsWith("#")) {
+              return <a href={href} className="internal-link" onClick={(e) => { e.preventDefault(); scrollToFragment(e.currentTarget, href); }}>{children}</a>;
+            }
             return <a href={href} target="_blank" rel="noreferrer" className="external-link">{children}</a>;
           },
           img({ src, alt }: { src?: string; alt?: string }) {

@@ -11,7 +11,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy } from "lucide-react";
 import { remarkObsidian } from "@/lib/obsidianMarkdown";
-import { chatFileUrl, classifyChatHref, looksLikeFilePath, openChatHref, resolveChatFile } from "@/lib/chatLinks";
+import { chatFileUrl, classifyChatHref, looksLikeFilePath, openChatHref, resolveChatFile, scrollToFragment } from "@/lib/chatLinks";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content-hashed, capped, never written while streaming
@@ -91,6 +91,13 @@ function flatText(n: any): string {
 
 /** Opens in the Quick preview; ⌘/Ctrl-click (or anything the preview can't show) uses the browser. */
 function ChatLink({ href, children }: { href?: string; children?: ReactNode }) {
+  if (href?.startsWith("#")) {
+    return (
+      <a href={href} className="internal-link" onClick={(e) => { e.preventDefault(); scrollToFragment(e.currentTarget, href); }}>
+        {children}
+      </a>
+    );
+  }
   const target = classifyChatHref(href);
   const previewable = target?.kind === "web" || target?.kind === "file";
   return (

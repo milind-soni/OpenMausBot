@@ -30,6 +30,17 @@ export function classifyChatHref(href: string | undefined | null): ChatHref | nu
   return FILE_EXT.test(bare) ? { kind: "file", path: decodePath(value) } : { kind: "other", href: value };
 }
 
+/**
+ * In-page links (footnotes: "#user-content-fn-1") must scroll within their own message or
+ * document. Opened as a link they load the app's own URL in a new window.
+ */
+export function scrollToFragment(from: HTMLElement, href: string): void {
+  const id = decodeURIComponent(href.slice(1));
+  const scope = from.closest(".markdown-reading") ?? document;
+  const target = scope.querySelector(`[id="${CSS.escape(id)}"]`) ?? scope.querySelector(`[id="user-content-${CSS.escape(id)}"]`);
+  target?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
 /** True for inline-code text that is clearly a local file path we could preview. */
 export function looksLikeFilePath(text: string): boolean {
   const value = text.trim();
