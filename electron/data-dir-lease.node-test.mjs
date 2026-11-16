@@ -534,6 +534,84 @@ test("a delegated child from an earlier boot cannot block a new parent", (t) => 
 
 // macOS renames the host when it joins another network.
 const renamedHost = (current) => (current.host === "Ryans-MacBook-Pro.local" ? "Ryans-MBP.lan" : "Ryans-MacBook-Pro.local");
+const anotherMachineId = (current) => (current.machine === "0".repeat(32) ? "1".repeat(32) : "0".repeat(32));
+const withoutMachineId = ({ machine: _machine, ...record }) => record;
+
+test("a record names this machine by a hashed id where the platform has one", () => {
+  const { dataDir } = temporaryDirectory();
+  const record = recordWrittenByThisProcess(dataDir);
+  if (process.platform === "darwin" || process.platform === "win32") assert.match(record.machine, /^[0-9a-f]{32}$/);
+  else assert.ok(record.machine === null || /^[0-9a-f]{32}$/.test(record.machine));
+});
+
+test("a lease this computer left before a restart under another hostname is recovered by its machine id", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.machine === null) return t.skip("no machine id on this platform");
+  // A live pid too: a lease from an earlier boot of this machine is stale whatever now runs under its pid.
+  for (const pid of [await exitedPid(), process.pid]) {
+    plantOwner(dataDir, { host: renamedHost(current), boot: current.boot === null ? null : randomUUID(), uptime: Math.floor(osUptime() * 1000) + 3_600_000, pid, token: randomUUID() });
+    const lease = acquireDataDirLease(dataDir);
+    const written = JSON.parse(readFileSync(path.join(dataDir, LEASE_NAME), "utf8"));
+    assert.deepEqual({ host: written.host, machine: written.machine }, { host: hostname(), machine: current.machine });
+    assert.equal(lease.release(), true);
+  }
+});
+
+test("a live owner with this machine id under another hostname still blocks a second instance", (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.machine === null) return t.skip("no machine id on this platform");
+  plantOwner(dataDir, { host: renamedHost(current), pid: process.pid, token: randomUUID() });
+
+  assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
+});
+
+test("a lease with another machine id fails closed even under this hostname", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.machine === null) return t.skip("no machine id on this platform");
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  for (const boot of [current.boot, randomUUID()]) {
+    const planted = `${JSON.stringify({ ...current, machine: anotherMachineId(current), boot, pid: await exitedPid(), token: randomUUID() })}\n`;
+    writeFileSync(leasePath, planted, { mode: 0o600 });
+    assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+    assert.equal(readFileSync(leasePath, "utf8"), planted);
+  }
+});
+
+// An older build wrote no machine id. On a Mac's local disk, its record from an earlier boot is this Mac's whatever the
+// hostname was then; elsewhere (Windows and Linux keep their hostname across networks) another hostname still fails closed.
+test("an older build's lease from an earlier boot under another hostname: recovered on a Mac's local disk, refused elsewhere", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.boot === null) return t.skip("no boot identity on this platform");
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  const older = withoutMachineId({ ...current, host: renamedHost(current), boot: randomUUID(), pid: await exitedPid(), token: randomUUID() });
+  writeFileSync(leasePath, `${JSON.stringify(older)}\n`, { mode: 0o600 });
+
+  if (process.platform !== "darwin") {
+    assert.throws(() => acquireDataDirLease(dataDir), /already owned by a process on another machine/i);
+    assert.deepEqual(JSON.parse(readFileSync(leasePath, "utf8")), older);
+    return;
+  }
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(JSON.parse(readFileSync(leasePath, "utf8")).host, hostname());
+  assert.equal(lease.release(), true);
+});
+
+test("an older build's lease from this boot under another hostname is judged by its pid", async (t) => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  if (current.boot === null) return t.skip("no boot identity on this platform");
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  writeFileSync(leasePath, `${JSON.stringify(withoutMachineId({ ...current, host: renamedHost(current), pid: process.pid, token: randomUUID() }))}\n`);
+  assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
+  rmSync(leasePath);
+  writeFileSync(leasePath, `${JSON.stringify(withoutMachineId({ ...current, host: renamedHost(current), pid: await exitedPid(), token: randomUUID() }))}\n`);
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.release(), true);
+});
 
 test("a lease this computer left under its old hostname is recovered", async (t) => {
   const { dataDir } = temporaryDirectory();
@@ -564,7 +642,7 @@ test("a delegated child this computer left under its old hostname cannot block a
 test("a lease under another name from another boot still fails closed, and says how to recover", async () => {
   const { dataDir } = temporaryDirectory();
   const current = recordWrittenByThisProcess(dataDir);
-  const foreign = { host: renamedHost(current), boot: randomUUID(), pid: await exitedPid(), token: randomUUID() };
+  const foreign = { host: renamedHost(current), boot: randomUUID(), machine: anotherMachineId(current), pid: await exitedPid(), token: randomUUID() };
   const leasePath = plantOwner(dataDir, foreign);
   const planted = JSON.parse(readFileSync(leasePath, "utf8"));
   assert.throws(() => acquireDataDirLease(dataDir), (error) => {
@@ -709,7 +787,7 @@ test("a live but unrelated Windows pid reused within the same boot is treated as
 });
 
 // A Cloud home's volume mounts on one machine at a time, and each new home on it has a new hostname and boot.
-const otherMachine = (current) => ({ host: renamedHost(current), boot: randomUUID(), uptime: 1 });
+const otherMachine = (current) => ({ host: renamedHost(current), boot: randomUUID(), uptime: 1, machine: anotherMachineId(current) });
 
 test("on request, the lease, delegated child and recovery record another machine left are cleared and their holder named; then the lease is free", async () => {
   const { dataDir } = temporaryDirectory();

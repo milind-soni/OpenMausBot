@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname, uptime } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const LEASE_NAME = "openmausbot-server.lease";
 const DELEGATED_CHILD_DIR = ".openmausbot-server-child";
@@ -12,6 +12,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 const MAX_PID = 0x7fffffff;
 const MAX_BOOT_ID = 128;
 const MAX_REAPER_GENERATIONS = 128;
+const MACHINE_ID = /^[0-9a-f]{32}$/;
 
 export class DataDirLeaseError extends Error {
   name = "DataDirLeaseError";
@@ -137,12 +138,111 @@ function ownerIsAlive(owner) {
   return !ownerPredatesThisBoot(owner) && processIsAlive(owner.pid) && ownerIdentityMatches(owner);
 }
 
-/** macOS renames the host on another network, so the same boot session (random per boot) also proves this machine. */
-function sameMachine(record) {
+/**
+ * An install's own id, which outlives a reboot and a rename: macOS IOPlatformUUID, Windows MachineGuid, Linux machine-id.
+ * Recorded hashed, never raw. A container's /etc/machine-id comes from its image, so every container (and every VM booted
+ * from that image) shares one: Linux trusts it only when systemd, which generates it per install, is PID 1 outside a
+ * container. Null wherever it cannot be read.
+ */
+let cachedMachineId;
+
+function commandOutput(file, args) {
+  return execFileSync(file, args, { encoding: "utf8", timeout: 5_000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+}
+
+function linuxInstallHasOwnMachineId() {
+  if (existsSync("/.dockerenv") || existsSync("/run/.containerenv")) return false;
+  try {
+    return readFileSync("/proc/1/comm", "utf8").trim() === "systemd";
+  } catch {
+    return false;
+  }
+}
+
+function readRawMachineId() {
+  try {
+    if (process.platform === "darwin") {
+      return /"IOPlatformUUID"\s*=\s*"([0-9A-Fa-f-]{32,36})"/.exec(commandOutput("/usr/sbin/ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"]))?.[1] ?? null;
+    }
+    if (process.platform === "win32") {
+      const reg = join(process.env.SystemRoot || "C:\\Windows", "System32", "reg.exe");
+      // /reg:64: a 32-bit process would otherwise read the WOW64 view, which has no MachineGuid.
+      const output = commandOutput(reg, ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid", "/reg:64"]);
+      return /MachineGuid\s+REG_SZ\s+([0-9A-Fa-f-]{32,36})\s*$/m.exec(output)?.[1] ?? null;
+    }
+    if (process.platform === "linux" && linuxInstallHasOwnMachineId()) {
+      for (const path of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
+        try {
+          const id = readFileSync(path, "utf8").trim();
+          if (/^[0-9A-Fa-f]{32}$/.test(id)) return id;
+        } catch {
+        }
+      }
+    }
+  } catch {
+  }
+  return null;
+}
+
+function machineId() {
+  if (cachedMachineId === undefined) {
+    const raw = readRawMachineId();
+    cachedMachineId = raw === null
+      ? null
+      : createHash("sha256").update(`openmausbot-machine:${raw.toLowerCase()}`).digest("hex").slice(0, 32);
+  }
+  return cachedMachineId;
+}
+
+/** True when `dir` sits on a volume macOS mounted as local: never a network share (smbfs, nfs, afpfs, webdav). */
+function onLocalMacVolume(dir) {
+  let path;
+  let mounts;
+  try {
+    path = realpathSync(dir);
+    mounts = commandOutput("/sbin/mount", []);
+  } catch {
+    return false;
+  }
+  let best = null;
+  for (const line of mounts.split("\n")) {
+    const open = line.lastIndexOf(" (");
+    const on = line.lastIndexOf(" on ", open);
+    if (open < 0 || on < 0 || !line.endsWith(")")) continue;
+    const point = line.slice(on + 4, open);
+    const under = point === "/" || path === point || path.startsWith(`${point}/`);
+    if (!point.startsWith("/") || !under || (best && best.point.length >= point.length)) continue;
+    best = { point, options: line.slice(open + 2, -1).split(", ") };
+  }
+  return Boolean(best?.options.includes("local"));
+}
+
+/**
+ * macOS gives the host a new name on another network, and before boot sessions and machine ids were recorded nothing
+ * else identified the Mac; such a record is this Mac's when it was written in an earlier boot on a folder only this Mac
+ * mounts. Known open risk: an older build still running on another Mac against this folder through a sync service.
+ */
+function olderBuildRecordFromEarlierMacBoot(record, dir) {
+  if (process.platform !== "darwin" || dir === undefined || record.machine !== undefined) return false;
+  const boot = bootSession();
+  if (boot === null || typeof record.boot !== "string" || record.boot === boot) return false;
+  return onLocalMacVolume(dir);
+}
+
+/**
+ * Two records with machine ids name the same machine exactly when the ids match. Without one: the same host, or the
+ * same boot session (random per boot), proves this machine, since macOS renames the host on another network. `dir`, the
+ * folder the record sits in, admits an older build's record from an earlier boot of this Mac; without it that is never
+ * presumed, as when clearing a single-machine volume.
+ */
+function sameMachine(record, dir) {
   if (fromAnotherPidNamespace(record)) return false;
+  const machine = machineId();
+  if (machine !== null && typeof record.machine === "string") return record.machine === machine;
   if (record.host === hostname()) return true;
   const boot = bootSession();
-  return boot !== null && typeof record.boot === "string" && record.boot === boot;
+  if (boot !== null && typeof record.boot === "string" && record.boot === boot) return true;
+  return olderBuildRecordFromEarlierMacBoot(record, dir);
 }
 
 function otherMachineAdvice(path, t) {
@@ -167,7 +267,8 @@ function isLeaseOwner(value) {
     && (value.boot === undefined || isBootIdentity(value.boot))
     && (value.uptime === undefined || (Number.isInteger(value.uptime) && value.uptime >= 0))
     && (value.ns === undefined || isPidNamespace(value.ns))
-    && (value.start === undefined || isStartTicks(value.start));
+    && (value.start === undefined || isStartTicks(value.start))
+    && (value.machine === undefined || value.machine === null || (typeof value.machine === "string" && MACHINE_ID.test(value.machine)));
 }
 
 function isReaperOwner(value, targetToken) {
@@ -345,6 +446,7 @@ function claimReaperAuthority(leasePath, expected) {
       boot: bootSession(),
       uptime: uptimeMs(),
       ...processIdentity(),
+      machine: machineId(),
       targetToken: expected.token,
     };
     if (publishRecord(
@@ -356,7 +458,7 @@ function claimReaperAuthority(leasePath, expected) {
 
     const current = readReaper(reaperPath, expected.token);
     if (!current) continue;
-    if (!sameMachine(current)) {
+    if (!sameMachine(current, dirname(leasePath))) {
       throw leaseError(
         `A stale OpenMausBot data-directory lease is being recovered on another machine. Recovery record: ${JSON.stringify(reaperPath)}.`,
       );
@@ -371,7 +473,7 @@ function retireDeadOwner(leasePath, expected) {
   if (!claimReaperAuthority(leasePath, expected)) return false;
   const current = readOwner(leasePath);
   if (!current || current.token !== expected.token) return true;
-  if (!sameMachine(current)) {
+  if (!sameMachine(current, dirname(leasePath))) {
     throw leaseError(
       `The stale OpenMausBot data-directory lease changed ownership to another machine. Lease record: ${JSON.stringify(leasePath)}.`,
     );
@@ -412,7 +514,7 @@ function assertNoLiveDelegatedChild(dataDir, t) {
   const childLeasePath = join(dataDir, DELEGATED_CHILD_DIR, LEASE_NAME);
   const child = readOwner(childLeasePath);
   if (!child) return;
-  if (!sameMachine(child)) {
+  if (!sameMachine(child, dataDir)) {
     throw leaseError(
       `This OpenMausBot data directory still has a delegated server on another machine. Delegated server lease: ${JSON.stringify(childLeasePath)}.${otherMachineAdvice(childLeasePath, t)}`,
     );
@@ -459,7 +561,7 @@ function validateChildDelegation(dataDir, encoded) {
   const matchesLiveParent = (owner) => Boolean(owner
     && owner.pid === capability.pid
     && owner.token === capability.token
-    && sameMachine(owner)
+    && sameMachine(owner, dataDir)
     && ownerIsAlive(owner));
   if (!matchesLiveParent(readOwner(parentLeasePath))) {
     throw invalid();
@@ -493,6 +595,7 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
     boot: bootSession(),
     uptime: uptimeMs(),
     ...processIdentity(),
+    machine: machineId(),
   };
   const candidatePath = `${leasePath}.candidate-${owner.pid}-${owner.token}`;
   try {
@@ -516,7 +619,7 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
 
       const current = readOwner(leasePath);
       if (!current) continue;
-      if (!sameMachine(current)) {
+      if (!sameMachine(current, dataDir)) {
         throw leaseError(
           `This OpenMausBot data directory is already owned by a process on another machine. Lease record: ${JSON.stringify(leasePath)}.${otherMachineAdvice(leasePath, options.t)}`,
         );
