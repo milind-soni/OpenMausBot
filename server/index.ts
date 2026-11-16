@@ -8391,7 +8391,7 @@ async function beginTurn(
           place: phones.place(threadId, !(commsDepth > 0 || opts?.automationSource !== undefined || opts?.unattended || opts?.peerAsk || opts?.coordination)),
         }),
         { id: "coordination", label: "Team and who is speaking", text: PROVENANCE_PROMPT + (coordinationPrompt && !apiFenced ? ` ${coordinationPrompt}` : "") },
-        { id: "assignment", label: "Teammate task", text: coordinationNode?.parentId ? `\n${coordinationSystemInstructions()}` : "" },
+        { id: "assignment", label: "Teammate task", text: coordinationNode?.parentId ? `\n${[coordinationSystemInstructions(), roomJobs.laneBulletin(coordinationNode)].filter(Boolean).join("\n")}` : "" },
         { id: "outstanding", label: "Outstanding teammate work", text: teammatePrompts.outstanding(threadId) },
         { id: "teammate-questions", label: "Teammates' questions to the person", text: teammatePrompts.questions(liveBot ?? bot, threadId) },
         { id: "credential", label: "Credentials", text: credentialPrompt }, { id: "just-do-it", label: "Just do it", text: approvalModeForTurn(bot, commsDepth > 0, threadId) === "full" && !isUnattended(bot.id, threadId) && coordinationNode?.origin?.kind !== "outside" ? JUST_DO_IT_PROMPT : "" },
@@ -13683,7 +13683,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const mode: NonNullable<HandoffOptions["mode"]> = call.consult ? "consult" : call.reply === "none" ? "notify" : "work";
         const reply: NonNullable<HandoffOptions["reply"]> = call.reply === "none" ? "none" : EXTERNAL ? "poll" : "resume";
         const returns = reply === "none" ? "nothing comes back from it" : reply === "poll" ? "read its result with assignment_status" : "its result will resume you";
-        const inRoom = targets.filter(target => target.groupId).length, lanes = inRoom > 0 && roomJobs.useLanes(destination!, roomThreadId!, inRoom, mode);
+        const inRoom = targets.filter(target => target.groupId).length, lanes = inRoom > 0 && Boolean(addressedRoom?.here) && roomJobs.useLanes(destination!, roomThreadId!, inRoom, mode);
         const receipts: PeerDeliveryReceipt[] = [];
         const refused: string[] = [];
         const answeredForPerson = new Set<PeerDeliveryReceipt>();

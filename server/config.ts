@@ -241,7 +241,7 @@ const featureConfigSchema = z.object({
   shareLearnedSkills: z.enum(["off", "ask", "auto"]).optional(),
   /** Memory upkeep also reads a member bot's room turns. Off unless true. */
   roomMemoryCapture: z.boolean().optional(),
-  /** Room jobs to several members run side by side, each in a thread of its own. Off unless true. */
+  /** Room jobs to several members run side by side, each in a thread of its own. On unless false. */
   parallelRoomJobs: z.boolean().optional(),
   acpPlanLines: z.boolean().optional(), // An ACP agent's plan as activity lines. Off unless true.
 }).extend({ agentsToolBridge: z.boolean().optional(), savedSteps: z.boolean().optional(), usbPhoneTakeover: z.boolean().optional(), cloudComputerAutoReplace: z.boolean().optional(), phonePush: z.boolean().optional() }); // cloudComputerAutoReplace: delete and replace a dead cloud computer by itself, off unless true (OMB_CLOUD_COMPUTER_AUTO_REPLACE wins); agentsToolBridge: the find_tool / use_tool bridge, off unless true; savedSteps: repeat a computer task from its saved steps, on unless false; usbPhoneTakeover: watch and take over the bots' USB phone, off unless true; phonePush: wake a paired phone whose app is closed through the hosted push relay, off unless true (OMB_PHONE_PUSH wins)
