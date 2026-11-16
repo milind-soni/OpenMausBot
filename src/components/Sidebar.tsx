@@ -1,10 +1,11 @@
 import { track } from "@/lib/analytics";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   BellDot,
   Bot as BotIcon,
   Check,
+  ChevronDown,
   ClipboardCopy,
   Copy,
   EyeOff,
@@ -27,6 +28,7 @@ import {
 import { useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
+import { taskSummary } from "@/lib/taskSummary";
 import { cn } from "@/lib/cn";
 import { usePanelResize } from "@/lib/usePanelResize";
 import { ResizeHandle } from "./ResizeHandle";
@@ -56,9 +58,9 @@ function formatMessagePreview(m: Message): string {
       ? m.attachments[0].mimeType?.startsWith("image/") ? `[Image: ${m.attachments[0].name}]` : `[File: ${m.attachments[0].name}]`
       : `[${m.attachments.length} attachments]`
     : "";
-  if (m.text && attLabel) return `${attLabel} ${m.text}`;
+  if (m.text && attLabel) return `${attLabel} ${taskSummary(m.text)}`;
   if (attLabel) return attLabel;
-  return m.text ?? "";
+  return taskSummary(m.text ?? "");
 }
 
 function preview(bot: Bot): string {
@@ -94,26 +96,26 @@ function groupPreview(group: Group, bots: Bot[]): string {
   return last.from ? `${last.from.name}: ${formatted}` : formatted;
 }
 
-/** Room avatar: 2–3 overlapping mauses in the same 56px slot a bot gets. */
+/** Room avatars share the same compact slot as individual bots. */
 function StackedMauses({ members }: { members: Bot[] }) {
   if (members.length <= 1) {
     const b = members[0];
     return (
-      <div className="flex size-14 shrink-0 items-center justify-center">
-        {b ? <MausAvatar color={b.color} state="happy" size={56} /> : <Users size={24} className="text-ink-secondary" />}
+      <div className="flex size-10 shrink-0 items-center justify-center">
+        {b ? <MausAvatar color={b.color} state="happy" size={40} /> : <Users size={24} className="text-ink-secondary" />}
       </div>
     );
   }
-  const shown = members.slice(0, 3);
+  const shown = members.slice(0, 2);
   const extra = members.length - shown.length;
   return (
-    <div className="flex size-14 shrink-0 items-center justify-center">
-      <div className="flex items-center -space-x-3">
+    <div className="flex size-10 shrink-0 items-center justify-center">
+      <div className="flex items-center -space-x-2.5">
         {shown.map((b) => (
-          <MausAvatar key={b.id} color={b.color} state="happy" size={30} />
+          <MausAvatar key={b.id} color={b.color} state="happy" size={26} />
         ))}
         {extra > 0 && (
-          <span className="z-10 flex size-[22px] items-center justify-center rounded-full border border-hairline/40 bg-raised text-[10px] font-medium text-ink-secondary">
+          <span className="z-10 flex size-[18px] items-center justify-center rounded-full border border-hairline/40 bg-raised text-[10px] font-medium text-ink-secondary">
             +{extra}
           </span>
         )}
@@ -145,24 +147,26 @@ function GroupListItem({
         e.preventDefault();
         onMenu({ groupId: group.id, x: e.clientX, y: e.clientY });
       }}
-      aria-label={collapsed ? group.name : undefined}
-      title={collapsed ? group.name : undefined}
+      aria-label={group.name}
+      aria-description={[group.unread && "Unread messages", group.busyBotId && "Working"].filter(Boolean).join(". ") || undefined}
+      aria-current={selected ? "page" : undefined}
+      title={group.name}
       className={cn(
-        "flex items-center gap-3 rounded-xl text-left",
-        collapsed ? "justify-center p-2.5 w-auto" : "w-full px-3 py-2.5",
-        selected ? "bg-raised" : "hover:bg-raised/50",
+        "group flex items-center gap-2.5 rounded-xl border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60",
+        collapsed ? "justify-center p-1.5 w-auto" : "min-h-[64px] w-full px-2.5 py-2",
+        selected ? "border-accent/20 bg-accent/10" : "border-transparent hover:bg-raised/50",
       )}
     >
-      <StackedMauses members={members} />
+      <span className="relative shrink-0"><StackedMauses members={members} />{collapsed && group.unread && <span aria-label="Unread messages" className="absolute right-0 top-0 size-1.5 rounded-full bg-accent" />}</span>
       {!collapsed && (
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
-            {selected && last && <span className="shrink-0 text-xs text-ink-secondary">{formatTime(last.at)}</span>}
+            <span className="truncate text-[13px] font-semibold text-ink">{group.name}</span>
+            {selected && last && <span className="shrink-0 text-[10px] tabular-nums text-ink-secondary">{formatTime(last.at)}</span>}
           </div>
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-[13px] text-ink-secondary">{groupPreview(group, state.bots)}</span>
-            {group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
+            <span className="truncate text-[12px] leading-5 text-ink-secondary">{groupPreview(group, state.bots)}</span>
+            {group.unread && <span aria-label="Unread messages" className="size-1.5 shrink-0 rounded-full bg-accent" />}
           </div>
         </div>
       )}
@@ -457,40 +461,42 @@ function BotListItem({
         e.preventDefault();
         onMenu({ botId: bot.id, x: e.clientX, y: e.clientY });
       }}
-      aria-label={collapsed ? bot.name : undefined}
-      title={collapsed ? bot.name : undefined}
+      aria-label={bot.name}
+      aria-description={[bot.unread && "Unread messages", bot.busy && "Working"].filter(Boolean).join(". ") || undefined}
+      aria-current={selected ? "page" : undefined}
+      title={bot.name}
       className={cn(
-        "flex items-center gap-3 rounded-xl text-left",
-        collapsed ? "justify-center p-2.5 w-auto" : "w-full px-3 py-2.5",
-        selected ? "bg-raised" : "hover:bg-raised/50",
+        "group flex items-center gap-2.5 rounded-xl border text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60",
+        collapsed ? "justify-center p-1.5 w-auto" : "min-h-[64px] w-full px-2.5 py-2",
+        selected ? "border-accent/20 bg-accent/10" : "border-transparent hover:bg-raised/50",
       )}
     >
-      <MausAvatar
+      <span className="relative shrink-0"><MausAvatar
         color={bot.color}
         state={stateForBot({ ...bot, messages: visible })}
-        size={56}
+        size={40}
         motion={mascotMotion?.kind ?? "none"}
         motionKey={mascotMotion?.nonce ?? 0}
-      />
+      />{collapsed && bot.unread && <span aria-label="Unread messages" className="absolute right-0 top-0 size-1.5 rounded-full bg-accent" />}</span>
       {!collapsed && (
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
-            <span className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold text-ink">
+            <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] font-semibold text-ink">
               {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
               <span className="truncate">{bot.name}</span>
             </span>
             {selected && last && (
-              <span className="shrink-0 text-xs text-ink-secondary">
+              <span className="shrink-0 text-[10px] tabular-nums text-ink-secondary">
                 {formatTime(last.at)}
               </span>
             )}
           </div>
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate text-[13px] text-ink-secondary">
+            <span className="truncate text-[12px] leading-5 text-ink-secondary">
               {preview(bot)}
             </span>
             {bot.unread && (
-              <span className="size-2 shrink-0 rounded-full bg-accent" />
+              <span aria-label="Unread messages" className="size-1.5 shrink-0 rounded-full bg-accent" />
             )}
           </div>
         </div>
@@ -582,6 +588,55 @@ function ClearChatDialog({
   );
 }
 
+function ConversationSection({ label, count, unread, collapsed, searching, children }: {
+  label: string;
+  count: number;
+  unread: number;
+  collapsed: boolean;
+  searching: boolean;
+  children: ReactNode;
+}) {
+  const id = useId();
+  const storageKey = `gbs-sidebar-section-${label.toLowerCase()}`;
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(storageKey) !== "closed"; } catch { return true; }
+  });
+  const expanded = searching || open;
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try { localStorage.setItem(storageKey, next ? "open" : "closed"); } catch { /* optional UI preference */ }
+  };
+  if (!count) return null;
+  if (collapsed) {
+    return (
+      <div role="group" aria-label={label} className="flex flex-col items-center gap-0.5 border-b border-hairline/30 pb-2 last:border-0">
+        {children}
+      </div>
+    );
+  }
+  return (
+    <section aria-label={label} className="mb-3 last:mb-0">
+      <h2 className="sticky top-0 z-10 bg-panel pb-1 pt-1">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={id}
+          disabled={searching}
+          onClick={toggle}
+          className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[11px] font-medium text-ink-secondary hover:bg-raised/40 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:hover:bg-transparent"
+        >
+          <ChevronDown size={12} aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", !expanded && "-rotate-90")} />
+          <span className="flex-1">{label}</span>
+          {unread > 0 && <span aria-label={`${unread} unread`} className="size-1.5 rounded-full bg-accent" />}
+          <span className="tabular-nums text-ink-secondary/70">{count}</span>
+        </button>
+      </h2>
+      <div id={id} hidden={!expanded} className="space-y-0.5">{children}</div>
+    </section>
+  );
+}
+
 export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
   const { state, dispatch } = useStore();
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -602,14 +657,17 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
         preview(b).toLowerCase().includes(q),
     )
     .sort((a, b) => Number(b.pinned ?? false) - Number(a.pinned ?? false));
-  const visibleGroups = state.groups.filter((g) => !q || g.name.toLowerCase().includes(q));
+  const visibleGroups = state.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || groupPreview(g, state.bots).toLowerCase().includes(q));
+  const pinnedBots = visibleBots.filter((b) => b.pinned);
+  const unpinnedBots = visibleBots.filter((b) => !b.pinned);
   const taskCounts = {
     todo: state.tasks.filter((task) => task.status === "todo").length,
     doing: state.tasks.filter((task) => task.status === "doing").length,
     review: state.tasks.filter((task) => task.status === "review").length,
     done: state.tasks.filter((task) => task.status === "done").length,
   };
-  const totalTaskCount = taskCounts.todo + taskCounts.doing + taskCounts.review + taskCounts.done;
+  const activeTaskCount = taskCounts.todo + taskCounts.doing + taskCounts.review;
+  const totalTaskCount = activeTaskCount + taskCounts.done;
   const closeClearDialog = () => {
     const targetId = clearTarget?.id;
     setClearTarget(null);
@@ -699,39 +757,41 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
       {/* Search */}
       {!collapsed && (
         <div className="px-3 pt-2 pb-3 w-full">
-          <div className="flex items-center gap-2 rounded-lg bg-raised/70 px-3 py-2">
+          <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset/50 px-3 py-2 focus-within:border-accent/60">
             <Search size={16} className="text-ink-secondary" aria-hidden="true" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-              placeholder="Search"
-              aria-label="Search bots"
+              placeholder="Search conversations"
+              aria-label="Search conversations"
               className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
             />
           </div>
         </div>
       )}
 
-      {/* Bot list */}
-      <div className="flex-1 overflow-y-auto px-2 w-full">
-        <div className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-          {visibleBots.length === 0 && visibleGroups.length === 0 && q && !collapsed && (
-            <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">Nothing matches “{query}”</div>
-          )}
-          {visibleGroups.map((g) => (
-            <GroupListItem key={g.id} group={g} onMenu={setRoomMenu} collapsed={collapsed} />
-          ))}
-          {visibleBots.map((b) => (
-            <BotListItem key={b.id} bot={b} onMenu={setMenu} collapsed={collapsed} />
-          ))}
-        </div>
+      {/* Conversations */}
+      <div className="min-h-0 w-full flex-1 overflow-y-auto px-2 pb-2" aria-label="Conversations">
+        {visibleBots.length === 0 && visibleGroups.length === 0 && !collapsed && (
+          <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{q ? `Nothing matches “${query}”` : "Create a bot or room to get started."}</div>
+        )}
+        <ConversationSection label="Pinned" count={pinnedBots.length} unread={pinnedBots.filter(b => b.unread).length} collapsed={collapsed} searching={Boolean(q)}>
+          {pinnedBots.map(b => <BotListItem key={b.id} bot={b} onMenu={setMenu} collapsed={collapsed} />)}
+        </ConversationSection>
+        <ConversationSection label="Rooms" count={visibleGroups.length} unread={visibleGroups.filter(g => g.unread).length} collapsed={collapsed} searching={Boolean(q)}>
+          {visibleGroups.map(g => <GroupListItem key={g.id} group={g} onMenu={setRoomMenu} collapsed={collapsed} />)}
+        </ConversationSection>
+        <ConversationSection label="Bots" count={unpinnedBots.length} unread={unpinnedBots.filter(b => b.unread).length} collapsed={collapsed} searching={Boolean(q)}>
+          {unpinnedBots.map(b => <BotListItem key={b.id} bot={b} onMenu={setMenu} collapsed={collapsed} />)}
+        </ConversationSection>
       </div>
 
       {/* Footer */}
-      <div className={cn("px-3 pb-3 pt-2 flex flex-col gap-1", collapsed ? "w-full items-center px-1" : "w-full")}>
-        <button onClick={() => dispatch({ type: "toggleSchedules", open: true })} aria-label="Schedules" title={collapsed ? "Schedules" : undefined} className={cn("flex items-center gap-3 rounded-xl p-2 text-left hover:bg-raised", collapsed ? "justify-center p-2.5" : "w-full px-3 py-2", state.schedulesOpen && "bg-raised")}>
-          <AlarmClock size={20} className={state.schedulesOpen ? "text-accent" : "text-ink-secondary"} />{!collapsed && <><span className="min-w-0 flex-1 text-[14px] text-ink">Schedules</span><span className="rounded-full bg-raised px-2 text-[11px] text-ink-secondary">{state.schedules.paused ? "Paused" : state.schedules.schedules.filter(s => s.enabled).length}</span></>}
+      <div className={cn("shrink-0 border-t border-hairline/40 px-3 pb-3 pt-2 flex flex-col gap-0.5", collapsed ? "w-full items-center px-1" : "w-full")}>
+        {!collapsed && <h2 className="px-3 pb-1 pt-1 text-[11px] font-medium text-ink-secondary">Workspace</h2>}
+        <button onClick={() => dispatch({ type: "toggleSchedules", open: true })} aria-label="Schedules" title={collapsed ? "Schedules" : undefined} className={cn("flex items-center gap-3 rounded-xl p-2 text-left hover:bg-raised", collapsed ? "justify-center p-2.5" : "w-full px-3 py-1.5", state.schedulesOpen && "bg-raised")}>
+          <AlarmClock size={18} className={state.schedulesOpen ? "text-accent" : "text-ink-secondary"} />{!collapsed && <><span className="min-w-0 flex-1 truncate text-[13px] text-ink">Schedules</span><span className="rounded-full bg-raised px-2 text-[11px] text-ink-secondary">{state.schedules.paused ? "Paused" : state.schedules.schedules.filter(s => s.enabled).length}</span></>}
         </button>
         <button
           onClick={() => dispatch({ type: "toggleTaskBoard", open: true })}
@@ -739,32 +799,20 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
           title={collapsed ? `Task Board (${totalTaskCount})` : undefined}
           className={cn(
             "flex items-center gap-3 rounded-xl p-2 text-left",
-            collapsed ? "justify-center p-2.5" : "w-full px-3 py-2",
+            collapsed ? "justify-center p-2.5" : "w-full px-3 py-1.5",
             state.taskBoardOpen ? "bg-raised" : "hover:bg-raised/50",
           )}
         >
-          <ListTodo size={20} className={state.taskBoardOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
+          <ListTodo size={18} className={state.taskBoardOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
           {!collapsed && (
             <>
-              <span className="min-w-0 flex-1 text-[14px] text-ink">Task Board</span>
-              {totalTaskCount > 0 && (
+              <span className="min-w-0 flex-1 truncate text-[13px] text-ink">Task Board</span>
+              {activeTaskCount > 0 && (
                 <span
-                  className="flex items-center gap-2"
-                  title={`${taskCounts.todo} todo · ${taskCounts.doing} doing · ${taskCounts.review} review · ${taskCounts.done} done`}
+                  className="shrink-0 rounded-full bg-raised px-2 py-0.5 text-[11px] tabular-nums text-ink-secondary"
+                  title={`${activeTaskCount} active tasks · ${taskCounts.todo} todo · ${taskCounts.doing} doing · ${taskCounts.review} review · ${taskCounts.done} done`}
                 >
-                  {([
-                    ["todo", "bg-ink-secondary"],
-                    ["doing", "bg-accent"],
-                    ["review", "bg-warning"],
-                    ["done", "bg-success"],
-                  ] as const).map(([status, dotColor]) =>
-                    taskCounts[status] > 0 ? (
-                      <span key={status} className="flex items-center gap-1">
-                        <span className={cn("size-1.5 rounded-full", dotColor)} />
-                        <span className="text-[10px] tabular-nums text-ink-secondary">{taskCounts[status]}</span>
-                      </span>
-                    ) : null,
-                  )}
+                  {activeTaskCount}
                 </span>
               )}
             </>
@@ -777,14 +825,15 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
           title={collapsed ? "Projects" : undefined}
           className={cn(
             "flex items-center gap-3 rounded-xl p-2 text-left",
-            collapsed ? "justify-center p-2.5" : "w-full px-3 py-2",
+            collapsed ? "justify-center p-2.5" : "w-full px-3 py-1.5",
             state.projectsOpen ? "bg-raised" : "hover:bg-raised/50",
           )}
         >
-          <FolderKanban size={20} className={state.projectsOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
-          {!collapsed && <span className="text-[14px] text-ink">Projects</span>}
+          <FolderKanban size={18} className={state.projectsOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
+          {!collapsed && <span className="text-[13px] text-ink">Projects</span>}
         </button>
 
+        {!collapsed && <h2 className="mt-1 border-t border-hairline/30 px-3 pb-1 pt-2 text-[11px] font-medium text-ink-secondary">Tools</h2>}
         <button
           onClick={() => dispatch({ type: "togglePreview", open: true })}
           aria-label="Preview"
@@ -792,12 +841,12 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
           title={collapsed ? "Preview" : undefined}
           className={cn(
             "flex items-center gap-3 rounded-xl p-2 text-left",
-            collapsed ? "justify-center p-2.5" : "w-full px-3 py-2",
+            collapsed ? "justify-center p-2.5" : "w-full px-3 py-1.5",
             state.previewOpen ? "bg-raised" : "hover:bg-raised/50",
           )}
         >
-          <MonitorSmartphone size={20} className={state.previewOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
-          {!collapsed && <span className="text-[14px] text-ink">Preview</span>}
+          <MonitorSmartphone size={18} className={state.previewOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
+          {!collapsed && <span className="text-[13px] text-ink">Preview</span>}
         </button>
 
         <button
@@ -806,12 +855,12 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
           title={collapsed ? "Apps" : undefined}
           className={cn(
             "flex items-center gap-3 rounded-xl p-2 text-left",
-            collapsed ? "justify-center p-2.5" : "w-full px-3 py-2",
+            collapsed ? "justify-center p-2.5" : "w-full px-3 py-1.5",
             state.appsOpen ? "bg-raised" : "hover:bg-raised/50",
           )}
         >
-          <LayoutGrid size={20} className={state.appsOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
-          {!collapsed && <span className="text-[14px] text-ink">Apps</span>}
+          <LayoutGrid size={18} className={state.appsOpen ? "text-accent" : "text-ink-secondary"} aria-hidden="true" />
+          {!collapsed && <span className="text-[13px] text-ink">Apps</span>}
         </button>
 
         {collapsed ? (
@@ -825,11 +874,11 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
                 state.appSettingsOpen && "bg-raised text-accent",
               )}
             >
-              <Settings size={20} aria-hidden="true" />
+              <Settings size={18} aria-hidden="true" />
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-1">
+          <div className="mt-2 flex items-center gap-1 border-t border-hairline/40 pt-2">
             <button
               onClick={() => dispatch({ type: "toggleAppSettings" })}
               aria-label={`User profile: ${state.config?.profile?.name?.trim() || state.config?.profile?.email?.trim() || "You"}`}
@@ -839,7 +888,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
               )}
             >
               <InitialsAvatar initials={profileInitials(state.config?.profile)} size={28} />
-              <span className="truncate text-[14px] text-ink">
+              <span className="truncate text-[13px] text-ink">
                 {state.config?.profile?.name?.trim() || state.config?.profile?.email?.trim() || "You"}
               </span>
             </button>
