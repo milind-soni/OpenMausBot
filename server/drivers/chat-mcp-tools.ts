@@ -52,9 +52,6 @@ export interface ChatToolSession {
   budget: ToolBudget;
   /** Lists the turn's tools again within `limit`, after a provider refused that many; started servers keep running. */
   refit(limit: number): Promise<void>;
-  /** Mounted with `background`: lists the turn's tools again with the servers that finished starting since the last call.
-   * The lines say which were skipped and what the tool limit did; undefined when no server finished starting. */
-  join(): Promise<string[] | undefined>;
   validate(name: string, args: unknown): void;
   /** Directory reads and OpenMausBot's own agents server need no card; call_tool shows the tool it runs. */
   view(name: string, args: Record<string, unknown>): ChatToolCallView;
@@ -341,24 +338,11 @@ export async function refitChatTools(session: ChatToolSession, error: unknown, k
   return toolLimitNotices(session);
 }
 
-/** Between rounds, lists the tools of the servers that finished starting in the background, the runtime's own `runtime`
- * definitions kept after them. The lines say what changed; undefined when nothing did. */
-export async function joinLateChatTools(session: ChatToolSession, runtime: readonly ChatToolDefinition[]): Promise<string[] | undefined> {
-  const kept = session.definitions.filter((definition) => runtime.includes(definition));
-  const lines = await session.join();
-  if (lines !== undefined) session.definitions.push(...kept);
-  return lines;
-}
-
-function skippedServerNotice({ server, reason }: SkippedChatMcpServer): string {
-  return `MCP server "${server}" was skipped for this turn: ${reason}`;
-}
-
 /** What the person hears about a turn's MCP servers before the model runs, one line each. */
 export function chatToolNotices(session: Pick<ChatToolSession, "skipped" | "trimmed" | "budget"> & Partial<Pick<ChatToolSession, "merged">>): string[] {
   return [
     ...(session.merged ?? []).map(mergedServersNotice),
-    ...session.skipped.map(skippedServerNotice),
+    ...session.skipped.map(({ server, reason }) => `MCP server "${server}" was skipped for this turn: ${reason}`),
     ...toolLimitNotices(session),
   ];
 }
@@ -508,13 +492,9 @@ export function directServers(servers: ReadonlyArray<{ name: string; tools: numb
 
 /** Under `schemaProfile` the model reads each tool's schema fitted to its provider; calls are still checked against the full one.
  * A tool result over 50KB is saved whole in `resultFolder`, the bot's working folder, after `scrub` masks secrets (see savedOrBounded).
- * `toolLimit` is the most tools the provider takes in one request, ask_user included; null when it takes any number.
- * With `background`, setup waits only for the agents server, a computer and the built-in browser; the rest keep starting
- * and are listed by `join` once they have. Without the agents server, setup waits for every one. `onSettled` hears each
- * server's name once it has listed its tools or failed, and `join` would take it in. */
+ * `toolLimit` is the most tools the provider takes in one request, ask_user included; null when it takes any number. */
 export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope, callTimeoutMs: number = DEFAULT_CALL_MS,
-  schemaProfile?: ToolSchemaProfile, resultFolder?: string, scrub: (text: string) => string = redactSecretsInText, toolLimit: number | null = CHAT_TOOL_LIMIT,
-  background = false, onSettled?: (server: string) => void): Promise<ChatToolSession> {
+  schemaProfile?: ToolSchemaProfile, resultFolder?: string, scrub: (text: string) => string = redactSecretsInText, toolLimit: number | null = CHAT_TOOL_LIMIT): Promise<ChatToolSession> {
   const parsed = parseToolScope(toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
@@ -585,13 +565,6 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const directoryNames = new Map<string, string>();
   let directory: ToolDirectory | undefined;
   const budget: ToolBudget = { limit: toolLimit, listed: 0, servers: [] };
-  // A tool keeps the name it was first listed under, so a server that joins later can't take it over.
-  const assigned = new Map<ChatMcpClient, Map<string, string>>();
-  const reserved = new Set<string>();
-  // The same for the tool search: a searched tool and a directory tool keep their names whichever servers are listed.
-  const searchedAs = new Map<ChatMcpClient, Map<string, string>>();
-  const catalogReserved = new Set<string>();
-  const directoryAs = new Map<string, string>();
   const register = (origin: ToolOrigin, tools: readonly CheckedTool[]) => {
     const staged: Array<{ tool: RegisteredTool; definition: ChatToolDefinition }> = [];
     for (const { tool, schema, check } of tools) {
@@ -606,17 +579,13 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       }
       const description = (typeof listed.description === "string" ? listed.description : "Configured MCP tool") +
         (Object.keys(constraints).length ? " Additional argument constraints (validated before execution): " + JSON.stringify(constraints) : "");
-      const name = assigned.get(origin.client)?.get(tool.name)
-        ?? uniqueName(chatToolName(origin.server, tool.name), (candidate) => reserved.has(candidate) || registered.has(candidate) || staged.some((entry) => entry.definition.function.name === candidate));
+      const name = uniqueName(chatToolName(origin.server, tool.name), (candidate) => registered.has(candidate) || staged.some((entry) => entry.definition.function.name === candidate));
       staged.push({ tool: { ...origin, name: tool.name, schema }, definition: { type: "function", function: { name, description, parameters } } });
     }
     if (Buffer.byteLength(JSON.stringify([...definitions, ...staged.map((entry) => entry.definition)])) > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
     for (const { tool, definition } of staged) {
       registered.set(definition.function.name, tool);
       definitions.push(definition);
-      const names = assigned.get(tool.client) ?? new Map<string, string>();
-      assigned.set(tool.client, names.set(tool.name, definition.function.name));
-      reserved.add(definition.function.name);
     }
     // Unlisted, so a call by an alias in an earlier tool call reaches the agents server, which runs it as its action
     // tool; the server holds it to that tool's full schema.
@@ -675,9 +644,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       const entries: CatalogTool[] = [];
       for (const { origin, tools } of searched) {
         for (const { tool, schema } of tools) {
-          const name = searchedAs.get(origin.client)?.get(tool.name) ?? uniqueName(chatToolName(origin.server, tool.name), (candidate) => catalogReserved.has(candidate) || catalog.has(candidate));
-          searchedAs.set(origin.client, (searchedAs.get(origin.client) ?? new Map<string, string>()).set(tool.name, name));
-          catalogReserved.add(name);
+          const name = uniqueName(chatToolName(origin.server, tool.name), (candidate) => catalog.has(candidate));
           catalog.set(name, { ...origin, name: tool.name, schema });
           entries.push({ ...tool, name });
         }
@@ -687,44 +654,17 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         return validate(args) ? undefined : schemaProblems(validate.errors);
       } });
       for (const tool of directory.listed({ server: DIRECTORY_SERVER, servers: searched.map(({ origin }) => origin.server) })) {
-        const name = directoryAs.get(tool.name as string) ?? uniqueName(chatToolName(DIRECTORY_SERVER, tool.name as string), (candidate) => reserved.has(candidate) || registered.has(candidate) || directoryNames.has(candidate));
-        directoryAs.set(tool.name as string, name);
-        reserved.add(name);
+        const name = uniqueName(chatToolName(DIRECTORY_SERVER, tool.name as string), (candidate) => registered.has(candidate) || directoryNames.has(candidate));
         directoryNames.set(name, tool.name as string);
         definitions.push({ type: "function", function: { name, description: tool.description as string, parameters: tool.inputSchema as Record<string, unknown> } });
       }
     }
     budget.listed = definitions.length;
   };
-  type Mounted = { origin: ToolOrigin; tools: Awaited<ReturnType<ChatMcpClient["tools"]>> };
-  const outcomes: Array<PromiseSettledResult<Mounted> | undefined> = [];
-  const consumed = new Set<number>();
-  /** Takes in, in config order, the servers that finished starting since the last call; true when any did. */
-  const absorb = async (): Promise<boolean> => {
-    let any = false;
-    for (const [index, mount] of outcomes.entries()) {
-      if (!mount || consumed.has(index)) continue;
-      if (signal.aborted || closed) throw aborted();
-      consumed.add(index);
-      any = true;
-      const name = servers[index]![0];
-      if (mount.status === "rejected") {
-        if (index >= builtIns || (OPTIONAL_BUILT_INS.has(name) && !mustHave(servers[index]![1]))) { await skip(name, mount.reason, startedAt[index]); continue; }
-        throw new Error(`MCP server "${name}" didn't start: ${mount.reason instanceof Error ? mount.reason.message : "no reason given"}`);
-      }
-      if (index < builtIns) {
-        offeredTools.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) });
-        continue;
-      }
-      try { configured.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) }); }
-      catch (error) { await skip(mount.value.origin.server, error, mount.value.origin.client); }
-    }
-    return any;
-  };
   try {
     if (signal.aborted) throw aborted();
     // Concurrent starts, consumed in config order so names and collision suffixes stay stable.
-    const mounts = servers.map(async ([name, descriptor], index): Promise<Mounted> => {
+    const mounts = await Promise.allSettled(servers.map(async ([name, descriptor], index) => {
       if (signal.aborted || closed) throw aborted();
       const client = new ChatMcpClient(descriptor, computerUse, index >= builtIns);
       clients.push(client);
@@ -742,20 +682,21 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       const origin: ToolOrigin = { client, server: name, launch, builtInBrowser: descriptor === integrations?.browser, agents: descriptor === agentsServer,
         hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", required: index < builtIns && mustHave(descriptor), searched: searchable.has(name) };
       return { origin, tools };
-    });
-    const settled = mounts.map((mount, index) => mount.then((value) => { outcomes[index] = { status: "fulfilled", value }; },
-      (reason: unknown) => { outcomes[index] = { status: "rejected", reason }; }).then(() => onSettled?.(servers[index]![0])));
-    // Waited for in the background too: what the turn can't run without, the computer and browser a computer-use turn
-    // acts through from its first step, and a server sharing its name with another, whose tools' names depend on which
-    // of the two is listed first.
-    const waited = (index: number) => {
-      const [name, descriptor] = servers[index]!;
-      return (index < builtIns && (mustHave(descriptor) || !OPTIONAL_BUILT_INS.has(name) || descriptor === integrations?.localComputer || descriptor === integrations?.browser))
-        || servers.filter(([other]) => other === name).length > 1;
-    };
-    const waitAll = !background || !servers.some(([, descriptor]) => descriptor === agentsServer);
-    await Promise.all(settled.filter((_, index) => waitAll || waited(index)));
-    await absorb();
+    }));
+    for (const [index, mount] of mounts.entries()) {
+      if (signal.aborted || closed) throw aborted();
+      const name = servers[index]![0];
+      if (mount.status === "rejected") {
+        if (index >= builtIns || (OPTIONAL_BUILT_INS.has(name) && !mustHave(servers[index]![1]))) { await skip(name, mount.reason, startedAt[index]); continue; }
+        throw new Error(`MCP server "${name}" didn't start: ${mount.reason instanceof Error ? mount.reason.message : "no reason given"}`);
+      }
+      if (index < builtIns) {
+        offeredTools.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) });
+        continue;
+      }
+      try { configured.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) }); }
+      catch (error) { await skip(mount.value.origin.server, error, mount.value.origin.client); }
+    }
     await layout(toolLimit);
     if (signal.aborted || closed) throw aborted();
   } catch (error) { await close(); throw error; }
@@ -847,15 +788,6 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     async refit(limit) {
       if (closed || signal.aborted) throw new ChatToolSessionError("MCP session closed");
       await layout(limit);
-    },
-    async join() {
-      if (closed || signal.aborted) return undefined;
-      const skippedBefore = skipped.length;
-      const limitBefore = toolLimitNotices({ trimmed, budget });
-      if (!await absorb()) return undefined;
-      await layout(budget.limit);
-      const limitAfter = toolLimitNotices({ trimmed, budget });
-      return [...skipped.slice(skippedBefore).map(skippedServerNotice), ...(limitAfter.join("\n") === limitBefore.join("\n") ? [] : limitAfter)];
     },
     async execute(name, args, callSignal) {
       validate(name, args);
