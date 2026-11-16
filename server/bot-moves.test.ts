@@ -145,3 +145,10 @@ describe("a bot moving from this computer to My Cloud", () => {
     expect("refused" in moves.back("pip")).toBe(true);
   });
 });
+
+it("a bot that lives in another of the person's places takes no turn here, and says where it lives", () => {
+  const standIn = { name: "Atlas", home: { place: "ab12cd34", placeName: "My Cloud", botId: "b1" } };
+  expect(botMoveRefusal(standIn)).toBe("Atlas lives on My Cloud: its turns run there, not here.");
+  expect(() => assertBotHere(standIn)).toThrow(/lives on My Cloud/);
+  expect(botMoveRefusal({ name: "Scout" })).toBeNull();
+});

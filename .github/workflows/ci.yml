@@ -198,7 +198,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.static.outputs.vitest_matrix) }}
-    runs-on: ${{ matrix.os }}
+    # The Linux shards stay on Ubuntu 24.04 while `ubuntu-latest` (still the
+    # matrix's name for them, in job names and release-ci) is 26.04. On 26.04
+    # an unprivileged bubblewrap works, so every Cloud-role e2e fixture starts
+    # boxed and the real-box *.linux tests run for the first time; on 24.04
+    # the box does not start, so they run unboxed or skip, as they always
+    # have here. Move to 26.04 once those suites pass with a real box.
+    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     # scripts/testing/duration-sequencer.ts splits each platform's files by
     # their recorded seconds on that platform, about 6 minutes a Linux shard
     # (four files at once); a Windows shard runs two files at once. The cap

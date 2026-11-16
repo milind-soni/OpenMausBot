@@ -46,7 +46,7 @@ instance at it:
   hint instead of failing at first message.
 - **Sign in first.** The driver has no auth flow of its own — run the CLI once
   in a terminal and log in there; OpenMausBot spawns it with your login intact.
-- **Choose models per bot.** Open the bot's model picker and use **Re-detect**
+- **Choose models per bot.** Open the bot's model picker and use **Refresh models**
   to load the models advertised by the agent. Select a model and, when offered,
   its thinking level. Bot defaults and individual conversation overrides are
   saved independently. **Agent default** leaves the native session's model
@@ -129,7 +129,7 @@ a custom ACP engine with your own Command Code sign-in. (Checked with
    is not on the app's `PATH`: `which cmd` on macOS or Linux, or
    `where.exe cmdc` on Windows.
 4. Pick **Command Code** for a bot. Its model menu shows **Agent default**,
-   which runs Command Code's own default model; **Re-detect** lists the models
+   which runs Command Code's own default model; **Refresh models** lists the models
    it advertises once you're signed in.
 
 Without a sign-in the chat shows ``Not authenticated. Run `cmd login` in a

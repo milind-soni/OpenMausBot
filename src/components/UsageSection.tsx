@@ -4,6 +4,7 @@ import { ArrowLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { activeLocale, documentLanguage, t } from "@/lib/i18n";
 import { listenLiveFrames } from "@/lib/live-events";
+import { modelColor, modelFamily } from "@/lib/model-color";
 import { formatTokens, hasFiniteCost, headlineTokens } from "@/lib/usage";
 import { currentBotName, fetchTraces, formatCost, formatDuration, runTitle, USAGE_PERIODS, usageExportHref, usagePeriodRange, type UsagePeriod } from "@/lib/usage-trace";
 import { api, useStore } from "@/state/store";
@@ -13,6 +14,7 @@ import { BotAvatar } from "./Avatar";
 import { PlanUsage } from "./PlanUsage";
 import { Select } from "./Select";
 import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
+import { UsageCapsCard, type UsageCapView } from "./UsageCaps";
 import { TraceView } from "./usage/TraceView";
 import { LiveBadge, modelName, StatStrip, totalsStats } from "./usage/TraceWaterfall";
 
@@ -27,12 +29,34 @@ export interface UsageGroup {
   output: number;
   cachedInput: number;
   costUsd: number | null;
+  /** The additive tokens the bar shows, summed row by row on the server. */
+  barTokens?: number;
+  /** The group broken down by the requested split, largest first. */
+  segments?: UsageGroup[];
 }
 
 interface UsageSummary {
   groupBy: UsageGroupBy;
   groups: UsageGroup[];
+  /** The period as a whole; `unpriced` counts its turns whose model has no price, booked at $0. */
+  total?: { turns: number; unpriced: number };
   budget?: BudgetState | null;
+  caps?: UsageCapView | null;
+  /** Dollars booked on engines signed in with a subscription: an estimate nobody is billed. */
+  notBilled?: { usd: number; turns: number };
+}
+
+/** What the period's dollars leave out or overstate, one line each; nothing when the total is complete and billed. */
+export function CostCaveats({ summary }: { summary: Pick<UsageSummary, "total" | "notBilled"> | null }) {
+  const plan = summary?.notBilled?.usd ?? 0;
+  const unpriced = summary?.total?.unpriced ?? 0;
+  if (!(plan > 0) && !unpriced) return null;
+  return (
+    <div data-testid="usage-caveats" className="flex flex-col gap-0.5 px-1 text-[12px] leading-5 text-ink-secondary">
+      {plan > 0 && <p>{t("usage.page.notBilled", { cost: formatCost(plan) })}</p>}
+      {unpriced > 0 && <p>{t("usage.page.unpriced", { count: String(unpriced) })}</p>}
+    </div>
+  );
 }
 
 const GROUP_LABEL_KEYS: Record<UsageGroupBy, LocaleKey> = {
@@ -67,39 +91,83 @@ export function usageGroupLabel(groupBy: UsageGroupBy, group: Pick<UsageGroup, "
   return group.label;
 }
 
-function useUsageGroups(range: { from: string; to: string }, groupBy: UsageGroupBy, version: number): UsageSummary | null {
+/** The tokens a bar shows: the server's additive sum when present, or the older aggregate. */
+function barTokens(group: UsageGroup): number {
+  return group.barTokens ?? headlineTokens(group);
+}
+
+/** Loads the usage summary for a range and grouping, optionally split by model, and refreshes with `version`. */
+function useUsageGroups(
+  range: { from: string; to: string },
+  groupBy: UsageGroupBy,
+  version: number,
+  splitBy?: "model",
+): UsageSummary | null {
   const [summary, setSummary] = useState<UsageSummary | null>(null);
   useEffect(() => {
     let current = true;
-    void api(`/api/usage?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&groupBy=${groupBy}`)
+    void api(`/api/usage?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}&groupBy=${groupBy}${splitBy ? `&splitBy=${splitBy}` : ""}`)
       .then((next: UsageSummary) => { if (current) setSummary(next); })
       .catch(() => { if (current) setSummary(null); });
     return () => { current = false; };
-  }, [range.from, range.to, groupBy, version]);
+  }, [range.from, range.to, groupBy, splitBy, version]);
   return summary;
 }
 
+/** One bar: a group's models stacked in their own colours, or a single solid bar when it has no split. */
+function Bar({ group, width, color }: { group: UsageGroup; width: number; color?: string }) {
+  const { state } = useStore();
+  const segments = group.segments ?? [];
+  const stack = segments.reduce((sum, piece) => sum + barTokens(piece), 0);
+  if (segments.length && stack > 0) {
+    return (
+      <span className="flex h-full" style={{ width: `${width}%` }}>
+        {segments.map((piece) => {
+          const tokens = barTokens(piece);
+          const share = Math.round((tokens / stack) * 100);
+          return (
+            <span
+              key={piece.key}
+              className="h-full"
+              data-model-color={modelColor(piece.key)}
+              style={{ width: `${(tokens / stack) * 100}%`, backgroundColor: modelColor(piece.key) }}
+              title={`${modelName(piece.label, state.instances)} · ${formatTokens(tokens)} · ${share}%`}
+            />
+          );
+        })}
+      </span>
+    );
+  }
+  return <span data-model-color={color} className={cn("block h-full rounded-full", !color && "bg-accent/70")} style={{ width: `${width}%`, backgroundColor: color }} />;
+}
+
+/** The six largest groups as proportional bars, with a model colour dot when the grouping is by model. */
 export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: readonly UsageGroup[] }) {
   const { state } = useStore();
   const settings = useContext(SettingsLook);
-  const top = [...groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).slice(0, 6);
-  const max = Math.max(...top.map(headlineTokens), 0);
+  const top = [...groups].sort((a, b) => barTokens(b) - barTokens(a)).slice(0, 6);
+  const max = Math.max(...top.map(barTokens), 0);
   if (!top.length || max <= 0) return <p className="text-[13px] text-ink-secondary">{t("usage.page.whereEmpty")}</p>;
   return (
     <ul className="flex flex-col gap-2.5">
       {top.map((group) => {
         const bot = groupBy === "bot" ? state.bots.find((item) => `bot:${item.id}` === group.key) : undefined;
+        const family = !settings && groupBy === "model" ? modelFamily(group.key) : undefined;
+        const color = family ? modelColor(group.key) : undefined;
         return (
           <li key={group.key} className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-3 text-[13px]" title={t("usage.page.turns", { count: String(group.turns) })}>
             <span className="flex min-w-0 items-center gap-2 text-ink">
               {bot && <BotAvatar bot={bot} state="idle" size={18} animated={false} />}
+              {family && <span aria-hidden="true" title={family.label} data-model-color={color} className="size-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
               <span className="truncate">{bot ? bot.name : groupBy === "model" ? modelName(group.label, state.instances) : usageGroupLabel(groupBy, group)}</span>
             </span>
             <span className={cn("h-2 overflow-hidden rounded-full", settings ? "bg-ink/[0.08]" : "bg-raised")}>
-              <span className={cn("block h-full rounded-full", settings ? "bg-ink" : "bg-accent/70")} style={{ width: `${Math.max(2, (headlineTokens(group) / max) * 100)}%` }} />
+              {settings
+                ? <span className="block h-full rounded-full bg-ink" style={{ width: `${Math.max(2, (barTokens(group) / max) * 100)}%` }} />
+                : <Bar group={group} width={Math.max(2, (barTokens(group) / max) * 100)} color={color} />}
             </span>
             <span className="min-w-[4.5rem] text-right tabular-nums text-ink-secondary">
-              {formatTokens(headlineTokens(group))}
+              {formatTokens(barTokens(group))}
               {hasFiniteCost(group.costUsd) && group.costUsd > 0 && ` · ${formatCost(group.costUsd)}`}
             </span>
           </li>
@@ -109,12 +177,37 @@ export function GroupBars({ groupBy, groups }: { groupBy: UsageGroupBy; groups: 
   );
 }
 
-function WhereItWent({ range, version, onBudget }: { range: { from: string; to: string }; version: number; onBudget: (budget: BudgetState | null) => void }) {
+/** The colours a stacked bar is made of, so its slices read without hovering. */
+function ModelLegend({ groups }: { groups: readonly UsageGroup[] }) {
+  const { state } = useStore();
+  const totals = new Map<string, { label: string; tokens: number }>();
+  for (const group of groups) {
+    for (const piece of group.segments ?? []) {
+      const seen = totals.get(piece.key);
+      totals.set(piece.key, { label: piece.label, tokens: (seen?.tokens ?? 0) + headlineTokens(piece) });
+    }
+  }
+  const items = [...totals.entries()].sort((a, b) => b[1].tokens - a[1].tokens);
+  if (items.length < 2) return null;
+  return (
+    <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
+      {items.map(([key, item]) => (
+        <li key={key} className="flex min-w-0 items-center gap-1.5 text-[11px] text-ink-secondary">
+          <span aria-hidden="true" data-model-color={modelColor(key)} className="size-2 shrink-0 rounded-full" style={{ backgroundColor: modelColor(key) }} />
+          <span className="max-w-[9rem] truncate">{modelName(item.label, state.instances)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The "Where it went" panel: bots on one side, the chosen grouping on the other, both split by model. */
+function WhereItWent({ range, version, onSummary }: { range: { from: string; to: string }; version: number; onSummary: (summary: UsageSummary | null) => void }) {
   const [other, setOther] = useState<UsageGroupBy>("model");
   const settings = useContext(SettingsLook);
-  const byBot = useUsageGroups(range, "bot", version);
-  const byOther = useUsageGroups(range, other, version);
-  useEffect(() => { onBudget(byBot?.budget ?? null); }, [byBot, onBudget]);
+  const byBot = useUsageGroups(range, "bot", version, "model");
+  const byOther = useUsageGroups(range, other, version, other === "model" ? undefined : "model");
+  useEffect(() => { onSummary(byBot); }, [byBot, onSummary]);
   if (settings) return null;
   return (
     <section className="rounded-2xl border border-hairline/50 bg-card p-5" aria-label={t("usage.page.where")}>
@@ -122,7 +215,12 @@ function WhereItWent({ range, version, onBudget }: { range: { from: string; to: 
       <div className="mt-4 grid gap-6 md:grid-cols-2">
         <div>
           <div className="mb-3 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">{t(GROUP_LABEL_KEYS.bot)}</div>
-          {byBot ? <GroupBars groupBy="bot" groups={byBot.groups} /> : <Loader2 size={14} className="animate-spin text-ink-secondary" />}
+          {byBot ? (
+            <>
+              <GroupBars groupBy="bot" groups={byBot.groups} />
+              <ModelLegend groups={byBot.groups} />
+            </>
+          ) : <Loader2 size={14} className="animate-spin text-ink-secondary" />}
         </div>
         <div>
           <div role="tablist" aria-label={t("usage.history.groupBy")} className="-mt-1 mb-2 flex flex-wrap gap-1">
@@ -148,12 +246,12 @@ function WhereItWent({ range, version, onBudget }: { range: { from: string; to: 
 const SETTINGS_GROUPINGS: readonly UsageGroupBy[] = ["bot", ...OTHER_GROUPINGS];
 
 /** Settings' Where it went: a select (by bot, model, person…) as the section's action, then one row per item. */
-function SettingsWhereItWent({ range, version, onBudget }: { range: { from: string; to: string }; version: number; onBudget: (budget: BudgetState | null) => void }) {
+function SettingsWhereItWent({ range, version, onSummary }: { range: { from: string; to: string }; version: number; onSummary: (summary: UsageSummary | null) => void }) {
   const { state } = useStore();
   const [by, setBy] = useState<UsageGroupBy>("bot");
   const byBot = useUsageGroups(range, "bot", version);
   const groups = useUsageGroups(range, by, version);
-  useEffect(() => { onBudget(byBot?.budget ?? null); }, [byBot, onBudget]);
+  useEffect(() => { onSummary(byBot); }, [byBot, onSummary]);
   const top = groups?.groupBy === by ? [...groups.groups].sort((a, b) => headlineTokens(b) - headlineTokens(a)).filter((group) => headlineTokens(group) > 0).slice(0, 8) : null;
   return (
     <SettingsGroup label={t("usage.page.where")} block="where"
@@ -220,7 +318,8 @@ export function UsageSection() {
   const [list, setList] = useState<TraceList | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
-  const [budget, setBudget] = useState<BudgetState | null>(null);
+  const [summary, setSummary] = useState<UsageSummary | null>(null);
+  const budget = summary?.budget ?? null;
   const [open, setOpen] = useState<{ id: string; at: number } | null>(null);
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -277,7 +376,8 @@ export function UsageSection() {
               </div>
             </SettingsRows>
           </SettingsGroup>
-          <SettingsWhereItWent range={range} version={version} onBudget={setBudget} />
+          <CostCaveats summary={summary} />
+          <SettingsWhereItWent range={range} version={version} onSummary={setSummary} />
           <SettingsGroup label={t("usage.page.runs")} block="runs" footnote={untimed ? t("usage.page.untimedNote") : undefined}
             actions={<a href={usageExportHref(range)} download className="ui-button ui-button-md rounded-full">{t("usage.history.export")}</a>}>
             <SettingsRows>
@@ -288,6 +388,7 @@ export function UsageSection() {
           </SettingsGroup>
         </>}
         <PlanUsage />
+        <UsageCapsCard view={summary?.caps} onSaved={() => setVersion((value) => value + 1)} />
         <UsageBudgetCards budget={budget} />
       </div>
     );
@@ -319,7 +420,8 @@ export function UsageSection() {
             {list ? <StatStrip items={totalsStats(list.totals, t("trace.stat.time"))} />
               : <div className="flex items-center gap-2 p-5 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" />{t("common.checking")}</div>}
           </section>
-          <WhereItWent range={range} version={version} onBudget={setBudget} />
+          <CostCaveats summary={summary} />
+          <WhereItWent range={range} version={version} onSummary={setSummary} />
           <section className="rounded-2xl border border-hairline/50 bg-card p-2" aria-label={t("usage.page.runs")}>
             <div className="px-3 pb-1 pt-3">
               <h3 className="text-[15px] font-medium text-ink">{t("usage.page.runs")}</h3>
@@ -337,6 +439,7 @@ export function UsageSection() {
         </>
       )}
       <PlanUsage />
+      <UsageCapsCard view={summary?.caps} onSaved={() => setVersion((value) => value + 1)} />
       <UsageBudgetCards budget={budget} />
     </div>
   );

@@ -31,6 +31,8 @@ const PACKAGE = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/;
 const COMPONENT = /^([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)\/\S+$/;
 const SAFE_TEXT = /^[A-Za-z0-9 _.,@-]+$/;
 const ADB_KEYBOARD = "com.android.adbkeyboard/.AdbIME";
+// `adb shell` hands its arguments to the phone's shell as one line, so a keyboard id is sent back only when that shell reads each character of it literally.
+const SAFE_KEYBOARD_ID = /^[\w.]+\/[\w.]+$/;
 const KEYCODES: Record<string, string> = {
   back: "KEYCODE_BACK",
   delete: "KEYCODE_DEL",
@@ -162,24 +164,49 @@ const claimedDevice = (ensureClaim: EnsureClaim, adb: Adb): OnDevice => async (s
 type Shell = (...command: string[]) => Promise<string>;
 const deviceShell = (onDevice: OnDevice, serial: string): Shell => async (...command) => (await onDevice(serial, ["shell", ...command])).toString("utf8");
 
-export async function typePhoneText(shell: Shell, text: string, clear = false): Promise<string> {
+const NO_FIELD_TEXT = "No text field is taking input, so nothing was cleared or typed. Tap the field first, then call type_text again.";
+// `dumpsys input_method` prints the current keyboard's own state under a header that names it (seen on Android 9).
+const adbKeyboardShown = (inputState: string) =>
+  /\bmIsInputViewShown=(\w+)/.exec(inputState.split("Input method service state for com.android.adbkeyboard.AdbIME@")[1]?.split("Input method service state for ")[0] ?? "")?.[1] === "true";
+
+export async function typePhoneText(shell: Shell, text: string, clear = false, unclaimed: Shell = shell): Promise<string> {
   if (!text || [...text].length > 256) throw new Error("Android text must be 1 to 256 characters");
   if (!clear && SAFE_TEXT.test(text)) {
     await shell("input", "text", text.replaceAll(" ", "%s"));
     return "Typed text into the focused Android field";
   }
-  if ((await shell("settings", "get", "secure", "default_input_method")).trim() !== ADB_KEYBOARD) {
+  const keyboard = (await shell("settings", "get", "secure", "default_input_method")).trim();
+  if (keyboard === ADB_KEYBOARD) return sendThroughAdbKeyboard(shell, text, clear);
+  const switchedOn = (await shell("ime", "list", "-s")).split(/\s+/);
+  if (!switchedOn.includes(ADB_KEYBOARD) || !switchedOn.includes(keyboard) || !SAFE_KEYBOARD_ID.test(keyboard)) {
     throw new Error(clear
-      ? "A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard. Ask the person to set it up, or call type_text without clear and remove the old text with press delete."
-      : "Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and chosen as the phone's keyboard. Ask the person to set it up, or type only those characters.");
+      ? "A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and switched on in the phone's keyboard list. Ask the person to set it up, or call type_text without clear and remove the old text with press delete."
+      : "Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and switched on in the phone's keyboard list. Ask the person to set it up, or type only those characters.");
   }
+  // Known open risk: a proxy killed between the switch and the restore leaves the phone on ADBKeyBoard.
+  try {
+    await shell("ime", "set", ADB_KEYBOARD);
+    // `ime set` returns before the keyboard is up (ADBKeyBoard took 0.2 to 0.4 s on Android 9), and it stays down while no field takes input.
+    for (let read = 1; !adbKeyboardShown(await shell("dumpsys", "input_method")); read += 1) {
+      if (read === 10) throw new Error(NO_FIELD_TEXT);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return await sendThroughAdbKeyboard(shell, text, clear);
+  } finally {
+    await unclaimed("ime", "set", keyboard).catch(() => {
+      throw new Error("The phone is still on ADBKeyBoard, which shows no keys. Tell the person to choose their keyboard again in the phone's settings, and call read_screen to see whether the text arrived.");
+    });
+  }
+}
+
+async function sendThroughAdbKeyboard(shell: Shell, text: string, clear: boolean): Promise<string> {
   // -p delivers each broadcast to ADBKeyBoard alone, not to any other app listening for the action.
   const toKeyboard = (action: string, ...extras: string[]) => shell("am", "broadcast", "-a", action, "-p", "com.android.adbkeyboard", ...extras);
   if (clear) {
     // ADBKeyBoard 2.0 and 2.1 crash on ADB_CLEAR_TEXT when the app in front has no field taking input. Android then dumps
     // that app's served input connection as null (named ...Wrapper before Android 13); a dump without the line is not refused.
     if (/\bmServedInputConnection(?:Wrapper)?=(\S+)/.exec(await shell("dumpsys", "input_method"))?.[1] === "null") {
-      throw new Error("No text field is taking input, so nothing was cleared or typed. Tap the field first, then call type_text again.");
+      throw new Error(NO_FIELD_TEXT);
     }
     // A cleared field's text goes through ADBKeyBoard too, so the two arrive in order.
     await toKeyboard("ADB_CLEAR_TEXT");
@@ -296,9 +323,9 @@ const SINGLE_TOOLS = [
   { name: "list_apps", description: "List installed launchable Android package names, optionally filtered by a human app name. Prefer open_app first.", inputSchema: { type: "object", properties: { query: { type: "string" }, serial: { type: "string" } } } },
   { name: "open_app", description: "Open an installed Android app directly by its English name, such as Uber or Skyscanner, or by its package name. Do not scan the app drawer first.", inputSchema: { type: "object", properties: { name: { type: "string" }, serial: { type: "string" } }, required: ["name"] } },
   { name: "tap_text", description: "Tap visible Android text or an accessibility label.", inputSchema: { type: "object", properties: { text: { type: "string" }, exact: { type: "boolean" }, index: { type: "integer", minimum: 0 }, serial: { type: "string" } }, required: ["text"] } },
-  { name: "tap", description: "Tap Android screen pixel coordinates obtained from read_screen or screenshot.", inputSchema: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, serial: { type: "string" } }, required: ["x", "y"] } },
-  { name: "swipe", description: "Swipe the Android screen in a direction.", inputSchema: { type: "object", properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] }, serial: { type: "string" } }, required: ["direction"] } },
-  { name: "type_text", description: "Type text into the focused Android field. Letters, digits, spaces and _.,@- always work; other text, such as Chinese, emoji or +, needs the ADBKeyBoard keyboard selected on the phone. Set clear to true to empty the field first, which also needs ADBKeyBoard. Never enter passwords or payment details. A one-time code only for a sign-in the person asked for, into the app it was sent for.", inputSchema: { type: "object", properties: { text: { type: "string", maxLength: 256 }, clear: { type: "boolean" }, serial: { type: "string" } }, required: ["text"] } },
+  { name: "tap", description: "Tap Android screen pixel coordinates obtained from read_screen or screenshot. Add duration_ms to hold the tap; about 1000 is a long press.", inputSchema: { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, duration_ms: { type: "integer" }, serial: { type: "string" } }, required: ["x", "y"] } },
+  { name: "swipe", description: "Swipe the Android screen in a direction. By default the finger moves half the screen through the centre in 260 ms. To scroll a list, a pane or a picker wheel by a chosen amount, give x and y (where the finger starts), distance (pixels it moves) and duration_ms (longer is slower).", inputSchema: { type: "object", properties: { direction: { type: "string", enum: ["up", "down", "left", "right"] }, x: { type: "number" }, y: { type: "number" }, distance: { type: "number" }, duration_ms: { type: "integer" }, serial: { type: "string" } }, required: ["direction"] } },
+  { name: "type_text", description: "Type text into the focused Android field. Letters, digits, spaces and _.,@- always work; other text, such as Chinese, emoji or +, needs the ADBKeyBoard app switched on in the phone's keyboard list. Set clear to true to empty the field first, which also needs ADBKeyBoard. Never enter passwords or payment details. A one-time code only for a sign-in the person asked for, into the app it was sent for.", inputSchema: { type: "object", properties: { text: { type: "string", maxLength: 256 }, clear: { type: "boolean" }, serial: { type: "string" } }, required: ["text"] } },
   { name: "press", description: "Press an Android navigation or keyboard key. wakeup turns the screen on and sleep turns it off.", inputSchema: { type: "object", properties: { key: { type: "string", enum: Object.keys(KEYCODES) }, serial: { type: "string" } }, required: ["key"] } },
 ] as const;
 
@@ -319,6 +346,8 @@ const STEP_FIELD_NOTES: Record<string, string> = {
   x: "pixel x from read_screen or screenshot",
   y: "pixel y from read_screen or screenshot",
   direction: "which way to swipe",
+  distance: "pixels the finger moves, 50 to 10000, default half the screen",
+  duration_ms: "milliseconds a tap is held or a swipe takes, 50 to 2000; without it a tap is not held and a swipe takes 260",
   key: "the key to press",
   seconds: `how long to wait, 0 to ${MAX_WAIT_SECONDS}, default ${DEFAULT_WAIT_SECONDS}`,
 };
@@ -333,13 +362,26 @@ const STEP_EXAMPLES: Record<StepAction, Json> = {
   wait: { action: "wait", seconds: 3 },
 };
 const inPixels = (value: unknown) => Number.isFinite(value) && Number(value) >= 0 && Number(value) <= 10_000;
+const given = (value: unknown) => value !== undefined && value !== null && value !== "";
+const rounded = (value: unknown) => Math.round(toNumber(value));
+const absentOrWithin = (value: unknown, min: number, max: number) => !given(value) || (rounded(value) >= min && rounded(value) <= max);
+const DURATION_NEEDS = "duration_ms from 50 to 2000";
+const HELD_TAP_EXAMPLE = { x: 540, y: 900, duration_ms: 1000 };
+const durationOk = (args: Json) => absentOrWithin(args.duration_ms, 50, 2000);
+const SWIPE_NEEDS = `x and y from 0 to 10000, distance from 50 to 10000 and ${DURATION_NEEDS}`;
+const SWIPE_EXAMPLE = { direction: "up", x: 300, y: 1400, distance: 400, duration_ms: 800 };
+const swipeFieldsOk = (args: Json) => absentOrWithin(args.x, 0, 10_000) && absentOrWithin(args.y, 0, 10_000) && absentOrWithin(args.distance, 50, 10_000) && durationOk(args);
 const STEP_RULES: Partial<Record<StepAction, StepRule[]>> = {
   open_app: [{ ok: (step) => String(step.name).trim() !== "", needs: "name, an app's English name or package name" }],
   tap_text: [
     { ok: (step) => String(step.text).trim() !== "", needs: "text that is not blank" },
     { ok: (step) => step.index === undefined || (Number.isInteger(step.index) && Number(step.index) >= 0), needs: "index as a whole number from 0", example: { action: "tap_text", text: "Search", index: 1 } },
   ],
-  tap: [{ ok: (step) => inPixels(step.x) && inPixels(step.y), needs: "x and y from 0 to 10000" }],
+  tap: [
+    { ok: (step) => inPixels(step.x) && inPixels(step.y), needs: "x and y from 0 to 10000" },
+    { ok: durationOk, needs: DURATION_NEEDS, example: { action: "tap", ...HELD_TAP_EXAMPLE } },
+  ],
+  swipe: [{ ok: swipeFieldsOk, needs: SWIPE_NEEDS, example: { action: "swipe", ...SWIPE_EXAMPLE } }],
   type_text: [{ ok: (step) => [...String(step.text)].length <= 256, needs: "text of at most 256 characters" }],
   wait: [{ ok: (step) => step.seconds === undefined || Number(step.seconds) >= 0, needs: `seconds as a number from 0 to ${MAX_WAIT_SECONDS}` }],
 };
@@ -510,8 +552,8 @@ async function wait(requested: unknown): Promise<string> {
   return seconds < Number(requested) ? `Waited ${seconds} s (a wait is at most ${MAX_WAIT_SECONDS} s)` : `Waited ${seconds} s`;
 }
 
-const actOn = (onDevice: OnDevice) => async (serial: string, { action, ...fields }: PhoneStep): Promise<string> => {
-  const [first] = (await callToolOn(onDevice, serial, action, fields)).content;
+const actOn = (onDevice: OnDevice, unclaimed: OnDevice) => async (serial: string, { action, ...fields }: PhoneStep): Promise<string> => {
+  const [first] = (await callToolOn(onDevice, unclaimed, serial, action, fields)).content;
   return first.type === "text" ? first.text : "";
 };
 
@@ -553,15 +595,18 @@ async function callTool(name: string, args: Json, adb: Adb, onDevice: OnDevice, 
     const devices = available ? await usbDevices(adb) : [];
     return textResult(JSON.stringify({ available, devices }, null, 2));
   }
+  // Security: this sends a command without asking for the phone claim, so a person's hold does not stop it.
+  // Only type_text's keyboard restore may use it: it puts back what that call changed.
+  const unclaimed: OnDevice = (serial, command) => adb(["-s", serial, ...command]);
   if (name === "batch") {
     const steps = parseSteps(args.steps);
-    return runSteps(await readySerial(adb, args.serial), steps, ensureClaim, actOn(onDevice));
+    return runSteps(await readySerial(adb, args.serial), steps, ensureClaim, actOn(onDevice, unclaimed));
   }
   const serial = await readySerial(adb, args.serial);
-  return callToolOn(onDevice, serial, name, args);
+  return callToolOn(onDevice, unclaimed, serial, name, args);
 }
 
-async function callToolOn(onDevice: OnDevice, serial: string, name: string, args: Json): Promise<ToolResult> {
+async function callToolOn(onDevice: OnDevice, unclaimed: OnDevice, serial: string, name: string, args: Json): Promise<ToolResult> {
   if (name === "read_screen") return textResult(nodeLines(await readNodes(onDevice, serial)));
   if (name === "screenshot") {
     const png = await onDevice(serial, ["exec-out", "screencap", "-p"], true);
@@ -598,27 +643,36 @@ async function callToolOn(onDevice: OnDevice, serial: string, name: string, args
   if (name === "tap") {
     const x = Number(args.x); const y = Number(args.y);
     if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) throw new Error("Invalid Android coordinates");
-    await onDevice(serial, ["shell", "input", "tap", String(Math.round(x)), String(Math.round(y))]);
-    return textResult(`Tapped ${Math.round(x)},${Math.round(y)}`);
+    if (!durationOk(args)) throw new Error(`tap needs ${DURATION_NEEDS}, e.g. ${JSON.stringify(HELD_TAP_EXAMPLE)}`);
+    const at = [String(Math.round(x)), String(Math.round(y))];
+    const held = given(args.duration_ms) ? String(rounded(args.duration_ms)) : undefined;
+    // Android's `input` has no touch long press: a swipe that ends where it starts holds the finger there (seen on Android 9).
+    await onDevice(serial, ["shell", "input", ...(held ? ["swipe", ...at, ...at, held] : ["tap", ...at])]);
+    return textResult(held ? `Pressed ${at.join(",")} for ${held} ms` : `Tapped ${at.join(",")}`);
   }
   if (name === "swipe") {
     const direction = String(args.direction ?? "");
+    if (!swipeFieldsOk(args)) throw new Error(`swipe needs ${SWIPE_NEEDS}, e.g. ${JSON.stringify(SWIPE_EXAMPLE)}`);
     const size = (await onDevice(serial, ["shell", "wm", "size"])).toString("utf8");
     const match = /(\d+)x(\d+)/.exec(size);
     if (!match) throw new Error("Could not read Android screen size");
     const width = Number(match[1]); const height = Number(match[2]);
-    const points: Record<string, [number, number, number, number]> = {
-      up: [width / 2, height * 0.75, width / 2, height * 0.25],
-      down: [width / 2, height * 0.25, width / 2, height * 0.75],
-      left: [width * 0.75, height / 2, width * 0.25, height / 2],
-      right: [width * 0.25, height / 2, width * 0.75, height / 2],
+    const moves: Record<string, { x: number; y: number; dx: number; dy: number; distance: number }> = {
+      up: { x: width / 2, y: height * 0.75, dx: 0, dy: -1, distance: height / 2 },
+      down: { x: width / 2, y: height * 0.25, dx: 0, dy: 1, distance: height / 2 },
+      left: { x: width * 0.75, y: height / 2, dx: -1, dy: 0, distance: width / 2 },
+      right: { x: width * 0.25, y: height / 2, dx: 1, dy: 0, distance: width / 2 },
     };
-    const point = points[direction];
-    if (!point) throw new Error("Invalid swipe direction");
-    await onDevice(serial, ["shell", "input", "swipe", ...point.map((value) => String(Math.round(value))), "260"]);
-    return textResult(`Swiped ${direction}`);
+    const move = Object.hasOwn(moves, direction) ? moves[direction] : undefined;
+    if (!move) throw new Error("Invalid swipe direction");
+    const or = (value: unknown, fallback: number) => (given(value) ? rounded(value) : fallback);
+    const x = or(args.x, move.x); const y = or(args.y, move.y); const distance = or(args.distance, move.distance);
+    const sent = [x, y, x + move.dx * distance, y + move.dy * distance, or(args.duration_ms, 260)].map((value) => String(Math.round(value)));
+    await onDevice(serial, ["shell", "input", "swipe", ...sent]);
+    const chosen = [args.x, args.y, args.distance, args.duration_ms].some(given);
+    return textResult(chosen ? `Swiped from ${sent[0]},${sent[1]} to ${sent[2]},${sent[3]} in ${sent[4]} ms` : `Swiped ${direction}`);
   }
-  if (name === "type_text") return textResult(await typePhoneText(deviceShell(onDevice, serial), String(args.text ?? ""), args.clear === true));
+  if (name === "type_text") return textResult(await typePhoneText(deviceShell(onDevice, serial), String(args.text ?? ""), args.clear === true, deviceShell(unclaimed, serial)));
   if (name === "press") {
     const key = String(args.key ?? "").toLowerCase();
     if (!KEYCODES[key]) throw new Error("Unsupported Android key");

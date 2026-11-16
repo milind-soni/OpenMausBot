@@ -107,6 +107,24 @@ sending a message. Choose which bots get each card under **Bot access**. To
 have a bot answer new mail, texts or calls, add a webhook for that bot in
 **Automations** and paste its address into the service.
 
+### BubblaV
+
+In Plugins, find **BubblaV** and click **Connect**. The card uses BubblaV's
+official hosted MCP endpoint, `https://www.bubblav.com/mcp`, and opens BubblaV's
+browser sign-in. Sign in (or create a free account), choose the one chatbot
+(website) the connection may reach, and choose **Full access** or **Read
+only**. No API key is needed. After sign-in and tool discovery it enables the
+connection, and **Disconnect** and **Bot access** work as they do for Whop.
+
+A bot that can use BubblaV reads that chatbot's reports, unanswered questions,
+conversations and leads. With **Full access** it can also add and delete
+knowledge and change the chatbot's instructions, widget, forms and webhook
+tools, so choose which bots get it under **Bot access**; **Read only** lists
+and runs only BubblaV's read-only tools. BubblaV saves the sign-in as an API
+key named **MCP Client** under **Settings → API Keys**, where revoking it ends
+the connection. The key lasts one year, then the card asks you to sign in
+again. See [BubblaV's OpenMausBot guide](https://docs.bubblav.com/user-guide/integrations/openmausbot).
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser
@@ -395,6 +413,22 @@ tool search used by bots that cannot search tools themselves, two minutes).
 An HTTP 401 tells the bot to send the message again (a sign-in is refreshed
 when a message starts) and, if that fails, to sign in again or check the
 server's header values in Plugins → MCP servers.
+
+### Which bot made a call, on a server that runs on a lent computer
+
+A server saved on a Cloud to run on a computer lent to it is started by that
+computer. Each tool call it gets names the bot and conversation that made it,
+in the call's `_meta`:
+
+```json
+{ "_meta": { "openmausbot/caller": { "botId": "…", "threadId": "…", "verified": false } } }
+```
+
+It is a hint for the server's own logs or per-bot settings, never proof of
+who called: the Cloud says it, the computer passes it on as it is, and
+OpenMausBot never uses it to allow or refuse anything. The Cloud sends it
+only to a desktop app new enough to pass it on, so an older one keeps running
+calls as before; a listing of the server's tools never carries it.
 
 ## What a Claude bot sees, and the "Also use my Claude Code MCP servers" switch
 

@@ -2,12 +2,17 @@
 // message in, the bot's reply out; the turn it starts is outside work (the "api" trigger), so it never acts for the
 // person, is told the message came from outside, and anything that needs an approval waits for the person in the thread.
 // Inside: the app's routes to switch it on, mint a key and switch it off, open only to whoever may edit the bot.
+// Security: the owner may mark a key as acting for them (`acts-as-owner`, off by default, owner only, never on a team's
+// Cloud or a hosted workspace without the operator's policy). A thread such a key opens runs at the bot's own level with
+// its saved allowances, as the owner's work, and is not outside; the never-list, the safety floor and the level's own
+// holds still apply. That holds only while the key still acts as the owner and the server still allows it: otherwise the
+// thread is fenced like any other API thread, and the key can't go on in it.
 import { z } from "zod";
 
 import { redactSecretsInText } from "../shared/redact.ts";
 import { BOT_API_UPGRADE, botApiEndpoint, type BotApiReply } from "../shared/bot-api.ts";
 import type { AdminActionRow } from "./admin-activity.ts";
-import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiPrompt, withoutAttachedImages, type BotApiAttempt, type BotApiStatus } from "./bot-api.ts";
+import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiOwnerPrompt, botApiPrompt, withoutAttachedImages, type BotApiAttempt, type BotApiStatus } from "./bot-api.ts";
 import { personKey } from "./person-key.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { PASS, type RouteHandler } from "./routes/table.ts";
@@ -21,7 +26,7 @@ export const BOT_API_DEFAULT_WAIT_MS = 50_000;
 const BOT_API_MAX_WAIT_MS = 5 * 60_000;
 const POLL_MS = 250;
 const PUBLIC_PATH = /^\/hooks\/api\/bots\/([\w-]{1,128})\/messages$/;
-const APP_PATH = /^\/api\/bots\/([\w-]{1,128})\/bot-api(?:\/(new-key))?$/;
+const APP_PATH = /^\/api\/bots\/([\w-]{1,128})\/bot-api(?:\/(new-key|acts-as-owner))?$/;
 
 const callSchema = z.object({
   message: z.string().min(1).max(BOT_API_MAX_MESSAGE_CHARS),
@@ -64,6 +69,13 @@ export interface BotApiHostDeps {
   claimRequest?(): () => void;
   /** Settings → Activity on a Team Cloud. */
   record?(auth: RequestAuth, row: Omit<AdminActionRow, "at" | "actor">): void;
+  /** Whether a key may act as the owner here. Absent: never. */
+  actsAsOwner?: {
+    /** This server allows it now: one person's own, or a hosted workspace under the operator's policy. Asked on every call. */
+    available(): boolean;
+    /** Why this person may not mark a key; null for the owner. */
+    refusal(auth: RequestAuth): string | null;
+  };
   manager?: BotApiManager;
   waitMs?: number;
 }
@@ -81,7 +93,10 @@ function callerWords(error: unknown): string {
 
 const COULD_NOT_ANSWER = "The bot could not answer. Open this thread in the app to see why.";
 const BUSY = "The bot is busy. Try again soon.";
+const CAPPED = "This bot has reached a usage cap its owner set, so it takes no new calls for now.";
 const CANNOT_CONFINE = "This bot's AI can't take Bot API calls. Choose another AI for this bot.";
+const NO_LONGER_OWNER = "This thread was opened with a key that acted as the bot's owner, and the key no longer does. Start a new thread.";
+const ACTS_AS_OWNER_NEVER = "A key can't act as the owner here.";
 
 function detailOf(error: unknown): string {
   const parsed = z.object({ detail: z.string() }).safeParse(error);
@@ -113,6 +128,8 @@ export function createBotApiHost(deps: BotApiHostDeps) {
   deps.store.onChange((change) => { if (change.type === "bot.deleted") manager.removeForBot(change.botId); });
 
   const included = () => deps.included?.() !== false;
+  /** The key acts as the owner, and this server allows that now. */
+  const asOwner = (botId: string) => manager.actsAsOwner(botId) && deps.actsAsOwner?.available() === true;
   const pendingFor = (botId: string) => {
     const set = running.get(botId);
     for (const threadId of set ?? []) if (!deps.threadBusy(botId, threadId)) set!.delete(threadId);
@@ -137,13 +154,17 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     return { reply: replyText(after), thread: threadId };
   }
 
-  async function runCall(botId: string, call: z.output<typeof callSchema>, turnStarted: () => void): Promise<{ status: number; body: BotApiReply }> {
+  async function runCall(botId: string, call: z.output<typeof callSchema>, turnStarted: () => void, keyAsOwner: boolean): Promise<{ status: number; body: BotApiReply }> {
     const store = deps.store;
     let threadId = call.thread;
+    // A thread keeps what it was opened as: a fenced one stays fenced whatever the key does now.
+    let owned = keyAsOwner;
     if (threadId !== undefined) {
       const task = store.taskByThread(botId, threadId);
       // Only a thread this API opened: the caller never writes into the person's own conversations.
       if (!task || task.botApi !== true) fail(404, "no such thread");
+      owned = task.botApiAsOwner === true;
+      if (owned && !keyAsOwner) fail(403, NO_LONGER_OWNER);
       if (deps.threadBusy(botId, threadId)) return { status: 409, body: { thread: threadId, status: "working" } };
     }
     if (!deps.canStart(botId, threadId ?? "")) fail(409, BUSY, "The bot already had as many conversations going as it may");
@@ -151,20 +172,21 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     let opened = false;
     if (threadId === undefined) {
       // Asks from the start, with none of the bot's saved allowances: nothing may answer an approval for an outside caller.
-      const task = store.createTask(botId, message.slice(0, 80), false, undefined, undefined, "ask", undefined, undefined, (created) => deps.opened?.(created.threadId));
+      // A key acting as the owner opens it at the bot's own level with its saved allowances instead, as the owner's work.
+      const task = store.createTask(botId, message.slice(0, 80), false, undefined, undefined, owned ? undefined : "ask", undefined, undefined, (created) => deps.opened?.(created.threadId));
       if (!task) fail(404, "no such bot");
       threadId = task.threadId;
       opened = true;
-      store.patchTask(botId, threadId, { botApi: true, outside: true });
+      store.patchTask(botId, threadId, owned ? { botApi: true, botApiAsOwner: true } : { botApi: true, outside: true });
     }
     const receivedAt = Date.now();
-    const userMessage = store.appendMessage(threadId, { role: "user", kind: "text", text: message, via: "api" });
+    const userMessage = store.appendMessage(threadId, { role: "user", kind: "text", text: message, via: "api", ...(owned ? { apiAsOwner: true as const } : {}) });
     const after = () => { const all = store.messagesFor(threadId!); return all.slice(all.findIndex((line) => line.id === userMessage.id) + 1); };
     let settled: TurnOutcome | undefined;
     let dispatchError: string | undefined;
     markRunning(botId, threadId, true);
     try {
-      await deps.startTurn(botId, botApiPrompt(message, receivedAt), {
+      await deps.startTurn(botId, owned ? botApiOwnerPrompt(message) : botApiPrompt(message, receivedAt), {
         threadId, automationSource: "api", unattended: true, userMessage,
         onSettled: (outcome) => { settled = outcome; markRunning(botId, threadId!, false); },
         onDispatchError: (message) => { dispatchError = message; markRunning(botId, threadId!, false); },
@@ -172,6 +194,8 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     } catch (error) {
       markRunning(botId, threadId, false);
       if (opened) deps.discard?.(botId, threadId);
+      const capped = z.object({ code: z.literal("spend_cap"), message: z.string(), resetsAt: z.number().optional() }).safeParse(error);
+      if (capped.success) throw Object.assign(new Error(capped.data.resetsAt === undefined ? CAPPED : `${CAPPED} Try again after ${new Date(capped.data.resetsAt).toISOString()}.`), { status: 429, forCaller: true, detail: capped.data.message, retryAt: capped.data.resetsAt });
       const busy = z.object({ code: z.enum(["thread_busy", "thread_limit"]) }).safeParse(error).success;
       fail(busy ? 409 : 502, busy ? BUSY : COULD_NOT_ANSWER, error instanceof Error ? error.message : String(error));
     }
@@ -219,7 +243,10 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         json(res, 403, { error: BOT_API_UPGRADE });
         return true;
       }
-      if (!deps.canConfine(botId)) {
+      const keyAsOwner = asOwner(botId);
+      // A key acting as the owner opens threads that run unconfined; a thread it continues that was opened fenced still
+      // runs confined, and an AI that can't be is refused when its turn starts.
+      if (!keyAsOwner && !deps.canConfine(botId)) {
         manager.recordRefused(botId, 403, CANNOT_CONFINE);
         json(res, 403, { error: CANNOT_CONFINE });
         return true;
@@ -258,12 +285,15 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         return true;
       }
       try {
-        const answer = await runCall(botId, call, release);
+        const answer = await runCall(botId, call, release, keyAsOwner);
         manager.record(botId, { outcome: "accepted", statusCode: answer.status, threadId: answer.body.thread, preview: call.message,
+          ...(deps.store.taskByThread(botId, answer.body.thread)?.botApiAsOwner ? { asOwner: true as const } : {}),
           reason: "reply" in answer.body ? "Replied" : answer.body.status === "needs_approval" ? "Stopped at an approval" : "Still working" });
         json(res, answer.status, answer.body);
       } catch (error) {
         manager.record(botId, { outcome: "rejected", statusCode: statusOf(error), reason: detailOf(error), preview: call.message });
+        const retryAt = z.object({ retryAt: z.number() }).safeParse(error).data?.retryAt;
+        if (retryAt !== undefined) res.setHeader("retry-after", String(Math.max(1, Math.ceil((retryAt - Date.now()) / 1000))));
         json(res, statusOf(error), { error: callerWords(error) });
       }
       return true;
@@ -273,9 +303,12 @@ export function createBotApiHost(deps: BotApiHostDeps) {
   };
 
   /** What callers sent is for the people who manage the key, not everyone who can see the bot. */
-  const view = (botId: string, auth: RequestAuth): BotApiStatus & { included: boolean; canTakeCalls: boolean; url: string; canManage: boolean; calls: BotApiAttempt[] } => {
+  const ownerRefusal = (auth: RequestAuth) => deps.actsAsOwner?.refusal(auth) ?? (deps.actsAsOwner ? null : ACTS_AS_OWNER_NEVER);
+  /** `actsAsOwner` is what the key does now: marked, and allowed on this server. `mayActAsOwner`: this person may change it. */
+  const view = (botId: string, auth: RequestAuth): BotApiStatus & { included: boolean; canTakeCalls: boolean; url: string; canManage: boolean; mayActAsOwner: boolean; calls: BotApiAttempt[] } => {
     const canManage = deps.manageRefusal(auth, botId) === null;
-    return { included: included(), canTakeCalls: deps.canConfine(botId), ...manager.status(botId), url: botApiEndpoint(deps.hooksBaseUrl(), botId), canManage, calls: canManage ? manager.callsSinceOn(botId).slice(-10).reverse() : [] };
+    return { included: included(), canTakeCalls: asOwner(botId) || deps.canConfine(botId), ...manager.status(botId), actsAsOwner: asOwner(botId), url: botApiEndpoint(deps.hooksBaseUrl(), botId), canManage,
+      mayActAsOwner: canManage && ownerRefusal(auth) === null, calls: canManage ? manager.callsSinceOn(botId).slice(-10).reverse() : [] };
   };
 
   const routes: RouteHandler = async ({ req, res, path, method, auth, json: answer, readBody }) => {
@@ -290,11 +323,27 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     if (refusal) return answer(res, 403, { error: refusal });
     const target = { kind: "bot", id: bot.id, name: bot.name };
     try {
+      if (match[2] === "acts-as-owner") {
+        const parsed = switchSchema.safeParse(await readBody(req));
+        if (!parsed.success) return answer(res, 400, { error: schemaIssue(parsed.error, "Send {\"enabled\": true | false}") });
+        // Switching it off is always allowed to whoever manages the key; switching it on only to the owner, where allowed.
+        const refused = parsed.data.enabled ? ownerRefusal(auth) : null;
+        if (refused) return answer(res, 403, { error: refused });
+        if (!manager.enabled(botId)) return answer(res, 409, { error: "The Bot API is off for this bot" });
+        if (manager.actsAsOwner(botId) !== parsed.data.enabled) {
+          manager.setActsAsOwner(botId, parsed.data.enabled);
+          deps.record?.(auth, { category: "bot-api", action: parsed.data.enabled ? "bot-api.acts-as-owner.on" : "bot-api.acts-as-owner.off", target });
+        }
+        return answer(res, 200, view(botId, auth));
+      }
       if (match[2] === "new-key") {
         if (!included()) return answer(res, 403, { error: BOT_API_UPGRADE, upgrade: true });
         if (!manager.enabled(botId)) return answer(res, 409, { error: "The Bot API is off for this bot" });
+        const wasOwner = manager.actsAsOwner(botId);
         const minted = manager.enable(botId, minter(auth));
         deps.record?.(auth, { category: "bot-api", action: "bot-api.new-key", target });
+        // A new key starts without the mark: say so in Activity, as switching it off by hand would.
+        if (wasOwner) deps.record?.(auth, { category: "bot-api", action: "bot-api.acts-as-owner.off", target });
         return answer(res, 200, { key: minted.key, ...view(botId, auth) });
       }
       const parsed = switchSchema.safeParse(await readBody(req));
@@ -307,7 +356,11 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         deps.record?.(auth, { category: "bot-api", action: "bot-api.on", target });
         return answer(res, 200, { key: minted.key, ...view(botId, auth) });
       }
-      if (manager.disable(botId)) deps.record?.(auth, { category: "bot-api", action: "bot-api.off", target });
+      const wasOwner = manager.actsAsOwner(botId);
+      if (manager.disable(botId)) {
+        deps.record?.(auth, { category: "bot-api", action: "bot-api.off", target });
+        if (wasOwner) deps.record?.(auth, { category: "bot-api", action: "bot-api.acts-as-owner.off", target });
+      }
       return answer(res, 200, view(botId, auth));
     } catch (error) {
       return answer(res, statusOf(error), { error: error instanceof Error ? error.message : String(error) });

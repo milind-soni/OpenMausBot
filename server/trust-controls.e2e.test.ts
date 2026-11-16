@@ -1,12 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchVerificationServer, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const key = "isolated-trust-capability";
 let fixture: VerificationServer;
@@ -23,6 +24,8 @@ let sandboxBot: any;
 const gmailDrafts = new Map<string, Record<string, unknown>>();
 let brokerOrigin = "";
 const relayed: unknown[] = [];
+/** Files put to the fixture's upload links: what a connected-app call's local file sent to Composio's storage. */
+const uploads: Array<{ request: unknown; bytes?: string }> = [];
 const evidence: unknown[] = [];
 let blockSession: (() => void) | undefined;
 let sessionEntered = false;
@@ -65,8 +68,17 @@ beforeAll(async () => {
   broker = createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
+    const put = req.method === "PUT" ? /^\/upload\/(\d+)$/.exec(req.url ?? "") : null;
+    if (put) {
+      uploads[Number(put[1]) - 1]!.bytes = raw;
+      return res.end();
+    }
     const body = raw ? JSON.parse(raw) : {};
     res.setHeader("content-type", "application/json");
+    if (req.url === "/api/files/upload/request") {
+      uploads.push({ request: body });
+      return res.end(JSON.stringify({ key: `fixture-files/${uploads.length}`, new_presigned_url: `${brokerOrigin}/upload/${uploads.length}` }));
+    }
     if (req.url === "/v1/connectors/connected") return res.end(JSON.stringify({ services: { gmail: { connected: true }, slack: { connected: true } } }));
     if (req.url === "/api/tool_router/session/fixture-session") {
       if (blockSession) {
@@ -117,8 +129,7 @@ beforeAll(async () => {
   expect(sandboxCreated.status).toBe(201);
   sandboxBot = (await sandboxCreated.json() as any).bot;
   await waitForExit(fixture.child, { signal: "SIGTERM" });
-  const botsFile = join(fixture.info.dataDir, "bots.json");
-  const bots = JSON.parse(readFileSync(botsFile, "utf8"));
+  const bots = readRegistry(fixture.info.dataDir).bots;
   const saved = bots.find((row: any) => row.id === fullBot.id);
   for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot, noRuleBot, sandboxBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
     full.approvalMode = "full";
@@ -127,7 +138,7 @@ beforeAll(async () => {
   }
   // Full access asks only for a bot someone set a sending rule on. These rules carry the daily cap older apps stored.
   for (const bot of [fullBot, draftBot, draftHelper, outboundPolicyBot]) bots.find((row: any) => row.id === bot.id).outbound = { policy: "ask", dailyCap: 100 };
-  writeFileSync(botsFile, JSON.stringify(bots));
+  writeRegistry(fixture.info.dataDir, { bots });
   const configFile = join(fixture.info.dataDir, "config.json");
   const config = JSON.parse(readFileSync(configFile, "utf8"));
   config.signIn = { admins: ["admin@fixture.test"], members: ["member@fixture.test"] };
@@ -442,6 +453,42 @@ it.each(["scope", "turn"])("rechecks %s revocation after project-session metadat
   if (revocation === "scope") expect(result.body.result.isError).toBe(true);
   else expect(result.status).toBe(401);
   expect(relayed).toHaveLength(before);
+});
+
+it.each(["scope", "turn"])("lists a send's file on its card and uploads nothing when %s revocation lands before the send", async (revocation) => {
+  const b = await bot("File upload race " + revocation);
+  const file = join(fixture.info.dataDir, "workspaces", b.id, "board deck.pdf");
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, "%PDF-1.4 deck");
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length, uploaded = uploads.length;
+  const send = () => relay(token, "GMAIL_SEND_EMAIL", { to: "board@fixture.test", body: "y".repeat(600), attachment: file });
+  const held = send();
+  const card = await pending(b.threadId);
+  expect(card.card.subtitle).toContain(`Uploads board deck.pdf (${file}, 13 B)`);
+  expect(card.card.subtitle.indexOf(file)).toBeLessThan(card.card.subtitle.indexOf("[arguments truncated]"));
+  expect(uploads, "nothing is uploaded while the card waits").toHaveLength(uploaded);
+  sessionEntered = false;
+  blockSession = () => {};
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "allow" });
+  await expect.poll(() => sessionEntered, { timeout: 5_000 }).toBe(true);
+  if (revocation === "scope") await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
+  else await mint(b.id, b.threadId);
+  blockSession();
+  blockSession = undefined;
+  const result = await held;
+  if (revocation === "scope") expect(result.body.result.isError).toBe(true);
+  else expect(result.status).toBe(401);
+  expect(uploads, "a revoked send uploads nothing").toHaveLength(uploaded);
+  expect(relayed).toHaveLength(before);
+  if (revocation === "turn") return;
+  await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: null });
+  const allowed = send();
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: (await pending(b.threadId)).card.requestId, behavior: "allow" });
+  expect((await allowed).body.result.isError).not.toBe(true);
+  expect(uploads).toHaveLength(uploaded + 1);
+  expect(uploads.at(-1)).toMatchObject({ request: { toolkit_slug: "gmail", tool_slug: "GMAIL_SEND_EMAIL", filename: "board deck.pdf", mimetype: "application/pdf" }, bytes: "%PDF-1.4 deck" });
+  expect((relayed.at(-1) as any).params.arguments.attachment).toEqual({ name: "board deck.pdf", mimetype: "application/pdf", s3key: `fixture-files/${uploaded + 1}` });
 });
 
 it("does not consume a Gmail draft reservation when the fresh scope check refuses dispatch", async () => {

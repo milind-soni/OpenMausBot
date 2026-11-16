@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR, type AppConfig } from "../config.ts";
+import type { GrokConnector, GrokMove } from "../grok-move-tunnel.ts";
 import { json, readBody } from "../harness/http.ts";
 import { IMPORTED_SKILLS_DIR, importedSkillsFor } from "../imported-skills.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -43,7 +44,20 @@ function fixtureHome() {
   return home;
 }
 
-async function serve({ local = true, home = fixtureHome(), dataDir }: { local?: boolean; home?: string; dataDir?: string } = {}) {
+/** A link that needs no cloudflared: the routes only pass along what it answers. */
+function fakeGrokMove(available = true) {
+  const calls: string[] = [];
+  let open = false;
+  const state = (arrived: GrokConnector["arrived"] = []): GrokConnector => ({ available, ...(open ? { connectorUrl: "https://words.trycloudflare.com/mcp/move/key", expiresAt: 9 } : {}), arrived });
+  const move: GrokMove = {
+    connect: async () => { calls.push("connect"); open = available; return state(); },
+    look: (after) => { calls.push(`look ${after}`); return state(open && after < 1 ? [{ seq: 1, at: 5, text: "{}" }] : []); },
+    end: () => { calls.push("end"); open = false; return state(); },
+  };
+  return { move, calls };
+}
+
+async function serve({ local = true, home = fixtureHome(), dataDir, grokMove = fakeGrokMove(false).move }: { local?: boolean; home?: string; dataDir?: string; grokMove?: GrokMove } = {}) {
   const cfg = { mcpServers: {} } as Pick<AppConfig, "mcpServers" | "features">;
   const bot = { id: `bot-${randomUUID().slice(0, 8)}` };
   let busy = false;
@@ -55,6 +69,7 @@ async function serve({ local = true, home = fixtureHome(), dataDir }: { local?: 
     persistMcpServers: (next) => { cfg.mcpServers = next; },
     machine: () => ({ ...thisMachine(), home, platform: "darwin", env: {} }),
     ...(dataDir ? { dataDir } : {}),
+    grokMove,
   })];
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -86,6 +101,42 @@ describe("the setup import routes", () => {
     const found = await local.call("GET", "/api/setup-import/grok");
     expect(found.headers.get("cache-control")).toBe("no-store");
     expect(await found.json()).toMatchObject({ files: [{ name: "grok-bot-export-drew.json", text: "reply" }], bots: [] });
+  });
+
+  it("opens one link for Grok Bot, hands over what arrived through it, and ends it", async () => {
+    const { move, calls } = fakeGrokMove();
+    const local = await serve({ grokMove: move });
+    const connector = "/api/setup-import/grok/connector";
+    const looked = await local.call("GET", connector);
+    expect(looked.headers.get("cache-control")).toBe("no-store");
+    expect(await looked.json()).toEqual({ available: true, arrived: [] });
+    expect((await local.call("POST", connector, { body: "", type: "text/plain" })).status).toBe(415);
+    expect(calls).toEqual(["look 0"]);
+    const made = await (await local.call("POST", connector, { body: {} })).json() as GrokConnector;
+    expect(made).toEqual({ available: true, connectorUrl: "https://words.trycloudflare.com/mcp/move/key", expiresAt: 9, arrived: [] });
+    expect(await (await local.call("GET", connector)).json()).toMatchObject({ connectorUrl: made.connectorUrl, arrived: [{ seq: 1, at: 5, text: "{}" }] });
+    expect(await (await local.call("GET", `${connector}?after=1`)).json()).toMatchObject({ arrived: [] });
+    for (const after of ["x", "-1", "1.5"]) expect((await local.call("GET", `${connector}?after=${after}`)).status, after).toBe(400);
+    expect(await (await local.call("DELETE", connector)).json()).toEqual({ available: true, arrived: [] });
+    expect(calls).toEqual(["look 0", "connect", "look 0", "look 1", "end"]);
+  });
+
+  it("keeps the Grok Bot link to the owner's own loopback, and says plainly when no link can be made", async () => {
+    const { move, calls } = fakeGrokMove();
+    const local = await serve({ grokMove: move });
+    const connector = "/api/setup-import/grok/connector";
+    for (const auth of ["paired", "service"]) {
+      for (const method of ["GET", "POST", "DELETE"]) expect((await local.call(method, connector, { auth, ...(method === "POST" ? { body: {} } : {}) })).status, `${auth} ${method}`).toBe(403);
+    }
+    for (const method of ["GET", "POST", "DELETE"]) expect((await (await serve({ local: false, grokMove: move })).call(method, connector, method === "POST" ? { body: {} } : {})).status, method).toBe(403);
+    expect((await local.call("PUT", connector, { body: {} })).status).toBe(405);
+    expect(calls).toEqual([]);
+
+    expect(await (await (await serve()).call("POST", connector, { body: {} })).json()).toEqual({ available: false, arrived: [] });
+    const failing = await serve({ grokMove: { ...move, connect: async () => { throw new Error("The link could not be made: cloudflared did not open a tunnel in time."); } } });
+    const failed = await failing.call("POST", connector, { body: {} });
+    expect(failed.status).toBe(502);
+    expect(await failed.json()).toEqual({ error: "The link could not be made: cloudflared did not open a tunnel in time." });
   });
 
   it("deletes an old Cursor sign-in as the routes start, on any server", async () => {

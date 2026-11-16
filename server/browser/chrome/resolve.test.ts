@@ -70,7 +70,7 @@ describe("which Chrome the bots' browser runs", () => {
   it("on a Linux desktop without its own Google Chrome keeps the bundled shell, as a fixed choice", () => {
     const linuxDesktop = (files: string[]) => host("linux", files, { env: { OMB_RESOURCES_PATH: "/opt/OpenMausBot/resources" } });
     expect(resolveChromePlan(linuxDesktop(["/opt/google/chrome/chrome"]), managed)).toMatchObject({ kind: "chrome", chrome: { source: "installed" }, fallback: null });
-    expect(resolveChromePlan(linuxDesktop([]), managed)).toEqual({ kind: "legacy", reason: "Google Chrome is not installed" });
+    expect(resolveChromePlan(linuxDesktop([]), managed)).toEqual({ kind: "legacy", reason: "Google Chrome is not installed", noChrome: true });
     const policy = linuxDesktop(["/opt/google/chrome/chrome", "/etc/opt/chrome/policies/managed/corp.json"]);
     expect(chromePolicyManaged(policy)).toBe(true);
     expect(resolveChromePlan(policy, managed)).toEqual({ kind: "legacy", reason: "Google Chrome here is managed by an organization" });
@@ -89,7 +89,7 @@ describe("which Chrome the bots' browser runs", () => {
     expect(downloaded.replaceAll("\\", "/")).toBe("/data/tools/chrome/153.0.8010.47/linux-arm64/chrome-linux-arm64/chrome");
     expect(resolveChromePlan(host("linux", [downloaded]), managed)).toEqual({ kind: "chrome", chrome: { path: downloaded, source: "downloaded" }, fallback: null });
     expect(resolveChromePlan(host("linux", ["/opt/google/chrome/chrome"]), managed)).toEqual({ kind: "chrome", chrome: { path: "/opt/google/chrome/chrome", source: "installed" }, fallback: chromeForTestingPin("linux", "arm64") });
-    expect(resolveChromePlan({ ...host("linux", []), arch: "ia32" }, managed)).toEqual({ kind: "legacy", reason: "no Chrome is installed and none is pinned for this platform" });
+    expect(resolveChromePlan({ ...host("linux", []), arch: "ia32" }, managed)).toEqual({ kind: "legacy", reason: "no Chrome is installed and none is pinned for this platform", noChrome: true });
   });
 
   it("on a Linux server keeps a browser agent-browser already finds, rather than downloading another", () => {
@@ -132,8 +132,8 @@ describe("which Chrome the bots' browser runs", () => {
   it("downloads only for a platform with a SHA-256 pin, and keeps the bundled shell where none is pinned yet", () => {
     expect(chromeForTestingPin("darwin", "arm64")).toMatchObject({ version: CHROME_FOR_TESTING_VERSION, platform: "mac-arm64", sha256: expect.stringMatching(/^[0-9a-f]{64}$/u) });
     expect(resolveChromePlan(host("darwin", []), managed)).toEqual({ kind: "download", pin: chromeForTestingPin("darwin", "arm64") });
-    expect(resolveChromePlan({ ...host("darwin", []), arch: "x64" }, managed)).toEqual({ kind: "legacy", reason: "no Chrome is installed and none is pinned for this platform" });
-    expect(resolveChromePlan(host("win32", []), managed)).toEqual({ kind: "legacy", reason: "no Chrome is installed and none is pinned for this platform" });
+    expect(resolveChromePlan({ ...host("darwin", []), arch: "x64" }, managed)).toEqual({ kind: "legacy", reason: "no Chrome is installed and none is pinned for this platform", noChrome: true });
+    expect(resolveChromePlan(host("win32", []), managed)).toEqual({ kind: "legacy", reason: "no Chrome is installed and none is pinned for this platform", noChrome: true });
   });
 
   it("knows the headless shell by name", () => {

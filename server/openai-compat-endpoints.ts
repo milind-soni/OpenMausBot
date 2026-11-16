@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
+import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, probeOllama } from "./drivers/ollama.ts";
 
 export const ADDED_ENDPOINT_PREFIX = "openai-compat-";
 
@@ -39,6 +40,13 @@ export function isAddedEndpoint(instanceId: string, entry: InstanceConfig | unde
   return entry?.driver === "openai-compat" && instanceId.startsWith(ADDED_ENDPOINT_PREFIX);
 }
 
+/** Ollama and LM Studio are added once per address: a second entry only shows the same engine twice. Returns why, or null. */
+export function localServerAlreadyAdded(instances: InstanceConfigMap, rawUrl: string): string | null {
+  const url = endpointBaseUrl(rawUrl);
+  const existing = url ? Object.entries(instances).find(([instanceId, entry]) => isAddedEndpoint(instanceId, entry) && endpointDisplayUrl(entry.config) === url) : undefined;
+  return existing ? `"${existing[1].displayName ?? existing[0]}" at ${url} is already an engine (${existing[0]}). Use that one; do not add it again.` : null;
+}
+
 export function addEndpoint(instances: InstanceConfigMap, body: AddEndpoint): { instanceId: string } | { error: string } {
   const url = endpointBaseUrl(body.url);
   if (!url) return { error: "Enter an http or https base URL without a user name, password or query string." };
@@ -52,6 +60,47 @@ export function addEndpoint(instances: InstanceConfigMap, body: AddEndpoint): { 
   return { instanceId };
 }
 
+/** A new base URL and, optionally, a new key for an added server, in place: its id, models and bots stay. A saved key is
+ * only sent on to the origin (scheme, host and port) it was entered for, so a move to another origin, or from https to
+ * http, needs the key again. Ollama's placeholder key is no secret and moves with it. */
+export function changeEndpointAddress(
+  instances: InstanceConfigMap, instanceId: string, change: { url?: string; apiKey?: string },
+): { addressChanged: boolean } | { error: string; status: 400 | 409 } {
+  const entry = instances[instanceId];
+  const config = (entry.config ?? {}) as Record<string, unknown>;
+  const saved = typeof config.url === "string" ? endpointBaseUrl(config.url) : null;
+  const url = change.url === undefined ? saved : endpointBaseUrl(change.url);
+  if (!url) return { status: 400, error: "Enter an http or https base URL without a user name, password or query string." };
+  if (change.apiKey !== undefined && /^https?:\/\//i.test(change.apiKey)) {
+    return { status: 400, error: "That API key looks like a URL. Paste the secret key itself, not a web address." };
+  }
+  if (change.apiKey === undefined && config.key !== OLLAMA_PLACEHOLDER_KEY && (!saved || new URL(url).origin !== new URL(saved).origin)) {
+    return { status: 400, error: "Enter the API key again: a saved key is only sent to the server it was entered for." };
+  }
+  if (config.catalog && url !== saved) {
+    const others = Object.fromEntries(Object.entries(instances).filter(([id]) => id !== instanceId));
+    const duplicate = localServerAlreadyAdded(others, url);
+    if (duplicate) return { status: 409, error: duplicate };
+  }
+  entry.config = { ...config, url, ...(change.apiKey !== undefined ? { key: change.apiKey } : {}) };
+  return { addressChanged: url !== saved };
+}
+
+/** Whether the server at `url` lists its models with `key`: Ollama's own list for an Ollama server, else /models. */
+export async function endpointModelsReadable(config: { url: string; key: string; catalog?: unknown }, timeoutMs = 8_000): Promise<boolean> {
+  if (isOllamaServer(config)) return ["ready", "no-models"].includes((await probeOllama(config.url, { key: config.key, timeoutMs })).state);
+  try {
+    const response = await fetch(`${config.url}/models`, {
+      headers: { authorization: `Bearer ${config.key}` }, redirect: "error", signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) return false;
+    const body = await response.json() as { data?: unknown } | unknown[];
+    return Array.isArray(body) || Array.isArray((body as { data?: unknown }).data);
+  } catch {
+    return false;
+  }
+}
+
 export function withEndpointUrls(described: unknown, configs: InstanceConfigMap): unknown {
   if (!Array.isArray(described)) return described;
   return described.map((instance: { instanceId?: string }) => {
@@ -59,6 +108,7 @@ export function withEndpointUrls(described: unknown, configs: InstanceConfigMap)
     if (!entry || !isAddedEndpoint(instance.instanceId!, entry)) return instance;
     const url = endpointDisplayUrl(entry.config);
     const managedModels = (entry.config as { managedModels?: unknown } | undefined)?.managedModels;
-    return { ...instance, ...(url ? { url } : {}), ...(Array.isArray(managedModels) ? { managedModels } : {}) };
+    const placeholderKey = (entry.config as { key?: unknown } | undefined)?.key === OLLAMA_PLACEHOLDER_KEY;
+    return { ...instance, ...(url ? { url } : {}), ...(Array.isArray(managedModels) ? { managedModels } : {}), ...(placeholderKey ? { placeholderKey } : {}) };
   });
 }

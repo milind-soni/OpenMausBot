@@ -1,7 +1,7 @@
 // The key itself is never kept, only a hash of it beside the provider's base URL.
 import { createHash } from "node:crypto";
 
-export const KEY_REJECTED_REASON = "The provider rejected this key. Change it in Settings → API keys.";
+export const KEY_REJECTED_REASON = "The provider rejected this key. Change it in Settings → AI.";
 
 const rejected = new Set<string>();
 const listeners = new Set<() => void>();

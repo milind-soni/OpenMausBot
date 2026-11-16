@@ -3,12 +3,13 @@ import { Loader2, RefreshCw, RotateCcw } from "lucide-react";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { recoveryUnderWay, type CloudComputerRecovery, type CloudComputerRecoveryState } from "../../shared/cloud-computer-recovery";
+import { DISK_WARN_PERCENT, recoveryUnderWay, type CloudComputerAnswering, type CloudComputerDisk, type CloudComputerRecovery, type CloudComputerRecoveryState } from "../../shared/cloud-computer-recovery";
 
 const POLL_MS = 15_000;
 
 const LINES: Record<CloudComputerRecoveryState, LocaleKey> = {
   "not-responding": "computer.recovery.notResponding",
+  restoring: "computer.recovery.restoring",
   restarting: "computer.recovery.restarting",
   replacing: "computer.recovery.replacing",
   restarted: "server.cloudComputer.restarted",
@@ -25,17 +26,40 @@ export function recoveryLine(recovery: CloudComputerRecovery, name: string): str
   return t(LINES[recovery.state], { name });
 }
 
+const clock = (at: number) => new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+/** Whether the computer answers its commands, in one line; nothing while it is awake and `quiet`, or was never asked. */
+export function answeringLine(answering: CloudComputerAnswering | null, quiet: boolean): string | null {
+  if (!answering) return null;
+  if (answering.state === "awake") return quiet || answering.lastAnsweredAt === null ? null : t("computer.answering.awake", { time: clock(answering.lastAnsweredAt) });
+  if (answering.state === "not-responding") return t("computer.answering.notResponding", { time: clock(answering.since ?? Date.now()) });
+  return t(answering.state === "restoring" ? "computer.answering.restoring" : "computer.answering.waking");
+}
+
+/** The disk's part of the state line: how full it is once that matters, and when its caches were last cleared. */
+export function diskLine(disk: CloudComputerDisk | null): string | null {
+  if (!disk) return null;
+  const parts = [
+    disk.percent >= DISK_WARN_PERCENT ? t("computer.disk.full", { percent: disk.percent }) : null,
+    disk.spaceClearedAt !== undefined ? t("computer.disk.clearedSpace", { time: clock(disk.spaceClearedAt) })
+      : disk.clearedAt !== undefined ? t("computer.disk.cleared", { time: clock(disk.clearedAt) }) : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length ? parts.join(" ") : null;
+}
+
 /** What MausBot is doing about a cloud computer that stopped answering, and the person's Restart computer and Replace computer. */
 /** `always`: the buttons show even while nothing is wrong (Advanced); otherwise only once MausBot is dealing with the computer. */
 export function CloudComputerRecoveryRow({ botId, name, always }: { botId: string; name: string; always?: boolean }) {
   const [recovery, setRecovery] = useState<CloudComputerRecovery | null>(null);
+  const [answering, setAnswering] = useState<CloudComputerAnswering | null>(null);
+  const [disk, setDisk] = useState<CloudComputerDisk | null>(null);
   const [pending, setPending] = useState<"restart" | "replace" | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const path = `/api/bots/${botId}/computer/recovery`;
 
   const refresh = useCallback(() => {
-    api<{ recovery: CloudComputerRecovery | null }>(path, { background: true })
-      .then((body) => setRecovery(body.recovery ?? null))
+    api<{ recovery: CloudComputerRecovery | null; answering?: CloudComputerAnswering | null; disk?: CloudComputerDisk | null }>(path, { background: true })
+      .then((body) => { setRecovery(body.recovery ?? null); setAnswering(body.answering ?? null); setDisk(body.disk ?? null); })
       .catch(() => {});
   }, [path]);
 
@@ -61,9 +85,12 @@ export function CloudComputerRecoveryRow({ botId, name, always }: { botId: strin
   };
 
   const busy = pending !== null || Boolean(recovery && recoveryUnderWay(recovery.state));
-  if (!always && !recovery && !result) return null;
+  // While MausBot is dealing with the computer its own line says more than this one.
+  const state = recovery && recoveryUnderWay(recovery.state) ? null : [answeringLine(answering, !always), diskLine(disk)].filter(Boolean).join(" ") || null;
+  if (!always && !recovery && !result && !state) return null;
   return (
     <div className="mt-3" data-testid="cloud-computer-recovery">
+      {state && <p className="text-[12px] leading-5 text-ink-secondary" role="status" data-testid="cloud-computer-answering">{state}</p>}
       {recovery && <p className="text-[12px] leading-5 text-ink-secondary" role="status">{recoveryLine(recovery, name)}</p>}
       {result && <p className="text-[12px] leading-5 text-danger" role="alert">{result}</p>}
       <div className="mt-2 flex flex-wrap gap-2">

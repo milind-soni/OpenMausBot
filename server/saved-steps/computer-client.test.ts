@@ -60,7 +60,7 @@ describe("openComputerCaller", () => {
 
   it("reports a JSON-RPC error as a failed call", async () => {
     const caller = await recordingComputer();
-    expect(await caller.call("unknown_tool", {}, signal)).toEqual({ ok: false, error: "MCP request failed; inspect the configured integration" });
+    expect(await caller.call("unknown_tool", {}, signal)).toEqual({ ok: false, error: "MCP request failed; inspect the configured integration (method tools/call, JSON-RPC code -32602)" });
   });
 
   it("gives every call the 60 second step timeout, past the control gate's longest hold, and reports a timeout as a failed call", async () => {

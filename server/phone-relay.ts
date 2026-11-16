@@ -22,6 +22,7 @@ import { MANAGED_COMPANION_ENDPOINT_FIELD } from "../electron/managed-companion-
 import { createRelayTokenService, validRelayGrant, type RelayGrant } from "../electron/relay-token.mjs";
 import { isLoopbackHost } from "../electron/server-address.mjs";
 import { writeFileAtomic } from "./atomic.ts";
+import { reportableServerVersion } from "./environment.ts";
 import { bearerToken, PROXY_HEADERS } from "./request-auth.ts";
 import { isPairingCredential, type SessionRegistry } from "./sessions.ts";
 import { describeTunnelAccount, FLEET_CREDENTIAL_ENV, fleetCredential, openTunnelCredentials } from "./tunnel.ts";
@@ -177,6 +178,7 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
     return null;
   }
   const { sessions, dataDir } = options;
+  const version = reportableServerVersion();
   const holder = tunnelHolder(options.env, dataDir);
   if (holder) {
     log(`phone relay: off: ${holder}. Use the relay on a machine signed in with \`openmausbot login --relay\`, which holds no tunnel address.`);
@@ -334,7 +336,7 @@ export function startPhoneRelay(options: PhoneRelayOptions): PhoneRelay | null {
       if (method === "GET" && path === "/api/companion/endpoints") {
         if (!bearer) return reply(res, 401, { error: "pair this device first" });
         const route = qrRoute(options.publicOrigin());
-        return reply(res, 200, { serverName: options.serverName(), endpoints: route.endpoints ?? [], ...(descriptor() ? { e2e: descriptor() } : {}) });
+        return reply(res, 200, { serverName: options.serverName(), endpoints: route.endpoints ?? [], ...(version ? { version } : {}), ...(descriptor() ? { e2e: descriptor() } : {}) });
       }
     }
     void pairing.run(context, () => Promise.resolve(options.handle(req, res))).catch(() => {

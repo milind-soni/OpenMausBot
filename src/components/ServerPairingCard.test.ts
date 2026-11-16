@@ -58,6 +58,16 @@ describe("pairing devices from a hosted server's settings", () => {
     expect(html).toContain('data-phone-pairing="server"');
   });
 
+  it("says Pair a computer, not Pair a phone, where the code is for another computer", () => {
+    const owner = { kind: "loopback" as const };
+    const computer = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: owner, simple: true, reveal: false, forComputer: true }));
+    expect(computer).toContain(">Pair a computer<");
+    expect(computer).not.toContain("Pair a phone");
+    const chatOnly = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: { kind: "session", id: "s", label: "Mac", scopes: ["client"], expiresAt: 1 }, forComputer: true }));
+    expect(chatOnly).toMatch(/<button[^>]*aria-disabled="true"[^>]*>Pair a computer<\/button>/);
+    expect(renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: owner, simple: true }))).toContain(">Pair a phone<");
+  });
+
   it("offers no pairing code on a hosted workspace, where people sign in through the portal", () => {
     const admin = { kind: "session" as const, id: "s", label: "Hosted workspace", scopes: ["admin", "client"], expiresAt: 1 };
     const html = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: admin, initialPairingCodes: false }));

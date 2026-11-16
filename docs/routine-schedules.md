@@ -84,16 +84,170 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
   routine and while one runs (Automations → *Keep this computer awake for
   routines*, on by default; a closed lid still sleeps). For true 24/7, run
   OpenMausBot on a VPS — see [deploy-vps.md](deploy-vps.md).
-- Existing catch-up policy remains: up to 12 hours late, one missed occurrence
-  can be dispatched; older work receives a missed-run receipt. The next date
-  advances without replaying every missed minute. Queued/running/waiting work
-  for the same cron routine does not accumulate overlapping copies (a run is
-  waiting while teammates still owe it results on the job runtime,
-  docs/runtime-contract.md §9).
+- Catching up after downtime (the app closed, the computer asleep, a Cloud
+  home off or restarting): for each routine, the newest occurrence that came
+  due meanwhile runs late, if it is no more than 12 hours past its time, and
+  the ones before it close on one **Missed** row that counts them and says why
+  ("Missed 3 scheduled runs because this computer was asleep or OpenMausBot
+  was not running"; on a Cloud, "because this Cloud was asleep or
+  restarting"). That row is shown as already seen: the newest one is running,
+  so it asks nothing of you. When even the newest is more than 12 hours old,
+  nothing runs: all of them close on one Missed row that you are told about.
+  The next date advances without replaying every missed minute. Routines found
+  late in the same pass start 15 seconds apart (at most 40 steps, then again
+  from the first), so a long downtime does not start them all in one second.
+  A "when my limit resets" routine runs however late it is found. When the
+  scheduler itself got to a routine late because it was waiting on another
+  run's start (a pass ended after the run came due), the row says that
+  instead ("…because the scheduler was held up starting another run") and the
+  occurrences passed over are not counted as missed in the health report.
+  Queued/running/waiting work for the same cron routine does not accumulate
+  overlapping copies (a run is waiting while teammates still owe it results on
+  the job runtime, docs/runtime-contract.md §9).
+- **The occurrence ledger.** Beside `routines.json` the scheduler keeps
+  `routines.ledger.jsonl`: one record per scheduled occurrence of each routine,
+  keyed by the routine's id and the scheduled-for time. A record says how the
+  occurrence ended (`ran`, `failed`, `missed` or `skipped`, or that it is
+  `queued` or `running`), a fixed word for why, how often it started, when its
+  first start was, and which run rows it produced. It holds ids, times, counts
+  and fixed words only: never a name, a prompt or an output. The run rows stay
+  in `routines.json`, and a row and its routine's next time are still saved in
+  one write; the ledger is worked out from the rows at every save.
+  - **Each occurrence starts once.** Before the scheduler makes a row for an
+    occurrence it asks the ledger whether that occurrence already has a
+    record; one that has is not made again, whatever brought it back (a
+    `routines.json` put back from a copy, a clock set back, an edit made while
+    the clock was wrong, a second process on the same files). A start is
+    appended to the ledger and flushed to disk before its turn begins. A retry
+    is a further start of the same record, counted on it.
+  - **A ledger that cannot be written never stops a schedule.** A write that
+    fails is logged once and made again with the next save; it fails neither
+    the save nor any other run. A scheduled start waits at most three
+    scheduler passes for the ledger; after that it starts without a record,
+    and so does every later one until the ledger can be written again, with
+    `routines.json` alone keeping a run from starting twice, as before there
+    was a ledger. Meanwhile the health report says `unreadable: true`. A run
+    someone started by hand never waits for the ledger.
+  - **A clock that was ahead.** A row closed without starting says nothing
+    about a time that has not come: a record reaching past now is cut back to
+    now when that is seen, and cut again to just before an occurrence that
+    comes due inside it, so every occurrence after the clock is put right is
+    made and run. A record of a run that did start keeps its time.
+  - **Leases.** A started occurrence's record carries a lease naming the
+    machine and process that run it, renewed every minute for three, and given
+    up at a clean shutdown. A process that starts on the same machine takes a
+    cut run over at once (only one server holds a data folder). One that
+    starts on another machine, a copy of the disk, waits until the lease has
+    lapsed before it starts that run again.
+  - **A restore from a backup.** A small file, `routines.ledger.mark`, keeps
+    the ledger's sequence number and the time of its last change. A ledger
+    with a lower number than the mark was brought back from a backup: every
+    occurrence up to the mark's time already had its turn, so runs the backup
+    held unfinished are let go ("Not run again: this schedule was restored
+    from a backup…") and the occurrences up to then close on one counted row
+    per routine; what came due after that is caught up as after any downtime.
+    When a whole disk is restored, mark included, there is nothing to tell it
+    by, and the catch-up rule above applies.
+  - **Size.** The file is appended to and rewritten whole, through a temporary
+    file and a rename, once it holds 500 more lines than records. Records that
+    have ended are all kept for 48 hours; after that each routine keeps its
+    200 newest for 90 days, and the file never holds more than 10,000. A
+    record that has not ended is never dropped. A torn last line (a crash in
+    the middle of an append) is dropped at the next start and the rest kept;
+    a ledger that is lost, or left empty, is made again from the run rows,
+    and its sequence number carries on from the mark; neither is taken for a
+    restore.
+  - **Earlier versions.** A version from before the ledger reads and writes
+    `routines.json` as it always did and ignores the two new files, so going
+    back loses no routine and no run row. Coming forward again, the ledger
+    takes in the rows that version made. At the first start with the ledger,
+    it is made from the run rows already saved; none is moved or dropped.
+  - `GET /api/routines?history=<routine id>` adds `occurrences`: that
+    routine's records, newest first, for a routine the asker may see.
+- The run rows in `routines.json` are still capped at 2,000. When the cap is
+  reached, the row dropped is the oldest ended one of the routine that holds
+  the most ended rows, so a routine that runs every five minutes uses up its
+  own history and not the others'.
+- **A run whose turn is gone.** A run that shows as running while its
+  conversation has had no turn of its own for five minutes of scheduler
+  passes, and has sent no event in that time, is treated like a run that
+  failed: it starts once more ("Starting again shortly after a failure: its
+  turn ended without reporting back"), and a second loss fails it. A run that
+  waits on you or on work it handed on is never taken for lost, nor is a room
+  goal's run, nor one whose turn is parked waiting for a computer another
+  conversation holds: that turn resumes by itself when the computer is free. The five minutes are added up a pass at a time, so the hours a
+  computer slept are not in them.
+- Every occurrence that does not run leaves a **Missed** row with its reason in
+  the routine's log. Occurrences skipped behind the same earlier run share one
+  row, which counts them ("Skipped 12 scheduled runs because the previous run
+  of this routine is still running") and keeps the first and the last time, so
+  a schedule every minute behind a long run adds one row. Such a row is shown
+  as already seen and is never the routine's "latest run", a failure in a row,
+  or one of its "N of M runs OK": it asks nothing of you. A run that has waited
+  on you for 30 minutes when an occurrence is skipped behind it is the
+  exception: you are told once, and that row shows under To review.
+- Failures never turn a routine off. When a routine's cloud desktop does not
+  start three runs in a row, the routine stays on and its scheduled runs are
+  spaced out instead: the next one starts no sooner than an hour after the
+  third failure, and four hours after each later one, because every such run
+  spends the bot's AI for minutes before it fails. You are told once, the list
+  says "Its cloud desktop did not start N runs in a row", and the occurrences
+  held back share one Missed row. While it is spaced, the routine's next due
+  time (what wakes a sleeping Cloud, keeps a desktop awake, and holds back a
+  restart) is the first occurrence after the spacing, not one it will skip.
+  The first run whose cloud desktop starts, **Run now**, or any change to the
+  routine ends the spacing.
+- A routine that an earlier version turned off after three such failures is
+  turned back on, once per installation, at the first start of a version with
+  this rule, when it can be told apart from one you turned off: it is off
+  without a hold, its three newest results are that failure, the third ended
+  within the last 30 days, and the routine has not been changed since that
+  moment. Its bot says so in one quiet line in its own chat ("Turned back on:
+  …"), with nothing to answer. One you edited after it was turned off, one
+  that a workspace restore brought back (a restore leaves every routine off
+  and counts as a change), one switched off longer ago, or one whose failed
+  runs are no longer in the log, stays off: turn it on in the list. A copy
+  frozen by a move to another home turns nothing back on until the freeze
+  lifts.
+- A run stops when it reaches its limit, ends as failed with the limit named
+  ("Stopped: this run ran longer than the 3-hour limit"), and the schedule
+  carries on. A routine may set its own limit, 5 minutes to 24 hours: that one
+  counts the time since the run started, less the time its approvals and
+  questions were open. Without one, the default applies to every run, whether
+  the schedule, an event or **Run now** started it: 3 hours of work for a
+  bot's run, 12 hours for a room goal's run (which stays running across every
+  member's turn). Work is the time the run spent running since its current
+  start: the time it is queued (behind a busy bot, for its one retry, for a
+  usage limit's reset) and the time it waits (on your approval or answer, on a
+  conversation left with you, on work it handed to teammates) is not in it.
+  It is added up a minute at a time while the app runs, so the hours a
+  computer slept, or a clock that was changed, are not in it either.
+- A scheduled run queued behind its busy bot for an hour ends as Missed ("Did
+  not run: the bot was busy for more than 60 minutes"), and the next
+  occurrence starts as usual. Only the time it was seen waiting counts, not
+  the time the computer slept or the app was closed, and the count starts
+  again if the run starts and is queued once more. A run an event or **Run
+  now** started has no next occurrence and waits as long as it takes; so does
+  a run waiting behind its own routine's earlier run (overlap **queue**).
+- Stopping a run's turn is given 10 seconds. If the AI has not confirmed the
+  stop by then, the scheduler goes on with the other routines, but starts no
+  new run of that routine until the stop is confirmed or 5 minutes have
+  passed, so two runs of one routine never work side by side. The stop is sent
+  again each minute, and the stopped run's row says so; a stop that was never
+  confirmed stays written on it.
+- `routines.json` is written through a temporary file and a rename. If it
+  cannot be read, nothing in it is overwritten: no routine runs, changes are
+  refused, the Automations list says so, a copy of the file is kept beside it
+  (`routines.json.unreadable-…`, one per content, five at most), and the file is
+  read again every minute. Once it can be read, the desktop app and a
+  self-hosted server load it and do again what start does with routines
+  (phone adoption, run-on-startup, the quiet lines above); a Cloud home
+  restarts itself instead, because who owns its routines is settled only at
+  start.
 - A run that asks you for an approval or an answer waits for you. Its card and
   the Routines log say what it waits for ("Waiting for your approval to use
   COMPOSIO_SEARCH_TOOLS"), the approval notification names the routine, and the
-  time it waits does not count toward its optional run limit, which bounds
+  time it waits does not count toward its run limit, which bounds
   active work only. If the engine's own wait for an approval runs out with
   nobody's answer, the run stops with "Stopped: nobody answered the approval to
   use …" and the routine-failed notification. A run still waiting when its

@@ -12,6 +12,7 @@ import { directoryCallTarget, isDirectoryTool } from "./mcp-directory.ts";
 import { QUERY_TOOL, QUERY_TOOL_NAME, ResultStore, answerQuery, describeShape, exampleQuery } from "./mcp-shape.ts";
 import { fitToolList } from "./mcp-tool-schema.ts";
 import { DEFAULT_RESULT_BUDGET, type HeldResult, trimResultText, trimStructured } from "./mcp-trim.ts";
+import { descendantsOf, signalTree, stopTree, type TreeProcess } from "./proc-descendants.ts";
 import { killCliTree } from "./procs.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
@@ -193,8 +194,11 @@ function trimCallResult(result: Json, tool: string): boolean {
     trimmed = true;
   }
 
-  // Trim structuredContent too, or the provider gets a second full copy; structurally only, so it stays valid against the output schema.
-  if (trimmed && result.structuredContent && typeof result.structuredContent === "object") {
+  // Claude Code prefers structuredContent over text, hiding the shaping note. Without an outputSchema,
+  // omit it so the model sees the note; schema-declaring tools retain the structural trim.
+  if (trimmed && !outputSchemas.get(tool)) {
+    delete result.structuredContent;
+  } else if (trimmed && result.structuredContent && typeof result.structuredContent === "object") {
     if (structuredIsText && keptValue && typeof keptValue === "object") {
       result.structuredContent = keptValue as Json;
     } else {
@@ -214,6 +218,7 @@ const observer = (() => {
   } catch { return fail("invalid MCP apps configuration"); }
 })();
 const appOnly = new Set<string>();
+const outputSchemas = new Map<string, boolean>();
 const spec = upstreamSpec();
 if (SPILL_DIR) sweepSpill(SPILL_DIR);
 
@@ -230,22 +235,41 @@ const child = spawn(resolved.command, resolved.args, {
   ...(process.platform === "win32" ? { windowsHide: true } : {}),
 });
 
-// The real server must not outlive a killed gate, and on Windows only taskkill /T reaps a tree.
-let reaping = false;
-const reapChild = () => {
-  if (reaping) return;
-  reaping = true;
-  void killCliTree(child);
+// The real server must not outlive its gate: a launcher (npx, a shell) does not pass a signal on to what it started, so
+// each process below the gate is signalled itself. On Windows only taskkill /T reaps a tree.
+const END_OF_INPUT_GRACE_MS = 5_000;
+const TREE_STOP_GRACE_MS = 1_500;
+const tree: TreeProcess[] = [];
+const captureTree = () => {
+  if (!child.pid) return;
+  const seen = new Set(tree.map((one) => `${one.pid}:${one.start}`));
+  for (const one of descendantsOf(child.pid)) {
+    if (!seen.has(`${one.pid}:${one.start}`)) tree.push(one);
+  }
 };
-process.on("SIGTERM", () => {
-  reapChild();
-  process.exit(0);
+let stopping: Promise<void> | undefined;
+const stopUpstream = (): Promise<void> => stopping ??= (async () => {
+  captureTree();
+  if (process.platform === "win32") {
+    await killCliTree(child, TREE_STOP_GRACE_MS);
+    return;
+  }
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+  await stopTree(tree, TREE_STOP_GRACE_MS);
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+})();
+const leave = (code: number) => void stopUpstream().finally(() => process.exit(code));
+process.on("SIGTERM", () => leave(0));
+process.on("SIGINT", () => leave(0));
+process.on("exit", () => {
+  if (stopping) return;
+  if (process.platform === "win32") void killCliTree(child);
+  else {
+    captureTree();
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    signalTree(tree, "SIGTERM");
+  }
 });
-process.on("SIGINT", () => {
-  reapChild();
-  process.exit(0);
-});
-process.on("exit", reapChild);
 
 child.on("error", (error) => {
   process.stderr.write(`mcp-gate(${NAME}): could not start ${resolved.command}: ${String(error)}\n`);
@@ -323,7 +347,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
   child.stdin.write(`${line}\n`);
 });
-process.stdin.on("end", () => child.stdin.end());
+process.stdin.on("end", () => {
+  child.stdin.end();
+  captureTree();
+  setTimeout(() => leave(0), END_OF_INPUT_GRACE_MS);
+});
 
 createInterface({ input: child.stdout }).on("line", (line) => {
   if (!line.trim()) return;
@@ -356,6 +384,7 @@ createInterface({ input: child.stdout }).on("line", (line) => {
     observer?.listed(result);
     for (const tool of result.tools) {
       if (!isRecord(tool) || typeof tool.name !== "string") continue;
+      outputSchemas.set(tool.name, tool.outputSchema !== undefined);
       if (modelVisible(tool)) appOnly.delete(tool.name);
       else appOnly.add(tool.name);
     }
@@ -394,4 +423,4 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 });
 
-child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+child.on("exit", (code, signal) => leave(code ?? (signal ? 1 : 0)));

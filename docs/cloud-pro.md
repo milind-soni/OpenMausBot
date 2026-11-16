@@ -969,7 +969,7 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   | --- | --- |
   | Claude Code (2.1.257 or newer) | `--restricted` and only Read, Grep, Glob, Edit, Write and WebSearch: no Bash, PowerShell or WebFetch; reads outside its folder refused outright (`blockReadsOutsideWorkingDirectories`, plus deny rules); the folder's own `.mcp.json` and settings never load; only the harness's own MCP tools are pre-allowed, every other call asks the owner. The session's `init` must list no command-running tool, or the turn stops. An older Claude Code refuses. |
   | Codex / ChatGPT (codex-cli 0.159) | no environment (`environments: []`: no `exec_command`, `apply_patch` or `view_image`, and calls to them are refused), `features.shell_tool`, `unified_exec` and `view_image` off and web search disabled, proven in `config/read` before the turn starts, or the turn refuses. |
-  | API models (OpenAI-compatible, MiniMax, Mistral, Grok API) | no shell or file tool on the machine at all; only the harness's own agents tools are pre-allowed, every other MCP call asks the owner, and no owner's "Always allow this session" applies or is kept. |
+  | API models (OpenAI-compatible, MiniMax, Mistral, Grok API) | no shell or file tool on the machine at all; only the harness's own agents tools are pre-allowed, every other MCP call asks the owner, and no owner's "Allow for this session" applies or is kept. |
   | Cursor, Qwen, Gemini, Hermes, Pi, OpenCode, Grok Build, Antigravity, Droid, Kimi, a custom ACP engine, Boat | refused: each runs its own shell or reads files outside its folder without asking in Ask (Qwen, Gemini, OpenCode and Pi could have it switched off; that needs a separate process per guest conversation, a follow-up). |
 - Everything the owner's own devices write carries one owner identity, so
   pairing a device again (or revoking one) never makes the owner's earlier
@@ -1122,9 +1122,11 @@ boot id while its pids start again from 1, so the lease names its pid
 namespace and its process's start time too), and runs two children as `maus`: the
 server on `127.0.0.1:8799` (webhooks on `127.0.0.1:8800`) and Caddy on
 `:8080`. It stays a small root supervisor: if either child exits, both stop
-and Fly restarts the machine. The one exception: after a restore commits
-(a backup restored in Settings), the server exits with code 75
-(`server/restart.ts`) and the launcher starts only the server again.
+and Fly restarts the machine. Two exceptions (`server/restart.ts`): after a restore
+commits (a backup restored in Settings), the server exits with code 75 and the
+launcher starts only the server again; after a crash (exit 70 from
+`server/crash-guard.ts`, or killed by the system, as out of memory) it starts the
+server again after 1, 2, 5, 15 and 30 s, then gives up so Fly restarts the machine.
 
 The machine's secrets (`OMB_CLOUD_BOOTSTRAP_SECRET` and the relay tokens
 `OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`,
@@ -1719,6 +1721,10 @@ wait for the next read, `truncated: true`):
     "botId": "<uuid>", "threadId": "<uuid>", "seq": 12 }],
   "turns": { "started15m": 6, "failed15m": 3, "started24h": 40, "failed24h": 5 },
   "routines": [{ "routineId": "<uuid>", "status": "failed", "at": 1790000200000, "consecutiveFailures": 2 }],
+  "schedule": { "v": 1, "seq": 4182, "unreadable": false, "nextDueAt": 1790086400000, "oldestUnconfirmed": null,
+    "lastConfirmed": { "dueAt": 1790000000000, "startedAt": 1790000001250, "state": "ran" },
+    "due": { "boot": { "ran": 1, "failed": 0, "missed": 0, "late": 0, "retried": 0 },
+             "day":  { "ran": 1, "failed": 0, "missed": 0, "late": 0, "retried": 0 } }, "slowStops": 0 },
   "engines": [{ "kind": "codex", "used": true, "available": true, "authenticated": false, "version": "0.130.0" }],
   "connectors": { "checkedAt": 1790000000000, "failed": false, "items": [{ "slug": "gmail", "connected": false }] },
   "browser": { "available": true, "installing": false, "interrupted": 0 },
@@ -1794,7 +1800,42 @@ place's state (`shared/place-view.ts`); a cause the server words itself
 else `unknown`. A turn that ends in `shutdown_timeout`, `auth_required`,
 `update_required`, `spawn_error` or `rpc_error` without a failed row of its own
 counts once too. `turns` counts turns started and failed rows per minute;
-`routines` keeps each routine's last outcome and its failures in a row.
+`routines` gives, for each routine that is on and each outside trigger, its last
+outcome and its failures in a row, counted from the saved run rows at every read,
+so a restart does not start the count again. A row that only counts occurrences
+skipped while the routine was at work is not a result and is left out.
+
+**`schedule`** says what is due on this home, what has not started and what
+last did (`server/routine-schedule-report.ts`), worked out from the occurrence
+ledger (docs/routine-schedules.md) each time the report is read, on every page
+of a truncated one too. It is about scheduled occurrences only: one firing of a
+routine that is on and runs by the clock. Runs a person, a start-up, a webhook
+or a connected-app event started are not in it, and neither are routines with
+checks, which make no run when nothing is new. Times are this home's clock in
+epoch milliseconds; counters run from 0 to 1e9.
+
+| Field | Meaning |
+| --- | --- |
+| `v` | `1` |
+| `seq` | Goes up by at least 1 with every change to this section other than the day's window moving: a row made, started, finished or closed, a routine added, changed, turned on or off or deleted, `unreadable` changing. It is saved with the ledger, so a restart never lowers it; a lower value means the schedule was restored from a backup. Renewing a run's lease does not raise it |
+| `unreadable` | The saved routines cannot be read, so nothing runs; or the ledger cannot be written, so runs start without it and this section cannot say what is due. The next three fields are then `null` |
+| `nextDueAt` | The earliest scheduled-for time among occurrences that have no run row yet, over routines whose bot takes runs now; `null` when nothing is scheduled. It may be past |
+| `oldestUnconfirmed` | The due occurrence with the earliest scheduled-for time of which no attempt has started: `{ dueAt, state, since }`, with `state` `due` (no run row yet; `since` is `dueAt`) or `queued` (a row waits to start; `since` is when it was made). `null` when every due occurrence is decided. A routine whose bot is paused counts here too |
+| `lastConfirmed` | The decided occurrence with the latest scheduled-for time: `{ dueAt, startedAt, state }`. `state` is `running` (started and not finished: waiting on a person, or for its retry, included), `ran`, `failed`, `missed` or `skipped`; `startedAt` is when its first attempt started, `null` for `missed` and `skipped`. A record that counts several occurrences stands at the last of them |
+| `due.boot`, `due.day` | `{ ran, failed, missed, late, retried }` since this process started, and over the last 24 hours from the saved ledger: occurrences that finished well; that finished failed (a run someone stopped after it started counts here); that were closed without starting (`missed` and `skipped` together, each occurrence a record counts); whose first attempt started more than 5 minutes after its time; and starts after the first. Occurrences passed over only because the scheduler was held up starting another run are not counted as missed |
+| `slowStops` | Since boot, the times stopping a turn took the scheduler longer than 10 seconds and it went on without waiting |
+
+What a reader may rely on: an occurrence that is due and has not started
+shows in `oldestUnconfirmed` at or before its time; a past `nextDueAt` always
+comes with it; the report right after an occurrence's first start names it in
+`lastConfirmed` (the start is written to the ledger before the turn begins, unless the ledger cannot be written),
+unless one due later is already decided; and after a boot an overdue
+occurrence shows as `due` or `queued` until the scheduler starts it or closes
+it as missed, never moved past in silence. Two gaps are known: a routine that
+also runs at start-up and is found more than 12 hours late runs its start-up
+run in place of the missed occurrence, which gets no record; and occurrences
+that fall while a routine is held (its owner left) are not recorded, because a
+held routine is off.
 
 **What it never carries:** a failure's words, a bot's name, a thread's title,
 a prompt, a URL, an email address, a token, or an engine's account

@@ -153,12 +153,17 @@ describe("container images", () => {
     expect(last(server, "USER")).toBe("maus");
     expect(last(server, "VOLUME")).toBe('["/data"]');
     expect(last(server, "CMD")).toBe('["node", "dist-server/server-launcher.js"]');
+    // A container platform runs the image with no --init: the image is its own.
+    expect(last(server, "ENTRYPOINT")).toBe('["/usr/bin/tini", "-s", "--"]');
+    expect(chain("runtime").find(step => step.op === "RUN" && step.args.includes("apt-get install"))!.args).toMatch(/ tini /);
     expect(last(server, "HEALTHCHECK")).toContain("http://127.0.0.1:8799/api/health");
     const home = chain("cloud-home");
     expect(last(home, "USER")).toBe("root");
     expect(last(home, "VOLUME")).toBe('["/data"]');
     expect(last(home, "EXPOSE")).toBe("8080");
     expect(last(home, "CMD")).toBe('["node", "/app/dist-server/cloud-home-start.js"]');
+    // A host that starts a Cloud home with a plain `docker run` gives it no init either.
+    expect(last(home, "ENTRYPOINT")).toBe('["/usr/bin/tini", "-s", "--"]');
     expect(last(home, "HEALTHCHECK")).toContain("http://127.0.0.1:8080/api/health");
     expect(last(chain("runtime"), "ENV")).toMatch(/^AGENT_BROWSER_EXECUTABLE_PATH=\/opt\/openmausbot-browser\/chrome .*NODE_ENV=production$/);
   });
@@ -296,6 +301,34 @@ describe("container images", () => {
     expect(keys.env!.CLOUD_HOME_ENGINES).toBe("@anthropic-ai/claude-code @openai/codex");
   });
 
+  it.skipIf(process.platform === "win32")("installs the engines once more when one does not start, and fails the build when it still does not", () => {
+    const engines = all.find(s => s.name === "cloud-home")!.steps.find(step => npmInstall(step) && step.args.includes("$CLOUD_HOME_ENGINES"))!;
+    // `broken` lists what each install leaves out: one line per npm run, read in turn.
+    const run = (broken: string[], packages = "@anthropic-ai/claude-code@2.1.291 @openai/codex@0.160.1") => {
+      const root = mkdtempSync(join(tmpdir(), "omb-engines-"));
+      temporaryDirectories.push(root);
+      writeFileSync(join(root, "plan"), broken.join("\n") + "\n");
+      writeFileSync(join(root, "npm"), `#!/bin/sh\necho "$*" >> "${root}/npm.log"\nsed -n "$(wc -l < "${root}/npm.log")p" "${root}/plan" > "${root}/broken"\n`, { mode: 0o755 });
+      for (const cli of ["claude", "codex"]) {
+        writeFileSync(join(root, cli), `#!/bin/sh\ngrep -qx ${cli} "${root}/broken" && { echo "Missing optional dependency" >&2; exit 1; }\necho ${cli} 1.0\n`, { mode: 0o755 });
+      }
+      const result = spawnSync("sh", ["-c", engines.args], {
+        env: { PATH: `${root}:/usr/bin:/bin`, CLOUD_HOME_ENGINES: packages, ENGINES_CACHE_TAG: "" }, encoding: "utf8",
+      });
+      const installs = readFileSync(join(root, "npm.log"), "utf8").trim().split("\n");
+      return { status: result.status, installs: installs.length, stderr: result.stderr };
+    };
+    expect(run([""])).toMatchObject({ status: 0, installs: 1 });
+    // npm leaving out Codex's platform package the first time: a second install puts it in
+    expect(run(["codex", ""])).toMatchObject({ status: 0, installs: 2 });
+    const stillBroken = run(["codex", "codex"]);
+    expect(stillBroken).toMatchObject({ installs: 2 });
+    expect(stillBroken.status).not.toBe(0);
+    expect(stillBroken.stderr).toContain("@openai/codex@0.160.1 installed, but codex does not start");
+    // names without versions, as the default build argument has them
+    expect(run(["claude", "claude"], "@anthropic-ai/claude-code @openai/codex").status).not.toBe(0);
+  });
+
   it.skipIf(!jq)("resolves the current Chrome and engine releases, and keys on the date when a lookup fails", () => {
     const keys = (workflow.jobs.publish.steps as { id?: string; run?: string; env?: Record<string, string> }[]).find(step => step.id === "keys")!;
     const resolve = (ok: boolean) => {
@@ -349,7 +382,8 @@ describe("container images", () => {
       expect(volumes.edge.driver_opts.type, file).toBe("tmpfs");
       const { OMB_TUNNEL_SOCKET: api, OMB_WEBHOOK_SOCKET: hooks } = services.omb.environment;
       expect([api, hooks], file).toEqual(["/run/openmausbot/http.sock", "/run/openmausbot/hooks.sock"]);
-      const proxied = [...readFileSync(new URL(caddyfile, import.meta.url), "utf8").matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]);
+      // The local Caddyfile proxies the API twice: once for the trusted TLS terminator, once for everyone else.
+      const proxied = [...new Set([...readFileSync(new URL(caddyfile, import.meta.url), "utf8").matchAll(/reverse_proxy (\S+)/g)].map((m) => m[1]))];
       expect(proxied, caddyfile).toEqual([`unix/${hooks}`, `unix/${api}`]);
     }
   });

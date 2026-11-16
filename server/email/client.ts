@@ -163,7 +163,9 @@ export function sendingError(error: unknown, server: EmailServer): SendingError 
   const code = `${known.code ?? ""} ${known.originalCode ?? ""}`;
   const message = known.message ?? "";
   const answered = typeof known.responseCode === "number" ? known.responseCode : undefined;
-  if (/ENOTFOUND|EAI_AGAIN|EDNS|ENODATA/u.test(code)) return new SendingError("missing", server);
+  if (known.code === "EAI_AGAIN" || known.originalCode === "EAI_AGAIN" ||
+      (known.code === "EDNS" && /^(?:ETIMEOUT|ETIMEDOUT|ESERVFAIL|ECONNREFUSED|EREFUSED)$/u.test(known.originalCode ?? ""))) return new SendingError("no-answer", server);
+  if (/ENOTFOUND|EDNS|ENODATA/u.test(code)) return new SendingError("missing", server);
   if (/CERT|ALTNAME|SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER|DEPTH_ZERO/u.test(code) || /certificate|altnames/iu.test(message)) return new SendingError("certificate", server);
   // Nodemailer's words for the two mix-ups: STARTTLS on a port that starts in TLS waits for a greeting that never comes,
   // and TLS on a port that starts in the clear reads its plain greeting as a broken TLS record.
@@ -198,11 +200,19 @@ export async function testSending(login: { username: string; password: string } 
   const connection = new SMTPConnection(smtpOptions(server, at));
   // A failure after the answer below reports here too; the awaited step carries it.
   connection.on("error", () => {});
+  const step = (start: (done: (error?: Error | null) => void) => void) => new Promise<void>((resolve, reject) => {
+    const done = (error?: Error | null) => {
+      connection.removeListener("error", done);
+      if (error) reject(error); else resolve();
+    };
+    connection.once("error", done);
+    try { start(done); } catch (error) { connection.removeListener("error", done); reject(error); }
+  });
   try {
-    await new Promise<void>((resolve, reject) => { connection.once("error", reject); connection.connect(() => { connection.removeListener("error", reject); resolve(); }); });
+    await step((done) => connection.connect(done));
     if (!connection.secure) throw new SendingError("no-tls", server);
     if (!connection.allowsAuth) throw new SendingError("no-sign-in", server);
-    if (login) await new Promise<void>((resolve, reject) => connection.login({ user: login.username, pass: login.password }, (error) => (error ? reject(error) : resolve())));
+    if (login) await step((done) => connection.login({ user: login.username, pass: login.password }, done));
   } catch (error) {
     throw sendingError(error, server);
   } finally { connection.close(); }
@@ -229,6 +239,7 @@ export async function listMessages(account: EmailAccount, guard: EmailGuard, inp
     try {
       const total = client.mailbox ? client.mailbox.exists : 0;
       if (!total) return { total: 0, messages: [] };
+      if (input.beforeUid === 1) return { total, messages: [] };
       const out: MessageSummary[] = [];
       if (input.beforeUid) {
         const uids = (await client.search({ uid: `1:${input.beforeUid - 1}` }, { uid: true })) || [];
@@ -288,6 +299,7 @@ export interface ReadMessage extends MessageSummary {
   replyTo: string[];
   messageId?: string;
   inReplyTo?: string;
+  references?: string[];
   text: string;
   truncated: boolean;
   attachments: Array<{ filename: string; contentType: string; size: number; savedTo?: string }>;
@@ -295,8 +307,15 @@ export interface ReadMessage extends MessageSummary {
 
 /** A file name that stays inside the folder, from a name a stranger wrote. */
 export function safeAttachmentName(raw: string | undefined, index: number): string {
-  const name = basename((raw ?? "").replaceAll("\\", "/")).replace(/[^\p{L}\p{N}._ -]+/gu, "_").replace(/^[.\s]+/u, "").slice(-120).trim();
-  return name || `attachment-${index + 1}`;
+  const clean = basename((raw ?? "").replaceAll("\\", "/")).replace(/[^\p{L}\p{N}._ -]+/gu, "_").trim();
+  let name = "", bytes = 0;
+  for (const character of Array.from(clean).reverse()) {
+    const size = Buffer.byteLength(character);
+    if (name.length + character.length > 120 || bytes + size > 252) break;
+    name = character + name;
+    bytes += size;
+  }
+  return name.replace(/^[.\s]+/u, "") || `attachment-${index + 1}`;
 }
 
 /** Security: `folder` is the server's own and read-only in the box, so a bot can't plant a link in it, and the file is
@@ -339,6 +358,7 @@ export async function readMessage(account: EmailAccount, guard: EmailGuard, inpu
         subject: parsed.subject ?? summary(head).subject,
         ...(parsed.messageId ? { messageId: parsed.messageId } : {}),
         ...(typeof parsed.inReplyTo === "string" ? { inReplyTo: parsed.inReplyTo } : {}),
+        ...(parsed.references ? { references: Array.isArray(parsed.references) ? parsed.references : [parsed.references] } : {}),
         text: text.slice(0, MAX_TEXT_CHARS),
         truncated: text.length > MAX_TEXT_CHARS,
         attachments: parsed.attachments.map((attachment, index) => ({
@@ -400,7 +420,9 @@ export async function sendMessage(account: EmailAccount, guard: EmailGuard, inpu
   const { default: MailComposer } = await import("nodemailer/lib/mail-composer");
   const composed = new MailComposer({
     from: account.address, to: input.to, ...(input.cc?.length ? { cc: input.cc } : {}), ...(input.bcc?.length ? { bcc: input.bcc } : {}),
-    subject: input.subject, text: input.text, html: input.html, attachments, disableFileAccess: true, disableUrlAccess: true, ...(input.inReplyTo ? { inReplyTo: input.inReplyTo, references: input.references ?? input.inReplyTo } : {}),
+    subject: input.subject, text: input.text, html: input.html, attachments, disableFileAccess: true, disableUrlAccess: true,
+    ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
+    ...(input.references || input.inReplyTo ? { references: input.references ?? input.inReplyTo } : {}),
   }).compile();
   const envelope = composed.getEnvelope();
   const raw = await composed.build();

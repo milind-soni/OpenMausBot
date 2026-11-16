@@ -109,23 +109,25 @@ export function homeProgramDirs(home: string): string[] {
 }
 
 export function augmentedPath(): string {
-  if (cached === null) {
-    const fallback = fallbackDirs.filter((d) => existsSync(d));
-    cached = mergePaths([
-      ...registeredDirs.filter((d) => existsSync(d)),
-      ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
-      ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
-      // Keep the last login-shell result while a rescan re-probes, or rc-only CLIs vanish for the response that triggered it.
-      ...(loginShellPath ? loginShellPath.split(delimiter) : []),
-      ...(process.platform === "win32" ? windowsKnownDirs() : knownDirs()).filter((d) => existsSync(d)),
-    ].filter((d) => !fallback.includes(d)).concat(fallback).filter(serverMayRunFrom));
-  }
+  if (cached === null) cached = buildPath();
   // The login shell reads its rc files from HOME, which a boxed bot can write.
   if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32" && !homeProgramsDistrusted()) {
     probed = true;
     probeLoginShellPath();
   }
   return cached;
+}
+
+function buildPath(): string {
+  const fallback = fallbackDirs.filter((d) => existsSync(d));
+  return mergePaths([
+    ...registeredDirs.filter((d) => existsSync(d)),
+    ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
+    ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
+    // Keep the last login-shell result while a rescan re-probes, or rc-only CLIs vanish for the response that triggered it.
+    ...(loginShellPath ? loginShellPath.split(delimiter) : []),
+    ...(process.platform === "win32" ? windowsKnownDirs() : knownDirs()).filter((d) => existsSync(d)),
+  ].filter((d) => !fallback.includes(d)).concat(fallback).filter(serverMayRunFrom));
 }
 
 function mergePaths(parts: string[]): string {
@@ -144,9 +146,7 @@ function probeLoginShellPath(): void {
       const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
       if (!m || !m[1]) return;
       loginShellPath = m[1];
-      // Fallback dirs stay last, behind what the person's shell adds.
-      const fallback = fallbackDirs.filter((d) => existsSync(d));
-      cached = mergePaths([...(cached ?? "").split(delimiter).filter((d) => !fallback.includes(d)), ...m[1].split(delimiter), ...fallback].filter(serverMayRunFrom));
+      cached = buildPath();
     },
   );
 }

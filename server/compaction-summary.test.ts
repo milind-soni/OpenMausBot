@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { EXCERPT_SUMMARY_HEADER } from "../shared/wire.ts";
 import { deterministicSummary, draftSummary, foldPoint, summaryPrompt } from "./compaction-summary.ts";
-import type { ReplayEntry } from "./context-rebuild.ts";
+import { MAX_SUMMARY_BYTES, selectReplay, type CompactionRecord, type ReplayEntry } from "./context-rebuild.ts";
 import { createSideJobs, type SideJobInstance, type SideJobsDeps } from "./side-jobs.ts";
 
 const history: ReplayEntry[] = [
@@ -48,6 +48,52 @@ it("opens only the excerpt fallback with the header stored records are recognise
   expect(deterministicSummary(history).split("\n")[0]).toBe(EXCERPT_SUMMARY_HEADER);
   const written = await draftSummary(history, { signal: new AbortController().signal, generateText: async () => "The person cancelled the deployment." });
   expect(written.startsWith(EXCERPT_SUMMARY_HEADER)).toBe(false);
+});
+
+it("does not re-escape the previous summary across repeated manual compactions", () => {
+  const longestBackslashRun = (text: string) => Math.max(0, ...(text.match(/\\+/g) ?? []).map(run => run.length));
+  const history: ReplayEntry[] = [{ id: "m1", role: "user", text: "Deploy to \"staging\"\nthen run the tests" }];
+  let record: (CompactionRecord & { id: string }) | undefined;
+  let summary = "";
+  const runs: number[] = [];
+  for (let round = 1; round <= 4; round++) {
+    const replay = selectReplay(history, { compaction: record });
+    summary = deterministicSummary(replay.transcript.filter(entry => entry.id));
+    runs.push(longestBackslashRun(summary));
+    record = { id: `c${round}`, firstKeptId: "", foldedThroughId: history.at(-1)!.id, summary, tokensBefore: 0, by: "person" };
+    history.push({ id: record.id, role: "assistant", text: "" }, { id: `m${round + 1}`, role: "user", text: `Round ${round + 1} note` });
+  }
+  expect(runs.every(run => run === runs[0])).toBe(true);
+  expect(summary).toContain("Deploy to \\\"staging\\\"\\nthen run the tests");
+  expect(summary).toContain("Round 4 note");
+  expect(summary.split(EXCERPT_SUMMARY_HEADER).length).toBe(2);
+  expect(Buffer.byteLength(summary)).toBeLessThanOrEqual(MAX_SUMMARY_BYTES);
+});
+
+it("falls back to quoting the entry when the prior summary is empty or blank", () => {
+  for (const priorSummary of ["", "  \n "]) {
+    const summary = deterministicSummary([{ id: "c", role: "assistant", text: "[summary]", priorSummary }, { id: "m", role: "user", text: "next" }]);
+    expect(summary).toContain('Assistant/record: "[summary]"');
+    expect(summary).toContain('User message: "next"');
+  }
+});
+
+it("keeps a model-written prior summary verbatim", () => {
+  const priorSummary = 'The person said "ship it"\nand cancelled the rollback.';
+  const summary = deterministicSummary([{ id: "c", role: "assistant", text: JSON.stringify(priorSummary), priorSummary }]);
+  expect(summary).toBe(`${EXCERPT_SUMMARY_HEADER}\n${priorSummary}`);
+});
+
+it.each([512, 3_200, MAX_SUMMARY_BYTES])("keeps multibyte summaries valid and within a %i byte budget", maxBytes => {
+  const priorSummary = "摘要🙂".repeat(580);
+  expect(Buffer.byteLength(priorSummary)).toBeGreaterThan(5_500);
+  const summary = deterministicSummary([
+    { id: "c", role: "assistant", text: JSON.stringify(priorSummary), priorSummary },
+    { id: "m", role: "user", text: "最新訊息🙂" },
+  ], maxBytes);
+  expect(Buffer.byteLength(summary)).toBeLessThanOrEqual(maxBytes);
+  expect(summary).toContain("最新訊息🙂");
+  expect(summary).not.toContain("\uFFFD");
 });
 
 it("works without a model helper", async () => {

@@ -6,7 +6,7 @@ import type { Duplex, Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { createGzip, type Gzip } from "node:zlib";
 
-import { bearerToken } from "./devices.ts";
+import { bearerToken, type PairingRefusal } from "./devices.ts";
 import type { E2EDescriptor } from "./e2e/descriptor.ts";
 import { e2eContextOf } from "./e2e/origin.ts";
 import type { E2EContext } from "./e2e/registry.ts";
@@ -38,8 +38,11 @@ export interface ProxyOptions {
     code: string,
     deviceName: unknown,
     pairRequestId?: unknown,
-  ) => { token: string; device: unknown } | { error: string };
+    replacesToken?: unknown,
+  ) => { token: string; device: unknown } | PairingRefusal;
   serverName: () => string;
+  /** The desktop app's version: told only to a paired device. */
+  version?: string;
   /** Every host the phone could dial later, best first, sent with the pairing
    * response as an advisory fallback list. */
   hosts?: () => string[];
@@ -65,6 +68,8 @@ export type ProxyListener = "lan" | "origin";
 const UPDATE_APP = { error: "update_app" } as const;
 
 const PAIRING_SESSION_PATHS = new Set(["POST /api/pair", "GET /api/health"]);
+
+const RELEASE_VERSION = /^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}(-[0-9A-Za-z.-]{1,64})?(\+[0-9A-Za-z.-]{1,64})?$/;
 
 /** A token presented inside a session must belong to the device whose psk opened it. */
 function e2eRefusal(context: E2EContext, method: string, path: string, deviceId: string | undefined): string | null {
@@ -382,9 +387,10 @@ export function createProxyHandler(options: ProxyOptions) {
   const capabilityStreams = new Map<string, Set<() => void>>();
   /** Each device's open `/api/events` streams, for the events the sidecar itself sends. */
   const eventStreams = new Map<string, Set<(event: string) => void>>();
+  const version = options.version !== undefined && RELEASE_VERSION.test(options.version) ? options.version : undefined;
   const endpointsFor = (deviceId: string | null) => {
     const descriptor = options.e2eDescriptor?.(deviceId) ?? null;
-    return { ...endpointSnapshot(options), ...(descriptor ? { e2e: descriptor } : {}) };
+    return { ...endpointSnapshot(options), ...(version ? { version } : {}), ...(descriptor ? { e2e: descriptor } : {}) };
   };
   const handle = function handle(req: IncomingMessage, res: ServerResponse, listener: ProxyListener = "lan"): void {
     const target = requestTarget(req.url);
@@ -450,14 +456,15 @@ export function createProxyHandler(options: ProxyOptions) {
         (body) => {
           const credential = body.credential ?? body.code;
           if (!isPlainValue(credential) || !isPlainValue(body.deviceName)) {
-            return sendJson(res, 400, { error: "invalid pairing request" });
+            return sendJson(res, 400, { error: "invalid pairing request", code: "pairing_bad_request" } satisfies PairingRefusal);
           }
           const result = options.redeem(
             String(credential ?? ""),
             body.deviceName,
             body.pairRequestId,
+            body.replacesToken,
           );
-          if ("error" in result) return sendJson(res, 401, { error: result.error });
+          if ("error" in result) return sendJson(res, 401, { error: result.error, code: result.code } satisfies PairingRefusal);
           const pairedId = (result.device as { id?: unknown } | null)?.id;
           if (e2e && typeof pairedId === "string") options.e2ePaired?.(e2e, pairedId);
           const hosts = options.hosts?.() ?? [];
@@ -477,10 +484,10 @@ export function createProxyHandler(options: ProxyOptions) {
           if (descriptor) response.e2e = descriptor;
           return sendJson(res, 201, response);
         },
-        (error: Error) => sendJson(res, 400, { error: error.message }),
+        (error: Error) => sendJson(res, 400, { error: error.message, code: "pairing_bad_request" } satisfies PairingRefusal),
       ).catch((error: unknown) => {
         console.error("companion: pairing failed", error);
-        sendJson(res, 500, { error: "could not complete the pairing" });
+        sendJson(res, 500, { error: "could not complete the pairing", code: "pairing_failed" } satisfies PairingRefusal);
       });
       return;
     }
@@ -552,7 +559,7 @@ export function createProxyHandler(options: ProxyOptions) {
               return;
             }
             finished = true;
-            sendJson(res, 200, { app: "openmausbot" });
+            sendJson(res, 200, { app: "openmausbot", ...(device && version ? { version } : {}) });
           });
           return;
         }

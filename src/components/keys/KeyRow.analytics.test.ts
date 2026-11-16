@@ -19,6 +19,7 @@ vi.mock("react", async (original) => ({
     }];
   },
   useEffect: () => {},
+  useLayoutEffect: () => {},
   useId: () => "row",
   useRef: (current: unknown) => {
     const index = fixture.refIndex++;

@@ -110,6 +110,20 @@ export function splitSessionPrompt(
   return { text: withContextNote(note, text), receipt: { ...fingerprints, turnsSinceFull: turnsSinceFull + 1 } };
 }
 
+/** The stable half a per-thread process is keyed on: without the team roster (`systemRoster`), which a warm process takes
+ * as a note (withRosterNote) when it changes, so adding, renaming or removing a bot relaunches no engine. */
+export function keyedStable(turn: Pick<SendTurnInput, "systemStable" | "systemRoster">): string | undefined {
+  const { systemStable: stable, systemRoster: roster } = turn;
+  return stable !== undefined && roster ? stable.replace(roster, "") : stable;
+}
+
+/** The team roster as it is now, before `text`, when it differs from what the process last had (`had`). */
+export function withRosterNote(text: string, roster: string, had: string): string {
+  if (roster === had) return text;
+  const note = `<system-reminder>\n${roster.trim() ? `The team roster changed since this session started. It replaces the roster in your instructions:\n\n${roster.trim()}` : "The team roster in your instructions is out of date: it has no members now."}\n</system-reminder>`;
+  return text ? `${note}\n\n${text}` : note;
+}
+
 /** The volatile half as a reminder in a Claude turn, by the CLI's own out-of-band convention: on a
  * live session when it changed, and in a new process's first message (`launch`), so the launched
  * system prompt is the stable half alone and a relaunch keeps a prefix the provider already cached. */

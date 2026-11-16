@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Copy, Download, ExternalLink, KeyRound, Loader2, LogIn, TerminalSquare, X } from "lucide-react";
-import { api, type InstanceInfo, useStore } from "@/state/store";
+import { api, ApiError, type InstanceInfo, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { engineDisplayName } from "@/lib/engine-name";
 import { copyText } from "@/lib/copy-text";
 import { DEVICE_SIGN_IN_COPY, DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
+import { EngineBrowserSignIn } from "./EngineBrowserSignIn";
 import { ClaudeSignIn } from "./ClaudeSignIn";
 import { RefreshEngines } from "./EngineLibrary";
 import { AppCopyNotice, AppCopySetup } from "./EngineAppCopy";
@@ -32,12 +33,6 @@ export function needsCli(instance: InstanceInfo | undefined): boolean {
 
 export function serverTerminal(cloudHome: boolean): boolean {
   return Boolean(window.ogb?.openInstallTerminal) && window.ogb?.remoteClient?.active !== true && !cloudHome;
-}
-
-/** Google's redirect goes to 127.0.0.1 on the server, which the person's browser can't reach when the server is a Cloud or
- * another computer: there the paste-the-redirect step is the only way to finish, so it starts open. */
-export function redirectPasteOpen(cloudHome: boolean): boolean {
-  return cloudHome || window.ogb?.remoteClient?.active === true;
 }
 
 export function grokKeyInstead(instance: InstanceInfo, cloudHome: boolean): boolean {
@@ -246,9 +241,9 @@ export function EngineUpdateNotice({
           <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{update.message}</p>
         </div>
       </div>
-      {instance?.install?.server
+      {update.command && (instance?.install?.server && update.serverInstall !== false
         ? <ServerEngineInstall instance={instance} mode="update" command={update.command} quiet={quiet} />
-        : <CommandRow command={update.command} actionLabel={t("engineSetup.openUpdate")} compact />}
+        : <CommandRow command={update.command} actionLabel={t("engineSetup.openUpdate")} compact />)}
     </div>
   );
 }
@@ -284,11 +279,34 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
   const [callbackUrl, setCallbackUrl] = useState("");
   const managed = instance.install!.managed!;
 
+  const flowId = flow?.flowId;
   useEffect(() => {
-    if (!flow || instance.snapshot.authenticated) return;
-    const timer = window.setInterval(() => void refreshInstances(), 2_000);
-    return () => window.clearInterval(timer);
-  }, [flow, instance.snapshot.authenticated, refreshInstances]);
+    if (!flowId || instance.snapshot.authenticated) return;
+    let live = true;
+    const ended = (line: string | null) => {
+      if (!live) return;
+      setFlow((current) => current?.flowId === flowId ? null : current);
+      if (line) setError(line);
+    };
+    const check = async () => {
+      try {
+        const { auth } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/status?flowId=${encodeURIComponent(flowId)}`);
+        if (!live || auth.phase === "waiting" || auth.phase === "verifying") return;
+        if (auth.phase !== "succeeded") return ended(auth.phase === "expired" ? t("engineSetup.googleExpired") : auth.message ?? t("engineSetup.googleFailed"));
+        await refreshInstances();
+        await refreshModels(instance.instanceId);
+        ended(null);
+      } catch (cause) {
+        // 404: this sign-in is gone on the server (finished through the pasted redirect, or its session ended).
+        if (cause instanceof ApiError && cause.status === 404) {
+          await refreshInstances().catch(() => {});
+          ended(null);
+        }
+      }
+    };
+    const timer = window.setInterval(() => void check(), 2_000);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [flowId, instance.instanceId, instance.snapshot.authenticated, refreshInstances, refreshModels]);
 
   const run = async (kind: NonNullable<typeof busy>, action: () => Promise<void>) => {
     setBusy(kind);
@@ -306,7 +324,13 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
     }
   });
 
+  const openLink = async (link: string) => {
+    if (window.ogb?.openExternal) await window.ogb.openExternal(link);
+    else window.open(link, "_blank", "noopener,noreferrer");
+  };
+
   const signIn = () => run("signin", async () => {
+    if (flow) return openLink(flow.authorizationUrl);
     const { auth } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/auth/start`, { method: "POST" });
     if (auth.phase === "succeeded") {
       await refreshInstances();
@@ -315,8 +339,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
     }
     if (!auth.flowId || !auth.authorizationUrl) throw new Error(t("engineSetup.googleNoLink"));
     setFlow({ flowId: auth.flowId, authorizationUrl: auth.authorizationUrl });
-    if (window.ogb?.openExternal) await window.ogb.openExternal(auth.authorizationUrl);
-    else window.open(auth.authorizationUrl, "_blank", "noopener,noreferrer");
+    await openLink(auth.authorizationUrl);
   });
 
   const complete = () => run("complete", async () => {
@@ -355,8 +378,10 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
     );
   }
 
+  const cloudHome = state.config?.cloudHome === true;
   return (
     <div className="mt-3 space-y-2">
+      {cloudHome && <p className="text-[12px] leading-relaxed text-ink-secondary">{t("engineSetup.cloudPasteHint")}</p>}
       <button
         type="button"
         disabled={busy !== null}
@@ -376,8 +401,8 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
           <button type="button" onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink hover:bg-raised-hover">
             {busy === "check" ? t("common.checking") : t("engineSetup.finishedSignIn")}
           </button>
-          <details open={redirectPasteOpen(state.config?.cloudHome === true)} className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
-            <summary className="cursor-pointer select-none">{t("engineSetup.otherComputer")}</summary>
+          <div data-redirect-paste className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
+            <p>{t(cloudHome ? "engineSetup.cloudPasteSummary" : "engineSetup.otherComputer")}</p>
             <p className="mt-2 leading-relaxed">{t("engineSetup.otherComputerHint")}</p>
             <input
               value={callbackUrl}
@@ -394,7 +419,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
             >
               {busy === "complete" ? t("engineSetup.sending") : t("engineSetup.sendRedirect")}
             </button>
-          </details>
+          </div>
         </>
       )}
       {error && <p className="text-[12px] text-danger">{error}</p>}
@@ -549,6 +574,7 @@ export function EngineSetup({
   /** A Cloud's "not installed" reason only says to install it in a terminal or use Set CLI; the card says what to do instead. */
   const cloudReasonHidden = cloudCantInstall || (cloudHome && !signInOnly && Boolean(install?.server) && instance.snapshot.notEngineCli !== true);
   const deviceSignIn = signInOnly && instance.authentication?.method === "device-code";
+  const engineBrowserSignIn = signInOnly && instance.authentication?.method === "browser";
   const browserSignIn = signInOnly && instance.authentication?.method === "browser-pkce";
   const pasteSignIn = signInOnly && instance.authentication?.method === "paste-code";
   const provider = deviceSignInProvider(instance.driverKind);
@@ -557,7 +583,9 @@ export function EngineSetup({
     ? t("engineSetup.signInTitle", { name: engineDisplayName(instance) })
     : t("engineSetup.setupTitle", { name: engineDisplayName(instance) });
   const description = descriptionOverride ?? (signInOnly
-    ? browserSignIn
+    ? engineBrowserSignIn
+      ? t("engineSetup.engineBrowser.description", { name: engineDisplayName(instance) })
+      : browserSignIn
       ? t("engineSetup.chatgpt.description")
       : deviceSignIn
       ? t(DEVICE_SIGN_IN_COPY[provider].description)
@@ -608,7 +636,7 @@ export function EngineSetup({
   }
 
   // The app's own copy is out of reach of the person's terminal, so its sign-in is finished here.
-  if (signInOnly && install.appCopy && !deviceSignIn && !browserSignIn && !pasteSignIn) {
+  if (signInOnly && install.appCopy && !deviceSignIn && !browserSignIn && !engineBrowserSignIn && !pasteSignIn) {
     return <AppCopySetup instance={instance} className={className} unframed={unframed} />;
   }
 
@@ -635,7 +663,9 @@ export function EngineSetup({
         </p>
       ))}
 
-      {deviceSignIn || browserSignIn ? (
+      {engineBrowserSignIn ? (
+        <EngineBrowserSignIn key={instance.instanceId} instanceId={instance.instanceId} />
+      ) : deviceSignIn || browserSignIn ? (
         <>
           <DeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} browserPkce={browserSignIn} provider={provider} />
           {deviceSignIn && provider !== "codex" && signInCommand && serverTerminal(cloudHome) && (

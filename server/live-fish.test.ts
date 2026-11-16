@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { LiveSessionError } from "./live-call.ts";
 import {
   createFishLiveSession, endFishLiveSession, fishErrorMessage, fishInstructions, fishKeyPrint, fishLiveBaseUrl, fishLiveEndpoint, FishRelays,
-  FISH_UPDATE_PREFIX, setUpFishAgent, usableFishAgent,
+  FISH_UPDATE_PREFIX, fishSpeakingLanguage, setFishAgentLanguage, setUpFishAgent, usableFishAgent,
 } from "./live-fish.ts";
 
 const ENDPOINT = fishLiveEndpoint("agent_123", {});
@@ -50,12 +50,12 @@ describe("the Fish agent for Live calls", () => {
       const route = `${init!.method} ${String(url).replace(ENDPOINT.apiBase, "")}`;
       return new Response(JSON.stringify(answers[route] ?? {}), { status: route in answers ? 200 : 404 });
     });
-    await expect(setUpFishAgent(" fish-key ", { ...ENDPOINT, model: "" }, "MausBot", fetchImpl)).resolves.toBe("agent_new");
+    await expect(setUpFishAgent(" fish-key ", { ...ENDPOINT, model: "" }, "MausBot", "vi", fetchImpl)).resolves.toBe("agent_new");
     const calls = fetchImpl.mock.calls.map(([url, init]) => ({ route: `${init!.method} ${String(url).replace(ENDPOINT.apiBase, "")}`, body: JSON.parse(String(init!.body)), init: init! }));
     expect(calls.map((call) => call.route)).toEqual(Object.keys(answers));
     expect(calls[0]!.body).toMatchObject({ name: "delegate", tool_type: "client", expects_response: true });
     expect(calls[1]!.body.name).toBe("MausBot Live calls");
-    expect(calls[1]!.body.config).toEqual({ voice: { engine: "live3", speaking_language: "en" }, tools: { enabled: true, tool_ids: ["tool_1"] } });
+    expect(calls[1]!.body.config).toEqual({ voice: { engine: "live3", speaking_language: "vi" }, tools: { enabled: true, tool_ids: ["tool_1"] } });
     expect(calls[2]!.body).toEqual({ overrides_allowed: ["system_prompt"] });
     for (const call of calls) {
       expect((call.init.headers as Record<string, string>).authorization).toBe("Bearer fish-key");
@@ -63,11 +63,29 @@ describe("the Fish agent for Live calls", () => {
     }
   });
 
+  it("speaks the app's language when Fish Audio speaks it, else English", () => {
+    expect(fishSpeakingLanguage("vi")).toBe("vi");
+    expect(fishSpeakingLanguage(" pt-br ")).toBe("pt");
+    expect(fishSpeakingLanguage("zh_TW")).toBe("zh");
+    expect(fishSpeakingLanguage("en-US")).toBe("en");
+    expect(fishSpeakingLanguage("xx")).toBe("en");
+    expect(fishSpeakingLanguage("")).toBe("en");
+    expect(fishSpeakingLanguage(undefined)).toBe("en");
+  });
+
+  it("moves a saved agent to another language through its draft config, then publishes it", async () => {
+    const fetchImpl = fakeFetch(200, {});
+    await setFishAgentLanguage("fish-key", ENDPOINT, "agent_123", "vi", fetchImpl);
+    const calls = fetchImpl.mock.calls.map(([url, init]) => [`${init!.method} ${String(url).replace(ENDPOINT.apiBase, "")}`, JSON.parse(String(init!.body))]);
+    expect(calls).toEqual([["PATCH /agents/agent_123/config", { voice: { speaking_language: "vi" } }], ["POST /agents/agent_123/publish", {}]]);
+    await expect(setFishAgentLanguage("fish-key", ENDPOINT, "agent_123", "vi", fakeFetch(404, {}))).rejects.toMatchObject({ status: 502 });
+  });
+
   it("stops at Fish's first refusal with the user's next step, never Fish's body", async () => {
     const fetchImpl = fakeFetch(401, { message: "raw fish-key detail" });
-    await expect(setUpFishAgent("fish-key", ENDPOINT, "MausBot", fetchImpl)).rejects.toMatchObject({ status: 502, message: fishErrorMessage(401) });
+    await expect(setUpFishAgent("fish-key", ENDPOINT, "MausBot", "en", fetchImpl)).rejects.toMatchObject({ status: 502, message: fishErrorMessage(401) });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    await expect(setUpFishAgent("fish-key", ENDPOINT, "MausBot", fakeFetch(201, {}))).rejects.toMatchObject({ status: 502 });
+    await expect(setUpFishAgent("fish-key", ENDPOINT, "MausBot", "en", fakeFetch(201, {}))).rejects.toMatchObject({ status: 502 });
   });
 });
 

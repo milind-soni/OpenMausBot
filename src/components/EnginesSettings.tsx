@@ -6,6 +6,7 @@ import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./Engin
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotice, isApiKeyEngine } from "./EngineSetup";
 import { AppCopyNotice } from "./EngineAppCopy";
 import { forgetAppCopySwitches } from "@/state/engine-install";
@@ -19,7 +20,12 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
 import { SettingsFoldRow, SettingsGroup, SettingsMark, SettingsRows, StatusDot } from "./SettingsPrimitives";
 import { OllamaModels, ollamaShortStatus } from "./OllamaStatusLine";
+import { isAddedServer } from "@/lib/openai-compat-endpoints";
 import { InstanceProviderMark } from "./ProviderIcons";
+import { HiddenEngines, HiddenProviderRows, useHiddenProviders } from "./HiddenProviders";
+import { AdminOnly } from "./AdminOnly";
+
+export { HiddenEngines };
 
 interface ProbeResult {
   ok: boolean;
@@ -324,8 +330,9 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
   );
 }
 
-/** Remove drops an added account; Sign out forgets a signed-in account's Google sign-in, the first one too. */
-function AntigravityAccountAction({ instance, action }: { instance: InstanceInfo; action: "remove" | "signOut" }) {
+/** Remove drops an added Antigravity account or an added server; Sign out forgets a signed-in account's sign-in (Antigravity's
+ * Google one, or a CLI's own login such as Kimi's) and never hides the provider, which stays listed with Set up. */
+function EngineAccountAction({ instance, action, cli = false, removeBody = "accounts.removeBodyAntigravity" }: { instance: InstanceInfo; action: "remove" | "signOut"; cli?: boolean; removeBody?: LocaleKey }) {
   const { state, dispatch, refreshInstances } = useStore();
   const [confirming, setConfirming] = useState(false);
   const [running, setRunning] = useState(false);
@@ -350,14 +357,17 @@ function AntigravityAccountAction({ instance, action }: { instance: InstanceInfo
   };
   return <>
     <div className="flex flex-wrap items-center gap-2">
-      <button type="button" disabled={running || usedBy > 0} onClick={() => setConfirming(true)} className={cn("rounded-lg px-2.5 py-1.5 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50", remove ? "text-danger hover:bg-danger/10" : "text-ink-secondary hover:bg-raised hover:text-ink")}>
+      <button type="button" disabled={running || usedBy > 0} onClick={() => setConfirming(true)} aria-label={remove ? undefined : t("accounts.signOutAria", { name: instance.displayName })} className={cn("rounded-lg px-2.5 py-1.5 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50", remove ? "text-danger hover:bg-danger/10" : "text-ink-secondary hover:bg-raised hover:text-ink")}>
         {running ? <Loader2 size={13} className="animate-spin" /> : label}
       </button>
       {usedBy > 0 && <p className="text-[11px] text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
     </div>
     {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
     <ConfirmDialog open={confirming} title={t(remove ? "accounts.removeTitle" : "accounts.signOutTitle", { name: instance.displayName })}
-      body={t(remove ? "accounts.removeBodyAntigravity" : "accounts.signOutBody")}
+      body={remove ? t(removeBody) : cli
+        // The CLI's own sign-in is the one removed: its files in the home folder of the computer this app runs on.
+        ? <>{t("accounts.signOutBody")}<span data-sign-out-cli="" className="mt-2 block">{t("accounts.signOutCliBody", { name: instance.displayName })}</span></>
+        : t("accounts.signOutBody")}
       confirmLabel={label} tone="neutral" pending={running} onCancel={() => { if (!running) setConfirming(false); }} onConfirm={() => void run()} />
   </>;
 }
@@ -392,6 +402,8 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
       {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} description={instance.codexEndpoint ? t("agentEndpoints.codexHint") : undefined} unframed />}
       {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
       {engineReady(instance) && instance.serverKind === "ollama" && <OllamaModels instance={instance} className="mt-3" />}
+      {/* A server added by address (LM Studio, Ollama, a gateway) is removed here too, not only from API keys. */}
+      {isAddedServer(instance) && <div className="mt-3"><EngineAccountAction instance={instance} action="remove" removeBody="claudeEndpoints.removeBody" /></div>}
       {/* The setup panel that first said so is gone once the engine is Ready. */}
       {engineReady(instance) && <AppCopyNotice instance={instance} className="mt-3" />}
       {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" quiet />}
@@ -403,13 +415,17 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
             <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t("engineSetup.claude.connectedAccount")}</p>
           )
       )}
+      {/* Not for an engine a provider key signs in: removing its own sign-in would leave it connected. */}
+      {instance.driverKind !== "antigravityAgent" && engineReady(instance) && instance.snapshot.authenticated === true && instance.authentication?.signOut === true && instance.snapshot.account?.method !== "api-key" && (
+        <div data-engine-sign-out={instance.instanceId} className="mt-3"><EngineAccountAction instance={instance} action="signOut" cli /></div>
+      )}
       {instance.freeUpSpace && <AntigravityFreeSpace instance={instance} />}
       {instance.driverKind === "antigravityAgent" && (
         <div className="mt-3 space-y-3">
           {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
           <AntigravityAddAccount source={instance} />
-          {instance.snapshot.authenticated === true && instance.authentication?.signOut === true && <AntigravityAccountAction instance={instance} action="signOut" />}
-          {instance.instanceId.startsWith("antigravity-") && <AntigravityAccountAction instance={instance} action="remove" />}
+          {instance.snapshot.authenticated === true && instance.authentication?.signOut === true && <EngineAccountAction instance={instance} action="signOut" />}
+          {instance.instanceId.startsWith("antigravity-") && <EngineAccountAction instance={instance} action="remove" />}
         </div>
       )}
       <EngineAdvanced instance={instance} />
@@ -451,14 +467,18 @@ function ProviderRow({ instance, ready, open, onToggle, compact, children }: {
   </>;
 }
 
-function SimpleEngines({ rows, isReady, renderEngine, more }: {
+function SimpleEngines({ rows, isReady, renderEngine, more, accountsOnly = false }: {
   rows: InstanceInfo[];
   isReady: (instance: InstanceInfo) => boolean;
   renderEngine: (instance: InstanceInfo, bare?: boolean) => ReactNode;
   more: { id: string; open: boolean; onToggle: () => void };
+  /** The chat's sign-in card: every account row in view, no fold and no hidden providers. */
+  accountsOnly?: boolean;
 }) {
   const [opened, setOpened] = useState<string | null>(null);
-  const featured = rows.filter((instance) => isReady(instance) || instance.authentication !== undefined);
+  // A hidden provider is gone from the instance list, so without these rows nothing in Settings brings it back.
+  const allHidden = useHiddenProviders(), hidden = accountsOnly ? [] : allHidden;
+  const featured = rows.filter((instance) => accountsOnly || isReady(instance) || instance.authentication !== undefined);
   const others = rows.filter((instance) => !featured.includes(instance));
   const row = (instance: InstanceInfo, compact: boolean) => {
     const open = opened === instance.instanceId;
@@ -469,10 +489,11 @@ function SimpleEngines({ rows, isReady, renderEngine, more }: {
     <SettingsGroup label={t("settings.ai.providers")} actions={<RefreshEngines />}>
       <SettingsRows icons>
         {featured.map((instance) => row(instance, false))}
-        {others.length > 0 && (
-          <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(others.length)} open={more.open} onToggle={more.onToggle}
+        {others.length + hidden.length > 0 && (
+          <SettingsFoldRow id={more.id} title={t("settings.ai.moreProviders")} value={String(others.length + hidden.length)} open={more.open} onToggle={more.onToggle}
             leading={<span aria-hidden="true" />}>
             {others.map((instance) => row(instance, true))}
+            <HiddenProviderRows hidden={hidden} />
           </SettingsFoldRow>
         )}
       </SettingsRows>
@@ -480,55 +501,8 @@ function SimpleEngines({ rows, isReady, renderEngine, more }: {
   );
 }
 
-/** Providers someone hid: listed apart, folded, each one click from coming back. */
-export function HiddenEngines() {
-  const { state, refreshInstances } = useStore();
-  const [hidden, setHidden] = useState<Array<{ instanceId: string; displayName: string }>>([]);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    // An older server has no such route: nothing is hidden there.
-    api<{ instances?: Array<{ instanceId: string; displayName: string }> } | undefined>("/api/instances/hidden")
-      .then((result) => { if (alive) setHidden(Array.isArray(result?.instances) ? result.instances : []); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [state.instances]);
-  if (hidden.length === 0) return null;
-  const unhide = (instanceId: string) => {
-    setBusy(instanceId);
-    setError(null);
-    api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify({ hidden: false }) })
-      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
-      .catch((e) => setError(e.message))
-      .finally(() => setBusy(null));
-  };
-  return (
-    <details data-hidden-engines className="px-4">
-      <summary className="cursor-pointer text-[13px] font-medium text-ink-secondary hover:text-ink">{t("engines.hiddenTitle", { count: String(hidden.length) })}</summary>
-      <p className="mt-2 text-[12px] text-ink-secondary">{t("engines.hiddenHint")}</p>
-      <div className="mt-2 flex flex-col gap-1.5">
-        {hidden.map((entry) => (
-          <div key={entry.instanceId} className="flex items-center justify-between gap-3 rounded-lg border border-hairline/40 bg-inset px-3 py-2">
-            <span className="min-w-0 truncate text-[13px] text-ink">{entry.displayName}</span>
-            <button type="button" data-unhide-engine={entry.instanceId} disabled={busy !== null} onClick={() => unhide(entry.instanceId)}
-              className="shrink-0 text-[12px] font-medium text-accent hover:underline disabled:opacity-50">
-              {busy === entry.instanceId ? t("engines.unhiding") : t("engines.unhide")}
-            </button>
-          </div>
-        ))}
-      </div>
-      {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
-    </details>
-  );
-}
-
-export function EnginesSettings({ simple = false, more }: { simple?: boolean; more?: { id: string; open: boolean; onToggle: () => void } }) {
-  const { state } = useStore();
-  // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
-  useEffect(() => forgetAppCopySwitches, []);
-  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
-  // A provider's accounts share one card, which takes the place of its first account.
+/** A provider's accounts share one card, which takes the place of its first account. */
+function groupedAccounts(listed: InstanceInfo[]) {
   const groups = new Map<AccountGroup, InstanceInfo[]>();
   for (const instance of listed) {
     const group = accountGroupOf(instance);
@@ -538,7 +512,30 @@ export function EnginesSettings({ simple = false, more }: { simple?: boolean; mo
     const group = accountGroupOf(instance);
     return group && groups.get(group)?.[0] === instance ? group : null;
   };
-  const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
+  return { groups, groupOf, rows: listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance)) };
+}
+
+/** The chat's AI sign-in card: Simple Providers with only the accounts a person signs in to (Claude, ChatGPT or Codex,
+ * Antigravity), for an owner or admin. */
+export function AiSignInSettings() {
+  const { state } = useStore();
+  const { groups, groupOf, rows } = groupedAccounts(state.instances.filter((instance) => accountGroupOf(instance) !== null || (instance.driverKind === "antigravityAgent" && !instance.readOnly)));
+  const isReady = (instance: InstanceInfo) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); };
+  const renderEngine = (instance: InstanceInfo, bare = false) => {
+    const group = groupOf(instance);
+    return group ? <AccountsCard group={group} accounts={groups.get(group)!} bare={bare} /> : <EngineRow instance={instance} bare={bare} />;
+  };
+  return <AdminOnly><div data-ai-sign-in="">
+    <SimpleEngines rows={rows} isReady={isReady} renderEngine={renderEngine} accountsOnly more={{ id: "ai-sign-in-more", open: false, onToggle: () => {} }} />
+  </div></AdminOnly>;
+}
+
+export function EnginesSettings({ simple = false, more }: { simple?: boolean; more?: { id: string; open: boolean; onToggle: () => void } }) {
+  const { state } = useStore();
+  // Leaving Settings ends the "now uses the copy OpenMausBot installed" lines.
+  useEffect(() => forgetAppCopySwitches, []);
+  const listed = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i) || i.claudeEndpoint !== undefined || i.claudeBedrock !== undefined || i.codexEndpoint !== undefined);
+  const { groups, groupOf, rows } = groupedAccounts(listed);
   // A hidden ordinary Claude instance takes its card, and the endpoint section inside it, away. A hosted
   // workspace lists every engine read-only and refuses instance changes, so there the section has no Add.
   const hostedWorkspace = rows.length > 0 && rows.every((instance) => instance.readOnly);

@@ -78,7 +78,7 @@ export class ProviderAuthSessions {
     const revision = flow.revision;
     const status = await flow.instance.getAuthentication(flowId);
     if (flow.revoked || this.flows.get(instanceId) !== flow || flow.flowId !== flowId || flow.revision !== revision) throw failure("This sign-in session ended.", 404);
-    if (status.phase !== "waiting") flow.expiresAt = 0;
+    if (status.phase !== "waiting" && status.phase !== "verifying") flow.expiresAt = 0;
     if (status.phase === "succeeded") this.signedIn(instanceId);
     return status;
   }

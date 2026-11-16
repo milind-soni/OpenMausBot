@@ -34,12 +34,12 @@ export interface ErrorClassification {
 const TRANSIENT_PATTERNS: Array<{ pattern: RegExp; reason: TransientReason }> = [
   { pattern: /\b(?:429|rate.?limit|too many requests)\b/i, reason: "rate_limited" },
   { pattern: /\boverloaded\b|\bcapacity\b/i, reason: "overloaded" },
-  { pattern: /\b5\d{2}\b|\binternal server error\b|\bbad gateway\b|\bservice unavailable\b/i, reason: "server_error" },
+  { pattern: /\b5\d{2}\b|\binternal server error\b|\binternal service failure\b|\bServiceUnavailableError\b|\bbad gateway\b|\bservice unavailable\b/i, reason: "server_error" },
   // Codex's ChatGPT workspace routing lookup (codex-cli 0.160); only its "unauthorized" variant is a sign-in problem.
   { pattern: /\bworkspace routing discovery (?:failed|timed out)\b/i, reason: "server_error" },
   {
     pattern:
-      /\b(?:econnreset|econnrefused|epipe|etimedout|eai_again|connection reset|connection refused|socket hang up|network error|fetch failed)\b/i,
+      /\b(?:econnreset|econnrefused|epipe|etimedout|eai_again|unexpected_eof_while_reading|connection reset|connection refused|socket hang up|network error|fetch failed)\b/i,
     reason: "connection_reset",
   },
   { pattern: /\btimeout(ed)?\b|\btimed? out\b/i, reason: "timeout" },
@@ -72,6 +72,7 @@ const TERMINAL_PATTERNS: Array<{ pattern: RegExp; reason: TerminalReason }> = [
   { pattern: /\b404\b|\bno such thread\b|\bthread gone\b/i, reason: "not_found" },
   // A turn the user stopped must never come back as an auto-retry.
   { pattern: /\b(?:interrupted|cancelled by user)\b/i, reason: "interrupted" },
+  { pattern: /\bcertificate[ _]verify[ _]failed\b/i, reason: "unknown" },
 ];
 
 interface CliExit {

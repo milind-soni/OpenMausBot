@@ -21,7 +21,7 @@ export interface SurfacePlan {
   browser: boolean;
   pinned: Surface | null;
   note: string;
-  /** A bot opened this thread, so no person watches its Screen panel: the browser is mounted beside any computer. */
+  /** A bot opened this thread, so no person watches its Screen panel: a missing place is reported to that bot. */
   botOpened?: true;
 }
 
@@ -48,7 +48,8 @@ export function computerSkippedNote(cause: string): string {
   return ` This turn answers a Team incidents report and your computer could not be prepared for it (${why}), so no computer is mounted: you cannot open, click or check anything on it this turn. Act through your teammates, or tell the person what only they can fix — never claim to have checked that computer yourself.`;
 }
 
-/** One place per turn, plus the browser beside it in a thread a bot opened. A person's pin beats the bot's default (only Off overrides it), an Auto pin yields to a Works on change, and a pin the turn cannot honour is reported, never swapped. */
+/** One computer per turn, with the built-in browser beside it whenever the browser is on, so one task can use a website
+ * and a desktop app at once. A person's pin beats the bot's default (only Off overrides it), an Auto pin yields to a Works on change, and a pin the turn cannot honour is reported, never swapped. */
 export function resolveSurface(input: {
   destination: Destination;
   pinnedSurface?: Surface | null;
@@ -59,12 +60,11 @@ export function resolveSurface(input: {
   return input.botOpened ? { ...plan, botOpened: true } : plan;
 }
 
-function placeOf(input: { destination: Destination; pinnedSurface?: Surface | null; browserOn: boolean; botOpened?: boolean }): SurfacePlan {
+function placeOf(input: { destination: Destination; pinnedSurface?: Surface | null; browserOn: boolean }): SurfacePlan {
   const { destination, browserOn } = input;
   if (destination === "off") {
     return { computer: "off", browser: false, pinned: null, note: OFF_NOTE };
   }
-  const beside = input.botOpened === true && browserOn;
   const pin = input.pinnedSurface ?? null;
   if (pin === "browser") {
     if (browserOn) return { computer: "off", browser: true, pinned: "browser", note: "" };
@@ -72,14 +72,14 @@ function placeOf(input: { destination: Destination; pinnedSurface?: Surface | nu
     return { computer: "off", browser: false, pinned: pin,
       note: " This conversation is pinned to the built-in browser, but its tools are unavailable this turn. No computer is mounted instead. Do not claim to have used it; a different place must be selected before acting there." };
   }
-  if (pin) return { computer: pin, browser: beside, pinned: pin, note: "" };
+  if (pin) return { computer: pin, browser: browserOn, pinned: pin, note: "" };
   if (destination === "browser") {
     return browserOn
       ? { computer: "off", browser: true, pinned: null, note: "" }
       : { computer: "off", browser: false, pinned: null, note: NO_BROWSER_NOTE };
   }
   if (destination !== undefined) {
-    return { computer: destination, browser: beside, pinned: null, note: "" };
+    return { computer: destination, browser: browserOn, pinned: null, note: "" };
   }
   return { computer: undefined, browser: browserOn, pinned: null, note: "" };
 }
@@ -103,6 +103,18 @@ export function ownCloudStateWithin(status: Promise<{ box?: { state?: string | n
     status.then((result) => ({ state: result.box?.state, unavailable: false }), () => unavailable),
     new Promise<typeof unavailable>((resolve) => { timer = setTimeout(() => resolve(unavailable), ms); }),
   ]).finally(() => clearTimeout(timer));
+}
+
+/** Opens the built-in browser for a turn. Beside a computer it is extra: a browser that fails to open is left out and
+ * the turn goes on with the computer alone, never failed. Where the browser is the only place, its failure stands. */
+export async function openBrowserBeside<T>(open: () => Promise<T | null>, computer: Surface | null, skipped: (error: unknown) => void): Promise<T | null> {
+  try {
+    return await open();
+  } catch (error) {
+    if (!computer) throw error;
+    skipped(error);
+    return null;
+  }
 }
 
 export function browserIsThePlace(plan: SurfacePlan): boolean {
@@ -173,6 +185,10 @@ const YOUR_COMPUTER_ALONE =
 const CONNECTED_APP_FIRST =
   " When a connected app can do the task, use it before any browser or screen. If that app is refused or fails, say so in one plain line with what fixes it (connecting it, or who can), and ask before doing the task on a screen instead.";
 
+/** Both surfaces stay mounted for the whole turn: a task that needs a website and a desktop app uses each for its part. */
+const BOTH_IN_ONE_TASK =
+  "Both stay available for the whole turn, so one task can use each for its own part (for example a website in the built-in browser and a desktop app or file on the computer) without asking anyone to switch; keep any one website on one surface for the whole task, and say in one short sentence which surface you move to.";
+
 const RESTATE_SENTENCE =
   " Before your first action on a screen or page in a task, say in one short sentence where you are working, using that same name.";
 
@@ -183,6 +199,57 @@ const REPORT_BACK = "tell the bot that gave you this job which place you need an
 
 const SURFACE_AUTHORITY =
   ` For browser and computer tasks, use OpenMausBot's mounted browser/computer tools first: inspect the target, perform the action, and verify its result before claiming success. Discover deferred tools by their server/name when needed. Do not substitute the provider's own desktop, a shell-launched browser, or another automation path for the selected OpenMausBot surface. Ordinary code and file tasks may still use their normal tools. Announcing an action is not performing it. A request naming another place does not move these tools: this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote, and the built-in browser is a separate browser. If the requested place differs from the mounted one, ${ASK_TO_SWITCH}; never act on a different computer or describe a host window as a VM.`;
+
+/** The one control that moves a bot onto this computer, in the app's own words (en.json chat.botScreen,
+ * computer.simple.whereWorks, vm.dest.local). A bot left to guess sent the person to a "Settings → Computers" screen it made up. */
+export function whereWorksControl(bot: string): string {
+  return `open Bot's screen in this chat and choose This computer under “Where ${bot} works”`;
+}
+
+/** Each place as the person's Screen panel names it. */
+const PLACE_NAMES: Record<Surface, string> = {
+  cloud: "its Cloud desktop", vm: "its Private desktop", local: "This computer", browser: "the built-in Browser",
+};
+
+/** What a bot says and does when work needs this computer's own files but the turn works elsewhere. `canSelect`: this
+ * turn may call select_computer, the switch the person allows with one tap; otherwise only the person's own choice moves
+ * it. `botId`: the bot's own id, so a person's own request can keep This computer as its Works on through app_settings;
+ * only such a turn hears it, since an allow-once tap or an automation is never a lasting choice. */
+export function thisComputerSwitch(input: { place: Surface | null; bot: string; canSelect: boolean; botId?: string }): string {
+  const where = input.place && input.place !== "local"
+    ? `This bot works on ${PLACE_NAMES[input.place]}, not on this computer.` : "This bot does not work on this computer this turn.";
+  const how = input.canSelect
+    ? `say so in one line, call select_computer with surface "local", then end your turn; the request continues on this computer by itself, and the person allows it with one tap unless they gave you Full access. If select_computer refuses, ask the person to ${whereWorksControl(input.bot)}`
+    : `ask the person to ${whereWorksControl(input.bot)}`;
+  const keep = input.canSelect && input.botId
+    ? ` When the person asks you to keep using this computer, also keep it there: app_settings set, id "bots.settings", value {"botId":"${input.botId}","computer":"local"}; it applies at once with Undo.`
+    : "";
+  return `${where} To use files on this computer, switch it to This computer: ${how}.${keep} No other setting or menu does this, so never name one.`;
+}
+
+/** A path only this computer's own disk has, by the platform this server runs on; another place never has it. */
+const HOST_PATHS: Partial<Record<NodeJS.Platform, { pattern: RegExp; example: string }>> = {
+  win32: { pattern: /(?:^|[\s"'`=(,;|>])(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+\\|%(?:USERPROFILE|HOMEPATH|OneDrive\w*)%)/i, example: "C:\\Users\\…" },
+  darwin: { pattern: /(?:^|[\s"'`=(,;|>])\/Users\/[^/\s"']/, example: "/Users/…" },
+  linux: { pattern: /(?:^|[\s"'`=(,;|>])\/home\/(?!cua(?![\w.-]))[\w.-]/, example: "/home/…" },
+};
+
+/** Whether a command names a path on this computer's own disk, which a Private desktop never has. */
+export function namesHostPath(command: unknown, platform: NodeJS.Platform = process.platform): boolean {
+  return typeof command === "string" && Boolean(HOST_PATHS[platform]?.pattern.test(command));
+}
+
+/** A vm_exec command that failed and names such a path: only then does its result carry the switch to This computer.
+ * A command that merely mentions one (writing it into a file, a volume flag) runs as written. */
+export function failedOnHostPath(command: unknown, result: { exitCode?: unknown; timedOut?: unknown }, platform: NodeJS.Platform = process.platform): boolean {
+  return Number(result.exitCode ?? 0) !== 0 && result.timedOut !== true && namesHostPath(command, platform);
+}
+
+/** On a server where This computer can be picked: a host path or "my PC" is this computer, never the mounted place. */
+function ownFilesSentence(own: { bot: string; botId?: string; platform: NodeJS.Platform }, place: Surface | null, canSelect: boolean): string {
+  const example = HOST_PATHS[own.platform]?.example;
+  return ` A file or folder on the person's own computer (${example ? `a path such as ${example}, ` : ""}their Desktop, Documents, Downloads or OneDrive, or "my PC") is on this computer${place ? `, which ${surfaceLabel(place)} cannot reach` : ""}, and it is never one of the shared computers. ${thisComputerSwitch({ place, bot: own.bot, canSelect, ...(own.botId ? { botId: own.botId } : {}) })}`;
+}
 
 /** A Cloud home without the shared-computer tools cannot reach the person's own computer at all. */
 const UNREACHABLE_OWN = "the user's own computer cannot be reached from here";
@@ -215,20 +282,22 @@ function ownComputerSentence(lent: ReadonlyArray<{ name: string; platform: LentP
 export function surfacePrompt(
   mounted: MountedSurfaces,
   opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; cloudHome?: boolean; botOpened?: boolean;
-    ownComputer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }> } = {},
+    ownComputer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>;
+    /** This computer can be picked for this bot here: its name, and the platform this server runs on. */
+    thisComputer?: { bot: string; botId?: string; platform: NodeJS.Platform } } = {},
 ): string {
   const reportBack = opts.botOpened && !opts.canSelect;
   const computer = mounted.computer ? surfaceLabel(mounted.computer) : null;
   let text = "";
   if (mounted.computer === "local" && !opts.cloudHome) {
     text = mounted.browser
-      ? ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and this computer (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → this computer tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or this computer.${YOUR_COMPUTER_BESIDE_BROWSER}`
+      ? ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and this computer (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → this computer tools. ${BOTH_IN_ONE_TASK} If you need the user to sign in, say which surface — the Browser tab or this computer.${YOUR_COMPUTER_BESIDE_BROWSER}`
       : YOUR_COMPUTER_ALONE;
   } else if (computer && mounted.browser) {
     // The two browsers usually share no cookies: "Web tasks → the built-in browser" alone sent a bot whose site was
     // signed in on the computer to a signed-out tab, where it asked the person to sign in again.
     text =
-      ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and ${computer} (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → ${computer} tools. Pick one surface for a task and stay on it; if you need the user to sign in, say which surface — the Browser tab or ${computer}. The built-in browser and ${computer} may not share sign-ins. When you pick the surface for a new task and the user did not name a place, if you already saw its site signed in on ${computer} with the account it needs, pick ${computer} instead of the Browser tab, unless the task needs something already in the Browser tab, such as a cart; if the site turns out signed out on ${computer}, use the Browser tab when it is signed in there.`;
+      ` Two surfaces are mounted this turn: the built-in browser (the browser server's browser_navigate, browser_snapshot, browser_click, browser_fill and friends) and ${computer} (the computer server's tools). Web tasks → the built-in browser. Desktop apps, files and shell → ${computer} tools. ${BOTH_IN_ONE_TASK} If you need the user to sign in, say which surface — the Browser tab or ${computer}. The built-in browser and ${computer} may not share sign-ins. When you pick the surface for a new task and the user did not name a place, if you already saw its site signed in on ${computer} with the account it needs, pick ${computer} instead of the Browser tab, unless the task needs something already in the Browser tab, such as a cart; if the site turns out signed out on ${computer}, use the Browser tab when it is signed in there.`;
   } else if (computer) {
     text =
       ` Everything you do on screen happens on ${computer}, web pages included, through its own browser; there is no separate built-in browser this turn. If you need the user to sign in, tell them it is on ${computer}.`;
@@ -255,6 +324,9 @@ export function surfacePrompt(
     // What this turn's places reach, never every screen: their own computer is reachable too, through shared_computer.
     for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
     text = text.replace(UNREACHABLE_OWN, `${theirComputer(opts.ownComputer).theirs} is not one of these places`) + ownComputerSentence(opts.ownComputer, computer);
+  }
+  if (opts.thisComputer && !opts.cloudHome && !reportBack && mounted.computer !== "local") {
+    text += ownFilesSentence(opts.thisComputer, mounted.computer, Boolean(opts.canSelect));
   }
   return text + (opts.note ?? "");
 }

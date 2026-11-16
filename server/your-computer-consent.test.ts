@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { claimWithYourComputerConsent, YourComputerDeclined } from "./your-computer-consent.ts";
+import { claimWithYourComputerConsent, yourComputerCallFrom, YourComputerDeclined } from "./your-computer-consent.ts";
 
 describe("claimWithYourComputerConsent", () => {
   const run = (levels: boolean[], answer: "allow" | "deny" = "allow") => {
@@ -34,5 +34,14 @@ describe("claimWithYourComputerConsent", () => {
     const { steps, done } = run([false, true], "deny");
     await expect(done).rejects.toBeInstanceOf(YourComputerDeclined);
     expect(steps).toEqual(["bind", "ask"]);
+  });
+});
+
+describe("what a call on the person's computer asks about", () => {
+  it("asks about their files for a file call, and about the app or site otherwise", () => {
+    expect(yourComputerCallFrom(new URLSearchParams("files=1"))).toEqual({ files: true });
+    expect(yourComputerCallFrom(new URLSearchParams("files=1&app=Chrome"))).toEqual({ files: true });
+    expect(yourComputerCallFrom(new URLSearchParams("files=yes&app=Chrome"))).toEqual({ app: "Chrome" });
+    expect(yourComputerCallFrom(new URLSearchParams(""))).toBeUndefined();
   });
 });

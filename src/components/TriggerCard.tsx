@@ -2,7 +2,7 @@ import { lazy, Suspense, useState } from "react";
 import { createPortal } from "react-dom";
 import { Undo2, Zap } from "lucide-react";
 
-import { automationFor, automationSentence, automationStatus, capital, cardAutomation, firstRunLine, lastWhen, nextWhen, runLine } from "@/lib/automations";
+import { automationFor, automationSentence, automationStatus, capital, cardAutomation, firstRunLine, lastWhen, latestRun, nextWhen, runLine } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
@@ -45,7 +45,7 @@ export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId
   const botName = state.bots.find((bot) => bot.id === automation.botId)?.name ?? t("routines.unavailableBot");
   const sentence = automationSentence(automation, botName);
   const status = automationStatus(automation);
-  const last = automation.runs.find((run) => run.status !== "queued");
+  const last = latestRun(automation);
   const next = automation.nextRunAt != null ? nextWhen(automation.nextRunAt) : null;
   const lastRan = last && `${t("automations.card.lastRan", { when: lastWhen(last.startedAt ?? last.scheduledFor) })} ${runLine(last).mark} ${runLine(last).text}`;
   let line: string;

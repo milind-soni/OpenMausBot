@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
-import { createConnection } from "node:net";
+import { createConnection, type AddressInfo } from "node:net";
+import { createServer } from "node:http";
 import { createInterface } from "node:readline";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -18,6 +19,7 @@ import { publishedMessages, replyProblems } from "../harness/text-items.testkit.
 import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
 import { CodexDriver, codexNativeIncomingLogMessage, codexUpdateCommand } from "./codex.ts";
 import { codexCliOverrides } from "./codex-process.ts";
+import { codexReleaseUpdate } from "./codex-update.ts";
 import { parseToml } from "../toml-lite.ts";
 import * as codexProcess from "./codex-process.ts";
 import { CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, codexSignInRefused, codexUserError } from "./codex-errors.ts";
@@ -27,6 +29,10 @@ import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
 import { unsupportedCallsNotice } from "./codex-unsupported-calls.ts";
 import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
+import { OWN_MCP_HTTP_ENV } from "./own-mcp-http.ts";
+import { ownMcpHttpRoutes } from "../routes/own-mcp-http.ts";
+import { json as sendJson, readBody } from "../harness/http.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import * as procs from "../procs.ts";
 import { botBox } from "../bot-box/box.ts";
 import { boxEnvironment } from "../bot-box/env.ts";
@@ -559,6 +565,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     delete process.env.FAKE_CODEX_RESOLVED_SANDBOX;
     delete process.env.FAKE_CODEX_MCP_START;
     delete process.env.FAKE_CODEX_MCP_HANDSHAKE;
+    vi.unstubAllEnvs();
     delete process.env.FAKE_CODEX_STEER_ERROR;
     delete process.env.FAKE_CODEX_STEER_ERROR_FILE;
     delete process.env.FAKE_CODEX_STEER_HANG;
@@ -1943,7 +1950,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(seen.env.HEALTH_REGION).toBe("eu");
   });
 
-  it.each(["ask", "auto"] as const)("pre-allows peer-agent comms without exposing its token in %s mode", async (approvalMode) => {
+  it.each([["ask", "0"], ["auto", "0"], ["ask", "1"], ["auto", "1"]] as const)("pre-allows peer-agent comms without exposing its token in %s mode (OMB_OWN_MCP_HTTP=%s)", async (approvalMode, http) => {
+    vi.stubEnv(OWN_MCP_HTTP_ENV, http);
     await create();
     const dump = join(scratch, "agents.json");
     process.env.FAKE_CODEX_DUMP = dump;
@@ -1962,7 +1970,6 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
             OMB_BOT_ID: "captain",
             OMB_THREAD_ID: "t-agents",
             OMB_COMMS_TOKEN: "peer-comms-secret",
-            OMB_TURN_DEPTH: "0",
           },
         },
       },
@@ -1970,14 +1977,47 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     await recorder.until((event) => event.type === "turn.completed");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.argv.join(" ")).toContain("mcp_servers.agents.command");
+    expect(seen.argv.join(" ")).toContain(http === "1" ? 'mcp_servers.agents.url="http://127.0.0.1:8799/api/internal/mcp-http/agents"' : "mcp_servers.agents.command");
     expect(seen.argv).toContain('mcp_servers.agents.default_tools_approval_mode="approve"');
     expect(seen.argv).toContain("mcp_servers.agents.tool_timeout_sec=960");
-    expect(seen.argv.join(" ")).toContain("/tmp/agents-proxy.js");
+    if (http === "1") expect(seen.argv).toContain('mcp_servers.agents.bearer_token_env_var="OMB_COMMS_TOKEN"');
+    else expect(seen.argv.join(" ")).toContain("/tmp/agents-proxy.js");
     expect(seen.argv.join(" ")).toContain("OMB_COMMS_TOKEN");
     expect(seen.argv.join(" ")).not.toContain("peer-comms-secret");
     expect(seen.env.OMB_COMMS_TOKEN).toBe("peer-comms-secret");
     expect(instance.adapter.capabilities.agentsMcp).toBe(true);
+  });
+
+  it("with OMB_OWN_MCP_HTTP=1, starts the agents server by URL with the bot's settings and capability, the loopback out of any proxy", async () => {
+    vi.stubEnv(OWN_MCP_HTTP_ENV, "1");
+    const seenAuth: Array<string | undefined> = [];
+    const harness = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      seenAuth.push(req.headers.authorization);
+      await ownMcpHttpRoutes({ req, res, url, path: url.pathname, method: req.method ?? "GET", auth: {} as RequestAuth, json: sendJson, readBody });
+      if (!res.headersSent) sendJson(res, 404, { error: "no such endpoint" });
+    });
+    await new Promise<void>((resolve) => harness.listen(0, "127.0.0.1", resolve));
+    try {
+      process.env.FAKE_CODEX_MCP_START = "1";
+      // Codex given a proxy for HTTP must reach this server's loopback URL around it.
+      await create({ environment: { NO_PROXY: "corp.internal" } });
+      const dump = join(scratch, "agents-http.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId: "t-agents-http", text: "go", integrations: { agents: { command: process.execPath, args: ["/tmp/agents-proxy.js"], env: {
+        ELECTRON_RUN_AS_NODE: "1", OMB_HARNESS_URL: `http://127.0.0.1:${(harness.address() as AddressInfo).port}`, OMB_BOT_ID: "captain", OMB_THREAD_ID: "t-agents-http",
+        OMB_COMMS_TOKEN: "peer-comms-secret", OMB_CHIEF_OF_STAFF: "1",
+      } } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.mcpStartup.agents).toMatchObject({ status: "ready", tools: expect.arrayContaining(["coordinate_bots", "create_bot"]) });
+      expect(seenAuth.length).toBeGreaterThan(0);
+      expect(seenAuth.every((authorization) => authorization === "Bearer peer-comms-secret")).toBe(true);
+      expect(seen.env.NO_PROXY.split(",")).toEqual(["corp.internal", "127.0.0.1", "localhost", "::1"]);
+      expect(seen.argv.join(" ")).not.toContain("peer-comms-secret");
+    } finally {
+      await new Promise<void>((resolve) => harness.close(() => resolve()));
+    }
   });
 
   it.each(["ask", "auto"] as const)("pre-allows the built-in browser while preserving the native %s reviewer", async (approvalMode) => {
@@ -3627,6 +3667,12 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(codexUpdateCommand("'C:\\Program Files\\ag.exe' codex", "win32")).toBe(
       "& 'C:\\Program Files\\ag.exe' 'codex' update",
     );
+  });
+
+  it("shows no update card on My Cloud, whose Codex updates with the Cloud", async () => {
+    expect(await codexReleaseUpdate("0.150.0", "codex", false)).toMatchObject({ title: "Update Codex to 0.156.1", command: "codex update" });
+    expect(await codexReleaseUpdate("0.150.0", "codex", true)).toBeUndefined();
+    expect(await codexReleaseUpdate("0.156.1", "codex", true)).toBeUndefined();
   });
 
   it("marks a Codex 401 as setup so the UI offers sign-in instead of Retry", async () => {

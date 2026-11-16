@@ -2,27 +2,18 @@
 // runs in the desktop renderer and, bundled, in the phones' web views, so it never touches a window: a platform
 // hands it each `message` event and an adapter for the rest.
 import { APP_LIMITS, APP_PROTOCOL_VERSION, ROOM_VIEW_ONLY, utf8Bytes, type AppDocument } from "../app.ts";
+import {
+  APP_RPC_METHODS,
+  RPC_HOST_REFUSED,
+  RPC_INVALID_PARAMS,
+  RPC_METHOD_NOT_FOUND,
+  type AppRpcMethod,
+  type JsonRpcError,
+  type JsonRpcId,
+  type JsonRpcMessage,
+} from "../../packages/phone-protocol/src/app-rpc.ts";
 
-export type JsonRpcId = string | number;
-
-export interface JsonRpcError {
-  code: number;
-  message: string;
-  data?: unknown;
-}
-
-export type JsonRpcMessage =
-  | { jsonrpc: "2.0"; id: JsonRpcId; method: string; params?: Record<string, unknown> }
-  | { jsonrpc: "2.0"; method: string; params?: Record<string, unknown> }
-  | { jsonrpc: "2.0"; id: JsonRpcId; result: unknown }
-  | { jsonrpc: "2.0"; id: JsonRpcId; error: JsonRpcError };
-
-export const APP_RPC_METHODS = ["tools/call", "tools/list", "resources/read", "resources/list"] as const;
-export type AppRpcMethod = (typeof APP_RPC_METHODS)[number];
-
-export const RPC_METHOD_NOT_FOUND = -32601;
-export const RPC_INVALID_PARAMS = -32602;
-export const RPC_HOST_REFUSED = -32000;
+export * from "../../packages/phone-protocol/src/app-rpc.ts";
 
 export const APP_FRAME_LIMITS = {
   messageBytes: 1_000_000,

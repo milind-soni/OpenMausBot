@@ -17,6 +17,7 @@ import { acceptedSendMatch, sendFingerprint, SendSequencer } from "../send-idemp
 import { _queuedCount, drainSteeredMessages, queuedSteeredMessage, queueSteeredMessage } from "../steer-queue.ts";
 import { Store, type Message } from "../store.ts";
 import { typedWords } from "../typed-sends.ts";
+import { USER_ERROR } from "../user-errors.ts";
 import { createBotMessageRoutes, type BotMessageRouteDeps } from "./bot-messages.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -544,6 +545,15 @@ describe("POST /api/bots/:id/messages with widgetAction", () => {
     expect((await post({ threadId, text: "Hold off until Monday", replyToId: widgetId })).status).toBe(202);
     expect(sent().map((message) => [message.text, message.replyToId])).toEqual([["Hello", undefined], ["Hold off until Monday", widgetId]]);
     expect(state.accepted.map((input) => input.replyTo?.id)).toEqual([undefined, widgetId]);
+  });
+});
+
+describe("a typed answer to a card the server refuses", () => {
+  it("returns the refusal with its language-pack key, like a pressed card's", async () => {
+    const error = USER_ERROR["serverError.card.cloudOwnerOnly"];
+    const { threadId, post, sent } = await fixture({ typedCardAnswer: async () => ({ status: 403, error }) });
+    expect(await post({ threadId, text: "allow" })).toEqual({ status: 403, body: { error, errorKey: "serverError.card.cloudOwnerOnly" } });
+    expect(sent()).toEqual([]);
   });
 });
 

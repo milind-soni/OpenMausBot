@@ -1,10 +1,11 @@
-import { Check, Copy, FileUp, Loader2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, Copy, ExternalLink, FileUp, Loader2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { track } from "@/lib/analytics";
+import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
-import { foundExports, grokErrorText, lookForGrokBot, NOTHING_FOUND, previewGrokMove, runGrokMove, type GrokLook, type GrokPreview, type GrokReport } from "@/lib/grok-move";
+import { foundExports, grokConnector, grokErrorText, lookForGrokBot, MAUSBOT_GROK_TEMPLATE_URL, NOTHING_FOUND, previewGrokMove, runGrokMove, type GrokConnector, type GrokLook, type GrokPreview, type GrokReport } from "@/lib/grok-move";
 import { t } from "@/lib/i18n";
 import { localSetupImport } from "@/lib/setup-import";
 import { api, useStore } from "@/state/store";
@@ -49,7 +50,57 @@ export function GrokMoveLines({ paused, files = null, apps, moved, unreadable, f
   return lines.length > 0 && <div className="flex flex-col gap-1">{lines.map((line) => <p key={line} className={LINE}>{line}</p>)}</div>;
 }
 
-function BringBack({ local, look, found, reply, error, onReply, onFile, onFound }: {
+const NO_CONNECTOR: Pick<GrokConnector, "available" | "connectorUrl" | "stopped"> = { available: false, stopped: false };
+const POLL_MS = 3_000;
+
+/** The other way over: a link Grok Bot is given once, which the MausBot bot there sends every Bot through. */
+function ConnectGrokBot({ url, stopped, names, error, busy, onConnect, onUse }: {
+  url: string | undefined; stopped: boolean; names: readonly string[]; error: boolean; busy: boolean; onConnect: () => void; onUse: () => void;
+}) {
+  const arrived = names.length > 0 && (
+    <div data-grok-move-arrived role="status" className="mt-1 flex w-full items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent/[0.06] px-3 py-2">
+      <span className="min-w-0 break-words text-[13px] text-ink">{t("grokMove.connect.arrived", { names: names.join(", ") })}</span>
+      <button type="button" data-grok-move-use-arrived onClick={onUse} className={cn(PRIMARY, "shrink-0")}>{t("grokMove.useFound")}</button>
+    </div>
+  );
+  const { state: copied, copy } = useCopyFeedback(url ?? "");
+  return (
+    <section data-grok-move-connect className="flex flex-col items-start gap-1.5">
+      <h3 className="text-[14px] font-medium text-ink">{t("grokMove.connect.title")}</h3>
+      <p className={LINE}>{t("grokMove.connect.hint")}</p>
+      {url ? (
+        <>
+          <div className="mt-1 flex w-full items-center gap-2">
+            <input readOnly value={url} aria-label={t("grokMove.connect.linkLabel")} onFocus={(event) => event.target.select()}
+              className="min-w-0 flex-1 rounded-xl border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink focus:outline-none" />
+            <button type="button" data-grok-move-copy-link onClick={copy} className={cn(SECONDARY, "inline-flex shrink-0 items-center gap-2")}>
+              {copied === "copied" ? <Check size={15} /> : <Copy size={15} />}
+              {copied === "copied" ? t("grokMove.copied") : copied === "failed" ? t("grokMove.copyFailed") : t("grokMove.connect.copy")}
+            </button>
+          </div>
+          <p className={LINE}>{t("grokMove.connect.where")}</p>
+          <p className={LINE}>{t("grokMove.connect.private")}</p>
+          <button type="button" data-grok-move-template onClick={() => void openExternalLink(MAUSBOT_GROK_TEMPLATE_URL)} className={cn(SECONDARY, "mt-1 inline-flex items-center gap-2")}>
+            <ExternalLink size={15} />{t("grokMove.connect.addBot")}
+          </button>
+          {arrived}
+        </>
+      ) : (
+        <>
+          {stopped && <p role="status" data-grok-move-stopped className={LINE}>{t("grokMove.connect.stopped")}</p>}
+          {arrived}
+          <button type="button" data-grok-move-connect-start disabled={busy} onClick={onConnect} className={cn(SECONDARY, "mt-1 inline-flex items-center gap-2")}>
+            {busy && <Loader2 size={15} className="animate-spin" />}{t("grokMove.connect.start")}
+          </button>
+        </>
+      )}
+      {error && <p role="alert" className="text-[13px] leading-relaxed text-danger">{t("grokMove.connect.failed")}</p>}
+    </section>
+  );
+}
+
+function BringBack({ connect, local, look, found, reply, error, onReply, onFile, onFound }: {
+  connect: ReactNode;
   local: boolean;
   look: GrokLook;
   found: ReturnType<typeof foundExports>;
@@ -64,6 +115,7 @@ function BringBack({ local, look, found, reply, error, onReply, onFile, onFound 
   return (
     <>
       <p className="text-[13px] leading-relaxed text-ink-secondary">{t("grokMove.intro")}</p>
+      {connect}
       <section className="flex flex-col items-start gap-1.5">
         <h3 className="text-[14px] font-medium text-ink">{t("grokMove.step1")}</h3>
         <p className="text-[13px] leading-relaxed text-ink-secondary">{t("grokMove.step1Hint")}</p>
@@ -121,9 +173,60 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
 
   const found = useMemo(() => foundExports(look.files), [look.files]);
 
-  const show = async (read: () => GrokBot[]) => {
+  const onStart = !preview && !report;
+  const [connector, setConnector] = useState(NO_CONNECTOR);
+  const [arrivedFiles, setArrivedFiles] = useState<GrokLook["files"]>([]);
+  const [connecting, setConnecting] = useState(false);
+  const [connectFailed, setConnectFailed] = useState(false);
+  const lastSeq = useRef(0);
+  /** The Bots in the preview came through the link, so a finished import ends it. */
+  const viaLink = useRef(false);
+  const arrived = useMemo(() => foundExports(arrivedFiles).bots, [arrivedFiles]);
+  /** Leaving the dialog ends the link, so nothing stays open to the internet once the person has left the move. */
+  const linkOpen = useRef(false);
+  const left = useRef(false);
+  useEffect(() => {
+    left.current = false;
+    return () => {
+      left.current = true;
+      if (linkOpen.current) void grokConnector("DELETE").catch(() => {});
+    };
+  }, []);
+  const takeConnector = useCallback((next: GrokConnector) => {
+    linkOpen.current = Boolean(next.connectorUrl);
+    setConnector({ available: next.available, stopped: next.stopped, ...(next.connectorUrl ? { connectorUrl: next.connectorUrl } : {}) });
+    if (!next.connectorUrl && !next.stopped) {
+      lastSeq.current = 0;
+      setArrivedFiles([]);
+    } else if (next.seq > lastSeq.current) {
+      // Two looks may overlap: each arrival is taken once.
+      const fresh = next.arrived.filter((file) => Number(file.name) > lastSeq.current);
+      lastSeq.current = next.seq;
+      setArrivedFiles((files) => [...files, ...fresh]);
+    }
+  }, []);
+  useEffect(() => {
+    if (local) void grokConnector("GET").then(takeConnector, () => {});
+  }, [local, takeConnector]);
+  useEffect(() => {
+    if (!connector.connectorUrl || !onStart) return;
+    const timer = setInterval(() => void grokConnector("GET", lastSeq.current).then(takeConnector, () => {}), POLL_MS);
+    return () => clearInterval(timer);
+  }, [connector.connectorUrl, onStart, takeConnector]);
+  const connect = async () => {
+    setConnecting(true);
+    setConnectFailed(false);
+    await grokConnector("POST").then((next) => {
+      if (!left.current) return takeConnector(next);
+      if (next.connectorUrl) void grokConnector("DELETE").catch(() => {});
+    }, () => setConnectFailed(true));
+    setConnecting(false);
+  };
+
+  const show = async (read: () => GrokBot[], fromLink = false) => {
     try {
       const bots = read();
+      viaLink.current = fromLink;
       const servers = await api<{ servers?: Array<{ name: string }> }>("/api/mcp/servers").then((answer) => answer.servers ?? [], () => []);
       setPreview(previewGrokMove(bots, { bots: state.bots, servers: new Set(servers.map((server) => server.name)), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
       setError("");
@@ -138,7 +241,6 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     if (file.size > GROK_EXPORT_MAX_CHARS) return setError(t("grokMove.error.tooLarge"));
     void file.text().then((text) => show(() => parseGrokExport(text)));
   };
-  const onStart = !preview && !report;
   // The chat box behind this dialog attaches any file dropped on the window, and one Send would hand a private export to its
   // model. So nothing behind the dialog sees a drag, on any step, and only the first step reads what was dropped.
   useEffect(() => {
@@ -162,6 +264,10 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     setImporting(true);
     const done = await runGrokMove(preview, dispatch);
     track("team_imported", { members: preview.plans.length, source: "grok", mode: "add", format: "package" });
+    if (viaLink.current && done.bots.length > 0 && done.failed.length === 0) {
+      // Best effort: a link left behind stops working on its own within the hour.
+      void grokConnector("DELETE").then(takeConnector, () => {});
+    }
     setReport(done);
     setPreview(null);
     setImporting(false);
@@ -211,7 +317,11 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
             </>
           ) : (
             <BringBack local={local} look={look} found={found} reply={reply} error={error} onReply={setReply}
-              onFile={(file) => readFile.current(file)} onFound={() => void show(() => found.bots)} />
+              onFile={(file) => readFile.current(file)} onFound={() => void show(() => found.bots)}
+              connect={local && connector.available && (
+                <ConnectGrokBot url={connector.connectorUrl} stopped={connector.stopped} names={arrived.map((bot) => bot.name)} error={connectFailed} busy={connecting}
+                  onConnect={() => void connect()} onUse={() => void show(() => arrived, true)} />
+              )} />
           )}
         </div>
         <div className="ui-modal-divider shrink-0" />

@@ -17,6 +17,7 @@ import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backu
 import { cjkSearchText } from "./cjk-search.ts";
 import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
+import { flushLaterSaves } from "./save-batch.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
@@ -33,6 +34,8 @@ const EXCLUDED = new Set([
   ".backups", "tools", "browser", "agent-browser-profiles", "cache", ".cache", "tmp", ".tmp", "dist-native", "tunnel-runtime", "evidence",
   ".openmausbot-server-child", "environment-id", "sessions.json", "tunnel-account.json",
   "team-computers.json",
+  // Slack messages a Cloud took from the Admin (team-slack.ts): this machine's own, of no use anywhere else.
+  "team-slack-messages.json",
   "openmausbot-server.lease", "box-create-requests.lock", "messages.db-wal", "messages.db-shm",
   "runtime.db-wal", "runtime.db-shm",
   "decider-log",
@@ -42,6 +45,8 @@ const EXCLUDED = new Set([
   "claude-user-skills",
   // The bot box's live sockets and seccomp filter (bot-box/box.ts), made again each time the server starts.
   "box",
+  // The processes this machine's servers started (engine-records.ts), stopped by its next start.
+  "engine-runs",
   // A Team Cloud's engine homes (engine-homes/layout.ts): CLI login homes, each audience's own transcripts and the held
   // folder, which no admin reads.
   "engine-homes",
@@ -274,6 +279,7 @@ function databaseCounts(path: string): { threads: number; messages: number } {
 /** The existing maintenance gate owns exclusivity until this worker has exited.
  * Keep synchronous file validation/fsync intact, but off the request thread. */
 export async function createWorkspaceBackup(dataDir: string, options: CreateWorkspaceBackupOptions): Promise<CreatedWorkspaceBackup> {
+  flushLaterSaves();
   const source = new URL("./workspace-backup.worker.ts", import.meta.url);
   // Assign ownership before the worker can create staging, even if it crashes before reporting back.
   const jobId = randomUUID();
@@ -761,6 +767,8 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
     if (!record(value)) throw new Error("Invalid routine definitions in workspace backup.");
     if (Array.isArray(value.routines)) for (const routine of value.routines) if (record(routine)) {
       routine.enabled = false;
+      // A restore is a change to the routine: nothing may read its old stamp as the moment something else switched it off.
+      routine.updatedAt = Math.max(Date.now(), (typeof routine.updatedAt === "number" ? routine.updatedAt : 0) + 1);
       if (typeof routine.prompt === "string") routine.prompt = paths.text(routine.prompt);
     }
     if (Array.isArray(value.runs)) for (const run of value.runs) {

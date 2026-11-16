@@ -457,3 +457,55 @@ export function saveSimpleSectionOrder(
 ): void {
   saveStringList(SIMPLE_SIDEBAR_SECTION_ORDER_KEY, ids, storage);
 }
+
+/** Bots whose sidebar thread list stays at "Show all N threads" until the person picks "Show fewer". */
+export const SIDEBAR_SHOW_ALL_KEY = "openmausbot.sidebarShowAllThreads.v1";
+
+let showAllBots: ReadonlySet<string> | null = null;
+const showAllListeners = new Set<() => void>();
+
+function currentShowAllBots(): ReadonlySet<string> {
+  // With no list mounted, no storage listener kept the cache current: another window may have changed it.
+  if (showAllListeners.size === 0) showAllBots = null;
+  showAllBots ??= new Set(loadStringList(SIDEBAR_SHOW_ALL_KEY));
+  return showAllBots;
+}
+
+function notifyShowAll(): void {
+  for (const listener of showAllListeners) listener();
+}
+
+function onShowAllStorage(event: StorageEvent): void {
+  if (event.key !== null && event.key !== SIDEBAR_SHOW_ALL_KEY) return;
+  if (event.storageArea && event.storageArea !== globalThis.localStorage) return;
+  showAllBots = null;
+  notifyShowAll();
+}
+
+function subscribeShowAll(listener: () => void): () => void {
+  if (showAllListeners.size === 0) globalThis.addEventListener?.("storage", onShowAllStorage);
+  showAllListeners.add(listener);
+  return () => {
+    showAllListeners.delete(listener);
+    if (showAllListeners.size === 0) globalThis.removeEventListener?.("storage", onShowAllStorage);
+  };
+}
+
+export function setSidebarShowAllThreads(botId: string, showAll: boolean): void {
+  const saved = currentShowAllBots();
+  if (saved.has(botId) === showAll) return;
+  // Newest first, so the stored list's cap drops the oldest bots.
+  const next = showAll ? [botId, ...saved] : [...saved].filter((id) => id !== botId);
+  showAllBots = new Set(saveStringList(SIDEBAR_SHOW_ALL_KEY, next));
+  notifyShowAll();
+}
+
+/** A bot's "Show all N threads", remembered so it survives collapsing the bot and reloading the app. */
+export function useSidebarShowAllThreads(botId: string): [boolean, (showAll: boolean) => void] {
+  const read = () => currentShowAllBots().has(botId);
+  return [useSyncExternalStore(subscribeShowAll, read, () => false), (showAll) => setSidebarShowAllThreads(botId, showAll)];
+}
+
+export function forgetSidebarShowAllForTests(): void {
+  showAllBots = null;
+}

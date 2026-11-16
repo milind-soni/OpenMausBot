@@ -186,7 +186,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
               ? t("approval.aria.pendingProfile")
               : t("approval.aria.pending")
       }
-      data-ask-card="approval"
+      data-ask-card="approval" data-look="approval-card"
       className="px-4 pb-3.5 pt-3"
     >
       <div className="flex min-w-0 items-center gap-2" aria-live="polite">
@@ -308,11 +308,12 @@ export function PendingApprovalActions({
   }
   const always = durableRequest ? null
     : bot && pending.allowKey
-      ? { name: t("approval.action.alwaysAllow"), hint: t("approval.action.stopAsking", { name: bot.name, key: pending.allowKey }), run: () => decide("allow", true) }
+      ? { label: t("approval.action.alwaysAllow"), name: t("approval.action.alwaysAllow"), hint: t("approval.action.stopAsking", { name: bot.name, key: pending.allowKey }), run: () => decide("allow", true) }
       : canRememberCommand && pending.commandAllowlist
-        ? { name: t("approval.action.alwaysAllowCommand"), hint: t("approval.action.alwaysAllowCommandHint", { cwd: pending.commandAllowlist.cwd }), run: () => decide("allow", false, true) }
+        ? { label: t("approval.action.alwaysAllow"), name: t("approval.action.alwaysAllowCommand"), hint: t("approval.action.alwaysAllowCommandHint", { cwd: pending.commandAllowlist.cwd }), run: () => decide("allow", false, true) }
         : !pending.allowKey && pending.allowSession
-          ? { name: t("approval.action.alwaysAllowSession"), hint: t("approval.action.alwaysAllowSessionHint"), run: () => decide("allow", true) }
+          // Nothing is saved for this one: it lasts while the AI's session does, and the button says so.
+          ? { label: t("approval.action.allowSession"), name: t("approval.action.allowSession"), hint: t("approval.action.alwaysAllowSessionHint"), run: () => decide("allow", true) }
           : null;
   const more = showMore && !durableRequest ? [
     <button key="cancel" type="button" onClick={onCancelTurn} className={ASK_QUIET_ANSWER}>
@@ -329,7 +330,7 @@ export function PendingApprovalActions({
         title={always.hint}
         className={ASK_QUIET_ANSWER}
       >
-        {t("approval.action.alwaysAllow")}
+        {always.label}
       </button>
     ),
     <button

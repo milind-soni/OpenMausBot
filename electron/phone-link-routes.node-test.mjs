@@ -5,9 +5,13 @@ import { createPhoneLinkRoutes, PHONE_LINK_SLEEP_GRACE_MS } from "./phone-link-r
 import { checkTailscale, magicDnsName, readTailscaleStatus, TAILSCALE_CLI_PATHS, tailscaleEnvironment, tailscaleInstall } from "./tailscale-check.mjs";
 
 function world({ check = async () => ({ state: "ready", name: "mac.tail1.ts.net" }), tailscaleOn = false, sidecar = null } = {}) {
-  const w = { routes: { tailscale: tailscaleOn }, names: [], computers: [], shares: 0, checks: 0, wakes: 0, sleeps: 0, changed: [], clock: 1_000_000, sidecar, running: sidecar !== null };
+  const w = { routes: { tailscale: tailscaleOn }, forShare: false, marks: [], names: [], computers: [], shares: 0, checks: 0, wakes: 0, sleeps: 0, changed: [], clock: 1_000_000, sidecar, running: sidecar !== null };
   w.links = createPhoneLinkRoutes({
-    rememberRoute: async (route, on, extra) => { w.routes[route] = on; if (extra?.name) w.names.push(extra.name); if (extra?.computers !== undefined) w.computers.push(extra.computers); },
+    tailscaleRoute: () => ({ on: w.routes.tailscale === true, forShare: w.forShare }),
+    rememberRoute: async (route, on, extra) => {
+      w.routes[route] = on; if (extra?.name) w.names.push(extra.name); if (extra?.computers !== undefined) w.computers.push(extra.computers);
+      if (route === "tailscale") { if (!on) w.forShare = false; else if (extra?.forShare !== undefined) { w.forShare = extra.forShare; w.marks.push(extra.forShare); } }
+    },
     shareChanged: async () => { w.shares++; },
     routeOn: (route) => w.routes[route] === true,
     dismissNotice: () => {},
@@ -59,17 +63,54 @@ test("turning Tailscale off runs nothing", async () => {
   assert.equal(w.routes.tailscale, false);
 });
 
-test("the switch for other computers needs the Tailscale route, and every Tailscale change reaches the share", async () => {
-  const off = world();
-  await off.links.setTailscaleComputers(true);
-  assert.deepEqual([off.computers, off.shares, off.routes.tailscale], [[], 0, false], "no route, no share");
+test("the switch for other computers changes only the share while the person's Tailscale route is on, and every Tailscale change reaches the share", async () => {
   const on = world({ tailscaleOn: true });
   await on.links.setTailscaleComputers(true);
-  assert.deepEqual([on.computers, on.shares], [[true], 1]);
+  assert.deepEqual([on.computers, on.shares, on.checks, on.wakes], [[true], 1, 0, 0]);
   await on.links.checkTailscale();
   assert.equal(on.shares, 2);
+  await on.links.setTailscaleComputers(false);
+  assert.deepEqual([on.computers, on.routes.tailscale], [[true, false], true], "a route the person had on stays on");
   await on.links.setTailscale(false);
-  assert.equal(on.shares, 3);
+  assert.equal(on.shares, 4);
+});
+
+test("turning the share on with Tailscale off turns the route on as the share's, without waking the phone link; turning it off turns that route off again", async () => {
+  const w = world();
+  await w.links.setTailscaleComputers(true);
+  assert.deepEqual([w.routes.tailscale, w.marks, w.names, w.checks, w.wakes, w.shares], [true, [true], ["mac.tail1.ts.net"], 1, 0, 1]);
+  await w.links.setTailscaleComputers(false);
+  assert.deepEqual([w.routes.tailscale, w.shares], [false, 2]);
+});
+
+test("a route the share turned on stays on when a device is paired, which may be using it", async () => {
+  const w = world({ sidecar: { enabled: true, devices: [{ id: "a" }], pairing: null } });
+  await w.links.setTailscaleComputers(true);
+  await w.links.setTailscaleComputers(false);
+  assert.deepEqual([w.routes.tailscale, w.computers], [true, [true, false]]);
+});
+
+test("a route the person turned on themselves after the share is no longer the share's", async () => {
+  const w = world();
+  await w.links.setTailscaleComputers(true);
+  await w.links.setTailscale(false);
+  await w.links.setTailscale(true);
+  assert.deepEqual(w.marks, [true, false]);
+  await w.links.setTailscaleComputers(true);
+  await w.links.setTailscaleComputers(false);
+  assert.equal(w.routes.tailscale, true);
+});
+
+test("the share stays off and says why when Tailscale can't start, and off with no route does nothing", async () => {
+  for (const state of ["not-installed", "signed-out", "needs-approval"]) {
+    const w = world({ check: async () => ({ state }) });
+    const reply = await w.links.setTailscaleComputers(true);
+    assert.equal(reply.tailscaleProblem, state);
+    assert.deepEqual([w.routes.tailscale, w.computers, w.shares], [false, [], 0]);
+  }
+  const off = world();
+  await off.links.setTailscaleComputers(false);
+  assert.deepEqual([off.checks, off.shares, off.routes.tailscale], [0, 0, false]);
 });
 
 test("other routes switch on their own, tell main which changed, and wake only when turned on", async () => {
@@ -148,4 +189,9 @@ test("one status reading tells ready, signed out, not running and not allowed ap
   assert.deepEqual(tried, ["/opt/homebrew/bin/tailscale", "/usr/bin/tailscale"]);
   assert.ok(!TAILSCALE_CLI_PATHS.some((cli) => /Tailscale\.app/.test(cli)), "no app executable among the candidates");
   assert.equal(tailscaleEnvironment({ PATH: "" }).TAILSCALE_BE_CLI, "1");
+});
+
+test("a computer waiting for its tailnet's approval is told apart from one signed out", () => {
+  assert.deepEqual(readTailscaleStatus(JSON.stringify({ BackendState: "NeedsMachineAuth", Self: { DNSName: "mac.tail1.ts.net." } })), { state: "needs-approval" });
+  assert.deepEqual(readTailscaleStatus(JSON.stringify({ BackendState: "NeedsLogin" })), { state: "signed-out" });
 });

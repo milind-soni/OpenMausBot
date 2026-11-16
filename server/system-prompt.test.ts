@@ -459,6 +459,15 @@ it("tells Cloud bots that their AIs run on the Cloud and are signed in from the 
   }
 });
 
+// A Cloud's Antigravity sign-in ended on Google's redirect to 127.0.0.1, which can't load from the person's browser; the bot
+// should point at the card's paste box instead of calling the sign-in broken.
+it("tells Cloud bots that a sign-in ending on an unreachable 127.0.0.1 page is finished by pasting its address on the AI's card", () => {
+  for (const text of [cloudHomePrompt(true), cloudHomePrompt(false), cloudHomePrompt(true, [], [{ name: "ASH-PC", platform: "win32" }], true)]) {
+    expect(text).toContain("ends on a 127.0.0.1 or localhost page that can't be reached, that is the expected last step, not a failed sign-in");
+    expect(text).toContain("paste it in the \"Paste its address here\" field on the AI's card");
+  }
+});
+
 describe("longCommandsPrompt", () => {
   it("names Bash's limit everywhere and vm_exec's own limit only with a Local VM", () => {
     for (const kind of [null, "local", "vps", "box"] as const) {
@@ -483,6 +492,7 @@ describe("longCommandsPrompt", () => {
       expect(text).not.toContain("nohup");
       expect(text).toContain("trust only the command's own fresh exit code and output");
       expect(text).toContain("cannot set a wait, so finish it in this turn");
+      expect(text).toContain("Work a bot handed you for the person's own request may set one wait_until (not a trigger), cannot cancel it");
     }
   });
 

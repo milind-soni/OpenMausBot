@@ -393,6 +393,12 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       const me = sessionPerson(auth);
       return Boolean(team && me && inbox.markRead(me.key, id));
     },
+    /** The viewer read every line of their inbox; null for someone on a team without one. */
+    markAllRead(auth: RequestAuth): number | null {
+      if (!team && deps.place) return deps.place.markAllRead(auth);
+      const me = sessionPerson(auth);
+      return team && me ? inbox.markAllRead(me.key) : null;
+    },
     /** This person's Needs you lines: the messages in their inbox they have not opened, newest first. */
     needsYou(auth: RequestAuth): NeedsYouItem[] {
       const me = sessionPerson(auth);
@@ -421,10 +427,6 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     /** A notification about to go out: an ask, a failure or a routine's report routed to a person reaches their inbox. */
     route(notification: Notification, how: { routine?: boolean; summary?: boolean } = {}): Notification | null {
       return !team && deps.place ? deps.place.route(notification, how) : inbox.route(notification, how);
-    },
-    /** Work handed on finished: on a place that is no team's, a line in the inbox (place-inbox.ts). */
-    handedResult(work: { botId: string; threadId: string; groupId?: string; text: string }, requester: { botId: string; threadId: string }): void {
-      if (!team) deps.place?.handedResult(work, requester);
     },
     stop(): void {
       unsubscribe();

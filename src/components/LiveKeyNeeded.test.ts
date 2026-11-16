@@ -60,3 +60,14 @@ it("with Azure chosen and no endpoint yet, asks for the endpoint first: a key is
   expect(html).toContain('placeholder="https://my-resource.openai.azure.com"');
   expect(html).not.toContain('aria-label="Azure OpenAI key for Live calls"');
 });
+
+it("starts a new key form when the endpoint changes, so a key typed for one address is never saved for another", () => {
+  const formKey = (customEndpoint: string) => {
+    f.live = { configured: false, provider: "custom", customEndpoint, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    return nodes(LiveKeyNeeded()).find((node) => typeof node.type === "function" && node.type.name === "ProviderAndKey")?.props as { formKey?: string } | undefined;
+  };
+  const first = formKey("https://a.example.com/v1")?.formKey;
+  expect(first).toBeTruthy();
+  expect(formKey("https://b.example.com/v1")?.formKey).not.toBe(first);
+  expect(formKey("https://a.example.com/v1")?.formKey).toBe(first);
+});

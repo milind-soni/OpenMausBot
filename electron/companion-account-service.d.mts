@@ -42,6 +42,8 @@ export interface CompanionAccountState {
   /** The secure address was ended for old phone apps: a phone that has not used the encrypted connection must be
    * updated and paired again. */
   tunnelRetired?: true;
+  /** What failed, as one fixed word for the renderer's diagnosis: never a message or a control-plane code. */
+  problem?: "unconfigured" | "unreachable" | "sign_in" | "busy" | "limit" | "update" | "address" | "failed";
 }
 
 export interface CompanionAccountService {
@@ -51,6 +53,10 @@ export interface CompanionAccountService {
   retry(): Promise<CompanionAccountState>;
   /** On demand: create or repair the address because a person is pairing. */
   prepare(): Promise<CompanionAccountState>;
+  /** Before the connector dials a stored address: asks whether it still exists (null when nothing changed). */
+  checkStoredAddress(): Promise<CompanionAccountState | null>;
+  /** The managed connector's status as it changes: verify failures check the address with the control plane. */
+  connectorChanged(status: { status: string } | null | undefined): void;
   signOut(): Promise<CompanionAccountState>;
   restore(): Promise<CompanionAccountState>;
   /** Cancels background recovery timers (autoRecover only). */
@@ -88,6 +94,10 @@ export declare function createCompanionAccountService(options: {
   relay?: { capable: () => boolean; legacyDevices: () => Promise<number | null> };
   releaseGraceMs?: number;
   releaseJitterMs?: number;
+  /** The first wait between two out-of-turn checks of an address that does not answer (then 3x, then 12x). */
+  forcedCheckIntervalMs?: number;
+  /** A new installation credential was stored. */
+  installationChanged?: () => void;
   /** One line per failed setup step: code, HTTP status, request id, retry delay. */
   log?: (line: string) => void;
 }): CompanionAccountService;

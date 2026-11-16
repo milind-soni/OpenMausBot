@@ -101,6 +101,79 @@ describe("relay tokens", () => {
     await service.refreshNow();
     expect(grants).toEqual([grant(), null]);
     expect([...timers.pending.values()][0].milliseconds).toBe(30 * 60_000);
+    expect(service.status).toEqual({ state: "failed", code: "unavailable" });
+    service.stop();
+    expect(service.status).toEqual({ state: "off", code: null });
+  });
+
+  it("after a sign-in failure, wait for a wake-up, with only an hourly fallback", async () => {
+    const timers = manualTimers();
+    const answers = [
+      () => Promise.reject(Object.assign(new Error("signed out"), { code: "signed_out" })),
+      () => Promise.reject(Object.assign(new Error("expired"), { status: 401 })),
+      () => grant(),
+    ];
+    const fetchGrant = vi.fn(async () => answers.shift()());
+    const service = createRelayTokenService({ fetchGrant, onGrant: () => {}, ...timers, now: () => 0, random: () => 0.5, wakeAfterSignInFailure: true });
+    service.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect([...timers.pending.values()].map((timer) => timer.milliseconds)).toEqual([60 * 60_000]);
+    expect(service.status).toEqual({ state: "waiting", code: "sign_in" });
+    await timers.fireAll();
+    expect(fetchGrant).toHaveBeenCalledTimes(2);
+    expect([...timers.pending.values()].map((timer) => timer.milliseconds)).toEqual([60 * 60_000]);
+    expect(service.status).toEqual({ state: "waiting", code: "sign_in" });
+    await service.refreshNow();
+    expect(service.status).toEqual({ state: "ready", code: null });
+    expect(fetchGrant).toHaveBeenCalledTimes(3);
+    service.stop();
+  });
+
+  it("asks again once a request in flight settles, when a wake-up arrived during it", async () => {
+    const timers = manualTimers();
+    let answerOld;
+    const answers = [
+      () => new Promise((_resolve, reject) => {
+        answerOld = () => reject(Object.assign(new Error("old credential"), { status: 401 }));
+      }),
+      () => grant(),
+    ];
+    const fetchGrant = vi.fn(async () => answers.shift()());
+    const service = createRelayTokenService({ fetchGrant, onGrant: () => {}, ...timers, now: () => 0, random: () => 0.5, wakeAfterSignInFailure: true });
+    service.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    const woken = service.refreshNow();
+    answerOld();
+    await woken;
+    expect(fetchGrant).toHaveBeenCalledTimes(2);
+    expect(service.status).toEqual({ state: "ready", code: null });
+    service.stop();
+  });
+
+  it("without the wake-up option, a sign-in failure still asks again after half an hour", async () => {
+    const timers = manualTimers();
+    const service = createRelayTokenService({
+      fetchGrant: async () => Promise.reject(Object.assign(new Error("signed out"), { code: "signed_out" })),
+      onGrant: () => {}, ...timers, now: () => 0, random: () => 0.5,
+    });
+    service.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect([...timers.pending.values()][0].milliseconds).toBe(30 * 60_000);
+    service.stop();
+  });
+
+  it("reports only a fixed word: never a token, a server message or its code", async () => {
+    const timers = manualTimers();
+    const answers = [
+      () => Promise.reject(Object.assign(new Error("eyJ2IjoxfQ.c2lnbmF0dXJl leaked"), { code: "Bearer omb_install_secret" })),
+      () => Promise.reject(Object.assign(new Error("busy"), { code: "rate_limited", status: 429 })),
+    ];
+    const service = createRelayTokenService({ fetchGrant: async () => answers.shift()(), onGrant: () => {}, ...timers, now: () => 0, random: () => 0.5 });
+    service.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(service.status).toEqual({ state: "failed", code: "failed" });
+    await service.refreshNow();
+    expect(service.status).toEqual({ state: "failed", code: "busy" });
     service.stop();
   });
 });
@@ -147,6 +220,46 @@ describe("the desktop's end-to-end connection", () => {
     expect(posted.at(-1)).toEqual({ type: "openmausbot:companion-e2e", transportKey: readE2EIdentity(document).privateKey, relay: null });
     e2e.resumed();
     expect(posted.at(-1)).toEqual({ type: "openmausbot:companion-e2e-redial" });
+    e2e.stop();
+  });
+
+  it("asks for the relay token as soon as a person pairs with Anywhere on, before a code opens, and again on a new credential", async () => {
+    let document = {};
+    let relayOn = true;
+    let answer = Object.assign(new Error("signed out"), { code: "signed_out" });
+    const fetchGrant = vi.fn(async () => (answer instanceof Error ? Promise.reject(answer) : answer));
+    const e2e = createCompanionE2E({
+      readCredentials: () => document,
+      updateCredentials: async (derive) => {
+        document = derive(document);
+      },
+      fetchGrant,
+      // Nothing paired and no code open: the relay is not needed yet by the usual rule.
+      companionState: async () => ({ enabled: true, routes: { relay: { on: relayOn, since: 1 } }, devices: [], pairing: null }),
+      post: () => {},
+      setTimer: () => 1,
+      clearTimer: () => {},
+    });
+    await e2e.start();
+    expect(fetchGrant).not.toHaveBeenCalled();
+
+    relayOn = false;
+    await e2e.prime();
+    expect(fetchGrant).not.toHaveBeenCalled();
+
+    // No installation credential yet: refused, and the token service waits its half hour.
+    relayOn = true;
+    await e2e.prime();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fetchGrant).toHaveBeenCalledTimes(1);
+    expect(e2e.enabled).toBe(false);
+
+    // The account service stored a new credential: asked again at once, and the key is made.
+    answer = grant();
+    await e2e.prime();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(fetchGrant).toHaveBeenCalledTimes(2);
+    expect(e2e.enabled).toBe(true);
     e2e.stop();
   });
 

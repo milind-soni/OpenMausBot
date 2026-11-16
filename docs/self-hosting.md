@@ -171,7 +171,7 @@ npx openmausbot pair
 | "Can't reach 192.168.1.20:8799. Check the server is running and reachable from this computer." | Nothing answers there. | Start it with a way in (`serve --lan` for this network), and check a firewall allows the port. |
 | "maus.example.com doesn't exist yet." / "…certificate isn't valid yet." | DNS or the certificate isn't ready. | Wait for the DNS record, or give a new server a minute. |
 | "That address answers, but it isn't a MausBot server." | Something else answers there, often a proxy pointing at the wrong port. | Point it at `http://127.0.0.1:8799`. |
-| "That's a sign-in code from an email…" / "That's a code from an older MausBot…" / "That's a script key…" | The wrong kind of code. | On the server, run `openmausbot pair` for a 12-character pairing code. |
+| "That's a sign-in code from an email…" / "That code is for the phone app…" / "That's a script key…" | The wrong kind of code. | On the server, run `openmausbot pair` for a 12-character pairing code. |
 | "Too many wrong codes. Try again at 11:19." | Five wrong codes in five minutes from one address. | Wait until then, or make a new code. |
 | `Reach    ✗ https://… doesn't reach this server (connection refused).` | Your tunnel or proxy doesn't reach port 8799. | Point it at `http://127.0.0.1:8799`, then run `openmausbot status`. |
 | `Reach    ✗ https://… answers as a different server.` | The address leads to another MausBot server. | Point the tunnel at this machine's port. |
@@ -429,6 +429,160 @@ across code changes. To pick up the current ones, rebuild with a new tag:
 ```sh
 docker compose build --build-arg CHROME_CACHE_TAG=$(date +%F) omb && docker compose up -d
 ```
+
+## Running on a container platform (Railway, Render, Kubernetes, Cloud Run)
+
+These platforms run the image's own command, with no `--init`, and usually
+with a 64 MB `/dev/shm` and a limit on how many processes the container may
+hold. The server image (`ghcr.io/milind-soni/openmausbot`) is built for that:
+
+- **It brings its own init.** tini is the image's entrypoint and collects
+  the processes that bots' engines, browsers and shell commands leave behind.
+  Without one they stay in the process table as zombies until the container's
+  limit is reached, and then nothing new can start: bots fail with
+  `spawn EAGAIN`. Keep the image's entrypoint when you set a start command.
+  If your platform replaces it, the server says so in one line at start and
+  starts itself again under the image's tini, which then stays process 1; an
+  init of the platform's own on top (`docker run --init`, Compose's
+  `init: true`) does no harm. A command you give the container runs as
+  written, so start it with `openmausbot …` or `node …`
+  (`docker run --rm ghcr.io/milind-soni/openmausbot openmausbot --version`):
+  a bare `--version` or `dist-server/openmausbot.js`, which older images
+  passed on to Node, no longer starts.
+- **Chrome does not need a larger `/dev/shm`.** Where `/dev/shm` is under
+  512 MB the bots' browser keeps its shared memory in `/tmp`, so there is
+  nothing to set. `/tmp` is slower, and where it is itself in memory (Cloud
+  Run) it counts against the container's memory limit; a 512 MB `/dev/shm`,
+  where your platform lets you set one, avoids both.
+- **Mount a volume at `/data`.** Engine sign-ins and all of OpenMausBot's
+  state live there.
+- **Give the platform a way in.** The server listens on `127.0.0.1` inside
+  the container, which a proxy outside the container cannot reach. Any one
+  of these works:
+  - `OMB_LAN=1`: the server listens on every IPv4 address, on `OMB_PORT`
+    (8799 unless you set it; point the platform there). It still drops any
+    connection whose either end is not a private address (10/8, 172.16/12,
+    192.168/16, 100.64/10, link-local), so it answers a proxy that reaches
+    the container over a private network, such as an ingress controller
+    inside a Kubernetes cluster, and refuses one that arrives from a public
+    address: check which your platform's does. Every request through it is
+    a remote one and has to pair.
+  - A proxy next to the server (a sidecar in the same Kubernetes pod or
+    Cloud Run service): share an in-memory volume between the two, set
+    `OMB_TUNNEL_SOCKET` to a socket in it, and point the proxy at that
+    socket, as [the Compose setup](#docker-with-https-on-your-own-domain)'s
+    Caddy does. A sidecar can reach `127.0.0.1:8799` too, but then it must
+    add `X-Forwarded-For` to every request (Caddy does): a loopback request
+    with no forwarding header and a loopback `Host` is taken to be the
+    server's owner.
+  - A tunnel that dials out, so nothing has to reach the container:
+    `openmausbot serve --tunnel` as the start command ([`--tunnel`](#ways-in-in-detail)).
+
+**How many processes and how much memory.** A container's process limit
+(`pids.max`; Docker's `--pids-limit`, Kubernetes' `podPidsLimit`) counts
+threads, not only processes, and every bot that is working holds an engine
+and the small helper programs that give it its tools:
+
+| What | Processes | Counted against the limit | Memory |
+| --- | --- | --- | --- |
+| The server itself | 3 | about 20 | about 1 GB |
+| Each bot that is working | 6 or more | about 45, more while it runs commands | about 700 MB |
+| Each open browser | about 13 | about 165 | about 400 MB |
+
+An engine stays loaded for ten minutes after its bot's last turn, so count
+the bots that work within the same ten minutes, not only in the same second.
+Leave room for the commands bots run: budget about 80 per working bot.
+
+| Bots working at once | Process limit to ask for | Memory |
+| --- | --- | --- |
+| 5 | 1,024 | 6 GB |
+| 10 | 2,048 | 10 GB |
+| 20 | 4,096 | 18 GB |
+| 34 | 4,096 | 28 GB |
+
+The limit column includes two open browsers. A server opens more when its
+limits leave room for them (at most 40% of the process limit and of the memory
+go to browsers; `OMB_BROWSER_MAX_RUNNING` sets the number instead), and each
+new browser also waits for room for its processes, as a turn does. If
+your platform's limit is fixed and lower than the row you need, the server
+still works: fewer bots run at the same moment and the others wait.
+
+**Turns wait for room instead of failing.** In a container that was given a
+memory limit or a process limit, the server holds a turn back while its
+engine would not fit, and starts it by itself when there is room:
+
+- It reads the container's own limits (cgroup `memory.max` and `pids.max`,
+  v1 or v2) and what is used now, never the host machine's totals.
+- Before it makes a turn wait it closes an engine no turn is using. An idle
+  engine otherwise stays loaded for ten minutes for the conversation in
+  front of you and thirty seconds for work nobody is watching (a teammate's
+  task, a routine), and no more stay idle than fit beside the ones working.
+- A waiting turn says so in its chat ("Waiting for room on this server…"),
+  and again every ten minutes. A routine's run waits the same way; a routine
+  is never switched off for it.
+- A bot's browser opens only where its processes fit under the process
+  limit. Each open browser is counted at its full size for as long as it
+  runs, so one that a bot opens halfway through its turn is never missed.
+  With no room, the browser call waits up to 20 seconds, then tells the bot
+  that the server is close to its limit and to try again later.
+- If the system refuses to start a bot's engine anyway (`spawn EAGAIN`,
+  `EMFILE`, `ENOMEM`), or the kernel stops an engine for memory, that is the
+  server's shortage, not the AI's failure: nothing is sent to a backup AI
+  and no Chief is asked about it. The chat shows one line, the turn starts
+  again by itself once, half a minute later, behind the same wait, and only
+  if that fails too are you told. A failure that names its own cause (a usage
+  limit, a sign-in) is always shown as it is.
+- A new engine that says nothing for 90 seconds is stopped the same way only
+  while the server is short of room (its process limit nearly full, a start
+  refused since the engine began, or memory short) and only once the
+  engine and everything it started have stopped using the CPU. A slow first
+  start, such as an engine that `npx` is still installing, is left to finish
+  or to time out on its own.
+
+`OMB_TURNS_MAX_RUNNING` sets how many turns run at once on the whole server:
+
+| Value | What it does |
+| --- | --- |
+| unset | In a container with a memory or process limit: a number worked out from those limits (below). Anywhere else: no limit, as before. |
+| `auto` | The worked-out number on any self-hosted server, with or without a container limit. |
+| a number | That many turns at once. The live checks on memory and processes still apply. |
+| `off` or `0` | No waiting at all. |
+
+The worked-out number is the smaller of two: the memory limit less a tenth
+(at least 320 MB), divided by 700 MB for an engine; and the process limit
+less a tenth (at least 32) and 40 for the server, divided by 60. A 4 GB
+container runs 5 turns at once, an 8 GB one 10; a process limit of 512 allows
+7, 1,024 allows 14, 4,096 allows 60. The desktop app never uses this setting,
+and a MausBot Cloud keeps its own rules.
+
+On Kubernetes a pod's process limit (`podPidsLimit`) is set above the
+container, where the server cannot read it. The server then learns it from
+the first refused start and holds turns below that count for the next half
+hour; set `OMB_TURNS_MAX_RUNNING` to a number to avoid that first refusal.
+
+**Reading how close the server is.** At start the server logs one line with
+what it found, for example `processes: process 1 is an init; limits:
+processes and threads 512, memory 4096 MB, ulimit -u unlimited, /dev/shm 64
+MB`. It logs one more line the first time it passes 80% of its process limit,
+one the first time it passes 80% of its memory limit, and one the first time
+more than 20 exited processes are waiting to be collected (which means the
+container has no init). `GET
+/api/diagnostics/performance` and the performance part of a problem report
+carry a "Process room" block: what process 1 is, the limits, how many
+processes, threads, zombies and open files there are now and at their most
+since start (engines by kind, browser, tool servers, commands, other; sampled
+each minute, and the kernel's own exact high-water marks where cgroup v2
+keeps them), how
+many turns run and wait and the longest wait, and counts since start of
+turns that waited, starts the system refused by error code, engines that
+never came up, and processes that had to be force-stopped or outlived their
+turn. It holds numbers and fixed words only: no command line, path, bot name
+or message.
+
+**Bots' cloud computers do not count.** A bot's cloud computer runs at the
+provider that hosts it, not in this container, so its desktop and browser
+use none of the container's processes or memory. Only the built-in browser
+described above runs here.
 
 ## From source
 
@@ -1121,6 +1275,19 @@ curl -H "Authorization: Bearer $TOKEN" -o usage.csv \
 Dates are inclusive, UTC, at most a year apart; without them you get the
 current month to date.
 
+### Usage caps
+
+By default nothing limits what the bots use. The owner can cap a day's and a
+month's usage, for the whole server and for each bot, in estimated dollars
+and in tokens, under **Settings → Usage → Usage caps**, in `config.json`, or
+for the server's own caps in the environment
+(`OMB_USAGE_CAP_DAILY_USD`, `OMB_USAGE_CAP_MONTHLY_USD`,
+`OMB_USAGE_CAP_DAILY_TOKENS`, `OMB_USAGE_CAP_MONTHLY_TOKENS`,
+`OMB_USAGE_CAP_STOPS`). A reached cap stops new unattended work (routines,
+webhooks, app events, Bot API calls, hand-offs nobody is waiting on) until
+the day or month rolls over, and cuts nothing off mid-turn.
+[Usage caps](usage-caps.md) has every setting and what a person sees.
+
 ### When an engine runs out
 
 When a turn ends on a usage limit (a subscription's 5-hour or weekly limit,
@@ -1454,6 +1621,10 @@ off by default, also tells the bot:
   until something is ready (`curl -f` against a server that is still starting)
   counts as a failing command, which is why the stop is not on by default.
 
+A turn nobody is watching (a routine's, a webhook's) has the guard on and is
+stopped at 20 identical failures in a row, whatever is set here: see "Keeping
+unattended bots from spending on failures".
+
 The note needs an engine that accepts a message in the middle of a turn
 (Claude Code, Codex, Pi, Muse Code). ACP agents cannot take one, so they get
 only the stop, and only if you set it. The note and the stop do not cover bots
@@ -1488,6 +1659,111 @@ It stops a member's turn that shows no progress for that long. While one of the
 turn's tools runs, the turn may show nothing for up to 60 minutes (the longest
 an MCP call can be set to take) or the room's limit if that is longer. These two
 settings do not change it.
+
+## Keeping unattended bots from spending on failures
+
+Work that nobody is watching (a routine, an event, work one bot hands to
+another) backs off when it keeps failing, and has an upper bound when it keeps
+going. Nothing here turns a routine off or asks you anything. Each limit that
+stops something leaves one line saying so, on the routine's run row or in the
+thread. A failure that is this server's own (it could not start another
+process, its disk is full, a tool server is down, an AI is signed out) is told
+apart from the AI's errors, because starting the same work again cannot fix it.
+
+### Routines and incidents
+
+A routine stays on however often it fails.
+
+A failed run starts once more by itself only when a second start can plausibly
+pass: a rate limit, a provider that is overloaded or answered with a temporary
+error, an engine that crashed or was stopped for memory (that start waits for
+room). A tool server that is down, an AI that is signed out, a full disk or an
+engine that could not be started fail the run at once. The second start sends
+one short line saying to finish the run when the engine resumes a session that
+holds the routine's instructions, or replays a conversation small enough to
+still include them. Otherwise, and always on a backup AI, after a usage-limit
+wait or for a routine that calls a /command, it sends the instructions again.
+
+Past these limits, something is held back and says so in one line: on the
+routine's run row, or in the Chief's "Problems to look at" chat.
+
+| Setting | Default | What it bounds |
+| --- | --- | --- |
+| `OMB_ROUTINE_FAILURES_BEFORE_SPACING` | `3` | The runs of one routine that may fail in a row before its next scheduled runs are spaced out. A run that completes, a change to the routine, turning it on again, or a run that failed only because the bot's AI is signed out, out of credit or at its usage limit ends the streak and the spacing. The skipped runs share one row: "Skipped 12 scheduled runs because its last runs failed, so its next tries are spaced out". From `1`. |
+| `OMB_ROUTINE_FAILURE_SPACING_MS` | `3600000` (1 hour) | How long after the failure that starts the spacing the next run waits. From `60000`. |
+| `OMB_ROUTINE_FAILURE_SPACING_MAX_MS` | `14400000` (4 hours) | How long after each later failure the next run waits. Never below `OMB_ROUTINE_FAILURE_SPACING_MS`. |
+| `OMB_CHIEF_INCIDENT_TURNS_PER_HOUR` | `6` | The turns a Chief of Staff is started for problems in an hour, across all the chats it hears about. Past that, the Chief is not started: you are notified of each such problem, and one line in its "Problems to look at" chat counts them, names the first five chats they came from and links the newest. From `1`. |
+| `OMB_STARTUP_ROUTINE_GAP_MS` | `1800000` (30 minutes) | On a server not started by the desktop app, how soon after the start that last ran them routines set to "Also run when OpenMausBot starts" may run again. A start within that time leaves one row per routine: "Not run at 4 starts because OpenMausBot started again soon after the start that last ran it". `0` runs them at every start. |
+| `OMB_ROUTINE_RESTART_STAGGER_MS` | `30000` (30 seconds) | The time between the runs a restart cut off as each starts again, so they do not all start at once. From `0`. |
+| `OMB_BURST_PART_MAX_RESTARTS` | `2` | The times a burst's part, or its merge, starts again after a restart cut it off. Past that the part fails with "Not started again: OpenMausBot restarted while this part ran 3 times.", and the parts are posted as they came instead of merged. From `0`. |
+
+A routine every minute (`* * * * *`) is still accepted and is spaced out the
+same way. Identical failures are told to you and to the Chief once: two
+failures that differ only in ids, paths, long numbers or times count as the
+same, while different exit codes, HTTP statuses or models do not.
+A Chief told of a failure that is this server's own is told not to retry it.
+
+Any value that is not a whole number in range leaves the default. Set them in
+the server's environment and restart it.
+
+### Hand-offs and unattended turns
+
+A turn with a person waiting in the chat keeps the limits described under
+"A turn that goes silent".
+
+A turn nobody is watching is one a routine, a webhook or an app event started,
+or work a bot handed on from such a turn. Past any of these it is stopped, and
+its thread (and a routine's run row) gets one line saying which:
+
+| Setting | Default | What it bounds |
+| --- | --- | --- |
+| `OMB_UNATTENDED_TURN_MAX_MS` | `14400000` (4 hours) | The time one such turn may work. Time it waits on a person or a computer is not counted. From `60000`. |
+| `OMB_UNATTENDED_TURN_MAX_REQUESTS` | `400` | The requests one such turn may make to its AI. A usage report that names its call counts that call once however often it repeats; reports without a name count one call per step between tool calls; the tool calls count instead when that is the larger number. |
+| `OMB_UNATTENDED_TURN_MAX_DENIALS` | `5` | The permission requests of one such turn that may be denied or go unanswered (each unanswered one waits 15 minutes first). One a person denies is not counted. |
+| `loopGuard.unattendedStopAt`, or `OMB_LOOP_GUARD_UNATTENDED_STOP_AT` | `20` | The times in a row one shell command may fail the same way. For such a turn the loop guard (see "A bot stuck on a failing command") is on whatever `loopGuard.enabled` says, with its note at `loopGuard.steerAt` and its stop here, or at `loopGuard.stopAt` if that is lower. `2`-`1000`. |
+| `OMB_HANDOFF_MAX_FAILURES` | `5` | For work nobody is waiting on: work one request handed to other bots that may fail in a row, with none completing between. At that many the request is stopped with a line naming the last failure. |
+| `OMB_HANDOFF_MAX_TURNS` | `300` | For work nobody is waiting on: the turns one request may hand out in all, across every bot it hands work to. Nothing renews it. Past it no more work is handed out, and the bot that asked still gets one turn to wrap up what came back. |
+
+The three `OMB_UNATTENDED_TURN_*` settings and
+`OMB_LOOP_GUARD_UNATTENDED_STOP_AT` also take `off`; `loopGuard.unattended:
+false` in `config.json` does the same for the loop guard. Any other value that
+is not a whole number in range leaves the default. Set them in the server's
+environment and restart it.
+
+For work nobody is waiting on, work that fails no longer renews a request's
+hand-off limits (64 hand-offs, 96 turns and 48 wake-ups since any work last
+completed): only work that completes does. A request a person made keeps the
+earlier behaviour and none of the limits above end it on failures alone: the
+bot that asked is resumed after each failure and decides. When handed-off work
+failed for a reason in the server's own failure words (not anything the bot
+said), the bot that asked is told: for this server (it could not start a
+process, its disk is full), that sending it again anywhere fails the same way;
+for one teammate's own setup (a tool server down, its AI signed out), which
+teammate, and that another teammate may do it.
+
+### Pausing every bot
+
+A paused bot's routines skip quietly and leave a row saying so.
+
+**Pause every bot** (any bot's menu in the sidebar, under More) pauses all of
+them at once, the bots made later included. It is the same pause as
+**Pause bot** ([Pausing a bot, a department or every bot](pausing-bots.md)): work in
+progress stops as Stop does, and until **Resume every bot** each routine or
+webhook run that comes due is let go with one line in its run log, "Every bot
+is paused, so <bot> takes no new work. Resume every bot from any bot's menu in
+the sidebar." A message to a bot is refused with the same line. Resuming leaves
+a bot or department that was paused by itself paused.
+
+From a terminal on the server, to stop spending at once (an admin route like
+any other: see "Loopback trust: owner or service"):
+
+```sh
+curl -X POST http://127.0.0.1:8799/api/paused \
+  -H 'content-type: application/json' -d '{"kind":"all","paused":true}'
+```
+
+It has no setting: the pause is kept in `paused-bots.json` in the data
+directory and lasts across restarts until it is resumed.
 
 ## Updating
 

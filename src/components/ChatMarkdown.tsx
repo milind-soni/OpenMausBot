@@ -105,14 +105,16 @@ const normalizationParseOptions: MarkdownParseOptions = {
   mdastExtensions: [...(gfmParseData.fromMarkdownExtensions ?? []), windowsPathDestinations],
 };
 
-/** A single line break in a reply is a line break, as chat apps show it, not a space. */
+/** A reply's newlines and a table cell's attribute-free <br> tags become Markdown breaks, without parsing raw HTML. */
 function remarkSoftBreaks() {
   return (tree: { children?: any[] }) => {
-    const visit = (node: { children?: any[] }) => {
+    const visit = (node: { type?: string; children?: any[] }, inTableCell = false) => {
       if (!node.children) return;
+      const tableCell = inTableCell || node.type === "tableCell";
       node.children = node.children.flatMap((child) => {
+        if (tableCell && child?.type === "html" && /^<br\s*\/?>$/i.test(child.value)) return [{ type: "break" }];
         if (child?.type !== "text" || !child.value.includes("\n")) {
-          visit(child);
+          visit(child, tableCell);
           return [child];
         }
         return (child.value as string).split("\n").flatMap((value, index) => [
@@ -854,7 +856,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals };
   return (
     <MessageScopeContext.Provider value={scope}>
-      <div className="chat-md min-w-0 [&>*+*]:mt-2">
+      <div data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
         {parts.map((part, index) => (
           // The whole text's tree puts a line break between its top-level blocks; the parts keep it.
           <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <CodeBlock code={part.fence.code} lang={part.fence.lang} initialWrap={part.fence.wrap} open /> : draw(part)}</Fragment>

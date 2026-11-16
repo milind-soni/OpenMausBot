@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -46,10 +46,12 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
     },
     patchTask: () => undefined, patchGroup: () => undefined,
     messagesFor: (threadId: string) => said.get(threadId) ?? [],
+    activePath: (threadId: string) => said.get(threadId) ?? [],
     onChange: (listener: (change: { type: string; threadId: string }) => void) => { listeners.push(listener); return () => undefined; },
   };
   const inbox = createPlaceInbox({
     dataDir, store: store as unknown as PlaceInboxDeps["store"], openCards: () => cards,
+    live: () => false,
     viewer: (auth) => viewers.get(auth)!,
     sees: () => true,
     mayAnswer: (auth) => auth === OWNER,
@@ -66,67 +68,49 @@ function setup(over: Partial<PlaceInboxDeps> = {}, dataDir = mkdtempSync(join(tm
 }
 
 describe("finished work reaches the inbox once", () => {
-  const work = (threadId: string, text = "Pricing page updated.") => ({ botId: "mira", threadId, text });
-  const asked = { botId: "eli", threadId: "eli-main" };
   const summary = { kind: "done", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Done", body: "All three pages are live." } as Notification;
+  const routine = { kind: "done", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Done", body: "Weekly report." } as Notification;
+  const failure = (threadId: string) => ({ kind: "turn-failed", botId: "eli", botName: "Eli", threadId, title: "Failed", body: `It stopped in ${threadId}.` }) as Notification;
   const infoRows = (f: ReturnType<typeof setup>) => f.inbox.view(OWNER).rows.filter((row) => row.tab === "info");
 
-  it("files handed-off work as an unread line, opening its own thread, and sends nothing", () => {
+  it("files the asking bot's summary and a routine's report, and nothing of its own for work handed on", () => {
     const f = setup();
-    f.inbox.handedResult(work("mira-pricing"), asked);
-    expect(infoRows(f)).toMatchObject([{ kind: "result", from: { name: "Mira", botId: "mira" }, workingFor: { name: "Eli" }, text: "Pricing page updated.", unread: true,
-      origin: { botId: "mira", threadId: "mira-pricing" } }]);
+    f.inbox.route(routine, { routine: true });
+    f.tick(1);
+    f.inbox.route(summary, { summary: true });
+    expect(infoRows(f).map((row) => row.text)).toEqual(["All three pages are live.", "Weekly report."]);
+    expect(f.inbox.count(OWNER)).toBe(2);
     expect(f.sent).toEqual([]);
-    expect(f.inbox.count(OWNER)).toBe(1);
   });
 
-  it("keeps one row per job: the next teammate's result and then the summary replace it", () => {
+  it("keeps one row per job: the next summary replaces the last one the person has not read", () => {
     const f = setup();
-    f.inbox.handedResult(work("mira-pricing"), asked);
-    f.tick(1);
-    f.inbox.handedResult(work("mira-launch", "Launch post drafted."), asked);
-    expect(infoRows(f).map((row) => row.text)).toEqual(["Launch post drafted."]);
+    f.inbox.route({ kind: "delegation-settled", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Results", body: "Results from Mira" } as Notification, { summary: true });
+    f.inbox.route({ kind: "delegation-settled", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Results", body: "ignored" } as Notification);
+    expect(infoRows(f).map((row) => row.text)).toEqual(["Results from Mira"]);
     f.tick(1);
     f.inbox.route(summary, { summary: true });
     expect(infoRows(f)).toMatchObject([{ kind: "result", from: { name: "Eli" }, text: "All three pages are live.", origin: { threadId: "eli-main" } }]);
   });
 
-  it("leaves what the person already read, other jobs and routine reports alone", () => {
+  it("still files a failure in work another bot handed on, saying whose work it was", () => {
     const f = setup();
-    f.inbox.handedResult(work("mira-pricing"), asked);
-    f.inbox.markRead(OWNER, infoRows(f)[0]!.id);
-    f.inbox.handedResult(work("mira-launch", "Second."), { botId: "eli", threadId: "eli-launch" });
-    f.inbox.route({ kind: "done", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Done", body: "Weekly report." } as Notification, { routine: true });
-    f.tick(1);
+    f.handed.set("eli-pricing", "mira");
+    f.inbox.route(failure("eli-pricing"));
+    expect(infoRows(f)).toMatchObject([{ kind: "notice", text: "It stopped in eli-pricing.", workingFor: { botId: "mira", name: "Mira" } }]);
+  });
+
+  it("drops a hand-off result filed before hand-offs stopped filing lines, and keeps the rest", () => {
+    const f = setup();
+    f.handed.set("eli-pricing", "mira");
+    f.inbox.route(failure("eli-pricing"));
     f.inbox.route(summary, { summary: true });
-    expect(infoRows(f).map((row) => row.text).sort()).toEqual(["All three pages are live.", "Pricing page updated.", "Second.", "Weekly report."]);
-  });
-
-  it("adds no line for a muted bot, an empty reply or a plain turn's done, and a restart keeps the row", () => {
-    const f = setup();
-    f.bots.mira!.notifications = false;
-    f.inbox.handedResult(work("mira-pricing"), asked);
-    f.bots.mira!.notifications = true;
-    f.inbox.handedResult(work("mira-pricing", "   "), asked);
-    f.inbox.route({ kind: "done", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Done", body: "Plain." } as Notification);
-    expect(infoRows(f)).toEqual([]);
-
-    f.inbox.handedResult(work("mira-pricing"), asked);
+    const file = join(f.dataDir, PLACE_INBOX_FILE);
+    const saved = JSON.parse(readFileSync(file, "utf8")) as { lines: Array<Record<string, unknown>> };
+    saved.lines.push({ id: "old-hand-off", botId: "mira", threadId: "mira-pricing", kind: "result", from: "Mira", workingFor: { botId: "eli", name: "Eli" }, text: "Pricing page updated.", at: 1_000, job: "eli-main" });
+    writeFileSync(file, JSON.stringify(saved));
     const reopened = setup({}, f.dataDir);
-    expect(infoRows(reopened).map((row) => row.text)).toEqual(["Pricing page updated."]);
-    reopened.inbox.route(summary, { summary: true });
-    expect(infoRows(reopened).map((row) => row.text)).toEqual(["All three pages are live."]);
-  });
-
-  it("files a resumed answer's results notice under the same job, and keeps a guest's work theirs", () => {
-    const f = setup();
-    f.inbox.route({ kind: "delegation-settled", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Results", body: "Results from Mira" } as Notification, { summary: true });
-    f.inbox.route({ kind: "delegation-settled", botId: "eli", botName: "Eli", threadId: "eli-main", title: "Results", body: "ignored" } as Notification);
-    expect(infoRows(f).map((row) => row.text)).toEqual(["Results from Mira"]);
-    f.guests.set("guest-chat", "p_guest");
-    f.inbox.handedResult(work("mira-pricing", "For the guest."), { botId: "eli", threadId: "guest-chat" });
-    expect(f.inbox.view(GUEST).rows.map((row) => row.text)).toEqual(["For the guest."]);
-    expect(infoRows(f).map((row) => row.text)).toEqual(["Results from Mira"]);
+    expect(infoRows(reopened).map((row) => row.text).sort()).toEqual(["All three pages are live.", "It stopped in eli-pricing."]);
   });
 });
 
@@ -173,6 +157,16 @@ describe("the inbox of a place that is no team's", () => {
     f.cards.length = 0;
     expect(f.inbox.count(OWNER)).toBe(0);
     expect(f.inbox.view(OWNER).rows).toEqual([]);
+  });
+
+  it("drops a question the person wrote past, unless a running turn still waits on it", () => {
+    const live = new Set<string>();
+    const f = setup({ live: (_threadId, requestId) => live.has(requestId) });
+    const row = f.ask("eli-main", "q");
+    f.said.set("eli-main", [{ ...row, role: "bot", kind: "options", card: JSON.parse(row.card!) } as Said, { id: "said", at: 2_000, role: "user", text: "Do the report instead" }]);
+    expect(f.inbox.count(OWNER)).toBe(0);
+    live.add("q");
+    expect(f.inbox.view(OWNER).rows.map((one) => one.id)).toEqual(["card-q"]);
   });
 
   it("leaves out offers and receipts, and a card somebody already settled", () => {
@@ -335,6 +329,23 @@ describe("the inbox of a place that is no team's", () => {
     expect(f.inbox.markDone(OWNER, "card-q")).toBe("an ask");
     expect(f.inbox.markRead(OWNER, "not-a-line")).toBe(false);
     expect(f.inbox.markDone(OWNER, "not-a-line")).toBe("unknown");
+  });
+
+  it("reads every line and open ask at once for the viewer who has them, answers nothing, and repeats harmlessly", () => {
+    const f = setup();
+    f.guests.set("guest-chat", "p_guest");
+    f.ask("eli-main", "q");
+    f.inbox.message("eli", "eli-main", "News");
+    f.inbox.message("eli", "guest-chat", "For the guest");
+    expect(f.inbox.markAllRead(OWNER)).toBe(2);
+    expect(f.inbox.view(OWNER).rows.map((row) => [row.kind, row.tab, row.unread])).toEqual(expect.arrayContaining([["ask", "needs-you", false], ["message", "info", false]]));
+    expect(f.inbox.count(OWNER), "the ask still waits on them").toBe(1);
+    expect(f.inbox.markDone(OWNER, "card-q")).toBe("an ask");
+    expect(f.inbox.view(GUEST).rows.map((row) => row.unread), "the guest's line is not the owner's to read").toEqual([true]);
+    expect(f.inbox.markAllRead(OWNER)).toBe(0);
+    expect(f.inbox.markAllRead(SHELL)).toBe(0);
+    const again = setup({ openCards: () => f.cards, store: f.store as unknown as PlaceInboxDeps["store"] }, f.dataDir);
+    expect(again.inbox.view(OWNER).rows.every((row) => !row.unread)).toBe(true);
   });
 
   it("opening a conversation reads what waited there", () => {

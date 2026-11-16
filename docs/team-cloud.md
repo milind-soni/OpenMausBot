@@ -98,6 +98,11 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   *Paired devices* lists the phones those codes opened as *device · member* (`GET /api/team/phones`): a member sees their
   own, the Super admin and Admins every member's. **Remove** (`DELETE /api/team/phones/<id>`, the same rule) signs that
   phone out at once and closes its open streams; the app windows the Admin signs in are not listed there.
+- **Slack.** With the team's Slack connected on MausBot Cloud, a message to `@MausBot` in a channel, or a direct
+  message, is its writer's own request here: the Admin hands it over with a session it opened for that member, so their
+  level on the bot, their run and their right to stop it hold as in the app. A channel thread is a conversation shared
+  with the team; a direct message is their private chat. It is never the relayed, information-only kind of line. See
+  [team-slack.md](team-slack.md).
 - **Asleep only when nobody needs it, kept across restarts.** On a plan that sleeps, a Team Cloud answers the Admin's
   sleep request as any home does ([Sleeping homes](cloud-pro.md#sleeping-homes-the-power-read-and-the-sleep-handshake)):
   not while any member used it in the last minutes, a turn or routine runs, or work one bot handed another is still

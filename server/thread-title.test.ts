@@ -1,7 +1,48 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { createJobSlots } from "./job-slots.ts";
 import type { Message } from "./store.ts";
-import { callTitleExcerpt, threadTitlePrompt, titleConversationExcerpt, TITLE_INPUT_MAX_CHARS } from "./thread-title.ts";
+import { callTitleExcerpt, threadTitlePrompt, titleConversationExcerpt, titleFromMessage, TITLE_INPUT_MAX_CHARS, UNTITLED_TASK } from "./thread-title.ts";
+import { generateThreadTitle, THREAD_TITLE_TIMEOUT_MS } from "./thread-title-generate.ts";
+
+describe("a generated title and the background slots", () => {
+  it("answers null after 10 s, but keeps its slot until the engine call has really ended", async () => {
+    vi.useFakeTimers();
+    try {
+      const slots = createJobSlots(1);
+      let end!: (text: string) => void;
+      let aborted = false;
+      const provider = { generateText: (_prompt: string, options?: { signal?: AbortSignal }) => {
+        options?.signal?.addEventListener("abort", () => { aborted = true; });
+        return new Promise<string>((resolve) => { end = resolve; });
+      } };
+      const title = generateThreadTitle(provider, "plan the trip", "first-message", slots);
+      await vi.advanceTimersByTimeAsync(THREAD_TITLE_TIMEOUT_MS);
+      expect(await title).toBeNull();
+      expect(aborted).toBe(true);
+      expect(slots.running).toBe(1);
+      end("Trip plan");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(slots.running).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("waits ahead of background upkeep for a free slot", async () => {
+    const slots = createJobSlots(1);
+    let free!: () => void;
+    const busy = slots.run(() => new Promise<void>((resolve) => { free = resolve; }));
+    const order: string[] = [];
+    const upkeep = slots.run(async () => { order.push("upkeep"); });
+    const title = generateThreadTitle({ generateText: async () => { order.push("title"); return "Trip plan"; } }, "plan the trip", "first-message", slots);
+    await vi.waitFor(() => expect(free).toBeTypeOf("function"));
+    free();
+    await Promise.all([busy, upkeep]);
+    expect(await title).toBe("Trip plan");
+    expect(order).toEqual(["title", "upkeep"]);
+  });
+});
 
 let next = 0;
 const message = (role: Message["role"], text: string, extra: Partial<Message> = {}): Message => ({
@@ -108,5 +149,20 @@ describe("a Live call's title", () => {
 
   it("is empty when nothing was asked on the call", () => {
     expect(callTitleExcerpt([message("user", "typed")], "c")).toBe("");
+  });
+});
+
+describe("titleFromMessage", () => {
+  it("names a message that starts with pasted text by the pasted text, not its wrapper", () => {
+    expect(titleFromMessage('<pasted-text index="1">\n\n  Stack trace from the build\nline two\n</pasted-text>')).toBe("Stack trace from the build");
+    expect(titleFromMessage('<pasted-text index="1">\n</pasted-text>\n\n<pasted-text index="2">\nSecond paste\n</pasted-text>')).toBe("Second paste");
+    expect(titleFromMessage('<pasted-text index="1">\n\n</pasted-text>')).toBe(UNTITLED_TASK);
+    expect(titleFromMessage('<pasted-text index="1">\n\n</pasted-text>\n\n<attached-file path="/tmp/a.txt" name="a.txt" />')).toBe(UNTITLED_TASK);
+    expect(titleFromMessage('<pasted-text index="1">\n</pasted-text>\n\n<attached-image path="/tmp/b.png" name="b.png" />\n\n<pasted-text index="3">\nThird\n</pasted-text>')).toBe("Third");
+  });
+
+  it("keeps typed text first, and a typed wrapper with no pasted block stays as typed", () => {
+    expect(titleFromMessage('Fix this\n\n<pasted-text index="1">\nerror\n</pasted-text>')).toBe("Fix this");
+    expect(titleFromMessage('<pasted-text index="1">\nnot closed')).toBe('<pasted-text index="1">');
   });
 });

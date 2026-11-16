@@ -58,4 +58,19 @@ describe("HandoffChip", () => {
     expect(markup).toMatch(/<button[^>]*class="[^"]*text-danger/);
     expect(render(row("result", "Done."))).not.toContain("text-danger");
   });
+
+  it("shows the files a hand-off passed, and the ones a result returned, as chips under the row", () => {
+    const report = { kind: "file" as const, path: "/data/attachments/1f0c.pdf", mime: "application/pdf", name: "report.pdf" };
+    const sent: Message = { ...row("request"), roomRequest: undefined, tool: { name: "Sent to Mira", ok: true }, attachments: [report] };
+    const withFiles = (message: Message, threadId?: string) =>
+      renderToStaticMarkup(createElement(HandoffChip, { message, bots: [], title: "Open Mira", onClick: () => {}, threadId }));
+    for (const message of [sent, { ...sent, doneWhen: "it opens" }, { ...row("result", "Done."), attachments: [report] }]) {
+      const markup = withFiles(message, "chief-main");
+      expect(markup).toContain("data-handoff-files");
+      expect(markup).toContain("report.pdf");
+      expect(markup).not.toContain("/data/attachments");
+    }
+    expect(withFiles(sent)).not.toContain("data-handoff-files");
+    expect(render({ ...sent, attachments: undefined })).not.toContain("data-handoff-files");
+  });
 });

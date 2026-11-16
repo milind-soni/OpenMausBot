@@ -47,7 +47,7 @@ export interface KeyTarget {
 export type KeyId =
   | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
   | "ollama" | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
-  | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageGemini" | "imageCustom";
+  | "jev" | "openrouterHelper" | "workersAi" | "customDecider" | "imageOpenai" | "imageGemini" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
 
@@ -195,6 +195,10 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     words: ["cloudflare", "workers ai", "clef", "clairic", "decisions", "helper"], mark: { icon: Zap }, kind: "elsewhere",
     opens: "decisionModel", whereKey: "keys.where.decisions",
     status: (config) => flag(config.savedKeys?.workersAiToken ?? { configured: config.helpers?.own.workersAi === true }) },
+  { id: "customDecider", section: "helpers", labelKey: "decider.custom.key.label", purposeKey: "keys.purpose.customDecider", name: "Custom endpoint", env: ["OMB_CUSTOM_DECIDER_KEY"],
+    words: ["custom", "endpoint", "gateway", "system one", "decisions", "helper"], mark: { icon: Zap }, kind: "elsewhere",
+    opens: "decisionModel", whereKey: "keys.where.decisions",
+    status: (config) => flag(config.savedKeys?.customDeciderKey ?? { configured: false }) },
   { id: "imageOpenai", section: "helpers", labelKey: "keys.label.imageOpenai", purposeKey: "keys.purpose.imageOpenai", name: "OpenAI", env: ["OMB_OPENAI_IMAGE_KEY"],
     words: ["openai", "image", "images", "pictures", "avatar", "gpt image"], mark: { icon: Image }, kind: "key",
     target: { patch: (value) => ({ imageGen: { key: value } }), slot: "openaiImageApiKey",
@@ -216,15 +220,31 @@ export function keyEntry(id: KeyId): KeyEntry {
   return entry;
 }
 
-/** With Azure OpenAI or Fish Audio chosen for Live calls, the row for their key is about that service: required, and no OpenAI
- * key. With Fish Audio it is the Fish Audio key itself, which Fish voices use too. */
+/** With Azure OpenAI, a custom endpoint, Fish Audio, Gemini or ElevenLabs chosen for Live calls, the row for their key is about that service:
+ * required, and no OpenAI key. With Fish Audio, Gemini or ElevenLabs it is that service's key itself, which its voices use too. */
 export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined): KeyEntry {
   const entry = keyEntry(id);
   const provider = config?.live?.provider;
-  if (id !== "liveKey" || (provider !== "azure" && provider !== "fish") || !entry.target) return entry;
+  if (id !== "liveKey" || (provider !== "azure" && provider !== "custom" && provider !== "fish" && provider !== "gemini" && provider !== "elevenlabs") || !entry.target) return entry;
   const { shape: _openAiShape, ...target } = entry.target;
   if (provider === "fish") {
     return { ...entry, name: "Fish Audio", labelKey: "keys.label.fishAudio", purposeKey: "keys.purpose.liveKeyFish", target: keyEntry("fishAudio").target };
+  }
+  if (provider === "gemini") {
+    return { ...entry, name: "Gemini", labelKey: "keys.label.geminiTts", purposeKey: "keys.purpose.liveKeyGemini", target: keyEntry("geminiTts").target };
+  }
+  if (provider === "elevenlabs") {
+    // Cloud's included voices cannot place Live calls, so this row asks for the person's own key even then.
+    const voices = keyEntry("elevenlabs").target!;
+    const saved = (config: ConfigStatus): SavedState => {
+      const { included: _included, ...own } = voices.saved(config);
+      return own;
+    };
+    return { ...entry, name: "ElevenLabs", labelKey: "keys.label.elevenlabs", purposeKey: "keys.purpose.liveKeyElevenLabs", target: { ...voices, saved } };
+  }
+  if (provider === "custom") {
+    const { href: _openAiPage, ...own } = target;
+    return { ...entry, name: "Custom endpoint", labelKey: "call.live.customKeyField", purposeKey: "keys.purpose.liveKeyCustom", target: { ...own, placeholder: "…" } };
   }
   return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };
 }
@@ -239,10 +259,11 @@ export function savedState(entry: KeyEntry, config: ConfigStatus | null | undefi
   return entry.target?.saved(config) ?? entry.status?.(config) ?? { configured: false };
 }
 
-/** With Azure or Fish Audio chosen, Live calls do not use the OpenAI key the Live calls row points at, so that row is hidden. */
+/** With Azure, a custom endpoint, Fish Audio, Gemini or ElevenLabs chosen, Live calls do not use the OpenAI key the Live calls row points at, so that row is
+ * hidden. */
 export function keyHidden(id: KeyId, config: ConfigStatus | null | undefined): boolean {
   const provider = config?.live?.provider;
-  return id === "liveCalls" && (provider === "azure" || provider === "fish");
+  return id === "liveCalls" && (provider === "azure" || provider === "custom" || provider === "fish" || provider === "gemini" || provider === "elevenlabs");
 }
 
 /** With `config`, the row is matched as shown: the Live key row by the provider Live calls use. */

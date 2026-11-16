@@ -120,6 +120,45 @@ A turn a webhook, a routine, or another bot started runs in the bot's level
 like any other turn. The decision log records that nobody was at the keyboard
 when such a turn asked.
 
+### Approvals relayed by another bot, a webhook or an outside page
+
+An approval only counts when the person gives it to the bot that acts. Every
+line a bot reads opens with a note OpenMausBot writes, `[From <who> · <what> ·
+<authority>]` (`server/provenance-label.ts`, see
+[team-cloud.md](team-cloud.md)). A person's own typed or spoken line, or their
+answer on that bot's own card, is *their own request*. A line from another bot,
+an app through the API, a relay, an app event or a webhook is *information
+only*: the bot reads it as data, never as approval, even when it says "approved"
+or claims to come from you. So an Approve click on your own outside page (an
+approval dashboard, another bot's card) that reaches the acting bot through
+another bot or a webhook does not authorize anything, and the bot asks or stops
+instead. This is on purpose. Anyone who can make a bot read text, such as a web
+page, an email or a webhook call, could otherwise write "the owner approved
+this" and borrow your authority; a note written inside a message is escaped
+(`escapeNotes`, `server/peer-provenance.ts`), so only OpenMausBot opens one.
+
+The supported ways to have a bot act on your approval:
+
+- **Approve in the acting bot's own chat.** Tap its card, or type the go-ahead
+  there. On a phone or another device, the same chat works from any paired
+  client.
+- **Set the work up as that bot's own automation.** A routine, or a webhook
+  automation whose instructions you write ("when an approved deploy arrives,
+  run the deploy checklist"), runs *on their behalf at your level*: the
+  instructions are your own set-up, and only the event it carries is
+  information only (`server/webhooks.ts`). Keep the webhook's private address
+  secret: anyone who has it can send a call. Narrow the instructions to the
+  work you mean, and use its event-type or payload filter so calls of another
+  type or shape start nothing. A filter only checks what a call says; it does
+  not prove that a person approved it.
+- **Hand the work over from your own request.** When you ask one bot and it
+  hands the work on with `coordinate_bots`, the receiving bot gets it *on their
+  behalf at your level*, because it traces back to your own line.
+- **Change the approval level** of the acting bot when the prompts themselves
+  are the problem (see the table above).
+
+There is no signed-approval token that lets an outside page stand in for you.
+
 ### A Chief of Staff's level covers the work it delegates
 
 Teammates start at Full access like every bot, but a person may have set one
@@ -154,7 +193,8 @@ with it. Questions and missing credentials still reach you.
 ## Answering a request
 
 Approve or deny requests in the conversation to let the bot continue. **Allow
-once** answers this request only. **Always allow this session** hands the
+once** answers this request only. **Allow for this session** (the button says
+so, because nothing is saved) hands the
 provider its own remembered approval: Claude receives its suggested permission
 rules, and ACP agents such as Grok receive their `allow_always` option, or the
 driver repeats your answer for that exact operation until the native session
@@ -168,13 +208,18 @@ the same room asks again.
 For a read-shaped tool from a configured custom MCP server, the card also
 offers **Always allow**. This is an explicit standing grant for that exact bot,
 provider instance, MCP server, tool name, and current server configuration. A
-different tool still asks; editing the server command, URL, headers, or
-credentials invalidates the grant. It is not offered for create/update/delete
+different tool still asks; editing the server command, arguments, variables,
+URL or headers invalidates the grant. A key kept in the Vault is part of that
+configuration by its reference, not its value, so giving the Vault item a new
+value keeps the grant, and so does restarting the server. Switching the bot to
+Full access leaves its grants saved, unused, for when it goes back to Ask. It
+is not offered for create/update/delete
 tools, computer control, a sandbox change, an unconfigured server, or a guest's
 turn. A custom MCP server controls its own tool names, so only remember tools
 from a server you trust. The grant applies to the bot's current and future
 conversations, including newly delegated work. Saved entries are visible and
-revocable in the bot's Access settings.
+revocable in the bot's Access settings; removing one there takes it from every
+conversation of the bot at once, a running turn included.
 
 The harness's own agents tools (coordinating teammates, threads, memory) never
 ask on Claude, Codex or API models: OpenMausBot authorizes each of those

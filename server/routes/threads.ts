@@ -1,7 +1,7 @@
 import { userError } from "../user-errors.ts";
 import { basename, join } from "node:path";
 
-import type { WireBot, WireGroup } from "../../shared/wire.ts";
+import type { BotsResponse, SearchResponse, WireBot, WireGroup } from "../../shared/wire.ts";
 import { NO_SUCH_BOT } from "../../shared/bot-read.ts";
 import {
   ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
@@ -24,6 +24,7 @@ import {
 import { resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
 import type { queuedSteerSnapshot } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
+import { answerAsleep, backgroundWhileAsleep } from "../cloud-power.ts";
 import { createJobRoutes } from "./jobs.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
@@ -102,6 +103,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     const companionMutationToken = deps.companionMutationToken();
     const cliOwnerToken = deps.cliOwnerToken();
     if (method === "GET" && path === "/api/bots") {
+      if (backgroundWhileAsleep(path, req.headers)) return answerAsleep(res, json);
       try { groupUsageReader.refresh(); } catch { }
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
@@ -124,7 +126,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
             return [bot.id, { held: snapshot.held, helpReason: snapshot.helpReason, ...(snapshot.help ? { help: snapshot.help } : {}) }];
           }),
         ),
-      });
+        together: { newBot: true },
+      } satisfies BotsResponse<MessagePage["messages"][number]>);
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)$/);
@@ -269,7 +272,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         const name = message.role === "bot" && !botAttachment && !folderEntry && (code === "outside_workspace" || status === 404)
           ? referencedFileName(href)
           : null;
-        const copy = name ? deliveredCopy(store.messagesFor(threadId), message, name) : null;
+        const copy = name ? deliveredCopy(store.messagesFor(threadId), message, name, href) : null;
         if (copy) {
           file = await openMessageFile(copy.path, [ATTACHMENTS_DIR], maxBytes);
           downloadName = copy.name;
@@ -535,7 +538,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
           return null;
         })
         .filter((hit): hit is NonNullable<typeof hit> => hit !== null);
-      return json(res, 200, { hits });
+      return json(res, 200, { hits } satisfies SearchResponse);
     }
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/export$/);
