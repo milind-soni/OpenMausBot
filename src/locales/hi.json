@@ -3661,5 +3661,10 @@
   "remote.tailscale.needsApproval": "यह कंप्यूटर आपके Tailscale नेटवर्क पर मंज़ूरी का इंतज़ार कर रहा है। Tailscale एडमिन कंसोल में इसे मंज़ूर करें, फिर दोबारा कोशिश करें।",
   "together.switch.title": "यही कंप्यूटर और मेरा क्लाउड एक साथ",
   "together.switch.line": "डिफ़ॉल्ट रूप से बंद। क्लाउड के बॉट और इस कंप्यूटर के बॉट एक ही सूची में दिखते हैं, और हर बॉट वहीं खुलता है जहाँ वह है।",
-  "together.switch.failed": "इसे सहेजा नहीं जा सका। फिर से कोशिश करें।"
+  "together.switch.failed": "इसे सहेजा नहीं जा सका। फिर से कोशिश करें।",
+  "imageGen.complexity.label": "विवरण स्तर",
+  "imageGen.complexity.help": "GPT-Image-2.6 की छवियाँ कितनी विस्तृत हों। कम का मतलब सरल और तेज़।",
+  "imageGen.complexity.low": "कम",
+  "imageGen.complexity.medium": "मध्यम",
+  "imageGen.complexity.high": "उच्च"
 }

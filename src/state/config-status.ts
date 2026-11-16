@@ -1,6 +1,6 @@
 // What GET /api/config tells the app about the server and its settings (re-exported by store.tsx).
 import type { EffortLevel, LiveSettings } from "../../shared/wire";
-import type { ImageProvider } from "../../shared/image-generation";
+import type { ImageComplexity, ImageProvider } from "../../shared/image-generation";
 import type { ToolGroup } from "../../shared/tool-groups";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { ModelSelection } from "./store";
@@ -146,6 +146,7 @@ export interface ConfigStatus {
     fallback?: ImageSlotStatus | null;
     ready?: boolean;
     maxPerTurn?: number;
+    complexity?: ImageComplexity | null;
     customUrl?: string;
     customModel?: string;
     openaiConfigured?: boolean;

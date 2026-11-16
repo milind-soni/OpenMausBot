@@ -4082,5 +4082,10 @@
   "remote.tailscale.needsApproval": "Цей комп’ютер чекає на схвалення у вашій мережі Tailscale. Схваліть його в консолі адміністратора Tailscale, потім спробуйте ще раз.",
   "together.switch.title": "Цей комп'ютер і Моя хмара разом",
   "together.switch.line": "Типово вимкнено. Боти з хмари й боти цього комп'ютера показані в одному списку, і кожен відкривається там, де він є.",
-  "together.switch.failed": "Не вдалося зберегти. Спробуйте ще раз."
+  "together.switch.failed": "Не вдалося зберегти. Спробуйте ще раз.",
+  "imageGen.complexity.label": "Рівень деталізації",
+  "imageGen.complexity.help": "Наскільки детальними є зображення GPT-Image-2.6. Нижчий рівень простіший і швидший.",
+  "imageGen.complexity.low": "Низький",
+  "imageGen.complexity.medium": "Середній",
+  "imageGen.complexity.high": "Високий"
 }

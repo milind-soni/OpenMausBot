@@ -6507,5 +6507,10 @@
   "remote.tailscale.needsApproval": "Este ordenador espera la aprobación en tu red de Tailscale. Apruébalo en la consola de administración de Tailscale y vuelve a intentarlo.",
   "together.switch.title": "Este equipo y My Cloud juntos",
   "together.switch.line": "Desactivado de forma predeterminada. Los bots del Cloud y los de este equipo aparecen en una sola lista, y cada uno se abre donde está.",
-  "together.switch.failed": "No se pudo guardar. Inténtalo de nuevo."
+  "together.switch.failed": "No se pudo guardar. Inténtalo de nuevo.",
+  "imageGen.complexity.label": "Nivel de detalle",
+  "imageGen.complexity.help": "Cuánto detalle tienen las imágenes de GPT-Image-2.6. Más bajo es más simple y rápido.",
+  "imageGen.complexity.low": "Bajo",
+  "imageGen.complexity.medium": "Medio",
+  "imageGen.complexity.high": "Alto"
 }

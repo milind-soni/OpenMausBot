@@ -11073,5 +11073,10 @@
   "server.rooms.linkedEnded": "{place} não se conecta há 30 dias, então a ligação com ele terminou. Não está mais neste grupo: {bots}.",
   "room.members.far.place": "em {place}",
   "room.members.far.off": "Ligação desligada",
-  "room.members.far.missing": "Não está mais disponível"
+  "room.members.far.missing": "Não está mais disponível",
+  "imageGen.complexity.label": "Nível de detalhe",
+  "imageGen.complexity.help": "Quão detalhadas são as imagens do GPT-Image-2.6. Menor é mais simples e mais rápido.",
+  "imageGen.complexity.low": "Baixo",
+  "imageGen.complexity.medium": "Médio",
+  "imageGen.complexity.high": "Alto"
 }

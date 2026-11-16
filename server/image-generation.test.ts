@@ -37,6 +37,25 @@ describe("image slots", () => {
   });
 });
 
+describe("complexity", () => {
+  const sent = async (model: string, complexity?: "low" | "medium" | "high") => {
+    const fetchMock = vi.fn(async () => imageResponse());
+    const cfg = { imageGen: { key: "openai-secret", primary: { provider: "openai" as const, model }, ...(complexity && { complexity }) } };
+    await generateImage(cfg, { prompt: "owl" }, { fetchImpl: fetchMock });
+    return JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+  };
+
+  it("goes to GPT-Image-2.6 models when set", async () => {
+    expect((await sent("gpt-image-2.6-sunburst", "low")).complexity).toBe("low");
+    expect((await sent("gpt-image-2.6-flare", "medium")).complexity).toBe("medium");
+  });
+
+  it("is left out when unset, and never sent to other models", async () => {
+    expect(await sent("gpt-image-2.6-flare")).not.toHaveProperty("complexity");
+    expect(await sent("gpt-image-2", "low")).not.toHaveProperty("complexity");
+  });
+});
+
 describe("provider requests", () => {
   it("sends a Gemini key only to Google's OpenAI-compatible image route", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => imageResponse());
