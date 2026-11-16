@@ -193,6 +193,15 @@ describe("a page's word on whether it opens with a heading", () => {
     expect(onHeading.mock.calls).toEqual([[true], [false], [null]]);
     host.destroy();
   });
+
+  it("is passed on once however often the page repeats it", () => {
+    const onHeading = vi.fn();
+    const host = mountAppFrame({ container, doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: adapter(), onHeading });
+    const say = (heading: boolean | null) => window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", method: HEADING, params: { heading } }, source: host.iframe.contentWindow as MessageEventSource }));
+    for (const heading of [null, null, true, true, true, false, false, null, true]) say(heading);
+    expect(onHeading.mock.calls).toEqual([[null], [true], [false], [null], [true]]);
+    host.destroy();
+  });
 });
 
 describe("a row leaving the page", () => {

@@ -194,6 +194,7 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
   const engagement = trackAppEngagement(iframe);
   let gone = false;
   let leaving = false;
+  let said: boolean | null | undefined;
   const bridge = createAppBridge({
     doc,
     hostContext: options.hostContext,
@@ -216,7 +217,9 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
   const onMessage = (event: MessageEvent) => {
     const heading = event.source === iframe.contentWindow ? readPageHeading(event.data) : undefined;
     if (heading !== undefined) {
-      if (!leaving) options.onHeading?.(heading);
+      if (leaving || heading === said) return;
+      said = heading;
+      options.onHeading?.(heading);
       return;
     }
     const selection = event.source === iframe.contentWindow ? readPageSelection(event.data) : undefined;

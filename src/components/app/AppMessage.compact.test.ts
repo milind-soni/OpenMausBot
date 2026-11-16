@@ -135,6 +135,28 @@ describe("a bot's page as a compact card", () => {
     expect(card().querySelector<HTMLElement>("[data-app-box]")!.style.height).toBe("164px");
   });
 
+  it("keeps the title and the card's height while it has no frame, the page still on its way", async () => {
+    await render(row(payload({ height: 120 })));
+    await pageSays(false);
+    act(() => root.unmount());
+    // past the minute a fetched page is reused for, so the card has to ask for it again
+    const later = Date.now() + 61_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    const answer = vi.mocked(fetch).getMockImplementation()!;
+    let arrive = () => {};
+    vi.mocked(fetch).mockImplementationOnce((...args) => new Promise((resolve) => { arrive = () => resolve(answer(...args)); }));
+    root = createRoot(host);
+    await render(row(payload({ height: 120 })));
+    const shown = () => [card().dataset.appState, card().querySelector("[data-page-title]")?.textContent, card().querySelector<HTMLElement>("[data-app-box]")!.style.height];
+    expect(card().querySelector("iframe")).toBeNull();
+    expect(shown()).toEqual(["loading", "Pricing", "164px"]);
+    await act(async () => { arrive(); });
+    await settle();
+    vi.mocked(Date.now).mockRestore();
+    expect(card().querySelector("iframe")).not.toBeNull();
+    expect(shown()).toEqual(["live", "Pricing", "164px"]);
+  });
+
   it("shows the preview with the title after a while when the page never says", async () => {
     await render(row(payload()));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_600)); });
@@ -153,6 +175,39 @@ describe("a bot's page as a compact card", () => {
     expect(card().querySelector("[data-page-title]")).toBeNull();
   });
 
+  it("does not cover the preview again once the wait has run out, and still follows a later answer", async () => {
+    await render(row(payload()));
+    vi.useFakeTimers();
+    try {
+      await pageSays(null);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
+      expect(card().querySelector("[data-page-settling]")).toBeNull();
+      expect(card().querySelector("[data-page-title]")!.textContent).toBe("Pricing");
+      await pageSays(null);
+      expect(card().querySelector("[data-page-settling]")).toBeNull();
+      await pageSays(false);
+      await pageSays(null);
+      expect(card().querySelector("[data-page-settling]")).toBeNull();
+      expect(card().querySelector("[data-page-title]")!.textContent).toBe("Pricing");
+    } finally {
+      vi.useRealTimers();
+    }
+    await pageSays(true);
+    expect(card().querySelector("[data-page-settling]")).toBeNull();
+    expect(card().querySelector("[data-page-title]")).toBeNull();
+  });
+
+  it("keeps the wait's outcome for the next time the card is drawn", async () => {
+    await render(row(payload()));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_600)); });
+    act(() => root.unmount());
+    root = createRoot(host);
+    await render(row(payload()));
+    await pageSays(null);
+    expect(card().querySelector("[data-page-settling]")).toBeNull();
+    expect(card().querySelector("[data-page-title]")!.textContent).toBe("Pricing");
+  });
+
   it("fades the foot of a clipped preview with a plain gradient and parts it from the footer with a rule", async () => {
     await render(row(payload()));
     await pageSays(false);
@@ -161,6 +216,11 @@ describe("a bot's page as a compact card", () => {
     expect(fade.className).toContain("h-8");
     expect(fade.className).not.toMatch(/blur|mask|backdrop/);
     expect(card().querySelector("[data-page-footer]")!.className).toContain("border-t");
+  });
+
+  it("sits flat on the page, with no shadow", async () => {
+    await render(row(payload()));
+    expect(card().firstElementChild!.className).not.toContain("shadow");
   });
 
   it("shows a short page whole, with nothing over its foot", async () => {

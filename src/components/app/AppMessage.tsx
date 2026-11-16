@@ -25,11 +25,17 @@ const DOC_REUSE_MS = 60_000;
 const heights = new Map<string, number>();
 /** Whether a page opens with a heading of its own, as it last said: by message id and version. */
 const headings = new Map<string, boolean>();
-/** How long a card waits for its page to say, before it shows the preview with the title above it. */
+/** How long a card waits for its page to say, before it shows the preview with the title above it for good. */
 const HEADING_WAIT_MS = 1_500;
 /** The same once the page has said it is still drawing itself. */
 const HEADING_DRAWING_MS = 10_000;
 const docs = new Map<string, { doc: AppDocument; at: number }>();
+
+function rememberHeading(key: string, opens: boolean) {
+  headings.delete(key);
+  headings.set(key, opens);
+  while (headings.size > 200) headings.delete(headings.keys().next().value!);
+}
 
 export function forgetAppRows(): void {
   heights.clear();
@@ -173,8 +179,11 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
     if (mounted.current) setHeight(next);
   }, [message.id, rev]);
   const onHeading = useCallback((next: boolean | null) => {
-    if (next !== null) headings.set(`${message.id}:${rev}`, next);
-    if (mounted.current) setHeading({ key: `${message.id}:${rev}`, opens: next });
+    const key = `${message.id}:${rev}`;
+    if (next !== null) rememberHeading(key, next);
+    // Once the card has an answer, or stopped waiting for one, "still drawing" cannot take the preview away again.
+    else if (headings.has(key)) return;
+    if (mounted.current) setHeading((was) => (next === null && was?.key === key && was.opens !== null ? was : { key, opens: next }));
   }, [message.id, rev]);
 
   const current = slot.live ? loaded?.doc : undefined;
@@ -248,7 +257,10 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   useEffect(() => {
     if (!undecided) return;
     const key = `${message.id}:${rev}`;
-    const timer = setTimeout(() => setHeading({ key, opens: false }), drawing ? HEADING_DRAWING_MS : HEADING_WAIT_MS);
+    const timer = setTimeout(() => {
+      rememberHeading(key, false);
+      setHeading({ key, opens: false });
+    }, drawing ? HEADING_DRAWING_MS : HEADING_WAIT_MS);
     return () => clearTimeout(timer);
   }, [undecided, drawing, frameKey, message.id, rev]);
   // The title stays while the frame is away (the pool took its slot), so the card keeps its height.
