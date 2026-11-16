@@ -138,11 +138,14 @@ describe("a routine every 5 minutes whose tool server is dead", () => {
   });
 
   it("with the spacing set out of reach by OMB_ROUTINE_FAILURES_BEFORE_SPACING, starts one turn at every occurrence", async () => {
+    // Six hours, not the day: the defaults would have spaced it out within the first. The clock is the harness's, so
+    // nothing waits; the cost is real work per pass and per run, and a day of 288 runs took a Windows runner past 40 s.
     vi.stubEnv("OMB_ROUTINE_FAILURES_BEFORE_SPACING", "100000");
     const h = harness();
-    await h.passTo(START + 24 * HOUR, h.fail(DEAD_TOOL));
-    console.log(`turns started in 24 hours with a dead tool server and no spacing: ${h.started.length}`);
-    expect(h.started).toHaveLength(24 * 12);
+    await h.passTo(START + 6 * HOUR, h.fail(DEAD_TOOL));
+    console.log(`turns started in 6 hours with a dead tool server and no spacing: ${h.started.length}`);
+    expect(h.started).toHaveLength(6 * 12);
+    expect(h.rows().filter((run) => run.skipped)).toEqual([]);
   });
 });
 

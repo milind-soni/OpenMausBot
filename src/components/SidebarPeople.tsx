@@ -4,6 +4,7 @@
 // People page, where invitations are sent, so someone alone on a new team still has a way to bring people in.
 import { UserPlus } from "lucide-react";
 import { botOwner } from "../../shared/bot-owner";
+import { teamPeoplePage } from "@/lib/app-links";
 import { openAsksOf } from "@/lib/bot-unread";
 import { cn } from "@/lib/cn";
 import { leadComposerDraft } from "@/lib/drafts";
@@ -29,11 +30,6 @@ function openComposer(state: Pick<AppState, "activeView" | "selectedId" | "group
   if (group) return `group:${group.id}:${group.threadId}`;
   const bot = state.bots.find((one) => one.id === state.selectedId);
   return bot ? `bot:${bot.id}:${bot.threadId}` : null;
-}
-
-/** Where a team's admins invite people: the Team admin's People page on the Cloud that runs this team. */
-export function teamPeoplePage(team: { id: string; cloudPage?: string } | null | undefined): string | null {
-  return team?.cloudPage ? `${team.cloudPage}/team/${encodeURIComponent(team.id)}/people` : null;
 }
 
 const focusComposer = () => requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea')?.focus());
