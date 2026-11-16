@@ -11,6 +11,7 @@ import { boatAccount, boatFetch, runCommand } from "./boat.ts";
 import { boatHealth, type BoatHealth } from "./boat-health.ts";
 import { relayBody } from "./boat-relay.ts";
 import { cloudComputerCounters, type CloudComputerCounters } from "./cloud-computer-counters.ts";
+import { cloudComputerDisk } from "./cloud-computer-disk.ts";
 import type { AppConfig } from "./config.ts";
 
 export const READY_WAIT = {
@@ -79,7 +80,9 @@ export interface AwaitAnswerOptions {
 
 async function probeOnce(cfg: AppConfig, boxId: string, signal?: AbortSignal): Promise<boolean | null> {
   try {
-    const out = await runCommand(cfg, boxId, "true", { timeoutMs: READY_WAIT.probeTimeoutMs, probe: true, signal });
+    const disk = cloudComputerDisk.probeCommand(boxId);
+    const out = await runCommand(cfg, boxId, disk ?? "true", { timeoutMs: READY_WAIT.probeTimeoutMs, probe: true, signal });
+    if (disk && out.ok) cloudComputerDisk.probed(cfg, boxId, out.stdout);
     return out.ok ? true : out.unanswered ? false : null;
   } catch (error) {
     return transientClaimFailure(error) ? false : null;

@@ -186,6 +186,8 @@ export async function cloudComputerRpc(
     budgetMs?: number;
     /** A computer that stopped answering (server/boat-recovery.ts): what the bot is told instead, and once after it was replaced. */
     recovery?: { refusal(boxId: string, phase: "before" | "after"): string | null; notice(boxId: string): string | null };
+    /** The computer's disk (server/cloud-computer-disk.ts): told when each call begins and ends, and asked for a note to end the result with. */
+    disk?: { began(cfg: AppConfig, boxId: string): void; ended(cfg: AppConfig, boxId: string): void; after(cfg: AppConfig, boxId: string, texts: readonly string[], failed: boolean): Promise<string | null> };
     /** Whether the computer answered this call: a call refused before it was sent, or one that got no answer, did not. */
     settled?(answered: boolean): void;
   },
@@ -215,20 +217,25 @@ export async function cloudComputerRpc(
   const before = refused("before");
   if (before) { deps.settled?.(false); return before; }
   const late = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
+  deps.disk?.began(deps.cfg, boxId);
   let result: CloudComputerResult;
   try {
     result = await runCloudComputerTool(deps.cfg, boxId, params.name as string, args as Record<string, unknown>, AbortSignal.any([deps.signal, late]), deps.folder?.(), deadline, deps.signal);
   } catch (error) {
+    deps.disk?.ended(deps.cfg, boxId);
     if (deps.signal.aborted) throw error;
     const after = refused("after");
     if (after) { deps.settled?.(false); return after; }
     if (!late.aborted) throw error;
     return { isError: true, content: [{ type: "text", text: commandLateText(params.name, args) ?? (copy ? CLOUD_COMPUTER_COPY_LATE : CLOUD_COMPUTER_LATE) }] };
   }
+  const disk = cloudComputerUnanswered(result) ? null : await deps.disk?.after(deps.cfg, boxId, result.content.flatMap((part) => part.type === "text" ? [part.text] : []), result.isError === true);
+  deps.disk?.ended(deps.cfg, boxId);
   deps.assertActive();
   const unanswered = cloudComputerUnanswered(result);
   if (unanswered) result = refused("after") ?? result;
   deps.settled?.(!unanswered);
+  if (disk) result = { ...result, content: [...result.content, { type: "text", text: disk }] };
   const notice = deps.recovery?.notice(boxId);
   return notice ? { ...result, content: [{ type: "text", text: notice }, ...result.content] } : result;
 }

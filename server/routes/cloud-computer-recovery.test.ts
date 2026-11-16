@@ -78,7 +78,7 @@ describe("the computer panel's recovery routes", () => {
     const { base } = await serve();
     const response = await fetch(`${base}/bot-1/computer/recovery`);
     expect(response.headers.get("cache-control")).toContain("no-store");
-    expect(await response.json()).toEqual({ recovery: { state: "replaced", at: 1 }, answering: null });
+    expect(await response.json()).toEqual({ recovery: { state: "replaced", at: 1 }, answering: null, disk: null });
     expect((await fetch(`${base}/nobody/computer/recovery`)).status).toBe(404);
   });
 
