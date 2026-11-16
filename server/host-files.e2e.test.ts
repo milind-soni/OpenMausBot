@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { describe, expect, it } from "vitest";
 
@@ -35,8 +35,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 const FILE_TOOLS = ["list_files", "read_file", "write_file", "make_folder"];
 
 async function controlServer() {
-  const state = { held: false };
-  const server = createServer((_request, response) => {
+  const state = { held: false, asked: [] as string[] };
+  const server = createServer((request, response) => {
+    state.asked.push(request.url ?? "");
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify(state.held ? { held: true, helpOpen: false, blockedReason: "Another thread is using this computer." } : { held: false, helpOpen: false }));
   });
@@ -48,12 +49,12 @@ async function controlServer() {
 const driver = (env: Record<string, string> = {}) =>
   ({ command: process.execPath, args: ["-e", FAKE_DRIVER], env, platform: process.platform as "darwin" | "linux" | "win32", scope: "local-computer" as const });
 
-async function thisComputer(home: string, appData: string, files: boolean) {
+async function thisComputer(home: string, appData: string, files: boolean, env: Record<string, string> = {}) {
   const gate = await controlServer();
   const gated = gatedLocalComputer(driver(), gate.control);
   const connection = files ? withHostFiles(gated, [appData]) : gated;
   const child: ChildProcess = spawn(connection.command, connection.args, {
-    env: { ...process.env, ...connection.env, HOME: home, USERPROFILE: home, OMB_EXTRA_PATH: dirname(process.execPath) },
+    env: { ...process.env, ...connection.env, HOME: home, USERPROFILE: home, OMB_EXTRA_PATH: dirname(process.execPath), ...env },
     stdio: ["pipe", "pipe", "pipe"],
   });
   const replies = new Map<number, (value: any) => void>();
@@ -79,6 +80,7 @@ async function thisComputer(home: string, appData: string, files: boolean) {
   return {
     rpc, call,
     hold(value: boolean) { gate.state.held = value; },
+    asked: gate.state.asked,
     async close() {
       child.kill("SIGKILL");
       await gate.close();
@@ -94,7 +96,9 @@ describe("file tools on this computer, through its bridge", () => {
     for (const dir of ["OneDrive/Documentos", "Desktop", ".ssh", "AppDataElsewhere"]) mkdirSync(join(home, dir), { recursive: true });
     mkdirSync(join(root, "outside"));
     symlinkSync(join(root, "outside"), join(home, "Desktop", "elsewhere"), "junction");
-    const computer = await thisComputer(home, appData, true);
+    const programs = join(home, "bin");
+    mkdirSync(programs);
+    const computer = await thisComputer(home, appData, true, { PATH: [programs, process.env.PATH ?? ""].join(delimiter) });
     try {
       const real = realpathSync(home);
       const listed = (await computer.rpc("tools/list")).tools;
@@ -102,6 +106,7 @@ describe("file tools on this computer, through its bridge", () => {
       expect(listed.find((tool: { name: string }) => tool.name === "read_file").description).not.toBe("driver's own");
 
       const places = await computer.call("list_files");
+      expect(computer.asked.at(-1)).toContain("files=1");
       expect(places.text).toContain(`Home: ${real}`);
 
       const target = join(home, "OneDrive", "Documentos", "My Agents", "Vendas", "resumo.md");
@@ -140,6 +145,28 @@ describe("file tools on this computer, through its bridge", () => {
       }
       expect(readdirSync(join(root, "outside"))).toEqual([]);
       expect(readdirSync(join(home, ".ssh"))).toEqual([]);
+
+      // Hidden at any depth, things that run, and what is already there and runnable.
+      mkdirSync(join(home, "Projects", "site", ".git", "hooks"), { recursive: true });
+      writeFileSync(join(home, "Projects", "site", ".env"), "SECRET=1");
+      const read = await computer.call("read_file", { path: join(home, "Projects", "site", ".env") });
+      expect(read.error).toBe(true);
+      expect(read.text).not.toContain("SECRET");
+      const runnable = process.platform === "win32" ? "run.bat" : process.platform === "darwin" ? "go.command" : "launch.desktop";
+      writeFileSync(join(home, "Desktop", "run.sh"), "#!/bin/sh\necho hi\n", { mode: 0o755 });
+      for (const [args, why] of [
+        [{ path: join(home, "Projects", "site", ".git", "hooks", "pre-commit"), content: "x" }, /settings, keys or app data/],
+        [{ path: join(home, "Desktop", runnable), content: "x" }, /runs as a program/],
+        [{ path: join(programs, "git"), content: "x" }, /runs as a program/],
+        ...(process.platform === "win32" ? [] : [[{ path: join(home, "Desktop", "run.sh"), content: "rm -rf ~", overwrite: true }, /can be run/]] as const),
+      ] as const) {
+        const refusedRun = await computer.call("write_file", args);
+        expect(refusedRun.error, args.path).toBe(true);
+        expect(refusedRun.text, args.path).toMatch(why);
+      }
+      expect(readFileSync(join(home, "Desktop", "run.sh"), "utf8")).toBe("#!/bin/sh\necho hi\n");
+      expect(readdirSync(join(home, "Projects", "site", ".git", "hooks"))).toEqual([]);
+      expect(readdirSync(programs)).toEqual([]);
 
       computer.hold(true);
       const gated = await computer.call("write_file", { path: join(home, "Desktop", "while-held.txt"), content: "x" });

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,11 +12,12 @@ import {
   refusalFor,
   resolveHostPath,
   windowsFoldersFrom,
+  writeRefusal,
   type HostFolders,
 } from "./host-files.ts";
 import { listsComputerTool } from "./computer-tool-list.ts";
 import { withHostFileTools } from "./drivers/chat-mcp-tools.ts";
-import { HOST_FILE_TOOLS } from "./host-file-tools.ts";
+import { HOST_FILE_TOOLS, placeNew } from "./host-file-tools.ts";
 import { withHostFiles } from "./local-computer.ts";
 
 const WINDOWS: HostFolders = {
@@ -26,8 +27,18 @@ const WINDOWS: HostFolders = {
     { name: "Documents", path: "C:\\Users\\ana\\OneDrive\\Documentos", given: "C:\\Users\\ana\\OneDrive\\Documentos" },
     { name: "Desktop", path: "D:\\Mesa", given: "D:\\Mesa" },
   ],
-  denied: ["C:\\Users\\ana\\OneDrive\\Documentos\\WindowsPowerShell", "E:\\OpenMausBotData"],
+  denied: ["E:\\OpenMausBotData"],
+  programs: ["C:\\Users\\ana\\AppData\\Local\\Microsoft\\WindowsApps", "C:\\Users\\ana\\bin"],
 };
+
+const MAC: HostFolders = {
+  platform: "darwin",
+  places: [{ name: "Home", path: "/Users/ana", given: "/Users/ana" }],
+  denied: [],
+  programs: ["/Users/ana/.local/bin", "/Users/ana/tools"],
+};
+
+const LINUX: HostFolders = { platform: "linux", places: [{ name: "Home", path: "/home/ana", given: "/home/ana" }], denied: [], programs: [] };
 
 const refusal = (folders: HostFolders, raw: unknown) => {
   try {
@@ -104,6 +115,47 @@ describe("which paths a bot may name on Windows", () => {
       throw new Error("timed out");
     });
     expect(fallback.map((entry) => entry.path)).toEqual(["C:\\Users\\ana\\Desktop", "C:\\Users\\ana\\Documents", "C:\\Users\\ana\\Downloads"]);
+  });
+});
+
+describe("what stays closed at any depth, and what is never saved", () => {
+  it("refuses hidden folders and files anywhere, PowerShell's folders anywhere, and ~/snap on Linux, for reads and writes", () => {
+    for (const target of ["/Users/ana/Projects/site/.git/hooks/pre-commit", "/Users/ana/Projects/site/.git/config", "/Users/ana/Documents/app/.env",
+      "/Users/ana/Projects/x/.vscode/settings.json", "/Users/ana/Projects/x/.husky/pre-push", "/Users/ana/Projects/x/.github/workflows/ci.yml",
+      "/Users/ana/Projects/x/node_modules/.bin/vite", "/Users/ana/Documents/PowerShell/profile.ps1", "/Users/ana/Projects/x/windowspowershell/a.txt"]) {
+      expect(refusalFor(MAC, target), target).toMatch(/settings, keys or app data/);
+    }
+    for (const target of ["C:\\Users\\ana\\Projetos\\WindowsPowerShell\\x.txt", "D:\\Mesa\\PowerShell\\Modules\\a.psm1", "C:\\Users\\ana\\OneDrive\\Documentos\\windowspowershell\\Microsoft.PowerShell_profile.ps1"]) {
+      expect(refusalFor(WINDOWS, target), target).toMatch(/settings, keys or app data/);
+    }
+    expect(refusalFor(LINUX, "/home/ana/snap/firefox/common/.mozilla/x")).toMatch(/settings, keys or app data/);
+    expect(refusalFor(LINUX, "/home/ana/Documents/snap/notes.txt")).toBeNull();
+    expect(refusalFor(MAC, "/Users/ana/snap/notes.txt")).toBeNull();
+    expect(refusalFor(MAC, "/Users/ana/Projects/site/index.html")).toBeNull();
+  });
+
+  it("never saves a file type the system runs, nor anything in an app bundle or a folder on PATH", () => {
+    for (const name of ["run.bat", "RUN.CMD", "a.vbs", "a.vbe", "a.js", "a.jse", "a.wsf", "a.wsh", "a.hta", "setup.exe", "a.scr", "a.com", "a.pif", "a.msi",
+      "a.dll", "a.Ps1", "a.psm1", "Atalho.lnk", "a.url", "a.scf", "a.library-ms", "a.searchConnector-ms", "desktop.ini", "Desktop.INI"]) {
+      expect(writeRefusal(WINDOWS, `C:\\Users\\ana\\OneDrive\\Documentos\\${name}`), name).toMatch(/runs as a program/);
+    }
+    for (const name of ["notes.txt", "resumo.md", "contrato.docx", "a.pdf", "dados.csv", "foto.png", "planilha.xlsx"]) {
+      expect(writeRefusal(WINDOWS, `C:\\Users\\ana\\OneDrive\\Documentos\\${name}`), name).toBeNull();
+      expect(writeRefusal(MAC, `/Users/ana/Documents/${name}`), name).toBeNull();
+      expect(writeRefusal(LINUX, `/home/ana/Documents/${name}`), name).toBeNull();
+    }
+    for (const name of ["go.command", "a.terminal", "x.tool", "Do It.workflow", "Thing.app"]) {
+      expect(writeRefusal(MAC, `/Users/ana/Desktop/${name}`), name).toMatch(/runs as a program/);
+    }
+    expect(writeRefusal(MAC, "/Users/ana/Applications/Thing.app/Contents/MacOS/Thing")).toMatch(/runs as a program/);
+    expect(writeRefusal(MAC, "/Users/ana/Applications/Thing.APP/Contents/Info.plist")).toMatch(/runs as a program/);
+    expect(writeRefusal(MAC, "/Users/ana/Projects/Thing.app", "folder")).toMatch(/runs as a program/);
+    expect(writeRefusal(MAC, "/Users/ana/Projects/new", "folder")).toBeNull();
+    expect(writeRefusal(LINUX, "/home/ana/Desktop/launch.desktop")).toMatch(/runs as a program/);
+    expect(writeRefusal(LINUX, "/home/ana/Desktop/run.bat")).toBeNull();
+    expect(writeRefusal(MAC, "/Users/ana/tools/ls")).toMatch(/runs as a program/);
+    expect(writeRefusal(MAC, "/Users/ana/tools/sub/notes.txt")).toBeNull();
+    expect(writeRefusal(WINDOWS, "c:\\users\\ana\\BIN\\git.txt")).toMatch(/runs as a program/);
   });
 });
 
@@ -187,6 +239,39 @@ describe("paths on disk", () => {
       expect(await reason(resolveHostPath(folders, raw)), raw).toMatch(/settings, keys or app data/);
     }
     expect(await reason(resolveHostPath(folders, "Documents/a.txt"))).toMatch(/starts with \//);
+  });
+
+  it("puts a new file in place only while nothing is there, with or without links, and never overwrites what appeared", async () => {
+    const { home } = fixture();
+    const temp = join(home, "Documents", ".a.txt.tmp");
+    const target = join(home, "Documents", "a.txt");
+    writeFileSync(temp, "new");
+    await placeNew(temp, target);
+    expect(readFileSync(target, "utf8")).toBe("new");
+    expect(existsSync(temp)).toBe(false);
+
+    writeFileSync(temp, "late");
+    expect(await reason(placeNew(temp, target))).toMatch(/already exists.*overwrite: true/);
+    expect(readFileSync(target, "utf8")).toBe("new");
+    expect(existsSync(temp)).toBe(false);
+
+    const noLinks = async () => { throw Object.assign(new Error("links not supported"), { code: "EPERM" }); };
+    writeFileSync(temp, "copied");
+    await placeNew(temp, join(home, "Documents", "b.txt"), noLinks);
+    expect(readFileSync(join(home, "Documents", "b.txt"), "utf8")).toBe("copied");
+    writeFileSync(temp, "late");
+    expect(await reason(placeNew(temp, join(home, "Documents", "b.txt"), noLinks))).toMatch(/already exists/);
+    expect(readFileSync(join(home, "Documents", "b.txt"), "utf8")).toBe("copied");
+    expect(existsSync(temp)).toBe(false);
+  });
+
+  it.skipIf(!posix)("knows the folders on PATH by their real paths", async () => {
+    const { home, root } = fixture();
+    mkdirSync(join(home, "bin"));
+    symlinkSync(join(home, "bin"), join(root, "bin-link"));
+    const folders = await hostFolders({ platform: posix!, home, env: { PATH: `${join(root, "bin-link")}:relative/bin:` }, appData: [] });
+    expect(folders.programs).toEqual([join(root, "bin-link"), join(realpathSync(home), "bin")]);
+    expect(writeRefusal(folders, join(realpathSync(home), "bin", "tool"))).toMatch(/runs as a program/);
   });
 
   it.skipIf(process.platform !== "darwin")("opens iCloud Drive inside Library on macOS, and nothing else there", async () => {

@@ -3,7 +3,7 @@ import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 
 import type { ToolCall } from "./mcp-bridge.ts";
-import { HostFileRefusal, resolveHostPath, type HostFolders } from "./host-files.ts";
+import { HostFileRefusal, resolveHostPath, writeRefusal, type HostFolders } from "./host-files.ts";
 
 export const HOST_FILE_READ_LIMIT = 10 * 1024 * 1024;
 export const HOST_FILE_WRITE_LIMIT = 25 * 1024 * 1024;
@@ -25,7 +25,7 @@ export const HOST_FILE_TOOLS = [
   },
   {
     name: "write_file",
-    description: "Save a file in the person's folders on this computer, up to 25 MB, making any missing folders. An existing file is replaced only with overwrite: true. Answers with the real path saved.",
+    description: "Save a file in the person's folders on this computer, up to 25 MB, making any missing folders. An existing file is replaced only with overwrite: true. Programs, scripts and hidden folders are refused. Answers with the real path saved.",
     inputSchema: {
       type: "object",
       properties: {
@@ -45,7 +45,7 @@ export const HOST_FILE_TOOLS = [
   },
 ] as const;
 
-const NAMES: ReadonlySet<string> = new Set(HOST_FILE_TOOLS.map((tool) => tool.name));
+export const HOST_FILE_TOOL_NAMES: ReadonlySet<string> = new Set(HOST_FILE_TOOLS.map((tool) => tool.name));
 
 type Result = { content: Array<{ type: "text"; text: string }>; isError?: true };
 const said = (text: string): Result => ({ content: [{ type: "text", text }] });
@@ -146,14 +146,10 @@ async function writeFile(folders: HostFolders, args: Record<string, unknown>): P
   const data = Buffer.from(args.content, as);
   if (data.length > HOST_FILE_WRITE_LIMIT) throw new HostFileRefusal("Files up to 25 MB can be saved.");
   const { target, exists } = await resolveHostPath(folders, args.path);
-  let mode: number | undefined;
-  if (exists) {
-    const stat = await fs.lstat(target);
-    if (stat.isDirectory()) throw new HostFileRefusal(`${target} is a folder. Give a file name inside it.`);
-    if (args.overwrite !== true) throw new HostFileRefusal(`${target} already exists. To replace it, call write_file again with overwrite: true.`);
-    if (!stat.isFile() || stat.nlink > 1) throw new HostFileRefusal(`${target} is not an ordinary file, so it is not replaced.`);
-    mode = stat.mode & 0o777;
-  }
+  const refusedWrite = writeRefusal(folders, target);
+  if (refusedWrite) throw new HostFileRefusal(refusedWrite);
+  const overwrite = args.overwrite === true;
+  const mode = exists ? await replaceable(folders.platform, target, overwrite) : undefined;
   const p = folders.platform === "win32" ? path.win32 : path.posix;
   const folder = p.dirname(target);
   await makeFolders(folders, folder);
@@ -169,13 +165,48 @@ async function writeFile(folders: HostFolders, args: Record<string, unknown>): P
     }
     const again = await resolveHostPath(folders, target);
     if (again.target !== target) throw new HostFileRefusal(`${target} changed while it was saved. Try again.`);
-    if (again.exists && args.overwrite !== true) throw new HostFileRefusal(`${target} already exists. To replace it, call write_file again with overwrite: true.`);
-    await renameWithRetry(temp, target);
+    if (!overwrite) await placeNew(temp, target);
+    else {
+      if (again.exists) await replaceable(folders.platform, target, true);
+      await renameWithRetry(temp, target);
+    }
   } catch (error) {
     await fs.unlink(temp).catch(() => {});
     throw error;
   }
   return said(`Saved ${sizeText(data.length)} to ${target}${exists ? " (replaced the file that was there)" : ""}.`);
+}
+
+const alreadyThere = (target: string) => new HostFileRefusal(`${target} already exists. To replace it, call write_file again with overwrite: true.`);
+
+/** The mode of a file that may be replaced: an ordinary single-link file that nothing runs. */
+async function replaceable(platform: HostFolders["platform"], target: string, overwrite: boolean): Promise<number> {
+  const stat = await fs.lstat(target);
+  if (stat.isDirectory()) throw new HostFileRefusal(`${target} is a folder. Give a file name inside it.`);
+  if (!overwrite) throw alreadyThere(target);
+  if (!stat.isFile() || stat.nlink > 1) throw new HostFileRefusal(`${target} is not an ordinary file, so it is not replaced.`);
+  // Windows reports no execute bits; the file types it runs are refused by name.
+  if (platform !== "win32" && (stat.mode & 0o111) !== 0) throw new HostFileRefusal(`${target} is a program or script (it can be run), so bots cannot replace it.`);
+  return stat.mode & 0o777;
+}
+
+/** A finished temp file put at a path nothing may hold yet: a link fails if anything got there meanwhile, and where a
+ * folder takes no links (FAT, some cloud folders) a copy that fails the same way. The temp file goes either way. */
+export async function placeNew(temp: string, target: string, link: (from: string, to: string) => Promise<void> = fs.link): Promise<void> {
+  try {
+    try {
+      await link(temp, target);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EEXIST") throw alreadyThere(target);
+      if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "ENOSYS", "EINVAL", "EMLINK"].includes(code ?? "")) throw error;
+      await fs.copyFile(temp, target, constants.COPYFILE_EXCL).catch((copyError: NodeJS.ErrnoException) => {
+        throw copyError.code === "EEXIST" ? alreadyThere(target) : copyError;
+      });
+    }
+  } finally {
+    await fs.unlink(temp).catch(() => {});
+  }
 }
 
 /** Windows refuses a rename onto a file an indexer, antivirus or sync client holds for a moment. */
@@ -193,6 +224,8 @@ async function renameWithRetry(from: string, to: string): Promise<void> {
 
 async function makeFolder(folders: HostFolders, args: Record<string, unknown>): Promise<Result> {
   const { target, exists } = await resolveHostPath(folders, args.path);
+  const refusedFolder = writeRefusal(folders, target, "folder");
+  if (refusedFolder) return refused(refusedFolder);
   if (exists) {
     if (!(await fs.lstat(target)).isDirectory()) return refused(`${target} is a file, not a folder.`);
     return said(`${target} is already there.`);
@@ -207,7 +240,7 @@ const RUN = { list_files: listFiles, read_file: readFile, write_file: writeFile,
 export function hostFileRelay(folders: () => Promise<HostFolders>): (call: ToolCall) => Promise<Result> | null {
   let found: Promise<HostFolders> | undefined;
   return (call) => {
-    if (!NAMES.has(call.name)) return null;
+    if (!HOST_FILE_TOOL_NAMES.has(call.name)) return null;
     const at = typeof call.arguments.path === "string" && call.arguments.path ? call.arguments.path : "that path";
     found ??= folders().catch((error: unknown) => {
       found = undefined;

@@ -1232,6 +1232,7 @@
   "approval.yourComputer.site": "I need to use your browser where you're signed in to {site}. Allow once?",
   "approval.yourComputer.app": "I need to use {app} on your computer. Allow once?",
   "approval.yourComputer.screen": "I need to use your files and apps on this computer for this. Allow once?",
+  "approval.yourComputer.files": "I need to read and save files in your folders on this computer. Allow once?",
   "approval.yourComputer.detail": "{name} can use your files and apps here: it sees your screen and clicks and types on it, for this request only.",
   "computerAsk.want.screen": "{name} wants to use your {device}'s apps and screen",
   "computerAsk.want.folders": "{name} wants to use the files on your {device}",

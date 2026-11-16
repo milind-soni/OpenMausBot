@@ -8074,6 +8074,7 @@
   "approval.yourComputer.site": "Preciso usar seu navegador, onde você já fez login em {site}. Permitir uma vez?",
   "approval.yourComputer.app": "Preciso usar {app} no seu computador. Permitir uma vez?",
   "approval.yourComputer.screen": "Preciso usar seus arquivos e apps neste computador para isso. Permitir uma vez?",
+  "approval.yourComputer.files": "Preciso ler e salvar arquivos nas suas pastas neste computador. Permitir uma vez?",
   "approval.yourComputer.detail": "{name} poderá usar seus arquivos e apps aqui: vê a tela, clica e digita nela, só para este pedido.",
   "computerAsk.want.screen": "{name} quer usar os apps e a tela do seu {device}",
   "computerAsk.want.folders": "{name} quer usar os arquivos do seu {device}",

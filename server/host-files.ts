@@ -1,6 +1,8 @@
 // Security: a bot reaches the person's files here only inside their own folders: their home and the places Windows,
 // macOS or the desktop name as their Desktop, Documents, Downloads (which OneDrive or iCloud may keep elsewhere). Never
-// the system, another account, hidden settings, Library or AppData, the app's own data, nor anything through a link.
+// the system, another account, anything hidden at any depth (.git, .env, .ssh), Library or AppData, PowerShell's
+// folders, the app's own data, nor anything through a link. A write never makes or changes something that runs: no
+// script or program file type, no file with an execute bit, nothing in an app bundle or in a folder on PATH.
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -20,6 +22,8 @@ export interface HostFolders {
   /** Home first. */
   places: HostPlace[];
   denied: string[];
+  /** The folders on PATH, real paths. */
+  programs: string[];
 }
 
 /** The bridge's reading of `withHostFiles`; null leaves the file tools off. */
@@ -40,6 +44,7 @@ export class HostFileRefusal extends Error {}
 export const OUTSIDE =
   "That path is outside the person's own folders on this computer. Files can be read and saved only in their home folder and its subfolders, Desktop, Documents and Downloads included: call list_files with no path to see where those are.";
 const SETTINGS = "That is a folder of settings, keys or app data, which bots cannot open. Use a folder such as Documents or Desktop.";
+const RUNS = "Bots cannot save a file that runs as a program or script there. Save it as text (.txt, .md) or a document instead.";
 const LINKED = "That path goes through a link or shortcut to another place, which is not followed. Use the real folder's path: list_files with no path shows it.";
 
 const pathFor = (platform: HostFilePlatform) => (platform === "win32" ? path.win32 : path.posix);
@@ -94,15 +99,48 @@ export function placeOf(folders: HostFolders, raw: unknown): { place: HostPlace;
   return { place: best.place, parts };
 }
 
-/** Why a real path is off limits, or null. Pure. */
+/** Folders the shell and PowerShell run code from, at any depth. */
+const RUNS_FROM = new Set(["powershell", "windowspowershell"]);
+/** Opened by the system as a program, script or shortcut when double-clicked or listed. */
+const RUNNABLE_TYPES: Record<HostFilePlatform, readonly string[]> = {
+  win32: [".bat", ".cmd", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta", ".exe", ".scr", ".com", ".pif", ".msi", ".dll", ".ps1",
+    ".psm1", ".lnk", ".url", ".scf", ".library-ms", ".searchconnector-ms"],
+  darwin: [".command", ".terminal", ".app", ".tool", ".workflow"],
+  linux: [".desktop"],
+};
+
+/** The innermost place holding a real path, and the names below it. */
+function within(folders: HostFolders, target: string): { place: HostPlace; parts: string[] } | null {
+  const { platform } = folders;
+  const holding = folders.places.filter((place) => sameOrInside(platform, target, place.path));
+  const place = holding.sort((a, b) => b.path.length - a.path.length)[0];
+  return place ? { place, parts: target.slice(trimmed(platform, place.path).length).split(pathFor(platform).sep).filter(Boolean) } : null;
+}
+
+/** Why a real path is off limits to read or write, or null. Pure. */
 export function refusalFor(folders: HostFolders, target: string): string | null {
   const { platform } = folders;
-  if (!folders.places.some((place) => sameOrInside(platform, target, place.path))) return OUTSIDE;
+  const found = within(folders, target);
+  if (!found) return OUTSIDE;
   if (folders.denied.some((denied) => sameOrInside(platform, target, denied))) return SETTINGS;
-  const [home, ...others] = folders.places;
-  if (others.some((place) => sameOrInside(platform, target, place.path)) || !sameOrInside(platform, target, home!.path)) return null;
-  const first = target.slice(trimmed(platform, home!.path).length).split(pathFor(platform).sep).find(Boolean);
-  if (first && (first.startsWith(".") || ["library", "appdata"].includes(first.normalize("NFC").toLowerCase()))) return SETTINGS;
+  const names = found.parts.map((part) => part.normalize("NFC").toLowerCase());
+  if (names.some((name) => name.startsWith(".") || RUNS_FROM.has(name))) return SETTINGS;
+  const top = found.place === folders.places[0] ? names[0] : undefined;
+  if (top === "library" || top === "appdata" || (platform === "linux" && top === "snap")) return SETTINGS;
+  return null;
+}
+
+/** Why a file may not be saved at this real path, beyond `refusalFor`, or null. Pure. */
+export function writeRefusal(folders: HostFolders, target: string, kind: "file" | "folder" = "file"): string | null {
+  const { platform } = folders;
+  const p = pathFor(platform);
+  const names = trimmed(platform, target).split(p.sep).filter(Boolean).map((part) => part.normalize("NFC").toLowerCase());
+  if (platform === "darwin" && names.some((name) => name.endsWith(".app"))) return RUNS;
+  if (kind === "folder") return null;
+  const name = names.at(-1) ?? "";
+  if (RUNNABLE_TYPES[platform].some((type) => name.endsWith(type)) || (platform === "win32" && name === "desktop.ini")) return RUNS;
+  const folder = fold(platform, p.dirname(trimmed(platform, target)));
+  if (folders.programs.some((program) => fold(platform, trimmed(platform, program)) === folder)) return RUNS;
   return null;
 }
 
@@ -225,7 +263,7 @@ export async function hostFolders(options: { platform: HostFilePlatform; home: s
   const { platform, home, env } = options;
   const p = pathFor(platform);
   const realHome = await fs.realpath(home).catch(() => null);
-  if (!realHome) return { platform, places: [], denied: [] };
+  if (!realHome) return { platform, places: [], denied: [], programs: [] };
   const places: HostPlace[] = [{ name: "Home", path: realHome, given: home }];
   for (const found of await knownFolders(platform, home, env, options.run)) {
     if (!acceptablePlace(platform, found.path, home, env)) continue;
@@ -240,11 +278,12 @@ export async function hostFolders(options: { platform: HostFilePlatform; home: s
     const real = await fs.realpath(entry).catch(() => null);
     if (real) denied.add(real);
   }
-  // PowerShell runs its profile from Documents at every start.
-  for (const documents of places.filter((place) => place.name === "Documents" || place.name === "Home")) {
-    const base = documents.name === "Home" ? p.join(documents.path, "Documents") : documents.path;
-    denied.add(p.join(base, "PowerShell"));
-    denied.add(p.join(base, "WindowsPowerShell"));
+  const programs = new Set<string>();
+  for (const entry of (env.PATH ?? env.Path ?? "").split(platform === "win32" ? ";" : ":")) {
+    if (!entry || !p.isAbsolute(entry)) continue;
+    programs.add(entry);
+    const real = await fs.realpath(entry).catch(() => null);
+    if (real) programs.add(real);
   }
-  return { platform, places, denied: [...denied] };
+  return { platform, places, denied: [...denied], programs: [...programs] };
 }
