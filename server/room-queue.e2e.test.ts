@@ -8,7 +8,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
-import { openSse } from "./testing/sse.ts";
+import { openSse, type SseRecorder } from "./testing/sse.ts";
 
 it("tells the requester and the room that three same-room jobs run in turn", async () => {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
@@ -165,8 +165,9 @@ it("names the other room a queued member is busy in", async () => {
   const env = { OPENMAUSBOT_URL: session.info.url };
   const cli = (...args: string[]) => runControlOmb(args, { env }) as Promise<any>;
   const tool = (name: string, args: Record<string, unknown>) => handleToolCall(name, args, (path, options) => request(path, options, session.info.url)) as Promise<any>;
-  const events = await openSse(`${session.info.url}/api/events`, { Origin: session.info.url });
+  let events: SseRecorder | undefined;
   try {
+    events = await openSse(`${session.info.url}/api/events`, { Origin: session.info.url });
     const lead = (await cli("new-bot", "--name", "Lead", "--section", "A")).bot;
     const worker = (await cli("new-bot", "--name", "Worker", "--section", "A")).bot;
     const lab = (await tool("create_channel", { name: "Lab", member_ids: [worker.id] })).channel;
@@ -186,15 +187,19 @@ it("names the other room a queued member is busy in", async () => {
     // Studio's line names Lab as where Worker is busy, not just "queued".
     const frame = await events.until(f => f.kind === "group" && f.group?.id === studio.id &&
       (f.group.queue ?? []).some((e: any) => e.botId === worker.id && e.state === "queued"), 30_000);
+    const queuedAt = events.frames.indexOf(frame);
     const entry = frame.group.queue.find((e: any) => e.botId === worker.id);
     expect(entry.busyIn).toEqual({ groupId: lab.id, threadId: expect.any(String) });
     expect(entry.busyIn.threadId).not.toBe(frame.group.threadId);
 
     writeFileSync(gate, "release");
     expect((await cli("wait", "--channel", studio.id, "--timeout", "60")).status).toBe("settled");
-    await events.until(f => f.kind === "group" && f.group?.id === studio.id && Array.isArray(f.group.queue) && f.group.queue.length === 0, 15_000);
+    // Only frames after the queued one count: earlier Studio frames also have an empty queue.
+    const recorder = events;
+    await recorder.until(f => recorder.frames.indexOf(f) > queuedAt && f.kind === "group" && f.group?.id === studio.id &&
+      Array.isArray(f.group.queue) && f.group.queue.length === 0, 15_000);
   } finally {
-    events.close();
+    events?.close();
     await session.close();
   }
 }, 120_000);
