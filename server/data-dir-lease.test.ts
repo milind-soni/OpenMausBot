@@ -8,7 +8,7 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { acquireDataDirLease } from "./data-dir-lease.ts";
+import { acquireDataDirLease, releaseOnceAtExit } from "./data-dir-lease.ts";
 
 const MODULE_URL = pathToFileURL(join(process.cwd(), "server", "data-dir-lease.ts")).href;
 const dirs: string[] = [];
@@ -160,5 +160,21 @@ describe("OpenMausBot data-directory lease", () => {
 
     expect(() => acquireDataDirLease(dir)).toThrow(/lease is invalid.*refusing to start/i);
     expect(readFileSync(path, "utf8")).toBe("not-json\n");
+  });
+
+  it("releases once at exit, and a failed release is logged, never thrown", () => {
+    let calls = 0;
+    const release = releaseOnceAtExit({ release: () => { calls += 1; throw new Error("gone"); } });
+    const logged: unknown[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => { logged.push(args[0]); };
+    try {
+      expect(() => release()).not.toThrow();
+      release();
+    } finally {
+      console.error = original;
+    }
+    expect(calls).toBe(1);
+    expect(logged).toEqual(["[data-directory] lease release failed: gone"]);
   });
 });
