@@ -209,7 +209,7 @@ function gitFailure(command: string, err: Error & { killed?: boolean }, stderr: 
 }
 
 function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal, input?: string): Promise<string> {
-  return checkpointGitSlots.run(() => startGit(args, cwd, env, signal, input), signal);
+  return checkpointGitSlots.run(() => startGit(args, cwd, env, signal, input), { signal });
 }
 
 function startGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal, input?: string): Promise<string> {

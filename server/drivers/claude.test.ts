@@ -1433,6 +1433,39 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(sent[1].message.content.endsWith("two")).toBe(true);
   });
 
+  it("keeps a warm session when only the team roster changed (a bot added), and tells it the new roster once", async () => {
+    await create();
+    const dump = join(scratch, "roster.json");
+    const prompts = join(scratch, "roster-prompts.jsonl");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
+    const roster = (names: string) => `\n[TEAM ROSTER]\n${names}\n[/TEAM ROSTER]`;
+    const send = async (text: string, names: string, busy: string) => {
+      await instance.adapter.sendTurn({
+        threadId: "t-roster", text,
+        system: `You are Testy.${roster(names)}\n\nBusy: ${busy}`, systemStable: `You are Testy.${roster(names)}`, systemVolatile: `Busy: ${busy}`, systemRoster: roster(names),
+      });
+      await recorder.until((e) => e.type === "turn.completed");
+      recorder.events.length = 0;
+    };
+    await send("one", "Ana [id: a]", "nobody");
+    const firstPid = JSON.parse(readFileSync(dump, "utf8")).pid;
+    await send("two", "Ana [id: a]\nBo [id: b]", "nobody");
+    await send("three", "Ana [id: a]\nBo [id: b]", "Ana");
+    await send("four", "Ana [id: a]\nBo [id: b]", "Ana");
+    expect(JSON.parse(readFileSync(dump, "utf8")).pid).toBe(firstPid);
+    const sent = readFileSync(prompts, "utf8").trim().split("\n").map((line) => JSON.parse(line).message.content as string);
+    expect(sent).toHaveLength(4);
+    expect(sent[1]).toContain("The team roster changed");
+    expect(sent[1]).toContain("Bo [id: b]");
+    expect(sent[1]).not.toContain("Busy:");
+    expect(sent[1].endsWith("two")).toBe(true);
+    // Availability changed: only the per-turn half rides along, not the roster again.
+    expect(sent[2]).toContain("Busy: Ana");
+    expect(sent[2]).not.toContain("[TEAM ROSTER]");
+    expect(sent[3]).toBe("four");
+  });
+
   it("redelivers unchanged mention context on every tagged turn", async () => {
     await create();
     const dump = join(scratch, "mention.json");

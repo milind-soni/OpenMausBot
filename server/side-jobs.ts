@@ -53,8 +53,12 @@ export interface SideJobBot {
 
 export interface SideJobText {
   via: "engine" | "helper";
-  generateText: (prompt: string, options?: Pick<TextGenerationOptions, "signal" | "timeoutMs">) => Promise<string>;
+  generateText: (prompt: string, options?: SideJobTextOptions) => Promise<string>;
 }
+
+/** `waiting`: the call has to wait for a free slot (other bots' background calls); `started`: it starts now, after waiting
+ * or at once. A call that is never queued calls neither. */
+export type SideJobTextOptions = Pick<TextGenerationOptions, "signal" | "timeoutMs"> & { waiting?(): void; started?(): void };
 
 export interface SideJobsDeps {
   bot: (botId: string) => SideJobBot | null | undefined;
@@ -90,6 +94,8 @@ function ownCall(job: SideJob, instance: SideJobInstance): TextCall | undefined 
 
 /** A turn or a person is waiting on these, so they start at once. */
 const NEVER_QUEUED: ReadonlySet<SideJob> = new Set(["compaction", "representative", "status-reply"]);
+/** A person sees these soon (a new bot's suggestions card): they wait ahead of memory upkeep and skill review. */
+const SEEN_SOON: ReadonlySet<SideJob> = new Set(["setup-suggestions"]);
 
 export function createSideJobs(deps: SideJobsDeps): SideJobs {
   // Logged once per change, not once per call.
@@ -190,7 +196,10 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
 
   const slots = deps.slots ?? backgroundTextSlots;
   const queued = (job: SideJob, found: SideJobText | null): SideJobText | null => found && !NEVER_QUEUED.has(job)
-    ? { via: found.via, generateText: (prompt, options) => slots.run(() => found.generateText(prompt, options), options?.signal) }
+    ? { via: found.via, generateText: (prompt, { waiting, started, ...options } = {}) => slots.run(() => {
+      started?.();
+      return found.generateText(prompt, options);
+    }, { signal: options.signal, interactive: SEEN_SOON.has(job), onWait: waiting }) }
     : found;
 
   function find(job: SideJob, botId: string, at: { instance?: SideJobInstance }): SideJobText | null {

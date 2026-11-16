@@ -43,8 +43,11 @@ export function heavyPrompt(sections: readonly PromptSection[]): boolean {
 // at the computer, or not there) and what its words switched on.
 // Two per-turn sections stay stable on purpose: "setup" sits right after the standing instructions it overrides,
 // and "webhook" keeps its untrusted-data rule in the system prompt, out of reach of the payload it guards.
-const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "long-waits", "recent", "availability", "roster", "active-routines",
+const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "long-waits", "recent", "availability", "active-routines",
   "plan", "assignment", "routine-execution", "skill-instructions", "playbooks", "device-place", "files"]);
+/** In the stable half, so it is not sent again whenever availability changes, but no part of what a per-thread process is
+ * keyed on: a warm process gets a changed roster as a note instead of a relaunch (SendTurnInput.systemRoster). */
+const ROSTER_SECTION = "roster";
 
 /** Its id is what puts it in the volatile half. */
 export function teamAvailabilityPart(team: readonly RosterMember[]): PromptPart {
@@ -53,7 +56,7 @@ export function teamAvailabilityPart(team: readonly RosterMember[]): PromptPart 
 
 /** Follows the "coordination" part, whose rules say how to read it. */
 export function teamRosterPart(roster: string): PromptPart {
-  return { id: "roster", label: "Team roster", text: roster ? `\n${roster}` : "" };
+  return { id: ROSTER_SECTION, label: "Team roster", text: roster ? `\n${roster}` : "" };
 }
 
 /** One standing rule for a bridged turn, so every tool name the prompt, a description or a result gives
@@ -86,7 +89,7 @@ export function buildSystemPrompt(
   parts: PromptPart[],
   agents?: { env?: Record<string, string | undefined> },
   opts?: { replyStyle?: ReplyStyle; rules?: string },
-): { text: string; sections: PromptSection[]; stable: string; volatile: string } {
+): { text: string; sections: PromptSection[]; stable: string; volatile: string; roster: string } {
   const ordered: PromptPart[] = [
     { id: "persona", label: "Identity", text: persona },
     { id: "every-bot-rules", label: "Rules for every bot", text: everyBotRulesPrompt(opts?.rules) },
@@ -102,7 +105,8 @@ export function buildSystemPrompt(
     .map((part) => ({ ...part, bytes: Buffer.byteLength(part.text, "utf8") }));
   const halves = (volatile: boolean) =>
     sections.filter((section) => VOLATILE_SECTIONS.has(section.id) === volatile).map((section) => section.text).join("");
-  return { text: sections.map((section) => section.text).join(""), sections, stable: halves(false), volatile: halves(true) };
+  const roster = sections.find((section) => section.id === ROSTER_SECTION)?.text ?? "";
+  return { text: sections.map((section) => section.text).join(""), sections, stable: halves(false), volatile: halves(true), roster };
 }
 
 // "box" is Boat's persisted kind literal.

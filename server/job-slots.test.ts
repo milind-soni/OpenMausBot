@@ -32,7 +32,7 @@ describe("a few background jobs at once", () => {
     const first = slots.run(() => gate.done);
     const abort = new AbortController();
     let ran = false;
-    const second = slots.run(async () => { ran = true; }, abort.signal);
+    const second = slots.run(async () => { ran = true; }, { signal: abort.signal });
     abort.abort();
     await expect(second).rejects.toThrow();
     expect(slots.waiting).toBe(0);
@@ -47,7 +47,7 @@ describe("a few background jobs at once", () => {
     const gate = later();
     const first = slots.run(() => gate.done);
     let awaited = false, ran = false;
-    const second = slots.run(async () => { ran = true; }, undefined, () => awaited);
+    const second = slots.run(async () => { ran = true; }, { urgent: () => awaited });
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(ran).toBe(false);
     awaited = true;
@@ -56,6 +56,23 @@ describe("a few background jobs at once", () => {
     gate.finish();
     await first;
     expect(slots.running).toBe(0);
+  });
+
+  it("lets what a person sees soon wait ahead of what nobody sees, each in arrival order, and says when a job waits", async () => {
+    const slots = createJobSlots(1);
+    const gate = later();
+    const order: string[] = [];
+    const waited: string[] = [];
+    const first = slots.run(() => gate.done);
+    const runs = [["review", false], ["upkeep", false], ["title", true], ["suggestions", true]].map(([name, interactive]) =>
+      slots.run(async () => { order.push(name as string); }, { interactive: interactive as boolean, onWait: () => waited.push(name as string) }));
+    expect(waited).toEqual(["review", "upkeep", "title", "suggestions"]);
+    gate.finish();
+    await Promise.all([first, ...runs]);
+    expect(order).toEqual(["title", "suggestions", "review", "upkeep"]);
+    let told = false;
+    await slots.run(async () => undefined, { onWait: () => { told = true; } });
+    expect(told).toBe(false);
   });
 
   it("reads its limit from the environment only when it is a whole number from 1 to 64", () => {

@@ -148,11 +148,16 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
       return null;
     },
     // Each summary is an engine process (a fork, or the one-shot summary call): a few at once across bots, and one a turn
-    // now waits on starts at once.
-    run: (target, plan, control) => (deps.slots ?? backgroundTextSlots).run(async () => {
-      if (plan.way === "native") return native(target, control);
-      return await deps.fold(target, control.signal) ? { ok: true } : { ok: false, reason: "the conversation does not need a summary yet" };
-    }, control.signal, control.awaited),
+    // now waits on starts at once. One that had to wait looks again: the cache may have gone cold, or a turn begun, meanwhile.
+    run: (target, plan, control) => {
+      let waited = false;
+      return (deps.slots ?? backgroundTextSlots).run(async () => {
+        const stale = waited && !control.awaited() ? control.stale() : null;
+        if (stale) return { ok: false, reason: `${stale.reason} (after waiting for a free slot)`, retry: stale.retry };
+        if (plan.way === "native") return native(target, control);
+        return await deps.fold(target, control.signal) ? { ok: true } : { ok: false, reason: "the conversation does not need a summary yet" };
+      }, { signal: control.signal, urgent: control.awaited, onWait: () => { waited = true; } });
+    },
     log: deps.log,
   });
 
