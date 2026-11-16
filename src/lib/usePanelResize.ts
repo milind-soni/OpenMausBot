@@ -20,13 +20,16 @@ export function setStoredPanelWidth(id: string, width: number): void {
   } catch {}
 }
 
-export function getOtherDockedWidths(selfId: string): number {
+// Panels that share the chat's right slot. A drawer overlays them, so they don't limit its width.
+const RIGHT_SLOT_PANELS = new Set(["preview", "tasks"]);
+
+export function getOtherDockedWidths(selfId: string, docked = true): number {
   if (typeof document === "undefined") return 0;
   const panels = document.querySelectorAll<HTMLElement>("[data-panel]");
   let total = 0;
   panels.forEach((el) => {
     const panelId = el.getAttribute("data-panel");
-    if (panelId && panelId !== selfId) {
+    if (panelId && panelId !== selfId && (docked || !RIGHT_SLOT_PANELS.has(panelId))) {
       // Only count panels in horizontal flex flow (exclude floating drawers)
       const isFloating =
         el.classList.contains("absolute") ||
@@ -84,7 +87,7 @@ export function usePanelResize({
   maxWidth,
   edge,
   label,
-  docked: _docked = true,
+  docked = true,
   minChatWidth = 300,
   onResize,
 }: UsePanelResizeOptions): UsePanelResizeReturn {
@@ -96,11 +99,12 @@ export function usePanelResize({
   const getEffectiveMaxWidth = useCallback((): number => {
     const configuredMax = typeof maxWidth === "function" ? maxWidth() : maxWidth;
     if (typeof window === "undefined") return configuredMax;
-    const otherWidth = getOtherDockedWidths(id);
-    const available = window.innerWidth - otherWidth - minChatWidth;
+    const otherWidth = getOtherDockedWidths(id, docked);
+    // A drawer overlays the chat, so it may cover all of it; a docked panel must leave the chat its minimum.
+    const available = window.innerWidth - otherWidth - (docked ? minChatWidth : 0);
     const maxAllowedByChat = Math.max(minWidth, available);
     return Math.max(minWidth, Math.min(configuredMax, maxAllowedByChat));
-  }, [id, maxWidth, minWidth, minChatWidth]);
+  }, [id, docked, maxWidth, minWidth, minChatWidth]);
 
   // The user's chosen width. Only user actions (drag, keyboard, reset) change and persist it;
   // window and neighbour changes clamp the rendered width without overwriting this preference.

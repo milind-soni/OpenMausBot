@@ -494,7 +494,7 @@ export function MobilePreviewPanel({
       )}
       style={{ width: `${previewWidth}px`, ...style }}
     >
-      {docked && <ResizeHandle {...previewHandleProps} />}
+      <ResizeHandle {...previewHandleProps} />
       {/* Redesigned Single Header (h-[60px] aligned with Chat & Tasks headers) */}
       <header className={cn("flex shrink-0 items-center justify-between gap-1 border-b border-hairline/40 bg-panel px-2 min-w-0 max-w-full overflow-hidden", SHARED_HEADER_HEIGHT_CLASS)}>
         {isDeviceSource ? (

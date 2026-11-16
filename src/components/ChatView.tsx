@@ -1043,7 +1043,7 @@ export function ChatView({ bot }: { bot: Bot }) {
             className={cn(
               previewAsDrawer
                 ? "absolute inset-y-0 right-0 z-30 flex max-w-full shadow-2xl"
-                : "static inset-auto z-auto max-w-none shadow-none flex",
+                : "relative inset-auto z-auto max-w-none shadow-none flex",
             )}
           />
         </>
