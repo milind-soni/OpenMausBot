@@ -4,23 +4,51 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
-import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { titleCaseModelId, type ModelCatalog, type ProviderDriver } from "../contracts.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 
 const DRIVER_KIND = "minimax";
 const API_KEY_ENV = "MINIMAX_API_KEY";
 const DEFAULT_URL = "https://api.minimax.io/v1";
 const CN_URL = "https://api.minimaxi.com/v1";
+const FLASH_MODEL = "MiniMax-M3.1-Flash";
+const M3_MODEL = "MiniMax-M3";
+/** The thinking depths MiniMax's own API takes for `reasoning_effort`; it answers 400 to any other value. */
+const THINKING_DEPTHS = ["low", "medium", "high", "xhigh", "max"];
 const MODELS: ModelCatalog = {
-  default: "MiniMax-M3",
+  default: M3_MODEL,
   // `custom: true` is load-bearing: a custom-access engine's picker pane lists only custom-flagged models.
   options: [
-    { id: "MiniMax-M3.1-Flash", label: "MiniMax M3.1 Flash", contextWindow: 1_000_000, custom: true },
-    { id: "MiniMax-M3", label: "MiniMax M3", contextWindow: 1_000_000, custom: true },
+    {
+      id: FLASH_MODEL,
+      label: "MiniMax M3.1 Flash",
+      contextWindow: 1_000_000,
+      custom: true,
+      // MiniMax-M3.1-Flash always thinks; only its depth is a choice.
+      variants: THINKING_DEPTHS.map((id) => ({ id, label: titleCaseModelId(id, /[-_ ]+/) })),
+    },
+    {
+      id: M3_MODEL,
+      label: "MiniMax M3",
+      contextWindow: 1_000_000,
+      custom: true,
+      // MiniMax-M3 answers straight when its thinking is off; its depth is not a choice.
+      variants: [{ id: "off", label: "No thinking" }],
+    },
     { id: "MiniMax-M2.7", label: "MiniMax M2.7", contextWindow: 204_800, custom: true },
     { id: "MiniMax-M2.7-highspeed", label: "MiniMax M2.7 Highspeed", contextWindow: 204_800, custom: true },
   ],
 };
+
+/** MiniMax's own thinking controls: `reasoning_effort` sets the depth on MiniMax-M3.1-Flash, and
+ * `thinking: { type: "disabled" }` answers straight on MiniMax-M3. The API answers 400 to
+ * `reasoning_effort: "none"` and to a disabled thinking on MiniMax-M3.1-Flash, which always thinks. */
+function thinkingParams(model: string, variant: string | undefined): Record<string, unknown> {
+  if (!variant) return {};
+  if (model === FLASH_MODEL) return THINKING_DEPTHS.includes(variant) ? { reasoning_effort: variant } : {};
+  if (model === M3_MODEL) return variant === "off" ? { thinking: { type: "disabled" } } : {};
+  return {};
+}
 
 export interface MinimaxConfig {
   tools?: boolean;
@@ -110,13 +138,18 @@ export const MinimaxDriver: ProviderDriver<MinimaxConfig> = {
       apiUrl,
       tools: input.config.tools,
       models: () => models,
-      requestBody: (model, messages, stream) => ({
+      modelVariants: true,
+      requestBody: (model, messages, stream, variant) => ({
         model,
         messages,
         stream,
         reasoning_split: true,
+        ...thinkingParams(model, variant),
         stream_options: stream ? { include_usage: true } : undefined,
       }),
+      // MiniMax has no `reasoning_effort: "none"`: its own switch turns thinking off, and on
+      // MiniMax-M3.1-Flash, which always thinks, there is nothing to send.
+      reasoningOffBody: (model) => (model === M3_MODEL ? { thinking: { type: "disabled" } } : {}),
       httpErrorLabel: "MiniMax",
       missingKeyError: `no MiniMax key — set ${API_KEY_ENV} or run mmx auth login --api-key …`,
       unavailableReason: `no MiniMax API key — run mmx auth login --api-key … or set ${API_KEY_ENV}`,
