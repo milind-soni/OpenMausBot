@@ -141,10 +141,10 @@ function parent(cells: string[]) {
       rmSync(data, { recursive: true, force: true });
     }
   }
-  console.log("\n| bots × threads | bots.json | load | save p50 / p95 / max | bookkeeping p50 / p95 | serialize p50 | room save p50 |");
-  console.log("|---|---|---|---|---|---|---|");
+  console.log("\n| bots × threads | bots.json | load | heap after load | save p50 / p95 / max | bookkeeping p50 / p95 | serialize p50 | room save p50 |");
+  console.log("|---|---|---|---|---|---|---|---|");
   for (const r of results) {
-    console.log(`| ${r.bots} × ${r.threadsPerBot} | ${r.botsJsonKb} KB | ${r.loadMs} ms | ${r.saveP50Ms} / ${r.saveP95Ms} / ${r.saveMaxMs} ms | `
+    console.log(`| ${r.bots} × ${r.threadsPerBot} | ${r.botsJsonKb} KB | ${r.loadMs} ms | ${r.heapMb} MB | ${r.saveP50Ms} / ${r.saveP95Ms} / ${r.saveMaxMs} ms | `
       + `${r.bookkeepingP50Ms} / ${r.bookkeepingP95Ms} ms | ${r.serializeP50Ms} ms | ${r.roomSaveP50Ms} ms |`);
   }
 }
