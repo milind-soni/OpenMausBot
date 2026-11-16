@@ -6,7 +6,10 @@ import {
   Camera,
   ChevronDown,
   ExternalLink,
+  FileImage,
+  FileText,
   FolderOpen,
+  Globe,
   History,
   Laptop,
   Maximize2,
@@ -46,6 +49,7 @@ import {
   savePreviewStudioState,
 } from "@/lib/mobilePreviewState";
 import { PreviewFrame, type PreviewFrameHandle, type PreviewFrameStatus } from "@/components/PreviewFrame";
+import { DocumentChromeContext } from "@/components/DocumentView";
 import { PreviewFilePicker, usePreviewAutoRefreshWatcher } from "@/components/PreviewFilePicker";
 import { PreviewMoreMenu } from "@/components/PreviewMoreMenu";
 import { usePanelResize } from "@/lib/usePanelResize";
@@ -269,6 +273,24 @@ export function MobilePreviewPanel({
 
   // An empty panel starts in the web header so the address field is available.
   const isDeviceSource = !activeSource || isWebPreviewSource(activeSource);
+  const [docStatusSlot, setDocStatusSlot] = useState<HTMLElement | null>(null);
+  const [docControlsSlot, setDocControlsSlot] = useState<HTMLElement | null>(null);
+  const documentChrome = useMemo(() => ({ status: docStatusSlot, controls: docControlsSlot }), [docStatusSlot, docControlsSlot]);
+  const fileMeta = useMemo(() => {
+    const path = activeSource?.kind === "file" ? activeSource.filePath : "";
+    const parts = path.split("/").filter(Boolean);
+    const name = parts.pop() ?? "";
+    const project = activeSource?.kind === "file" ? activeSource.projectName : undefined;
+    const folder = [project, ...parts].filter(Boolean).join(" / ") || "Project root";
+    const type = activeSource?.kind === "file" ? activeSource.fileType : undefined;
+    return type === "image"
+      ? { name, folder, Icon: FileImage, tone: "text-emerald-400" }
+      : type === "pdf"
+        ? { name, folder, Icon: FileText, tone: "text-rose-400" }
+        : type === "markdown"
+          ? { name, folder, Icon: FileText, tone: "text-violet-400" }
+          : { name, folder, Icon: FileText, tone: "text-ink-secondary" };
+  }, [activeSource]);
 
   const handleOpenExternally = useCallback(() => {
     if (!activeSource) return;
@@ -651,42 +673,48 @@ export function MobilePreviewPanel({
         ) : (
           /* State B: Full-screen file viewer (Markdown, PDF, Image) */
           <>
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <FolderOpen size={15} className="text-accent shrink-0" />
-              <div className="flex min-w-0 flex-col">
-                <span className="truncate text-[12.5px] font-semibold text-ink" title={describePreviewSource(activeSource)}>
-                  {describePreviewSource(activeSource)}
-                </span>
-                {activeSource?.kind === "file" && (
-                  <span className="text-[10px] uppercase tracking-wider text-ink-secondary">
-                    {activeSource.fileType} viewer
-                  </span>
+            <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-1">
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-hairline/50 bg-inset",
+                  fileMeta.tone,
                 )}
-              </div>
-              <button
-                type="button"
-                onClick={(e) => openFilePicker(e.currentTarget)}
-                aria-label="Choose another file"
-                title="Choose another file"
-                className="ml-1 inline-flex h-6 items-center gap-1 rounded border border-hairline/60 bg-inset px-1.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink shrink-0"
               >
-                Change
-              </button>
+                <fileMeta.Icon className="h-4 w-4" />
+              </span>
+              <div className="flex min-w-0 flex-col gap-0.5">
+                <button
+                  type="button"
+                  onClick={(e) => openFilePicker(e.currentTarget)}
+                  aria-label={`Choose another file (current: ${fileMeta.name})`}
+                  title={describePreviewSource(activeSource)}
+                  className="group -mx-1 flex min-w-0 items-center gap-1 rounded px-1 text-left text-[13px] font-semibold leading-tight text-ink transition-colors hover:bg-raised"
+                >
+                  <span className="truncate">{fileMeta.name}</span>
+                  <ChevronDown className="h-3 w-3 shrink-0 text-ink-secondary transition-colors group-hover:text-ink" />
+                </button>
+                <div className="flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-ink-secondary">
+                  <span className="min-w-0 truncate" title={fileMeta.folder}>{fileMeta.folder}</span>
+                  <span ref={setDocStatusSlot} className="flex shrink-0 items-center gap-1.5 empty:hidden before:h-[3px] before:w-[3px] before:rounded-full before:bg-ink-secondary/60 before:content-['']" />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-0.5 shrink-0 ml-auto">
+              <span ref={setDocControlsSlot} className="mr-1 flex items-center empty:hidden" />
               <button
                 type="button"
                 onClick={() => {
                   setActiveSource(null);
                   setInputUrl("");
                 }}
-                aria-label="Enter web address"
-                title="Switch to web address"
-                className="inline-flex h-6 items-center gap-1 rounded border border-hairline/60 bg-inset px-1.5 text-[10.5px] text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink shrink-0"
+                aria-label="Open a web address instead"
+                title="Open a web address"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
               >
-                Web URL
+                <Globe className="h-3.5 w-3.5" />
               </button>
-            </div>
-
-            <div className="flex items-center gap-0.5 shrink-0 ml-auto">
               <button
                 type="button"
                 onClick={() => frameRef.current?.reload()}
@@ -764,6 +792,7 @@ export function MobilePreviewPanel({
       )}
 
       {/* Viewport stage */}
+      <DocumentChromeContext.Provider value={documentChrome}>
       <div
         ref={stageRef}
         className={cn("relative flex flex-1 items-start justify-center overflow-auto", isDeviceSource ? "bg-inset/50 p-4" : "bg-panel p-0")}
@@ -802,8 +831,10 @@ export function MobilePreviewPanel({
           showDeviceBezel={preset.group === "phone" || preset.group === "tablet"}
         />
       </div>
+      </DocumentChromeContext.Provider>
 
-      {/* Footer status strip */}
+      {/* Footer status strip (file viewers only need it for notices and errors) */}
+      {(isDeviceSource || toast || frameStatus === "error" || frameStatus === "blocked") && (
       <div className="flex h-7 items-center justify-between border-t border-hairline/50 bg-raised/70 px-3 text-[11px] text-ink-secondary">
         <div className="flex items-center gap-1.5 truncate">
           {isDeviceSource ? (
@@ -857,6 +888,7 @@ export function MobilePreviewPanel({
           ) : null}
         </div>
       </div>
+      )}
 
       {/* Portaled Size Selector Dropdown */}
       {sizeMenuOpen &&

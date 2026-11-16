@@ -3,7 +3,8 @@
 // text files open straight in the editor. Edits autosave, and a save is
 // refused if the file changed on disk meanwhile, so an agent's write and
 // the user's edit never silently overwrite each other.
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlertTriangle, BookOpen, Check, Loader2, Pencil } from "lucide-react";
@@ -12,6 +13,10 @@ import { remarkObsidian, splitFrontmatter, toggleTaskLine } from "@/lib/obsidian
 import { cn } from "@/lib/cn";
 
 const AUTOSAVE_MS = 800;
+
+/** Header slots supplied by the Quick preview panel, so the save status and
+ * Read/Edit switch live in its file bar instead of a second toolbar. */
+export const DocumentChromeContext = createContext<{ status: HTMLElement | null; controls: HTMLElement | null } | null>(null);
 
 type SaveState = "saved" | "dirty" | "saving" | "conflict" | "error";
 
@@ -182,27 +187,40 @@ export const DocumentView = forwardRef<HTMLDivElement, DocumentViewProps>(functi
   }, [save]);
 
   const status = saveState === "saving" ? "Saving…" : saveState === "dirty" ? "Edited" : saveState === "saved" ? "Saved" : saveState === "error" ? "Not saved" : "Changed on disk";
+  const chrome = useContext(DocumentChromeContext);
+
+  const statusLine = (
+    <span className="inline-flex min-w-0 shrink-0 items-center gap-1" aria-live="polite">
+      {saveState === "saving" ? <Loader2 className="h-3 w-3 animate-spin" /> : saveState === "saved" ? <Check className="h-3 w-3 text-success" /> : saveState === "dirty" ? <span className="h-1.5 w-1.5 rounded-full bg-ink-secondary" /> : <AlertTriangle className="h-3 w-3 text-warning" />}
+      <span className="truncate">{status}</span>
+    </span>
+  );
+
+  const segment = (active: boolean) => cn(
+    "flex h-6 items-center justify-center gap-1 rounded-[5px] px-1.5 text-[11.5px] font-medium transition-colors",
+    active ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
+  );
+  const modeSwitch = kind === "markdown" ? (
+    <div role="group" aria-label="Document mode" className="flex shrink-0 items-center gap-0.5 rounded-md border border-hairline/50 bg-inset p-0.5">
+      <button type="button" onClick={() => setMode("read")} aria-pressed={mode === "read"} aria-label="Reading view" title="Reading view (⌘E)" className={segment(mode === "read")}>
+        <BookOpen className="h-3.5 w-3.5" />
+      </button>
+      <button type="button" onClick={() => setMode("edit")} aria-pressed={mode === "edit"} aria-label="Edit" title="Edit (⌘E)" className={segment(mode === "edit")}>
+        <Pencil className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  ) : null;
 
   return (
     <div className="flex h-full w-full flex-col bg-panel" onKeyDown={onKeyDown}>
-      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-hairline/30 px-3 text-[12px] text-ink-secondary">
-        <span className="flex min-w-0 items-center gap-1.5" aria-live="polite">
-          {saveState === "saving" ? <Loader2 className="h-3 w-3 animate-spin" /> : saveState === "saved" ? <Check className="h-3 w-3 text-success" /> : saveState === "dirty" ? null : <AlertTriangle className="h-3 w-3 text-warning" />}
-          <span className="truncate">{status}</span>
-        </span>
-        {kind === "markdown" && (
-          <div role="group" aria-label="Document mode" className="flex items-center rounded-md border border-hairline/40 p-0.5">
-            <button type="button" onClick={() => setMode("read")} aria-pressed={mode === "read"} title="Reading view (⌘E)"
-              className={cn("flex items-center gap-1 rounded px-2 py-0.5", mode === "read" ? "bg-raised text-ink" : "hover:text-ink")}>
-              <BookOpen className="h-3 w-3" /> Read
-            </button>
-            <button type="button" onClick={() => setMode("edit")} aria-pressed={mode === "edit"} title="Edit (⌘E)"
-              className={cn("flex items-center gap-1 rounded px-2 py-0.5", mode === "edit" ? "bg-raised text-ink" : "hover:text-ink")}>
-              <Pencil className="h-3 w-3" /> Edit
-            </button>
-          </div>
-        )}
-      </div>
+      {chrome?.status ? createPortal(statusLine, chrome.status) : null}
+      {chrome?.controls ? createPortal(modeSwitch, chrome.controls) : null}
+      {!chrome?.status && (
+        <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-hairline/30 px-3 text-[12px] text-ink-secondary">
+          {statusLine}
+          {modeSwitch}
+        </div>
+      )}
       {(saveState === "conflict" || saveState === "error") && (
         <div role="alert" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-ink">
           <span className="min-w-0 flex-1">
