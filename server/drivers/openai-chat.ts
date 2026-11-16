@@ -106,12 +106,8 @@ interface RuntimeOptions<Config> {
   refreshModels?: () => Promise<void>;
   generateModel?: () => string;
   reasoning?: boolean;
-  /** Cerebras rejects `reasoning_content` and takes `reasoning`. */
-  reasoningReplayField?: "reasoning_content" | "reasoning";
-  /** What to send when a turn drops to reasoning-off, for a provider whose API has no
-   * `reasoning_effort: "none"`: its own switch, or `{}` to leave the model thinking as it is.
-   * Unset keeps OpenAI's default. */
-  reasoningOffBody?: (model: string) => Record<string, unknown>;
+  /** Cerebras rejects `reasoning_content` and takes `reasoning`. */ reasoningReplayField?: "reasoning_content" | "reasoning";
+  /** Sent on reasoning-off by a provider with no `reasoning_effort: "none"`: its own switch, or `{}`. Unset sends "none". */ reasoningOffBody?: (model: string) => Record<string, unknown>;
   contentText?: (content: unknown) => string;
   billing?: "metered";
   includeUsageInCompleted?: boolean;
