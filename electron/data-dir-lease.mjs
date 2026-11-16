@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname, uptime } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 
 const LEASE_NAME = "openmausbot-server.lease";
 const DELEGATED_CHILD_DIR = ".openmausbot-server-child";
@@ -215,7 +215,7 @@ const MAC_SYNCED_FOLDERS = [["Library", "Mobile Documents"], ["Library", "CloudS
 export function inMacSyncedFolder(path, home) {
   const lower = path.toLowerCase();
   return MAC_SYNCED_FOLDERS.some((parts) => {
-    const root = join(home, ...parts).toLowerCase();
+    const root = posix.join(home, ...parts).toLowerCase();
     return lower === root || lower.startsWith(`${root}/`);
   });
 }

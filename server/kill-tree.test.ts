@@ -19,12 +19,17 @@ function reportedPid(stdout: Readable): Promise<number> {
   });
 }
 
+/** A stopped process nobody has reaped yet still answers signal 0; Linux shows it as a zombie, which counts as stopped. */
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
     return false;
+  }
+  try {
+    return !/^\S+ \(.*\) Z /.test(readFileSync(`/proc/${pid}/stat`, "utf8"));
+  } catch {
+    return process.platform !== "linux";
   }
 }
 
