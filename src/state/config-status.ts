@@ -1,6 +1,7 @@
 // What GET /api/config tells the app about the server and its settings (re-exported by store.tsx).
 import type { EffortLevel, LiveSettings } from "../../shared/wire";
 import type { ImageProvider } from "../../shared/image-generation";
+import type { ToolGroup } from "../../shared/tool-groups";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { ModelSelection } from "./store";
 
@@ -26,6 +27,8 @@ export interface ConfigStatus {
   /** X research comes with MausBot Cloud plans: `included` while this server holds the plan's relay credential;
    * `unavailable` when the Admin said no to this desktop's paid sign-in. */
   xResearch?: { included: boolean; unavailable?: boolean };
+  /** The built-in tool groups this workspace has, the ones a bot's Settings offer to turn off. */
+  toolGroups?: ToolGroup[];
   /** The person's own treg key for research: configured or not, never the key. */
   treg?: SavedKey;
   /** The Postiz organisation API key, and the Postiz server it belongs to when it is not Postiz Cloud. */
@@ -69,6 +72,12 @@ export interface ConfigStatus {
   awakeLimit?: number;
   /** Bots paused for the plan's limit: kept, but taking no turns. */
   pausedBots?: string[];
+  /** What the person paused (Pause in the sidebar menus): bots by id and departments by name. Absent from older servers. */
+  pausedByPerson?: { bots: string[]; departments: string[]; all?: true };
+  /** Every bot taking no new work because the person paused it or its department. */
+  heldBots?: string[];
+  /** The server cannot read its saved routines, so none runs until it can. */
+  routinesUnreadable?: true;
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
@@ -101,7 +110,10 @@ export interface ConfigStatus {
    * saved. OpenRouter only: `keySource` says which key is in use (its own, or
    * the one under Settings → API keys); `sharedKey`: that one is on file. */
   decider?: {
-    provider: "jev" | "workersai" | "openrouter" | "custom";
+    provider: "jev" | "workersai" | "openrouter" | "custom" | "gemini";
+    /** Jev, when the person picked it but the shared OpenRouter key decides until a Jev key is saved; OpenRouter, when
+     * it was picked but a saved Gemini key decides until an OpenRouter key is saved. */
+    chosen?: "jev" | "openrouter";
     /** The OpenRouter or custom model in use; present only while that is the provider. */
     model?: string;
     /** The custom endpoint's protocol, or the OpenRouter API. */

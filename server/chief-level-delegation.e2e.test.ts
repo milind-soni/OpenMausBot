@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { readRegistry } from "./testing/registry.ts";
 
 it("starts a thread a Chief opens with a teammate at the Chief's level, and a Chief on Ask raises nobody", async () => {
   const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true });
@@ -20,7 +21,7 @@ it("starts a thread a Chief opens with a teammate at the Chief's level, and a Ch
   };
   const cli = (...args: string[]) => runControlOmb([...args, "--url", url]) as Promise<any>;
   const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
-  const persistedTask = (botId: string, threadId: string) => JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"))
+  const persistedTask = (botId: string, threadId: string) => readRegistry(dataDir).bots
     .find((bot: any) => bot.id === botId).tasks.find((task: any) => task.threadId === threadId);
   /** The Chief brings `teammate` in from `threadId` (coordinate_bots opens a
    * thread with them); resolves with the teammate's provider turn. */

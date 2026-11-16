@@ -245,6 +245,60 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
   });
 });
 
+describe("PATCH /api/bots/:id toolsOff", () => {
+  it("stores known groups once each in one order, clears them with null or an empty list, and refuses anything else", async () => {
+    const { store, bot, patch } = fixture();
+    expect((await patch(bot.id, { toolsOff: ["pages", "meetings", "pages"] })).status).toBe(200);
+    expect(store.bot(bot.id)?.toolsOff).toEqual(["meetings", "pages"]);
+    const refused = await patch(bot.id, { toolsOff: ["browser"] });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toBe("toolsOff must be a list of meetings, data, pages, images, email");
+    expect((await patch(bot.id, { toolsOff: "meetings" })).status).toBe(400);
+    expect(store.bot(bot.id)?.toolsOff).toEqual(["meetings", "pages"]);
+    expect((await patch(bot.id, { toolsOff: [] })).status).toBe(200);
+    expect(store.bot(bot.id)?.toolsOff).toBeUndefined();
+    await patch(bot.id, { toolsOff: ["data"] });
+    expect((await patch(bot.id, { toolsOff: null })).status).toBe(200);
+    expect(store.bot(bot.id)?.toolsOff).toBeUndefined();
+  });
+});
+
+describe("PATCH /api/bots/:id liveVoice", () => {
+  it("gives one bot its own Live call voice, leaves the others on the app's, clears it, and refuses a voice that is not a Live one", async () => {
+    const { store, bot, patch } = fixture();
+    const other = store.createBot({ name: "Echo" });
+    expect((await patch(bot.id, { liveVoice: "cedar" })).status).toBe(200);
+    expect(store.bot(bot.id)?.liveVoice).toBe("cedar");
+    expect(store.bot(other.id)?.liveVoice).toBeUndefined();
+    expect((await patch(bot.id, { liveVoice: "Kore" })).status).toBe(200);
+    expect(store.bot(bot.id)?.liveVoice).toBe("Kore");
+    for (const liveVoice of ["robot", "kore", 7, "cedar ".repeat(3)]) {
+      const refused = await patch(bot.id, { liveVoice });
+      expect(refused.status, String(liveVoice)).toBe(400);
+      expect(refused.body.error).toBe("liveVoice must be a GPT-Live or Gemini Live voice, or empty");
+    }
+    expect(store.bot(bot.id)?.liveVoice).toBe("Kore");
+    expect((await patch(bot.id, { liveVoice: "" })).status).toBe(200);
+    expect(store.bot(bot.id)?.liveVoice).toBeUndefined();
+    await patch(bot.id, { liveVoice: "ash" });
+    expect((await patch(bot.id, { liveVoice: null })).status).toBe(200);
+    expect(store.bot(bot.id)?.liveVoice).toBeUndefined();
+  });
+});
+
+describe("PATCH /api/bots/:id alwaysAllow", () => {
+  it("stores the list once each, and refuses a list over the limit instead of cutting it", async () => {
+    const { store, bot, patch } = fixture();
+    const keys = Array.from({ length: 200 }, (_, i) => `tool_${i}`);
+    expect((await patch(bot.id, { alwaysAllow: [...keys, keys[0]] })).status).toBe(200);
+    expect(store.bot(bot.id)?.alwaysAllow).toEqual(keys);
+    const refused = await patch(bot.id, { alwaysAllow: [...keys, "tool_200"] });
+    expect(refused.status).toBe(400);
+    expect(refused.body.errorKey).toBe("serverError.bot.alwaysAllowFull");
+    expect(store.bot(bot.id)?.alwaysAllow).toEqual(keys);
+  });
+});
+
 describe("PATCH /api/bots/:id phoneApps", () => {
   it("stores phoneApps and clears it with null", async () => {
     const { store, bot, patch } = fixture();

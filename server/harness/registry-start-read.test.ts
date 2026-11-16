@@ -179,6 +179,27 @@ describe("the start-up read", () => {
     expect(changed).toBe(false);
   });
 
+  it("keeps a terminal-only update in the saved status before the live read completes", async () => {
+    const file = statusFile();
+    const update = { title: "Update Codex", message: "Use the terminal for the newer release.", command: "codex update", serverInstall: false as const };
+    const answer = { ...AVAILABLE, update };
+    timersForTheFile();
+    await (await engines({ fake: { answer } }, { statusFile: file })).registry.describe();
+    await saved();
+    const probe = gate();
+    const { registry, probes } = await engines({ fake: { answer, holdSnapshot: probe.promise } }, { statusFile: file });
+    const read = registry.readAtStart();
+    try {
+      const [listed] = await registry.describe({ known: true });
+      expect(listed.snapshot).toMatchObject({ update });
+      expect(registry.lastSnapshot("fake")).toBeUndefined();
+      expect(probes()).toEqual({ fake: 1 });
+    } finally {
+      probe.open();
+      await read;
+    }
+  });
+
   it("reports no change when the probe agrees with the last run", async () => {
     const file = statusFile();
     timersForTheFile();

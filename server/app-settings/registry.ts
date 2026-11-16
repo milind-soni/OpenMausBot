@@ -10,7 +10,7 @@ import { MAX_MCP_CALL_TIMEOUT_MINUTES, MAX_ROOM_TURN_TIMEOUT_MINUTES, mcpCallTim
 import type { InstanceConfig } from "../contracts.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
-import { endpointDisplayUrl, isAddedEndpoint } from "../openai-compat-endpoints.ts";
+import { endpointDisplayUrl, isAddedEndpoint, localServerAlreadyAdded } from "../openai-compat-endpoints.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { callRoute, type RouteReply } from "../routes/call-route.ts";
 import type { RouteHandler } from "../routes/table.ts";
@@ -154,7 +154,7 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
   const groups = () => Object.fromEntries(deps.sections().map((section) => [section, deps.bots().filter((bot) => bot.section === section).map((bot) => bot.id)]));
 
   const safe: SettingEntry[] = [
-    windowPref("appearance.skin", "Skin", "The window's look; \"system\" follows the computer's light or dark mode.", "Settings → Appearance", ["theme", "dark mode", "light mode", "colors", "look"], enumOf(WINDOW_PREFS["appearance.skin"].options)),
+    windowPref("appearance.skin", "Skin", "The window's built-in look; \"system\" follows the computer's light or dark mode. A custom look (any colours, fonts, CSS, pictures) is a theme: use action theme.", "Settings → Appearance", ["theme", "dark mode", "light mode", "colors", "look"], enumOf(WINDOW_PREFS["appearance.skin"].options)),
     windowPref("appearance.advanced", "Advanced mode", "Advanced shows every setting and tool; Simple keeps the everyday ones.", "Settings → Appearance", ["simple mode", "advanced mode", "interface mode"], "true or false"),
     windowPref("appearance.font", "Font", "The app's typeface.", "Settings → Appearance", ["typeface", "typography"], enumOf(WINDOW_PREFS["appearance.font"].options)),
     windowPref("appearance.chatWidth", "Chat width", "How wide the chat column is.", "Settings → Appearance", ["layout", "column", "wide"], enumOf(WINDOW_PREFS["appearance.chatWidth"].options)),
@@ -278,6 +278,10 @@ export function createSettingsRegistry(deps: RegistryDeps): SettingEntry[] {
     current: (): EngineKeep => ({ kind: "keep", instanceIds: deps.engines().map((engine) => engine.instanceId) }), read: listEngines,
     describe: (change: EngineChange) => {
       if (change.kind === "remove") return { refusal: personOnly("Removing an AI engine", "Settings → AI") };
+      if (change.kind === "ollama" || change.kind === "lmstudio") {
+        const duplicate = localServerAlreadyAdded(instances(), change.url);
+        if (duplicate) return { refusal: duplicate };
+      }
       if (change.kind === "openai-compat") {
         if (!savedKey(change.keyFrom)) return { refusal: keyMissing(change.keyFrom) };
         return { change: `Add the engine "${change.name}" (OpenAI-compatible) at ${change.url}, sending it your saved ${CREDENTIAL_TARGETS[change.keyFrom].label}` };

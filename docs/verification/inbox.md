@@ -7,6 +7,8 @@
 3. An answer through the row's own conversation reaches the bot, its turn goes on and the count clears. A second answer to
    the same card is refused.
 4. `message_person` arrives as one line, one row and one notification, and a reply reaches the bot.
+5. A question left by `NEEDS INPUT:` that the person writes past leaves Needs you and stops marking the thread as
+   waiting on the person; its card stays open to answer.
 
 On My Cloud it also checks that nobody connects as a guest, that a bot's shell reads nothing, and that a guest's conversation
 left behind reaches the owner labelled, with its news kept away.

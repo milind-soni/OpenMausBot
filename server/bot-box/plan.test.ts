@@ -21,6 +21,24 @@ const turn = (mutate?: BoxMutation[]) => planBox(setup(mutate), {
 // over POSIX paths, which Windows' path module would write with drive letters and backslashes.
 const linuxBox = describe.skipIf(process.platform === "win32");
 
+describe("explicit read-only grants", () => {
+  it("overrides a writable engine profile for its staged skills", () => {
+    const home = join(process.cwd(), "box-fixture-home");
+    const dataDir = join(home, "data");
+    const profile = join(dataDir, "providers", "antigravity", "account");
+    const skills = join(profile, "omb-skills");
+    const plan = planBox({ dataDir, home, codeRoots: [], engineRoots: [], bridges: [] }, {
+      command: "antigravity", args: [], cwd: join(dataDir, "task-workspaces", "bot", "thread"),
+      env: { HOME: home, GEMINI_HOME: profile }, ro: [skills],
+    });
+    expect(visibleInBox(plan, join(skills, "hash", "SKILL.md"))).toBe("ro");
+    expect(visibleInBox(plan, join(profile, "antigravity-acp", "acp_token.json"))).toBe("rw");
+    const args = bwrapArgs(plan);
+    expect(args).toContain("--ro-bind-try");
+    expect(args.slice(args.indexOf(skills) - 1, args.indexOf(skills) + 2)).toEqual(["--ro-bind-try", skills, skills]);
+  });
+});
+
 linuxBox("the box plan", () => {
   it("shows the turn its own folders and the code, and nothing else of the data folder", () => {
     const plan = turn();

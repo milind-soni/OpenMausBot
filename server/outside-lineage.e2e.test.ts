@@ -11,6 +11,7 @@ import { OUTSIDE_REFUSAL } from "./host/outside-fence.ts";
 import { OUTSIDE_STAYS_HERE } from "./host/outside-lineage.ts";
 import { markLeftBehind } from "./testing/cloud-left-behind.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const tag = randomBytes(6).toString("hex");
 const dump = join(tmpdir(), `outside-${tag}.json`), release = join(tmpdir(), `outside-${tag}.release`), failing = join(tmpdir(), `outside-${tag}.fail`), notes = join(tmpdir(), `outside-${tag}.notes`),
@@ -459,10 +460,12 @@ describe("a Team Cloud", () => {
     const scout = await newBot("Earlier bot");
     const { thread } = await webhookTurn(scout.id, "Earlier hook", "marker-earlier");
     await finish(scout.id);
-    const file = join(team.home, ".openmausbot", "bots.json");
-    const before = readFileSync(file, "utf8");
-    expect(before).toContain('"outside":true');
-    writeFileSync(file, before.replaceAll('"outside":true', '"unmarked":true'));
+    const dataDir = join(team.home, ".openmausbot");
+    const { bots } = readRegistry(dataDir);
+    const marked = bots.flatMap((bot: any) => bot.tasks ?? []).filter((task: any) => task.outside === true);
+    expect(marked.length).toBeGreaterThan(0);
+    for (const task of marked) { delete task.outside; task.unmarked = true; }
+    writeRegistry(dataDir, { bots });
     await team.relaunch();
     ada = (await team.pair({ email: "ada@acme.test", role: "admin" })).token!;
     expect((await team.as(ada, "POST", `/api/bots/${scout.id}/messages`, { text: "person-line-earlier", threadId: thread })).status).toBe(202);

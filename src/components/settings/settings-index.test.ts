@@ -77,6 +77,19 @@ describe("the pages", () => {
     expect(find("backups", simple)[0]).toMatchObject({ entry: { page: "transfer" }, advanced: undefined });
   });
 
+  it("finds Your other computers without Advanced mode, on this computer only", () => {
+    for (const advanced of [false, true]) {
+      for (const query of ["other computers", "another computer", "tailscale", "your other", "laptop"]) {
+        const hit = find(query, fullContext({ advanced })).find((found) => found.entry.id === "other-computers");
+        expect(hit, query).toMatchObject({ entry: { page: "phone", anchor: "computers" }, elsewhere: false });
+        expect(hit!.advanced, query).toBeUndefined();
+      }
+      expect(find("tailscale", fullContext({ advanced }))[0]?.entry.id).toBe("other-computers");
+    }
+    const cloud = find("other computers", fullContext({ desktop: false, here: false, cloud: true, environments: false }));
+    expect(cloud.filter((found) => found.entry.id === "other-computers")).toEqual([]);
+  });
+
   it("names Phone & devices the same on every place: there is no This server page", () => {
     for (const ctx of Object.values(PEOPLE)) expect(visiblePages(ctx).find((page) => page.id === "phone")?.labelKey).toBe("settings.section.phoneDevices");
     expect(JSON.stringify(SETTINGS_PAGES)).not.toContain("thisServer");
@@ -160,6 +173,8 @@ describe("search", () => {
   it.each(["cancel", "billing", "invoice", "subscription", "refund"])("puts Plan & billing first for “%s”", (query) => expect(first(query)?.page).toBe("plan"));
   it.each(["voice", "microphone", "dictation"])("puts the Talk shortcut first for “%s” on the desktop", (query) => expect(first(query)?.id).toBe("talk"));
   it("puts All bots on You and your bots", () => expect(first("all bots")?.page).toBe("bots"));
+  it.each(["kimi", "hidden providers", "unhide"])("puts AI › Providers first for “%s”", (query) => expect(first(query)?.id).toBe("providers"));
+  it("finds AI › Providers for “cursor” beside importing from Cursor", () => expect(find("cursor").map((hit) => hit.entry.id)).toEqual(expect.arrayContaining(["providers", "ai-apps"])));
   it("finds Activity in Data where it exists: a browser, for an admin", () => {
     expect(first("activity", PEOPLE["a team admin"])?.anchor).toBe("activity");
     expect(find("activity", fullContext()).some((hit) => hit.entry.anchor === "activity")).toBe(false);

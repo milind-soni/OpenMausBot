@@ -1,4 +1,4 @@
-import type { Routine, RoutineRun } from "./routines";
+import { isCountedSkip, type Routine, type RoutineRun } from "./routines";
 import { activeLocale, t } from "./i18n";
 import { routineLineText } from "./activity-text";
 import { clockOptions } from "./clock-time";
@@ -7,8 +7,9 @@ export function routineRunTime(run: RoutineRun): number {
   return run.createdAt || run.startedAt || run.scheduledFor;
 }
 
+/** The routine's newest run, leaving out a row that only counts skipped occurrences. */
 export function latestRoutineRun(routineId: string, runs: readonly RoutineRun[]): RoutineRun | undefined {
-  return runs.filter((run) => run.routineId === routineId)
+  return runs.filter((run) => run.routineId === routineId && !isCountedSkip(run))
     .reduce<RoutineRun | undefined>((latest, run) => !latest || routineRunTime(run) > routineRunTime(latest) ? run : latest, undefined);
 }
 

@@ -84,6 +84,7 @@ const PENDING_WORDS: readonly Word[] = [
 ];
 
 const ALLOWED: Record<string, string> = {
+  "grokMove.connect.where": "names the Server URL field of Grok Bot's own form, where the link is pasted",
   "sidebar.servers": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServer": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServerError": "points at the app menu's Server menu",

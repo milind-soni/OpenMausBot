@@ -158,13 +158,13 @@ describe("bot-first sidebar", () => {
     expect(line).toMatch(/^>Done\.<\/span><\/span><span data-testid="model-badge" role="img" aria-label="Model: [^"]+ \(Claude\)" class="[^"]*\bms-auto\b[^"]*"><span data-provider-mark="brand" class="[^"]*\bopacity-60\b/);
     expect(line).toMatch(/^>Done\.<\/span><\/span><span data-testid="model-badge"[^>]*><span data-provider-mark="brand"[^>]*><svg[\s\S]*?<\/svg><\/span><\/span><\/div><span class="sr-only">Unread<\/span>/);
     const name = markup.slice(markup.indexOf('class="flex items-baseline justify-between gap-2 pr-7"'), markup.indexOf(">Done.<"));
-    expect(name).toMatch(/<span aria-hidden="true" data-row-dot="" class="pointer-events-none absolute right-2 top-1 flex size-7 items-center justify-center transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0 max-md:hidden"><span data-testid="unread-dot" title="Unread" class="size-2 shrink-0 rounded-full bg-accent"><\/span><\/span>/);
+    expect(name).toMatch(/<span aria-hidden="true" data-row-dot="" class="pointer-events-none absolute right-\[3px\] top-1\.5 flex size-6 items-center justify-center transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0 max-md:hidden"><span data-testid="unread-dot" title="Unread" class="size-2 shrink-0 rounded-full bg-accent"><\/span><\/span>/);
     expect(name).toContain('<span aria-hidden="true" title="Unread" class="size-2 shrink-0 rounded-full bg-accent hidden self-center max-md:block touch:block"></span>');
     expect(markup.match(/data-provider-mark=/g)).toHaveLength(1);
     expect(line.slice(0, line.indexOf("data-provider-mark"))).not.toContain("title=");
     expect(String(findElement(tree, "data-sidebar-bot-row", bot.id)!.props.className)).not.toContain("group-hover:pr-9");
     expect(markup).not.toContain("group-hover:pr-7");
-    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bright-2 top-1 translate-y-0\b/);
+    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*right-\[3px\] top-1\.5 size-6 translate-y-0\b/);
   });
 
   it("fades the collapsed rail's engine badge in both modes", () => {
@@ -250,6 +250,18 @@ describe("bot-first sidebar", () => {
     expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-auto opacity-100/);
   });
 
+  it.each(densities)("marks a room as one place instead of its members' faces, where a two-bot channel keeps both faces (%s)", (density) => {
+    const pip: Bot = { ...quiet, id: "pip", name: "Pip", color: "blue" };
+    fixture.state = { ...fixture.state, bots: [bot, pip] };
+    const room: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id, pip.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
+    const roomMarkup = renderToStaticMarkup(createElement(GroupListItem, { group: room, density, onMenu: vi.fn() }));
+    expect(roomMarkup).toContain("data-room-mark");
+    expect(roomMarkup).not.toContain("data-avatar-kind=\"bot\"");
+    const channel = renderToStaticMarkup(createElement(GroupListItem, { group: { ...room, dm: true }, density, onMenu: vi.fn() }));
+    expect(channel).not.toContain("data-room-mark");
+    expect(channel.match(/data-avatar-kind="bot"/g)).toHaveLength(2);
+  });
+
   it("marks an unread Simple group chat with the same top-right dot as a bot row, said once for a screen reader", () => {
     const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: true, createdAt: 1 };
     const markup = renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() }));
@@ -290,11 +302,11 @@ describe("bot-first sidebar", () => {
   });
 
   it.each([
-    { advanced: false, density: "comfortable", face: 36, spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"], name: "font-medium", preview: "text-[13px]" },
-    { advanced: false, density: "icons", face: 36, spacing: ["h-[54px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
-    { advanced: true, density: "icons", face: 44, spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
-    { advanced: true, density: "comfortable", face: 32, spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
-  ] as const)("sizes group chat rows in $density density (advanced $advanced)", ({ advanced, density, face, spacing, name, preview }) => {
+    { advanced: false, density: "comfortable", slot: "size-9", spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"], name: "font-medium", preview: "text-[13px]" },
+    { advanced: false, density: "icons", slot: "size-9", spacing: ["h-[54px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: true, density: "icons", slot: "size-12", spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: true, density: "comfortable", slot: "size-8", spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
+  ] as const)("sizes group chat rows in $density density (advanced $advanced)", ({ advanced, density, slot, spacing, name, preview }) => {
     fixture.advanced = advanced;
     const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
     let tree: ReactNode;
@@ -302,7 +314,7 @@ describe("bot-first sidebar", () => {
     const markup = renderToStaticMarkup(createElement(Capture));
     const row = findElement(tree, "data-sidebar-group-row", group.id)!;
     expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining([...spacing]));
-    expect(markup).toContain(`width="${face}px" height="${face}px"`);
+    expect(markup).toMatch(new RegExp(`data-room-mark="" class="[^"]*\\b${slot}\\b[^"]*"><svg[^>]*width="16" height="16"`));
     expect(markup).toMatch(new RegExp(`truncate text-\\[14px\\] text-ink ${name}`));
     expect(markup).toContain(`truncate text-ink-secondary ${preview}`);
   });
@@ -320,7 +332,7 @@ describe("bot-first sidebar", () => {
     expect(queuedDot).toContain("bg-ink-secondary");
     expect(queuedDot).not.toContain("size-4");
     expect(queuedDot).not.toContain("size-5");
-    expect(markup).toContain('class="truncate">Queued</span>');
+    expect(markup).toContain('class="min-w-0 overflow-hidden whitespace-nowrap">Queued</span>');
     expect(markup).not.toContain("font-semibold text-warning");
     expect(markup).not.toContain("waiting-dot");
   });

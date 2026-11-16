@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { DATA_DIR, type AppConfig } from "./config.ts";
 import { loadEnvironmentId } from "./environment.ts";
 import { boatCredential, boatProviderApi, type ServiceCredential } from "./included-services.ts";
-import { relayBody, relayPath } from "./boat-relay.ts";
+import { relayBody, relayPath } from "./boat-relay.ts"; import { COMMAND_WALL, runToEnd, type CommandOutcome } from "./boat-command.ts";
 import { boatHealth, DEAD_COMPUTER, unansweredStatus } from "./boat-health.ts";
 import { CLOUD_COMPUTER_NO_ANSWER } from "../shared/cloud-computer-recovery.ts";
 import { cloudLimitFromBody, type CloudLimit } from "../shared/place-view.ts";
@@ -350,9 +350,9 @@ export async function boatNameMatchesBot(botId: string, name: string): Promise<b
   return name === await boatNameFor(botId) || name === legacyBoatNameFor(botId);
 }
 
-/** `probe`: the health check itself, which records nothing; any other command that gets no answer starts one. */
-export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000, signal, probe = false }: { timeoutMs?: number; signal?: AbortSignal; probe?: boolean } = {}) {
-  assertBoatNotDeleting(boxId);
+/** `probe`: the health check itself, which records nothing; any other command that gets no answer starts one. A command given more than COMMAND_WALL.syncSafeMs is started detached and followed to its end (boat-command.ts). */
+export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000, signal, probe = false }: { timeoutMs?: number; signal?: AbortSignal; probe?: boolean } = {}): Promise<CommandOutcome> {
+  assertBoatNotDeleting(boxId); if (!probe && timeoutMs > COMMAND_WALL.syncSafeMs) return runToEnd(cfg, boxId, command, { timeoutMs, signal });
   const suspect = () => { if (!probe && !signal?.aborted) boatHealth.suspect(boxId, () => probeBoat(cfg, boxId)); };
   const res = await boatFetch(cfg, `/sandboxes/${boxId}/commands`, { method: "POST", body: JSON.stringify({ command }),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs) }).catch((error: unknown) => { suspect(); throw error; });
@@ -361,7 +361,7 @@ export async function runCommand(cfg: AppConfig, boxId: string, command: string,
   if (unanswered) suspect(); else if (!probe && res.ok && typeof body?.exitCode === "number") boatHealth.answered(boxId);
   return {
     ok: res.ok && body?.exitCode === 0, exitCode: body?.exitCode ?? null, stdout: body?.stdout ?? "",
-    stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const } : {}), ...(unanswered ? { unanswered: true as const } : {}),
+    stderr: body?.stderr ?? "", ...(body?.timedOut === true ? { timedOut: true as const, providerLimit: true as const } : {}), ...(unanswered ? { unanswered: true as const } : {}), ...(res.status === 503 ? { busy: true as const } : {}),
   };
 }
 
@@ -1243,7 +1243,7 @@ export async function screenshotBoat(cfg: AppConfig, botId: string, knownBoatId?
   }
   const framePath = options?.nativeSize ? PANEL_PATH + ".model.jpg" : PANEL_PATH;
   const out = await runCommand(cfg, boxId, options?.nativeSize ? panelShotCommand({ framePath, nativeSize: true }) : SHOT_CMD,
-    { timeoutMs: 60_000, signal: options?.signal });
+    { timeoutMs: 25_000, signal: options?.signal });
   if (!/captured/.test(out.stdout)) {
     throw new Error(out.unanswered ? CLOUD_COMPUTER_NO_ANSWER : out.stderr.slice(0, 200) || "screen capture failed on the cloud computer");
   }

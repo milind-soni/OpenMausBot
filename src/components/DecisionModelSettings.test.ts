@@ -47,6 +47,7 @@ function render() {
     job: byTestId("decider-job-roomRouting")[0]!,
     provider: byTestId("decider-provider")[0],
     model: byTestId("decider-model")[0],
+    customApi: byTestId("decider-custom-api")[0],
     save: byTestId("decider-save")[0]!,
     test: byTestId("decider-test")[0]!,
     manage: byTestId("decider-manage-keys")[0],
@@ -130,6 +131,18 @@ describe("DecisionModelSettings", () => {
     expect(deciderFailureText({ reason: "http_error", status: 500 }, false, "custom")).toBe("Your endpoint sent back an error (500).");
   });
 
+  it("offers OpenAI-compatible chat as a custom endpoint protocol and saves it", async () => {
+    fixture.config = status({ provider: "custom", model: "gemini-2.5-flash", api: "chat", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", configured: true, enabled: true, jobs: { roomRouting: true } });
+    const view = render();
+    expect(optionsOf(view.customApi!)).toEqual(["systemone", "decisions", "chat"]);
+    expect(view.customApi!.props.value).toBe("chat");
+    expect(view.html).toContain("OpenAI-compatible chat");
+    fixture.api.mockResolvedValue(fixture.config);
+    change(view.customApi!, "chat");
+    await flush();
+    expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { customApi: "chat" } }) });
+  });
+
   it("lists only the jobs that work: no coming-soon rows", () => {
     const view = render();
     for (const label of ["Browser clicks", "Tool selection", "Where work runs", "Coming soon"]) expect(view.html).not.toContain(label);
@@ -197,6 +210,28 @@ describe("DecisionModelSettings", () => {
     expect(view.save.props.disabled).toBe(true);
     expect(view.input.props.placeholder).toBe("Paste your TypeSafe API key");
     expect(view.test.props.disabled).toBe(false);
+  });
+
+  it("a Gemini key saved for speech or images is switchable here, but has no key to clear", () => {
+    fixture.config = status({ provider: "gemini", configured: true, enabled: false, jobs: { roomRouting: true } });
+    const view = render();
+    expect(view.master.props.disabled).toBe(false);
+    expect(view.save.props.disabled).toBe(true);
+    expect(view.html).not.toContain("Clear");
+  });
+
+  it("Test names Gemini when the saved Gemini key answers, and keeps a picked OpenRouter selected", async () => {
+    fixture.config = status({ provider: "gemini", chosen: "openrouter", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(render().provider!.props.value).toBe("openrouter");
+    fixture.api.mockResolvedValueOnce({ ok: true, latencyMs: 410 });
+    click(render().test);
+    await flush();
+    expect(fixture.api).toHaveBeenCalledWith("/api/decider/test", { method: "POST", body: "{}" });
+    expect(render().html).toContain("Gemini answered in 410 ms with your saved Gemini key.");
+    fixture.api.mockResolvedValueOnce({ ok: false, reason: "rejected", status: 400 });
+    click(render().test);
+    await flush();
+    expect(render().html).toContain("Google rejected your saved Gemini key. Check it under API keys.");
   });
 
   it("with an own key saved as well, shows Connected and offers Clear, as without Cloud Pro", () => {
@@ -397,6 +432,24 @@ describe("DecisionModelSettings", () => {
         click(view.master);
         await flush();
         expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { enabled: true } }) });
+      });
+
+      it("keeps a chosen Jev selected with Jev's key field, and saves a pasted Jev key in Jev's slot", async () => {
+        fixture.config = openrouter({ ...SHARED, chosen: "jev", enabled: true });
+        const view = render();
+        expect(view.provider!.props.value).toBe("jev");
+        expect(view.model).toBeUndefined();
+        expect(view.input.props["aria-label"]).toBe("Jev API key");
+        expect(view.input.props.placeholder).toBe("Paste your TypeSafe API key");
+        expect(view.html).toContain("Using your OpenRouter API key");
+        expect(view.html).toContain("https://typesafe.ai");
+        expect(view.html).not.toContain("Clear");
+        fixture.api.mockResolvedValueOnce(status({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } }));
+        type(view.input, KEY);
+        click(render().save);
+        await flush();
+        expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PUT", body: JSON.stringify({ decider: { key: KEY } }) });
+        expect(render().provider!.props.value).toBe("jev");
       });
 
       it("links to where the key is managed", () => {

@@ -2,7 +2,7 @@ import { createElement, type ComponentProps, type MemoExoticComponent, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadRowActions, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 type ThreadRowProps = ComponentProps<typeof SidebarThreadRow>;
 
@@ -645,6 +645,13 @@ describe("Refresh permissions", () => {
 });
 
 describe("Regenerate title", () => {
+  it("is in every bot thread menu, with automatic titles on or off, and asks for that thread", () => {
+    const dispatch = vi.fn();
+    const settled = vi.fn();
+    threadRowActions("scout", dispatch).onRegenerateTitle({ threadId: "t1" }, settled);
+    expect(dispatch).toHaveBeenCalledWith({ type: "regenerateTaskTitle", botId: "scout", threadId: "t1", onSettled: settled });
+  });
+
   const openMenu = (tree: RowNode) => {
     (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
   };

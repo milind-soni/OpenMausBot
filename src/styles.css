@@ -3613,3 +3613,12 @@ button:disabled.bg-danger {
 .trace-step-box { background: color-mix(in srgb, #8b7cf6 14%, var(--color-card)); border-color: color-mix(in srgb, #8b7cf6 30%, var(--color-card)); }
 .trace-step-ink { color: color-mix(in srgb, #7c6cf0 85%, var(--color-ink)); }
 .trace-tool-ink { color: color-mix(in srgb, #1f9a8c 80%, var(--color-ink)); }
+
+.fade-end {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.fade-end:dir(rtl) {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}

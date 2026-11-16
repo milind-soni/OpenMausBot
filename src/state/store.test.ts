@@ -198,6 +198,28 @@ describe("independent bot threads", () => {
     expect(open.bots[0]?.onlyPeopleAdded).toBeUndefined();
   });
 
+  it("a frame without liveVoice clears the bot's own call voice", () => {
+    const voiced = reducer(start(), { type: "botPatched", bot: { ...bot, liveVoice: "marin" } });
+    expect(voiced.bots[0]?.liveVoice).toBe("marin");
+    const cleared = reducer(voiced, { type: "botPatched", bot: { ...bot } });
+    expect(cleared.bots[0]?.liveVoice).toBeUndefined();
+  });
+
+  it("a thread-switch snapshot without liveVoice clears the bot's own call voice", () => {
+    const voiced = reducer(start(), { type: "botPatched", bot: { ...bot, liveVoice: "marin" } });
+    const full = { ...bot, threadId: "second", activeLeafId: null, tasks: bot.tasks!.slice(1), messages: [] };
+    const switched = reducer(voiced, { type: "botPatched", bot: full });
+    expect(switched.bots[0]).toMatchObject({ threadId: "second" });
+    expect(switched.bots[0]?.liveVoice).toBeUndefined();
+  });
+
+  it("a direct thread snapshot without liveVoice clears the bot's own call voice", () => {
+    const voiced = reducer(start(), { type: "botPatched", bot: { ...bot, liveVoice: "marin" } });
+    const switched = reducer(voiced, { type: "taskSwitched", bot: { ...bot, threadId: "second", messages: [] } });
+    expect(switched.bots[0]).toMatchObject({ threadId: "second" });
+    expect(switched.bots[0]?.liveVoice).toBeUndefined();
+  });
+
   it("keeps background bot frames from switching the visible transcript or clearing unread", () => {
     const patched = reducer(start(), { type: "botPatched", bot: { ...bot, threadId: "second", messages: [], activeLeafId: "other" } });
     expect(patched.bots[0]?.threadId).toBe("first");
@@ -2971,13 +2993,14 @@ describe("restoring the open conversation", () => {
       expect(stored.get(LAST_CONVERSATION_KEY)).toBe("bot-2");
     });
 
-    it("a pressed Steer that stays queued for its pictures says why, and a plain queued answer stays quiet", async () => {
+    it("a pressed Steer that stays queued says why: pictures anywhere, any held room steer, and a plain 1:1 queued answer stays quiet", async () => {
       const { stream } = await boot();
       stream.send(hello());
       await settle();
       const answers: Record<string, unknown> = {
         "/api/bots/bot-1/queue/q-image/steer": { ok: true, queued: true, threadId: "bot-1-thread", blockedBy: "images" },
         "/api/groups/room-1/queue/q-room/steer": { ok: true, queued: true, threadId: "room-thread", blockedBy: "images" },
+        "/api/groups/room-1/queue/q-room-plain/steer": { ok: true, queued: true, threadId: "room-thread" },
         "/api/bots/bot-1/queue/q-plain/steer": { ok: true, queued: true, threadId: "bot-1-thread" },
       };
       vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}))));
@@ -2998,6 +3021,12 @@ describe("restoring the open conversation", () => {
       await settle();
       expect(settled).toHaveBeenCalledTimes(3);
       expect(seen.notice).toEqual({ kind: "steer-images", botName: null });
+
+      flushSync(() => dispatch({ type: "notice", notice: null }));
+      flushSync(() => dispatch({ type: "steerGroupQueued", groupId: "room-1", queueId: "q-room-plain", onSettled: settled }));
+      await settle();
+      expect(settled).toHaveBeenCalledTimes(4);
+      expect(seen.notice).toMatchObject({ kind: "note", text: expect.stringContaining("Nothing was stopped") });
     });
 
     it("the provider restores the conversation remembered on this device", async () => {

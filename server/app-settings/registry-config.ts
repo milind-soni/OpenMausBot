@@ -53,7 +53,7 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
       synonyms: ["decision", "extraction", "routing", "who answers", "jev", "openrouter", "workers ai", "cloudflare", "custom endpoint", "system one"],
       // Security: a custom endpoint's address is where its key goes, so only the person sets it.
       value: nonEmpty(withoutKeys(F.decider.unwrap().omit({ key: true, openrouterKey: true, workersAiToken: true, customKey: true, customBaseUrl: true }).strict())),
-      allowed: '{"enabled"?,"provider"?:"jev"|"openrouter"|"custom"|"off","openrouterModel"?,"openrouterApi"?:"chat"|"decisions","customModel"?,"customApi"?:"systemone"|"decisions","jobs"?:{"roomRouting"?,"inboxTriage"?},"workersAiAccountId"?, addresses?}',
+      allowed: '{"enabled"?,"provider"?:"jev"|"openrouter"|"custom"|"off","openrouterModel"?,"openrouterApi"?:"chat"|"decisions","customModel"?,"customApi"?:"systemone"|"decisions"|"chat","jobs"?:{"roomRouting"?,"inboxTriage"?},"workersAiAccountId"?, addresses?}',
       current: () => cfg().decider ?? {}, patch: (decider) => ({ decider }),
       says: (decider) => `Decision and extraction: ${fields(decider)}. Decisions send conversation text to the chosen provider, off this computer`,
     }),

@@ -235,6 +235,18 @@ describe("LimitResetClock", () => {
     await instance.refresh(true);
     expect(load).toHaveBeenCalledTimes(1);
   });
+
+  it("does not ask for the usage of an engine whose usage holds nothing here", async () => {
+    const load = vi.fn(async (_asked: Array<{ id: string }>) => report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR])));
+    const antigravity = { id: "antigravity", name: "Antigravity", driver: "antigravity" as const, environment: {} };
+    let current = [...accounts, antigravity];
+    const instance = new LimitResetClock({ accounts: () => current, now: () => NOW, loadUsage: load });
+    await instance.refresh(true);
+    expect(load.mock.calls.map(([asked]) => asked.map((account) => account.id))).toEqual([["claude"]]);
+    current = [antigravity];
+    await instance.refresh(true);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("codexLimitResetsAt", () => {
@@ -464,7 +476,7 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("claude")).toBeNull();
   });
 
-  it("re-reads usage every few minutes while an engine is held, with nothing else waiting, and so ends a hold that reset early", async () => {
+  it("re-reads usage every few minutes while an engine is held and turns run, with nothing else waiting, and so ends a hold that reset early", async () => {
     vi.useFakeTimers({ now: NOW });
     let usage = report(claude([100, NOW + 23 * HOUR], [8, NOW + 5 * 24 * HOUR]));
     const loadUsage = vi.fn(async () => ({ ...usage, fetchedAt: iso(Date.now()) }));
@@ -472,7 +484,9 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     instance.start();
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(loadUsage, "nothing held, nothing waiting: no reads").not.toHaveBeenCalled();
-    instance.noteRefusal("claude", Date.now() + 23 * HOUR);
+    // A turn on Claude meets its limit: the home is in use.
+    instance.noteRuntimeEvent("claude", { eventId: "e", provider: "claudeAgent", createdAt: iso(Date.now()), threadId: "t1", type: "runtime.error",
+      message: "limit", limitResetsAt: Date.now() + 23 * HOUR } as RuntimeEvent);
     await vi.advanceTimersByTimeAsync(6_000);
     expect(instance.blockedUntil("claude"), "the read soon after the refusal still shows the full window").not.toBeNull();
     usage = report(claude([2, NOW + 5 * HOUR], [8, NOW + 5 * 24 * HOUR]));
@@ -512,6 +526,29 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("opencodeGo"), "a full month keeps it held").not.toBeNull();
     instance.noteUsage(report(go(40)));
     expect(instance.blockedUntil("opencodeGo")).toBeNull();
+  });
+
+  it("holds only OpenCode Go's own models at a full Go meter, so Zen's free models on the same login keep working", () => {
+    const goAccounts = [{ id: "opencodeGo", name: "OpenCode", driver: "opencode" as const, environment: {} }];
+    const instance = new LimitResetClock({ accounts: () => goAccounts, now: () => NOW });
+    instance.noteUsage(report(row("opencodeGo", "opencode", parseOpenCodeUsage({ usage: {
+      rolling: { percent: 100, resetsAt: iso(NOW + 4 * HOUR) },
+      weekly: { percent: 60, resetsAt: iso(NOW + 5 * 24 * HOUR) },
+    } }))));
+    expect(instance.blockedUntil("opencodeGo", "opencode-go/kimi-k2")).toBe(NOW + 4 * HOUR);
+    expect(instance.blockedUntil("opencodeGo", "typed::opencode-go/new-model"), "a Go model typed by hand").toBe(NOW + 4 * HOUR);
+    expect(instance.blockedUntil("opencodeGo"), "no model named: the whole engine, as before").toBe(NOW + 4 * HOUR);
+    expect(instance.blockedUntil("opencodeGo", "opencode/big-pickle")).toBeNull();
+    instance.noteRefusal("opencodeGo", NOW + 2 * HOUR);
+    expect(instance.blockedUntil("opencodeGo", "opencode/big-pickle"), "a refusal of the whole account still holds every model").not.toBeNull();
+    expect(instance.resetAt("opencodeGo", "opencode/big-pickle"), "a free model resets with the refusal, not the Go meter").toBeLessThan(NOW + 4 * HOUR);
+    expect(instance.resetAt("opencodeGo", "opencode-go/kimi-k2")).toBe(NOW + 4 * HOUR);
+  });
+
+  it("still holds every model of an engine other than OpenCode at a full window", () => {
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
+    instance.noteUsage(report(claude([100, NOW + 2 * HOUR], [40, NOW + 3 * 24 * HOUR])));
+    expect(instance.blockedUntil("claude", "claude-sonnet-5")).toBe(NOW + 2 * HOUR);
   });
 
   it("ends a hold at once on Try again now, saved across a restart, and a new refusal holds it again", () => {

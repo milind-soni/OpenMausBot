@@ -144,6 +144,30 @@ describe("Command Code ACP driver", () => {
     expect(prompts().at(-1)).toMatchObject({ model: "claude-sonnet-5-5" });
   });
 
+  it("starts a fresh `command-code acp` when the app's MCP bearer changes, since a live session/load keeps the old one", async () => {
+    const launches = join(scratch, "launches");
+    const { instance, recorder } = await create({ FAKE_ACP_LAUNCH_COUNT_FILE: launches });
+    const launchCount = () => Number(readFileSync(launches, "utf8"));
+    const agents = (token: string) => ({
+      command: process.execPath,
+      args: ["/app/dist-server/agents-proxy.js"],
+      env: { OMB_HARNESS_URL: "http://127.0.0.1:8799", OMB_COMMS_TOKEN: token, OMB_BOT_ID: "sprout", OMB_THREAD_ID: "command-code-bearer" },
+    });
+    const turn = async (text: string, token: string, resume: boolean) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "command-code-bearer", text, model: "agent-default", approvalMode: "ask",
+        ...(resume ? { resumeCursor: "fake-acp-session" } : {}), integrations: { agents: agents(token) },
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    };
+    await turn("open the portal", "token-one", false);
+    const afterFirst = launchCount();
+    await turn("signed in, carry on", "token-two", true);
+    expect(launchCount()).toBe(afterFirst + 1);
+    await turn("same bearer", "token-two", true);
+    expect(launchCount()).toBe(afterFirst + 1);
+  });
+
   it("leaves Command Code on its own default model, and runs Bypass Permissions only under Full access", async () => {
     const { instance, recorder } = await create();
     const { turnId } = await instance.adapter.sendTurn({ threadId: "command-code-full", text: "hello", model: "agent-default", approvalMode: "full" });

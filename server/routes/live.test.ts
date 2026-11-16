@@ -139,7 +139,10 @@ describe("live routes", () => {
     expect((await request(d, "PATCH", "/api/live/settings", { idleMinutes: 0 })).status).toBe(400);
     expect((await request(d, "PATCH", "/api/live/settings", { idleMinutes: 61 })).status).toBe(400);
     expect((await request(d, "PATCH", "/api/live/settings", { voice: "Marin!" })).status).toBe(400);
-    expect(d.saved).toEqual([{ idleMinutes: 10, readTypedReplies: false }]);
+    expect((await request(d, "PATCH", "/api/live/settings", { geminiVoice: "marin" })).status).toBe(400);
+    expect((await request(d, "PATCH", "/api/live/settings", { geminiVoice: "Kore" })).status).toBe(200);
+    expect((await request(d, "PATCH", "/api/live/settings", { geminiVoice: "" })).status).toBe(200);
+    expect(d.saved).toEqual([{ idleMinutes: 10, readTypedReplies: false }, { geminiVoice: "Kore" }, { geminiVoice: "" }]);
   });
   it("saves an Azure provider, endpoint and deployment, refusing a host the key must not reach", async () => {
     const d = deps();
@@ -151,6 +154,17 @@ describe("live routes", () => {
     expect((await request(d, "PATCH", "/api/live/settings", { provider: "aws" })).status).toBe(400);
     expect((await request(d, "PATCH", "/api/live/settings", { azureEndpoint: "", azureDeployment: "" })).status).toBe(200);
     expect(d.saved).toEqual([azure, { azureEndpoint: "", azureDeployment: "" }]);
+  });
+  it("saves a custom endpoint and model, refusing an address the key must not reach", async () => {
+    const d = deps();
+    const custom = { provider: "custom", customEndpoint: "https://gateway.example.com/v1", customModel: "gpt-live-1" };
+    expect(await request(d, "PATCH", "/api/live/settings", custom)).toMatchObject({ status: 200, body: { live: custom } });
+    for (const customEndpoint of ["http://gateway.example.com/v1", "https://u:p@gateway.example.com", "gateway.example.com"]) {
+      expect(await request(d, "PATCH", "/api/live/settings", { customEndpoint }), customEndpoint).toMatchObject({ status: 400, body: { error: expect.stringContaining("https address") } });
+    }
+    expect(await request(d, "PATCH", "/api/live/settings", { customModel: "a b" })).toMatchObject({ status: 400, body: { error: expect.stringContaining("model") } });
+    expect((await request(d, "PATCH", "/api/live/settings", { customEndpoint: "http://127.0.0.1:4555/v1", customModel: "" })).status).toBe(200);
+    expect(d.saved).toEqual([custom, { customEndpoint: "http://127.0.0.1:4555/v1", customModel: "" }]);
   });
   it("saves Fish Audio as the provider, and takes no agent from a request", async () => {
     const d = deps();

@@ -11,7 +11,7 @@ function context(answers: { api?: unknown; response?: { ok: boolean; status: num
       return answers.response ?? { ok: true, status: 201, body: { resultId: "t-1", summary: "When an email arrives in Gmail from acme.com, Scout follows: Draft." } };
     },
   };
-  return { calls, context: { botId: "scout", threadId: "thread-1", depth: 0, externalRuntime: false, sharedComputers: false, client } as unknown as ToolCallContext };
+  return { calls, context: { botId: "scout", threadId: "thread-1", externalRuntime: false, sharedComputers: false, client } as unknown as ToolCallContext };
 }
 
 describe("app events in the trigger tools", () => {
@@ -92,13 +92,15 @@ describe("the trigger tool's actions", () => {
     expect(calls[0]!.body).toEqual({ fromBotId: "scout", fromThreadId: "thread-1", action: "update", triggerId: "t-1", changes: { name: "Inbox", filter: { text: "urgent" } } });
     const refused = context();
     const text = async (args: Record<string, unknown>) => (await callTool("trigger", args, refused.context)).text;
-    expect(await text({ action: "update", trigger_id: "t-1" })).toBe("The update action needs at least one supported field to change.");
+    expect(await text({ action: "update", trigger_id: "t-1" })).toMatch(/^The update action needs at least one supported field to change\. trigger takes action, trigger_id, when, name, instructions, schedule, .*, for_bot_id\.$/);
     expect(await text({ action: "update", trigger_id: "t-1", when: "schedule", name: "A" })).toBe("when applies only to action=create.");
     expect(await text({ action: "pause", trigger_id: "t-1", name: "A" })).toBe("The pause action changes no fields; send them with action=update.");
     expect(await text({ action: "delete", trigger_id: "t-1" })).toBe("trigger does not delete: call delete_trigger with the trigger_id.");
     expect(await text({ action: "pause" })).toBe("trigger action=pause needs the trigger_id from trigger_info.");
     expect(await text({ action: "create", trigger_id: "t-1", when: "webhook", name: "A", instructions: "B" })).toBe("trigger_id is for a trigger that exists; leave it out to create one.");
     expect(await text({ trigger_id: "t-1" })).toContain("trigger needs action: create, or update, pause, resume or run_now");
+    expect(await text({ action: "create", when: "schedule", instructions: "B" })).toContain("needs name and instructions. trigger takes action, trigger_id, when, name, instructions,");
+    expect(await text({ action: "create", when: "schedule", name: "A", instructions: "B", cron: "0 9 * * *" })).toMatch(/^A schedule trigger needs schedule\. Supported schedules: .*L for the last day/);
     const deletes = async (args: Record<string, unknown>) => (await callTool("delete_trigger", args, refused.context)).text;
     expect(await deletes({})).toBe("delete_trigger needs the trigger_id from trigger_info.");
     expect(await deletes({ trigger_id: "t-1", schedule: { type: "daily", time: "09:00" } })).toBe("delete_trigger takes only trigger_id and for_bot_id.");
@@ -126,16 +128,18 @@ describe("delete_trigger", () => {
 });
 
 describe("same_conversation in the trigger tool", () => {
-  it("sends it for an app event, webhook or update, and refuses it elsewhere before anything is sent", async () => {
+  it("sends it for an app event, webhook, schedule or update, and refuses it for a limit reset before anything is sent", async () => {
     const { calls, context: ctx } = context();
     await callTool("trigger", { action: "create", when: "app_event", name: "Acme", instructions: "Draft.", app: "gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", same_conversation: true }, ctx);
     expect(calls[0]!.body).toMatchObject({ action: "create", kind: "app", trigger: { sameConversation: true } });
     await callTool("trigger", { action: "update", trigger_id: "t-1", same_conversation: false }, ctx);
     expect(calls[1]!.body).toMatchObject({ action: "update", triggerId: "t-1", changes: { sameConversation: false } });
+    await callTool("trigger", { action: "create", when: "schedule", name: "A", instructions: "B", schedule: { type: "daily", time: "09:00" }, same_conversation: true }, ctx);
+    expect(calls[2]!.body).toMatchObject({ action: "create", kind: "schedule", routine: { sameConversation: true } });
     const refused = context();
     const text = async (args: Record<string, unknown>) => (await callTool("trigger", args, refused.context)).text;
-    expect(await text({ action: "create", when: "schedule", name: "A", instructions: "B", schedule: { type: "daily", time: "09:00" }, same_conversation: true }))
-      .toBe("same_conversation applies only to when=app_event or when=webhook.");
+    expect(await text({ action: "create", when: "limit_reset", name: "A", instructions: "B", same_conversation: true }))
+      .toBe("same_conversation applies only to when=app_event, when=webhook or when=schedule.");
     expect(await text({ action: "create", when: "app_event", name: "A", instructions: "B", app: "gmail", event: "X", same_conversation: "yes" }))
       .toBe("same_conversation must be true or false.");
     expect(refused.calls).toEqual([]);

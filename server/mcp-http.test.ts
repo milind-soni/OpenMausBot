@@ -11,6 +11,16 @@ afterEach(async () => {
 });
 
 describe("a server's own requests to the client", () => {
+  it("does not charge earlier SSE replies against a later request's byte limit", async () => {
+    fake = await startFakeHttpMcp({ transport: "sse", tools: [{ name: "still_available" }] });
+    client = new RemoteMcpClient({ type: "sse", url: fake.url, headers: {} }, { maxBytes: 512 });
+    await client.initialize("fixture", AbortSignal.timeout(5_000));
+    for (let i = 0; i < 20; i++) {
+      await expect(client.request("tools/list", {}, AbortSignal.timeout(1_000))).resolves.toEqual({ tools: [{ name: "still_available" }] });
+    }
+    expect(fake.toolsLists).toBe(20);
+  });
+
   it("keeps the shared SSE stream alive after the opening request's signal expires", async () => {
     fake = await startFakeHttpMcp({ transport: "sse", tools: [{ name: "still_available" }] });
     let streamSignal: AbortSignal | null | undefined;

@@ -55,10 +55,10 @@ const stopping = new WeakMap<ChildProcess, Promise<boolean>>();
 type LinuxProcess = { pid: number; parent: number; start: string; state: string };
 const linuxTrees = new WeakMap<ChildProcess, Map<number, string>>();
 
-function linuxProcess(pid: number): LinuxProcess | null {
+function linuxProcess(pid: number, file = `/proc/${pid}/stat`): LinuxProcess | null {
   let stat: string;
   try {
-    stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    stat = readFileSync(file, "utf8");
   } catch (error) {
     if (["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "")) return null;
     throw error;
@@ -71,6 +71,34 @@ function linuxProcess(pid: number): LinuxProcess | null {
   return { pid, parent, start, state };
 }
 
+/** /proc/<pid>/task/<tid>/children needs CONFIG_PROC_CHILDREN (CONFIG_CHECKPOINT_RESTORE before Linux 4.2); a kernel built without it, or gVisor, has no such file. */
+function linuxChildrenFiles(): boolean {
+  return existsSync(`/proc/self/task/${process.pid}/children`);
+}
+
+/** Every thread's children, or null when the list may miss one: Linux hides /proc/<pid>/task once the main thread has
+ * exited while others run, and a thread that exits hands its children to a sibling thread, after which its own
+ * children file reads empty. */
+function linuxChildren(pid: number): number[] | null {
+  let tasks: string[];
+  try { tasks = readdirSync(`/proc/${pid}/task`); } catch { return null; }
+  if (tasks.length === 0) return null;
+  const children: number[] = [];
+  for (const task of tasks) {
+    let listed: string;
+    try { listed = readFileSync(`/proc/${pid}/task/${task}/children`, "utf8"); } catch { return null; }
+    let thread: LinuxProcess | null;
+    try { thread = linuxProcess(pid, `/proc/${pid}/task/${task}/stat`); } catch { return null; }
+    if (!thread || thread.state === "Z" || thread.state === "X") return null;
+    for (const entry of listed.split(" ")) if (/^\d+$/.test(entry)) children.push(Number(entry));
+  }
+  return children;
+}
+
+function isLinuxProcess(pid: number, start: string): boolean {
+  try { return linuxProcess(pid)?.start === start; } catch { return false; }
+}
+
 /** Linux sandbox helpers can leave the CLI's process group and reparent during a protocol interrupt. */
 export function captureCliTree(child: ChildProcess): void {
   if (process.platform !== "linux" || !cliGroups.has(child) || !child.pid) return;
@@ -79,6 +107,32 @@ export function captureCliTree(child: ChildProcess): void {
     tree = new Map();
     linuxTrees.set(child, tree);
   }
+  if (!linuxChildrenFiles() || !addLinuxDescendants(tree)) addLinuxDescendantsFromEveryProcess(tree);
+}
+
+/** False when the walk may have missed a descendant; those it confirmed stay in the tree. A children file can skip a
+ * live child while a sibling listed before it is reaped (docs.kernel.org/filesystems/proc.html,
+ * "/proc/<pid>/task/<tid>/children"), and that sibling is then gone or reparented when its stat is read. */
+function addLinuxDescendants(tree: Map<number, string>): boolean {
+  const queue = [...tree].filter(([pid, start]) => isLinuxProcess(pid, start));
+  for (let next = 0; next < queue.length; next += 1) {
+    const [parent, parentStart] = queue[next];
+    const children = linuxChildren(parent);
+    if (!children || !isLinuxProcess(parent, parentStart)) return false;
+    for (const pid of children) {
+      if (pid === process.pid) continue;
+      let current: LinuxProcess | null;
+      try { current = linuxProcess(pid); } catch { return false; }
+      if (!current || current.parent !== parent) return false;
+      if (tree.get(pid) === current.start) continue;
+      tree.set(pid, current.start);
+      queue.push([pid, current.start]);
+    }
+  }
+  return true;
+}
+
+function addLinuxDescendantsFromEveryProcess(tree: Map<number, string>): void {
   const snapshot = new Map<number, LinuxProcess>();
   let entries: string[];
   try { entries = readdirSync("/proc"); } catch { return; }

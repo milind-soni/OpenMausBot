@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Message } from "./store.ts";
-import { callTitleExcerpt, threadTitlePrompt, titleConversationExcerpt, TITLE_INPUT_MAX_CHARS } from "./thread-title.ts";
+import { callTitleExcerpt, threadTitlePrompt, titleConversationExcerpt, titleFromMessage, TITLE_INPUT_MAX_CHARS, UNTITLED_TASK } from "./thread-title.ts";
 
 let next = 0;
 const message = (role: Message["role"], text: string, extra: Partial<Message> = {}): Message => ({
@@ -108,5 +108,20 @@ describe("a Live call's title", () => {
 
   it("is empty when nothing was asked on the call", () => {
     expect(callTitleExcerpt([message("user", "typed")], "c")).toBe("");
+  });
+});
+
+describe("titleFromMessage", () => {
+  it("names a message that starts with pasted text by the pasted text, not its wrapper", () => {
+    expect(titleFromMessage('<pasted-text index="1">\n\n  Stack trace from the build\nline two\n</pasted-text>')).toBe("Stack trace from the build");
+    expect(titleFromMessage('<pasted-text index="1">\n</pasted-text>\n\n<pasted-text index="2">\nSecond paste\n</pasted-text>')).toBe("Second paste");
+    expect(titleFromMessage('<pasted-text index="1">\n\n</pasted-text>')).toBe(UNTITLED_TASK);
+    expect(titleFromMessage('<pasted-text index="1">\n\n</pasted-text>\n\n<attached-file path="/tmp/a.txt" name="a.txt" />')).toBe(UNTITLED_TASK);
+    expect(titleFromMessage('<pasted-text index="1">\n</pasted-text>\n\n<attached-image path="/tmp/b.png" name="b.png" />\n\n<pasted-text index="3">\nThird\n</pasted-text>')).toBe("Third");
+  });
+
+  it("keeps typed text first, and a typed wrapper with no pasted block stays as typed", () => {
+    expect(titleFromMessage('Fix this\n\n<pasted-text index="1">\nerror\n</pasted-text>')).toBe("Fix this");
+    expect(titleFromMessage('<pasted-text index="1">\nnot closed')).toBe('<pasted-text index="1">');
   });
 });

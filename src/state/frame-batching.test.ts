@@ -46,10 +46,13 @@ function Probe() {
 let root: Root;
 const task = () => new Promise((resolve) => setTimeout(resolve, 0));
 const settle = async () => { for (let i = 0; i < 5; i++) await task(); };
-const paint = async () => {
+const drawFrames = () => {
   painting = true;
   for (const callback of paints.splice(0)) callback(performance.now());
   painting = false;
+};
+const paint = async () => {
+  drawFrames();
   await settle();
 };
 const stream = () => FixtureEventSource.opened[0]!;
@@ -82,16 +85,28 @@ beforeEach(async () => {
 
 describe("live frames reach the screen once per paint", () => {
   it("draws a burst of frames that arrived in separate tasks in one render, in arrival order", async () => {
-    const before = renders;
-    const start = ids().length;
-    for (let i = 0; i < 10; i++) {
-      stream().send(frame(`burst-${i}`), `run:${++cursor}`);
-      await task();
+    // The batch also flushes after a 100 ms timer, for a hidden window without frames. Ten real timer tasks can take that
+    // long (Windows' clock ticks every 15.6 ms), so the timers' clock moves only here: the frames come 1 ms apart, each in
+    // its own task (setImmediate stays real).
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const nextTask = () => new Promise((resolve) => setImmediate(resolve));
+      const before = renders;
+      const start = ids().length;
+      for (let i = 0; i < 10; i++) {
+        stream().send(frame(`burst-${i}`), `run:${++cursor}`);
+        await nextTask();
+        vi.advanceTimersByTime(1);
+      }
+      expect(renders, "nothing renders before the paint").toBe(before);
+      drawFrames();
+      for (let i = 0; i < 5; i++) await nextTask();
+      expect(renders).toBe(before + 1);
+      expect(ids().slice(start)).toEqual(Array.from({ length: 10 }, (_, i) => `burst-${i}`));
+      expect(vi.getTimerCount(), "the paint cancels the fallback timer").toBe(0);
+    } finally {
+      vi.useRealTimers();
     }
-    expect(renders, "nothing renders before the paint").toBe(before);
-    await paint();
-    expect(renders).toBe(before + 1);
-    expect(ids().slice(start)).toEqual(Array.from({ length: 10 }, (_, i) => `burst-${i}`));
   });
 
   it("applies frames that arrived before an action ahead of it", async () => {

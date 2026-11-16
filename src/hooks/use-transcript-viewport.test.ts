@@ -268,6 +268,18 @@ describe("transcript viewport", () => {
     expect(view.current.windowedMessages[0]?.id).toBe("m1180");
   });
 
+  it("keeps the open card work rests on drawn however many rows follow it", () => {
+    const rests = (row: Row) => row.id === "card";
+    const thread = [...rows(5), { id: "card" }, ...rows(200, 5)];
+    const view = mount({ messages: thread, rests });
+    expect(view.current.hiddenCount).toBe(thread.length - 120);
+    expect(view.current.windowedMessages[0]?.id).toBe("card");
+    expect(view.current.windowedMessages.slice(1)).toEqual(thread.slice(-120));
+
+    view.rerender({ messages: thread, rests: () => false });
+    expect(view.current.windowedMessages).toEqual(thread.slice(-120));
+  });
+
   it("keeps the window bounded while the reader follows new rows", () => {
     const view = mount({ messages: rows(300) });
     for (let total = 301; total <= 900; total++) {
