@@ -33,7 +33,8 @@ describe("file tools on disk", () => {
     for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
   const fixture = () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "omb-host-files-")));
+    // The native call, as the tools use: on Windows it also expands an 8.3 short name such as RUNNER~1.
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "omb-host-files-")));
     made.push(root);
     const home = join(root, "home");
     mkdirSync(join(home, "Documents"), { recursive: true });
