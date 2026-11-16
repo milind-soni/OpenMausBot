@@ -365,7 +365,9 @@ describe("BotListItem", () => {
     expect(dot).toContain("size-2.5");
     expect(failed).not.toContain('data-testid="waiting-dot"');
     expect(failed).not.toContain("bg-warning");
-    expect(opening(renderRow(bot({ messages: failedTurn }), "icons"), "failed-dot")).toContain("size-3");
+    const icons = renderRow(bot({ messages: failedTurn }), "icons");
+    expect(opening(icons, "failed-dot")).toContain("size-3");
+    expect(icons).toContain('aria-label="Atlas · Ran into a problem"');
     // An engine that could not start writes the same row in its own thread; another thread's state alone paints nothing.
     expect(renderRow(bot({ activity: "dead" }))).not.toContain('data-testid="failed-dot"');
     // A failure outranks a teammate wait, but a question for you or a new turn already running wins.
