@@ -14,7 +14,7 @@ import {
 import { procHidepid } from "./bot-box/hidepid.ts";
 import { boxMemory, heapSizeArgs } from "./box-memory.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
-import { OOM_SCORE, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
+import { OOM_SCORE, protectInit, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
 import { restartPolicy } from "./restart.ts";
 
 const SERVICE_USER = "maus";
@@ -395,6 +395,8 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   const env = root ? { ...processEnv, ...readCloudSecretsFile(home) } : processEnv;
   const config = cloudHomeConfiguration(env);
   if (!config) throw new Error("This image runs a My Cloud machine for MausBot Cloud; set its boot contract (docs/cloud-pro.md).");
+  // Linux hands orphans to process 1, and Node waits only for the children it started.
+  if (process.pid === 1) console.warn("cloud home: this supervisor is process 1, so nothing collects the processes bots leave behind and they pile up as zombies. Keep the image's entrypoint (tini), or start the container with --init.");
   // Logged here once: the server child never sees what they are about.
   for (const warning of config.warnings) console.warn(`cloud home: ${warning}`);
   const { server, edge, edgeFiles, tunnelToken, secrets, dropped } = cloudHomeChildEnvironments(config, env, home);
@@ -405,6 +407,7 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
     ids = passwdIds(readFileSync("/etc/passwd", "utf8"), SERVICE_USER);
     if (!ids) throw new Error(`The ${SERVICE_USER} user is missing from this image.`);
     if (protectSupervisor()) console.log("cloud home: the supervisor is never stopped for memory");
+    protectInit();
     // Only the mount point changes owner; anything inside keeps its owner.
     const stat = statSync(home);
     if (stat.uid !== ids.uid || stat.gid !== ids.gid) chownSync(home, ids.uid, ids.gid);

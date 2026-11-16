@@ -333,7 +333,6 @@ describe("Chat MCP session", () => {
   describe("a built-in the turn can go on without", () => {
     const broken = `if (message.method === "tools/list") { process.stdout.write('{"result":1}\\n'); continue; }`;
     it.each([
-      ["computer", "hostComputer"],
       ["browser", "browser"],
       ["email", "email"],
       ["device", "device"],
@@ -342,9 +341,7 @@ describe("Chat MCP session", () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       try {
         const dead = fixture(broken), agents = fixture();
-        // This desktop's own computer is the optional one; a Local VM is not (below).
-        const integrations = key === "hostComputer" ? { localComputer: { ...dead.server, scope: "local-computer" as const } } : { [key]: dead.server };
-        const session = await mountChatTools({ ...integrations, agents: agents.server } as SendTurnInput["integrations"], dead.controller.signal, true);
+        const session = await mountChatTools({ [key]: dead.server, agents: agents.server } as SendTurnInput["integrations"], dead.controller.signal, true);
         sessions.push(session);
         expect(session.skipped).toEqual([{ server, reason: expect.stringMatching(/MCP/) }]);
         expect(chatToolNotices(session).join(" ")).toContain(`MCP server "${server}" was skipped for this turn`);
@@ -451,10 +448,13 @@ describe("Chat MCP session", () => {
   });
 
   describe("how long a server gets to start", () => {
-    it("is about half a minute on a Cloud home and eight seconds elsewhere", () => {
-      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "home" })).toBe(30_000);
-      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "team" })).toBe(30_000);
-      expect(mcpStartupMs({})).toBe(8_000);
+    it("is about half a minute on a Cloud home, twenty seconds for the app's own servers on Windows and eight seconds elsewhere", () => {
+      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "home" }, "win32")).toBe(30_000);
+      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "team" }, "linux", false)).toBe(30_000);
+      expect(mcpStartupMs({}, "win32")).toBe(20_000);
+      expect(mcpStartupMs({}, "win32", false)).toBe(8_000);
+      expect(mcpStartupMs({}, "darwin")).toBe(8_000);
+      expect(mcpStartupMs({}, "linux")).toBe(8_000);
     });
 
     // tools/list needs a budget that outlasts the child's own start, or the overrun would land in initialize.
@@ -1142,16 +1142,17 @@ describe("Chat MCP startup budgets", () => {
     }
   });
 
-  it("still gives a command server 8 seconds", async () => {
+  it("still gives a configured command server 8 seconds, on Windows too", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const f = fixture(`if (message.method === "tools/list") return;`);
       const mounting = watch(f.mount());
       const listed = () => { try { return f.read().calls.some((call) => call.method === "tools/list"); } catch { return false; } };
       await untilReal(listed);
-      await vi.advanceTimersByTimeAsync(7_900);
+      // The deadline runs on the real clock from the spawn, so a loaded runner has already spent some of it.
+      await vi.advanceTimersByTimeAsync(mcpStartupMs(process.env, process.platform, false) - 3_000);
       expect(mounting.done).toBe(false);
-      await vi.advanceTimersByTimeAsync(200);
+      await vi.advanceTimersByTimeAsync(3_100);
       // stopped at 8 seconds: well short of the 30 a URL server gets
       await settleWithin(1_000, () => mounting.done);
       expect(mounting.error).toBeUndefined();

@@ -46,12 +46,14 @@ export const personWho = (name: string, role?: string): string => {
 export const relayedWho = (name: string | undefined): string => `${name?.trim() || "someone"} (person, relayed by another app)`;
 export const botWho = (name: string): string => `@${name} (bot)`;
 export const API_WHO = "an app, through the API";
+/** A Bot API key its owner marked as acting for them (bot-api.ts). */
+export const API_OWNER_WHO = "the owner, through the API with a key they marked as acting for them";
 export const HARNESS_WHO = "OpenMausBot";
 export const routineWho = (name: string | undefined): string => name?.trim() ? `routine ${JSON.stringify(name.trim())}` : "a routine";
 export const webhookWho = (name: string | undefined): string => name?.trim() ? `webhook ${JSON.stringify(name.trim())}` : "a webhook";
 export const appEventWho = (app: string, event?: string): string => `${app}${event ? ` (${event})` : ""}, a connected app's event`;
 
-export type ProvenanceLine = Partial<Pick<Message, "role" | "kind" | "relayed" | "via" | "sender" | "peerAsk" | "aside" | "reaction">>;
+export type ProvenanceLine = Partial<Pick<Message, "role" | "kind" | "relayed" | "via" | "apiAsOwner" | "sender" | "peerAsk" | "aside" | "reaction">>;
 
 /** What a chat's person lines need: `shared` when more than one person can write in the chat, so each person's line is
  * named; `role` the team role of a line's sender, if any. */
@@ -69,7 +71,7 @@ export function lineNote(line: ProvenanceLine, labels: LineLabels): string | und
   if (line.role !== "user" || line.peerAsk || line.aside) return undefined;
   const what = line.reaction ? "reaction" : "message";
   if (line.relayed) return fromNote(relayedWho(labels.name(line)), what, AUTHORITY.info);
-  if (line.via === "api") return fromNote(API_WHO, what, AUTHORITY.info);
+  if (line.via === "api") return line.apiAsOwner ? fromNote(API_OWNER_WHO, what, AUTHORITY.behalf) : fromNote(API_WHO, what, AUTHORITY.info);
   if (labels.shared) return fromNote(personWho(labels.name(line) || "someone", labels.role?.(line)), what, AUTHORITY.own);
   return undefined;
 }

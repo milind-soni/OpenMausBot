@@ -738,8 +738,9 @@ export function createBotLink(deps: BotLinkDeps) {
       peers: Object.entries(state.peers).map(([peer, known]) => ({ ...known.place, online: isOnline(peer), bots: known.bots.length })),
       bots: Object.values(state.peers).reduce((sum, known) => sum + known.bots.length, 0), waiting: pending.size }
       : (() => { const ended = [...new Set(readEnded().map((one) => one.origin))]; return { on: false as const, ...(ended.length ? { ended } : {}) }; })()),
-    /** Every bot of every linked place, with its address here. */
-    linked: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), peer, place: known.place, online: isOnline(peer), bot }))),
+    /** Every bot of every linked place, with its address here. `kind`: what that place is, in the words the sidebar's
+     * own rows use for where a bot lives: a computer links to its Cloud, a Cloud to computers. */
+    linked: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), peer, place: known.place, kind: state!.role === "dialer" ? "cloud" as const : "computer" as const, online: isOnline(peer), bot }))),
     /** Other places' bots as list_bots names them. */
     agents: () => Object.entries(state?.peers ?? {}).flatMap(([peer, known]) => known.bots.map((bot) => ({ id: linkedId(peer, bot.id), name: bot.name, section: "", model: bot.model ?? "", busy: false,
       status: isOnline(peer) ? "linked" : "offline", statusText: isOnline(peer) ? `on ${known.place.name}` : `on ${known.place.name}, offline now: work for it waits until it is back`,

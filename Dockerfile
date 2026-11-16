@@ -26,9 +26,10 @@
 # with no `--init`, and Node as PID 1 waits only for its own children, so the
 # rest stay as zombies until the container's pids limit refuses every spawn.
 # The compose files' `init: true` on top of it is harmless. The Cloud home
-# has no entrypoint: Fly's own init is PID 1 there, and a plain `docker run`
-# of that image wants `--init`. Chrome keeps its shared memory out of a small
-# /dev/shm by itself (server/browser/chrome/shm.ts).
+# image has the same entrypoint: a host that starts it with a plain
+# `docker run` gives it no init, and under Fly's own init tini collects as a
+# subreaper. Chrome keeps its shared memory out of a small /dev/shm by itself
+# (server/browser/chrome/shm.ts).
 
 FROM caddy:2.10.2 AS edge
 # Official Caddy carries a privileged-port file capability. The Cloud home's
@@ -238,6 +239,12 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
 # environment `maus` could read (server/cloud-home-start.ts). It runs only
 # root's code from the image, never anything on the volume.
 USER root
+# tini is PID 1 where the host gives the container no init, and collects the
+# orphans of everything beneath it: the server's, the edge's and the bots'.
+# It passes signals on to the supervisor and exits with its code. -s: under
+# Fly's init, or `docker run --init`, it is not PID 1 and collects as a
+# subreaper instead of warning.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "/app/dist-server/cloud-home-start.js"]
 
 # The self-hosted server, last so a plain `docker build .` builds it.

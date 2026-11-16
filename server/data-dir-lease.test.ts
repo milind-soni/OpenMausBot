@@ -63,7 +63,7 @@ describe("OpenMausBot data-directory lease", () => {
     // across a restart cannot be mistaken for a live owner, and ns/start which
     // pid namespace and process, so a container's reused pid cannot either.
     // Each is null where the platform does not expose it.
-    const { boot, ns, start, ...rest } = stored;
+    const { boot, ns, start, machine, ...rest } = stored;
     expect(rest).toEqual({
       version: 1,
       pid: process.pid,
@@ -74,8 +74,10 @@ describe("OpenMausBot data-directory lease", () => {
     });
     expect(boot === null || (typeof boot === "string" && boot.length > 0)).toBe(true);
     expect(process.platform === "linux" ? /^[1-9]\d*$/.test(ns) && Number.isSafeInteger(start) : ns === null && start === null).toBe(true);
+    // machine: a hashed id that survives a restart and a hostname change, null where unreadable.
+    expect(machine === null || /^[0-9a-f]{32}$/.test(machine)).toBe(true);
     expect(Object.keys(stored).sort()).toEqual(
-      ["boot", "createdAt", "host", "ns", "pid", "start", "token", "uptime", "version"],
+      ["boot", "createdAt", "host", "machine", "ns", "pid", "start", "token", "uptime", "version"],
     );
     expect(() => acquireDataDirLease(dir)).toThrow(/already using this data directory/i);
 

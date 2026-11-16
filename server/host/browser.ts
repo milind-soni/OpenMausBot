@@ -28,6 +28,7 @@ import {
   noteBrowserEngineUnavailable,
   setBrowserViewport,
 } from "../browser-engine.ts";
+import { BrowserRoom, defaultBrowserRoomSize, spareForRoom } from "../browser-room.ts";
 import { BrowserSweep, browserIdleMs, type BrowserCleanupWireRequest } from "../browser-lifecycle-cleanup.ts";
 import { AudienceBrowsers, audienceBrowserSuffix } from "../browser/audience.ts";
 import type { BrowserSitesTarget } from "../browser-sites.ts";
@@ -82,6 +83,8 @@ export interface BrowserHostDeps {
   audienceOf?(threadId: string): Audience;
   /** The box every Chrome of the bots' browsers runs in (a Team Cloud's), or none. */
   browserBox?(seccompFd: number, ro: readonly string[]): LauncherBox | null;
+  /** How many agent-browser browsers run at once; sized by this server's limits without it. */
+  browsersAtOnce?(): number;
 }
 
 /** The lent computer's connection for a browser's pages, under the rule for everything it lends: only while the last
@@ -105,10 +108,25 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const store: Pick<Store, "bots" | "bot" | "botByThread"> = { get bots() { return deps.store().bots; }, bot: (id: string) => deps.store().bot(id),
     botByThread: (threadId: string) => deps.store().botByThread(threadId) };
 
+  // Only a bot waiting for a slot closes a browser a running turn holds; the idle sweep below never does.
+  const browserRoom = new BrowserRoom({
+    max: deps.browsersAtOnce ?? (() => defaultBrowserRoomSize()),
+    spare: (session) => spareForRoom(agentBrowserRuntime.spare(session), { holds: !turnResources.free(`browser:${session}`), idleMs: idleMs() }),
+    close: (session) => agentBrowserRuntime.closeIfIdle(session, 1),
+  });
   const agentBrowserRuntime = new BrowserRuntime({
     closeBrowser: (session, spec) => closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })),
     applyViewport: (spec, size) => setBrowserViewport(spec.command, spec.env, size),
-    launch: chromeLauncher,
+    // A browser a person's view started counts toward the limit too. It is not refused, so a bot's next new one waits.
+    launch: {
+      ready: (spec) => chromeLauncher.ready(spec),
+      started: (session, spec) => {
+        if (!attachesToChrome(spec.env ?? {})) browserRoom.entered(session);
+        return chromeLauncher.started(session, spec);
+      },
+      stopped: (session) => chromeLauncher.stopped(session),
+    },
+    room: browserRoom,
     relayCommand: (spec, session, command, timeoutMs) => relayCommand(spec, session, command, timeoutMs).catch((error: unknown) => {
       throw error instanceof RelayTimeout ? new TransportError(error.message) : error;
     }),
@@ -561,7 +579,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
 
   return {
-    browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions, browserIdleMs: idleMs,
+    browserRuntime, browserLive, browserRoom, usedBrowserSessions, browserSweep, temporaryBrowserSessions, browserIdleMs: idleMs,
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, lentChromeSummary, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,

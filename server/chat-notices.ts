@@ -25,6 +25,9 @@ export const CHAT_NOTICE = {
   "chat.notice.part.weeklyOpusLimit": "weekly Opus limit",
   "chat.notice.part.weeklySonnetLimit": "weekly Sonnet limit",
   "chat.notice.part.usageLimit": "usage limit",
+  "chat.notice.part.computerToolsTookTooLong": "they took too long to start",
+  "chat.notice.part.computerToolsHelperStopped": "their helper stopped",
+  "chat.notice.part.computerToolsHelperFailed": "their helper did not answer properly",
   "chat.notice.part.chooseModel": "choose another model for this bot",
   "chat.notice.part.switchAccount": "switch this bot to another AI or Claude account",
   "chat.notice.webhookHome":
@@ -137,6 +140,8 @@ export const CHAT_NOTICE = {
   "chat.notice.computerDesktopOnly": "Only the OpenMausBot app on this computer can let a bot use it. Open the app here, or let the bot work in its own browser or on a cloud desktop instead.",
   "chat.notice.computerPermissionsThenRestart": "OpenMausBot can't use this computer yet — make sure OpenMausBot has the permissions it asks for, then restart it",
   "chat.notice.computerNotReadyDetail": "OpenMausBot can't use this computer yet — {reason}",
+  "chat.notice.computerToolsDidNotStart": "The tools for this computer did not start this time ({why}). Send your message again in a moment.",
+  "chat.notice.computerToolsStillNotStarting": "The tools for this computer are still not starting.",
   "chat.notice.computerNotReadyMacPermission": "OpenMausBot can't use this computer yet — {reason}. Relaunch OpenMausBot after granting the missing macOS permission.",
   "chat.notice.computerSystemUnsupported": "bots can't use this computer on this system — choose another place for this bot to work",
   "chat.notice.computerAiUnsupported": "this bot's AI can't use this computer — pick another AI for this bot, or choose another place for it to work",
