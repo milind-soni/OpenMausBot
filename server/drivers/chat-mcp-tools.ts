@@ -587,6 +587,10 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   // A tool keeps the name it was first listed under, so a server that joins later can't take it over.
   const assigned = new Map<ChatMcpClient, Map<string, string>>();
   const reserved = new Set<string>();
+  // The same for the tool search: a searched tool and a directory tool keep their names whichever servers are listed.
+  const searchedAs = new Map<ChatMcpClient, Map<string, string>>();
+  const catalogReserved = new Set<string>();
+  const directoryAs = new Map<string, string>();
   const register = (origin: ToolOrigin, tools: readonly CheckedTool[]) => {
     const staged: Array<{ tool: RegisteredTool; definition: ChatToolDefinition }> = [];
     for (const { tool, schema, check } of tools) {
@@ -670,7 +674,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       const entries: CatalogTool[] = [];
       for (const { origin, tools } of searched) {
         for (const { tool, schema } of tools) {
-          const name = uniqueName(chatToolName(origin.server, tool.name), (candidate) => catalog.has(candidate));
+          const name = searchedAs.get(origin.client)?.get(tool.name) ?? uniqueName(chatToolName(origin.server, tool.name), (candidate) => catalogReserved.has(candidate) || catalog.has(candidate));
+          searchedAs.set(origin.client, (searchedAs.get(origin.client) ?? new Map<string, string>()).set(tool.name, name));
+          catalogReserved.add(name);
           catalog.set(name, { ...origin, name: tool.name, schema });
           entries.push({ ...tool, name });
         }
@@ -680,7 +686,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         return validate(args) ? undefined : schemaProblems(validate.errors);
       } });
       for (const tool of directory.listed({ server: DIRECTORY_SERVER, servers: searched.map(({ origin }) => origin.server) })) {
-        const name = uniqueName(chatToolName(DIRECTORY_SERVER, tool.name as string), (candidate) => registered.has(candidate) || directoryNames.has(candidate));
+        const name = directoryAs.get(tool.name as string) ?? uniqueName(chatToolName(DIRECTORY_SERVER, tool.name as string), (candidate) => reserved.has(candidate) || registered.has(candidate) || directoryNames.has(candidate));
+        directoryAs.set(tool.name as string, name);
+        reserved.add(name);
         directoryNames.set(name, tool.name as string);
         definitions.push({ type: "function", function: { name, description: tool.description as string, parameters: tool.inputSchema as Record<string, unknown> } });
       }

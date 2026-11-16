@@ -1505,35 +1505,68 @@ describe("a configured MCP server that cannot mount", () => {
 });
 
 describe("a turn with the person's Windows computer, the built-in browser and the agents server", () => {
-  function catalog(names: readonly string[], startMs = 0) {
-    const { dir, server } = catalogServer(names, startMs);
+  const readyOf = new WeakMap<object, string>();
+  function catalog(names: readonly string[], options: Parameters<typeof catalogServer>[1] = {}) {
+    const { dir, ready, server } = catalogServer(names, options);
     cleanups.push(() => removeTempDir(dir));
+    readyOf.set(server, ready);
     return server;
   }
-  const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => ({
-    localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" },
-    browser: catalog(syntheticToolNames("agent_browser", 32)),
-    // Started last, so the servers that start in the background are listed from the first request.
-    agents: catalog(syntheticToolNames("agent", agents), 1_500),
-    composio: catalog(syntheticToolNames("router", 7)),
-    data: catalog(syntheticToolNames("table", 5)),
-    ...more,
-  });
+  const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => {
+    const computer = catalog(CUA_DRIVER_WINDOWS_TOOLS);
+    const others = { localComputer: { ...computer, scope: "local-computer" as const }, browser: catalog(syntheticToolNames("agent_browser", 32)),
+      composio: catalog(syntheticToolNames("router", 7)), data: catalog(syntheticToolNames("table", 5)), ...more };
+    const servers = [computer, ...Object.entries(others).flatMap(([key, server]) => key === "custom" ? Object.values(server as object) : [server])];
+    // Started once every other server has listed its tools, so the ones that start in the background are listed from the first request.
+    const after = servers.flatMap((server) => readyOf.get(server) ?? []);
+    return { ...others, agents: catalog(syntheticToolNames("agent", agents), { after }) };
+  };
 
   it("sends the first request without waiting for a slow server, and lists its tools from the next round", async () => {
     let firstAt = 0;
+    const notes = catalog(["note"], { startMs: 1_500 });
     const f = await fixture(async (_body, response, round) => {
       if (round > 1) return answer(response);
       firstAt = Date.now();
-      // Long enough for the slow server to have started before the next round.
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      // The slow server has started (and listed its tools) before the next round.
+      for (const since = Date.now(); !existsSync(readyOf.get(notes)!) && Date.now() - since < 10_000;) await new Promise((resolve) => setTimeout(resolve, 10));
       sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
     });
     const startedAt = Date.now();
-    await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes: catalog(["note"], 1_500) } } });
+    await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(firstAt - startedAt).toBeLessThan(1_000);
     expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([["agents_agent_1", "ask_user"], ["agents_agent_1", "notes_note", "ask_user"]]);
+  });
+
+  it("lists fewer tools when servers that joined after a tool call go past the provider's limit", async () => {
+    const gate = mkdtempSync(join(tmpdir(), "omb-chat-tools-gate-"));
+    cleanups.push(() => removeTempDir(gate));
+    const go = join(gate, "go");
+    const notes = catalog(syntheticToolNames("note", 5), { after: [go] });
+    const f = await fixture(async (body, response) => {
+      if (!body.messages.some((message) => message.role === "tool")) {
+        // The slow server starts, and has listed its tools, before the next round.
+        writeFileSync(go, "");
+        for (const since = Date.now(); !existsSync(readyOf.get(notes)!) && Date.now() - since < 10_000;) await new Promise((resolve) => setTimeout(resolve, 10));
+        return sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
+      }
+      if ((body.tools?.length ?? 0) <= 6) return answer(response);
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: `Invalid 'tools': array too long. Expected an array with maximum length 6, but got an array with length ${body.tools!.length} instead.`, type: "invalid_request_error" } }));
+    });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([
+      ["agents_agent_1", "ask_user"],
+      ["agents_agent_1", ...syntheticToolNames("notes_note", 5), "ask_user"],
+      ["agents_agent_1", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool", "ask_user"],
+    ]);
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
   it("sends at most 128 tools, ask_user and every agents tool among them", async () => {

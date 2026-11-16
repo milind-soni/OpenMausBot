@@ -627,10 +627,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           turnEntry.ending = round === MAX_CHAT_ROUNDS - 1;
           // Servers still starting when the turn began join once they have, never after the tools were dropped (none left while ask_user is allowed).
-          if (!questionAllowed || tools.definitions.length) for (const message of await joinLateChatTools(tools, [ASK_USER_TOOL_DEFINITION]) ?? []) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
+          const joined = !questionAllowed || tools.definitions.length ? await joinLateChatTools(tools, [ASK_USER_TOOL_DEFINITION]) : undefined;
+          for (const message of joined ?? []) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
           native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
-          let attempt = 0;
-          let resized = false;
+          let attempt = 0, resized = false;
           let completion: Completion;
           for (;;) {
             let streamed = false;
@@ -678,8 +678,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             } catch (value) {
               const error = asError(value);
               const verdict = classifyError(error);
-              // A provider refuses a request with too many tools before running anything: learn its limit and list fewer.
-              const refit = streamed || seenCalls.size || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
+              // Refused for too many tools, nothing ran: learn the limit and list fewer (after a call only when servers just joined).
+              const refit = streamed || (seenCalls.size && !joined) || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
               if (refit) {
                 for (const message of refit) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
                 noteToolBudget(turn.botId, tools.budget);
