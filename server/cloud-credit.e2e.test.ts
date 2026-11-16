@@ -13,6 +13,7 @@ import { cloudPairingSignature } from "./cloud-home.ts";
 import { CLOUD_CREDIT_INSTANCE } from "./cloud-credit-provider.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 import { TRIAL_CREDIT_OWN_AI, TRIAL_CREDIT_REFUSED } from "./trial-credit.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -122,7 +123,6 @@ beforeAll(async () => {
   writeFileSync(cli, `#!/usr/bin/env node
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { readRegistry, writeRegistry } from "./testing/registry.ts";
 const home = ${JSON.stringify(home)};
 // Signing out in Settings runs \`claude auth logout\`.
 if (process.argv[2] === "auth" && process.argv[3] === "logout") {

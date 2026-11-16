@@ -159,7 +159,7 @@ it("lets an Auto conversation pinned to the cloud computer use the person's lent
   // a guest opened the other one before the Cloud was personal.
   await waitForExit(child, { signal: "SIGTERM" });
   const bots = readRegistry(dataDir).bots;
-  const record = (bots.bots ?? bots).find((bot: any) => bot.id === created.id);
+  const record = bots.find((bot: any) => bot.id === created.id);
   expect(record.computer).toBeUndefined();
   const task = record.tasks.find((candidate: any) => candidate.threadId === created.threadId);
   Object.assign(task, { surface: "cloud", surfaceSource: "auto" });

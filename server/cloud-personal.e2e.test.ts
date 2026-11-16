@@ -227,8 +227,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   writeFileSync(join(dataDir, "lending-routines.json"), JSON.stringify({ version: 1, routines: { [before.stale]: "0".repeat(64) }, writers: { [before.stale]: ownerKeyAtBoot, [before.fullApproved]: ownerKeyAtBoot } }));
   // A bot at Full access (set where only the desktop app can set it: its record).
   const bots = readRegistry(dataDir).bots;
-  const record = Array.isArray(bots) ? bots : bots.bots;
-  const full = record.find((bot: any) => bot.id === before.full.id);
+  const full = bots.find((bot: any) => bot.id === before.full.id);
   full.approvalMode = "full";
   delete full.approvalGrant;
   for (const task of full.tasks ?? []) { task.approvalMode = "full"; delete task.approvalGrant; delete task.autoApprove; }
