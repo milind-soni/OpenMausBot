@@ -105,6 +105,22 @@ describe("the composer's context button", () => {
     expect(panel()!.querySelector<HTMLButtonElement>("[data-context-fresh]")!.disabled).toBe(false);
   });
 
+  it("takes the focus into the panel when it opens and gives it back to the button on Escape", async () => {
+    await render({ bot: chat({ tokens: 136_000, window: 200_000 }) });
+    trigger().focus();
+    await press(trigger());
+    expect(document.activeElement).toBe(panel()!.querySelector("[data-context-compact]"));
+    await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(trigger());
+
+    await render({ bot: chat({ tokens: 136_000, window: 200_000 }, { busy: true }) });
+    await press(trigger());
+    expect(document.activeElement).toBe(panel());
+    await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    expect(document.activeElement).toBe(trigger());
+  });
+
   it("keeps token counts out of Simple mode: a reading without a window shows as none, a room bot by name alone", async () => {
     await render({ bot: chat({ tokens: 170_000 }) });
     expect(trigger().getAttribute("aria-label")).toBe("Context");

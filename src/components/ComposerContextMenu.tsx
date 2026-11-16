@@ -182,8 +182,12 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLSpanElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const close = () => { setOpen(false); trigger.current?.focus(); };
   usePopoverDismiss(open, root, close);
+  useEffect(() => {
+    if (open) (panel.current?.querySelector<HTMLElement>("button:not(:disabled)") ?? panel.current)?.focus();
+  }, [open]);
   const advanced = useAdvancedMode();
   const breakdown = useContextBreakdown(group || !advanced ? undefined : bot, open);
   if (!bot && !group) return null;
@@ -200,8 +204,8 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
         {fullest?.percent === undefined ? <Gauge size={16} /> : <ContextRing percent={fullest.percent} />}
       </button>
       {open && (
-        <div role="dialog" aria-label={t("contextMenu.title")} data-context-panel
-          className={cn("animate-pop-in absolute bottom-full end-0 z-50 mb-2 max-h-[min(28rem,calc(100dvh-8rem))] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain", MENU_SHEET)}>
+        <div ref={panel} role="dialog" tabIndex={-1} aria-label={t("contextMenu.title")} data-context-panel
+          className={cn("animate-pop-in absolute bottom-full end-0 z-50 mb-2 max-h-[min(28rem,calc(100dvh-8rem))] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain outline-none", MENU_SHEET)}>
           {group ? <RoomContext group={group} members={members ?? []} detailed={advanced} /> : bot && <ChatContext bot={bot} reading={fullest ?? null} breakdown={breakdown} detailed={advanced} onDone={close} />}
         </div>
       )}
