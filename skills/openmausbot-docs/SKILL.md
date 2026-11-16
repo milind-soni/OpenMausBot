@@ -9,7 +9,13 @@ Answer from this install and from the app's own docs, in that order. Never
 describe a setting from memory: read the file, or read the page.
 
 - **This install.** Every setting is a file under `~/.openmausbot/`, and
-  `OMB_DATA_DIR` moves that folder. The file says what is set right now.
+  `OMB_DATA_DIR` moves that folder. The file says what is set right now, unless
+  an environment variable overrides it: the environment wins, because it is
+  applied after `config.json` is read (`OPENAI_COMPAT_URL` over
+  `openaiCompat.url`, `OMB_JEV_API_KEY` over the decision model's key, and
+  `OMB_<PROVIDER>_API_KEY` over an engine's key). Before saying a change holds,
+  check the value the running process actually loaded, and after a restart for
+  what is read at boot: reading the file back alone proves nothing.
 - **The docs.** One page per area: in a repo checkout under `docs/`, otherwise
   at `https://github.com/milind-soni/OpenMausBot/blob/main/docs/<page>.md`. A
   page explains why something is built that way and what happens if.
@@ -72,8 +78,10 @@ a hand edit races the next save.
   turn, and the skill never appears in the bot's own list. A skill the person
   writes or imports is the opposite: listed, and owned by one bot.
 - **Memory is local markdown.** `MEMORY.md` loads every turn, `memory/*.md` is
-  read on demand, `memory/log/` is the bot's own record of its days. Nothing
-  leaves the computer unless a Cloud is in use.
+  read on demand, `memory/log/` is the bot's own record of its days. The files
+  stay on this computer, but what a turn reads goes to the model provider that
+  bot is set to, and with a helper model set the helper's provider reads it too.
+  A Cloud moves the whole data folder off the computer; nothing else uploads it.
 - **Nothing is changed until you read it back.** After a change, read the file
   or the settings response again and say what it now holds; if it was
   `config.json`, say that a restart is what makes `instances` apply.

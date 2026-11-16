@@ -25,6 +25,7 @@ describe("openmausbot-docs skill guide", () => {
       "fix the failing test in src/app.ts",
       "summarize this email",
       "chart our signups by month",
+      "Build a bot settings form for my Discord bot",
     ]) {
       expect(ids(text), text).not.toContain("openmausbot-docs");
     }
