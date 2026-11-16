@@ -10,6 +10,7 @@ import { AboutMeSettings } from "./AboutMeSettings";
 import { EveryBotRules } from "./EveryBotRules";
 import { SETTINGS_INPUT, SettingsField } from "./SettingsPrimitives";
 import { profileInitials } from "./SidebarProfileMenu";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { User } from "lucide-react";
 
 const PHOTO_MIN_SIDE = 64;
@@ -163,7 +164,16 @@ export function ProfileFields() {
   }, [state.config?.profile?.name, state.config?.profile?.email]);
 
   const team = Boolean(state.config?.team);
+  const admin = useOwnerOrAdmin();
+  const member = !team && admin === false;
   const save = () => {
+    if (member) {
+      if (name.trim() === (state.config?.profile?.name ?? "").trim()) return;
+      void saveTeamProfile({ name: name.trim() })
+        .then((profile) => dispatch({ type: "profileSaved", profile: { name: profile.name } }))
+        .catch(() => {});
+      return;
+    }
     if (team) {
       void saveTeamProfile({ name: name.trim() })
         .then((profile) => dispatch({ type: "profileSaved", profile: { name: profile.name, email: profile.email } }))
@@ -194,8 +204,8 @@ export function ProfileFields() {
           aria-label={t("phone.signIn.email")}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          onBlur={team ? undefined : save}
-          readOnly={team}
+          onBlur={team || member ? undefined : save}
+          readOnly={team || member}
           placeholder={t("common.emailPlaceholder")}
           className={SETTINGS_INPUT}
         />

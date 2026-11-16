@@ -3,7 +3,8 @@ import { api, type ConfigStatus } from "@/state/store";
 export type OwnProfile = NonNullable<ConfigStatus["profile"]>;
 
 /** Settings → Profile on a Team Cloud: the signed-in person's own profile (PUT /api/me, open to every member). The
- * address is their sign-in's and never changes here. Elsewhere Settings → Profile is the server's one profile. */
+ * address is their sign-in's and never changes here. On a self-hosted server only a member's name goes here (the server's
+ * one profile is the owner's); elsewhere Settings → Profile is the server's one profile. */
 export function saveTeamProfile(patch: Partial<Pick<OwnProfile, "name" | "aboutMe" | "avatarUrl">>): Promise<OwnProfile> {
   return api<OwnProfile>("/api/me", { method: "PUT", body: JSON.stringify(patch), timeoutMs: 10_000 });
 }

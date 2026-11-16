@@ -5,13 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConfigStatus } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ config: {} as Partial<ConfigStatus>, dispatch: vi.fn(), api: vi.fn() }));
+const fixture = vi.hoisted(() => ({ config: {} as Partial<ConfigStatus>, dispatch: vi.fn(), api: vi.fn(), admin: true as boolean | null }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   api: fixture.api,
   useStore: () => ({ state: { config: fixture.config }, dispatch: fixture.dispatch }),
 }));
 vi.mock("./AboutMeSettings", () => ({ AboutMeSettings: () => null }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 
 const { ProfileFields, profilePhotoFileProblem, profilePhotoSizeProblem } = await import("./ProfileSettings");
 const { InitialsAvatar } = await import("./Avatar");
@@ -24,6 +25,7 @@ const photo = "/api/attachments/5f0c2b1e-8a43-4c1d-9e7a-2b6f1d3c4e5a.webp";
 beforeEach(() => {
   fixture.dispatch.mockReset();
   fixture.api.mockReset();
+  fixture.admin = true;
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -96,6 +98,29 @@ describe("the profile photo", () => {
       expect(fixture.api).toHaveBeenLastCalledWith("/api/me", { method: "PUT", body: JSON.stringify({ avatarUrl: "" }), timeoutMs: 10_000 });
       expect(fetched).not.toHaveBeenCalled();
       expect(fixture.api.mock.calls.map(([path]) => path)).not.toContain("/api/config");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("saves only the name of someone who may only chat on a self-hosted server, as their own, never the server's", async () => {
+    fixture.admin = false;
+    fixture.config = { profile: { name: "", email: "" } };
+    fixture.api.mockResolvedValue({ name: "Robert", email: "bob@example.test" });
+    const fetched = vi.fn();
+    vi.stubGlobal("fetch", fetched);
+    try {
+      await act(async () => root.render(createElement(ProfileFields)));
+      expect(host.querySelector<HTMLInputElement>('input[type="email"]')!.readOnly).toBe(true);
+      const name = host.querySelector<HTMLInputElement>('input[aria-label="Your name"]')!;
+      await act(async () => name.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+      expect(fixture.api, "an unchanged name is not saved").not.toHaveBeenCalled();
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      await act(async () => { setValue.call(name, "Robert "); name.dispatchEvent(new Event("input", { bubbles: true })); });
+      await act(async () => name.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+      expect(fixture.api).toHaveBeenCalledWith("/api/me", { method: "PUT", body: JSON.stringify({ name: "Robert" }), timeoutMs: 10_000 });
+      expect(fixture.dispatch).toHaveBeenCalledWith({ type: "profileSaved", profile: { name: "Robert" } });
+      expect(fetched).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }

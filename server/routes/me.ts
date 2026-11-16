@@ -1,6 +1,7 @@
 // GET and PUT /api/me: a person's own profile on a Team Cloud (people-about.ts): the name and picture they go by and their
-// "About you", read into their own turns only, with the address of their verified sign-in. Anywhere else the server's one
-// profile (Settings → Profile) is the person's, and this answers 404.
+// "About you", read into their own turns only, with the address of their verified sign-in. On a self-hosted server only the
+// name each signed-in person goes by on their lines (`ownName`); the server's one profile stays Settings → Profile's.
+// Anywhere else this answers 404.
 import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
 import type { CloudTeam } from "../cloud-team.ts";
 import type { MemberProfile, MemberProfilePatch } from "../host/cloud-team-host.ts";
@@ -23,12 +24,31 @@ export interface MeRouteDeps {
   seeded(session: SessionRecord): SeedField[];
   /** After a save: the person's own windows and phones show it. */
   changed(): void;
+  /** On a self-hosted server: the name a signed-in person set for themselves, "" when unset. */
+  ownName?: {
+    read(session: SessionRecord): { name: string; email: string };
+    save(session: SessionRecord, name: string): { name: string; email: string };
+  };
 }
 
 export function createMeRoutes(deps: MeRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (path !== "/api/me" && path !== "/api/me/welcome") return PASS;
-    if (!deps.team) return json(res, 404, { error: "not found" });
+    const ownNameRoute = async (own: NonNullable<MeRouteDeps["ownName"]>) => {
+      const session = deps.session(auth);
+      if (!session) return json(res, 403, { error: "Sign in to have a name here." });
+      if (method === "GET") return json(res, 200, own.read(session));
+      if (method !== "PUT") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req, 8 * 1024);
+      const given = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+      if (Object.keys(given).some((key) => key !== "name")) return json(res, 400, { error: "Only your name can change here" });
+      if (typeof given.name !== "string") return json(res, 400, { error: "send { name }" });
+      if (given.name.trim().length > PERSON_NAME_MAX) return json(res, 400, { error: `Your name is at most ${PERSON_NAME_MAX} characters` });
+      const saved = own.save(session, given.name);
+      deps.changed();
+      return json(res, 200, saved);
+    };
+    if (!deps.team) return deps.ownName && path === "/api/me" ? ownNameRoute(deps.ownName) : json(res, 404, { error: "not found" });
     const session = deps.session(auth);
     if (!session) return json(res, 403, { error: "Sign in to this team to have a profile." });
     const team = { id: deps.team.id, name: deps.team.name };

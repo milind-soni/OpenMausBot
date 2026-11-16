@@ -620,6 +620,33 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect(lines?.map((line: any) => [line.reaction, line.sender?.name]), JSON.stringify(thread.map((m: any) => [m.role, m.kind, m.text?.slice(0, 60), m.reaction]))).toEqual([["👍", "Ada"], ["👍", "Bob"], ["👎", "Ada"]]);
   }, 90_000);
 
+  it("lets a member name themselves, on their own lines and in their own Settings only", async () => {
+    expect((await api("PUT", "/api/me", { name: "Robert" })).status, "the server itself has no person to name").toBe(403);
+    expect((await api("PUT", "/api/me", { aboutMe: "hi" }, BOB)).status, "only the name changes off a team").toBe(400);
+    expect((await api("PUT", "/api/me", { name: "Robert", avatarUrl: "" }, BOB)).status).toBe(400);
+    expect((await api("GET", "/api/config", undefined, BOB)).body.profile.name, "never the owner's profile").toBe("");
+    const saved = await api("PUT", "/api/me", { name: "  Robert  " }, BOB);
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(saved.body).toEqual({ name: "Robert", email: BOB });
+    expect((await api("GET", "/api/me", undefined, BOB)).body).toEqual({ name: "Robert", email: BOB });
+    expect((await api("GET", "/api/config", undefined, BOB)).body.profile, "the sidebar shows it beside their own address").toMatchObject({ name: "Robert", email: BOB });
+    expect((await api("GET", "/api/config", undefined, ADA)).body.profile.name).toBe("");
+    try {
+      expect((await api("POST", `/api/bots/${ids.pub}/messages`, { text: "Who is asking about the desk?", threadId: ids.pubThread }, BOB)).status).toBe(202);
+      const replied = await settledReply(ids.pubThread, "Who is asking about the desk?");
+      expect(replied, log.slice(-2_000)).not.toBeNull();
+      const asked = (replied as Array<{ role: string; text?: string; sender?: { name: string } }>).find((m) => m.role === "user" && m.text?.includes("Who is asking about the desk?"));
+      expect(asked?.sender?.name).toBe("Robert");
+      const answer = (replied as Array<{ id: string; role: string; kind: string; text?: string }>).findLast((m) => m.role === "bot" && m.kind === "text" && m.text)!;
+      const reacted = await api("POST", `/api/threads/${ids.pubThread}/messages/${answer.id}/reactions`, { emoji: "👍", on: true }, ADA);
+      expect(reacted.status).toBe(200);
+      expect(reacted.body.message.reactions.map((reaction: any) => reaction.name), "Ada keeps her name").toEqual(["Ada"]);
+      await waitFor(async () => !(await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((bot: any) => bot.id === ids.pub).busy);
+    } finally {
+      expect((await api("PUT", "/api/me", { name: "" }, BOB)).body).toEqual({ name: "", email: BOB });
+    }
+  }, 90_000);
+
   it("keeps bots with different audiences from reaching each other", async () => {
     // Payroll (Ada), Benefits (Ada) and Board (admins) share a team. Only the
     // two with the same audience are teammates to each other.

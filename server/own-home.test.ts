@@ -91,4 +91,11 @@ describe("what a self-hosted server calls someone on their lines", () => {
     expect(selfHostedPersonName(signIn(["admin", "client"]), [], { name: " ", email: "" })).toBe("Chrome on Mac");
     expect(selfHostedPersonName(signIn(["client"], "ada@example.test"), [], { email: "ada@example.test" })).toBe("Ada");
   });
+
+  it("is the name a person set for themselves first, over their address, their device's label and the profile's", () => {
+    expect(selfHostedPersonName(signIn(["client"], "grace.hopper@example.test"), [], profile, "Amazing Grace")).toBe("Amazing Grace");
+    expect(selfHostedPersonName(signIn(["client"]), [], profile, " Robert ")).toBe("Robert");
+    expect(selfHostedPersonName(signIn(["client"], "grace.hopper@example.test"), [], profile, " "), "an empty name is unset").toBe("Grace Hopper");
+    expect(selfHostedPersonName(signIn(["client"]), [], profile, "")).toBe("Chrome on Mac");
+  });
 });
