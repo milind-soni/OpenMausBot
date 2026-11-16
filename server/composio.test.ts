@@ -1412,6 +1412,29 @@ describe.sequential("Composio Sessions", () => {
     }
   });
 
+  it("still links when the request to raise the old cap cannot reach Composio, and tries again next time", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    sessionAccountCap = 5;
+    connectedAccountsOverride = [{ id: "ca_sub_0", alias: "sub-0", status: "ACTIVE", toolkit: { slug: "slack" } }];
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (init?.method === "PATCH") throw new TypeError("fetch failed");
+      return realFetch(input, init);
+    });
+    const before = calls.length;
+    try {
+      await expect(authorizeService(cfg, "slack", "sub-1")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
+      expect(calls.slice(before).some((call) => call.method === "POST" && call.path.endsWith("/link"))).toBe(true);
+      expect(fetchSpy.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      sessionAccountCap = 10;
+      connectedAccountsOverride = null;
+    }
+  });
+
   it("links a sixth account, raising a Session made under the old cap of 5 in place first", async () => {
     const cfg: AppConfig = {
       composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },

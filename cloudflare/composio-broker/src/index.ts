@@ -260,15 +260,19 @@ const multiAccountUpgradeAttempted = new Set<string>();
 const accountCapRaised = new Set<string>();
 
 /** A Session made under a lower account cap gets the current one, in place, so
- *  its MCP endpoint stays. If Composio refuses, the old cap stays and the link
- *  goes ahead. */
+ *  its MCP endpoint stays. If Composio refuses or can't be reached, the old cap
+ *  stays, the next link tries again, and this link goes ahead. */
 async function raiseAccountCap(session: ComposioSession, env: Env) {
   if (session.maxAccounts === undefined || session.maxAccounts >= MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit
     || accountCapRaised.has(session.sessionId)) return;
   const response = await composioRequest(env, `/tool_router/session/${encodeURIComponent(session.sessionId)}`, {
     method: "PATCH",
     body: JSON.stringify({ multi_account: MULTI_ACCOUNT_CONFIG }),
+  }).catch((error: unknown) => {
+    console.warn(JSON.stringify({ message: "account cap not raised", error: error instanceof Error ? error.message : String(error) }));
+    return null;
   });
+  if (!response) return;
   if (!response.ok) {
     console.warn(JSON.stringify({ message: "account cap not raised", status: response.status }));
     return;

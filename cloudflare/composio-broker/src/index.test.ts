@@ -379,6 +379,27 @@ describe("connected-apps broker boundaries", () => {
     expect(fetchCalls.some((call) => call.init?.method === "POST" && call.url.endsWith("/tool_router/session"))).toBe(false);
   });
 
+  it("still links when the request to raise the old cap cannot reach Composio", async () => {
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const { env, ctx } = testEnv(fetchCalls, "offline-cap-user");
+    const installation = { id: "offline-cap-install", composio_user_id: "offline-cap-user", session_id: "trs_cap_offline", disabled_at: null };
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      fetchCalls.push({ url, init });
+      if (init?.method === "PATCH") throw new TypeError("fetch failed");
+      if (url.includes("/connected_accounts")) return Response.json({ items: [{ id: "ca_0", alias: "sub-0", status: "ACTIVE", toolkit: { slug: "gmail" } }] });
+      if (url.endsWith("/link")) return Response.json({ redirect_url: "https://connect.composio.dev/link/gmail" });
+      if (url.includes("/auth_configs")) return Response.json({ items: [] });
+      const old = session("trs_cap_offline", "offline-cap-user");
+      return Response.json({ ...old, config: { ...old.config, multi_account: { ...multiAccount, max_accounts_per_toolkit: 5 } } });
+    });
+
+    const response = await authorize("gmail", "sub-1", installation, env as never, ctx as never);
+    expect(response.status).toBe(200);
+    expect(fetchCalls.some((call) => call.init?.method === "PATCH")).toBe(true);
+    expect(fetchCalls.some((call) => call.url.endsWith("/trs_cap_offline/link"))).toBe(true);
+  });
+
   it("links a toolkit whose only account failed to sign in", async () => {
     const fixture = accountFixture("failed-user");
     fixture.accounts = [{ id: "ca_failed", status: "FAILED", toolkit: { slug: "gmail" } }];

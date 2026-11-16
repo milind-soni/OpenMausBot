@@ -260,7 +260,7 @@ async function nameAuthConfigsInPlace(apiKey: string, session: SessionResponse, 
 }
 
 /** A Session made under a lower account cap gets the current one, in place, so its MCP endpoint stays. If Composio
- * refuses, the old cap stays and the link goes ahead. */
+ * refuses or can't be reached, the old cap stays, the next link tries again, and this link goes ahead. */
 export async function raiseAccountCap(apiKey: string, session: SessionResponse): Promise<void> {
   const cap = session.config?.multi_account?.max_accounts_per_toolkit;
   if (cap === undefined || cap >= MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit || accountCapRaised.has(session.session_id)) return;
@@ -269,7 +269,11 @@ export async function raiseAccountCap(apiKey: string, session: SessionResponse):
     headers: projectHeaders(apiKey, true),
     body: JSON.stringify({ multi_account: MULTI_ACCOUNT_CONFIG }),
     signal: AbortSignal.timeout(30_000),
+  }).catch((error: unknown) => {
+    console.warn(`[composio] Could not reach Composio to raise the Session's account cap (${error instanceof Error ? error.message : String(error)})`);
+    return null;
   });
+  if (!res) return;
   if (!res.ok) {
     console.warn(`[composio] Composio would not raise the Session's account cap (${await responseError(res, `HTTP ${res.status}`)})`);
     return;
