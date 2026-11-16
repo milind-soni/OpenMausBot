@@ -117,9 +117,12 @@ vi.mock("./chat-mcp-tools.ts", async (importOriginal) => {
     return actual.mountChatTools(...call);
   } };
 });
-/** Waits, at most 10 s, until the turn's tool session has `server` in hand. */
+/** Waits until the turn's tool session has `server` in hand; fails if it has not within 30 s. */
 async function settledServer(server: string) {
-  for (const since = Date.now(); !mountSettled.servers.has(server) && Date.now() - since < 10_000;) await new Promise((resolve) => setTimeout(resolve, 10));
+  for (const since = Date.now(); !mountSettled.servers.has(server);) {
+    if (Date.now() - since > 30_000) throw new Error(`the turn's tool session never had ${server} in hand`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {

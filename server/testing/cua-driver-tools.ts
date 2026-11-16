@@ -47,7 +47,13 @@ const names = JSON.parse(process.env.CATALOG_TOOLS);
 const after = JSON.parse(process.env.CATALOG_AFTER ?? "[]");
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
 const started = (since = Date.now()) => new Promise((resolve) => {
-  const check = () => after.every((path) => existsSync(path)) || Date.now() - since > 10_000 ? setTimeout(resolve, Number(process.env.CATALOG_START_MS ?? 0)) : setTimeout(check, 10);
+  const check = () => {
+    if (after.every((path) => existsSync(path))) setTimeout(resolve, Number(process.env.CATALOG_START_MS ?? 0));
+    else if (Date.now() - since > 30_000) {
+      process.stderr.write("catalog server: never saw " + after.filter((path) => !existsSync(path)).join(", ") + "\\n");
+      process.exit(1);
+    } else setTimeout(check, 10);
+  };
   check();
 });
 createInterface({ input: process.stdin }).on("line", (line) => {
@@ -59,7 +65,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 `;
 
 /** A stdio MCP server, as a turn's integrations take it, that lists exactly `names`. It answers `initialize` once every file
- * in `after` exists (at most 10 s), then `startMs` later. Remove `dir` when done. */
+ * in `after` exists, then `startMs` later; if they are not all there within 30 s it exits with an error, so it never
+ * starts out of order. Remove `dir` when done. */
 export function catalogServer(names: readonly string[], { startMs = 0, after = [] }: { startMs?: number; after?: readonly string[] } = {}): { dir: string; server: { command: string; args: string[]; env: Record<string, string> } } {
   const dir = mkdtempSync(join(tmpdir(), "omb-catalog-mcp-"));
   const script = join(dir, "catalog.mjs");
