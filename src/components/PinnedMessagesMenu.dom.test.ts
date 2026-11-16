@@ -27,7 +27,7 @@ it("shows no button while nothing is pinned", async () => {
   act(() => root.unmount());
 });
 
-it("lists who said the pinned message and what, and jumps to it", async () => {
+it("lists who said the pinned message and what, and jumps to it with focus back on its button", async () => {
   const { root, onJump } = await mount();
   expect(document.querySelector("[role=menu]")).toBeNull();
   await act(async () => trigger()!.click());
@@ -37,6 +37,7 @@ it("lists who said the pinned message and what, and jumps to it", async () => {
   await act(async () => items()[0]!.click());
   expect(onJump).toHaveBeenCalledWith("m1");
   expect(trigger()!.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(trigger());
   act(() => root.unmount());
 });
 

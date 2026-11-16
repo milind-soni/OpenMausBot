@@ -106,7 +106,7 @@ export function PinnedMessagesMenu({ pins, onJump, onUnpin, triggerClassName }: 
                 role="menuitem"
                 data-pinned-jump={pin.id}
                 title={t("chat.pinnedJump")}
-                onClick={() => { setOpen(false); onJump(pin.id); }}
+                onClick={() => { close(); onJump(pin.id); }}
                 className={cn(SIMPLE_MENU_ROW, "flex-1 flex-col items-start gap-0 py-1.5")}
               >
                 <span className={SIMPLE_MENU_META}>{pin.sender}</span>
