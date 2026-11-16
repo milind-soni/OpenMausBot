@@ -786,13 +786,14 @@ describe("the link between a computer and its Cloud", () => {
     await new Promise((resolve) => setTimeout(resolve, 900));
     expect(waiting().map((node) => node.status)).toEqual(["queued"]);
     expect(computer.coordinator.pace()).not.toBe("busy");
-    await computer.restart({ limits: { queueMs: 80, stallMs: 400 } });
+    // Back after the restart with a stall clock a slow runner's answer fits in; the short one was passed above.
+    await computer.restart({ limits: { queueMs: 80, stallMs: 4_000 } });
     expect(waiting().map((node) => node.status)).toEqual(["queued"]);
     expect(cloud.runs).toEqual([]);
     await cloud.listen(cloud.port);
     computer.dialer.start();
-    // Waits for the answer itself: on a slow runner the computer's 400 ms stall clock can add a line before it.
-    await until(() => computer.said(room.id).some((line) => line.startsWith("Analyst: ")), "the answer is in the room");
+    await until(() => computer.said(room.id).some((line) => line.startsWith("Analyst: ")), "the answer is in the room")
+      .catch((error: Error) => { throw new Error(`${error.message}: ${JSON.stringify(computer.said(room.id))}`); });
     expect(computer.said(room.id).slice(0, 3)).toEqual(["Sam: @Analyst how many orders this week?", "(server.rooms.linkedAway Analyst [My Cloud])", "Sam: @Analyst and split them by country."]);
     const turns = cloud.runs.filter((run) => run.botId === "cloud-analyst");
     expect(turns).toHaveLength(1);

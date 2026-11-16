@@ -393,7 +393,9 @@ it("says in the main chat, once per run of failures, that an automation could no
   })]);
   const second = await s.runNow(routineId);
   await s.settled(second, "failed");
-  expect((await s.run(second)).error).toBe((await s.run(first)).error);
+  // The same failure, though the prompt it quotes carries the minute each run started in.
+  const minuteless = (error: string | undefined) => error?.replace(/\d{2}:\d{2} UTC/g, "HH:MM UTC");
+  expect(minuteless((await s.run(second)).error)).toBe(minuteless((await s.run(first)).error));
   expect(await s.lines()).toHaveLength(1);
 }, 120_000);
 

@@ -945,8 +945,8 @@ test("a Windows owner this account cannot signal but that still runs keeps block
   const liveForeignPid = realWindows ? runningPid(t) : await exitedPid();
   fakeWindowsHost(t, { epermPids: [liveForeignPid], tasklist: [liveForeignPid] });
   const { dataDir } = temporaryDirectory();
-  // On Windows the record must postdate the live pid's real creation time, or it reads as a reused pid.
-  plantWindowsChildLease(dataDir, liveForeignPid, realWindows ? Date.now() : undefined);
+  // On Windows the record must postdate the live pid's real creation time (a second's margin), or it reads as a reused pid.
+  plantWindowsChildLease(dataDir, liveForeignPid, realWindows ? Date.now() + 1_000 : undefined);
 
   assert.throws(() => acquireDataDirLease(dataDir), /still shutting down/i);
 });
