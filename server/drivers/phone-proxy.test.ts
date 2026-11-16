@@ -353,6 +353,14 @@ describe("phone MCP text input", () => {
       expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, ...Array(10).fill(INPUT_STATE)]);
     });
 
+    it("does not hold the switch back on a phone whose dump does not say whether a keyboard is up", async () => {
+      const phone = switching(["", SWITCHED_AND_SHOWN]);
+      const typed = typePhoneText(phone.shell, "二手 iPad");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(phone.commands).toEqual([KEYBOARD, KEYBOARDS, INPUT_STATE, SWITCH, INPUT_STATE, INPUT, RESTORE]);
+      await expect(typed).resolves.toBe(SENT);
+    });
+
     it("still types when ADBKeyBoard shows only at the tenth read, 1.8 s after the first", async () => {
       const phone = switching([BEFORE_THE_SWITCH, ...Array(9).fill(SWITCHED_BUT_NOT_BOUND), SWITCHED_AND_SHOWN]);
       const typed = typePhoneText(phone.shell, "二手 iPad");
@@ -1183,18 +1191,21 @@ describe("phone MCP calls claim before each command sent to the phone", () => {
   const RESTORE = onPhone("shell", "ime", "set", "com.baidu.input_huawei/.ImeService");
   const OTHER_TEXT = { text: "二手" };
 
-  /** adb for a phone whose default keyboard is Baidu's, with ADBKeyBoard switched on in its keyboard list and showing as soon as it is set.
+  /** adb for a phone whose default keyboard is Baidu's and is up, with ADBKeyBoard switched on in its keyboard list and showing as soon as it is set.
    * `during` runs while adb runs each command. */
   function adbOfPhoneWithAnotherKeyboard(during: (command: string) => void) {
     const commands: string[][] = [];
+    let switched = false;
     const adb = async (args: string[]) => {
       commands.push(args);
       const line = args.join(" ");
       during(line);
+      switched ||= line === SWITCH.join(" ");
       if (line.includes("devices -l")) return Buffer.from(DEVICE_LIST);
       if (line.includes("default_input_method")) return Buffer.from("com.baidu.input_huawei/.ImeService\n");
       if (line.includes("ime list -s")) return Buffer.from("com.baidu.input_huawei/.ImeService\ncom.android.adbkeyboard/.AdbIME\n");
-      return Buffer.from(line.includes("dumpsys input_method") ? SWITCHED_AND_SHOWN : "");
+      if (!line.includes("dumpsys input_method")) return Buffer.from("");
+      return Buffer.from(switched ? SWITCHED_AND_SHOWN : BEFORE_THE_SWITCH);
     };
     return { commands, adb };
   }
