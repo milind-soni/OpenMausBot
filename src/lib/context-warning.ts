@@ -1,23 +1,28 @@
-import type { Bot, Group, TaskUsage } from "@/state/store";
+import type { Bot, Group, Message, TaskUsage } from "@/state/store";
 import { contextShare } from "./usage";
 
 export const CONTEXT_WARNING_PERCENT = 80;
 
-/** The header pill's reading: every thread whose last settled turn filled part of a known window keeps it in view. */
-export interface ThreadContextReading {
-  tokens: number;
-  window?: number;
-  percent?: number;
+export function compactedSinceReading(messages: readonly Pick<Message, "role" | "kind">[]): boolean {
+  const compaction = messages.findLastIndex((message) => message.kind === "compaction");
+  if (compaction < 0) return false;
+  const reply = messages.findLastIndex((message) => message.role === "bot" && message.kind === "text");
+  return compaction > reply;
 }
 
-export function threadContextWarning(usage: TaskUsage | undefined): ThreadContextReading | null {
+/** The header pill's reading, from 80% of a known window until the conversation is compacted. The message box's
+ * context button keeps a reading for every thread, so the header stays quiet below that. */
+export interface ThreadContextReading {
+  tokens: number;
+  window: number;
+  percent: number;
+}
+
+export function threadContextWarning(usage: TaskUsage | undefined, messages: readonly Pick<Message, "role" | "kind">[]): ThreadContextReading | null {
   const share = usage ? contextShare(usage) : null;
-  if (!share) return null;
-  return {
-    tokens: share.tokens,
-    ...(share.window !== undefined ? { window: share.window } : {}),
-    ...(share.percent !== undefined ? { percent: share.percent } : {}),
-  };
+  if (!share || share.window === undefined || share.percent === undefined || share.percent < CONTEXT_WARNING_PERCENT) return null;
+  if (compactedSinceReading(messages)) return null;
+  return { tokens: share.tokens, window: share.window, percent: share.percent };
 }
 
 export function roomContextWarnings(group: Pick<Group, "memberContext">, members: readonly Bot[]):

@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { CONTEXT_WARNING_PERCENT, roomContextWarnings, threadContextWarning } from "@/lib/context-warning";
 import { t } from "@/lib/i18n";
 import { formatTokens } from "@/lib/usage";
-import { api, useStore, type Bot, type Group } from "@/state/store";
+import { api, useStore, type Bot, type Group, type Message } from "@/state/store";
 
 const pill = "flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-[13px] text-ink";
 const calmPill = "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/50 px-2.5 py-1 text-[13px] text-ink-secondary";
@@ -44,9 +44,9 @@ export function ThreadContextWarningView({ name, tokens, window, percent, busy, 
   );
 }
 
-export function ThreadContextWarning({ bot }: { bot: Bot }) {
+export function ThreadContextWarning({ bot, messages }: { bot: Bot; messages: readonly Message[] }) {
   const usage = bot.tasks?.find((task) => task.threadId === bot.threadId)?.usage;
-  const reading = threadContextWarning(usage);
+  const reading = threadContextWarning(usage, messages);
   const { pending, run } = useContextAction();
   if (!reading) return null;
   return (
