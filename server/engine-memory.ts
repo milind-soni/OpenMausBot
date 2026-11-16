@@ -653,7 +653,7 @@ export class EngineMemory {
   }
 
   /** Whether this start's processes would not fit under the server's pids limit. A browser starts on a bot's first browser
-   * call, not with its engine, and a server in a container runs two at once (OMB_BROWSER_MAX_RUNNING): room for one more
+   * call, not with its engine, and itself waits for room before it opens (browser-room.ts): room for one more
    * is kept while any start pending may open one, rather than one for every such start, which would let one turn in at a
    * time. Browsers already running count in the limit's own count. */
   private crowded(start: "process" | "session", threadId: string, heldTasks: number, heldBrowser: boolean): boolean {

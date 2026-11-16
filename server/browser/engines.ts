@@ -186,8 +186,9 @@ export class ChromeEngine {
 export interface RuntimeRouterOptions {
   /** What a tool call is told instead of reaching either engine, or null to run it. */
   refusal?(session: string, spec: BrowserSpawnSpec, params: unknown): string | null;
-  /** Asked next, before a tool call that may open the session's browser: what it is told while the server has no room to
-   * run one (a self-hosted server's pids limit), or null once it has. */
+  /** Asked next, before an opt-in engine's tool call that may open the session's browser: what it is told while the server
+   * has no room to run one (a self-hosted server's pids limit), or null once it has. agent-browser's calls ask the same
+   * room through its BrowserRoom, after its count of browsers. */
   room?(session: string, spec: BrowserSpawnSpec, params: unknown): Promise<string | null>;
   /** Asked each time beforeDispatch ran, so after it claimed the session for this call's turn and before anything reaches
    * the engine: what a refusal that depends on who is calling tells the call, or null to run it. */
@@ -224,7 +225,8 @@ export class RuntimeRouter {
   async agentRpc(session: string, spec: BrowserSpawnSpec, method: "tools/list" | "tools/call", params: unknown, beforeDispatch?: () => void, ctx?: StepContext): Promise<unknown> {
     const refusal = method === "tools/call" ? this.#refusal?.(session, spec, params) : null;
     if (refusal) return { isError: true, content: [{ type: "text", text: refusal }] };
-    const full = method === "tools/call" ? await this.#room?.(session, spec, params) : null;
+    const target = chromeTarget(session, spec);
+    const full = method === "tools/call" && target ? await this.#room?.(session, spec, params) : null;
     if (full) return { isError: true, content: [{ type: "text", text: full }] };
     const afterClaim = method === "tools/call" ? this.#afterClaim : undefined;
     const dispatch = afterClaim ? () => {
@@ -232,7 +234,6 @@ export class RuntimeRouter {
       const text = afterClaim(session, spec);
       if (text) throw new ClaimRefused(text);
     } : beforeDispatch;
-    const target = chromeTarget(session, spec);
     let result: unknown;
     try {
       result = await (target ? this.#chrome.service.agentRpc(target, method, params, dispatch) : this.#old.agentRpc(session, spec, method, params, dispatch, ctx));

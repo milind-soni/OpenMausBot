@@ -151,18 +151,20 @@ describe("the runtime router", () => {
     expect(old.agentRpc).toHaveBeenCalledTimes(2);
   });
 
-  it("asks the server's room before a tool call on either engine, and a call it has no room for reaches neither", async () => {
+  it("asks the server's room before an opt-in engine's tool call, and a call it has no room for never reaches it", async () => {
     let full: string | null = "No room for another browser.";
     const asked: string[] = [];
     const { old, chrome, runtime } = engines({ room: async (session) => { asked.push(session); return full; } });
     const refused = { isError: true, content: [{ type: "text", text: "No room for another browser." }] };
-    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/call", { name: "agent_browser_open" })).resolves.toEqual(refused);
     await expect(runtime.agentRpc("s", CHROME, "tools/call", { name: "agent_browser_open" })).resolves.toEqual(refused);
-    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/list", {}), "a listing opens no browser").resolves.toBe("agent-browser");
-    expect(asked).toEqual(["s1", "s"]);
-    expect([old.agentRpc.mock.calls.length, chrome.service.agentRpc.mock.calls.length]).toEqual([1, 0]);
-    full = null;
+    // agent-browser asks the same room through its own BrowserRoom, after its count of browsers
     await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/call", { name: "agent_browser_open" })).resolves.toBe("agent-browser");
+    await expect(runtime.agentRpc("s", CHROME, "tools/list", {}), "a listing opens no browser").resolves.toBe("chrome");
+    expect(asked).toEqual(["s"]);
+    expect([old.agentRpc.mock.calls.length, chrome.service.agentRpc.mock.calls.length]).toEqual([1, 1]);
+    full = null;
+    await expect(runtime.agentRpc("s", CHROME, "tools/call", { name: "agent_browser_open" })).resolves.toBe("chrome");
+    expect(asked).toEqual(["s", "s"]);
   });
 
   it("asks afterClaim once beforeDispatch has claimed, and its refusal reaches neither engine", async () => {

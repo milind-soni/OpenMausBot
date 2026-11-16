@@ -500,8 +500,10 @@ Leave room for the commands bots run: budget about 80 per working bot.
 | 20 | 4,096 | 18 GB |
 | 34 | 4,096 | 28 GB |
 
-The limit column includes two open browsers, which is as many as a server in
-a container keeps open at once (`OMB_BROWSER_MAX_RUNNING` changes that). If
+The limit column includes two open browsers. A server opens more when its
+limits leave room for them (at most 40% of the process limit and of the memory
+go to browsers; `OMB_BROWSER_MAX_RUNNING` sets the number instead), and each
+new browser also waits for room for its processes, as a turn does. If
 your platform's limit is fixed and lower than the row you need, the server
 still works: fewer bots run at the same moment and the others wait.
 

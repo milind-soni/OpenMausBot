@@ -111,11 +111,15 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const store: Pick<Store, "bots" | "bot" | "botByThread"> = { get bots() { return deps.store().bots; }, bot: (id: string) => deps.store().bot(id),
     botByThread: (threadId: string) => deps.store().botByThread(threadId) };
 
+  // Where turns wait for room (a self-hosted server under its pids limit), a new browser also waits for room for its
+  // processes. `runs` is read only when a browser call asks, after usedBrowserSessions exists.
+  const processRoom = deps.engineMemory?.selfHosted?.() ? processBudget.browserRoom((session) => browserRunning(session, usedBrowserSessions.get(session))) : null;
   // Only a bot waiting for a slot closes a browser a running turn holds; the idle sweep below never does.
   const browserRoom = new BrowserRoom({
     max: deps.browsersAtOnce ?? (() => defaultBrowserRoomSize()),
     spare: (session) => spareForRoom(agentBrowserRuntime.spare(session), { holds: !turnResources.free(`browser:${session}`), idleMs: idleMs() }),
     close: (session) => agentBrowserRuntime.closeIfIdle(session, 1),
+    ...(processRoom ? { admit: (session: string) => processRoom.enter(session) } : {}),
   });
   const agentBrowserRuntime = new BrowserRuntime({
     closeBrowser: (session, spec) => closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })),
@@ -195,12 +199,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
   // A tool call that would open Reddit from MausBot Cloud is refused before it reaches the browser. My Chrome is the
   // person's own, outside the egress gate too; on My Cloud a call that can't reach it now says why instead.
-  const browserRoom = deps.engineMemory?.selfHosted?.() ? processBudget.browserRoom((session) => browserRunning(session, usedBrowserSessions.get(session))) : null;
   const browserRuntime = new RuntimeRouter(agentBrowserRuntime, chromeEngine, {
     refusal: (_session, spec, params) => (attachesToChrome(spec.env) ? null : browserEgress.callRefusal(params)),
-    // The person's own Chrome runs outside this server, and a close frees room.
-    room: (session, spec, params) => (!browserRoom || attachesToChrome(spec.env) || (params as { name?: unknown } | null)?.name === "agent_browser_close"
-      ? Promise.resolve(null) : browserRoom.enter(session)),
+    // The opt-in engine's browsers wait for the server's room here; agent-browser's wait in browserRoom above. The
+    // person's own Chrome runs outside this server, and a close frees room.
+    room: (session, spec, params) => (!processRoom || attachesToChrome(spec.env) || (params as { name?: unknown } | null)?.name === "agent_browser_close"
+      ? Promise.resolve(null) : processRoom.enter(session)),
     // After beforeDispatch's claim the holder is this call's own turn, so the verdict is the caller's, not the last
     // holder's. Only a caller who may use the computer learns whether it lends Chrome or is online.
     afterClaim: (session, spec) => {
