@@ -437,7 +437,7 @@ import { claudeUserSkillsEnabled } from "./turn-settings.ts";
 import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts";
-import { ROUTINE_RESTARTED, RoutineManager, type Routine, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts"; import { routineModelRefusal, routineThreadModel, type RoutineModelChecks } from "./routine-input.ts"; import { routineHistoryFor, routineRunsFor } from "./routine-run-window.ts"; import { runTurnLive } from "./routine-turn-live.ts"; import { batchSaves } from "./save-batch.ts";
+import { ROUTINE_RESTARTED, RoutineManager, type Routine, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts"; import { routineModelRefusal, routineThreadModel, type RoutineModelChecks } from "./routine-input.ts"; import { routineHistoryFor, routineRunsFor } from "./routine-run-window.ts"; import { runTurnLive } from "./routine-turn-live.ts"; import { batchSaves, flushLaterSaves } from "./save-batch.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BROWSER_UPLOAD_TOOL, browserRuntimeEnv } from "./browser-runtime.ts";
 import { BrowserUploadRefusal, uploadableFiles } from "./browser-upload.ts";
@@ -579,7 +579,7 @@ import {
   type Viewer,
 } from "./bot-visibility.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
-import { deliverSseFrame, openSseHeartbeat } from "./sse-fanout.ts";
+import { deliverSseFrame, openSseHeartbeat } from "./sse-fanout.ts"; import { createBotFrames, takesFrame, type BotFrameForm } from "./host/bot-frames.ts";
 import { PhoneSecretBridge, PhoneSecretSubmissionRegistry } from "./phone-secret.ts";
 // Keep these two last, so loading the route table leaves module start-up order as is.
 import { gzipTunnelReplies, json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
@@ -2921,7 +2921,7 @@ const wireTask = (task: TaskRecord, botModel: ModelSelection, awaiting = threads
 };
 
 /** Strips provider session ids (resumeCursors) here, not at call sites, so no broadcast or paired phone ever gets them. */
-const wireBot = (bot: BotRecord): WireBot => {
+const wireBot = (bot: BotRecord, onlyThreadId?: string): WireBot => {
   const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, assignedSkills: _assignedSkills, mainThreadChoice: _mainThreadChoice, ...rest } = bot;
   // Clients see Ask while an elevated grant awaits the desktop's confirmation, never a grant that may still roll back.
   const visible = approvalGrant && !approvalGrant.threadOnly
@@ -2930,7 +2930,7 @@ const wireBot = (bot: BotRecord): WireBot => {
   const awaiting = threadsAwaitingTeammates();
   return { ...visible, waitingForTeammates: awaiting.has(bot.threadId) && !threadBusy(bot.id, bot.threadId),
     mainThreadId: botMainThread(bot.id),
-    avatarUrl: visible.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
+    avatarUrl: visible.avatarUrl ?? null, ...(tasks ? { tasks: (onlyThreadId === undefined ? tasks : tasks.filter((task) => task.threadId === onlyThreadId)).map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
 };
 
 function toolScopeForTurn(botId: string) {
@@ -3935,7 +3935,7 @@ const botLink = createBotLinkHost({ dataDir: DATA_DIR, environmentId: ENVIRONMEN
       for (const threadId of directThreadIds) {
         settleTrackedRequest(threadId);
         const bot = store.botByThread(threadId);
-        if (bot) broadcast({ kind: "bot", bot: wireBot(bot) });
+        if (bot) botFrames.send(bot, threadId);
       }
       // Node changes are the release signal for messages parked behind a settled coordination: no later turn.completed arrives.
       if (directThreadIds.size > 0) drainQueuedSends();
@@ -4548,7 +4548,7 @@ store.onChange((change) => {
       break;
     case "bot": {
       const bot = store.bot(change.botId);
-      if (bot) broadcast({ kind: "bot", bot: { ...wireBot(bot), ...pageIfThreadChanged(bot.id, bot.threadId) } });
+      if (bot) botFrames.send(bot, change.threadId, pageIfThreadChanged(bot.id, bot.threadId));
       if (bot) for (const group of store.groups.filter((candidate) => candidate.memberIds.includes(bot.id))) settleRoomFloor(group);
       break;
     }
@@ -4629,7 +4629,7 @@ interface SseClient {
   admin: boolean;
   /** On a Team Cloud, who the stream is for: its config frames carry that person's own profile. */
   person?: SessionRecord;
-  screens: boolean;
+  screens: boolean; /** Takes bot frames that carry only the changed thread (`?frames=thread`). */ threadFrames: boolean;
   appWindow: boolean; /** The phone behind this stream, as routes/phones.ts keys it: while it is open, that phone gets no push. */ pushKey?: string;
   /** Revoking or expiring this session must end the stream, not just future requests. */
   sessionId?: string;
@@ -4724,7 +4724,7 @@ const SSE_HEARTBEAT_MS =
 let lastSeq = 0;
 const replayBuffer = new ReplayBuffer();
 
-const wants = (client: SseClient, kind: string) => kind !== "screen" || client.screens;
+const wants = (client: SseClient, kind: string, form?: BotFrameForm) => (kind !== "screen" || client.screens) && takesFrame(threadFramesFor(client), form); /** A stream narrowed to what one person may see derives fields from the bot's whole thread list, so it keeps whole frames. */ const threadFramesFor = (client: SseClient) => client.threadFrames && client.viewer.kind === "all" && !visibleTo(client.viewer).filtersThreads; const botFrames = createBotFrames<BotRecord>({ broadcast, wire: (bot, onlyThreadId) => wireBot(bot, onlyThreadId), wholeListeners: () => Array.from(sseClients).some((client) => !threadFramesFor(client)), lastSeq: () => lastSeq });
 
 function cursorSeq(raw: string | string[] | undefined): number | null {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -4736,7 +4736,7 @@ function cursorSeq(raw: string | string[] | undefined): number | null {
 }
 
 /** `adminOnly` frames are withheld from client sessions, live and on replay; a `person`'s frames reach only their streams. */
-function broadcast(payload: Record<string, unknown>, options: { adminOnly?: boolean; person?: string } = {}) {
+function broadcast(payload: Record<string, unknown>, options: { adminOnly?: boolean; person?: string; frames?: BotFrameForm } = {}) {
   // Close stale email streams before any further workspace data is delivered.
   sessions.recheckMembership();
   const seq = ++lastSeq;
@@ -4745,10 +4745,10 @@ function broadcast(payload: Record<string, unknown>, options: { adminOnly?: bool
   // Members get config as configured-or-not and every bot without its server alias.
   const clientPayload = options.adminOnly ? null : kind === "config" ? configForAccess(payload as ReturnType<typeof configStatus>, false) : memberFramePayload(payload);
   const clientFrame = clientPayload === null ? null : clientPayload === payload ? frame : `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...clientPayload, seq })}\n\n`;
-  replayBuffer.push({ seq, kind, frame, clientFrame, payload, ...(options.person ? { person: options.person } : {}) }); if (kind === "notify") phonePush.offer({ notification: payload.notification, seq }, (key) => pushReaches(key, payload, seq, options)); if (kind === "notify" || kind === "bot" || kind === "runtime") phoneActivity.offer(payload, (key) => pushReaches(key, payload, seq, options));
+  replayBuffer.push({ seq, kind, frame, clientFrame, payload, ...(options.person ? { person: options.person } : {}), ...(options.frames ? { frames: options.frames } : {}) }); if (kind === "notify") phonePush.offer({ notification: payload.notification, seq }, (key) => pushReaches(key, payload, seq, options)); if (kind === "notify" || kind === "bot" || kind === "runtime") phoneActivity.offer(payload, (key) => pushReaches(key, payload, seq, options));
   const ownGroups: OwnGroupFrames = new Map();
   for (const client of Array.from(sseClients)) {
-    if (!wants(client, kind) || !teamOwners.reaches(client.ask, payload) || !streamFor(client, options.person)) continue;
+    if (!wants(client, kind, options.frames) || !teamOwners.reaches(client.ask, payload) || !streamFor(client, options.person)) continue;
     // Admin-only frames (clientFrame null) never reach members, and a member never falls back to the admin frame.
     const out = CLOUD_TEAM && kind === "config" && clientFrame !== null ? teamConfigFrame(client, seq, payload)
       : memberFrame(client, seq, payload, client.admin ? frame : clientFrame, ownGroups);
@@ -5242,7 +5242,7 @@ const cacheKeepWarm = createCacheKeepWarm({
   book: bookForkUsage,
   changed: ({ threadId }) => {
     const bot = store.botByThread(threadId);
-    if (bot) broadcast({ kind: "bot", bot: wireBot(bot) });
+    if (bot) botFrames.send(bot, threadId);
   },
 });
 cacheKeepWarmStatus = (threadId) => cacheKeepWarm.status(threadId);
@@ -6819,7 +6819,7 @@ bus.subscribe((event: RuntimeEvent) => {
         settlingTurns.add(event.threadId);
         liveTurnByThread.delete(event.threadId);
         const routineReportThread = routineRun ? routineSourceThread(routineRun) : null;
-        if (!routineReportThread && (!internal || reviewAnswer) && (!routineRun || routineRunNeedsReview(routineRun, reply) || personWaits.open(event.threadId))) store.patchTask(bot.id, event.threadId, { unread: true });
+        if (!routineReportThread && (!internal || reviewAnswer) && (!routineRun || routineRunNeedsReview(routineRun, reply) || personWaits.open(event.threadId))) store.patchTask(bot.id, event.threadId, { unread: true }, { turnEnd: true });
         if (routineRun && routineReportThread !== event.threadId) automationReports.runSettled(routineRun, completedTurnId);
         else if ((!routineRun || routineRun.status === "completed") && (!internal || reviewAnswer) && !computerSelectionTurns.get(event.threadId)?.selected && doneNotice.atTurnEnd({ botId: bot.id, threadId: event.threadId, review: reviewAnswer, ok: event.ok, routine: Boolean(routineRun) }) === "notify" && !personWaits.atTurnEnd(event.threadId, reply) && !unaskedBotThread(settledTask, store.activePath(event.threadId))) {
           notify(buildNotification("done", bot, event.threadId, routineRun ? reply || routineRun.output || routineRun.routineName : reply, { avatarUrl: bot.avatarUrl }), routineRun ? { routine: true } : reviewAnswer ? { summary: true } : undefined);
@@ -14628,7 +14628,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const pushKey = phoneKey(auth);
       const client: SseClient = {
         res, ...streamView(auth, viewer), ...(pushKey ? { pushKey } : {}),
-        screens: url.searchParams.get("screens") !== "off", appWindow: url.searchParams.get("window") === "1",
+        screens: url.searchParams.get("screens") !== "off", threadFrames: url.searchParams.get("frames") === "thread", appWindow: url.searchParams.get("window") === "1",
         backpressured: false,
         // A comment frame keeps intermediaries from idling the connection; a data frame resets EventSource's own liveness watchdog. Heartbeats carry no id.
         close: openSseHeartbeat(res, {
@@ -14654,7 +14654,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const resumed =
         since !== null &&
         since <= lastSeq &&
-        replayBuffer.covers(since, lastSeq) &&
+        replayBuffer.covers(since, lastSeq) && botFrames.resumable(since, threadFramesFor(client)) &&
         // A replay is judged by today's audience and cannot withdraw what an audience change hid: snapshot instead.
         !(viewer.kind === "member" && audienceChangedAt > 0 && since <= audienceChangedAt);
       res.write(
@@ -14666,7 +14666,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       );
       if (resumed) {
         for (const buffered of replayBuffer) {
-          if (buffered.seq <= since || !wants(client, buffered.kind) || (buffered.payload && !teamOwners.reaches(client.ask, buffered.payload)) || !streamFor(client, buffered.person)) continue;
+          if (buffered.seq <= since || !wants(client, buffered.kind, buffered.frames) || (buffered.payload && !teamOwners.reaches(client.ask, buffered.payload)) || !streamFor(client, buffered.person)) continue;
           const frame = CLOUD_TEAM && buffered.kind === "config" && buffered.clientFrame !== null && buffered.payload
             ? teamConfigFrame(client, buffered.seq, buffered.payload)
             : buffered.payload
@@ -15420,7 +15420,7 @@ const gracefulShutdown = createGracefulShutdown({
         console.error("Session persistence failed during shutdown; account sign-in will be required again.");
         exitCode = 1;
       }
-      closeMessageDb();
+      flushLaterSaves(); closeMessageDb();
       mcpOAuth.dispose();
       releaseDataDirLeaseAtExit();
       process.exit(restartRequested && exitCode === 0 ? RESTART_EXIT_CODE : exitCode);

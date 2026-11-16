@@ -17,6 +17,7 @@ import { INSTRUCTION_FILE, restorePaths, validRelative } from "./workspace-backu
 import { cjkSearchText } from "./cjk-search.ts";
 import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, managedTaskSkillLink, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
+import { flushLaterSaves } from "./save-batch.ts";
 import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceLeftBehind } from "../shared/workspace-backup.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
@@ -276,6 +277,7 @@ function databaseCounts(path: string): { threads: number; messages: number } {
 /** The existing maintenance gate owns exclusivity until this worker has exited.
  * Keep synchronous file validation/fsync intact, but off the request thread. */
 export async function createWorkspaceBackup(dataDir: string, options: CreateWorkspaceBackupOptions): Promise<CreatedWorkspaceBackup> {
+  flushLaterSaves();
   const source = new URL("./workspace-backup.worker.ts", import.meta.url);
   // Assign ownership before the worker can create staging, even if it crashes before reporting back.
   const jobId = randomUUID();

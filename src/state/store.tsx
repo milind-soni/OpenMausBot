@@ -15,7 +15,7 @@ import type { NotificationLogEntry } from "../../shared/notification";
 import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, closeTrayUnlessShown, closeUnpinnedTray, openBot, openThread, visibleNotificationThread, withRememberedTrayPin } from "./thread-navigation";
-import { patchGroupTask } from "./thread-edits";
+import { patchGroupTask } from "./thread-edits"; import { unreadBeyondFrame, wholeBotFrame } from "./bot-thread-frame";
 import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
@@ -711,7 +711,7 @@ export type Action =
   | { type: "botDeletionPending"; botId: string; on: boolean }
   | { type: "duplicateBot"; botId: string }
   | { type: "markUnread"; botId: string }
-  | { type: "botPatched"; bot: BotAnnouncement }
+  | { type: "botPatched"; bot: BotAnnouncement; tasksPartial?: true }
   | { type: "messageAdded"; threadId: string; message: Message }
   | { type: "messagePatched"; threadId: string; message: Message }
   | { type: "optimisticMessageRemoved"; threadId: string; sendId: string; restoreLeafId?: string | null }
@@ -1110,6 +1110,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot(withMascotMotion(state, action.botId, "surprise"), action.botId, (b) => ({ ...b, unread: true }));
     case "botPatched": {
       const before = state.bots.find((b) => b.id === action.bot.id);
+      if (action.tasksPartial) return before ? reducer(state, { type: "botPatched", bot: wholeBotFrame(before, action.bot) }) : state;
       if (!before) {
         const added = {
           ...state,
@@ -3091,16 +3092,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rawDispatch({ type: "forkPanelActive", threadId: frame.threadId, activeLeafId: frame.activeLeafId });
           break;
         case "bot": {
-          const bot = frame.bot as BotAnnouncement;
+          const bot = frame.bot as BotAnnouncement, serverUnread = bot.unread;
           markVisibleBotThreadsRead(stateRef.current, bot, document.hasFocus(), (_path, threadId, newest) => {
             const read = `${bot.id}:${threadId}`, open = readsInFlight.get(read);
             if (!open) sendRead(bot.id, threadId, read, newest);
             else if (newest > open.covers) readsInFlight.set(read, { covers: newest, again: true });
           });
-          rawDispatch({
-            type: "botPatched",
-            bot: withTaskWrites({ ...bot, ...botPatchQueue.overlayFor(bot.id) }),
-          });
+          if (frame.tasksPartial && serverUnread && !bot.unread) bot.unread = unreadBeyondFrame(stateRef.current.bots.find((known) => known.id === bot.id), bot);
+          rawDispatch({ type: "botPatched", bot: withTaskWrites({ ...bot, ...botPatchQueue.overlayFor(bot.id) }), ...(frame.tasksPartial ? { tasksPartial: true as const } : {}) });
           break;
         }
         case "group": {

@@ -19,6 +19,7 @@ import {
 import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
+import { flushLaterSaves } from "./save-batch.ts";
 import { Store, toWireTask, type BotRecord } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
@@ -434,16 +435,19 @@ describe("Store", () => {
     const bot = store.createBot({}, { seedMessages: false });
     store.setResumeCursor(bot.id, "claude", { sessionId: "s-1" }, bot.threadId);
     store.patchTask(bot.id, bot.threadId, { lastContextModel: "claude-sonnet-5" });
+    flushLaterSaves();
     const saved = statSync(file).ino;
     const events: unknown[] = [];
     store.onChange((change) => events.push(change));
 
     store.setResumeCursor(bot.id, "claude", { sessionId: "s-1" }, bot.threadId);
     store.patchTask(bot.id, bot.threadId, { lastContextModel: "claude-sonnet-5" });
+    flushLaterSaves();
     expect(statSync(file).ino).toBe(saved);
-    expect(events).toEqual([{ type: "bot", botId: bot.id }]);
+    expect(events).toEqual([{ type: "bot", botId: bot.id, threadId: bot.threadId }]);
 
     store.setResumeCursor(bot.id, "claude", { sessionId: "s-2" }, bot.threadId);
+    flushLaterSaves();
     expect(statSync(file).ino).not.toBe(saved);
     expect(new Store(selection).taskByThread(bot.id, bot.threadId)?.resumeCursors).toEqual({ claude: { sessionId: "s-2" } });
   });
@@ -453,11 +457,13 @@ describe("Store", () => {
     const store = new Store(selection);
     const bot = store.createBot({ name: "Original" }, { seedMessages: false });
     store.setResumeCursor(bot.id, "claude", { sessionId: "s-1" }, bot.threadId);
+    flushLaterSaves();
     const edited = JSON.parse(readFileSync(file, "utf8"));
     edited[0].name = "Edited on disk";
     writeFileSync(file, JSON.stringify(edited, null, 2));
 
     store.setResumeCursor(bot.id, "claude", { sessionId: "s-2" }, bot.threadId);
+    flushLaterSaves();
     expect(JSON.parse(readFileSync(file, "utf8"))[0].name).toBe("Original");
   });
 
@@ -869,6 +875,7 @@ describe("Store", () => {
     // Providers occasionally report a cache count larger than input.
     store.addTaskUsage(bot.id, bot.threadId, { input: 10, output: 0, cachedInput: 20, costUsd: null });
     expect(store.addTaskUsage(bot.id, "no-such-thread", { input: 5, output: 5, costUsd: null })).toBeNull();
+    flushLaterSaves();
 
     const reloaded = new Store(selection);
     expect(reloaded.taskByThread(bot.id, bot.threadId)?.usage).toMatchObject({
@@ -1646,6 +1653,7 @@ describe("Store", () => {
     const bot = store.createBot();
     store.setResumeCursor(bot.id, "claude", "sess-abc");
     store.setResumeCursor(bot.id, "codex", "thread-xyz");
+    flushLaterSaves();
 
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)?.resumeCursors).toEqual({ claude: "sess-abc", codex: "thread-xyz" });
