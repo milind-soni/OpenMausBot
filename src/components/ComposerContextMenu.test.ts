@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-// The composer's context button: how full the conversation is, with compacting and starting fresh one click away.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
