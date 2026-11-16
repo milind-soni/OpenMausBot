@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { compactedSinceReading } from "@/lib/context-warning";
 import { contextReading, contextRowLabel, contextRows, roomContextReadings, type ContextReading, type ContextRow } from "@/lib/context-usage";
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 import { formatTokens, type ContextTone } from "@/lib/usage";
 import { api } from "@/state/api";
 import { visibleMessages, type Bot, type Group, type Message } from "@/state/store";
@@ -35,14 +36,15 @@ function tokensLine(reading: ContextReading): string {
     : t("contextMenu.tokens", { tokens: formatTokens(reading.tokens) });
 }
 
-function Meter({ reading, name }: { reading: ContextReading; name?: string }) {
-  const used = reading.percent === undefined ? tokensLine(reading) : t("contextMenu.used", { percent: reading.percent });
+function Meter({ reading, name, detailed }: { reading: ContextReading; name?: string; detailed: boolean }) {
+  const tokens = detailed ? tokensLine(reading) : "";
+  const used = reading.percent === undefined ? tokens : t("contextMenu.used", { percent: reading.percent });
   return (
     <div data-context-meter={reading.percent ?? ""} className="flex flex-col gap-1.5 px-2 py-1">
       <div className="flex items-baseline gap-3 text-[13px] leading-[18px]">
         <span className={cn("min-w-0 truncate font-medium tabular-nums", TONE_INK[reading.tone] || "text-ink")}>{name ?? used}</span>
         <span className="ms-auto shrink-0 text-[12px] leading-4 tabular-nums text-ink-tertiary">
-          {name ? used : reading.percent === undefined ? "" : tokensLine(reading)}
+          {name ? used : reading.percent === undefined ? "" : tokens}
         </span>
       </div>
       {reading.percent !== undefined && (
@@ -87,7 +89,7 @@ const lastBreakdown = new Map<string, { moment: string; breakdown: ContextBreakd
 const newestRequest = new Map<string, number>();
 let requests = 0;
 
-/** The engine's own count, asked for while the panel is open and again whenever a turn starts or ends. The last answer
+/** The engine's own count, asked for while the panel is open in Advanced mode and again whenever a turn starts or ends. The last answer
  * shows until the new one lands; none is asked for or shown between a summary or fresh start and the end of the next turn. */
 function useContextBreakdown(bot: Bot | undefined, open: boolean): ContextBreakdown | null {
   const id = bot?.id;
@@ -122,7 +124,7 @@ function useContextBreakdown(bot: Bot | undefined, open: boolean): ContextBreakd
   return last?.moment === moment ? last.breakdown : null;
 }
 
-function ChatContext({ bot, reading, breakdown, onDone }: { bot: Bot; reading: ContextReading | null; breakdown: ContextBreakdown | null; onDone: () => void }) {
+function ChatContext({ bot, reading, breakdown, detailed, onDone }: { bot: Bot; reading: ContextReading | null; breakdown: ContextBreakdown | null; detailed: boolean; onDone: () => void }) {
   const compact = useContextAction();
   const fresh = useContextAction();
   const messages = visibleMessages(bot);
@@ -132,7 +134,7 @@ function ChatContext({ bot, reading, breakdown, onDone }: { bot: Bot; reading: C
   return (
     <>
       <div className={MENU_LABEL}>{t("contextMenu.title")}</div>
-      {reading ? <Meter reading={reading} /> : <p className={MENU_NOTE}>{t("contextMenu.empty")}</p>}
+      {reading && (detailed || reading.percent !== undefined) ? <Meter reading={reading} detailed={detailed} /> : <p className={MENU_NOTE}>{t("contextMenu.empty")}</p>}
       {rows && <Breakdown rows={rows} />}
       {breakdown?.autoCompact === true && <p className={MENU_NOTE}>{t("contextMenu.providerCompacts")}</p>}
       <div className={MENU_SEPARATOR} />
@@ -152,7 +154,7 @@ function ChatContext({ bot, reading, breakdown, onDone }: { bot: Bot; reading: C
   );
 }
 
-function RoomContext({ group, members }: { group: Group; members: readonly Bot[] }) {
+function RoomContext({ group, members, detailed }: { group: Group; members: readonly Bot[]; detailed: boolean }) {
   const { pending, run } = useContextAction();
   const [target, setTarget] = useState<string | null>(null);
   const readings = roomContextReadings(group, members);
@@ -162,7 +164,7 @@ function RoomContext({ group, members }: { group: Group; members: readonly Bot[]
       {!readings.length && <p className={MENU_NOTE}>{t("contextMenu.roomEmpty")}</p>}
       {readings.map(({ bot, reading, requested }) => (
         <div key={bot.id} data-context-member={bot.id} className="flex flex-col">
-          <Meter reading={reading} name={bot.name} />
+          <Meter reading={reading} name={bot.name} detailed={detailed} />
           {requested
             ? <p className={MENU_NOTE}>{t("contextWarning.roomRequested")}</p>
             : <button type="button" data-context-compact className={MENU_ROW} disabled={pending} title={t("contextWarning.roomHint")}
@@ -182,7 +184,8 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
   const trigger = useRef<HTMLButtonElement>(null);
   const close = () => { setOpen(false); trigger.current?.focus(); };
   usePopoverDismiss(open, root, close);
-  const breakdown = useContextBreakdown(group ? undefined : bot, open);
+  const advanced = useAdvancedMode();
+  const breakdown = useContextBreakdown(group || !advanced ? undefined : bot, open);
   if (!bot && !group) return null;
   const context = bot && currentContext(bot, visibleMessages(bot));
   const fullest = group
@@ -199,7 +202,7 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
       {open && (
         <div role="dialog" aria-label={t("contextMenu.title")} data-context-panel
           className={cn("animate-pop-in absolute bottom-full end-0 z-50 mb-2 max-h-[min(28rem,calc(100dvh-8rem))] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain", MENU_SHEET)}>
-          {group ? <RoomContext group={group} members={members ?? []} /> : bot && <ChatContext bot={bot} reading={fullest ?? null} breakdown={breakdown} onDone={close} />}
+          {group ? <RoomContext group={group} members={members ?? []} detailed={advanced} /> : bot && <ChatContext bot={bot} reading={fullest ?? null} breakdown={breakdown} detailed={advanced} onDone={close} />}
         </div>
       )}
     </span>
