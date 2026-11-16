@@ -712,9 +712,33 @@ test("a live but unrelated Windows pid reused within the same boot is treated as
  * The Windows liveness probes faked on any host: kill answers EPERM for the given pids (the OS answer
  * for a pid this account cannot signal — live processes of another user, and exited processes that a
  * handle still keeps referenced), tasklist answers from a PATH shim, and powershell.exe under a faked
- * SystemRoot. On Windows 11 wmic is absent, so the PATH shim intentionally carries no wmic.
+ * SystemRoot. On Windows 11 wmic is absent, so the PATH shim intentionally carries no wmic. On Windows
+ * itself the shims cannot execute, so only the platform and kill fakes apply and the real tasklist and
+ * powershell answer for themselves.
  */
 function fakeWindowsHost(t, { epermPids = [], tasklist, powershell = null } = {}) {
+  const realWindows = process.platform === "win32";
+  const priorPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { ...priorPlatform, value: "win32" });
+  const eperm = new Set(epermPids);
+  const priorKill = process.kill;
+  process.kill = (pid, signal) => {
+    if (eperm.has(pid)) throw Object.assign(new Error(`kill EPERM: ${pid}`), { code: "EPERM" });
+    return priorKill.call(process, pid, signal);
+  };
+  const priorEnv = {};
+  for (const name of ["PATH", "SystemRoot"]) priorEnv[name] = process.env[name];
+  t.after(() => {
+    Object.defineProperty(process, "platform", priorPlatform);
+    process.kill = priorKill;
+    for (const name of Object.keys(priorEnv)) {
+      if (priorEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = priorEnv[name];
+    }
+  });
+
+  if (realWindows) return;
+
   const { root } = temporaryDirectory("windows-tools");
   const binDir = path.join(root, "bin");
   mkdirSync(binDir);
@@ -732,37 +756,18 @@ function fakeWindowsHost(t, { epermPids = [], tasklist, powershell = null } = {}
     const rows = powershell.map((pid) => `  *"ProcessId=${pid}"*) echo 1 ;;`).join("\n");
     script(path.join(bin, "powershell.exe"), `case "$*" in\n${rows}\n  *) : ;;\nesac`);
   }
-
-  const priorPlatform = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", { ...priorPlatform, value: "win32" });
-  const eperm = new Set(epermPids);
-  const priorKill = process.kill;
-  process.kill = (pid, signal) => {
-    if (eperm.has(pid)) throw Object.assign(new Error(`kill EPERM: ${pid}`), { code: "EPERM" });
-    return priorKill.call(process, pid, signal);
-  };
-  const priorEnv = {};
-  for (const name of ["PATH", "SystemRoot"]) priorEnv[name] = process.env[name];
   process.env.PATH = binDir;
   process.env.SystemRoot = systemRoot;
-  t.after(() => {
-    Object.defineProperty(process, "platform", priorPlatform);
-    process.kill = priorKill;
-    for (const name of Object.keys(priorEnv)) {
-      if (priorEnv[name] === undefined) delete process.env[name];
-      else process.env[name] = priorEnv[name];
-    }
-  });
 }
 
 /** The record a Windows build leaves on disk: no boot id, no pid namespace, no start ticks. */
-function windowsLeaseRecord(pid) {
+function windowsLeaseRecord(pid, createdAt = Date.now() - 60_000) {
   return {
     version: 1,
     pid,
     host: hostname(),
     token: randomUUID(),
-    createdAt: Date.now() - 60_000,
+    createdAt,
     boot: null,
     uptime: 1,
     ns: null,
@@ -770,11 +775,19 @@ function windowsLeaseRecord(pid) {
   };
 }
 
-function plantWindowsChildLease(dataDir, pid) {
+function plantWindowsChildLease(dataDir, pid, createdAt) {
   const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
   mkdirSync(path.dirname(childPath));
-  writeFileSync(childPath, `${JSON.stringify(windowsLeaseRecord(pid))}\n`, { mode: 0o600 });
+  writeFileSync(childPath, `${JSON.stringify(windowsLeaseRecord(pid, createdAt))}\n`, { mode: 0o600 });
   return childPath;
+}
+
+/** A pid the real process list shows as running, for the Windows-host runs where no shim can fake one. */
+function runningPid(t) {
+  const child = spawn(process.execPath, ["--eval", "setInterval(()=>{}, 1_000);"], { stdio: "ignore" });
+  assert.ok(child.pid);
+  t.after(() => child.kill());
+  return child.pid;
 }
 
 test("an exited Windows server child that still answers EPERM no longer blocks startup", async (t) => {
@@ -800,6 +813,7 @@ test("an exited Windows lease owner that still answers EPERM is retired, not ser
 });
 
 test("a Windows zombie is still dead when tasklist cannot answer and the process list does", async (t) => {
+  if (process.platform === "win32") return t.skip("the tool-failure fixtures are POSIX shims; real Windows probes cannot be made to fail");
   const zombiePid = await exitedPid();
   fakeWindowsHost(t, { epermPids: [zombiePid], tasklist: "error", powershell: [process.pid] });
   const { dataDir } = temporaryDirectory();
@@ -811,15 +825,18 @@ test("a Windows zombie is still dead when tasklist cannot answer and the process
 });
 
 test("a Windows owner this account cannot signal but that still runs keeps blocking startup", async (t) => {
-  const liveForeignPid = await exitedPid();
+  const realWindows = process.platform === "win32";
+  const liveForeignPid = realWindows ? runningPid(t) : await exitedPid();
   fakeWindowsHost(t, { epermPids: [liveForeignPid], tasklist: [liveForeignPid] });
   const { dataDir } = temporaryDirectory();
-  plantWindowsChildLease(dataDir, liveForeignPid);
+  // On Windows the record must postdate the live pid's real creation time, or it reads as a reused pid.
+  plantWindowsChildLease(dataDir, liveForeignPid, realWindows ? Date.now() : undefined);
 
   assert.throws(() => acquireDataDirLease(dataDir), /still shutting down/i);
 });
 
 test("a Windows owner stays alive when the fallback process list still shows it running", async (t) => {
+  if (process.platform === "win32") return t.skip("the tool-failure fixtures are POSIX shims; real Windows probes cannot be made to fail");
   const liveForeignPid = await exitedPid();
   fakeWindowsHost(t, { epermPids: [liveForeignPid], tasklist: "error", powershell: [liveForeignPid] });
   const { dataDir } = temporaryDirectory();
@@ -829,6 +846,7 @@ test("a Windows owner stays alive when the fallback process list still shows it 
 });
 
 test("a Windows owner that can be neither signalled nor listed still fails closed", async (t) => {
+  if (process.platform === "win32") return t.skip("the tool-failure fixtures are POSIX shims; real Windows probes cannot be made to fail");
   const foreignPid = await exitedPid();
   fakeWindowsHost(t, { epermPids: [foreignPid], tasklist: "error" });
   const { dataDir } = temporaryDirectory();
