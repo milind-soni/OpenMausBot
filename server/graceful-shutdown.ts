@@ -4,11 +4,16 @@ export interface GracefulShutdownOptions {
   timeoutMs?: number;
 }
 
+/** Above the engines' kill path (engine-stop.ts: 0.5 s after end of input, 1.5 s after SIGTERM, 1 s after SIGKILL) and the
+ * browsers' close (4 s, then their process trees): engines lead sessions of their own and nothing else stops them. Below the
+ * desktop app's wait for the server (electron/main.mjs) and Docker's default 10 s stop timeout, with the 1 s log flush. */
+export const SHUTDOWN_DEADLINE_MS = 8_000;
+
 /** A wedged provider cannot keep the child alive, and a normal stop clears browser capabilities so no turn bearer outlives it. */
 export function createGracefulShutdown({
   cleanup,
   exit,
-  timeoutMs = 6_000,
+  timeoutMs = SHUTDOWN_DEADLINE_MS,
 }: GracefulShutdownOptions): () => void {
   let started = false;
   return () => {

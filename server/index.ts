@@ -524,7 +524,7 @@ import {
   isTurnEventQuarantined, TURN_ENDED_REFUSAL,
 } from "./turn-dispatch-guard.ts";
 import { createGracefulShutdown } from "./graceful-shutdown.ts";
-import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts";
+import { acquireDataDirLeaseForProcess } from "./data-dir-lease.ts"; import { markEngineRunClean, startEngineRecords } from "./engine-records.ts";
 import { createWorkspaceAccess, describeEdition, editionForSettings, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, licenseWarning, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer, workspaceMembership, type WorkspaceAccess } from "./enterprise.ts";
 import { environmentDescriptor, loadEnvironmentId, OWNER_LENDING, serverVersion } from "./environment.ts"; import { dataFormatAtStart } from "./data-format.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
@@ -663,7 +663,7 @@ const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
 
 dataFormatAtStart("check", DATA_DIR, serverVersion()); ensureDirs();
 // Acquire before any durable identity, sessions, config or Store state is loaded.
-const dataDirLease = acquireDataDirLeaseForProcess(DATA_DIR);
+const dataDirLease = acquireDataDirLeaseForProcess(DATA_DIR); void startEngineRecords(DATA_DIR); // stops what an earlier server left
 let dataDirLeaseReleaseAttempted = false;
 function releaseDataDirLeaseAtExit(): void {
   if (dataDirLeaseReleaseAttempted) return;
@@ -15422,7 +15422,7 @@ const gracefulShutdown = createGracefulShutdown({
       }
       flushLaterSaves(); closeMessageDb();
       mcpOAuth.dispose();
-      releaseDataDirLeaseAtExit();
+      markEngineRunClean(); releaseDataDirLeaseAtExit(); // before the lease: the next server must not sweep this run
       process.exit(restartRequested && exitCode === 0 ? RESTART_EXIT_CODE : exitCode);
     };
     // Streamed text and lines queued after the cleanup flush reach disk before exit; the deadline already elapsed, so the wait is short.
