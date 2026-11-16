@@ -4,9 +4,13 @@ import { t } from "@/lib/i18n";
 /** The colour behind a Simple row, which the status dot on its avatar is ring-cut against. */
 export function rowSurface(selected: boolean): string {
   return selected
-    ? "[--row:var(--color-raised)]"
+    ? "[--row:color-mix(in_srgb,var(--color-accent)_15%,var(--color-panel))]"
     : "[--row:var(--color-panel)] max-md:[--row:var(--color-app)] hover:[--row:color-mix(in_srgb,var(--color-raised)_50%,var(--color-panel))]";
 }
+
+/** LOCAL: the conversation the chat window has open. A tint, a left accent bar and an inset outline, the same mark the Inbox
+ * uses, because `raised` sits only a shade away from `panel` on both the dark and the light skins. */
+export const rowSelectedSurface = "bg-accent/15 shadow-[inset_3px_0_0_0_var(--color-accent)] ring-1 ring-inset ring-accent/30 hover:bg-accent/20";
 
 export type RowActivity = "working" | "teammate" | "queued";
 
