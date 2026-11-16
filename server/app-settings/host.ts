@@ -65,6 +65,8 @@ export interface AppSettingsDeps {
   /** Non-null when the turn is the owner's own (phones.turnOwner); null on a Team Cloud or hosted workspace. */
   turnOwner(turn: Turn): string | null;
   guestDriven(threadId: string): boolean;
+  /** The turn answers a routine, webhook or other automation, owner-written ones included: no lasting move onto this computer. */
+  automated?(turn: Turn): boolean;
   /** The secret card, as request_credential posts it. */
   requestCredential(bot: BotRecord, threadId: string, body: Record<string, unknown>): Promise<{ status: number; body: Record<string, unknown> }>;
   connectorThread(botId: string, threadId: string): { group?: GroupRecord } | null;
@@ -136,6 +138,9 @@ export function createAppSettings(deps: AppSettingsDeps) {
     }
     const parsed = parseValue(entry, body.value);
     if (!parsed.success) return refuse(400, `${entry.label} takes ${entry.allowed}. ${parsed.error.issues.map((issue) => issue.message).join("; ")}`);
+    if (entry.id === "bots.settings" && (parsed.data as { computer?: unknown }).computer === "local" && deps.automated?.(turn)) {
+      return refuse(403, `A routine or automation can't keep a bot on this computer. Nothing changed: say in one line that the person can choose This computer under “Where ${bot.name} works” in Bot's screen, or ask you in their own chat.`);
+    }
     const described = entry.describe?.(parsed.data);
     if (described && "refusal" in described) return refuse(409, described.refusal);
     const budget = spendWrite(turn);

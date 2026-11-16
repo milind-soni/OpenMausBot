@@ -16,6 +16,7 @@ import { botBox, type WrappedSpawn } from "./bot-box/box.ts";
 import type { BoxRequest } from "./bot-box/plan.ts";
 import { homeProgramsDistrusted, serverMayRunFrom, serverPath } from "./bot-box/program-trust.ts";
 import { engineMemory } from "./engine-memory.ts";
+import { ENGINE_TAG_ENV, engineRunTag, engineStopped, recordEngine } from "./engine-records.ts";
 import { engineHomes } from "./engine-homes/engine-homes.ts";
 import type { HomedSpawn } from "./engine-homes/layout.ts";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
@@ -286,9 +287,12 @@ export function spawnCli(
   const { box: _box, engineHome: _engineHome, botWork, ...spawnOpts } = boxed ? options : outsideBoxOptions(resolved.command, options);
   // The box's extra descriptors (its seccomp filter) follow stdio; only a plain three-entry stdio can take them.
   const stdio = boxed?.extraFds.length && Array.isArray(spawnOpts.stdio) && spawnOpts.stdio.length === 3 ? [...spawnOpts.stdio, ...boxed.extraFds] : spawnOpts.stdio;
+  // A server that restarts in place stops what an earlier one left by this tag (engine-records.ts).
+  const tag = process.platform === "win32" ? null : engineRunTag();
   const start = () => spawn(boxed?.command ?? resolved.command, boxed?.args ?? resolved.args, {
     ...spawnOpts,
     ...(boxed ? { env: boxed.env, stdio } : {}),
+    ...(tag ? { env: { ...(boxed?.env ?? spawnOpts.env ?? process.env), [ENGINE_TAG_ENV]: tag } } : {}),
     // POSIX: own group so kill(-pid) reaps child MCP servers; Windows: taskkill /T does it.
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>;
@@ -310,6 +314,7 @@ export function spawnCli(
     } catch {}
     linuxTrees.set(child, tree);
   }
+  if (process.platform !== "win32") recordEngine(child, child.pid ? linuxTrees.get(child)?.get(child.pid) ?? null : null);
   if (process.platform !== "win32" && owner === "bot") {
     rememberEngineSession(child);
     engineMemory.track(child);
@@ -458,7 +463,7 @@ export function killCliTree(child: ChildProcess, timeoutMs = 5_000): Promise<boo
   const run = stopCliTree(child, pid, Number.isFinite(timeoutMs) ? Math.max(0, timeoutMs) : 5_000);
   stopping.set(child, run);
   // Remember success, so a delayed caller cannot signal a reused PID/group.
-  void run.then((stopped) => { if (!stopped) stopping.delete(child); });
+  void run.then((stopped) => { if (!stopped) stopping.delete(child); else engineStopped(child); });
   return run;
 }
 

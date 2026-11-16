@@ -162,8 +162,8 @@ describe("container images", () => {
     expect(last(home, "VOLUME")).toBe('["/data"]');
     expect(last(home, "EXPOSE")).toBe("8080");
     expect(last(home, "CMD")).toBe('["node", "/app/dist-server/cloud-home-start.js"]');
-    // Fly's init is PID 1 on a Cloud home, and its supervisor starts as root.
-    expect(last(home, "ENTRYPOINT")).toBeUndefined();
+    // A host that starts a Cloud home with a plain `docker run` gives it no init either.
+    expect(last(home, "ENTRYPOINT")).toBe('["/usr/bin/tini", "-s", "--"]');
     expect(last(home, "HEALTHCHECK")).toContain("http://127.0.0.1:8080/api/health");
     expect(last(chain("runtime"), "ENV")).toMatch(/^AGENT_BROWSER_EXECUTABLE_PATH=\/opt\/openmausbot-browser\/chrome .*NODE_ENV=production$/);
   });

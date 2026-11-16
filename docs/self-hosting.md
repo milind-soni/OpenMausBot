@@ -1201,6 +1201,19 @@ curl -H "Authorization: Bearer $TOKEN" -o usage.csv \
 Dates are inclusive, UTC, at most a year apart; without them you get the
 current month to date.
 
+### Usage caps
+
+By default nothing limits what the bots use. The owner can cap a day's and a
+month's usage, for the whole server and for each bot, in estimated dollars
+and in tokens, under **Settings → Usage → Usage caps**, in `config.json`, or
+for the server's own caps in the environment
+(`OMB_USAGE_CAP_DAILY_USD`, `OMB_USAGE_CAP_MONTHLY_USD`,
+`OMB_USAGE_CAP_DAILY_TOKENS`, `OMB_USAGE_CAP_MONTHLY_TOKENS`,
+`OMB_USAGE_CAP_STOPS`). A reached cap stops new unattended work (routines,
+webhooks, app events, Bot API calls, hand-offs nobody is waiting on) until
+the day or month rolls over, and cuts nothing off mid-turn.
+[Usage caps](usage-caps.md) has every setting and what a person sees.
+
 ### When an engine runs out
 
 When a turn ends on a usage limit (a subscription's 5-hour or weekly limit,
@@ -1534,6 +1547,10 @@ off by default, also tells the bot:
   until something is ready (`curl -f` against a server that is still starting)
   counts as a failing command, which is why the stop is not on by default.
 
+A turn nobody is watching (a routine's, a webhook's) has the guard on and is
+stopped at 20 identical failures in a row, whatever is set here: see "Keeping
+unattended bots from spending on failures".
+
 The note needs an engine that accepts a message in the middle of a turn
 (Claude Code, Codex, Pi, Muse Code). ACP agents cannot take one, so they get
 only the stop, and only if you set it. The note and the stop do not cover bots
@@ -1583,10 +1600,72 @@ apart from the AI's errors, because starting the same work again cannot fix it.
 
 A routine stays on however often it fails.
 
+A failed run starts once more by itself only when a second start can plausibly
+pass: a rate limit, a provider that is overloaded or answered with a temporary
+error, an engine that crashed or was stopped for memory (that start waits for
+room). A tool server that is down, an AI that is signed out, a full disk or an
+engine that could not be started fail the run at once. The second start sends
+one short line saying to finish the run when the engine resumes a session that
+holds the routine's instructions, or replays a conversation small enough to
+still include them. Otherwise, and always on a backup AI, after a usage-limit
+wait or for a routine that calls a /command, it sends the instructions again.
+
+Past these limits, something is held back and says so in one line: on the
+routine's run row, or in the Chief's "Problems to look at" chat.
+
+| Setting | Default | What it bounds |
+| --- | --- | --- |
+| `OMB_ROUTINE_FAILURES_BEFORE_SPACING` | `3` | The runs of one routine that may fail in a row before its next scheduled runs are spaced out. A run that completes, a change to the routine, turning it on again, or a run that failed only because the bot's AI is signed out, out of credit or at its usage limit ends the streak and the spacing. The skipped runs share one row: "Skipped 12 scheduled runs because its last runs failed, so its next tries are spaced out". From `1`. |
+| `OMB_ROUTINE_FAILURE_SPACING_MS` | `3600000` (1 hour) | How long after the failure that starts the spacing the next run waits. From `60000`. |
+| `OMB_ROUTINE_FAILURE_SPACING_MAX_MS` | `14400000` (4 hours) | How long after each later failure the next run waits. Never below `OMB_ROUTINE_FAILURE_SPACING_MS`. |
+| `OMB_CHIEF_INCIDENT_TURNS_PER_HOUR` | `6` | The turns a Chief of Staff is started for problems in an hour, across all the chats it hears about. Past that, the Chief is not started: you are notified of each such problem, and one line in its "Problems to look at" chat counts them, names the first five chats they came from and links the newest. From `1`. |
+| `OMB_STARTUP_ROUTINE_GAP_MS` | `1800000` (30 minutes) | On a server not started by the desktop app, how soon after the start that last ran them routines set to "Also run when OpenMausBot starts" may run again. A start within that time leaves one row per routine: "Not run at 4 starts because OpenMausBot started again soon after the start that last ran it". `0` runs them at every start. |
+| `OMB_ROUTINE_RESTART_STAGGER_MS` | `30000` (30 seconds) | The time between the runs a restart cut off as each starts again, so they do not all start at once. From `0`. |
+| `OMB_BURST_PART_MAX_RESTARTS` | `2` | The times a burst's part, or its merge, starts again after a restart cut it off. Past that the part fails with "Not started again: OpenMausBot restarted while this part ran 3 times.", and the parts are posted as they came instead of merged. From `0`. |
+
+A routine every minute (`* * * * *`) is still accepted and is spaced out the
+same way. Identical failures are told to you and to the Chief once: two
+failures that differ only in ids, paths, long numbers or times count as the
+same, while different exit codes, HTTP statuses or models do not.
+A Chief told of a failure that is this server's own is told not to retry it.
+
+Any value that is not a whole number in range leaves the default. Set them in
+the server's environment and restart it.
+
 ### Hand-offs and unattended turns
 
 A turn with a person waiting in the chat keeps the limits described under
 "A turn that goes silent".
+
+A turn nobody is watching is one a routine, a webhook or an app event started,
+or work a bot handed on from such a turn. Past any of these it is stopped, and
+its thread (and a routine's run row) gets one line saying which:
+
+| Setting | Default | What it bounds |
+| --- | --- | --- |
+| `OMB_UNATTENDED_TURN_MAX_MS` | `14400000` (4 hours) | The time one such turn may work. Time it waits on a person or a computer is not counted. From `60000`. |
+| `OMB_UNATTENDED_TURN_MAX_REQUESTS` | `400` | The requests one such turn may make to its AI. A usage report that names its call counts that call once however often it repeats; reports without a name count one call per step between tool calls; the tool calls count instead when that is the larger number. |
+| `OMB_UNATTENDED_TURN_MAX_DENIALS` | `5` | The permission requests of one such turn that may be denied or go unanswered (each unanswered one waits 15 minutes first). One a person denies is not counted. |
+| `loopGuard.unattendedStopAt`, or `OMB_LOOP_GUARD_UNATTENDED_STOP_AT` | `20` | The times in a row one shell command may fail the same way. For such a turn the loop guard (see "A bot stuck on a failing command") is on whatever `loopGuard.enabled` says, with its note at `loopGuard.steerAt` and its stop here, or at `loopGuard.stopAt` if that is lower. `2`-`1000`. |
+| `OMB_HANDOFF_MAX_FAILURES` | `5` | For work nobody is waiting on: work one request handed to other bots that may fail in a row, with none completing between. At that many the request is stopped with a line naming the last failure. |
+| `OMB_HANDOFF_MAX_TURNS` | `300` | For work nobody is waiting on: the turns one request may hand out in all, across every bot it hands work to. Nothing renews it. Past it no more work is handed out, and the bot that asked still gets one turn to wrap up what came back. |
+
+The three `OMB_UNATTENDED_TURN_*` settings and
+`OMB_LOOP_GUARD_UNATTENDED_STOP_AT` also take `off`; `loopGuard.unattended:
+false` in `config.json` does the same for the loop guard. Any other value that
+is not a whole number in range leaves the default. Set them in the server's
+environment and restart it.
+
+For work nobody is waiting on, work that fails no longer renews a request's
+hand-off limits (64 hand-offs, 96 turns and 48 wake-ups since any work last
+completed): only work that completes does. A request a person made keeps the
+earlier behaviour and none of the limits above end it on failures alone: the
+bot that asked is resumed after each failure and decides. When handed-off work
+failed for a reason in the server's own failure words (not anything the bot
+said), the bot that asked is told: for this server (it could not start a
+process, its disk is full), that sending it again anywhere fails the same way;
+for one teammate's own setup (a tool server down, its AI signed out), which
+teammate, and that another teammate may do it.
 
 ### Pausing every bot
 

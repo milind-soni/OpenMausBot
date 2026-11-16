@@ -17,14 +17,34 @@ test("workspace URLs stay loopback and force the requested noVNC input mode", ()
   assert.equal(watch.hash.includes("autoconnect=true"), true);
   assert.equal(watch.hash.includes("resize=scale"), true);
   assert.equal(watch.hash.includes("password=secret123"), true);
-  assert.equal(watch.hash.includes("view_only=true"), true);
+  assert.equal(watch.searchParams.get("view_only"), "true");
+  assert.equal(watch.hash.includes("view_only"), false);
 
   const interactive = desktopWorkspaceUrl(watch.toString(), true);
-  assert.equal(interactive.hash.includes("view_only=false"), true);
-  assert.equal(interactive.hash.includes("view_only=true"), false);
+  assert.equal(interactive.searchParams.get("view_only"), "false");
+  assert.equal(interactive.hash.includes("view_only"), false);
+  assert.equal(interactive.hash.includes("password=secret123"), true);
+  assert.equal(interactive.search.includes("password"), false);
+  assert.equal(
+    desktopWorkspaceUrl("http://127.0.0.1:6080/vnc.html#password=p&view_only=true", true).hash.includes("view_only"),
+    false,
+  );
   assert.doesNotThrow(() => desktopWorkspaceUrl("https://localhost:6080/vnc.html"));
   assert.doesNotThrow(() => desktopWorkspaceUrl("http://[::1]:6080/vnc.html"));
   assert.throws(() => desktopWorkspaceUrl("https://desktop.example/vnc.html"), /loopback/);
+});
+
+const withoutFragment = (value) => {
+  const url = new URL(value);
+  url.hash = "";
+  return url.toString();
+};
+
+test("switching the input mode changes the request, not only the fragment", () => {
+  const watch = desktopWorkspaceUrl("http://127.0.0.1:6080/vnc.html#autoconnect=true&password=p");
+  const interactive = desktopWorkspaceUrl(watch.toString(), true);
+  assert.notEqual(withoutFragment(watch), withoutFragment(interactive));
+  assert.notEqual(withoutFragment(interactive), withoutFragment(desktopWorkspaceUrl(interactive.toString())));
 });
 
 test("workspace URL errors never echo a secret-bearing input", () => {
@@ -178,6 +198,17 @@ test("manager lays out panes and demotes the old pane before promoting the new o
   assert.equal(views[1].webContents.url.includes("view_only=false"), true);
   await manager.setInteractive(null);
   assert.equal(views.every((view) => view.webContents.url.includes("view_only=true")), true);
+});
+
+test("manager promotes and demotes a pane with a navigation that reloads the page", async () => {
+  const { manager, open, views } = managerFixture();
+  await open("left", 6080);
+  const watching = withoutFragment(views[0].webContents.url);
+  await manager.setInteractive("left");
+  const driving = withoutFragment(views[0].webContents.url);
+  assert.notEqual(driving, watching);
+  await manager.setInteractive(null);
+  assert.equal(withoutFragment(views[0].webContents.url), watching);
 });
 
 test("manager serializes overlapping demotion and promotion calls", async () => {

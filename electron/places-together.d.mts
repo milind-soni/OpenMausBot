@@ -5,6 +5,10 @@ export type BotHome = "computer" | "cloud";
 export interface PlaceBotRow {
   home: BotHome;
   id: string;
+  /** Its address over the link between the two places (`link-<place key>-<id>`): the id of this place's stand-in record
+   * for it, and what a room, a Chief or an automation here names it by. Absent while no link of this Cloud and account
+   * is on; the row is listed all the same. */
+  address?: string;
   threadId: string;
   name: string;
   title?: string;
