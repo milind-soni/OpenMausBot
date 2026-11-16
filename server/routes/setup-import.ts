@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { claudeUserMcpEnabled, DATA_DIR, type AppConfig } from "../config.ts";
 import { lookForGrokBot, removeOldCursorSignIn } from "../grok-local.ts";
-import { createGrokMove, type GrokMove } from "../grok-move-tunnel.ts";
+import { createGrokMove, type GrokMove, type GrokMoveHost } from "../grok-move-tunnel.ts";
 import { applySetupImport, detectSetup, thisMachine, type SetupHost, type SetupMachine } from "../setup-import.ts";
 import type { BusyFlag } from "./config.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -20,6 +20,8 @@ export interface SetupImportRouteDeps {
   machine?: () => SetupMachine;
   dataDir?: string;
   grokMove?: GrokMove;
+  /** Where the Grok Bot connector hands tasks. Absent, the connector only moves Bots. */
+  grokHost?: GrokMoveHost;
 }
 
 export const SETUP_IMPORT_PATH = "/api/setup-import";
@@ -29,12 +31,13 @@ const LOCAL_ONLY = "Only the desktop app on the computer running OpenMausBot can
 const requestSchema = z.object({ skills: z.boolean().optional(), tools: z.boolean().optional() }).strict();
 
 /** GET finds what is new here; POST brings in the chosen kinds. The Grok Bot connector: POST opens the link (a quick
- * tunnel to a listener that serves only the move MCP), GET reads what arrived, DELETE ends it. Only the owner's own
+ * tunnel to a listener that serves only the move MCP) or, with `taken`, lets go of what the person imported; GET reads
+ * what arrived and the last handoffs; DELETE turns it off. Only the owner's own
  * loopback, never a paired device, a browser elsewhere, a bot's shell on a service server, a Cloud home or a hosted server. */
 export function createSetupImportRoutes(deps: SetupImportRouteDeps): RouteHandler {
   removeOldCursorSignIn(deps.dataDir ?? DATA_DIR);
   const machine = deps.machine ?? thisMachine;
-  const grokMove = deps.grokMove ?? createGrokMove();
+  const grokMove = deps.grokMove ?? createGrokMove({ host: deps.grokHost });
   const host: SetupHost = {
     mcpServers: () => deps.cfg.mcpServers ?? {},
     mcpPolicyRefusal: deps.mcpPolicyRefusal,
@@ -60,7 +63,11 @@ export function createSetupImportRoutes(deps: SetupImportRouteDeps): RouteHandle
       const after = Number(url.searchParams.get("after") ?? "0");
       if (!Number.isSafeInteger(after) || after < 0) return json(res, 400, { error: "after must be a number" });
       try {
-        return json(res, 200, await (method === "POST" ? grokMove.connect() : method === "DELETE" ? grokMove.end() : grokMove.look(after)));
+        if (method !== "POST") return json(res, 200, method === "DELETE" ? grokMove.end() : grokMove.look(after));
+        const taken = (await readBody(req, 4_096) as { taken?: unknown } | null)?.taken;
+        if (taken === undefined) return json(res, 200, await grokMove.connect());
+        if (!Number.isSafeInteger(taken) || (taken as number) < 0) return json(res, 400, { error: "taken must be a number" });
+        return json(res, 200, grokMove.taken(taken as number));
       } catch (error) {
         return json(res, 502, { error: error instanceof Error ? error.message : String(error) });
       }

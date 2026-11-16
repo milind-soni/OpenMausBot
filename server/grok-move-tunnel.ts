@@ -1,9 +1,9 @@
-// Moving from Grok Bot over a connector: the link. Grok Bot runs a connector from its own cloud computer, which cannot
-// reach this one, so while the person asks for it this opens a second listener on loopback that serves the move MCP
+// The Grok Bot connector: the link. Grok Bot runs a connector from its own cloud computer, which cannot reach this
+// one, so once the person asks for it this opens a second listener on loopback that serves the move MCP
 // (grok-move-mcp.ts) and nothing else, and a Cloudflare quick tunnel from the bundled cloudflared to that listener.
 // Security: the main API is never tunnelled. The public address answers only POST /mcp/move/<256-bit key>, and the
 // key lives in this process's memory and in the address shown to the app's own window. The link ends when the person
-// ends it, after an hour, when the app quits or when cloudflared exits; what arrived stays in memory until then.
+// turns it off, when the app quits or when cloudflared exits; what arrived stays in memory until then.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -16,10 +16,9 @@ import { fileURLToPath } from "node:url";
 import { minimalCloudflaredEnvironment } from "../electron/managed-companion-guardian.mjs";
 import { resolveCloudflaredBinary } from "../electron/managed-companion-tunnel.mjs";
 import { GROK_EXPORT_MAX_CHARS } from "../shared/grok-import.ts";
-import { createMoveInbox, moveMcp, moveRpcError, type MoveInbox, type MoveMcpAnswer } from "./grok-move-mcp.ts";
+import { createMoveLink, moveMcp, moveRpcError, type HandoffState, type MoveHost, type MoveLink, type MoveMcpAnswer } from "./grok-move-mcp.ts";
 import { readBody } from "./harness/http.ts";
 
-export const MOVE_TTL_MS = 60 * 60 * 1000;
 export const MOVE_PATH_PREFIX = "/mcp/move/";
 /** A document at the importer's cap inside a JSON-RPC envelope. */
 const BODY_MAX = GROK_EXPORT_MAX_CHARS + 64 * 1024;
@@ -29,17 +28,25 @@ export interface GrokConnector {
   /** False where there is no cloudflared to open a link with. */
   available: boolean;
   connectorUrl?: string;
-  expiresAt?: number;
-  /** The link was made and has stopped working: its hour ran out, or cloudflared exited. */
+  /** The link was made and has stopped working: cloudflared exited. */
   stopped?: true;
   /** What arrived after the asked-for `seq`, oldest first, each as the text of one export. */
   arrived: Array<{ seq: number; at: number; text: string }>;
+  /** The last few tasks Grok Bot handed off, newest first. */
+  handoffs: GrokHandoff[];
 }
+
+export interface GrokHandoff { title: string; state: HandoffState; botId: string; threadId: string; at: number }
+
+/** The place a link hands tasks to, and what it shows of them in the app's own window. */
+export interface GrokMoveHost extends MoveHost { recent(): GrokHandoff[] }
 
 export interface GrokMove {
   /** The link to paste into Grok Bot: the one already made while it still works, so pasting it once is enough. */
   connect(): Promise<GrokConnector>;
   look(after: number): GrokConnector;
+  /** The person imported everything up to `seq`: the link lets it go and stays open. */
+  taken(seq: number): GrokConnector;
   end(): GrokConnector;
 }
 
@@ -50,7 +57,7 @@ export function grokMoveCloudflared(env: NodeJS.ProcessEnv = process.env, fromSo
     : { isPackaged: true, resourcesPath: env.OMB_RESOURCES_PATH });
 }
 
-interface Link { connectorUrl: string; expiresAt: number; inbox: MoveInbox; live: boolean; close(): void }
+interface Link { connectorUrl: string; move: MoveLink; live: boolean; close(): void }
 
 function send(res: ServerResponse, answer: MoveMcpAnswer, headers: Record<string, string> = {}) {
   const data = answer.body === undefined ? "" : JSON.stringify(answer.body);
@@ -59,13 +66,13 @@ function send(res: ServerResponse, answer: MoveMcpAnswer, headers: Record<string
 }
 
 /** The whole public surface. Anything but the exact keyed path is a 404 that says nothing about what is here. */
-export function moveListener(path: string, link: () => { inbox: MoveInbox; expiresAt: number } | null, now: () => number) {
+export function moveListener(path: string, link: () => MoveLink | null, now: () => number) {
   const expected = Buffer.from(path);
   return async (req: IncomingMessage, res: ServerResponse) => {
     try {
       const asked = Buffer.from((req.url ?? "").split("?")[0]!);
       const current = link();
-      if (asked.length !== expected.length || !timingSafeEqual(asked, expected) || !current || current.expiresAt <= now()) {
+      if (asked.length !== expected.length || !timingSafeEqual(asked, expected) || !current) {
         return send(res, { status: 404, body: { error: "not found" } });
       }
       if (req.method !== "POST") return send(res, { status: 405, body: { error: "method not allowed" } }, { allow: "POST" });
@@ -80,7 +87,7 @@ export function moveListener(path: string, link: () => { inbox: MoveInbox; expir
           ? moveRpcError(null, -32600, "The request is larger than 4 MB. Split the Bot into several documents with the same bot name and send each one with send_export.", 413)
           : moveRpcError(null, -32700, "Parse error", 400));
       }
-      send(res, moveMcp(message, current, now()));
+      send(res, await moveMcp(message, current, now()));
     } catch {
       if (!res.headersSent) send(res, { status: 500, body: { error: "internal error" } });
       else res.destroy();
@@ -113,8 +120,8 @@ export function createGrokMove(options: {
   binary?: () => string | null;
   spawn?: typeof spawn;
   now?: () => number;
-  ttlMs?: number;
   startTimeoutMs?: number;
+  host?: GrokMoveHost;
 } = {}): GrokMove {
   const now = options.now ?? Date.now;
   const binary = options.binary ?? grokMoveCloudflared;
@@ -126,24 +133,22 @@ export function createGrokMove(options: {
 
   const state = (after = 0): GrokConnector => ({
     available: Boolean(binary()),
-    ...(link?.live ? { connectorUrl: link.connectorUrl, expiresAt: link.expiresAt } : {}),
+    ...(link?.live ? { connectorUrl: link.connectorUrl } : {}),
     ...(link && !link.live ? { stopped: true as const } : {}),
-    arrived: (link?.inbox.arrivals ?? []).filter((arrival) => arrival.seq > after).map(({ seq, at, text }) => ({ seq, at, text })),
+    arrived: (link?.move.inbox.arrivals ?? []).filter((arrival) => arrival.seq > after).map(({ seq, at, text }) => ({ seq, at, text })),
+    handoffs: options.host?.recent() ?? [],
   });
 
   async function open(binaryPath: string): Promise<Link> {
     const path = `${MOVE_PATH_PREFIX}${randomBytes(32).toString("base64url")}`;
-    const expiresAt = now() + (options.ttlMs ?? MOVE_TTL_MS);
-    const inbox = createMoveInbox(() => ++seq);
+    const move = createMoveLink(() => ++seq, options.host);
     let made: Link | null = null;
     let child: ChildProcess | undefined;
-    let timer: NodeJS.Timeout | undefined;
     // A config of its own, so a ~/.cloudflared/config.yml or /etc/cloudflared one with ingress rules is never read.
     const runtime = mkdtempSync(join(tmpdir(), "omb-grok-move-"));
-    const server: Server = createServer(moveListener(path, () => ({ inbox, expiresAt }), now));
+    const server: Server = createServer(moveListener(path, () => move, now));
     const close = () => {
       if (made) made.live = false;
-      clearTimeout(timer);
       process.off("exit", close);
       child?.kill();
       server.close();
@@ -161,10 +166,8 @@ export function createGrokMove(options: {
         { stdio: ["ignore", "ignore", "pipe"], env: minimalCloudflaredEnvironment(), windowsHide: true },
       );
       const address = await tunnelAddress(child, options.startTimeoutMs ?? START_TIMEOUT_MS);
-      made = { connectorUrl: `${address}${path}`, expiresAt, inbox, live: true, close };
+      made = { connectorUrl: `${address}${path}`, move, live: true, close };
       child.once("exit", close);
-      timer = setTimeout(close, Math.max(0, expiresAt - now()));
-      timer.unref();
       return made;
     } catch (error) {
       close();
@@ -185,6 +188,10 @@ export function createGrokMove(options: {
       return state();
     },
     look: (after) => state(after),
+    taken(through) {
+      link?.move.inbox.take(through);
+      return state(through);
+    },
     end() {
       ended += 1;
       link?.close();

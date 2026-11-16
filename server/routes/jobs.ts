@@ -26,7 +26,10 @@ export interface JobRouteDeps {
   recheckMs?: number;
 }
 
-export function createJobRoutes(deps: JobRouteDeps): RouteHandler {
+type JobReaderDeps = Pick<JobRouteDeps, "store" | "coordinator" | "groupThreadIsWorking" | "now">;
+
+/** The job of one conversation, as `visible` may see it; null when there is no such conversation. */
+export function createJobReader(deps: JobReaderDeps) {
   const { store, coordinator } = deps;
   const now = deps.now ?? Date.now;
 
@@ -43,7 +46,7 @@ export function createJobRoutes(deps: JobRouteDeps): RouteHandler {
     return group ? { kind: "room", busy: deps.groupThreadIsWorking(group.id, threadId), queued: queuedChannelSends(threadId) } : null;
   };
 
-  const read = (threadId: string, scope: JobScope, since: number, full: boolean, visible: VisibleSet): JobView | null => {
+  return (threadId: string, scope: JobScope, since: number, full: boolean, visible: Pick<VisibleSet, "thread">): JobView | null => {
     const conversation = conversationOf(threadId);
     if (!conversation) return null;
     const owner = store.botByThread(threadId);
@@ -60,6 +63,45 @@ export function createJobRoutes(deps: JobRouteDeps): RouteHandler {
       visible: (thread) => visible.thread(thread),
     });
   };
+}
+
+/** Holds until `read` gives a version other than `known`, the wait runs out, or the caller lets go (`abandoned`
+ * hands over the stop and returns how to stop listening). No polling but the slow recheck. */
+export function holdJob(store: Pick<Store, "onChange">, read: () => JobView | null, known: string, wait: number,
+  options: { recheckMs?: number; abandoned?: (stop: () => void) => () => void } = {}): Promise<{ view: JobView | null } | { error: unknown }> {
+  return new Promise((answer) => {
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    let done = false;
+    const finish = (next: { view: JobView | null } | { error: unknown }) => {
+      if (done) return;
+      done = true;
+      clearTimeout(settleTimer);
+      clearTimeout(deadline);
+      clearInterval(recheck);
+      unsubscribe();
+      unwatch?.();
+      answer(next);
+    };
+    const look = (always: boolean) => {
+      if (done) return;
+      let next: JobView | null;
+      try { next = read(); } catch (error) { return finish({ error }); }
+      if (always || !next || next.version !== known) finish({ view: next });
+    };
+    const unsubscribe = store.onChange(() => {
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(() => look(false), SETTLE_MS);
+    });
+    const recheck = setInterval(() => look(false), options.recheckMs ?? RECHECK_MS);
+    const deadline = setTimeout(() => look(true), wait);
+    const unwatch = options.abandoned?.(() => finish({ view: null }));
+  });
+}
+
+export function createJobRoutes(deps: JobRouteDeps): RouteHandler {
+  const { store } = deps;
+  const now = deps.now ?? Date.now;
+  const read = createJobReader(deps);
 
   return async ({ res, url, path, method, auth, json }) => {
     const m = /^\/api\/threads\/([\w-]+)\/job$/.exec(path);
@@ -88,33 +130,9 @@ export function createJobRoutes(deps: JobRouteDeps): RouteHandler {
     if (!view) return json(res, 404, { error: "no such conversation" });
     if (!wait || view.version !== known) return json(res, 200, view);
 
-    const held = await new Promise<{ view: JobView | null } | { error: unknown }>((answer) => {
-      let settleTimer: ReturnType<typeof setTimeout> | undefined;
-      let done = false;
-      const finish = (next: { view: JobView | null } | { error: unknown }) => {
-        if (done) return;
-        done = true;
-        clearTimeout(settleTimer);
-        clearTimeout(deadline);
-        clearInterval(recheck);
-        unsubscribe();
-        res.off("close", abandoned);
-        answer(next);
-      };
-      const look = (always: boolean) => {
-        if (done) return;
-        let next: JobView | null;
-        try { next = read(threadId, scope, since, full, visible); } catch (error) { return finish({ error }); }
-        if (always || !next || next.version !== known) finish({ view: next });
-      };
-      const abandoned = () => finish({ view: null });
-      const unsubscribe = store.onChange(() => {
-        clearTimeout(settleTimer);
-        settleTimer = setTimeout(() => look(false), SETTLE_MS);
-      });
-      const recheck = setInterval(() => look(false), deps.recheckMs ?? RECHECK_MS);
-      const deadline = setTimeout(() => look(true), wait);
-      res.on("close", abandoned);
+    const held = await holdJob(store, () => read(threadId, scope, since, full, visible), known, wait, {
+      recheckMs: deps.recheckMs,
+      abandoned: (stop) => { res.on("close", stop); return () => res.off("close", stop); },
     });
     if (res.writableEnded || res.destroyed) return;
     if ("error" in held) throw held.error;
