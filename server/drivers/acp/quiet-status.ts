@@ -314,7 +314,7 @@ export function sampleProcessTree(pid: number, since?: number): Promise<ProcessS
 export const LIMIT_WORDS = /\b429\b|rate.?limit|too many requests|usage limit|quota|GoUsageLimitError|FreeUsageLimitError|insufficient_quota|credits? (?:exhausted|used up)|out of credits/i;
 
 /** How long an engine may stay quiet after a model request failed on a limit before the turn is ended as a usage limit,
- * so the bot carries on with another AI: longer than any retry an engine makes without a provider's retry-after
+ * so a backup the person chose carries on (or the bot waits for the reset): longer than any retry an engine makes without a provider's retry-after
  * (OMB_ACP_LIMIT_QUIET_MS overrides). */
 export const DEFAULT_LIMIT_QUIET_MS = 2 * 60_000;
 export const limitQuietMs = (): number => knob("OMB_ACP_LIMIT_QUIET_MS", DEFAULT_LIMIT_QUIET_MS);
