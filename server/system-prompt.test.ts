@@ -137,10 +137,13 @@ describe("buildSystemPrompt", () => {
       { id: "setup", label: "Setup", text: " Set yourself up." },
       { id: "skill-instructions", label: "Skill instructions", text: " Use the deploy skill." },
       { id: "routine-execution", label: "Routine execution", text: ROUTINE_EXECUTION_PROMPT },
+      { id: "automation-reply", label: "Automation reply", text: AUTOMATION_REPLY_PROMPT },
       { id: "webhook", label: "Webhook provenance", text: WEBHOOK_PROMPT },
     ]);
     expect(built.volatile).toContain("Use the deploy skill.");
     expect(built.volatile).toContain(ROUTINE_EXECUTION_PROMPT);
+    // a routine run that reports elsewhere reads the bot's own cached prefix
+    expect(built.volatile).toContain(AUTOMATION_REPLY_PROMPT);
     expect(built.stable).toBe(`You are Kiwi. Set yourself up.${WEBHOOK_PROMPT}${REPLY_HABITS_PROMPT}`);
   });
 
