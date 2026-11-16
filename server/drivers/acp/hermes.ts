@@ -8,7 +8,7 @@ import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
 import { findCliCandidates, harnessHome, resolveCliSpawn, splitCliString, whichWin } from "../../env-path.ts";
-import { resolveCli, spawnCli } from "../../procs.ts";
+import { killCliTree, resolveCli, spawnCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -288,31 +288,19 @@ export async function fetchHermesAcpModels(
     }
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let hardKillTimer: ReturnType<typeof setTimeout> | undefined;
     const done = (out: { id: string; label: string; custom: true }[]) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      try {
-        if (child.kill()) {
-          hardKillTimer = setTimeout(() => {
-            try {
-              child.kill("SIGKILL");
-            } catch {}
-          }, 1_000);
-          hardKillTimer.unref?.();
-        }
-      } catch {}
+      // Hermes' own children (its MCP servers) go too: spawnCli started it in a group of its own.
+      void killCliTree(child, 1_000);
       resolve(out);
     };
     timer = setTimeout(() => done([]), hermesAcpModelsTimeoutMs(env));
     child.once("error", () => done([]));
     // A child that already exited makes stdin emit EPIPE, and an unhandled stream 'error' crashes the server.
     child.stdin?.on("error", () => done([]));
-    child.once("close", () => {
-      if (hardKillTimer) clearTimeout(hardKillTimer);
-      done([]);
-    });
+    child.once("close", () => done([]));
 
     let buf = "";
     let id = 0;

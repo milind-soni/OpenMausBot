@@ -45,8 +45,9 @@ export function noStartAlert<T extends Outcome>(routine: Spaced | undefined, run
 /** The routine as the computer's wake and sleep planning should see it: while its runs are spaced out, its next run is the
  * first occurrence at or after the spacing's end (`next` gives a schedule's first occurrence after a time), not one that
  * will only be skipped. */
-export function afterSpacing<R extends Spaced & { enabled: boolean; nextRunAt: number | null; schedule: unknown }, T extends Outcome>(routine: R, runs: readonly T[], now: number, next: (schedule: R["schedule"], after: number) => number | null): R {
-  const spaced = routine.enabled && routine.nextRunAt !== null ? noStartSpacing(routine, runs) : null;
+export function afterSpacing<R extends Spaced & { enabled: boolean; nextRunAt: number | null; schedule: unknown }, T extends Outcome>(routine: R, runs: readonly T[], now: number, next: (schedule: R["schedule"], after: number) => number | null,
+  spacing: (routine: R, runs: readonly T[]) => { until: number } | null = noStartSpacing): R {
+  const spaced = routine.enabled && routine.nextRunAt !== null ? spacing(routine, runs) : null;
   if (!spaced || spaced.until <= now || routine.nextRunAt! >= spaced.until) return routine;
   return { ...routine, nextRunAt: next(routine.schedule, spaced.until - 1) };
 }

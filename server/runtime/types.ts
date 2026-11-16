@@ -1,5 +1,6 @@
 // The job runtime's public types: one record for every hand-off between bots, one lifecycle, one wake lane.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
+import type { HostFault } from "../host-fault.ts";
 
 /** Where the work ultimately started. Immutable down the whole tree. */
 export type OriginKind = "person" | "routine" | "outside";
@@ -98,6 +99,9 @@ export interface Assignment {
   status: Status;
   outcome?: Outcome;
   outcomeDetail?: string;
+  /** A failed turn's cause outside the work itself, read from the system's own failure words (never the bot's reply),
+   * when sending the same work again would meet it again. */
+  fault?: HostFault;
   level: Level;
   levelSource: LevelSource;
   /** Turns started for it, including resumes and reruns. */
@@ -138,7 +142,9 @@ export interface Assignment {
   /** Who gave `answer` when the person did not: a bot that passed one on or decided it, or nobody (the default). */
   answeredBy?: Answerer;
   /** On a root only: the budget window since its last durable progress. */
-  budgets?: { since: number; requests: number; executions: number; wakes: number };
+  /** `total`: every turn the root's tree has started, which no progress resets. `failed`: handed-off work that failed
+   * since any last completed. The rest count since the root's last progress. */
+  budgets?: { since: number; requests: number; executions: number; wakes: number; total?: number; failed?: number };
   /** While parked on the person's cards (a root): the ids of the cards the
    * turn left open; the answer arrives when the person acts on them. */
   cards?: string[];
@@ -258,7 +264,8 @@ export interface RunInput {
 export type RunResult =
   /** statusOnly: nothing in `text` for the requester to do (status-reply.ts). */
   | { kind: "completed"; text: string; evidence?: TurnEvidence; statusOnly?: boolean }
-  | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence }
+  /** failure: the system's own words for why the turn failed and the engine's stop reason, apart from anything the bot said. */
+  | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence; failure?: { text: string; stopReason?: string | null } }
   | { kind: "needs_input"; question: string; cards?: string[]; decide?: { default?: string }; evidence?: TurnEvidence }
   /** The turn stopped short (a step cap, a seat it could not get) and the
    * same node continues in place with its next execution. */
@@ -345,6 +352,10 @@ export interface Limits {
   requests: number;
   executions: number;
   wakes: number;
+  /** Turns one root's tree may start in all; progress does not renew it. */
+  totalExecutions: number;
+  /** Handed-off work that may fail in a row, with none completing between, before the root's tree is stopped. */
+  failedInARow: number;
   /** A queued assignment that never started within this is expired. */
   queueMs: number;
   /** No durable progress on a root for this long fails the tree. */
@@ -365,6 +376,8 @@ export const DEFAULT_LIMITS: Limits = {
   requests: 24,
   executions: 48,
   wakes: 48,
+  totalExecutions: 300,
+  failedInARow: 5,
   queueMs: 24 * 60 * 60_000,
   stallMs: 4 * 60 * 60_000,
   turnStallMs: 20 * 60_000,

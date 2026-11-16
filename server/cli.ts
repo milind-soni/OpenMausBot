@@ -27,7 +27,7 @@ import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts"
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
 import { reportableServerVersion, serverVersion } from "./environment.ts";
 import { resolveLoopbackTrust } from "./request-auth.ts";
-import { restartPolicy } from "./restart.ts";
+import { CRASH_EXIT_CODE, crashed, restartLine, restartPolicy } from "./restart.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
@@ -596,7 +596,7 @@ export async function runBrowser(options: CliOptions, io: CliIo = defaultIo()): 
     if (process.platform === "linux" && !options.withDeps) io.error(`on Linux, install Chrome's system libraries with: sudo ${cliCommand("browser install --with-deps")}, then retry ${cliCommand("browser install")} as the user running serve`);
     return 1;
   }
-  io.log("browser installed for this user and data directory; run serve as the same user, then enable it under Settings → Desktops & browser → Built-in browser and per bot");
+  io.log("browser installed for this user and data directory; run serve as the same user, then turn it on in Settings → Desktops & browser and for each bot");
   if (process.platform === "linux" && options.withDeps) io.log(`if serve runs as another user, run ${cliCommand("browser install")} from that user's login shell too`);
   return 0;
 }
@@ -776,7 +776,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   let exited: number | null = null;
   const childExit = new Promise<number>((done) => {
     child.once("error", () => { exited = 1; done(1); });
-    child.once("exit", (code, signal) => { exited = code ?? (signal === "SIGTERM" || signal === "SIGINT" ? 0 : 1); done(exited); });
+    child.once("exit", (code, signal) => { exited = code ?? (signal === "SIGTERM" || signal === "SIGINT" ? 0 : crashed(null, signal) ? CRASH_EXIT_CODE : 1); done(exited); });
   });
   let tunnel: RunningTunnel | null = null;
   let caddy: RunningCaddy | null = null;
@@ -900,7 +900,7 @@ export async function serveUntilStopped(options: CliOptions, run: (options: CliO
   for (;;) {
     const code = await run(launch);
     if (!policy.again(code)) return code;
-    console.log("\nOpenMausBot is starting again to finish installing a copy from the desktop app…");
+    console.log(`\n${restartLine(code, policy.delayMs())}`); if (policy.delayMs() > 0) await new Promise((resume) => setTimeout(resume, policy.delayMs()));
     launch = { ...options, pair: false, open: false };
   }
 }

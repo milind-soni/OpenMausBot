@@ -14,8 +14,8 @@ import {
 import { procHidepid } from "./bot-box/hidepid.ts";
 import { boxMemory, heapSizeArgs } from "./box-memory.ts";
 import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
-import { OOM_SCORE, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
-import { restartPolicy } from "./restart.ts";
+import { OOM_SCORE, protectInit, protectSupervisor, spawnWithOomScore } from "./oom-score.ts";
+import { restartLine, restartPolicy } from "./restart.ts";
 
 const SERVICE_USER = "maus";
 const SECRETS_FD = 3;
@@ -395,6 +395,8 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   const env = root ? { ...processEnv, ...readCloudSecretsFile(home) } : processEnv;
   const config = cloudHomeConfiguration(env);
   if (!config) throw new Error("This image runs a My Cloud machine for MausBot Cloud; set its boot contract (docs/cloud-pro.md).");
+  // Linux hands orphans to process 1, and Node waits only for the children it started.
+  if (process.pid === 1) console.warn("cloud home: this supervisor is process 1, so nothing collects the processes bots leave behind and they pile up as zombies. Keep the image's entrypoint (tini), or start the container with --init.");
   // Logged here once: the server child never sees what they are about.
   for (const warning of config.warnings) console.warn(`cloud home: ${warning}`);
   const { server, edge, edgeFiles, tunnelToken, secrets, dropped } = cloudHomeChildEnvironments(config, env, home);
@@ -405,6 +407,7 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
     ids = passwdIds(readFileSync("/etc/passwd", "utf8"), SERVICE_USER);
     if (!ids) throw new Error(`The ${SERVICE_USER} user is missing from this image.`);
     if (protectSupervisor()) console.log("cloud home: the supervisor is never stopped for memory");
+    protectInit();
     // Only the mount point changes owner; anything inside keeps its owner.
     const stat = statSync(home);
     if (stat.uid !== ids.uid || stat.gid !== ids.gid) chownSync(home, ids.uid, ids.gid);
@@ -433,28 +436,32 @@ export function startCloudHome(processEnv: NodeJS.ProcessEnv = process.env) {
   // Names only, never values: what the server does not get from here.
   if (dropped.length) console.log(`cloud home: not passed to the server: ${dropped.join(", ")}`);
   const children: ChildProcess[] = [];
-  let stopping = false;
+  let stopping = false, restartTimer: ReturnType<typeof setTimeout> | undefined;
   const stop = (failed: boolean) => {
     if (stopping) return;
     stopping = true;
+    if (restartTimer) clearTimeout(restartTimer);
     process.exitCode = failed ? 1 : 0;
     for (const child of children) if (child.exitCode === null) child.kill("SIGTERM");
     const force = setTimeout(() => { for (const child of children) if (child.exitCode === null) child.kill("SIGKILL"); }, 20_000);
     force.unref();
   };
-  const watch = (child: ChildProcess, again?: (code: number | null) => boolean) => {
+  const watch = (child: ChildProcess, again?: (code: number | null, signal: NodeJS.Signals | null) => boolean) => {
     children.push(child);
     child.once("error", () => stop(true));
-    child.once("exit", (code) => {
+    child.once("exit", (code, signal) => {
       children.splice(children.indexOf(child), 1);
-      if (!again?.(code)) stop(true);
+      if (!again?.(code, signal)) stop(true);
     });
   };
   const policy = restartPolicy();
   const runServer = () => {
-    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code) => {
-      if (!policy.again(code, stopping)) return false;
-      runServer();
+    if (stopping) return;
+    watch(spawnWithOomScore(OOM_SCORE.server, () => spawnWithSecrets(process.execPath, [...heapSizeArgs(boxMemory().cgroupLimit, server.NODE_OPTIONS), join(here, "index.js")], server, secrets, ids)), (code, signal) => {
+      if (!policy.again(code, stopping, signal)) return false;
+      console.warn(`cloud home: ${restartLine(code, policy.delayMs())}`);
+      if (policy.delayMs() > 0) restartTimer = setTimeout(runServer, policy.delayMs());
+      else runServer();
       return true;
     });
   };

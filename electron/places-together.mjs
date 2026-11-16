@@ -91,6 +91,7 @@ const needsSignIn = (response) => response?.status === 401 || response?.status =
  *   local(route: string, init?: RequestInit): Promise<Response>,
  *   cloudFetch(url: string, init?: RequestInit): Promise<Response>,
  *   napped?(): void,
+ *   address?(home: "computer" | "cloud", botId: string): string | null,
  *   shown(): "computer" | "cloud" | "waking" | "other" | null,
  *   focused(): boolean,
  *   openPlace(home: "computer" | "cloud"): unknown,
@@ -108,14 +109,15 @@ const needsSignIn = (response) => response?.status === 401 || response?.status =
  * wakes, "other" for any other place or screen, null while a page loads.
  * `focused()`: the window is the one the person is using: in front, and the screen not locked. `openPlace(home)`: main's
  * own switch to that place, waking My Cloud as opening it always does. `send`: to the page on screen. `changed()`: the
- * list or the switch changed, so a page that draws it asks again.
+ * list or the switch changed, so a page that draws it asks again. `address(home, botId)`: the address the link between
+ * the two places gives that bot (electron/bot-link-main.mjs), or null while no link of this Cloud and account is on.
  *
  * Security: My Cloud is never asked while it sleeps, since any request would wake it and run up its hours. It is asked
  * only right after the Admin said it is awake, at most once a minute, and only while the person is using the window. What
  * remains is a Cloud that fell asleep in the seconds since the Admin answered; one that only agreed to sleep answers so
  * itself and is left alone. Rows are kept for the Cloud and account they came from, and dropped the moment either changes.
  */
-export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, shown, focused, openPlace, send, changed, now = Date.now,
+export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, address = () => null, shown, focused, openPlace, send, changed, now = Date.now,
   setTimer = setInterval, clearTimer = clearInterval, later = setTimeout, cancelLater = clearTimeout }) {
   /** What each place gave last: its rows, when, and how the last read went. */
   const kept = new Map();
@@ -264,11 +266,19 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     }, over);
   }
 
+  /** The row with the address the link gives its bot, worked out as the row is handed over: the list is the sidebar's
+   * own read and stays whole with the link down; the address is there only while the link is this Cloud's and account's. */
+  function addressed(row) {
+    let linked = null;
+    try { linked = address(row.home, row.id); } catch {}
+    return typeof linked === "string" && linked ? { ...row, address: linked } : row;
+  }
+
   function otherOf(asking) {
     const home = otherHome(asking), known = kept.get(home);
     const state = home === "cloud" && pending?.home === home && (cloud().asleep || known?.state !== "ready") ? "waking"
       : home === "cloud" && cloud().asleep ? "asleep" : known?.state ?? "loading";
-    return { home, state, bots: known?.bots ?? [], ...(typeof known?.newBot === "boolean" ? { newBot: known.newBot } : {}) };
+    return { home, state, bots: (known?.bots ?? []).map((row) => addressed(row)), ...(typeof known?.newBot === "boolean" ? { newBot: known.newBot } : {}) };
   }
 
   return {
@@ -294,6 +304,8 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     refresh,
     /** The signed-in account or My Cloud's address may have changed: lists that belong to another are dropped now. */
     scopeChanged: sameScope,
+    /** The link between the two places came, went or changed hands: rows on screen get their addresses again. */
+    linkChanged() { if (active() && kept.size > 0) tell(); },
     /** A row's click: the other place opens at that bot. Only a bot main listed itself, for this Cloud and account, opens. */
     open(asking, botId) {
       sameScope();

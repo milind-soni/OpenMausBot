@@ -47,3 +47,18 @@ export function protectSupervisor(file: ScoreFile = procFile): boolean {
     return false;
   }
 }
+
+/** The init this supervisor runs under (the Cloud home image's tini, process 1 where the host supplies none): root gives
+ * it the supervisor's score too, since the container ends with its process 1. False where the parent is no such init, or
+ * its score can't be set. */
+export function protectInit(parent: number = process.ppid, file: ScoreFile = procFile): boolean {
+  if (process.platform !== "linux") return false;
+  try {
+    if (file.read(`/proc/${parent}/comm`).trim() !== "tini") return false;
+    const score = `/proc/${parent}/oom_score_adj`;
+    file.write(score, String(OOM_SCORE.supervisor));
+    return file.read(score).trim() === String(OOM_SCORE.supervisor);
+  } catch {
+    return false;
+  }
+}

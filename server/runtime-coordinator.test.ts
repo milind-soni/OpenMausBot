@@ -1982,3 +1982,56 @@ describe("pace: how soon the host must tick", () => {
     expect(w.coordinator.pace()).toBe("idle");
   });
 });
+
+describe("a teammate that cannot start", () => {
+  const CANNOT_START = "spawn /usr/local/bin/claude EAGAIN";
+
+  const resumeAfter = async (result: HostTurnResult) => {
+    const w = world((node) => node.botId === "builder" ? result : undefined);
+    send(w, chief, "gen-1", undefined, builder, "Build it");
+    ended(w, "gen-1");
+    w.coordinator.tick();
+    await flush();
+    w.coordinator.tick();
+    return w.host.runs.find(run => run.resumed)!.text;
+  };
+
+  it("resumes its requester told that the fault is the server's, with no suggestion to send the work again", async () => {
+    const text = await resumeAfter({ ok: false, text: CANNOT_START, failure: { text: CANNOT_START } });
+    expect(text).toContain("Work that failed here did not fail on the work itself: this server could not start another process. Sent again to any teammate on this server, it fails the same way");
+    expect(text).not.toContain("rework=true");
+  });
+
+  it("names the teammate whose own setup failed, and leaves another teammate open", async () => {
+    const text = await resumeAfter({ ok: false, text: "x", failure: { text: "", stopReason: "auth_required" } });
+    expect(text).toMatch(/Work that failed on a teammate's own setup, not on the work: @[^:]+: its AI is signed out\. Sent to that teammate again it fails the same way; another teammate may do it/);
+  });
+
+  it("reads only the system's own failure words, never what the teammate said", async () => {
+    const text = await resumeAfter({ ok: false, text: "The /orders endpoint returns 403 Forbidden, so I stopped." });
+    expect(text).not.toContain("did not fail on the work itself");
+    expect(text).not.toContain("own setup");
+    expect(text).toContain("rework=true");
+  });
+
+  it("unattended work whose requester sends it again on every resume is stopped at the fifth failure: 4 resumed turns", async () => {
+    const w = world();
+    let reworks = 0;
+    w.host.script = (node) => {
+      if (node.botId === "builder") return { ok: false, text: CANNOT_START };
+      reworks += 1;
+      send(w, chief, "gen-1", undefined, builder, "Build it", { rework: true });
+      return { ok: true, text: "sent again" };
+    };
+    begun(w, chief, "gen-1", undefined, { origin: { kind: "outside" } });
+    send(w, chief, "gen-1", undefined, builder, "Build it");
+    ended(w, "gen-1");
+    for (let i = 0; i < 200; i++) { w.coordinator.tick(); await flush(); }
+
+    expect(w.host.runs.filter(run => run.node.botId === "chief")).toHaveLength(4);
+    expect(reworks).toBe(4);
+    expect(w.coordinator.node("gen-1")).toMatchObject({ status: "failed", outcome: "budget",
+      result: `5 hand-offs in a row failed, so this request was stopped. The last one: ${CANNOT_START}` });
+    expect(w.host.reports.filter(report => report.child.id === "gen-1")).toHaveLength(1);
+  });
+});
