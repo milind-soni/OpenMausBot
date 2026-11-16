@@ -10243,5 +10243,15 @@
   "sidebar.newBotOn.noAi": "那里还没有登录任何 AI。",
   "sidebar.newBotOn.onlyThere": "只在那里登录：{ais}。",
   "sidebar.newBotOn.onlyHere": "只在这里登录：{ais}。",
-  "sidebar.newBotOn.needsUpdate": "My Cloud 需要下一次更新才能这样做。"
+  "sidebar.newBotOn.needsUpdate": "My Cloud 需要下一次更新才能这样做。",
+  "server.rooms.linkedAway": "{bot} 所在的 {place} 现在已关闭或休眠。{place} 恢复后它会在这里回复。",
+  "server.rooms.linkedGone": "{bot} 位于 {place}。与 {place} 的连接现在已关闭，连接恢复后它才能在这里回复。",
+  "server.rooms.linkedNotSent": "无法把 {bot} 的发言机会传给 {place}。再次提及 {bot} 可重试。",
+  "server.rooms.linkedNoAnswer": "{bot} 在 {place} 上完成了，但没有给这个群组聊天的回复。",
+  "server.rooms.linkedFailed": "{bot} 无法从 {place} 回复。",
+  "server.rooms.linkedMissing": "{bot} 已不在 {place} 上，所以无法在这里回复。请把它从这个群组聊天的成员中移除。",
+  "server.rooms.linkedEnded": "{place} 已有 30 天没有连接，与它的连接已结束。已不在这个群组聊天中：{bots}。",
+  "room.members.far.place": "位于 {place}",
+  "room.members.far.off": "连接已关闭",
+  "room.members.far.missing": "已不可用"
 }

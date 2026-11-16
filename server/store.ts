@@ -156,7 +156,7 @@ export function titleFromLlm(raw: string): string | null {
 export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   tasks?: TaskRecord[];
   avatarUrl?: string;
-  resumeCursors: Record<string, unknown>; /** Set on a stand-in: the place this bot lives in, and its id there. */ home?: { place: string; placeName: string; botId: string; /** What that place is, as the sidebar's rows say it. */ kind?: "computer" | "cloud" }; mainThreadChoice?: string; // mainThreadChoice ("Set as main thread") is host-only; clients get mainThreadId.
+  resumeCursors: Record<string, unknown>; /** Set on a stand-in: the place this bot lives in, and its id there. */ home?: { place: string; placeName: string; botId: string; /** What that place is, as the sidebar's rows say it. */ kind?: "computer" | "cloud"; /** It cannot be reached now: the link is off or its place is unlinked ("off"), or its place no longer has it ("missing"). */ gone?: "off" | "missing" }; mainThreadChoice?: string; // mainThreadChoice ("Set as main thread") is host-only; clients get mainThreadId.
   /** Elevation journal: Full/Custom runs as Ask until Electron confirms the prepared reply; a marker surviving a restart is revoked on load. */
   approvalGrant?: {
     requestId: string;
@@ -441,8 +441,8 @@ export class Store {
     for (const g of this.groups) {
       g.busyBotId = null;
       delete g.turnStartedAt;
-      if (botsLoaded && !g.dm && g.memberIds.some((id) => !botIds.has(id))) {
-        g.memberIds = g.memberIds.filter((id) => botIds.has(id));
+      if (botsLoaded && !g.dm && g.memberIds.some((id) => !botIds.has(id) && !id.startsWith("link-"))) {
+        g.memberIds = g.memberIds.filter((id) => botIds.has(id) || id.startsWith("link-")); // A member that lives in another of the person's places (server/bot-link/) is no bot of bots.json: the link, which starts later, says whether it is still there.
         groupsMigrated = true;
       }
       const normalized = normalizeGroupDefaultResponder(g.defaultResponder, g.memberIds, Boolean(g.dm));
@@ -1161,10 +1161,10 @@ export class Store {
     const persist = () => { mdb.appendMessage(threadId, full); return full; };
     const committed = command ? runCommand(command, persist) : persist();
     if (committed.id !== full.id) return committed;
-    t.messages.push(full);
+    t.messages.push(full); this.threads.grew(threadId, full);
     t.activeLeafId = full.id;
     if (full.kind === "screen") {
-      for (const pruned of this.pruneScreenFrames(t)) {
+      for (const pruned of this.pruneScreenFrames(t, threadId)) {
         mdb.updateMessage(threadId, pruned);
         this.emit({ type: "message.patch", threadId, message: pruned });
       }
@@ -1181,10 +1181,10 @@ export class Store {
     if (!anchorExists || t.activeLeafId === anchorId) return this.appendMessage(threadId, message);
     const full: Message = { id: newId(), at: Date.now(), ...redactBotAuthored(message), parentId: anchorId };
     const children = t.messages.filter((m) => m.parentId === anchorId);
-    t.messages.push(full);
+    t.messages.push(full); this.threads.grew(threadId, full);
     mdb.insertMessage(threadId, full);
     if (full.kind === "screen") {
-      for (const pruned of this.pruneScreenFrames(t)) {
+      for (const pruned of this.pruneScreenFrames(t, threadId)) {
         mdb.updateMessage(threadId, pruned);
         this.emit({ type: "message.patch", threadId, message: pruned });
       }
@@ -1205,7 +1205,7 @@ export class Store {
     return this.patchMessage(threadId, card.id, { card: { ...card.card, dismissed: true } });
   }
 
-  private pruneScreenFrames(t: { messages: Message[] }, keep = 4): Message[] {
+  private pruneScreenFrames(t: { messages: Message[] }, threadId: string, keep = 4): Message[] {
     const pruned: Message[] = [];
     let seen = 0;
     for (let i = t.messages.length - 1; i >= 0 && seen < t.messages.length; i--) {
@@ -1213,7 +1213,7 @@ export class Store {
       if (m.kind !== "screen" || !m.png) continue;
       seen += 1;
       if (seen > keep) {
-        m.png = undefined;
+        this.threads.grew(threadId, { ...m, png: undefined }, m); m.png = undefined;
         pruned.push(m);
       }
     }
@@ -1237,7 +1237,7 @@ export class Store {
       ...(sender ? { sender } : {}),
       ...(dataContext ? { dataContext } : {}),
     };
-    t.messages.push(full);
+    t.messages.push(full); this.threads.grew(threadId, full);
     t.activeLeafId = full.id;
     mdb.appendMessage(threadId, full);
     this.noteThreadActivity(threadId, full.at, true);
@@ -1273,7 +1273,7 @@ export class Store {
     const committed = command ? runCommand(command, persist) : persist();
     if (!applied) return committed;
     if (!movesThreadToTop(t.messages[idx]) && movesThreadToTop(next)) this.noteThreadActivity(threadId, next.at, true, next.turnCompletedAt ?? next.at);
-    t.messages[idx] = next;
+    this.threads.grew(threadId, next, t.messages[idx]); t.messages[idx] = next;
     this.emit({ type: "message.patch", threadId, message: next });
     return next;
   }

@@ -31,7 +31,7 @@ import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schem
 import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
 import { fishKeyFromLiveKey, liveConfigSchema, liveConfigWithEnv, liveSettingEnv, type LiveConfig } from "./live-config.ts";
 import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
-import { roomContextSettings } from "./room-context-settings.ts";
+import { roomContextSettings } from "./room-context-settings.ts"; import { usageCapsSchema, type UsageCapsConfig } from "./usage-caps-config.ts";
 import { localVmConfigSchema } from "./local-vm-settings.ts";
 export * from "./local-vm-settings.ts";
 
@@ -339,7 +339,7 @@ const appConfigSchema = z.object({
       monthlyUsd: z.number().min(0).max(1_000_000).optional(),
       warnAtPercent: z.number().int().min(1).max(100).optional(),
     })
-    .optional(),
+    .optional(), /** Caps on a day's and a month's usage, for the server and for each bot; none by default (usage-caps.ts). */ usageCaps: usageCapsSchema.optional(),
   /** Operator sell prices per million tokens by model id, `driver/model` or `default`; read only with the `billing` entitlement. */
   billing: z
     .object({
@@ -461,7 +461,7 @@ export interface AppConfig extends HelperConfig {
   anthropic?: { key?: string; url?: string; everyClaudeBot?: boolean };
   openai?: { key?: string };
   openrouter?: { key?: string };
-  budgets?: { monthlyUsd?: number; warnAtPercent?: number };
+  budgets?: { monthlyUsd?: number; warnAtPercent?: number }; usageCaps?: UsageCapsConfig;
   decisions?: { retentionDays?: number };
   loopGuard?: LoopGuardConfig;
   safetyFloor?: { enabled?: boolean };
@@ -925,7 +925,7 @@ export function saveConfig(
   if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
   // Replace the section so clearing a backup cannot revive the old selection.
   if (checkedPatch.automaticRecovery !== undefined) disk.automaticRecovery = checkedPatch.automaticRecovery;
-  if (checkedPatch.cacheKeepWarm !== undefined) disk.cacheKeepWarm = checkedPatch.cacheKeepWarm;
+  if (checkedPatch.cacheKeepWarm !== undefined) disk.cacheKeepWarm = checkedPatch.cacheKeepWarm; if (checkedPatch.usageCaps !== undefined) disk.usageCaps = checkedPatch.usageCaps;
   if (checkedPatch.defaultModelSelection !== undefined) {
     disk.defaultModelSelection = checkedPatch.defaultModelSelection;
     if (disk.newBotDefaults) {

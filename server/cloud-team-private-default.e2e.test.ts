@@ -326,7 +326,7 @@ describe("the team's bot limit", () => {
     expect(adminToo.status, `${all} bots: ${JSON.stringify(adminToo.body)}`).toBe(409);
     const refused = await as("rui", "POST", "/api/bots", { name: "One more" });
     expect([refused.status, refused.body.error]).toEqual([409, adminToo.body.error]);
-    expect(refused.body.error).toMatch(/limited to 100 bots/);
+    expect(refused.body.error).toMatch(/already has 100 bots.*delete a bot you no longer need/);
   }, hostTimeout(240_000));
 });
 

@@ -14,6 +14,7 @@ import { RelayTimeout, relay, relayCommand, relayInput } from "../browser-relay.
 import { browserSteps } from "../browser-steps.ts";
 import { BrowserLive } from "../browser-live.ts";
 import { browserEgress, type EgressSetup } from "../browser/egress/registry.ts";
+import { releaseEndedGates } from "../browser/egress/release-ended.ts";
 import {
   agentBrowserIntegration,
   BUILT_IN_BROWSER_SYSTEM_PROMPT,
@@ -248,13 +249,23 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     held: (session) => !turnResources.free(`browser:${session}`),
     closeIdle: (session) => browserRuntime.closeIfIdle(session, idleMs(), usedBrowserSessions.get(session)),
   });
+  // A browser that has ended keeps no loopback listener: its gate opens again with it, on the same port where it can, and
+  // the session's launch settings are worked out again then.
+  const releaseGates = () => releaseEndedGates({ sessions: () => browserEgress.sessions(), release: async (session) => { usedBrowserSessions.delete(session); await browserEgress.release(session); },
+    env: (session) => { const spec = usedBrowserSessions.get(session); return spec && !chromeTarget(session, spec) ? spec.env : null; },
+    running: (session) => browserRunning(session, usedBrowserSessions.get(session)),
+    inUse: (session) => !turnResources.free(`browser:${session}`) || agentBrowserRuntime.working(session) });
+  let gateTimer: ReturnType<typeof setInterval> | undefined;
   const browserSweep = {
     start() {
+      gateTimer = setInterval(() => void releaseGates().catch(() => undefined), 60_000);
+      gateTimer.unref?.();
       agentBrowserSweep.start();
       chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
       return browserSweep;
     },
     closeAll: () => {
+      clearInterval(gateTimer);
       doors?.close();
       doorUrls.clear();
       leftovers.clear();
