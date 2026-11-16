@@ -6,7 +6,7 @@ import type { AppConfig } from "../config.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
 import { json, readBody } from "../harness/http.ts";
 import { endpointBaseUrl, endpointDisplayUrl } from "../openai-compat-endpoints.ts";
-import { requiredScope } from "../request-auth.ts";
+import { requiredScope, type RequestAuth } from "../request-auth.ts";
 import { createInstanceRoutes, type InstanceRouteDeps } from "./instances.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -17,16 +17,18 @@ afterEach(async () => {
 
 const SECRET = "sk-test-0123456789";
 
-async function serve(options: { hosted?: boolean; botInstance?: string } = {}) {
+async function serve(options: { hosted?: boolean; botInstance?: string; botBusy?: boolean; auth?: RequestAuth } = {}) {
   const cfg = { instances: { openaiCompat: { driver: "openai-compat" }, claude: { driver: "claudeAgent" } } } as unknown as AppConfig;
   const persisted: InstanceConfigMap[] = [];
+  const refreshed: string[] = [];
   let busy = false;
   const bots = options.botInstance
-    ? [{ id: "b1", busy: false, modelSelection: { instanceId: options.botInstance, model: "m" } }]
+    ? [{ id: "b1", busy: Boolean(options.botBusy), modelSelection: { instanceId: options.botInstance, model: "m" } }]
     : [];
   const deps = {
     store: { bots, tasks: () => [] },
     cfg,
+    registry: { refreshModels: async (instanceId: string) => { refreshed.push(instanceId); return true; } },
     hostedModels: Boolean(options.hosted),
     providerConfigBusy: { get: () => busy, set: (value: boolean) => { busy = value; } },
     providerInstancesChanging: new Set<string>(),
@@ -46,7 +48,7 @@ async function serve(options: { hosted?: boolean; botInstance?: string } = {}) {
     const url = new URL(req.url ?? "/", "http://localhost");
     const handled = await dispatchRoutes(routes, {
       req, res, url, path: url.pathname, method: req.method ?? "GET",
-      auth: { kind: "loopback", scopes: ["admin"] }, json, readBody,
+      auth: options.auth ?? { kind: "loopback", scopes: ["admin"] }, json, readBody,
     });
     if (!handled) json(res, 404, { from: "inline routes" });
   });
@@ -60,7 +62,7 @@ async function serve(options: { hosted?: boolean; botInstance?: string } = {}) {
     const text = await response.text();
     return { status: response.status, text, body: JSON.parse(text) as any };
   };
-  return { cfg, persisted, call };
+  return { cfg, persisted, refreshed, call };
 }
 
 const add = { displayName: "Zhipu", url: "https://open.bigmodel.cn/api/paas/v4/", key: SECRET, models: ["glm-4.6", "glm-4.6", "glm-5"] };
@@ -130,6 +132,87 @@ describe("added OpenAI-compatible servers", () => {
     const { cfg, call } = await serve({ hosted: true });
     expect((await call("POST", "/api/instances/openai-compat", add)).status).toBe(403);
     expect(Object.keys(cfg.instances ?? {})).toEqual(["openaiCompat", "claude"]);
+  });
+});
+
+describe("changing an added server's base URL", () => {
+  const ID = "openai-compat-edit";
+  const seed = (cfg: AppConfig, config: Record<string, unknown> = { key: SECRET, url: "https://old.example.com/v1", managedModels: ["glm-5"] }) => {
+    cfg.instances = { ...cfg.instances, [ID]: { driver: "openai-compat", displayName: "Zhipu", access: "api", config } };
+  };
+
+  it("is admin-only", () => {
+    expect(requiredScope("PATCH", `/api/instances/${ID}`)).toBe("admin");
+  });
+
+  it("changes the address in place, keeping the id, models, the bot using it and the saved key", async () => {
+    const { cfg, refreshed, call } = await serve({ botInstance: ID });
+    seed(cfg);
+    const changed = await call("PATCH", `/api/instances/${ID}`, { url: " https://old.example.com/api/v2/ " });
+    expect(changed.status, changed.text).toBe(200);
+    expect(changed.text).not.toContain(SECRET);
+    expect(cfg.instances?.[ID]).toEqual({
+      driver: "openai-compat", displayName: "Zhipu", access: "api",
+      config: { key: SECRET, url: "https://old.example.com/api/v2", managedModels: ["glm-5"] },
+    });
+    // Models were entered by hand, so nothing is detected again.
+    expect(refreshed).toEqual([]);
+  });
+
+  it("detects the models again when they came from the server's own list", async () => {
+    const { cfg, refreshed, call } = await serve();
+    seed(cfg, { key: SECRET, url: "https://old.example.com/v1" });
+    expect((await call("PATCH", `/api/instances/${ID}`, { url: "https://old.example.com/v2" })).status).toBe(200);
+    expect(refreshed).toEqual([ID]);
+  });
+
+  it("refuses a bad address and changes nothing", async () => {
+    const { cfg, persisted, call } = await serve();
+    seed(cfg);
+    for (const url of ["ftp://old.example.com/v1", "old.example.com/v1", "https://u:p@old.example.com/v1", "https://old.example.com/v1?key=x", ""]) {
+      expect((await call("PATCH", `/api/instances/${ID}`, { url })).status, url).toBe(400);
+    }
+    expect((await call("PATCH", `/api/instances/${ID}`, { url: "https://old.example.com/v2", apiKey: "https://x.example" })).status).toBe(400);
+    expect(persisted).toEqual([]);
+    expect((cfg.instances?.[ID]?.config as { url?: string }).url).toBe("https://old.example.com/v1");
+  });
+
+  it("needs the key again when the host changes, and takes a new key with the address", async () => {
+    const { cfg, call } = await serve();
+    seed(cfg);
+    for (const url of ["https://new.example.com/v1", "https://old.example.com:8443/v1"]) {
+      const refused = await call("PATCH", `/api/instances/${ID}`, { url });
+      expect(refused.status, url).toBe(400);
+      expect(refused.body.error).toMatch(/API key again/);
+    }
+    expect((cfg.instances?.[ID]?.config as { url?: string }).url).toBe("https://old.example.com/v1");
+    const moved = await call("PATCH", `/api/instances/${ID}`, { url: "https://new.example.com/v1", apiKey: "sk-new" });
+    expect(moved.status, moved.text).toBe(200);
+    expect(moved.text).not.toContain("sk-new");
+    expect(cfg.instances?.[ID]?.config).toEqual({ key: "sk-new", url: "https://new.example.com/v1", managedModels: ["glm-5"] });
+    const rekeyed = await call("PATCH", `/api/instances/${ID}`, { apiKey: "sk-third" });
+    expect(rekeyed.status, rekeyed.text).toBe(200);
+    expect(cfg.instances?.[ID]?.config).toMatchObject({ key: "sk-third", url: "https://new.example.com/v1" });
+  });
+
+  it("waits while a bot using it is mid-turn, or while provider settings are changing", async () => {
+    const { cfg, persisted, call } = await serve({ botInstance: ID, botBusy: true });
+    seed(cfg);
+    expect((await call("PATCH", `/api/instances/${ID}`, { url: "https://old.example.com/v2" })).status).toBe(409);
+    expect(persisted).toEqual([]);
+  });
+
+  it("is refused for the built-in slot, other engines, a client without admin and a hosted server", async () => {
+    const { cfg, call } = await serve();
+    seed(cfg);
+    expect((await call("PATCH", "/api/instances/openaiCompat", { url: "https://x.example/v1", apiKey: "k" })).status).toBe(400);
+    expect((await call("PATCH", "/api/instances/claude", { url: "https://x.example/v1", apiKey: "k" })).status).toBe(400);
+    const service = await serve({ auth: { kind: "loopback", scopes: ["client"], trust: "service" } });
+    seed(service.cfg);
+    expect((await service.call("PATCH", `/api/instances/${ID}`, { url: "https://old.example.com/v2" })).status).toBe(403);
+    const hosted = await serve({ hosted: true });
+    seed(hosted.cfg);
+    expect((await hosted.call("PATCH", `/api/instances/${ID}`, { url: "https://old.example.com/v2" })).status).toBe(403);
   });
 });
 

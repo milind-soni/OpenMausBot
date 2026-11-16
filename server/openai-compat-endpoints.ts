@@ -59,6 +59,31 @@ export function addEndpoint(instances: InstanceConfigMap, body: AddEndpoint): { 
   return { instanceId };
 }
 
+/** A new base URL and, optionally, a new key for an added server, in place: its id, models and bots stay. A saved key is
+ * only sent on to the host it was entered for, so a move to another host needs the key again. */
+export function changeEndpointAddress(
+  instances: InstanceConfigMap, instanceId: string, change: { url?: string; apiKey?: string },
+): { addressChanged: boolean } | { error: string; status: 400 | 409 } {
+  const entry = instances[instanceId];
+  const config = (entry.config ?? {}) as Record<string, unknown>;
+  const saved = typeof config.url === "string" ? endpointBaseUrl(config.url) : null;
+  const url = change.url === undefined ? saved : endpointBaseUrl(change.url);
+  if (!url) return { status: 400, error: "Enter an http or https base URL without a user name, password or query string." };
+  if (change.apiKey !== undefined && /^https?:\/\//i.test(change.apiKey)) {
+    return { status: 400, error: "That API key looks like a URL. Paste the secret key itself, not a web address." };
+  }
+  if (change.apiKey === undefined && (!saved || new URL(url).host !== new URL(saved).host)) {
+    return { status: 400, error: "Enter the API key again: a saved key is only sent to the server it was entered for." };
+  }
+  if (config.catalog && url !== saved) {
+    const others = Object.fromEntries(Object.entries(instances).filter(([id]) => id !== instanceId));
+    const duplicate = localServerAlreadyAdded(others, url);
+    if (duplicate) return { status: 409, error: duplicate };
+  }
+  entry.config = { ...config, url, ...(change.apiKey !== undefined ? { key: change.apiKey } : {}) };
+  return { addressChanged: url !== saved };
+}
+
 export function withEndpointUrls(described: unknown, configs: InstanceConfigMap): unknown {
   if (!Array.isArray(described)) return described;
   return described.map((instance: { instanceId?: string }) => {

@@ -28,7 +28,7 @@ import {
 } from "../claude-bedrock.ts";
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
-import { addEndpoint, addEndpointSchema, endpointBaseUrl, isAddedEndpoint, localServerAlreadyAdded, withEndpointUrls } from "../openai-compat-endpoints.ts";
+import { addEndpoint, addEndpointSchema, changeEndpointAddress, endpointBaseUrl, isAddedEndpoint, localServerAlreadyAdded, withEndpointUrls } from "../openai-compat-endpoints.ts";
 import { findOllama, probeOllama } from "../drivers/ollama.ts";
 import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "../contracts.ts";
 import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
@@ -461,7 +461,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       }
     }
 
-    // PATCH /api/instances/:id {cli: "/path/to/cli" | ""}: "" reverts to the driver default.
+    // PATCH /api/instances/:id {cli: "/path/to/cli" | ""}: "" reverts to the driver default. An added OpenAI-compatible
+    // server also takes {url, apiKey}: its address changes in place, and its key stays unless the host changes.
     const instancePatch = /^\/api\/instances\/([\w.-]+)$/.exec(path);
     if (method === "PATCH" && instancePatch) {
       // JSON-only, so a hostile page cannot send it as a simple request.
@@ -514,6 +515,15 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           }
           entry.config = models.length ? { ...rest, managedModels: models } : rest;
         }
+        let detectModels = false;
+        if (body.url !== undefined || body.apiKey !== undefined) {
+          if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only the owner or an admin can change a server's address or key." });
+          if (!isAddedEndpoint(instanceId, entry)) return json(res, 400, { error: "The base URL and key can be changed here for added OpenAI-compatible servers only." });
+          const changed = changeEndpointAddress(instances, instanceId, { url: body.url, apiKey: body.apiKey });
+          if ("error" in changed) return json(res, changed.status, { error: changed.error });
+          // A model list read from the server's /models is read again from the new address or with the new key.
+          detectModels = (changed.addressChanged || body.apiKey !== undefined) && !Array.isArray((entry.config as { managedModels?: unknown } | undefined)?.managedModels);
+        }
         if (body.displayName !== undefined) entry.displayName = body.displayName;
         if (body.configDir !== undefined) {
           let previousDir: string | undefined;
@@ -527,6 +537,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           }
         }
         await persistProviderInstance(instanceId, instances);
+        if (detectModels) await registry?.refreshModels(instanceId).catch(() => {});
         return json(res, 200, { instances: await describeInstances() });
       } finally {
         providerInstancesChanging.delete(instanceId);

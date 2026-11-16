@@ -15,7 +15,8 @@ export function modelIds(text: string): string[] {
 const INPUT = cn(KEY_FIELD, "font-sans");
 /** A slow computer can take minutes before a local model's first words, so the wait is the person's call. */
 export const REPLY_WAIT_CHOICES = [5, 10, 20, 30, 60] as const;
-const ICON_BUTTON = "ui-icon-button shrink-0 hover:text-ink";
+const EDIT_LABEL = "flex flex-col gap-1 text-[12px] leading-4 text-ink-secondary";
+const ICON_BUTTON ="ui-icon-button shrink-0 hover:text-ink";
 /** Google's Gemini API speaks the OpenAI protocol here; the key comes from Google AI Studio. */
 export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai" } as const;
 
@@ -23,8 +24,13 @@ export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativela
 const MODEL_ID_LIMITS = { count: 64, length: 200 } as const;
 const withinModelIdLimits = (ids: string[]) => ids.length <= MODEL_ID_LIMITS.count && ids.every((id) => id.length <= MODEL_ID_LIMITS.length);
 
-const saveSettings = (instanceId: string, settings: { replyWaitMinutes?: number | null; models?: string[] }): Promise<{ instances?: unknown }> =>
+const saveSettings = (instanceId: string, settings: { replyWaitMinutes?: number | null; models?: string[]; url?: string; apiKey?: string }): Promise<{ instances?: unknown }> =>
   api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify(settings) });
+
+/** The server keeps a saved key only for the host it was entered for (server/openai-compat-endpoints.ts). */
+export function hostChanged(saved: string | undefined, next: string): boolean {
+  try { return !saved || new URL(next.trim()).host !== new URL(saved).host; } catch { return false; }
+}
 
 function ReplyWaitSelect({ server, disabled, onPick }: { server: InstanceInfo; disabled: boolean; onPick: (minutes: number | null) => void }) {
   return (
@@ -90,6 +96,9 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
   /** The server whose model IDs are open for editing, and the text being edited. */
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  /** The open server's base URL and a new key; an empty key keeps the saved one. */
+  const [editUrl, setEditUrl] = useState("");
+  const [editKey, setEditKey] = useState("");
   const ready = Boolean(name.trim() && url.trim() && key.trim());
 
   const run = (kind: "add" | "other", request: () => Promise<{ instances?: unknown }>, onDone?: () => void, at?: string) => {
@@ -123,7 +132,11 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
       <div className="mb-0.5 text-[13px] font-medium leading-[18px] text-ink">{t("apiInstances.title")}</div>
       <p className="mb-2 text-[12px] leading-4 text-ink-secondary">{t("apiInstances.subtitle")}</p>
       {servers.length === 0 && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.empty")}</p>}
-      {servers.map((server) => (
+      {servers.map((server) => {
+        const newUrl = editUrl.trim().replace(/\/+$/, "");
+        const urlChanged = newUrl !== (server.url ?? "");
+        const needsKey = urlChanged && !editKey.trim() && hostChanged(server.url, newUrl);
+        return (
         <div key={server.instanceId} className="py-1.5">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0 flex-1">
@@ -139,13 +152,15 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
               type="button"
               onClick={() => {
                 setEditText((server.managedModels ?? []).join(", "));
+                setEditUrl(server.url ?? "");
+                setEditKey("");
                 setEditing(editing === server.instanceId ? null : server.instanceId);
                 setError(null);
               }}
               disabled={busy !== null}
-              aria-label={t("apiInstances.editModels", { name: server.displayName })}
+              aria-label={t("apiInstances.editServer", { name: server.displayName })}
               aria-expanded={editing === server.instanceId}
-              title={t("apiInstances.editModels", { name: server.displayName })}
+              title={t("apiInstances.editServer", { name: server.displayName })}
               className={ICON_BUTTON}
             >
               <Pencil size={13} aria-hidden="true" />
@@ -173,6 +188,17 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
           </div>
           {editing === server.instanceId && (
             <div className="mt-1.5 flex flex-col gap-1.5">
+              <label className={EDIT_LABEL}>
+                {t("apiInstances.url")}
+                <input type="url" value={editUrl} onChange={(e) => setEditUrl(e.target.value)} placeholder="https://api.example.com/v1"
+                  aria-label={t("apiInstances.urlFor", { name: server.displayName })} spellCheck={false} disabled={busy !== null} className={INPUT} />
+              </label>
+              <label className={EDIT_LABEL}>
+                {t("apiInstances.key")}
+                <input type="password" value={editKey} onChange={(e) => setEditKey(e.target.value)} placeholder={t("apiInstances.keepKey")}
+                  aria-label={t("apiInstances.keyFor", { name: server.displayName })} autoComplete="off" disabled={busy !== null} className={INPUT} />
+              </label>
+              {needsKey && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.newHostKey")}</p>}
               <input value={editText} onChange={(e) => setEditText(e.target.value)} placeholder={t("apiInstances.models")}
                 aria-label={t("apiInstances.modelsFor", { name: server.displayName })} spellCheck={false} disabled={busy !== null} className={INPUT} />
               <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.editModelsHint")}</p>
@@ -185,20 +211,22 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
                       setError({ text: t("apiInstances.modelsLimit", MODEL_ID_LIMITS), at: server.instanceId });
                       return;
                     }
-                    run("other", () => saveSettings(server.instanceId, { models: ids }), () => setEditing(null), server.instanceId);
+                    const settings = { models: ids, ...(urlChanged ? { url: newUrl } : {}), ...(editKey.trim() ? { apiKey: editKey.trim() } : {}) };
+                    run("other", () => saveSettings(server.instanceId, settings), () => { setEditing(null); setEditKey(""); }, server.instanceId);
                   }}
-                  disabled={busy !== null}
+                  disabled={busy !== null || needsKey}
                   className="ui-button"
                 >
                   {t("common.save")}
                 </button>
-                <button type="button" onClick={() => setEditing(null)} disabled={busy !== null} className="ui-button">{t("common.cancel")}</button>
+                <button type="button" onClick={() => { setEditing(null); setEditKey(""); }} disabled={busy !== null} className="ui-button">{t("common.cancel")}</button>
               </div>
               {error?.at === server.instanceId && <div role="alert" className="text-[12px] leading-4 text-danger">{error.text}</div>}
             </div>
           )}
         </div>
-      ))}
+        );
+      })}
       <div className="mt-2 flex flex-col gap-1.5">
         <button
           type="button"
