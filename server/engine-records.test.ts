@@ -121,13 +121,19 @@ describe.skipIf(!posix)("engines an earlier server of this data folder left", ()
 });
 
 /** An engine this server starts with spawnCli: a background child in its own group (as an MCP server), and a daemon that
- * leaves for a session of its own (as an adb server, tmux or a dev server a bot starts on purpose). Both inherit the tag. */
+ * leaves for a session of its own (as an adb server, tmux or a dev server a bot starts on purpose). Both inherit the tag.
+ * The daemon detaches as daemons do: a starter puts it in a new session and exits, so it is no longer below the engine.
+ * (On Linux killCliTree stops every process still below the engine, whatever its session: sandbox helpers leave the
+ * engine's group, procs.ts captureCliTree.) */
 const ENGINE = `
 const { spawn } = require("node:child_process");
 const wait = ["-e", "setTimeout(() => {}, 60000)"];
 const child = spawn(process.execPath, wait, { stdio: "ignore" });
-const daemon = spawn(process.execPath, wait, { stdio: "ignore", detached: true });
-require("node:fs").writeFileSync(process.argv[2], JSON.stringify({ child: child.pid, daemon: daemon.pid }));
+const daemonize = "const d = require('node:child_process').spawn(process.execPath, " + JSON.stringify(wait) + ", { stdio: 'ignore', detached: true }); d.unref(); console.log(d.pid);";
+const starter = spawn(process.execPath, ["-e", daemonize], { stdio: ["ignore", "pipe", "ignore"] });
+let said = "";
+starter.stdout.on("data", (chunk) => { said += chunk; });
+starter.on("close", () => require("node:fs").writeFileSync(process.argv[2], JSON.stringify({ child: child.pid, daemon: Number(said.trim()) })));
 setInterval(() => {}, 60000);
 `;
 
