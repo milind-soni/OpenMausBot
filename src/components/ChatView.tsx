@@ -509,7 +509,7 @@ const Bubble = memo(function Bubble({
                 }}
               />}
               {message.steered && (
-                <div className="mt-1 text-[11px] text-ink-tertiary" title={t("chat.sentMidTurnHint")}>
+                <div className="mt-1 text-[11px] text-ink-tertiary">
                   {t("chat.sentMidTurn")}
                 </div>
               )}
