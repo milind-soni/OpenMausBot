@@ -708,6 +708,135 @@ test("a live but unrelated Windows pid reused within the same boot is treated as
   }
 });
 
+/**
+ * The Windows liveness probes faked on any host: kill answers EPERM for the given pids (the OS answer
+ * for a pid this account cannot signal — live processes of another user, and exited processes that a
+ * handle still keeps referenced), tasklist answers from a PATH shim, and powershell.exe under a faked
+ * SystemRoot. On Windows 11 wmic is absent, so the PATH shim intentionally carries no wmic.
+ */
+function fakeWindowsHost(t, { epermPids = [], tasklist, powershell = null } = {}) {
+  const { root } = temporaryDirectory("windows-tools");
+  const binDir = path.join(root, "bin");
+  mkdirSync(binDir);
+  const script = (name, source) => writeFileSync(name, `#!/bin/sh\n${source}\n`, { mode: 0o755 });
+  if (Array.isArray(tasklist)) {
+    const rows = tasklist.map((pid) => `  *"PID eq ${pid}"*) echo '"openmausbot-server.exe","${pid}","Console","1","64,000 K"' ;;`).join("\n");
+    script(path.join(binDir, "tasklist"), `case "$*" in\n${rows}\n  *) echo "INFO: No tasks are running which match the specified criteria." ;;\nesac`);
+  } else if (tasklist === "error") {
+    script(path.join(binDir, "tasklist"), "exit 1");
+  }
+  const systemRoot = path.join(root, "windows");
+  if (Array.isArray(powershell)) {
+    const bin = path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0");
+    mkdirSync(bin, { recursive: true });
+    const rows = powershell.map((pid) => `  *"ProcessId=${pid}"*) echo 1 ;;`).join("\n");
+    script(path.join(bin, "powershell.exe"), `case "$*" in\n${rows}\n  *) : ;;\nesac`);
+  }
+
+  const priorPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { ...priorPlatform, value: "win32" });
+  const eperm = new Set(epermPids);
+  const priorKill = process.kill;
+  process.kill = (pid, signal) => {
+    if (eperm.has(pid)) throw Object.assign(new Error(`kill EPERM: ${pid}`), { code: "EPERM" });
+    return priorKill.call(process, pid, signal);
+  };
+  const priorEnv = {};
+  for (const name of ["PATH", "SystemRoot"]) priorEnv[name] = process.env[name];
+  process.env.PATH = binDir;
+  process.env.SystemRoot = systemRoot;
+  t.after(() => {
+    Object.defineProperty(process, "platform", priorPlatform);
+    process.kill = priorKill;
+    for (const name of Object.keys(priorEnv)) {
+      if (priorEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = priorEnv[name];
+    }
+  });
+}
+
+/** The record a Windows build leaves on disk: no boot id, no pid namespace, no start ticks. */
+function windowsLeaseRecord(pid) {
+  return {
+    version: 1,
+    pid,
+    host: hostname(),
+    token: randomUUID(),
+    createdAt: Date.now() - 60_000,
+    boot: null,
+    uptime: 1,
+    ns: null,
+    start: null,
+  };
+}
+
+function plantWindowsChildLease(dataDir, pid) {
+  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  mkdirSync(path.dirname(childPath));
+  writeFileSync(childPath, `${JSON.stringify(windowsLeaseRecord(pid))}\n`, { mode: 0o600 });
+  return childPath;
+}
+
+test("an exited Windows server child that still answers EPERM no longer blocks startup", async (t) => {
+  const zombiePid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [zombiePid], tasklist: [] });
+  const { dataDir } = temporaryDirectory();
+  plantWindowsChildLease(dataDir, zombiePid);
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("an exited Windows lease owner that still answers EPERM is retired, not served forever", async (t) => {
+  const zombiePid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [zombiePid], tasklist: [] });
+  const { dataDir } = temporaryDirectory();
+  writeFileSync(path.join(dataDir, LEASE_NAME), `${JSON.stringify(windowsLeaseRecord(zombiePid))}\n`, { mode: 0o600 });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("a Windows zombie is still dead when tasklist cannot answer and the process list does", async (t) => {
+  const zombiePid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [zombiePid], tasklist: "error", powershell: [process.pid] });
+  const { dataDir } = temporaryDirectory();
+  writeFileSync(path.join(dataDir, LEASE_NAME), `${JSON.stringify(windowsLeaseRecord(zombiePid))}\n`, { mode: 0o600 });
+
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(lease.ownerPid, process.pid);
+  assert.equal(lease.release(), true);
+});
+
+test("a Windows owner this account cannot signal but that still runs keeps blocking startup", async (t) => {
+  const liveForeignPid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [liveForeignPid], tasklist: [liveForeignPid] });
+  const { dataDir } = temporaryDirectory();
+  plantWindowsChildLease(dataDir, liveForeignPid);
+
+  assert.throws(() => acquireDataDirLease(dataDir), /still shutting down/i);
+});
+
+test("a Windows owner stays alive when the fallback process list still shows it running", async (t) => {
+  const liveForeignPid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [liveForeignPid], tasklist: "error", powershell: [liveForeignPid] });
+  const { dataDir } = temporaryDirectory();
+  plantWindowsChildLease(dataDir, liveForeignPid);
+
+  assert.throws(() => acquireDataDirLease(dataDir), /still shutting down/i);
+});
+
+test("a Windows owner that can be neither signalled nor listed still fails closed", async (t) => {
+  const foreignPid = await exitedPid();
+  fakeWindowsHost(t, { epermPids: [foreignPid], tasklist: "error" });
+  const { dataDir } = temporaryDirectory();
+  plantWindowsChildLease(dataDir, foreignPid);
+
+  assert.throws(() => acquireDataDirLease(dataDir), /still shutting down/i);
+});
+
 // A Cloud home's volume mounts on one machine at a time, and each new home on it has a new hostname and boot.
 const otherMachine = (current) => ({ host: renamedHost(current), boot: randomUUID(), uptime: 1 });
 

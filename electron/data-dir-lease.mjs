@@ -216,7 +216,7 @@ function processIsAlive(pid) {
   } catch (error) {
     if (error?.code === "ESRCH") return false;
     // EPERM means the pid exists but this account cannot signal it.
-    if (error?.code === "EPERM") return true;
+    if (error?.code === "EPERM") return process.platform !== "win32" || windowsProcessListed(pid) !== false;
     throw leaseError("OpenMausBot could not verify the data-directory lease owner; refusing to start.", error);
   }
 }
@@ -281,6 +281,38 @@ function cimCreationTimeMs(pid) {
     ], 15_000);
     const ms = Number(output.trim());
     return output.trim() && Number.isSafeInteger(ms) && ms > 0 ? ms : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Windows keeps an exited process' pid allocated while any handle to it stays open, and EPERM answers
+ * for that dead object exactly as for a live process this account may not signal; only the process
+ * list separates them. null when neither probe can read it, so the caller stays conservative.
+ */
+function windowsProcessListed(pid) {
+  return tasklistHasPid(pid) ?? cimHasPid(pid);
+}
+
+/** tasklist ships with every Windows and lists every running process, whatever account or session owns it. */
+function tasklistHasPid(pid) {
+  try {
+    const output = windowsOutput("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], 5_000);
+    return output.split(/\r?\n/).some((line) => line.startsWith('"'));
+  } catch {
+    return null;
+  }
+}
+
+function cimHasPid(pid) {
+  const powershell = join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  try {
+    const output = windowsOutput(powershell, [
+      "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+      `if (Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction Stop) { '1' }`,
+    ], 15_000);
+    return output.trim() === "1";
   } catch {
     return null;
   }
