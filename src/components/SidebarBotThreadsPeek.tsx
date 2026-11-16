@@ -41,7 +41,7 @@ export function peekPlace(row: Pick<DOMRect, "left" | "right" | "top">, rows: nu
   };
 }
 
-const SLOT = "pointer-events-none absolute right-[30px] top-1.5 flex size-6 items-center justify-center rounded-lg text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:hidden touch:pointer-events-auto touch:opacity-70 motion-reduce:transition-none";
+const SLOT = "pointer-events-none absolute end-[30px] top-1.5 flex size-6 items-center justify-center rounded-lg text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:hidden touch:pointer-events-auto touch:opacity-70 motion-reduce:transition-none";
 
 const ROW_ACTIONS = "pointer-events-none absolute end-2 top-1/2 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity group-hover/peek:pointer-events-auto group-hover/peek:opacity-100 group-focus-within/peek:pointer-events-auto group-focus-within/peek:opacity-100 touch:pointer-events-auto touch:opacity-100 motion-reduce:transition-none";
 const ROW_ACTION = "flex size-6 items-center justify-center rounded-md text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:bg-ink/[0.06] focus-visible:text-ink active:bg-ink/[0.08] disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-ink-secondary touch:size-10";
