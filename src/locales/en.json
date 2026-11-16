@@ -4190,6 +4190,8 @@
   "decider.provider.openrouter": "OpenRouter",
   "decider.status.byCustom": "your own endpoint",
   "decider.status.byGemini": "your Gemini key",
+  "decider.gemini.test.ok": "Gemini answered in {ms} ms with your saved Gemini key.",
+  "decider.gemini.error.rejected": "Google rejected your saved Gemini key. Check it under API keys.",
   "decider.provider.custom": "Custom endpoint",
   "decider.custom.master": "Use your endpoint for fast decisions",
   "decider.custom.masterNeedsKey": "Save a base URL and a key below to turn this on.",

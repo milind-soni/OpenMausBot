@@ -243,19 +243,23 @@ export function DecisionModelSettings() {
     setError(null);
     const testingIncluded = !draft && included;
     const testingShared = !draft && usingShared;
+    // The saved Gemini key answers a test with no draft; its verdict must not name Jev or OpenRouter.
+    const testingGemini = !draft && borrowedGemini;
     try {
       const result = await api<TestResult>("/api/decider/test", { method: "POST", body: JSON.stringify(draft ? { key: draft } : {}) });
       setVerdict(result.ok
         ? {
           ok: true,
-          text: openrouter || custom || testingShared
+          text: openrouter || custom || testingShared || testingGemini
             ? [
-              t(custom ? "decider.custom.test.ok" : testingShared ? "decider.openrouter.test.okShared" : "decider.openrouter.test.ok", { ms: String(result.latencyMs) }),
+              t(testingGemini ? "decider.gemini.test.ok" : custom ? "decider.custom.test.ok" : testingShared ? "decider.openrouter.test.okShared" : "decider.openrouter.test.ok", { ms: String(result.latencyMs) }),
               ...(result.latencyMs > ROOM_BUDGET_MS ? [t("decider.test.slow")] : []),
             ].join(" ")
             : t("decider.test.ok", { ms: String(result.latencyMs) }),
         }
-        : { ok: false, text: deciderFailureText(result, testingIncluded, testingShared ? "openrouter" : provider) });
+        : { ok: false, text: testingGemini
+          ? t(result.reason === "rejected" ? "decider.gemini.error.rejected" : "decider.error.other")
+          : deciderFailureText(result, testingIncluded, testingShared ? "openrouter" : provider) });
     } catch (cause) {
       setVerdict({ ok: false, text: cause instanceof Error ? cause.message : String(cause) });
     } finally {

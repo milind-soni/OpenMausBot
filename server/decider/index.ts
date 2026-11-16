@@ -95,15 +95,17 @@ export function deciderBorrowedKey(cfg: AppConfig): boolean {
 
 /** Never a key, nor an operator base URL with no UI; a custom gateway's `baseUrl` is the person's own setting. `provider` is the one in use, else the one chosen
  * (so Settings shows its key field); `keySource` and `sharedKey` are OpenRouter's, while it is in use. `chosen` is Jev
- * when the person picked it but only the shared OpenRouter key stands in, so Settings keeps Jev and its key field.
+ * when the person picked it but only the shared OpenRouter key stands in, and OpenRouter when it was picked but only a
+ * saved Gemini key stands in, so Settings keeps the pick and its key field.
  * Which own keys are on file is `describeHelpers`'s. */
 export function describeDecider(cfg: AppConfig) {
   const account = deciderAccount(cfg);
   const provider = account?.provider ?? draftProvider(cfg);
   const jevChosen = cfg.decider?.provider === "jev" && provider === "openrouter" && account?.keySource === "shared";
+  const openrouterChosen = cfg.decider?.provider === "openrouter" && provider === "gemini";
   return {
     provider,
-    ...(jevChosen ? { chosen: "jev" as const } : {}),
+    ...(jevChosen ? { chosen: "jev" as const } : openrouterChosen ? { chosen: "openrouter" as const } : {}),
     ...(provider === "openrouter" ? { model: deciderModel(cfg), api: deciderApi(cfg) } : {}),
     ...(provider === "custom" ? {
       model: cfg.decider?.customModel?.trim() ?? "",

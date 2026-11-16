@@ -220,6 +220,20 @@ describe("DecisionModelSettings", () => {
     expect(view.html).not.toContain("Clear");
   });
 
+  it("Test names Gemini when the saved Gemini key answers, and keeps a picked OpenRouter selected", async () => {
+    fixture.config = status({ provider: "gemini", chosen: "openrouter", configured: true, enabled: true, jobs: { roomRouting: true } });
+    expect(render().provider!.props.value).toBe("openrouter");
+    fixture.api.mockResolvedValueOnce({ ok: true, latencyMs: 410 });
+    click(render().test);
+    await flush();
+    expect(fixture.api).toHaveBeenCalledWith("/api/decider/test", { method: "POST", body: "{}" });
+    expect(render().html).toContain("Gemini answered in 410 ms with your saved Gemini key.");
+    fixture.api.mockResolvedValueOnce({ ok: false, reason: "rejected", status: 400 });
+    click(render().test);
+    await flush();
+    expect(render().html).toContain("Google rejected your saved Gemini key. Check it under API keys.");
+  });
+
   it("with an own key saved as well, shows Connected and offers Clear, as without Cloud Pro", () => {
     fixture.config = status({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
     const view = render();

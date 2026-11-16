@@ -66,6 +66,19 @@ describe("the saved Gemini key as the decision model's last fallback", () => {
     expect(deciderAccount({})).toBeNull();
   });
 
+  it("never stands in for a set-up custom endpoint, whatever its protocol", () => {
+    for (const customApi of ["systemone", "decisions", "chat"] as const) {
+      const cfg: AppConfig = { ...ON, decider: { enabled: true, provider: "custom", customKey: "own", customBaseUrl: "https://decide.example.com/v1", customApi } };
+      expect(deciderAccount(cfg)?.provider).toBe("custom");
+      expect(describeDecider(cfg)).toMatchObject({ provider: "custom", api: customApi });
+    }
+  });
+
+  it("keeps a picked OpenRouter as Settings' choice while only the Gemini key decides", () => {
+    expect(describeDecider({ ...ON, decider: { enabled: true, provider: "openrouter" } })).toMatchObject({ provider: "gemini", chosen: "openrouter" });
+    expect(describeDecider(ON)).not.toHaveProperty("chosen");
+  });
+
   it("stays off until switched on, and never reports the key", () => {
     expect(describeDecider({ tts: { geminiKey: KEY } })).toMatchObject({ provider: "gemini", configured: true, enabled: false });
     expect(describeDecider(ON)).toMatchObject({ provider: "gemini", configured: true, enabled: true });
