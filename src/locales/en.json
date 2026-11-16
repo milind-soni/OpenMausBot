@@ -5233,6 +5233,8 @@
   "room.memberWorkingElsewhere": "{name} is working in another thread",
   "room.queue.waitingFor": "Queued · waiting for {name} ({position} of {of})",
   "room.queue.waiting": "Queued ({position} of {of})",
+  "room.queue.busyIn": "Busy in {place} · queued ({position} of {of}), starts when it finishes",
+  "room.queue.busyElsewhere": "Busy in another conversation · queued ({position} of {of}), starts when it finishes",
   "room.queue.member": "{name}: {status}",
   "room.responder.everyone": "Plain messages go to every group member; @mentions override this",
   "room.responder.mentions": "Only explicitly @mentioned bots respond",
