@@ -29,28 +29,34 @@ export interface ConfigCliArgs {
   dryRun: boolean;
 }
 
-export function parseConfigArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ConfigCliArgs | { error: string } {
+export interface ConfigCliError {
+  error: string;
+  json: boolean;
+}
+
+export function parseConfigArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ConfigCliArgs | ConfigCliError {
   const json = argv.includes("--json");
   const help = argv.includes("--help") || argv.includes("-h");
   const dryRun = argv.includes("--dry-run");
+  const fail = (error: string): ConfigCliError => ({ error, json });
   let dataDir = env.OMB_DATA_DIR || join(homedir(), ".openmausbot");
   let name: string | undefined;
   const words = argv.filter((arg) => arg !== "--json" && arg !== "--help" && arg !== "-h" && arg !== "--dry-run");
   const command = words[0];
   if (command !== "backups" && command !== "restore") {
-    return { error: command ? `unknown command "${command}"; say "backups" or "restore"` : "say what to do: \"backups\" or \"restore\"" };
+    return fail(command ? `unknown command "${command}"; say "backups" or "restore"` : "say what to do: \"backups\" or \"restore\"");
   }
   for (let index = 1; index < words.length; index += 1) {
     const arg = words[index]!;
     if (arg === "--data-dir") {
       const value = words[index + 1];
-      if (value === undefined || value.startsWith("--")) return { error: "--data-dir needs the folder that holds config.json" };
+      if (value === undefined || value.startsWith("--")) return fail("--data-dir needs the folder that holds config.json");
       dataDir = resolve(value);
       index += 1;
     } else if (command === "restore" && name === undefined && !arg.startsWith("-")) name = arg;
-    else return { error: `unknown argument "${arg}"; see openmausbot config --help` };
+    else return fail(`unknown argument "${arg}"; see openmausbot config --help`);
   }
-  if (command === "restore" && name === undefined) return { error: "restore needs the name of a copy, or \"latest\"; run openmausbot config backups to see them" };
+  if (command === "restore" && name === undefined) return fail("restore needs the name of a copy, or \"latest\"; run openmausbot config backups to see them");
   return { command, dataDir, name, json, help, dryRun };
 }
 
