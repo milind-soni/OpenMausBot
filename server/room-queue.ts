@@ -39,6 +39,11 @@ export function roomQueue(items: readonly RoomLineItem[], speakers: ReadonlyMap<
 }
 
 export function queuedJobDetail(entry: RoomQueueEntry, nameOf: (botId: string) => string): string {
+  if (entry.busyIn) {
+    const where = entry.busyIn.groupId ? "another room" : "another thread of its own";
+    const after = entry.waitingForBotId ? ` and after ${nameOf(entry.waitingForBotId)}` : "";
+    return `queued ${entry.position} of ${entry.of} in this room: ${nameOf(entry.botId)} is busy in ${where} now, so it starts here when that finishes${after}`;
+  }
   const after = entry.waitingForBotId ? `, after ${nameOf(entry.waitingForBotId)}` : "";
   return `queued ${entry.position} of ${entry.of} in this room: room jobs run one at a time, so it starts in turn${after}`;
 }

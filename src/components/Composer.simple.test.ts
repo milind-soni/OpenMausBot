@@ -223,10 +223,10 @@ describe("the Simple composer in a bot chat", () => {
     render({ bot: { ...bot, tasks: [{ ...task, approvalMode: "full" }] } });
     const chip = container.querySelector("[data-approval-chip]")!;
     expect(chip.getAttribute("data-approval-chip")).toBe("full");
-    expect(chip.textContent).toBe("Just do it");
+    expect(chip.textContent).toBe("Full access");
     click(chip.closest("button"));
     const level = popover()!;
-    expect(level.textContent).toContain("Ask me first");
+    expect(level.textContent).toContain("Ask for approval");
     expect(level.textContent).toContain("Command allowlist");
     expect(level.querySelector('[data-menu-key="approval:full"] .lucide-check')).not.toBeNull();
     click(level.querySelector('[data-menu-key="approval:ask"]'));

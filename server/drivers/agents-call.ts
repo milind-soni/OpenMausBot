@@ -103,7 +103,7 @@ function renderAssignmentStatus(r: Json, id: string): string {
   const children = Array.isArray(r.children) ? r.children.filter(jsonRecord) : [];
   if (children.length) lines.push("Its own hand-offs:", ...children.map((child) => `- ${assignmentLine(child)}`));
   const settled = a.status === "completed" || a.status === "failed" || a.status === "cancelled" || a.status === "done";
-  if (!settled) lines.push("It is not settled. Its result resumes you on its own; do not wait on it in this turn.");
+  if (!settled) lines.push(`It is not settled. ${r.sentElsewhere === true ? "It was sent from another of your chats, so its result returns there and does not resume you here" : "Its result resumes you on its own"}; do not wait on it in this turn.`);
   return lines.join("\n");
 }
 
@@ -340,7 +340,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const { ok, status, body: r } = await apiResponse(`/api/internal/assignment-status${query.size ? `?${query.toString()}` : ""}`);
     if (!ok) {
       const why = status === 404 ? `No assignment ${id || "(none given)"} is known here: check the id against your coordinate_bots receipt or list_threads.`
-        : status === 403 ? `Assignment ${id} is not this conversation's; only its requester can read it.`
+        : status === 403 ? `Assignment ${id} can't be read here: ${String(r.error ?? "only the conversation that sent it can read it")}.`
         : String(r.error ?? `HTTP ${status}`);
       return { text: why, isError: true };
     }
@@ -919,16 +919,16 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         text: `A confirmation card is now visible to the user to ${verb} skill “${skillName}”. Nothing changes until they approve it. End this turn and wait for the decision.`,
       };
     }
-    if (args.action !== "create" && args.action !== "update") {
-      return { text: `skill_manage action must be "create", "update", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
+    if (args.action !== "create" && args.action !== "update" && args.action !== "import") {
+      return { text: `skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
-    if (!skillMd.trim()) {
+    if (!skillMd.trim() && args.action !== "import") {
       return { text: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter, e.g. "---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n".', isError: true };
     }
     const source = typeof args.source === "string" ? args.source.trim() : "";
     if (!source) {
-      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill.', isError: true };
+      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill (for import, the GitHub or skills.sh link).', isError: true };
     }
     const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
     if (args.action === "update" && !skillName) {
