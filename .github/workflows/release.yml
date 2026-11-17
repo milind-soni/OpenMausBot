@@ -501,7 +501,7 @@ jobs:
           cp "release/OpenMausBot-$v-amd64.deb" release/OpenMausBot-amd64.deb
           cp "release/OpenMausBot-$v-x86_64.AppImage" release/OpenMausBot.AppImage
           cp "release/OpenMausBot-$v-x86_64.rpm" release/OpenMausBot-x86_64.rpm
-          (cd release && sha256sum OpenMausBot-$v-amd64.deb OpenMausBot-$v-x86_64.AppImage OpenMausBot-$v-x86_64.rpm > SHA256SUMS-ubuntu-x64.txt)
+          (cd release && sha256sum OpenMausBot-$v-amd64.deb OpenMausBot-$v-x86_64.AppImage OpenMausBot-$v-x86_64.rpm OpenMausBot-amd64.deb OpenMausBot.AppImage OpenMausBot-x86_64.rpm > SHA256SUMS-ubuntu-x64.txt)
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-release
