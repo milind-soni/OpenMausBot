@@ -179,14 +179,14 @@ export function readClaudeAuthSettings(
   }
 }
 
-/** OMB_CLAUDE_AUTOCOMPACT: a token count, "auto" (the CLI's own window) or "off". The CLI rejects
- * a window outside 100k-1M as an argument error, so a configured value is clamped. */
-export function autoCompactWindow(env: NodeJS.ProcessEnv): string | null {
+/** OMB_CLAUDE_AUTOCOMPACT: a token count, "auto" (the CLI's own window) or "off"; unset, 1M for a `[1m]` model, else 200K.
+ * The CLI rejects a window outside 100k-1M as an argument error, so a configured value is clamped. */
+export function autoCompactWindow(env: NodeJS.ProcessEnv, model?: string | null): string | null {
   const raw = (env.OMB_CLAUDE_AUTOCOMPACT ?? "").trim().toLowerCase();
   if (raw === "off") return null;
   if (raw === "auto") return "auto";
-  const parsed = raw ? Number(raw) : DEFAULT_AUTOCOMPACT_TOKENS;
-  if (!Number.isFinite(parsed) || parsed <= 0) return String(DEFAULT_AUTOCOMPACT_TOKENS);
+  const fallback = model && /\[1m\]$/i.test(model) ? 1_000_000 : DEFAULT_AUTOCOMPACT_TOKENS, parsed = raw ? Number(raw) : fallback;
+  if (!Number.isFinite(parsed) || parsed <= 0) return String(fallback);
   return String(Math.min(1_000_000, Math.max(100_000, Math.floor(parsed))));
 }
 
@@ -1054,12 +1054,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (projectSettingsOnly) args.push("--setting-sources", "project");
         if (turn.userSkillsDir) args.push("--add-dir", turn.userSkillsDir);
       }
-      const compactWindow = autoCompactWindow(turnEnvironment);
+      const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment, config.endpointModels);
+      const injected = config.managed || config.endpointModels ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
+      const compactWindow = autoCompactWindow(turnEnvironment, injected.model);
       const passedAutocompact = Boolean(compactWindow) && ownCli && cliHasAutocompact === true; if (compactWindow && passedAutocompact) args.push("--autocompact", compactWindow);
       // --resume keeps the recorded system prompt, so every turn refreshes it.
       if (ownCli && cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) args.push("--system-prompt-snapshot", "off");
-      const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment, config.endpointModels);
-      const injected = config.managed || config.endpointModels ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
       if (turn.effort) args.push("--effort", turn.effort);
 

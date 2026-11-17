@@ -41,7 +41,7 @@ export interface WarmSummaryHostDeps {
   /** Off with `context.autoCompact: false` or OMB_WARM_SUMMARY=0. */
   enabled(): boolean;
   /** Where the engine summarizes by itself, in tokens (Claude Code's --autocompact); undefined when OpenMausBot set none. */
-  nativeCompactAt(instanceId: string): number | undefined;
+  nativeCompactAt(target: WarmSummaryTarget): number | undefined;
   /** A turn is running or being set up in this conversation, or the bot is busy elsewhere. */
   busy(botId: string, threadId: string): boolean;
   memoryShort(): boolean;
@@ -127,7 +127,7 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
       const instance = deps.instance(target.instanceId);
       if (!instance) return null;
       if (!instance.adapter.cacheKeepWarm?.compact) return { way: "harness", soon: false };
-      const at = deps.nativeCompactAt(target.instanceId);
+      const at = deps.nativeCompactAt(target);
       if (at === undefined || contextTokens === undefined || contextTokens < Math.min(WARM_SUMMARY_MIN_TOKENS, at / 2)) return null;
       return { way: "native", soon: contextTokens >= at * NATIVE_SOON_FRACTION };
     },
