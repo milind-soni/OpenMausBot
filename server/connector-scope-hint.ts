@@ -93,7 +93,10 @@ export function annotateFailedCall(
   if (!refusals.length && result.isError === true && texts.some((text) => pattern.test(text))) refusals.push(null);
   if (!refusals.length) return false;
   const named = refusals.filter((slug): slug is string => slug !== null);
-  result.content.push({ type: "text", text: hint(named.length ? named : slugs) });
+  // A hint with nothing to say (an app with no other account to try) leaves the result as it was.
+  const note = hint(named.length ? named : slugs);
+  if (!note) return false;
+  result.content.push({ type: "text", text: note });
   return true;
 }
 
