@@ -290,6 +290,26 @@ describe("createWebhookRoomPost", () => {
     }
   });
 
+  it("receipts the actual thread when the room changes conversations during synthesis", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    try {
+      const h = host(chatterbox, (async () => {
+        await gate;
+        return mp3("http://fixture.invalid");
+      }) as typeof fetch);
+      const delivery = h.roomPost({ ...trigger, groupId: "room-1" } as WebhookTrigger, { text: "Deploy done", voiceNote: "deploy done" });
+      h.group.threadId = "room-1-new-thread";
+      release();
+      expect(await delivery).toEqual({ posted: true, attachments: 1, threadId: "room-1-new-thread" });
+      expect(h.appended).toHaveLength(1);
+      expect(h.appended[0]?.threadId).toBe("room-1-new-thread");
+    } finally {
+      release();
+      restore();
+    }
+  });
+
   it("answers 409 with the owner's next step when no voice is set up, and stores nothing", async () => {
     try {
       const h = host({ tts: { provider: "chatterbox", voice: "voice-1" } }, mp3);
