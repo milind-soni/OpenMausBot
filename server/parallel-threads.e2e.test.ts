@@ -13,6 +13,7 @@ import { CONTROL_BUSY } from "./control-client.ts";
 import { BROWSER_HANDED_OVER, browserBusyText } from "./host/browser-seats.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0123456789ab.fly.dev";
@@ -80,6 +81,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-ac
       req.on("data", (chunk) => { raw += chunk; });
       req.on("end", () => {
         const body = JSON.parse(raw) as { messages?: { role: string; content: unknown }[]; stream?: boolean };
+        if (isTitleCall(body)) { res.writeHead(500).end("{}"); return; }
         const last = JSON.stringify(body.messages?.findLast((m) => m.role === "user")?.content ?? "");
         const entry = { thread: last, release: () => {
           res.writeHead(200, { "content-type": "application/json" });

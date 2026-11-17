@@ -6,8 +6,8 @@ const english = en as Record<string, string>;
 
 // "Team" names the organization a Team Cloud belongs to, so the sidebar's groups of bots are departments.
 const DEPARTMENT_COPY = [
-  "sidebar.section.", "sidebar.bot.moveToSection", "sidebar.newChannel.context", "team.", "teamSettings.", "teamShare.",
-  "teamMemory.", "teamLibrary.share", "teamImport.newSection", "teamImport.backupCopies", "botAccess.teams.", "newBot.team",
+  "sidebar.section.", "sidebar.bot.moveToSection", "sidebar.newChannel.context", "team.", "teamSettings.", "template.",
+  "teamMemory.", "templateImport.", "sidebar.addDepartment", "botAccess.teams.", "newBot.team",
   "botPanel.page.team", "botPanel.page.chiefTeams", "permissions.chief.", "composer.mention.team", "canvas.", "canvasComputers.",
   "mapComposer.placeholder", "place.view.autoTeam.line",
 ];

@@ -29,7 +29,6 @@ import { inputCls } from "./bot-settings/field";
 import { RoutineEditor } from "./RoutinesPage";
 import { Layer, useIsTopLayer } from "./Layer";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
-import { SharePresetDialog } from "./SharePresetDialog";
 import { SettingRow, SettingsLinkRow } from "./SettingsPrimitives";
 import { Select } from "./Select";
 
@@ -364,21 +363,14 @@ function DraftRoutines({ draft }: { draft: BotCreationDraft }) {
 
 export function DefaultBotSettings({ simple = false }: { simple?: boolean }) {
   const [open, setOpen] = useState(false);
-  const [sharing, setSharing] = useState(false);
-  const dialogs = <>
-    {open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />}
-    {sharing && <SharePresetDialog onClose={() => setSharing(false)} />}
-  </>;
-  // One control per row: the defaults open their editor; sharing them as a preset is a row of its own.
+  const dialogs = open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />;
   if (simple) return <>
     <SettingsLinkRow title={t("newBot.defaults")} subtitle={t("settings.newBot.defaultsLine")} onClick={() => setOpen(true)} data={{ "data-new-bot-defaults": "" }} />
-    <SettingRow title={t("newBot.sharePresetRow")}><button type="button" className="ui-button" data-new-bot-share="" onClick={() => setSharing(true)}>{t("newBot.shareAction")}</button></SettingRow>
     {dialogs}
   </>;
 
   const content = <>
     <div className="flex shrink-0 gap-2">
-      <button type="button" onClick={() => setSharing(true)} className="cursor-pointer rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink">{t("newBot.sharePreset")}</button>
       <button type="button" onClick={() => setOpen(true)} className="cursor-pointer rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover">{t("newBot.edit")}</button>
     </div>
     {dialogs}

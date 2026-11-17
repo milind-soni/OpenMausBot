@@ -39,7 +39,8 @@ describe("the loop stall recorder", () => {
       const report = stalls.report();
       expect(report.m1!.max).toBeGreaterThanOrEqual(250);
       expect(report.m1!.over100ms).toBeGreaterThanOrEqual(1);
-      expect(report.m1!.p50).toBeLessThan(5);
+      // One stall does not set the median; the rest is timer slop, a few ms late on a busy runner (Windows ticks every 15.6 ms).
+      expect(report.m1!.p50).toBeLessThan(50);
       expect(report.h1!.max).toBe(report.m1!.max);
       expect(report.saves.m1.n).toBe(before + 1);
       expect(report.runtimeReads.m1).toMatchObject({ n: 1 });
