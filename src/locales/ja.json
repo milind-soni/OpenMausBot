@@ -7389,6 +7389,8 @@
   "email.needsGoogle": "Gmail ではここでアプリ パスワード（2 段階認証プロセスを有効にしたもの）が必要です。または Google でサインインしてください。",
   "email.needsMicrosoft": "Outlook はここでメールのパスワードを受け付けません。Microsoft でサインインしてください。",
   "email.needsAppPassword": "{provider} ではここでアプリ パスワードが必要です。通常のパスワードは使えません。",
+  "announcements.title": "お知らせ",
+  "announcements.new": "新しいお知らせ",
   "serverError.mailbox.outgoingFields": "送信サーバーを確認してください: mail.example.com のような名前、1〜65535 のポート、SSL/TLS または STARTTLS。",
   "native.menu.newLocal": "このコンピューターに新しいワークスペース…",
   "server.meetings.card.title": "会議メモ",

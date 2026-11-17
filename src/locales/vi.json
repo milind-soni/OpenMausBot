@@ -5767,6 +5767,8 @@
   "common.ok": "OK",
   "connectedWorkspaces.localTitle": "Môi trường trên máy tính này",
   "connectedWorkspaces.newEnvironment": "Môi trường mới",
+  "announcements.title": "Thông báo",
+  "announcements.new": "Thông báo mới",
   "policy.teamRemoteBlocked": "Do {organization} quản lý: mở Cloud này trên điện thoại đã bị tắt. Hãy hỏi quản trị viên nhóm.",
   "remote.status.pairedMany": "Đã ghép {count} thiết bị",
   "remote.status.pairedOne": "Đã ghép 1 thiết bị",

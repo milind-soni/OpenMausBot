@@ -4015,7 +4015,11 @@
       "cloudBuy.promise.teamPlan": "cc700a83e92de4a0be260f4cea4f9fa96a4117c58e6d4e0592f6682b09152f2e",
       "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
       "chat.newChatHint": "f50b2919941dfdd3337f86015f98c770cb22ed01d7060235415abe8c39a06ee0",
-      "chat.newChatHintButton": "db18382a249e0206bc28514931d423b77d55dce180c1eb8e4bf35f861c9a50ec"
+      "chat.newChatHintButton": "db18382a249e0206bc28514931d423b77d55dce180c1eb8e4bf35f861c9a50ec",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63",
+      "chat.notice.acpNodeTooOld": "1ed4170eee496793135910a81e9dd427c24f9d0522194cdcf2a08d65674c03c6"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -10408,7 +10412,10 @@
       "room.routedBy.gemini": "488da2a6e7c26e4a09b8ed8cdd65ff8237685317f18f9dacede1994658db498c",
       "devices.computers.title": "700633b6d9e8d3cebf611ff7642fd356d5febbf3d625fa63691063bc87bdf5f5",
       "cloudBuy.promise.teamPlan": "cc700a83e92de4a0be260f4cea4f9fa96a4117c58e6d4e0592f6682b09152f2e",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -14208,7 +14215,10 @@
       "room.routedBy.gemini": "488da2a6e7c26e4a09b8ed8cdd65ff8237685317f18f9dacede1994658db498c",
       "devices.computers.title": "700633b6d9e8d3cebf611ff7642fd356d5febbf3d625fa63691063bc87bdf5f5",
       "cloudBuy.promise.teamPlan": "cc700a83e92de4a0be260f4cea4f9fa96a4117c58e6d4e0592f6682b09152f2e",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -17862,7 +17872,10 @@
       "room.routedBy.gemini": "488da2a6e7c26e4a09b8ed8cdd65ff8237685317f18f9dacede1994658db498c",
       "devices.computers.title": "700633b6d9e8d3cebf611ff7642fd356d5febbf3d625fa63691063bc87bdf5f5",
       "cloudBuy.promise.teamPlan": "cc700a83e92de4a0be260f4cea4f9fa96a4117c58e6d4e0592f6682b09152f2e",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -25799,7 +25812,10 @@
       "cloudAccount.teamPeopleAsk": "5c5830e84be4eabc3825c9d6e2fb3ed549a144454eb085d31738ad44cb9e7c96",
       "cloudAccount.teamPeopleInvite": "27bf0f2d3f3f549002f193566e19b010a40b80c1a5564cf65a80d83f2f2c0462",
       "cloudAccount.teamPeopleSeats": "0f0b6ac0271734199d61e7cf1b9a52d79430b012e562985258d347ccfe4dfcab",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -36796,7 +36812,109 @@
       "room.queue.busyElsewhereAfter": "3432832abb792772c22e30806a674a4edcd22f660ee53d47ba4e2075121a79e8",
       "room.queue.aTeammate": "1ca7804e31164a622443afee44c7ab79a97c1fb2e169b4df211bff0c10bd4a30",
       "chat.newChatHint": "f50b2919941dfdd3337f86015f98c770cb22ed01d7060235415abe8c39a06ee0",
-      "chat.newChatHintButton": "db18382a249e0206bc28514931d423b77d55dce180c1eb8e4bf35f861c9a50ec"
+      "chat.newChatHintButton": "db18382a249e0206bc28514931d423b77d55dce180c1eb8e4bf35f861c9a50ec",
+      "teamsNew.title": "53cd57162944ac68e6b5215e7a1bc67a1012030c20f7779344040f6dfdbadffe",
+      "teamsNew.sharedBot": "5f471653fe41bbc7a7aa2b31e50e80ce760de84ff106fa74898906c54c8c941e",
+      "teamsNew.files": "49c6fe5360358960d2d456e59df8dec8b917f08ea6efecc63ebcc3b6d0db3e1e",
+      "teamsNew.private": "b6f66354a0516e30718d27fcbb0a803b1c1c52f258af075df1670743151a09ea",
+      "teamsNew.price": "9fe15e4106510af9edc7f26faf041dc9f203aed15110acecabc09f98a612ff8f",
+      "teamsNew.invite": "8caa939a811754ad72f19e7390498ee9e48368810bf0697b7ead376b15204367",
+      "teamsNew.gotIt": "5ad3dbd1242a4cea217e8b68a9fd2c8187f2c337258279193f6d9a31a9f1a69c",
+      "teamsNew.start": "94e695b0490232da2c6136013e0ecbe008c106a01554d526428690d3ab7df5fb",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.showAgain": "b800ebd32c8ec53f52c1854269b3468763c186604d500ece814de98ca44e77ad",
+      "announcements.ended": "7cdc804e6996997d599232fbf8ce066a4f6c0696e7b586fc7b3ee499f35d4559",
+      "announcements.empty": "e37c1eeac91527c856bcec7256bba9c9bd5a228742428627951c78d23431dfce",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "attach.videoHintStreams": "3b4fa3b4ffeaaccd64df3df7295d1268c4cf5d857bd1ba067d2a727bce43f21e",
+      "settings.logins.onePassword.team": "f39cb89dac0e21e514be112f0116813a632327191e92a73cd57dd00820a96dc3",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63",
+      "teamFiles.title": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63",
+      "teamFiles.intro": "0c98232345106df32c85b8422e7f9d4c796219666c2c04df845d2a5c1a78e4a9",
+      "teamFiles.upload": "865e89de78d94c747184d6a7e6f5244b453d8062343c07e014ae698cfb0260e8",
+      "teamFiles.newFolder": "cf28f49ec597a6ede5ae0fc5e121b6f0321d0ddfa645ff39cd44febac0b2ac75",
+      "teamFiles.folderName": "14d34edf50ef6c8738db97eb3fc56d0d5c8521b4555404b3ad456cedbb0c815d",
+      "teamFiles.create": "4759498ac2a719c619e2c8cf8ee60af2d2407425e95d308eb208425b2a6d427a",
+      "teamFiles.download": "d6eafe82359100423c93c5ce53c352c1b51ca1e699215fcec3f5c5dd9bf12d24",
+      "teamFiles.rename": "3064d79a295cefe4b384b8fe5cb29fd6b06d7eb1ad94b8895f4148039d06b330",
+      "teamFiles.newName": "04eea2a4ae80ebbe510d656f245a347c49328c4b79e642708d9028e27e84e1bb",
+      "teamFiles.save": "1509f561f2416598629b886ad7d3c05a7e221e4e0675c84bbff4ee6d9e03913d",
+      "teamFiles.delete": "e2d0a54968ead24efc0dffa6ac78fc606dceec34a0f586177a74a54cc2272cf8",
+      "teamFiles.deleteConfirm": "f066d07e2c299d0ad3a77138a3638f061d524998ab60621bd3e78e4dec263079",
+      "teamFiles.actions": "f608d3348f5f91d57ab2cce10e8532510658d5773ef01d01cad83396e652c1b3",
+      "teamFiles.open": "f687d18152a5b541e172a5468106160deb5dd30fdee78ecb4596cdc835a4c013",
+      "teamFiles.closePreview": "7d8ab368210c5ae8d2cec7bb577afe1e7cf9489c88f031e0f9de7555c9f20b66",
+      "teamFiles.noPreview": "00604c7d5208c3793c5ba92dbdcb444ba04014d96e2bd302d472cab2ee8a42f5",
+      "teamFiles.previewTooLarge": "fe681cd65f1dfa2b3da57c940a8ae05d79128c03ea6819a7f21a0d17cc32e97c",
+      "teamFiles.empty.title": "49abaf804ab38c1da030e3396f6f8aa27442a44af3c10055065b817996be33ec",
+      "teamFiles.empty.body": "6dc57e29a676c2aa0c6fcc573ac79dbe7a851e81d905140bc968beadd5287f42",
+      "teamFiles.drop": "e97cc3997e1db6ccd4400f33f63f6643db14f134b509259111d60300935fdb04",
+      "teamFiles.used": "5a8e357a4f18230b49dc41bcf861bb834920821bb4ed8c7ac5e4d0887d47aff8",
+      "teamFiles.loadFailed": "58570063f4a1eba60c2bce3401a5c63b16122944d7ccdf10b7afdaae169609a0",
+      "teamFiles.uploading": "fea603abe2c784d5c89882aea69c62cdef7c702130ac9c1a884884cd0d42499b",
+      "teamFiles.uploaded": "565535408c6d830a7022f71cbeccd95f89a1e1651d1d0e57425d0561cc12ebe5",
+      "teamFiles.made": "316d211c8d2ef5fb56abf4f95817c50b03c1e3398617f37368b02aaddf438119",
+      "teamFiles.changedWith": "2e2fdf6e446f566341cbfa24da5f1e0289e05aa93a5f836c36e5f4726211216c",
+      "teamFiles.changedBy": "d21ce888ee96f654a3df93a0395bcb4d631e94765808ed9c703359b0aab35487",
+      "teamFiles.someone": "2a59d59e3809f827ce709d3815e3950eef4a6a93af5557a93a7fdfba71460843",
+      "teamFiles.error.tooLarge": "a56fe01b458f72b943f119d5644fb36ef30cc7895efbb9837de7140bf445fe72",
+      "teamFiles.error.full": "bd006dc2150762c987651b1dcc3e9fe984f6cf914ed165aeeb9fb54a55e42363",
+      "teamFiles.error.exists": "a455805a8d0945fb7808fc93834cd30018928c1fb556e4de08b7b39bc380ef27",
+      "teamFiles.error.forbidden": "dc418a10291722bf847304aaf674cdc1615a0e6220cae27e322ce6b4547036e5",
+      "teamFiles.error.notFound": "94dc31e46a9f6aadcc1ff1ca71dc3a1bd87dfcb4fd371997d7a797de1b9667a5",
+      "teamFiles.error.badName": "b750786a0a3f9c715e0761efa4e2ea022ff0a073e732b57f0f8a6bde6484de70",
+      "teamFiles.error.failed": "d010a8621f3358d1491856e8ce9da938f4e64d596f8fbdd240ee36b3972485c0",
+      "botAccess.teamFiles.title": "edb0b46b6d6a135fcb5fa1a5765be1b166d99c81c61966b59bef860832469c57",
+      "botAccess.teamFiles.on": "56d18fbd01530bc0bf2edfdc3bf67add81509fa083345f4986e03302779b4b66",
+      "botAccess.teamFiles.off": "2c4905650646cdf562db5af5260a74341ceb874468fa2044b95432189c5f5a0e",
+      "botAccess.teamFiles.adminsOnly": "78b69d593f4ce419176eb42e2e2fd320f500885d106005e0edf75f168a77ddbb",
+      "native.context.copyImage": "bf21aa9bebe41ba69dab0d5a172aea1b9124d8fb824eabe7d7c46df5c1237e14",
+      "native.context.saveImageAs": "bbbda8c84f5fd419ee4ec680301910a75bfd4e6d46c9ea0495f3c818ac4b9a59",
+      "native.context.saveVideoAs": "a697fb64a2f1f67e7a33825a7f574653a957827be60531aa58dc1e3ae0ee2f8c",
+      "native.context.saveAudioAs": "3bc11da7aced7adf5ddc1286a3d347e2c012dfba9937a5bc11ad6b1d7411c6c3",
+      "native.context.saveLinkAs": "e4e9bea4f92587829080b691bde74a8bbf4335b425b846e7a31a396ef2309c20",
+      "native.context.openInDefaultApp": "42148b60f4d8a124879f213855108acbc74ff4210cc6408f5cbea7b15e595aa4",
+      "native.context.cannotOpen": "0b3b5e25baf6058ec4b29099941edfb212324eaa707e76ce9521b7606846811c",
+      "native.context.openFailed": "67bbee6999fe12ddd399e1ef2be47f3a75af55bd32ca137a907caee9781fa166",
+      "chat.notice.acpNodeTooOld": "1ed4170eee496793135910a81e9dd427c24f9d0522194cdcf2a08d65674c03c6",
+      "template.addToTeam": "00975ce1b38f15b896a50ecc47fe1374ebacf0fedd032704f6ae321a5a1f6328",
+      "template.addedToTeam": "037070d048df53a027f6b8de563889bc6e071d324efc1fec7a3cd007125d9850",
+      "template.replacedInTeam": "e200daef8f26cad624399ac1482728c7bdad84f4fdb4864d042bc17553e16dc5",
+      "template.publishToRepo": "ab46a583c6069281d91b212871d23cb26e39eddf76de960fe57f37e9535e5d0c",
+      "template.repo.title": "7105103f5fe48daff48755d7064d1c84d374240e055024d568ee71a6b0cdf3fe",
+      "template.repo.repoLabel": "13d6ff07b8a5d792ec87d5ec83bff2730ee77fa8f4fcd89ca5f1d688f64b4c73",
+      "template.repo.repoPlaceholder": "65e817eec8cd71edae741f73b5aa07d98e8f79c623a5f05014f1a88f89fb089c",
+      "template.repo.folderLabel": "ae35d107e7c426045f690f7d5ed85cb9dd8a60830b4aad7b9ed84472b2cdfe7c",
+      "template.repo.direct": "c1f4bf1bf020b6bbe783a9a321d2327044fd04dcac9afe5977041bba0ac1e4d4",
+      "template.repo.openPullRequest": "439996522e212635ebf564a8ef192c87e4b229b730b25826a73276a115bbd14c",
+      "template.repo.commit": "82a9c46ffa4789945d9f2359d75891558ef6faa8dee09e4b25e4e0597704f5bd",
+      "template.repo.working": "582e0f1abad43e9e307858b4315949e6e4ae402b224c1b0ce9bd7406d79ddc2c",
+      "template.repo.checking": "71a8f249ae488d58905b5c038abb2963e2d37daa6e3a242c0626918cdc85b6f7",
+      "template.repo.connectFirst": "4d9b0b4dea711f42190e22055a1240bf725d660c9fb7d71151ecd8162f1b862a",
+      "template.repo.openApps": "4d95ac69d87a388e1780013bcd35ebb1c8952295ee69558ada798f808993eb9e",
+      "template.repo.pullRequestOpened": "b5dcdeb769715c78e9d7de8d44a01171995054204592f0b875afeba17848c90b",
+      "template.repo.committed": "9a6564c332586c7d8337592e8c3bb0f6876f0615df1b5c15b78c8cf309f190ab",
+      "template.repo.note": "cb1c2057e14fe267799898673dde206c16f30f4d310dea90205c91c31d23d859",
+      "templateImport.fromTeam": "4062e48e1c5e86e65455ec07932258ec0dba9e814c3e1ecdeee652a605f9f925",
+      "templateImport.kindBot": "41e35ba1a1fd8b4cdc7f899b3b8f9442a7542f445170e8782e219732cc25c10f",
+      "templateImport.kindDepartment": "5304ab98e5815a35d33c39ddd9557ecf39e7902f29f1c132da4e69c265e9b9bf",
+      "templateImport.addedBy": "4e2d81fbc9da78e595e3fc00685c6bb4a03a5615f9ed5b274ce2ff3ee5dc23b7",
+      "templateImport.addedAt": "66d3972eeda7bfb4b428fd0f10e664704b444cccaf2ff06ee14f29611b8977e4",
+      "templateImport.remove": "e6a3c4a1250a6ad3f10faa22333e5e50a6ba78e5b28a3b26f5743d9f8c7ede93",
+      "settings.logins.source.bitwarden": "5da08592a5626919c301701aea2b6fe53a851f3838966be51f4284827d4499a7",
+      "settings.vault.bitwarden.title": "fb54e0f95e21a9916cc5c0fee00d520943a94effa4e4a91f7646dd1ebddf262a",
+      "settings.vault.bitwarden.line": "ae1f26c937bc820b3edf45fddb1f3bc312a51146b7af502727b3d27ab23ed584",
+      "settings.vault.bitwarden.connected": "68c5eca176b1820ca8b95bb3f09cee8ebcca61ff6740651fecf2f3b93745e482",
+      "settings.vault.bitwarden.connect": "3600e3bda7b44593cf05b133c8b35ab81a08dc8474401f29057097d754ddd6d7",
+      "settings.vault.bitwarden.disconnect": "1b42b1136c0650fac2987eb834770c35e5b39b7b09c91d226c54a027b7f55b37",
+      "settings.vault.bitwarden.team": "e23c5b627e0f681ebf28f61fe2ae27f20e6f3606584e6cfc3e75071af442c8a6",
+      "settings.vault.bitwarden.guide": "9a7bbfa1a16a0feaf5c53fbcbee3535b15f937ceffad2803005b602a8dfa00e7",
+      "settings.vault.bitwarden.server": "aef7de28d52977f1b5cd0fecfdc151717610adf41e0aa33b4d9f7522a43337ef",
+      "settings.vault.bitwarden.selfHosted": "adcada9abf653323ff95c549e0cbfeed946c76631b5299d8dbbcd8dc1455ff10",
+      "settings.vault.bitwarden.address": "8be89710b2f1d0c515eaff86dd4f049ec2447de5bfdb07d02d9720ff7fe017e1",
+      "settings.vault.bitwarden.password": "f4c2ee7d031e215c194db822a9f9fdf6cde500330d58ec3bda09ab7330cca4c9",
+      "settings.vault.bitwarden.note": "de354e48f4544eba3d26a90c9993c3db06bab7097af7ffe2d617171235235408",
+      "settings.vault.bitwarden.error": "dfb662fef386e7c8486cb9bb20268bd342c3423f53f6832cff0ae38564032f80"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -46857,7 +46975,10 @@
       "cloudAccount.teamPeopleAsk": "5c5830e84be4eabc3825c9d6e2fb3ed549a144454eb085d31738ad44cb9e7c96",
       "cloudAccount.teamPeopleInvite": "27bf0f2d3f3f549002f193566e19b010a40b80c1a5564cf65a80d83f2f2c0462",
       "cloudAccount.teamPeopleSeats": "0f0b6ac0271734199d61e7cf1b9a52d79430b012e562985258d347ccfe4dfcab",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -57022,7 +57143,10 @@
       "cloudAccount.teamPeopleAsk": "5c5830e84be4eabc3825c9d6e2fb3ed549a144454eb085d31738ad44cb9e7c96",
       "cloudAccount.teamPeopleInvite": "27bf0f2d3f3f549002f193566e19b010a40b80c1a5564cf65a80d83f2f2c0462",
       "cloudAccount.teamPeopleSeats": "0f0b6ac0271734199d61e7cf1b9a52d79430b012e562985258d347ccfe4dfcab",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -61096,7 +61220,10 @@
       "room.routedBy.gemini": "488da2a6e7c26e4a09b8ed8cdd65ff8237685317f18f9dacede1994658db498c",
       "devices.computers.title": "700633b6d9e8d3cebf611ff7642fd356d5febbf3d625fa63691063bc87bdf5f5",
       "cloudBuy.promise.teamPlan": "cc700a83e92de4a0be260f4cea4f9fa96a4117c58e6d4e0592f6682b09152f2e",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -66989,7 +67116,10 @@
       "room.routedBy.gemini": "488da2a6e7c26e4a09b8ed8cdd65ff8237685317f18f9dacede1994658db498c",
       "devices.computers.title": "700633b6d9e8d3cebf611ff7642fd356d5febbf3d625fa63691063bc87bdf5f5",
       "cloudBuy.promise.teamPlan": "cc700a83e92de4a0be260f4cea4f9fa96a4117c58e6d4e0592f6682b09152f2e",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -72882,7 +73012,10 @@
       "room.routedBy.gemini": "488da2a6e7c26e4a09b8ed8cdd65ff8237685317f18f9dacede1994658db498c",
       "devices.computers.title": "700633b6d9e8d3cebf611ff7642fd356d5febbf3d625fa63691063bc87bdf5f5",
       "cloudBuy.promise.teamPlan": "cc700a83e92de4a0be260f4cea4f9fa96a4117c58e6d4e0592f6682b09152f2e",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -79982,7 +80115,10 @@
       "cloudAccount.teamPeopleAsk": "5c5830e84be4eabc3825c9d6e2fb3ed549a144454eb085d31738ad44cb9e7c96",
       "cloudAccount.teamPeopleInvite": "27bf0f2d3f3f549002f193566e19b010a40b80c1a5564cf65a80d83f2f2c0462",
       "cloudAccount.teamPeopleSeats": "0f0b6ac0271734199d61e7cf1b9a52d79430b012e562985258d347ccfe4dfcab",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -87136,7 +87272,10 @@
       "cloudAccount.teamPeopleAsk": "5c5830e84be4eabc3825c9d6e2fb3ed549a144454eb085d31738ad44cb9e7c96",
       "cloudAccount.teamPeopleInvite": "27bf0f2d3f3f549002f193566e19b010a40b80c1a5564cf65a80d83f2f2c0462",
       "cloudAccount.teamPeopleSeats": "0f0b6ac0271734199d61e7cf1b9a52d79430b012e562985258d347ccfe4dfcab",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -94102,7 +94241,10 @@
       "cloudAccount.teamPeopleAsk": "5c5830e84be4eabc3825c9d6e2fb3ed549a144454eb085d31738ad44cb9e7c96",
       "cloudAccount.teamPeopleInvite": "27bf0f2d3f3f549002f193566e19b010a40b80c1a5564cf65a80d83f2f2c0462",
       "cloudAccount.teamPeopleSeats": "0f0b6ac0271734199d61e7cf1b9a52d79430b012e562985258d347ccfe4dfcab",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -101732,7 +101874,10 @@
       "cloudAccount.teamPeopleAsk": "5c5830e84be4eabc3825c9d6e2fb3ed549a144454eb085d31738ad44cb9e7c96",
       "cloudAccount.teamPeopleInvite": "27bf0f2d3f3f549002f193566e19b010a40b80c1a5564cf65a80d83f2f2c0462",
       "cloudAccount.teamPeopleSeats": "0f0b6ac0271734199d61e7cf1b9a52d79430b012e562985258d347ccfe4dfcab",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
+      "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
+      "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63"
     }
   }
 }
