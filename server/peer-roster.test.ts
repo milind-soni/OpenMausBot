@@ -4,6 +4,7 @@ import {
   canManage,
   canReach,
   departmentRefusal,
+  goneIdRefusal,
   hasAuthority,
   hasTeamAuthority,
   inChargeOfEvery,
@@ -190,7 +191,9 @@ describe("reachablePeers", () => {
 describe("resolveTeammate", () => {
   it("takes an id as an id, even one the caller cannot reach", () => {
     expect(resolveTeammate(fleet, self, "writer")).toEqual({ id: "writer", byName: false });
-    expect(resolveTeammate(fleet, self, "hidden")).toEqual({ id: "hidden", byName: false });
+    // An archived bot's exact id names that bot and nothing else, so the caller is refused in the same words the
+    // coordinate route uses rather than being sent to whoever else is around.
+    expect(resolveTeammate(fleet, self, "hidden")).toEqual({ error: goneIdRefusal("hidden") });
     expect(resolveTeammate(fleet, self, " elsewhere ")).toEqual({ id: "elsewhere", byName: false });
   });
 
@@ -265,6 +268,61 @@ describe("resolveTeammate", () => {
   it("never resolves an id start to a bot the id could not reach", () => {
     const ids = [...fleet, { id: "9f9f9f9f-0000-4eea-ac52-2249dfd0020d", name: "Secret plan", hidden: true, section: "Work" }];
     expect(resolveTeammate(ids, self, "9f9f9f9f")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });
+  });
+
+  it("never hands a brief to a visible case-variant twin when the exact id names a bot the caller cannot see", () => {
+    const real: RosterMember = { id: "ember-0001-4eea-ac52-2249dfd0020d", name: "Ember", section: "Work" };
+    const twin: RosterMember = { id: "EMBER-0001-4eea-ac52-2249dfd0020d", name: "Ember Twin", section: "Work" };
+    const roster = [...fleet, real, twin];
+    const unknown = (id: string) => `No bot with id "${id}" — call list_bots and copy the exact id from the result`;
+    // wider.hides takes the bot whose id was written out of its caller's sight, exactly as a person's own reach does.
+    const hiding = { reaches: () => true, hides: (bot: RosterMember) => bot.id === real.id, refusal: (bot: RosterMember) => unknown(bot.id) };
+    expect(resolveTeammate(roster, self, real.id, undefined, undefined, hiding)).toEqual({ error: unknown(real.id) });
+    // The twin's own spelling still reaches the twin, and the hidden bot's spelling never does.
+    expect(resolveTeammate(roster, self, twin.id, undefined, undefined, hiding)).toEqual({ id: twin.id, byName: false });
+    // An archived bot's exact id with a visible twin: refused in the route's own words, again never the twin.
+    const archived: RosterMember = { ...real, hidden: true };
+    expect(resolveTeammate([...fleet, archived, twin], self, archived.id)).toEqual({ error: goneIdRefusal(archived.id) });
+    expect(resolveTeammate([...fleet, archived, twin], self, twin.id)).toEqual({ id: twin.id, byName: false });
+    // Spelled in neither bot's case: both are counted, and only the candidate the caller can see is identified.
+    const spelled = resolveTeammate(roster, self, "eMbER-0001-4eea-ac52-2249dfd0020d", undefined, undefined, hiding);
+    expect(spelled).toEqual({ error: `2 bots differ only by the case of their ids, so nothing was sent: Ember Twin (id ${twin.id}). Send it again with the exact id of the one you mean, copied from list_bots.` });
+    expect((spelled as { error: string }).error).not.toContain(real.id);
+  });
+
+  it("takes no brief for an id start that also starts an id the caller cannot see", () => {
+    const lead: RosterMember = { id: "2cb14697-4805-4eea-ac52-2249dfd0020d", name: "Design Lead", section: "Work" };
+    const ghost: RosterMember = { id: "2cb14697-9999-4eea-ac52-2249dfd0020d", name: "Ghost Writer", title: "Secret plan", hidden: true, section: "Work" };
+    const start = "2CB14697";
+    const refused = `More than one bot has an id starting "${start}", and not all of them can be reached from here, so nothing was sent. Send the exact id of the one you mean, copied from list_bots.`;
+    const result = resolveTeammate([...fleet, lead, ghost], self, start);
+    expect(result).toEqual({ error: refused });
+    // The refusal says nothing about the bot it may not name, and no start of it reaches the visible one.
+    const text = (result as { error: string }).error;
+    for (const bot of [lead, ghost]) {
+      expect(text).not.toContain(bot.name);
+      expect(text).not.toContain(bot.id);
+    }
+    // A start only the visible bot has still resolves, and so does its whole id.
+    expect(resolveTeammate([...fleet, lead, ghost], self, "2cb14697-4805")).toEqual({ id: lead.id, byName: false });
+    // A twin that wider.hides keeps from the caller rules the start out the same way, whether or not it is archived.
+    const payroll: RosterMember = { id: "2cb14697-7777-4eea-ac52-2249dfd0020d", name: "Payroll Bot", section: "Work" };
+    const hiding = { reaches: () => true, hides: (bot: RosterMember) => bot.id === payroll.id, refusal: () => "nothing here" };
+    expect(resolveTeammate([...fleet, lead, payroll], self, start, undefined, undefined, hiding)).toEqual({ error: refused });
+  });
+
+  it("counts every candidate it may not name, and identifies none of them", () => {
+    const one: RosterMember = { id: "2cb14697-4805-4eea-ac52-2249dfd0020d", name: "Ghost One", title: "Secret plan", hidden: true, section: "Work" };
+    const two: RosterMember = { id: "2CB14697-4805-4eea-ac52-2249dfd0020d", name: "Ghost Two", title: "Legal", section: "Work", visibility: "admins" };
+    const result = resolveTeammate([...fleet, one, two], self, "2Cb14697-4805-4eea-ac52-2249dfd0020d");
+    expect(result).toEqual({ error: "2 bots differ only by the case of their ids, so nothing was sent. Send it again with the exact id of the one you mean, copied from list_bots." });
+    const text = (result as { error: string }).error;
+    for (const bot of [one, two]) {
+      expect(text).not.toContain(bot.name);
+      expect(text).not.toContain(bot.title!);
+      expect(text.toLowerCase()).not.toContain(bot.id.toLowerCase());
+    }
+    expect(text).not.toMatch(/Ghost|Secret|Legal|admins/u);
   });
 
   it("reads dashes and underscores in a name as spaces, for one teammate only", () => {

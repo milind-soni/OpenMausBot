@@ -68,15 +68,17 @@ describe("a routine's refused hand-off", () => {
   });
 
   it("leaves a refusal standing when the success went to a different bot that shares its id prefix", () => {
-    // The review's case: two teammates whose ids start alike. "2cb14697" can only mean the one the sender may reach, so
-    // the success is the reachable bot's and nothing was ever sent to the other: its refusal has to stay.
+    // The review's case: two teammates whose ids start alike. The start alone names neither of them, so the retry has to
+    // be the whole id, and the success is only ever the bot its receipt carries: nothing was sent to the other, so its
+    // refusal has to stay.
     const apart: RosterMember = { id: "2cb14697-4805-4a1e-9a54-0f1f5f6d3c11", name: "Bookkeeping", visibility: "admins" };
     const near: RosterMember = { id: "2cb14697-1111-4a1e-9a54-0f1f5f6d3c11", name: "Writer", visibility: B };
     const roster = [rooms, hours, near, apart, mausbot];
-    expect(resolveTeammate(roster, rooms, "2cb14697")).toEqual({ id: near.id, byName: false });
+    expect(resolveTeammate(roster, rooms, "2cb14697")).toMatchObject({ error: expect.stringContaining("More than one bot has an id starting") });
+    expect(resolveTeammate(roster, rooms, near.id)).toEqual({ id: near.id, byName: false });
     const { refused } = fixture({ roster });
     refused.settled("t", rooms, ["Bookkeeping"], 403);
-    refused.settled("t", rooms, ["2cb14697"], 200, [{ botId: near.id, outcome: "injected" }]);
+    refused.settled("t", rooms, [near.id], 200, [{ botId: near.id, outcome: "injected" }]);
     expect(refused.take("t")).toBe("Rooms couldn't hand this to Bookkeeping, because they're shared with different people. Nothing was sent.");
   });
 

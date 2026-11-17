@@ -128,7 +128,7 @@ import { BRIEF_MAX } from "./bot-link/protocol.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
 import { createAboutMe } from "./about-me.ts"; import { createPersonPreference } from "./host/person-preference.ts";
 import { botMemoryUpdate, ownersOwnAsk } from "./memory-forget.ts";
-import { canManage, canReach, departmentRefusal, hasTeamAuthority, inChargeOfEvery, livePeerRoster, livePeerRosterBlock, peerName, peerRosterPrompt, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
+import { canManage, canReach, departmentRefusal, goneIdRefusal, hasTeamAuthority, inChargeOfEvery, livePeerRoster, livePeerRosterBlock, peerName, peerRosterPrompt, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts"; import { roomPostRefusal, sharedNamesNote, unreachedMentionLines } from "./same-name-mentions.ts";
 import {
   containerComputerAction,
   containerComputerFrame,
@@ -13620,7 +13620,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const eligibility =
             target.botId === internalSender.id && !toSelf ? "Choose a teammate, not yourself"
             : !addressed ? `No bot with id "${target.botId}" — call list_bots and copy the exact id from the result`
-            : addressed.hidden ? `The bot with id "${target.botId}" is no longer available — call list_bots for the ones you can reach`
+            : addressed.hidden ? goneIdRefusal(target.botId)
             : roomHandoffProblem(target, address) ?? personalReach.handOnProblem(internalSender, addressed, address.threadId, internalCapability.generation);
           if (eligibility) return refuse(403, eligibility);
         }
