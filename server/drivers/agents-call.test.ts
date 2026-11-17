@@ -222,11 +222,26 @@ describe("skill_manage", () => {
     const sent: unknown[] = [];
     const ctx = context({ client: { api: async (path) => { sent.push(path); return {}; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
     expect(await callTool("skill_manage", { action: "save" }, ctx)).toEqual({
-      text: 'skill_manage action must be "create", "update", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source.',
+      text: 'skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source.',
       isError: true,
     });
     expect((await callTool("skill_manage", { action: "create", source: "conversation" }, ctx)).text).toContain("---\\nname: file-expense\\ndescription:");
     expect(sent).toEqual([]);
+  });
+
+  it("sends import with only its source, so the app fetches the skill and it gets the same card as create", async () => {
+    const sent: Array<{ path: string; body: any }> = [];
+    const ctx = context({ client: { api: async (path, init) => { sent.push({ path, body: JSON.parse(String(init?.body)) }); return { name: "pdf" }; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
+    expect((await callTool("skill_manage", { action: "import" }, ctx)).text).toContain("skill_manage needs source");
+    const result = await callTool("skill_manage", { action: "import", source: "https://skills.sh/acme/skills/pdf" }, ctx);
+    expect(result.text).toContain("A confirmation card is now visible to the user for new skill “pdf”.");
+    expect(sent).toEqual([{ path: "/api/internal/skills/stage", body: expect.objectContaining({ action: "import", skill_md: "", source: "https://skills.sh/acme/skills/pdf" }) }]);
+  });
+
+  it("tells bots they can import a skill from GitHub or skills.sh", () => {
+    const tool = availableTools({ ...catalogProfileFromEnv({}), skillAuthoring: true }).find((entry) => entry.name === "skill_manage");
+    expect(tool?.description).toContain("import one from GitHub or skills.sh");
+    expect(tool?.inputSchema.properties).toMatchObject({ action: { enum: expect.arrayContaining(["import"]) } });
   });
 });
 
@@ -425,6 +440,25 @@ describe("memory_update", () => {
     const stale = await callTool("memory_update", { action: "supersede", old_text: "The person wants replies in French", text: "The person wants long replies in English" }, ctx);
     expect(stale.isError).toBe(true);
     expect(isForgotten("The person likes long replies")).toBe(true);
+  });
+
+  it("reads a blank old_text on append or prefer as left out, since neither uses it", async () => {
+    const bot = "bot-memory-blank-old-text";
+    const ctx = context({ botId: bot, client: harness(bot) });
+    for (const old_text of ["", "  ", null]) {
+      const saved = await callTool("memory_update", { action: "append", text: `Exam on Friday ${JSON.stringify(old_text)}`, old_text, until: "2026-12-01" }, ctx);
+      expect(saved.isError, saved.text).toBeFalsy();
+    }
+    expect(readMemoryFile(bot).text).toContain("Exam on Friday \"\"");
+    expect(await callTool("memory_update", { action: "replace", old_text: "", text: "x" }, ctx)).toMatchObject({ isError: true, text: expect.stringContaining("old_text must not be empty") });
+  });
+
+  it("says old_text is not used with append instead of a generic error, and saves nothing", async () => {
+    const bot = "bot-memory-append-old-text";
+    const ctx = context({ botId: bot, client: harness(bot) });
+    const refused = await callTool("memory_update", { action: "append", old_text: "exam", text: "Exam on Friday" }, ctx);
+    expect(refused).toEqual({ isError: true, text: "memory_update was not run: old_text is not used with append. Leave it out to add a new note, or use replace or supersede to change the passage it names." });
+    expect(readMemoryFile(bot).text).not.toContain("Exam on Friday");
   });
 
   it("removes a whole dated entry when only its fact is named, never leaving a note with a date and no text", async () => {

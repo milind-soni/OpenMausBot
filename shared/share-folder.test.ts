@@ -70,7 +70,8 @@ describe("template folders", () => {
 
   it("refuses unsafe paths and opens only the files a template has", () => {
     for (const path of ["../bot.md", "/etc/passwd", "skills\\x\\SKILL.md", ".hidden/bot.md", "a/../bot.md", "a//b"]) expect(safeFolderPath(path)).toBeNull();
-    const kept = normalizeShareFolder({ "bot.md": "x", "../team.md": "y", "skills/a/SKILL.md": "z", "skills/a/run.sh": "rm -rf", "avatars/a.svg": "<svg/>", "memory/notes.md": "secret" });
+    const kept = normalizeShareFolder({ "bot.md": "x", "../team.md": "y", "skills/a/SKILL.md": "z", "skills/a/run.sh": "rm -rf", "skills/a/.env": "KEY=1",
+      "skills/a/node_modules/x.js": "x", "avatars/a.svg": "<svg/>", "memory/notes.md": "secret" });
     expect(Object.keys(kept).sort()).toEqual(["bot.md", "skills/a/SKILL.md"]);
   });
 

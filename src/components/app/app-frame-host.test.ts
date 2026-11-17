@@ -176,6 +176,48 @@ describe("text the person selects in a page", () => {
   });
 });
 
+describe("a page's word on whether it opens with a heading", () => {
+  const HEADING = "mausbot/notifications/heading";
+
+  it("is passed on each time the page says it, and only from the page's own window", () => {
+    const onHeading = vi.fn();
+    const host = mountAppFrame({ container, doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: adapter(), onHeading });
+    const send = (data: unknown, source: unknown = host.iframe.contentWindow) => window.dispatchEvent(new MessageEvent("message", { data, source: source as MessageEventSource }));
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: true } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: false } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: null } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: "yes" } });
+    send({ jsonrpc: "2.0", method: HEADING, params: {} });
+    send({ jsonrpc: "2.0", id: 4, method: HEADING, params: { heading: true } });
+    send({ jsonrpc: "2.0", method: HEADING, params: { heading: true } }, window);
+    expect(onHeading.mock.calls).toEqual([[true], [false], [null]]);
+    host.destroy();
+  });
+
+  it("is taken from the page's size report too, after the size", () => {
+    const calls: unknown[] = [];
+    const frame = { ...adapter(), resize: vi.fn((height: number) => { calls.push(height); }) };
+    const host = mountAppFrame({ container, doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: frame, onHeading: (heading) => { calls.push(heading); } });
+    const send = (data: object) => window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", ...data }, source: host.iframe.contentWindow as MessageEventSource }));
+    send({ id: 1, method: "ui/initialize", params: {} });
+    send({ method: "ui/notifications/initialized", params: {} });
+    send({ method: "ui/notifications/size-changed", params: { height: 240, heading: false } });
+    send({ method: "ui/notifications/size-changed", params: { height: 260 } });
+    send({ method: "ui/notifications/size-changed", params: { height: 280, heading: null } });
+    expect(calls).toEqual([240, false, 260, 280]);
+    host.destroy();
+  });
+
+  it("is passed on once however often the page repeats it", () => {
+    const onHeading = vi.fn();
+    const host = mountAppFrame({ container, doc, title: "Coffee counter", height: 200, hostContext: {}, hostVersion: "1", adapter: adapter(), onHeading });
+    const say = (heading: boolean | null) => window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", method: HEADING, params: { heading } }, source: host.iframe.contentWindow as MessageEventSource }));
+    for (const heading of [null, null, true, true, true, false, false, null, true]) say(heading);
+    expect(onHeading.mock.calls).toEqual([[null], [true], [false], [null], [true]]);
+    host.destroy();
+  });
+});
+
 describe("a row leaving the page", () => {
   type Movable = { moveBefore?: (node: Node, child: Node | null) => void };
   const proto = HTMLElement.prototype as unknown as Movable;

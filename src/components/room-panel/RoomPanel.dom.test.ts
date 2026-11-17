@@ -156,6 +156,20 @@ describe("Who responds", () => {
     expect($('[data-panel-choice="auto"]')?.textContent).toBe("Let MausBot chooseThe decision model is off, so plain messages go to Paperwork; @mentions override this");
     expect($('[data-panel-choice="auto"]')?.getAttribute("aria-checked")).toBe("true");
   });
+
+  it("sets how many turns each member takes, one by default", async () => {
+    render(room());
+    click($('[data-panel-page="responder"]'));
+    await settle();
+    const pressed = () => [...document.querySelectorAll("[data-panel-turns]")].filter((button) => button.getAttribute("aria-pressed") === "true").map((button) => button.textContent);
+    expect([...document.querySelectorAll("[data-panel-turns]")].map((button) => button.textContent)).toEqual(["1", "2", "3", "4", "5"]);
+    expect(pressed()).toEqual(["1"]);
+    click($('[data-panel-turns="1"]'));
+    click($('[data-panel-turns="3"]'));
+    expect(patches()).toEqual([{ type: "patchGroup", groupId: "desk", patch: { turnsPerMember: 3 } }]);
+    render(room({ turnsPerMember: 3 }));
+    expect(pressed()).toEqual(["3"]);
+  });
 });
 
 describe("Working folder", () => {

@@ -141,6 +141,8 @@ describe("the saved logins store", () => {
     expect(store.remove(login.id)).toBe(true);
     expect(store.secretValues()).toEqual([]);
     expect(store.update("missing", { password: "x-x-x-x" })).toBeNull();
+    const wide = store.create({ ...loginPlace("example.com", ["example.com", "login.microsoftonline.com"]), username: "wide", password: "fake-wide-pass", source: "settings", bots: "all" });
+    expect(store.update(wide.id, { site: "login.microsoftonline.com", password: "fake-wide-two" })).toMatchObject({ site: "example.com", hosts: ["example.com", "login.microsoftonline.com"] });
   });
 
   it("keeps the 1Password token in the same sealed file, and which bots each vault is for across reconnects", () => {
@@ -260,6 +262,18 @@ describe("a Team Cloud member's own secrets", () => {
     expect(store.listSecrets({ person: BEN, team: true }).map((one) => one.id)).toEqual([team.id]);
     expect(store.listSecrets({ person: BEN, team: false })).toEqual([]);
     expect(store.listSecrets({ person: ADA, team: false }).map((one) => one.id)).toEqual([ada.id]);
+  });
+
+  it("win over the team's secret of the same name in that person's turns, saved in the same millisecond or before it", () => {
+    let at = 5;
+    const store = new VaultStore({ dataDir: dir, now: () => at });
+    const team = store.saveSecret({ name: "Stripe secret key", value: "sk_test_fake-team", source: "settings", bots: ["pepper"] });
+    const ada = own(store);
+    expect(store.usableSecret("Stripe secret key", "pepper", "ref", { person: ADA, team: true })?.id).toBe(ada.id);
+    at = 6;
+    store.updateSecret(team.id, { value: "sk_test_fake-team-2" });
+    expect(store.usableSecret("Stripe secret key", "pepper", "ref", { person: ADA, team: true })?.id).toBe(ada.id);
+    expect(store.usableSecret("Stripe secret key", "pepper", "ref", { person: BEN, team: true })?.id).toBe(team.id);
   });
 
   it("are another secret than the team's or another member's of the same name, and are never replaced from elsewhere", () => {

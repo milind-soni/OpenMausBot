@@ -9,6 +9,7 @@ import {
   type ExecFileOptions,
   type SpawnOptions,
 } from "node:child_process";
+import { createHash } from "node:crypto";
 import { closeSync, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { basename, dirname, join, resolve } from "node:path";
@@ -264,15 +265,28 @@ export function boxedSpawn(resolved: ResolvedSpawn, opts: CliSpawnOptions, owner
   if (opts.box === false || (owner !== "bot" && !opts.box)) return null;
   const request = typeof opts.box === "object" ? opts.box : {};
   const home = homed ? { home: homed.home, shared: homed.shared } : {};
-  return botBox.wrap({ command: resolved.command, args: resolved.args, cwd: typeof opts.cwd === "string" ? opts.cwd : undefined, env: opts.env ?? process.env, ...request, ...home });
+  const threadId = engineHomes.thread(), conversationBot = engineHomes.bot();
+  return botBox.wrap({ command: resolved.command, args: resolved.args, cwd: typeof opts.cwd === "string" ? opts.cwd : undefined, env: opts.env ?? process.env, ...(threadId ? { threadId } : {}), ...(conversationBot ? { conversationBot } : {}), ...request, ...home });
+}
+
+/** What the audience rule gives a box in `cwd` now, as a key (null off a team or with the box off): a process kept
+ * between turns is started again when it changes, such as a bot's "Can edit team files". */
+export function boxAudienceKey(cwd: string): string | null {
+  if (!botBox.enabled()) return null;
+  const threadId = engineHomes.thread(), conversationBot = engineHomes.bot();
+  return botBox.audienceKey({ cwd, ...(threadId ? { threadId } : {}), ...(conversationBot ? { conversationBot } : {}) });
 }
 
 /** What a process several conversations share must be boxed with to serve `cwd` (null with the box off): all of the bot's
- * conversation folders for a conversation folder (task-workspaces/<bot>/<thread>, BoxRequest.botThreads), else `cwd`. */
+ * conversation folders for a conversation folder (task-workspaces/<bot>/<thread>, BoxRequest.botThreads), on a Team
+ * Cloud only those its audience may read (BoxAudience.threads), else `cwd`. */
 export function sharedBoxScope(cwd: string): string | null {
   if (!botBox.enabled()) return null;
   const parent = dirname(resolve(cwd));
-  return basename(dirname(parent)) === "task-workspaces" ? parent : resolve(cwd);
+  if (basename(dirname(parent)) !== "task-workspaces") return resolve(cwd);
+  const threadId = engineHomes.thread(), conversationBot = engineHomes.bot();
+  const threads = botBox.sharedThreadsKey({ cwd, ...(threadId ? { threadId } : {}), ...(conversationBot ? { conversationBot } : {}) });
+  return threads ? `${parent}#${createHash("sha256").update(threads).digest("hex").slice(0, 16)}` : parent;
 }
 
 /** Security (bot-box/program-trust.ts): a spawn outside the box neither starts a program from a folder a boxed bot can

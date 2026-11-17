@@ -7,7 +7,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { connectorAccessDecision } from "../../shared/connector-scopes.ts";
+import { accountLimit, connectorAccessDecision } from "../../shared/connector-scopes.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import type * as Composio from "../composio.ts";
 import type { AppConfig } from "../config.ts";
@@ -72,8 +72,12 @@ export function createLoginMailCodes(deps: LoginMailCodesDeps) {
 
   const usedKey = (site: string, code: string) => createHash("sha256").update(`${site}\0${code}`).digest("hex");
   const forgetOld = (map: Map<string, number>, before: number) => { for (const [key, at] of map) if (at < before) map.delete(key); };
-  const mayRead = (bot: Bot, app: MailApp): boolean => deps.appAllowed(app) && READS[app].every((slug) =>
-    connectorAccessDecision(bot.connectorScopes, [{ slug }], [app]).ok && evaluateConnectorTools([slug], bot.connectorTools, [app]).allowed);
+  // In an app with an account limit only allowed accounts are read (appBoxes), so the check names one of them.
+  const mayRead = (bot: Bot, app: MailApp): boolean => {
+    const account = accountLimit(bot.connectorScopes, app)?.[0];
+    return deps.appAllowed(app) && READS[app].every((slug) =>
+      connectorAccessDecision(bot.connectorScopes, [{ slug, ...(account ? { account } : {}) }], [app]).ok && evaluateConnectorTools([slug], bot.connectorTools, [app]).allowed);
+  };
 
   function imapBox(account: EmailAccount): CodeMailbox {
     return {
@@ -87,7 +91,7 @@ export function createLoginMailCodes(deps: LoginMailCodesDeps) {
     return { list: (sinceMs) => reads.outlookEmails(sinceMs, LIST_LIMIT), body: (id) => reads.outlookBody(id) };
   }
 
-  async function appBoxes(turn: Turn, app: MailApp): Promise<CodeMailbox[]> {
+  async function appBoxes(bot: Bot, turn: Turn, app: MailApp): Promise<CodeMailbox[]> {
     let cfg = deps.cfg();
     let access: BrokerAccess | undefined;
     if (deps.personApps().includes(app)) {
@@ -100,8 +104,11 @@ export function createLoginMailCodes(deps: LoginMailCodesDeps) {
     const state = (await deps.composio.connectedServices(cfg, access))[app];
     if (!state?.connected) return [];
     const active = (state.accounts ?? []).filter((one) => /^active$/i.test(one.status));
-    // Composio refuses a read that names no account when an app has several.
-    const accounts: Array<string | undefined> = active.length > 1 ? active.slice(0, ACCOUNTS_PER_APP).map((one) => one.id) : [undefined];
+    const allowed = accountLimit(bot.connectorScopes, app);
+    // A bot limited to some accounts reads only those, each named. Otherwise Composio refuses a read that names no
+    // account when an app has several.
+    const accounts: Array<string | undefined> = allowed ? active.filter((one) => allowed.includes(one.id)).slice(0, ACCOUNTS_PER_APP).map((one) => one.id)
+      : active.length > 1 ? active.slice(0, ACCOUNTS_PER_APP).map((one) => one.id) : [undefined];
     return accounts.map((account) => appBox(app, createConnectedReads({
       connected: async () => null,
       ...(account ? { accounts: async () => ({ [app]: account }) } : {}),
@@ -116,7 +123,7 @@ export function createLoginMailCodes(deps: LoginMailCodesDeps) {
     if (deps.composio.configured(deps.cfg()) && bot.composio !== false) {
       for (const app of ["gmail", "outlook"] as const) {
         if (!mayRead(bot, app)) continue;
-        try { boxes.push(...await appBoxes(turn, app)); } catch { unknown = true; }
+        try { boxes.push(...await appBoxes(bot, turn, app)); } catch { unknown = true; }
       }
     }
     return { boxes, unknown };

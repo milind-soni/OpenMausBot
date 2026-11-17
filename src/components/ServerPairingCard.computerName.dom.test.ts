@@ -43,3 +43,13 @@ it.each([
   if (list.length) await vi.waitFor(() => expect(host.querySelector("[data-paired-device]")).not.toBeNull());
   await vi.waitFor(() => expect(host.querySelector("[data-computer-name]")).not.toBeNull());
 });
+
+it("leads a device row with its person and keeps the device as the detail", async () => {
+  sessions.list = [{ ...phone, label: "Chrome on Mac", person: "Ada" }];
+  flushSync(() => root.render(createElement(ServerPairingCard)));
+  await vi.waitFor(() => expect(host.querySelector("[data-paired-device]")).not.toBeNull());
+  const row = host.querySelector("[data-paired-device]")!;
+  const [title, detail] = row.querySelectorAll("span.truncate");
+  expect(title?.textContent).toBe("Ada");
+  expect(detail?.textContent).toMatch(/^Chrome on Mac · /);
+});

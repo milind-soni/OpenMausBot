@@ -60,7 +60,7 @@ h2{margin:0;height:40px;font-size:18px;line-height:24px}
 <div class="row">Monday: design review</div><div class="row">Tuesday: ship the beta</div>
 <div class="row">Wednesday: customer calls</div><div class="row">Thursday: retro</div></body></html>`;
 const FLOWING_HEIGHT = 16 + 40 + 4 * 56 + 16;
-const PREVIEW_HEIGHT = 220;
+const PREVIEW_HEIGHT = 296;
 
 const PAGES = [
   { key: "map-layer", input: { title: "Ferry map", html: MAP_LAYER } },

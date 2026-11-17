@@ -30,6 +30,7 @@ export type BotUpdatePatch = Partial<
     | "voiceNotes"
     | "voiceNoteEveryReply"
     | "xResearch"
+    | "teamFilesEdit"
     | "toolsOff"
     | "pinned"
     | "hidden"

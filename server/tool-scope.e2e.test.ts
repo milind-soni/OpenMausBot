@@ -144,7 +144,7 @@ it.each(["direct", "preview", "room", "goal"] as const)("keeps a corrupt persist
   }
 }, 60_000);
 
-it("refuses selection changes during direct and room turns and requires a trusted widening path", async () => {
+it("saves selection changes during direct and room turns and requires a trusted widening path", async () => {
   await withFixture("hang", async ({ api, control, dump, url }) => {
     const { bot } = await control(["new-bot", "--name", "Active scope fixture"]);
     const { bot: idle } = await control(["new-bot", "--name", "Idle scope fixture"]);
@@ -152,15 +152,16 @@ it("refuses selection changes during direct and room turns and requires a truste
     expect((await api("PATCH", `/api/bots/${bot.id}`, { toolScope: current })).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${idle.id}`, { toolScope: { allow: [] } })).status).toBe(200);
     await control(["send", "--bot", bot.id, "--text", "Stay active."]); await dump();
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { toolScope: { allow: [] } }, { origin: url })).status).toBe(409);
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { toolScope: current })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { toolScope: { allow: [] } }, { origin: url })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { toolScope: current })).status).toBe(409);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { toolScope: current }, { origin: url })).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${idle.id}`, { toolScope: null })).status).toBe(409);
     expect((await api("PATCH", `/api/bots/${idle.id}`, { toolScope: { allow: ["native:read"] } }, { origin: url })).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${idle.id}`, { toolScope: { allow: [] } })).status).toBe(200);
     await control(["interrupt", "--bot", bot.id]); await control(["wait", "--bot", bot.id, "--timeout", "30"]);
     const { channel } = await control(["new-channel", "--name", "Selected tools room", "--members", bot.id]);
     await control(["send-channel", "--channel", channel.id, "--text", "Stay active in this room."]); await dump();
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { toolScope: { deny: ["native:bash"] } }, { origin: url })).status).toBe(409);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { toolScope: { deny: ["native:bash"] } }, { origin: url })).status).toBe(200);
     await control(["interrupt", "--channel", channel.id]); await control(["wait", "--channel", channel.id, "--timeout", "30"]);
   });
 }, 60_000);

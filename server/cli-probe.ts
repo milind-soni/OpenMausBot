@@ -26,15 +26,15 @@ export async function testCliBinary(
           const e = err as NodeJS.ErrnoException & { killed?: boolean };
           // Node's err.code is an errno string only for spawn failures; a non-zero exit gives the status, a timeout null with killed.
           const exceededBuffer = e.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
-          const isSpawnError = typeof e.code === "string" && !exceededBuffer;
+          const spawnFailure = typeof e.code === "string" && !exceededBuffer ? describeSpawnFailure(e, cli) : undefined;
           const message = exceededBuffer
             ? "CLI test produced more than 64 KiB of output"
-            : isSpawnError
-              ? describeSpawnFailure(e, cli).message
+            : spawnFailure
+              ? spawnFailure.message
               : e.killed
               ? "CLI test timed out after 10s"
               : `CLI exited with error ${String(e.code)}: ${(stderrOf(err) || "").slice(0, 200) || err.message.split("\n")[0]}`;
-          resolve({ ok: false, message, ...(driver?.install && isSpawnError ? { install: clientInstall(driver.install) } : {}) });
+          resolve({ ok: false, message, ...(driver?.install && spawnFailure?.setup ? { install: clientInstall(driver.install) } : {}) });
           return;
         }
         const version = stdout.trim().split("\n")[0];

@@ -140,5 +140,10 @@ describe("the secrets a bot may use", () => {
     expect(deploy!.id).toMatch(/^linked-[0-9a-f]{32}$/u);
     expect(reads).toEqual(["fake:1/user"]);
     expect(held).toEqual(["value-of-fake:1-user"]);
+    expect(logins.secretsPrompt("payroll", TEAM_READER), "a manager with no references").not.toContain("://");
+    const onePassword = { ...provider, id: "1password", resolve: () => null };
+    expect(new BotLogins(store, onePassword as unknown as OnePasswordLogins).secretsPrompt("payroll", TEAM_READER), "a bot that may use the manager's secrets").toContain("op://vault/item/field");
+    const none = new BotLogins(store, { ...onePassword, items: () => [] } as unknown as OnePasswordLogins);
+    expect(none.secretsPrompt("notes", TEAM_READER), "nothing from the manager for this bot").not.toContain("op://");
   });
 });

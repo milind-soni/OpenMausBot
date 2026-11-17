@@ -13,6 +13,7 @@ import { normalizeCronSchedule } from "./routine-schedule.ts";
 import { isToolGroup } from "./tool-groups.ts";
 import { MAUS_COLOR_NAMES } from "./wire.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES } from "./skill-md.ts";
+import { skillFilesSchema } from "./skill-files.ts";
 
 export const PACKAGE_FORMAT = "openmaus.package";
 /** The newest version this module reads and writes. */
@@ -61,7 +62,6 @@ export function utf8Bytes(value: string): number {
   return encoder.encode(value).length;
 }
 
-
 export const requiredText = (max: number) =>
   z.string({ error: "must be text" }).trim().min(1, { message: "is required" }).max(max, { message: "is too long" });
 
@@ -98,6 +98,7 @@ const portableSkillSchema = z.object({
   license: optionalText(200),
   compatibility: optionalText(200),
   instructions: skillInstructions,
+  files: skillFilesSchema,
 });
 const soulSchema = z.string().refine((value) => utf8Bytes(value) <= BOT_PROFILE_LIMITS.soul, {
   error: "standing instructions must be at most 24000 bytes",
@@ -261,7 +262,6 @@ const packageDocumentV1Schema = z.object({
 });
 
 export type PackageDocumentV1 = z.output<typeof packageDocumentV1Schema>;
-
 
 const semver = z.string({ error: "must be text" }).regex(/^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/, {
   message: "must be a version like 1.2.3",
@@ -883,7 +883,7 @@ function visitText(document: PackageDocument, visit: TextVisitor): void {
     if (!value || typeof value !== "object") return;
     const record = value as Record<string, unknown>;
     for (const name of Object.keys(record)) {
-      if (part.endsWith(".appearance.avatar") && name === "data") continue;
+      if ((part.endsWith(".appearance.avatar") && name === "data") || (name === "content" && /^skills\[[^\]]*\]\.files\[\d+\]$/.test(part))) continue;
       walk(record, name, part.endsWith(".seed.memory") ? `${part}[${JSON.stringify(name)}]` : `${part}.${name}`);
     }
   };

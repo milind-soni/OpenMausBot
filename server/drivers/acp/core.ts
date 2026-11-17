@@ -19,7 +19,7 @@ import { DeviceAuthController, deviceAuthInstanceSurface, type DeviceSignIn } fr
 import { AcpBrowserAuth, acpBrowserAuthInstanceSurface, type AcpBrowserSignInSpec } from "./browser-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
-import { describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
+import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
 import { runAcpOneShot } from "./background-text.ts";
 import { acpCapabilities } from "./capabilities.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
@@ -65,7 +65,7 @@ import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts"; import { SignInRequests, type AcpDriverHooks } from "./driver-hooks.ts";
-import { exitDetail } from "./exit-report.ts";
+import { exitBeforeResult } from "./exit-report.ts"; import { readNodeVersion } from "./node-version.ts";
 import { endTurn, trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { noticeFailure } from "../../chat-notices.ts";
@@ -101,6 +101,7 @@ export interface AcpSupport extends AcpDriverHooks {
   toolScopeCacheKey?(context: { config: AcpConfig; env: Record<string, string | undefined>; cwd: string }): string;
   driverKind: string;
   displayName: string; /** What this CLI's own `--version` looks like: any other answer is another program behind the CLI path. */ cliVersion?: RegExp;
+  /** The oldest Node.js the CLI runs on: an exit before its reply on an older one names both versions. */ minNodeVersion?: string;
   /** Omit for subscription CLIs. Custom-only CLIs have no first-party cloud catalog. */
   access?: "subscription" | "custom";
   models: ModelCatalog;
@@ -621,7 +622,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const commandCwd = permissionLaunchCwd(cwd);
         const host = hostFor(threadId, launch, argv, env, cwd, hostKey);
         const acp = host.link(threadId, cwd);
-        const send = (obj: unknown) => acp.send(obj);
+        const send = (obj: unknown) => acp.send(obj); const nodeVersion = support.minNodeVersion ? readNodeVersion(env) : undefined;
 
         const handleClientFileRequest = async (msg: any, current: AcpTurn): Promise<void> => {
           const fail = (error: unknown) => send({
@@ -931,16 +932,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             emit({ ...base(threadId, current.turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command, cwd) });
             settle(threadId, session, false, "spawn_error");
           },
-          exit: (code, signal) => {
+          exit: function exit(code, signal, found?: string | null) {
             session.dead = true;
+            // An engine with a Node.js minimum waits for the version read at launch, to say when that is too old.
+            if (nodeVersion && found === undefined) return void nodeVersion.then((version) => exit(code, signal, version ?? null));
             const current = session.current;
             if (current?.state.cancelling) return;
             if (current) {
-              if (!current.state.stopped) emit({
-                ...base(threadId, current.turnId),
-                type: "runtime.error",
-                message: `${support.displayName} exited ${code ?? signal ?? "unexpectedly"} before the prompt result${exitDetail(code, signal, session.stderr)}`,
-              });
+              if (!current.state.stopped) emit({ ...base(threadId, current.turnId), type: "runtime.error",
+                ...exitBeforeResult(support.displayName, code, signal, session.stderr, support.minNodeVersion, found) });
               settle(threadId, session, current.state.stopped, current.state.stopped ? "cancelled" : "exit_before_result");
             } else if (sessions.get(threadId) === session) {
               // The identity check keeps an old child's exit from unlinking its replacement.
@@ -1025,7 +1025,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           ? createHash("sha256").update(support.toolScopeCacheKey({ config: turnConfig, env, cwd })).digest("hex") : null;
         const processContract = [launch.command, launch.args ?? [], spawnArgs,
           support.sessionScopedApproval ? null : turnConfig.fullAuto === true, envFingerprint,
-          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null, launch.ro ?? []];
+          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null, launch.ro ?? [], boxAudienceKey(cwd)];
         const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint]);
         const launchModel = support.sessionModelEnv && cliTurn.model && /^[\w.:/-]{1,200}$/u.test(cliTurn.model)
           && catalog.accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;

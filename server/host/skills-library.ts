@@ -16,6 +16,7 @@ import { nativeSkillListing, nativeSkills, projectSkillListing, projectSkills, p
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
 import { librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
+import { librarySkillFiles, ownSkillFiles, type StoredSkillFiles } from "../skill-side-files.ts";
 import {
   conversationAssignedSkills,
   prepareShareNote,
@@ -111,6 +112,14 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     if (readImportedSkills()[name]) return readImportedSkillFile(name);
     const native = nativesFor(bot).find((skill) => skill.name === name) ?? projectFor(bot, bot.threadId).find((skill) => skill.name === name);
     return native ? readNativeSkillFile(native) : null;
+  };
+  /** The files beside the SKILL.md readBotSkillFile reads, from the same copy: none for a skill shared from this
+   * computer, null when they changed since they came in. */
+  const readBotSkillFiles = (bot: BotRecord, name: string): StoredSkillFiles => {
+    if (readSkillFile(bot.id, name) !== null) return ownSkillFiles(bot.id, name);
+    if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
+    if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return librarySkillFiles(name);
+    return [];
   };
 
   const shareBotsNow = (): ShareBot[] =>
@@ -283,6 +292,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   return {
     listBotSkills,
     readBotSkillFile,
+    readBotSkillFiles,
 
     mode,
 

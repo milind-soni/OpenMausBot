@@ -62,6 +62,28 @@ export interface TemplateDetails {
   brief?: string;
 }
 
+/** A template in a Team Cloud's own library (GET /api/share/library), which its admins add to from Share. */
+export interface TeamTemplate {
+  slug: string;
+  name: string;
+  scope: TemplateScope;
+  tagline: string;
+  /** Who added it last, by name or address. */
+  addedBy?: string;
+  addedAt: number;
+}
+
+/** Where "Publish to GitHub" sends a template besides the community repository: a repository the person's own GitHub
+ * connection can write to, as a pull request from a new branch or one commit on its default branch. */
+export interface TemplateRepoPublish {
+  kind: "pull_request" | "commit";
+  /** The pull request, or the folder on the default branch. */
+  url: string;
+  /** The folder's link that Import accepts. */
+  link: string;
+  branch: string;
+}
+
 /** The community repository a published template lands in, and the page anyone can upload a folder through. */
 export const COMMUNITY_REPOSITORY_URL = "https://github.com/milind-soni/openmausbot-teams";
 export const COMMUNITY_UPLOAD_URL = `${COMMUNITY_REPOSITORY_URL}/upload/main/teams`;

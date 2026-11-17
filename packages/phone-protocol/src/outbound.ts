@@ -127,6 +127,8 @@ export function trimOutboundPolicy(bot: { outbound?: OutboundPolicy }): boolean 
 export interface ConnectorCall {
   slug: string;
   arguments?: unknown;
+  /** The connected account a multi-execute item names (its id or alias). */
+  account?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -147,7 +149,11 @@ export function connectorCallsIn(name: string, args: unknown): ConnectorCall[] {
       if (!isRecord(item)) return [{ slug: "COMPOSIO_PROXY_EXECUTE", arguments: args }];
       const slug = [item.tool_slug, item.slug, item.name, item.tool].find((value) => typeof value === "string" && value);
       if (typeof slug !== "string") return [{ slug: "COMPOSIO_PROXY_EXECUTE", arguments: args }];
-      calls.push({ slug, ...(item.arguments !== undefined ? { arguments: item.arguments } : {}) });
+      calls.push({
+        slug,
+        ...(item.arguments !== undefined ? { arguments: item.arguments } : {}),
+        ...(typeof item.account === "string" && item.account.trim() ? { account: item.account.trim() } : {}),
+      });
     }
     return calls;
   }
