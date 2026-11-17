@@ -992,7 +992,7 @@ describe("agents-proxy MCP surface", () => {
     const res = await callTool("start_thread", { title: "Review", message: "Review the patch.", [key]: "Helper" });
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain(`unknown arguments "${key}"`);
-    expect(res.result.content[0].text).toContain("coordinate_bots with bot_ids from read_team");
+    expect(res.result.content[0].text).toContain("coordinate_bots with bot_ids from list_bots");
     expect(threadCalls).toBe(before);
   });
 

@@ -88,10 +88,10 @@ function startThreadArgumentProblem(schema: unknown, args: Json): string | undef
   const properties = record(schema) && record(schema.properties) ? schema.properties : {};
   const unknown = Object.keys(args).filter((key) => key !== "bot_id" && !Object.hasOwn(properties, key));
   if (unknown.length) {
-    return `start_thread was not run: unknown arguments ${unknown.map((key) => JSON.stringify(key)).join(", ")}. It opens a task on yourself. To hand work to a teammate, use coordinate_bots with bot_ids from read_team and thread "new".`;
+    return `start_thread was not run: unknown arguments ${unknown.map((key) => JSON.stringify(key)).join(", ")}. It opens a task on yourself. To hand work to a teammate, use coordinate_bots with bot_ids from list_bots and thread "new".`;
   }
   if (Object.hasOwn(args, "bot_id") && (typeof args.bot_id !== "string" || !args.bot_id.trim())) {
-    return 'start_thread was not run: bot_id must be a non-empty bot ID. For a teammate, use coordinate_bots with bot_ids from read_team and thread "new"; for a task on yourself, omit bot_id.';
+    return 'start_thread was not run: bot_id must be a non-empty bot ID. For a teammate, use coordinate_bots with bot_ids from list_bots and thread "new"; for a task on yourself, omit bot_id.';
   }
   return undefined;
 }
