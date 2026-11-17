@@ -12,31 +12,38 @@ let width = 0;
 let maxWidth = 0;
 // The room the chat and the panel share in the window's row.
 let room = 0;
-let observers: (() => void)[] = [];
+let observers: { notify: () => void; target: HTMLElement; last: number }[] = [];
+let handlers: ReturnType<typeof useComputerPanelResize>;
 
 function Panel() {
-  const { panelWidth, maxWidth: max, separatorRef, onSeparatorKeyDown } = useComputerPanelResize();
+  handlers = useComputerPanelResize();
+  const { panelWidth, maxWidth: max, separatorRef, onSeparatorKeyDown } = handlers;
   width = panelWidth;
   maxWidth = max;
   return createElement("aside", { style: { width: panelWidth } }, createElement("div", { ref: separatorRef, role: "separator", tabIndex: 0, onKeyDown: onSeparatorKeyDown }));
 }
 
-function ChatAndPanel() {
-  return createElement("div", null, createElement("main"), createElement(Panel));
+function ChatAndPanel({ view = "chat" }: { view?: string }) {
+  return createElement("div", null, createElement("main", { key: view }), createElement(Panel));
 }
 
 const press = (key: string) => act(() => {
   host.querySelector("[role=separator]")!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
 });
 
-// Like a browser, the observers fire again each time the panel's width changes,
-// until the layout settles.
+// Like a browser, an observer fires for an element still on the page whose width
+// changed, again each time the panel's width changes, until the layout settles.
 const resizeWindow = (next: number) => {
   room = next;
   for (let round = 0; round < 10; round++) {
     const before = width;
     act(() => {
-      for (const notify of observers) notify();
+      for (const observed of observers) {
+        const now = observed.target.offsetWidth;
+        if (!observed.target.isConnected || now === observed.last) continue;
+        observed.last = now;
+        observed.notify();
+      }
     });
     if (round > 0 && width === before) return;
   }
@@ -50,8 +57,9 @@ beforeEach(() => {
   vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => void stored.set(key, value) });
   vi.stubGlobal("ResizeObserver", class {
     constructor(private notify: () => void) {}
-    observe() { observers.push(this.notify); }
-    disconnect() { observers = observers.filter((notify) => notify !== this.notify); }
+    observe(target: HTMLElement) { observers.push({ notify: this.notify, target, last: target.offsetWidth }); }
+    unobserve(target: HTMLElement) { observers = observers.filter((observed) => observed.notify !== this.notify || observed.target !== target); }
+    disconnect() { observers = observers.filter((observed) => observed.notify !== this.notify); }
   });
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
     const panel = this.tagName === "ASIDE" ? this : this.parentElement?.querySelector<HTMLElement>(":scope > aside");
@@ -123,6 +131,28 @@ describe("the computer panel's resize edge", () => {
     expect(width).toBe(1000 - CHAT_MIN_WIDTH);
     resizeWindow(2000);
     expect(width).toBe(1500);
+  });
+
+  it("remembers the chosen width, not the narrowed one, after a press on the edge without moving", () => {
+    room = 2000;
+    localStorage.setItem("omb-computer-panel-width", "1500");
+    act(() => root.render(createElement(ChatAndPanel)));
+    resizeWindow(1000);
+    const edge = { setPointerCapture() {}, releasePointerCapture() {} };
+    const pointer = { clientX: 500, pointerId: 1, currentTarget: edge } as unknown as Parameters<typeof handlers.onResizeStart>[0];
+    act(() => handlers.onResizeStart(pointer));
+    act(() => handlers.onResizeEnd(pointer));
+    expect(width).toBe(1000 - CHAT_MIN_WIDTH);
+    expect(localStorage.getItem("omb-computer-panel-width")).toBe("1500");
+  });
+
+  it("keeps following the window after the chat beside it is replaced by another view", async () => {
+    room = 2000;
+    act(() => root.render(createElement(ChatAndPanel)));
+    expect(maxWidth).toBe(2000 - CHAT_MIN_WIDTH);
+    await act(async () => root.render(createElement(ChatAndPanel, { view: "settings" })));
+    resizeWindow(3000);
+    expect(maxWidth).toBe(3000 - CHAT_MIN_WIDTH);
   });
 
   it("clamps a stored width wider than the window instead of covering the chat", () => {

@@ -20,8 +20,7 @@ function readPanelWidth(): number {
 
 /** The panel and the chat beside it share the room in the window's row, so the
  * panel can take everything but the chat's minimum width. */
-function measureMaxWidth(panel: HTMLElement): number {
-  const chat = panel.parentElement?.querySelector<HTMLElement>(":scope > main");
+function measureMaxWidth(panel: HTMLElement, chat: HTMLElement | null): number {
   if (!chat) return PANEL_MAX_WIDTH;
   return Math.max(PANEL_MIN_WIDTH, panel.offsetWidth + chat.offsetWidth - CHAT_MIN_WIDTH);
 }
@@ -52,7 +51,7 @@ export function useComputerPanelResize() {
     if (!resizeFrom.current) return;
     resizeFrom.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
-    persistPanelWidth(panelWidth);
+    persistPanelWidth(chosenWidth);
   };
   const onResizeBy = (delta: number) => {
     const next = clamp(panelWidth + delta);
@@ -63,17 +62,29 @@ export function useComputerPanelResize() {
   const [separatorWidth, setSeparatorWidth] = useState<number | null>(null);
   useLayoutEffect(() => {
     const panel = separatorRef.current?.closest("aside");
-    if (!panel) return;
+    const row = panel?.parentElement;
+    if (!panel || !row) return;
+    let chat: HTMLElement | null = null;
     const read = () => {
+      const current = row.querySelector<HTMLElement>(":scope > main");
+      if (current !== chat) {
+        if (chat) resizes.unobserve(chat);
+        if (current) resizes.observe(current);
+        chat = current;
+      }
       setSeparatorWidth(panel.offsetWidth);
-      if (panel.offsetWidth > 0) setMaxWidth(measureMaxWidth(panel));
+      if (panel.offsetWidth > 0) setMaxWidth(measureMaxWidth(panel, chat));
     };
+    const resizes = new ResizeObserver(read);
+    resizes.observe(panel);
+    // A view change swaps the chat <main> beside the panel for a new element.
+    const swaps = new MutationObserver(read);
+    swaps.observe(row, { childList: true });
     read();
-    const observer = new ResizeObserver(read);
-    observer.observe(panel);
-    const chat = panel.parentElement?.querySelector(":scope > main");
-    if (chat) observer.observe(chat);
-    return () => observer.disconnect();
+    return () => {
+      resizes.disconnect();
+      swaps.disconnect();
+    };
   }, []);
   const onSeparatorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
