@@ -415,7 +415,7 @@ export function planLoad(input: LoadInput): LoadPlan[] {
     return [{ kind: "url", source: stripCredentials(source), stem: input.name ?? (stemOf(pathname) || "download"), reader: readerExpression(reader, source, input, false), extensions, warnings }];
   }
   const local = source.startsWith("~/") || source === "~" ? join(homedir(), source.slice(1)) : source;
-  if (GLOB_CHARS.test(local) || (kind === "folder" && !existsSync(local))) {
+  if ((GLOB_CHARS.test(local) || kind === "folder") && !existsSync(local)) {
     const reader = readerFor(extensionOf(local), kind === "folder" ? undefined : kind);
     if (!reader || reader === "sqlite" || reader === "xlsx") throw fail("source_unsupported", "A glob needs a file extension DuckDB reads many of: *.csv, *.parquet, *.json.", { hint: "Pass kind: csv, json or parquet with the glob." });
     return [{ kind: "folder", source: local, stem: input.name ?? (basename(dirname(local)) || "files"), reader: readerExpression(reader, local, input, true), warnings }];
@@ -435,7 +435,7 @@ export function planLoad(input: LoadInput): LoadPlan[] {
     if (!families.size) throw fail("source_unsupported", `${local} holds no csv, tsv, json or parquet files.`);
     const stem = input.name ?? basename(local);
     // DuckDB globs take forward slashes on every platform and no braces: one glob per extension.
-    const folder = local.replace(/\\/g, "/");
+    const folder = local.replace(/\\/g, "/").replace(/[*?[\]]/g, "[$&]");
     return [...families.entries()].map(([reader, exts]) => {
       // One case-independent pattern per suffix avoids both missing .CSV on
       // Linux and overlapping .csv/.CSV patterns on case-insensitive filesystems.
