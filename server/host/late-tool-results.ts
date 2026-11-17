@@ -14,6 +14,13 @@ export interface EndedHookTurn {
   toolUseIds: ReadonlySet<string>;
 }
 
+/** A conversation row, as far as remembering a turn's unsaved tool calls needs it. */
+interface ToolRow {
+  kind: string;
+  turnId?: string;
+  tool?: { itemId?: string; fullResult?: unknown };
+}
+
 /** Security invariant: an ended turn's hooks bearer is honoured for nothing but saving the full output of that turn's own
  * tool calls, each once, until LATE_TOOL_RESULT_MS after the turn ended; revoking the thread's bearers ends it at once. */
 export function createLateToolResults(now: () => number = Date.now) {
@@ -29,6 +36,10 @@ export function createLateToolResults(now: () => number = Date.now) {
     const expected = Buffer.from(`Bearer ${token}`);
     return got.length === expected.length && timingSafeEqual(got, expected);
   };
+  const turnEnded = (turn: EndedHookTurn): void => {
+    live();
+    if (turn.toolUseIds.size) ended.push({ ...turn, toolUseIds: new Set(turn.toolUseIds), until: now() + LATE_TOOL_RESULT_MS });
+  };
   return {
     /** Ended turns held, closed windows included until the next prune. */
     get held(): number {
@@ -42,9 +53,19 @@ export function createLateToolResults(now: () => number = Date.now) {
     revokedHooks(generation: string): { threadId: string; botId: string; token: string } | undefined {
       return revoked.get(generation);
     },
-    turnEnded(turn: EndedHookTurn): void {
-      live();
-      if (turn.toolUseIds.size) ended.push({ ...turn, toolUseIds: new Set(turn.toolUseIds), until: now() + LATE_TOOL_RESULT_MS });
+    turnEnded,
+    /** At a turn's end: its tool calls whose full output is not saved yet, under the turn's hooks bearer (`live` while the
+     * bearer is still held, else the one its generation's cleanup set aside). */
+    remember(threadId: string, generation: string, turnId: string, live: { botId: string; token: string } | undefined, rows: readonly ToolRow[]): void {
+      const hooks = live ?? revoked.get(generation);
+      if (hooks) turnEnded({ threadId, botId: hooks.botId, turnId, token: hooks.token, toolUseIds: new Set(rows
+        .flatMap((m) => m.kind === "activity" && m.turnId === turnId && m.tool?.itemId && m.tool.fullResult === undefined ? [m.tool.itemId] : [])) });
+    },
+    /** Security invariant: a capability that is never active, so only the hook route takes it, and only for its ended
+     * turn's late tool output. */
+    endedTurnCapability(header: string | string[] | undefined) {
+      const holder = live().find((candidate) => presents(header, candidate.token));
+      return holder ? { botId: holder.botId, threadId: holder.threadId, generation: "ended-turn", depth: 0, kind: "hooks" as const, skillAuthoring: false, createdBots: 0, openedThreads: 0, orphanExpiresAt: 0 } : null;
     },
     /** The bot and conversation an ended turn's bearer belongs to. */
     holder(header: string | string[] | undefined): { botId: string; threadId: string } | null {

@@ -1618,8 +1618,7 @@ const MAX_CREATED_BOTS_PER_TURN = 4;
 const MAX_CREATED_BOT_INSTRUCTIONS = 4_000;
 // Only an orphan backstop: normal terminal paths revoke a capability synchronously.
 const INTERNAL_CAPABILITY_ORPHAN_MS = 30 * 24 * 60 * 60_000;
-const internalCapabilities = new Map<string, InternalCapability>();
-const lateToolResults = createLateToolResults();
+const internalCapabilities = new Map<string, InternalCapability>(); const lateToolResults = createLateToolResults();
 const activeInternalGenerationByThread = new Map<string, string>();
 const turnCallSignals = createTurnCallSignals(internalCapabilityIsActive);
 const internalGenerationByProviderTurn = new ProviderTurnGenerationRegistry();
@@ -1723,11 +1722,7 @@ function revokeInternalCapabilityGeneration(threadId: string, generation: string
   if (standInRoots.delete(generation)) coordinator.endTurn(generation, { ok: true, text: "" });
   endForeignTurns(threadId, generation);
   if (guestDrivenTurns.get(threadId) === generation) guestDrivenTurns.delete(threadId);
-  for (const [token, capability] of internalCapabilities) {
-    if (capability.threadId !== threadId || capability.generation !== generation) continue;
-    if (capability.kind === "hooks") lateToolResults.generationRevoked(generation, { threadId, botId: capability.botId, token });
-    internalCapabilities.delete(token);
-  }
+  for (const [token, capability] of internalCapabilities) if (capability.threadId === threadId && capability.generation === generation) { if (capability.kind === "hooks") lateToolResults.generationRevoked(generation, { threadId, botId: capability.botId, token }); internalCapabilities.delete(token); }
   if (activeInternalGenerationByThread.get(threadId) === generation) activeInternalGenerationByThread.delete(threadId);
   internalGenerationByProviderTurn.deleteGeneration(threadId, generation);
   turnCallSignals.sweep();
@@ -1761,8 +1756,7 @@ function revokeAllInternalCapabilities(): void {
 
 function bindInternalCapabilityToProviderTurn(threadId: string, generation: string, turnId?: string): void {
   if (turnId && !internalGenerationByProviderTurn.bind(threadId, generation, turnId)) {
-    rememberLateToolResults(threadId, generation, turnId);
-    revokeInternalCapabilityGeneration(threadId, generation);
+    rememberLateToolResults(threadId, generation, turnId); revokeInternalCapabilityGeneration(threadId, generation);
   }
 }
 
@@ -1770,22 +1764,10 @@ function revokeInternalCapabilityForProviderEvent(event: RuntimeEvent): void {
   if (!event.turnId) return;
   const owner = internalGenerationByProviderTurn.complete(event.threadId, event.turnId);
   if (!owner) return;
-  rememberLateToolResults(owner.threadId, owner.generation, event.turnId);
-  revokeInternalCapabilityGeneration(owner.threadId, owner.generation);
+  rememberLateToolResults(owner.threadId, owner.generation, event.turnId); revokeInternalCapabilityGeneration(owner.threadId, owner.generation);
 }
 
-function rememberLateToolResults(threadId: string, generation: string, turnId: string): void {
-  const live = [...internalCapabilities].find(([, capability]) => capability.kind === "hooks" && capability.threadId === threadId && capability.generation === generation);
-  const hooks = live ? { botId: live[1].botId, token: live[0] } : lateToolResults.revokedHooks(generation);
-  if (hooks) lateToolResults.turnEnded({ threadId, botId: hooks.botId, turnId, token: hooks.token, toolUseIds: new Set(store.activePath(threadId)
-    .flatMap((m) => m.kind === "activity" && m.turnId === turnId && m.tool?.itemId && m.tool.fullResult === undefined ? [m.tool.itemId] : [])) });
-}
-
-/** Security invariant: never active, so only the hook route takes it, and only for its ended turn's late tool output. */
-function endedTurnHooks(header: string | string[] | undefined): InternalCapability | null {
-  const holder = lateToolResults.holder(header);
-  return holder && { ...holder, generation: "ended-turn", depth: 0, kind: "hooks", skillAuthoring: false, createdBots: 0, openedThreads: 0, orphanExpiresAt: 0 };
-}
+function rememberLateToolResults(threadId: string, generation: string, turnId: string): void { const live = [...internalCapabilities].find(([, capability]) => capability.kind === "hooks" && capability.threadId === threadId && capability.generation === generation); lateToolResults.remember(threadId, generation, turnId, live && { botId: live[1].botId, token: live[0] }, store.activePath(threadId)); }
 
 /** Constant-time comparisons, so the check does not leak a matching prefix length. */
 function authorizedInternalCapability(header: string | string[] | undefined): InternalCapability | null {
@@ -5437,8 +5419,7 @@ function ingestEngineHook(capability: Pick<InternalCapability, "botId" | "thread
   const event = body && typeof body === "object" ? (body as { event?: unknown; payload?: unknown }) : {};
   const name = typeof event.event === "string" ? event.event : "";
   const payload = event.payload && typeof event.payload === "object" ? (event.payload as Record<string, unknown>) : {};
-  const threadId = capability.threadId;
-  if (turnEnded && name !== "PostToolUse") return { ok: true, ignored: `${name || "unknown"} after its turn ended` };
+  const threadId = capability.threadId; if (turnEnded && name !== "PostToolUse") return { ok: true, ignored: `${name || "unknown"} after its turn ended` };
   const chip = (text: string) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: text, ok: true } });
   if (name === "PreCompact" || (name === "SessionStart" && payload.source === "compact")) roomSessions.distrust(threadId, capability.botId);
   if (name === "PreCompact") {
@@ -5462,10 +5443,8 @@ function ingestEngineHook(capability: Pick<InternalCapability, "botId" | "thread
   if (!Object.hasOwn(payload, "tool_response")) return { ok: true, ignored: "hook did not include a tool response" };
   const response = payload.tool_response;
   const text = typeof response === "string" ? response : JSON.stringify(response ?? null, null, 2);
-  const rows = store.activePath(threadId), toolRow = (turn: string | null | undefined) => turn ? rows.findLast((m) => m.kind === "activity" && m.turnId === turn && m.tool?.itemId === toolUseId) : undefined;
-  let turnId: string | null | undefined = turnEnded ? undefined : liveTurnByThread.get(threadId), row = toolRow(turnId);
-  const late = row ? null : lateToolResults.turnFor(bearer, threadId, capability.botId, toolUseId);
-  if (late) row = toolRow(turnId = late);
+  const rows = store.activePath(threadId), toolRow = (turn: string | null | undefined) => turn ? rows.findLast((m) => m.kind === "activity" && m.turnId === turn && m.tool?.itemId === toolUseId) : undefined; let turnId: string | null | undefined = turnEnded ? undefined : liveTurnByThread.get(threadId), row = toolRow(turnId);
+  const late = row ? null : lateToolResults.turnFor(bearer, threadId, capability.botId, toolUseId); if (late) row = toolRow(turnId = late);
   if (!turnId || !row?.tool) return { ok: true, ignored: "tool not observed in this turn" };
   const key = `${threadId}:${turnId}:${toolUseId}`;
   if (!commandReceipt("hook.ingest", key)) {
@@ -5474,11 +5453,7 @@ function ingestEngineHook(capability: Pick<InternalCapability, "botId" | "thread
     const fullResult = spillToolResult(dir, key, redacted, TOOL_RESULT_SPILL_MAX);
     store.patchMessage(threadId, row.id, { tool: { ...row.tool, fullResult } }, { kind: "hook.ingest", key });
   }
-  if (late) {
-    lateToolResults.saved(threadId, late, toolUseId);
-    const completed = digestCompletedLate(store.activePath(threadId), late);
-    if (completed) store.patchMessage(threadId, completed.id, { digest: completed.digest, text: completed.text });
-  }
+  if (late) { lateToolResults.saved(threadId, late, toolUseId); const completed = digestCompletedLate(store.activePath(threadId), late); if (completed) store.patchMessage(threadId, completed.id, { digest: completed.digest, text: completed.text }); }
   return { ok: true };
 }
 
@@ -5547,8 +5522,7 @@ async function scheduleTurnDigest(input: {
     } finally {
       clearTimeout(timer!);
     }
-    const stored = store.activePath(input.threadId).find(row => row.id === message.id);
-    if (!files || !input.isCurrent() || !stored) return;
+    const stored = store.activePath(input.threadId).find(row => row.id === message.id); if (!files || !input.isCurrent() || !stored) return;
     const withFiles = buildTurnDigest({ ...digest, hookCoverage: stored.digest?.hookCoverage ?? digest.hookCoverage, activities, memory, files });
     store.patchMessage(input.threadId, message.id, { digest: withFiles, text: renderDigest(withFiles) }, { kind: "digest.files", key: `${input.threadId}:${input.turnId}` });
   } catch (error) {
@@ -12855,7 +12829,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 201, { token });
     }
     if (path.startsWith("/api/internal/")) {
-      const internalCapability = authorizedInternalCapability(req.headers.authorization) ?? endedTurnHooks(req.headers.authorization);
+      const internalCapability = authorizedInternalCapability(req.headers.authorization) ?? lateToolResults.endedTurnCapability(req.headers.authorization);
       if (!internalCapability) {
         return json(res, 401, { error: "unauthorized" });
       }
@@ -12968,8 +12942,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           message: `End this turn now without using the previous computer tools. OpenMausBot will continue the original request on ${option.label} with a fresh tool connection.` });
       }
       if (method === "POST" && path === "/api/internal/hook") {
-        const body = await readBody(req), turnEnded = !internalCapabilityIsActive(internalCapability);
-        if (turnEnded && !lateToolResults.holder(req.headers.authorization)) return json(res, 401, { error: TURN_ENDED_REFUSAL });
+        const body = await readBody(req), turnEnded = !internalCapabilityIsActive(internalCapability); if (turnEnded && !lateToolResults.holder(req.headers.authorization)) return json(res, 401, { error: TURN_ENDED_REFUSAL });
         return json(res, 200, ingestEngineHook(internalCapability, body, req.headers.authorization, turnEnded));
       }
       if (method === "POST" && path === "/api/internal/tool-result") {
