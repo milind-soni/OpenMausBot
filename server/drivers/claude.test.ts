@@ -1707,7 +1707,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("200000");
   });
 
-  it("compacts a [1m] model's CLI session at 1M", async () => {
+  it("compacts a Claude Opus 5.5 (1M) CLI session at 1M", async () => {
     await create();
     await instance.snapshot();
     const dump = join(scratch, "compact-1m.json");
@@ -1731,10 +1731,11 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" })).toBe(null);
   });
 
-  it("compacts at 1M by default only for a model picked with the [1m] suffix", () => {
+  it("compacts at 1M by default only for the Claude Opus 5.5 (1M) pick", () => {
     expect(autoCompactWindow({}, "claude-opus-5-5[1m]")).toBe("1000000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "nonsense" }, "claude-opus-5-5[1m]")).toBe("1000000");
     expect(autoCompactWindow({}, "claude-opus-5-5")).toBe("200000");
+    expect(autoCompactWindow({}, "claude-sonnet-4-6[1m]")).toBe("200000");
     expect(autoCompactWindow({}, null)).toBe("200000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "300000" }, "claude-opus-5-5[1m]")).toBe("300000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" }, "claude-opus-5-5[1m]")).toBe(null);
