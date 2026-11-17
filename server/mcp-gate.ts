@@ -16,6 +16,7 @@ import { descendantsOf, signalTree, stopTree, type TreeProcess } from "./proc-de
 import { killCliTree } from "./procs.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
+import { buildMcpChildEnv } from "./mcp-gate-env.ts";
 
 type Json = Record<string, unknown>;
 
@@ -81,6 +82,7 @@ interface Upstream {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  envPassthrough?: string[];
 }
 
 function upstreamSpec(): Upstream {
@@ -222,8 +224,7 @@ const outputSchemas = new Map<string, boolean>();
 const spec = upstreamSpec();
 if (SPILL_DIR) sweepSpill(SPILL_DIR);
 
-const childEnv: NodeJS.ProcessEnv = { ...process.env, ...spec.env };
-for (const key of Object.keys(childEnv)) if (key.startsWith("OMB_GATE_")) delete childEnv[key];
+const childEnv = buildMcpChildEnv(process.env, spec.env, spec.envPassthrough);
 
 // CreateProcess cannot exec an npm .cmd shim or a node-shebang script, and a shell would re-interpret JSON argv.
 const resolved = resolveCliSpawn(spec.command, spec.args ?? []);

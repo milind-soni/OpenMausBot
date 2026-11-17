@@ -93,7 +93,7 @@ describe("mcp-gate", () => {
         OMB_GATE_UPSTREAM: JSON.stringify({
           command: process.execPath,
           args: [upstreamJs],
-          env: { SCRIPT: script, UPSTREAM_ONLY: "yes" },
+          env: { SCRIPT: script, UPSTREAM_ONLY: "yes", ...(env.CATALOG ? { CATALOG: env.CATALOG } : {}) },
         }),
         ...env,
       },
@@ -515,5 +515,43 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     start({}, selected, SCOPED_UPSTREAM);
     send({ jsonrpc: "2.0", id: 1, method: "peek" });
     expect(JSON.parse(await nextLine()).result).toEqual({ scope: null, upstreamOnly: "yes" });
+  });
+
+  it("never passes parent sentinel environment variables to child processes", async () => {
+    const sentinelKey = "SENTINEL_OPENAI_KEY_12345";
+    const sentinelToken = "SENTINEL_TOKEN_VALUE_67890";
+    const sentinelNodeOptions = "SENTINEL_NODE_OPTIONS";
+
+    const echoScript = `
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { env: process.env } }) + "\\n");
+    `;
+    const upstreamJs = join(scratch, "echo-env.cjs");
+    writeFileSync(upstreamJs, echoScript);
+
+    gate = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", GATE], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        OPENAI_API_KEY: sentinelKey,
+        OMB_COMMS_TOKEN: sentinelToken,
+        NODE_OPTIONS: sentinelNodeOptions,
+        OMB_GATE_NAME: "shop",
+        OMB_GATE_UPSTREAM: JSON.stringify({
+          command: process.execPath,
+          args: [upstreamJs],
+        }),
+      },
+    }) as ChildProcessWithoutNullStreams;
+
+    let received = "";
+    createInterface({ input: gate.stdout }).on("line", (line) => {
+      received = line;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(received).not.toBe("");
+    expect(received).not.toContain(sentinelKey);
+    expect(received).not.toContain(sentinelToken);
+    expect(received).not.toContain(sentinelNodeOptions);
   });
 });
