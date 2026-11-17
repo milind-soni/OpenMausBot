@@ -273,6 +273,8 @@ const dumpEnv = Object.fromEntries(
     "PATH",
     "HOME",
     "USERPROFILE",
+    "NO_PROXY",
+    "no_proxy",
     "PI_CODING_AGENT_SESSION_DIR",
     "TEMP",
     "TMP",

@@ -36,7 +36,7 @@ export function vpsStartsForTurn(input: { wants: "cloud" | "vm" | "local" | "off
 }
 
 export function vpsUnavailableHint(input: { automationSource?: string; autoStartVps?: boolean; reachable?: boolean }): string {
-  if (input.automationSource) return "This scheduled run tried to start the VPS computer and could not reach it. Check the VPS connection in Settings → API keys.";
-  if (input.autoStartVps || input.reachable === false) return "Check the VPS connection in Settings → API keys.";
+  if (input.automationSource) return "This scheduled run tried to start the VPS computer and could not reach it. Check the VPS connection in Settings → AI → Other services.";
+  if (input.autoStartVps || input.reachable === false) return "Check the VPS connection in Settings → AI → Other services.";
   return input.reachable ? "Open Computer and enable Start VPS automatically, or choose Cloud computer to start it manually." : "";
 }

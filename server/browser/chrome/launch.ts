@@ -6,6 +6,7 @@ import { pipeTransport, type CdpTransport } from "../cdp/transport.ts";
 import { chromeArgs, chromeEnv, type ChromeEnvInput, type ChromeFlagsInput } from "./flags.ts";
 import { diagnoseLaunchFailure, type BrowserHostError } from "./host-setup.ts";
 import type { ProcessRegistry } from "./processes.ts";
+import { devShmIsSmall } from "./shm.ts";
 
 export interface LaunchOptions extends ChromeFlagsInput, Omit<ChromeEnvInput, "host"> {
   /** A resolved Chrome or Chrome for Testing executable. */
@@ -98,7 +99,7 @@ function handshake(transport: CdpTransport, exited: Promise<ChromeExit>, timeout
 
 /** Starts Chrome on --remote-debugging-pipe (fd 3 to Chrome, fd 4 back) and waits until it answers. */
 export async function launchChrome(options: LaunchOptions): Promise<ChromeProcess> {
-  const argv = chromeArgs(options);
+  const argv = chromeArgs({ ...options, smallShm: options.smallShm ?? devShmIsSmall() });
   const env = chromeEnv(options.env ?? process.env, {
     host: options.host,
     timezone: options.timezone ?? null,

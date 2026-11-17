@@ -190,6 +190,51 @@ describe("a check's reads", () => {
     expect(error).toMatchObject({ app: "gmail", severalAccounts: false });
   });
 
+  it("names the fallback account while the lookup fails, and still asks again on the next read", async () => {
+    const { deps, frames } = relay({
+      GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "old@x.test" } }),
+      GOOGLECALENDAR_LIST_CALENDARS: () => ({ successful: true, data: { items: [] } }),
+      GOOGLECALENDAR_EVENTS_LIST: () => ({ successful: true, data: { items: [] } }),
+    });
+    let asked = 0;
+    const accounts = async () => {
+      asked += 1;
+      if (asked === 1) throw new Error("inventory down");
+      return { gmail: "ca_older", googlecalendar: "ca_cal_newest" };
+    };
+    const session = createConnectedReads({ ...deps, accounts, fallbackAccounts: () => ({ gmail: "ca_older" }) }).session("bot-1");
+    expect(await session.address()).toBe("old@x.test");
+    await session.events(0, 1);
+    expect(asked).toBe(2);
+    expect(frames.filter((one) => one.slug === "GMAIL_GET_PROFILE").map((one) => one.item!.account)).toEqual(["ca_older"]);
+    for (const frame of frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_"))) expect(frame.item!.account).toBe("ca_cal_newest");
+  });
+
+  it("names one account for every request of a calendar or mail read, even when the lookup recovers part-way", async () => {
+    const { deps, frames } = relay({
+      GOOGLECALENDAR_LIST_CALENDARS: () => ({ successful: true, data: { items: [{ id: "team@group.calendar.google.com", selected: true, accessRole: "reader" }] } }),
+      GOOGLECALENDAR_EVENTS_LIST: () => ({ successful: true, data: { items: [] } }),
+      GMAIL_FETCH_EMAILS: (args) => ({ successful: true, data: { messages: [], ...(args.page_token ? {} : { nextPageToken: "page-2" }) } }),
+    });
+    let asked = 0;
+    const accounts = async () => {
+      asked += 1;
+      if (asked === 1 || asked === 3) throw new Error("inventory down");
+      return { gmail: "ca_mail_new", googlecalendar: "ca_cal_new" };
+    };
+    const session = createConnectedReads({ ...deps, accounts, fallbackAccounts: () => ({ gmail: "ca_mail_old", googlecalendar: "ca_cal_old" }) }).session("bot-1");
+    await session.events(0, 1);
+    const calendar = frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_"));
+    expect(calendar.map((one) => one.slug)).toEqual(["GOOGLECALENDAR_LIST_CALENDARS", "GOOGLECALENDAR_EVENTS_LIST", "GOOGLECALENDAR_EVENTS_LIST"]);
+    for (const frame of calendar) expect(frame.item!.account).toBe("ca_cal_old");
+    await session.events(0, 1);
+    expect(frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_")).slice(3).map((one) => one.item!.account)).toEqual(["ca_cal_new", "ca_cal_new", "ca_cal_new"]);
+    asked = 2;
+    const fresh = createConnectedReads({ ...deps, accounts, fallbackAccounts: () => ({ gmail: "ca_mail_old", googlecalendar: "ca_cal_old" }) }).session("bot-1");
+    await fresh.emails(0, 5);
+    expect(frames.filter((one) => one.slug === "GMAIL_FETCH_EMAILS").map((one) => one.item!.account)).toEqual(["ca_mail_old", "ca_mail_old"]);
+  });
+
   it("gives up on an account lookup that outlasts the read's time limit, and asks again on the next read", async () => {
     const { deps, frames } = relay({ GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }) });
     let asked = 0;

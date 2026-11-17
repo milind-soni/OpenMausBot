@@ -22,9 +22,13 @@ import { REMOTE_MCP_STARTUP_MS, remoteMcpSpec } from "../mcp-http.ts";
 import { compileToolSchema, schemaProblems, serverToolValidator, type ServerToolCheck } from "../mcp-schema-validator.ts";
 import { fitToolList, withoutDanglingReferences } from "../mcp-tool-schema.ts";
 import { listsComputerTool } from "../computer-tool-list.ts";
+import { HOST_COMPUTER_QUICK_MS, HOST_COMPUTER_READY, hostComputerDidNotStart, hostComputerFailure, hostComputerKey, hostComputerNotice, hostComputerStandIn, hostComputerStarted,
+  hostComputerStartupMs, startHostComputer, watchHostComputerStart, type HostComputerStart } from "./chat-host-computer.ts";
+import { withHostFiles } from "../local-computer.ts";
 import { READ_OPEN_PAGE_ONLY, readsAroundBrowser } from "../browser-tool-shape.ts";
 import { capToolList, learnToolCountLimit, shareToolBudget, toolCountLimitFromError } from "../tool-count-limit.ts";
 import type { ToolSchemaProfile } from "../tool-schema-profile.ts";
+import type { ServerText } from "../../shared/server-text.ts";
 import { allowsTool, canUseMcpServer, parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { CHAT_TOOL_LIMIT, type ToolBudget } from "../../shared/tool-budget.ts";
@@ -61,13 +65,16 @@ export interface ChatToolSession {
 
 type Server = { command: string; args: string[]; env: Record<string, string> };
 /** `required`: a server the turn must not run without (see `mustHave` in mountChatTools). */
-type RegisteredTool = { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; required: boolean; name: string; schema: ValidateFunction; searched: boolean };
+type RegisteredTool = { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; required: boolean; name: string; schema: ValidateFunction; searched: boolean;
+  /** Listed from this computer's last start while this one finishes: a call waits for it. */ ready?: Promise<void> };
 function chatToolName(server: string, tool: string): string {
   return `${server}_${tool}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "mcp_tool";
 }
 const STARTUP_MS = 8_000;
 /** A small Cloud home that is busy can take this long to load Node and a server's own imports. */
 const CLOUD_STARTUP_MS = 30_000;
+/** Windows starts each of the app's built-ins as its own Electron process, all at once, and scans each new executable first. */
+const WINDOWS_BUILT_IN_STARTUP_MS = 20_000;
 const STARTUP_TIMED_OUT = "MCP startup timed out";
 const REQUEST_TIMED_OUT = "MCP request timed out; execution outcome may be uncertain";
 /** How much of a server's stderr is kept, and how much of its last line is ever shown. */
@@ -76,9 +83,18 @@ const STDERR_TAIL_CHARS = 4_000, STDERR_LINE_CHARS = 300;
  * was given (mountChatTools `mustHave`). */
 const OPTIONAL_BUILT_INS: ReadonlySet<string> = new Set(["computer", "browser", "composio", OWN_APPS_SERVER, "data", "email", "device"]);
 
-/** How long a server that runs a command gets to start here. */
-export function mcpStartupMs(env: Record<string, string | undefined> = process.env): number {
-  return cloudRole(env) ? CLOUD_STARTUP_MS : STARTUP_MS;
+/** How long a server that runs a command gets to start here: one of the app's own (`builtIn`) or one the person configured. */
+export function mcpStartupMs(env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform, builtIn = true): number {
+  return cloudRole(env) ? CLOUD_STARTUP_MS : builtIn && platform === "win32" ? WINDOWS_BUILT_IN_STARTUP_MS : STARTUP_MS;
+}
+
+/** `startupMs` replaces both mcpStartupMs budgets, `hostComputerMs` hostComputerStartupMs. `notice` hears, for the person,
+ * that this computer's tools did not start, worded once per `conversation`. */
+export interface ChatToolMountOptions {
+  startupMs?: number;
+  hostComputerMs?: number;
+  conversation?: string;
+  notice?: (line: { message: string; text: ServerText }) => void;
 }
 const DEFAULT_CALL_MS = 10 * 60_000;
 const FRAME_BYTES = 2 * 1024 * 1024;
@@ -425,7 +441,7 @@ export function loopbackNavigationHint(tool: string, args: unknown, text: string
   if (env.OMB_DESKTOP_PARENT === "1" || cloudHomeConfigured(env)) return "";
   if (!/^agent_browser_(?:open|navigate)$/u.test(tool) || !object(args) || typeof args.url !== "string") return "";
   if (!ROUTE_LOOPBACK.test(args.url.trim()) || !/(?:ERR_[A-Z_]+|failed)/u.test(text)) return "";
-  return " That address is the loopback of the machine running this browser, not your own computer: open the site by the LAN address it answers on (for example http://192.168.1.20:8188), which must be reachable from the server, and allow it under Settings → Browser → Open sites on this server.";
+  return " That address is the loopback of the machine running this browser, not your own computer: open the site by the LAN address it answers on (for example http://192.168.1.20:8188), which must be reachable from the server, and allow it under Settings → Desktops & browser → Built-in browser.";
 }
 
 /** agent-browser's read hides `url`: a call whose only misfit is a string url gets the way to read an address instead of the bare schema misfit. */
@@ -494,7 +510,8 @@ export function directServers(servers: ReadonlyArray<{ name: string; tools: numb
  * A tool result over 50KB is saved whole in `resultFolder`, the bot's working folder, after `scrub` masks secrets (see savedOrBounded).
  * `toolLimit` is the most tools the provider takes in one request, ask_user included; null when it takes any number. */
 export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope, callTimeoutMs: number = DEFAULT_CALL_MS,
-  schemaProfile?: ToolSchemaProfile, resultFolder?: string, scrub: (text: string) => string = redactSecretsInText, toolLimit: number | null = CHAT_TOOL_LIMIT): Promise<ChatToolSession> {
+  schemaProfile?: ToolSchemaProfile, resultFolder?: string, scrub: (text: string) => string = redactSecretsInText, toolLimit: number | null = CHAT_TOOL_LIMIT,
+  options: ChatToolMountOptions = {}): Promise<ChatToolSession> {
   const parsed = parseToolScope(toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
@@ -518,7 +535,10 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   // desktop's own): without the VM's tools the model would do the work some other way, outside the VM. Such a server that
   // can't start, lists no tools, or fails during the turn ends the turn, as every server did before.
   const mustHave = (descriptor: Server) => descriptor === agentsServer || (descriptor === integrations?.localComputer && integrations?.localComputer?.scope !== "local-computer");
-  const startupMs = mcpStartupMs();
+  const startupMs = options.startupMs ?? mcpStartupMs();
+  const configuredStartupMs = options.startupMs ?? mcpStartupMs(process.env, process.platform, false);
+  const hostComputerMs = Math.max(startupMs, options.hostComputerMs ?? hostComputerStartupMs());
+  let standIn: { definition: ChatToolDefinition; origin: ToolOrigin; ready?: Promise<unknown[]>; reason?: string } | undefined;
   const builtIns = servers.length;
   const besideBrowser = servers.some(([, descriptor]) => descriptor === integrations?.browser);
   const merged: MergedChatMcpServers[] = [];
@@ -579,7 +599,8 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       }
       const description = (typeof listed.description === "string" ? listed.description : "Configured MCP tool") +
         (Object.keys(constraints).length ? " Additional argument constraints (validated before execution): " + JSON.stringify(constraints) : "");
-      const name = uniqueName(chatToolName(origin.server, tool.name), (candidate) => registered.has(candidate) || staged.some((entry) => entry.definition.function.name === candidate));
+      const name = uniqueName(chatToolName(origin.server, tool.name), (candidate) => registered.has(candidate) || candidate === standIn?.definition.function.name
+        || staged.some((entry) => entry.definition.function.name === candidate));
       staged.push({ tool: { ...origin, name: tool.name, schema }, definition: { type: "function", function: { name, description, parameters } } });
     }
     if (Buffer.byteLength(JSON.stringify([...definitions, ...staged.map((entry) => entry.definition)])) > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
@@ -615,7 +636,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     directory = undefined;
     trimmed.length = 0;
     Object.assign(budget, { limit, listed: 0, servers: [] });
-    const room = limit === null ? Infinity : Math.max(0, limit - RUNTIME_TOOLS);
+    const room = limit === null ? Infinity : Math.max(0, limit - RUNTIME_TOOLS - (standIn ? 1 : 0));
     const wanted = [...offeredTools, ...configured].reduce((sum, server) => sum + server.tools.length, 0);
     const searchRoom = configured.some((server) => server.tools.length) && wanted > room ? DIRECTORY_TOOL_COUNT : 0;
     // The agents server keeps its whole list first; configured servers fit in what the built-ins leave.
@@ -629,6 +650,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       }
       register(origin, tools);
     }
+    if (standIn) definitions.push(standIn.definition);
     const direct = directServers(configured.map(({ origin, tools }) => ({ name: origin.server, tools: tools.length })), room - definitions.length);
     const searched: typeof configured = [];
     for (const server of configured) {
@@ -674,14 +696,19 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       const keeps = (tool: unknown) => !computer || !object(tool) || typeof tool.name !== "string" || listsComputerTool(tool.name, besideBrowser);
       const include = (tool: unknown) => keeps(tool) && (scope === undefined || (object(tool) && typeof tool.name === "string"
         && ((searchable.has(name) && isDirectoryTool(tool.name)) || allowsTool(scope, { kind: "mcp", server: name, name: tool.name }))));
-      const tools = await client.tools(signal, include, searchable.has(name) ? REMOTE_MCP_STARTUP_MS : startupMs, observers.get(name));
-      if (!tools.length && scope === undefined && descriptor === integrations?.localComputer) throw new Error("The Local VM listed no tools");
+      const hostComputer = descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer";
+      const host: HostComputerStart | undefined = hostComputer
+        ? await startHostComputer(hostComputerKey(descriptor), (record) => client.tools(signal, record, hostComputerMs), include, { quickMs: Math.min(startupMs, HOST_COMPUTER_QUICK_MS), firstMs: startupMs }, signal)
+        : undefined;
+      const budgetMs = searchable.has(name) ? REMOTE_MCP_STARTUP_MS : index < builtIns ? startupMs : configuredStartupMs;
+      const tools = host ? (host.state === "listed" || host.state === "pending" ? host.tools : []) : await client.tools(signal, include, budgetMs, observers.get(name));
+      if (!tools.length && scope === undefined && descriptor === integrations?.localComputer && (!host || host.state === "listed")) throw new Error("The Local VM listed no tools");
       // Harness mounts are known by descriptor, never by a name a configured server could claim. A grant
       // hashes the descriptor (no credential kept); machine bridges mint a bearer per turn, so theirs last a turn.
       const launch = createHash("sha256").update(JSON.stringify(descriptor)).digest("hex");
       const origin: ToolOrigin = { client, server: name, launch, builtInBrowser: descriptor === integrations?.browser, agents: descriptor === agentsServer,
-        hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", required: index < builtIns && mustHave(descriptor), searched: searchable.has(name) };
-      return { origin, tools };
+        hostComputer, required: index < builtIns && mustHave(descriptor), searched: searchable.has(name), ...(host?.state === "pending" ? { ready: host.ready } : {}) };
+      return { origin, tools, host };
     }));
     for (const [index, mount] of mounts.entries()) {
       if (signal.aborted || closed) throw aborted();
@@ -689,6 +716,19 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       if (mount.status === "rejected") {
         if (index >= builtIns || (OPTIONAL_BUILT_INS.has(name) && !mustHave(servers[index]![1]))) { await skip(name, mount.reason, startedAt[index]); continue; }
         throw new Error(`MCP server "${name}" didn't start: ${mount.reason instanceof Error ? mount.reason.message : "no reason given"}`);
+      }
+      const host = mount.value.host;
+      if (host?.state === "listed") hostComputerStarted(options.conversation);
+      if (host?.state === "pending" || host?.state === "starting") watchHostComputerStart(host.ready, options.conversation, options.notice, () => !closed && !signal.aborted);
+      if (host?.state === "starting" || host?.state === "failed") {
+        const reason = host.state === "failed" ? host.reason : undefined;
+        if (reason !== undefined) {
+          console.warn(`chat-mcp: this computer's tools did not start for this turn: ${reason}`);
+          options.notice?.(hostComputerNotice(options.conversation, reason));
+          await mount.value.origin.client.close().catch(() => {});
+        }
+        standIn = { definition: hostComputerStandIn(reason), origin: mount.value.origin, ...(host.state === "starting" ? { ready: host.ready } : { reason }) };
+        continue;
       }
       if (index < builtIns) {
         offeredTools.push({ origin: mount.value.origin, tools: checkedTools(mount.value.tools, mount.value.origin.server) });
@@ -717,6 +757,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   };
   const validate = (name: string, args: unknown) => {
     if (closed || signal.aborted) throw new ChatToolSessionError("MCP session closed");
+    if (name === standIn?.definition.function.name) return;
     const listedAs = directoryNames.get(name);
     if (listedAs) {
       const call = listedAs === CALL_TOOL ? searchedCall(args) : undefined;
@@ -740,6 +781,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
   };
   const view = (name: string, args: Record<string, unknown>): ChatToolCallView => {
+    if (name === standIn?.definition.function.name) return { title: name, input: args, ask: false };
     if (directoryNames.has(name)) {
       const call = directoryNames.get(name) === CALL_TOOL ? searchedCall(args) : undefined;
       return call ? viewOf(call.tool, call.args, chatToolName(call.tool.server, call.tool.name)) : { title: name, input: args, ask: false };
@@ -749,6 +791,8 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   };
   const run = async (tool: RegisteredTool, args: Record<string, unknown>, callSignal: AbortSignal): Promise<ChatToolResult> => {
     try {
+      const failure = tool.ready && await hostComputerFailure(tool.ready, AbortSignal.any([signal, callSignal]));
+      if (failure !== undefined) return { ok: false, text: hostComputerDidNotStart(failure) };
       const result = await tool.client.call("tools/call", { name: tool.name, arguments: args }, AbortSignal.any([signal, callSignal]), callTimeoutMs, true);
       if (signal.aborted || callSignal.aborted) throw aborted();
       if (!object(result) || !Array.isArray(result.content) || (result.isError !== undefined && typeof result.isError !== "boolean")) throw new Error("MCP tool returned an invalid result; execution outcome may be uncertain");
@@ -783,6 +827,31 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     }
   };
   const answer = (result: DirectoryResult): ChatToolResult => ({ text: boundedText(result.content.map((part) => part.text).join("\n")), ok: result.isError !== true });
+  /** Waits for this computer's start, then lists its tools in the stand-in's place, keeping the runtime's own tools. */
+  const awaitHostComputer = async (callSignal: AbortSignal): Promise<ChatToolResult> => {
+    const waiting = standIn!;
+    if (!waiting.ready) return { ok: false, text: hostComputerDidNotStart(waiting.reason!) };
+    let tools: unknown[] = [];
+    const failure = await hostComputerFailure(waiting.ready.then((listed) => { tools = listed; }), AbortSignal.any([signal, callSignal])).catch(async (error: unknown) => {
+      await close().catch(() => {});
+      throw new ChatToolSessionError(error instanceof Error ? error.message : "MCP operation cancelled");
+    });
+    if (failure !== undefined) {
+      if (standIn === waiting) {
+        Object.assign(waiting, { ready: undefined, reason: failure });
+        waiting.definition.function.description = hostComputerStandIn(failure).function.description;
+      }
+      return { ok: false, text: hostComputerDidNotStart(failure) };
+    }
+    if (standIn !== waiting) return { ok: true, text: HOST_COMPUTER_READY };
+    const runtime = definitions.filter((definition) => !registered.has(definition.function.name) && !directoryNames.has(definition.function.name)
+      && definition !== waiting.definition);
+    standIn = undefined;
+    offeredTools.push({ origin: waiting.origin, tools: checkedTools(tools, waiting.origin.server) });
+    await layout(budget.limit);
+    definitions.push(...runtime);
+    return { ok: true, text: HOST_COMPUTER_READY };
+  };
   return {
     definitions, skipped, trimmed, merged, budget, validate, view, close,
     async refit(limit) {
@@ -792,6 +861,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     async execute(name, args, callSignal) {
       validate(name, args);
       if (callSignal.aborted) { await close(); throw aborted(); }
+      if (name === standIn?.definition.function.name) return awaitHostComputer(callSignal);
       const listedAs = directoryNames.get(name);
       if (!listedAs) return run(registered.get(name)!, args, callSignal);
       if (listedAs === SEARCH_TOOL) return answer(await directory!.search(args));
@@ -800,4 +870,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       return "answer" in call ? answer(call.answer) : run(catalog.get(call.name)!, call.arguments, callSignal);
     },
   };
+}
+
+/** A chat runtime has no file tools of its own, so on this desktop's own computer its bridge answers them (host-file-tools.ts). */
+export function withHostFileTools(integrations: SendTurnInput["integrations"]): SendTurnInput["integrations"] {
+  return integrations?.localComputer ? { ...integrations, localComputer: withHostFiles(integrations.localComputer) } : integrations;
 }

@@ -132,6 +132,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   send_voice_note: "activity.tool.team.sendVoiceNote",
   session_read: "activity.tool.team.sessionRead",
   session_search: "activity.tool.team.sessionSearch",
+  share: "activity.tool.team.share",
   shared_computer: "activity.tool.team.sharedComputer",
   show_html: "activity.tool.team.showHtml",
   show_widget: "activity.tool.team.showWidget",

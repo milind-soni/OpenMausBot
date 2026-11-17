@@ -15,6 +15,7 @@ import { freePortBlock } from "./testing/ports.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { ownTurnText } from "./testing/room-handoff-agent.ts";
 import { withAnswer } from "./testing/your-computer.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const RERUN_NOTE = "OpenMausBot restarted while your previous turn here was running";
@@ -68,6 +69,7 @@ async function loopbackModel() {
     if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
     for await (const chunk of req) body += chunk;
     const sent = JSON.parse(body) as { messages: Array<{ role: string; content?: unknown }>; tools?: Array<{ function: { name: string } }> };
+    if (isTitleCall(sent)) { res.writeHead(500); res.end(); return; }
     const text = (message: { content?: unknown }) => typeof message.content === "string" ? message.content
       : Array.isArray(message.content) ? message.content.map((part: any) => part?.text ?? "").join("\n") : "";
     const lastUserAt = sent.messages.map((message) => message.role).lastIndexOf("user");
@@ -375,7 +377,7 @@ it("T6 continues a person's step-capped turn in place on the same root", async (
       const root = f.roots()[0];
       expect(root).toMatchObject({ status: "completed", outcome: "done", executions: 2, result: "T6-DONE: finished the rest." });
       expect(f.eventsOf(root.id)).toEqual(expect.arrayContaining(["started", "continued", "started", "settled"]));
-      expect(model.requests.filter((sent) => sent.lastUser.includes("T6-JOB") && !sent.lastUser.includes(STEP_CAP_CONTINUES))).toHaveLength(64);
+      expect(model.requests.filter((sent) => sent.lastUser.includes("T6-JOB") && !sent.lastUser.includes(STEP_CAP_CONTINUES))).toHaveLength(201);
       const continued = model.requests.filter((sent) => sent.lastUser.includes(STEP_CAP_CONTINUES));
       expect(continued).toHaveLength(1);
       expect(continued[0]!.lastUser).toMatch(/Every step so far is listed in \S*handoffs\S*; read it before going on\./);

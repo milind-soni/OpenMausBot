@@ -50,7 +50,6 @@ text and extra work can increase token usage.
 | `sharedComputers` | Single-owner lending only | Controls ordinary server lending; the bots' home has separate rules below. | Ordinary lending asks for consent; making a server home uses the home workflow. |
 | `claudeUserMcp` | Off | Claude bots also load this machine's personal Claude Code MCP servers. | Adds tools and may start those servers; their tools can consume tokens or contact services. |
 | `claudeUserSkills` | Off | Claude bots also load the personal skills in `~/.claude/skills`. | Adds skill instructions/files to the engine's available context; does not control Codex native skills. |
-| `llmThreadTitles` | Off | Generates new conversation titles with the engine. | Additional one-shot model calls. |
 | `smartSetupChoices` | On | Offers model-written setup choices for a new bot when enough information is available. | Background model calls, subject to the bot's engine capabilities and the budget. If that engine has no one-off text call, an eligible configured [helper](memory.md#the-helper-model) may write the choices using its own provider and model. |
 | `autoRecall` | On | Recalls matching memory passages into turns. | Recalled text uses context. Disabling this does not disable memory storage or upkeep; see [Memory](memory.md). |
 | `skillsLibrary` | Off | Enables the shared skills store and its Skills settings. | Enables the library, not automatic conversation review. Skill use follows assignments and permissions. |

@@ -18,7 +18,7 @@ import { z } from "zod";
 
 import type { createDialer } from "../bot-link/dial.ts";
 import type { BotLink } from "../bot-link/link.ts";
-import { FILE_PATH, PAIR_PATH, SEEN_MS, STATE_PATH, SYNC_PATH, fileWay, placeSchema, syncRequest } from "../bot-link/protocol.ts";
+import { BOTS_PATH, FILE_PATH, LEVEL_HEADER, PAIR_PATH, PROTOCOL_LEVEL, SEEN_MS, STATE_PATH, SYNC_PATH, fileWay, levelOf, placeSchema, syncRequest } from "../bot-link/protocol.ts";
 import { FILE_MAX_BYTES } from "../../shared/upload-limits.ts";
 import { answerAsleep } from "../cloud-power.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -64,6 +64,8 @@ export interface BotLinkRouteDeps {
   /** The link was turned on here. */
   turnedOn?(): void;
   seenMs?: number;
+  /** What this place says its version reads; a test stands in for an older Cloud with it. */
+  level?: number;
 }
 
 export function createBotLinkRoutes(deps: BotLinkRouteDeps): RouteHandler {
@@ -91,8 +93,18 @@ export function createBotLinkRoutes(deps: BotLinkRouteDeps): RouteHandler {
   const state = () => ({ ...link.status(), ...(link.role() === "dialer" ? dialer.state() : {}) });
 
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
-    if (path !== STATE_PATH && path !== PAIR_PATH && path !== SYNC_PATH && path !== FILE_PATH) return PASS;
+    if (path !== STATE_PATH && path !== PAIR_PATH && path !== SYNC_PATH && path !== FILE_PATH && path !== BOTS_PATH) return PASS;
     res.setHeader("cache-control", "no-store");
+
+    if (path === BOTS_PATH) {
+      req.resume();
+      if (!deps.local(auth)) return json(res, 403, { error: "Only the app on this computer lists its other places' bots." });
+      if (method !== "GET") return json(res, 405, { error: "method not allowed" });
+      // Names and looks only, as each place told this one: no message, address or sign-in.
+      return json(res, 200, { bots: link.linked().map(({ id, peer, place, kind, online, bot }) => ({ id, home: { id: place.id, key: peer, kind, name: place.name, online }, botId: bot.id, name: bot.name,
+        ...(bot.title ? { title: bot.title } : {}), ...(bot.color ? { color: bot.color } : {}), ...(bot.mascotBody ? { mascotBody: bot.mascotBody } : {}),
+        ...(bot.mascotFaceColor ? { mascotFaceColor: bot.mascotFaceColor } : {}), ...(bot.chief ? { chiefOfStaff: true } : {}), ...(bot.threadId ? { threadId: bot.threadId } : {}) })) });
+    }
 
     if (path === STATE_PATH) {
       if (!deps.local(auth)) { req.resume(); return json(res, 403, { error: "Only the app on this computer can turn the link to the Cloud on or off." }); }
@@ -178,6 +190,9 @@ export function createBotLinkRoutes(deps: BotLinkRouteDeps): RouteHandler {
     const power = deps.power();
     if (power?.sleeping()) return answerAsleep(res, json);
     seen(peer);
+    // Each side says what its version reads; a computer on the first version says nothing and is sent only what that reads.
+    link.setLevel(peer, levelOf(req.headers[LEVEL_HEADER]));
+    if ((deps.level ?? PROTOCOL_LEVEL) > 1) res.setHeader(LEVEL_HEADER, String(deps.level ?? PROTOCOL_LEVEL));
     if (body.data.fresh) link.sessionStarted(peer);
     link.receive(peer, body.data.frames);
     const linked = () => auth.kind === "session" && link.peerOfSession(auth.session.id) === peer;

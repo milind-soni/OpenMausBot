@@ -42,7 +42,7 @@ import { replyAndCopy, roomPin, useBotMessageMenu, userMessageMenu } from "./mes
 import { forkMessageItem, ForkLinks } from "./ForkMessage";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
-import { SpeakButton } from "./SpeakButton";
+import { SpeakButton, speakReady } from "./SpeakButton";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { localSystemVoiceActive } from "@/lib/local-voice";
 import { CancelledTurnRow } from "./CancelledTurnRow";
@@ -90,7 +90,7 @@ import { citationPreviewText, splitTranscriptCitations, type CitationAttachment 
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
-import { DataResultChip } from "./DataResultChip"; import { PublishedPageCard } from "./PublishedPageCard"; import { RoomRichRow, UserLineNote } from "./RichMessageRow";
+import { DataResultChip } from "./DataResultChip"; import { PublishedPageCard } from "./PublishedPageCard"; import { TemplateChatCard } from "./TemplateCard"; import { RoomRichRow, UserLineNote } from "./RichMessageRow";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
 import { dayLabel, localDay } from "@/lib/transcript-derivations";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
@@ -198,7 +198,7 @@ function RoomTextMessage({
       {canReact && m.from && <ReactAction threadId={group.threadId} message={m} />}
       {botText && <CopyButton text={botText} className={messageActionClass} />}
       {botText && viewRaw && <RawToggleAction active onToggle={() => setViewRaw(false)} className={messageActionClass} />}
-      {botText && speaking && <SpeakButton text={botText} botId={speakerBot?.id} messageId={m.id} voiceId={speakerBot?.voice} tts={state.config?.tts} localVoice={localSystemVoiceActive()} className={cn(messageActionClass, "text-accent")} />}
+      {botText && (speaking || speakReady(state.config?.tts, speakerBot?.voice, localSystemVoiceActive())) && <SpeakButton text={botText} botId={speakerBot?.id} messageId={m.id} voiceId={speakerBot?.voice} tts={state.config?.tts} localVoice={localSystemVoiceActive()} className={cn(messageActionClass, speaking && "text-accent")} />}
     </MessageActions>
   );
   return (
@@ -470,7 +470,7 @@ export const Transcript = memo(function Transcript({
             <CompactionChip message={m} />
           ) : m.kind === "digest" ? (
             showToolCalls ? <DigestChip message={m} /> : null
-          ) : (m.kind === "app" || m.kind === "widget") && m.from ? <RoomRichRow message={m} from={m.from} threadId={group.threadId} /> : m.publishedPage ? <PublishedPageCard message={m} /> : m.kind === "text" && (m.text || m.attachments?.length) ? (
+          ) : (m.kind === "app" || m.kind === "widget") && m.from ? <RoomRichRow message={m} from={m.from} threadId={group.threadId} /> : m.template ? <TemplateChatCard message={m} /> : m.publishedPage ? <PublishedPageCard message={m} /> : m.kind === "text" && (m.text || m.attachments?.length) ? (
             !user && isPureLeakedSystemHarnessMessage(m.text) && !m.attachments?.length ? null : (
               <RoomTextMessage
                 group={group}

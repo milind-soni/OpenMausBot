@@ -48,6 +48,14 @@ describe("connector scope hint (MOCA-273)", () => {
     expect(withScopeHint(unreadable, "application/json", ["GMAIL_CREATE_FILTER"])).toBe(unreadable);
   });
 
+  it("tells the person to sign Google Drive in again with every permission ticked when no special permission is known", () => {
+    const hint = scopeHint(["GOOGLEDRIVE_UPLOAD_FILE"]);
+    expect(hint).toContain("Google's sign-in screen lets a person leave a permission unticked");
+    expect(hint).toContain("open Connected apps, go to the Connected tab, choose Disconnect on Google Drive, then Connect it again");
+    expect(hint).not.toContain("Reconnecting will not add it");
+    expect(scopeHint(["SLACK_SEND_MESSAGE"])).not.toContain("Google");
+  });
+
   it("does not name an app it does not know", () => {
     const hint = scopeHint([]);
     expect(hint).toContain("The app refused this");
