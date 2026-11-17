@@ -139,7 +139,7 @@ export function NavRow({ title, hint, value, icon, onClick, drill = true, danger
         {hint && <div className={hintCls}>{hint}</div>}
       </div>
       {value !== undefined && value !== null && value !== "" && (
-        <span className="inline-flex min-w-0 max-w-[45%] items-center gap-1 truncate text-[13px] text-ink-secondary">{value}</span>
+        <span className="inline-flex min-w-0 max-w-[45%] items-center gap-1 text-[13px] text-ink-secondary"><span className="truncate">{value}</span></span>
       )}
       {drill && <ChevronRight size={15} className="shrink-0 text-ink-tertiary" aria-hidden="true" />}
     </button>

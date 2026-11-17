@@ -11,3 +11,8 @@ it("keeps room for the title on a phone and lets a long value shrink instead", (
   expect(classes(html, "span")).toContain("min-w-0");
   expect(classes(html, "span")).not.toContain("shrink-0");
 });
+
+it("puts the ellipsis on the value text itself, so it also shows in Firefox", () => {
+  const html = renderToStaticMarkup(createElement(NavRow, { title: "Apps it can use", value: "google-calendar, gmail, notion, slack, linear, github", onClick: () => {} }));
+  expect(html).toMatch(/<span class="truncate">google-calendar, gmail, notion, slack, linear, github<\/span>/);
+});
