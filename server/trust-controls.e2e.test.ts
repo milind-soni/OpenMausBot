@@ -412,6 +412,24 @@ it("sends 35 in a day at Full access with no sending rule, with no refusal and n
   for (const thread of threads) expect((await cards(thread)).filter((row: any) => row.card?.outboundRequest), "no card waits on anyone").toEqual([]);
 }, 90_000);
 
+it("holds a bot to the connected accounts its scopes name", async () => {
+  const b = await bot("Account limits");
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length;
+  const fetchAs = (account: string) => relay(token, "COMPOSIO_MULTI_EXECUTE_TOOL", { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {}, account }] });
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["other-account"] } } })).status).toBe(200);
+  const refused = await fetchAs("fixture-account");
+  expect(refused.body.result.isError).toBe(true);
+  expect(refused.body.result.content[0].text).toContain('may use only account id "other-account" in');
+  expect((await relay(token, "GMAIL_FETCH_EMAILS")).body.result.isError, "no account named").toBe(true);
+  expect(relayed).toHaveLength(before);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["fixture-account"] } } })).status).toBe(200);
+  expect((await fetchAs("fixture-account")).body.result.isError).not.toBe(true);
+  expect((await relay(token, "GMAIL_FETCH_EMAILS")).body.result.isError, "a limited app's call must name its account").toBe(true);
+  expect(relayed).toHaveLength(before + 1);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: [] } } })).status).toBe(400);
+});
+
 it("shows each outbound batch recipient and amount with explicit preview truncation before consent", async () => {
   const b = await bot("Batch consent preview");
   const token = await mint(b.id, b.threadId);

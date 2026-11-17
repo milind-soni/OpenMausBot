@@ -86,6 +86,8 @@ describe("what a request needs", () => {
     expect(levelNeeded("POST", "/api/bots/b1/tasks")).toBe("chat");
     expect(levelNeeded("PATCH", "/api/bots/b1/tasks/t1")).toBe("chat");
     expect(levelNeeded("POST", "/api/bots/b1/messages")).toBe("chat");
+    expect(levelNeeded("POST", "/api/bots/b1/compact")).toBe("chat");
+    expect(levelNeeded("POST", "/api/bots/b1/context")).toBe("chat");
     expect(levelNeeded("POST", "/api/threads/t1/respond")).toBe("chat");
     expect(levelNeeded("PATCH", "/api/bots/b1/profile")).toBe("chat");
     expect(levelNeeded("PUT", "/api/bots/b1/access")).toBe("edit");

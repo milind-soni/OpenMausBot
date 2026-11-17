@@ -112,6 +112,32 @@ The times are kept in
 model runs: whether a real Claude Code honours `--fork-session` for
 `/compact` in print mode is checked only by the fake.
 
+## The engine's own count of the window
+
+`POST /api/bots/:id/context` with `{ "threadId": "owned-thread-id" }` asks the
+engine process that holds the conversation what fills its window and answers
+`{ threadId, breakdown }` (`shared/context-breakdown.ts`). It needs the same
+access as sending a message, starts no turn, makes no model call and writes
+nothing: the question and its answer stay out of the conversation's native log.
+
+`breakdown` is `null`, never an estimate, when:
+
+- the engine has no such count (today only Claude Code answers
+  `get_context_usage`, from 2.1.325; an older CLI refuses the request);
+- no engine process holds the conversation: before its first turn, or after
+  the idle process was closed;
+- that process still holds what the next turn replaces: after Start fresh or
+  a rewind, and from a summary until the turn that starts the engine on it;
+- the engine did not answer within 5 seconds.
+
+```sh
+pnpm exec vitest run server/context-breakdown.e2e.test.ts server/drivers/claude-context-usage.test.ts
+pnpm exec vitest run server/drivers/claude.test.ts -t "context read"
+```
+
+The fixture's fake engine answers with `FAKE_CLAUDE_CONTEXT_USAGE`; what a real
+Claude Code counts is not exercised by any test.
+
 ## Rooms
 
 A room turn resumes no stored session: every turn re-sends the room's

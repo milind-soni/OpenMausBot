@@ -15,6 +15,9 @@
 //   FAKE_CLAUDE_DUMP  path for the latest turn's {argv, env, cwd, prompt, systemPrompt, mcpConfig}
 //   FAKE_CLAUDE_ELICIT  JSON request body: a "hang" turn (or a failing FAKE_CLAUDE_TRANSIENTS launch) first asks it
 //     as control_request "elicit-1"
+//   FAKE_CLAUDE_CONTEXT_USAGE  JSON answered to a get_context_usage control_request; unset, the request is refused as
+//     unsupported, like any other control_request
+//   FAKE_CLAUDE_CONTEXT_USAGE_LATE  1: the first get_context_usage is answered only when the next control_request arrives
 //   FAKE_CLAUDE_CONTROL_LOG  JSON-lines file every control_response the host writes is appended to
 //   FAKE_CLAUDE_EXIT_AFTER_TURN  1: exit once the turn is answered, so later turns relaunch with --resume
 //   FAKE_CLAUDE_AUTH_AFTER_TURN  1: from the second turn, answer as not-logged-in; FAKE_CLAUDE_AUTH_AFTER_WORK  1: not-logged-in
@@ -499,8 +502,20 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
     process.stderr.write("fake setup answers failed\n");
     process.exit(1);
   }
+  // Every new thread asks its engine for a title (server/thread-title-generate.ts), so that call stays out of the captures
+  // below unless a test answers it: by FAKE_CLAUDE_TEXT_FILE or a FAKE_CLAUDE_TEXT_ROUTES marker. Otherwise it fails at
+  // once and the thread keeps its first-message title. Answered, it still never overwrites the turn dump.
+  const titleCall = prompt.includes("Reply with only a short title: 3 to 6 words");
+  const routes = process.env.FAKE_CLAUDE_TEXT_ROUTES;
+  const routed = () => {
+    try { return Object.keys(JSON.parse(readFileSync(routes!, "utf8"))).some((marker) => prompt.includes(marker)); } catch { return false; }
+  };
+  if (titleCall && !process.env.FAKE_CLAUDE_TEXT_FILE && !(routes && routed())) {
+    process.stderr.write("fake title failed\n");
+    replyText("fake title failed", 1, null);
+  }
   // Background one-shots never overwrite the shared turn dump; FAKE_CLAUDE_TEXT_DUMP records them.
-  const upkeepCall = /You are the (?:CAPTURE|TIDY|ORGANIZE) step of a memory system|You are the SKILL REVIEW step/.test(prompt);
+  const upkeepCall = titleCall || /You are the (?:CAPTURE|TIDY|ORGANIZE) step of a memory system|You are the SKILL REVIEW step/.test(prompt);
   const oneShotDump = process.env.FAKE_CLAUDE_TEXT_DUMP ?? (upkeepCall ? undefined : process.env.FAKE_CLAUDE_DUMP);
   if (oneShotDump) {
     writeDumpAtomic(
@@ -552,6 +567,7 @@ const tools = [...new Set([...(toolsFlag ? toolsFlag.split(",") : ["Bash", "Read
   ...(process.env.FAKE_CLAUDE_KEEP_BASH === "1" ? ["Bash"] : [])])];
 let launchFiles: Record<string, unknown> | null = null;
 let turnRunning = false;
+let lateContextAnswer: object | true | null = null;
 let steered: string[] = [];
 let steeredMessages: JsonValue[] = [];
 const replayUserMessages = argv.includes("--replay-user-messages");
@@ -1335,6 +1351,17 @@ process.stdin.on("data", (c) => {
     }
     if ((prompt as { type?: unknown } | null)?.type === "control_response") {
       if (process.env.FAKE_CLAUDE_CONTROL_LOG) appendFileSync(process.env.FAKE_CLAUDE_CONTROL_LOG, `${line}\n`);
+      continue;
+    }
+    const control = prompt as { type?: unknown; request_id?: unknown; request?: { subtype?: unknown } } | null;
+    if (control?.type === "control_request") {
+      const usage = control.request?.subtype === "get_context_usage" ? process.env.FAKE_CLAUDE_CONTEXT_USAGE : undefined;
+      const answer = { type: "control_response", response: usage
+        ? { subtype: "success", request_id: control.request_id, response: JSON.parse(usage) }
+        : { subtype: "error", request_id: control.request_id, error: `Unsupported control request subtype: ${String(control.request?.subtype)}`, error_code: "unsupported_request" } };
+      if (usage && process.env.FAKE_CLAUDE_CONTEXT_USAGE_LATE === "1" && !lateContextAnswer) { lateContextAnswer = answer; continue; }
+      if (lateContextAnswer && lateContextAnswer !== true) { out(lateContextAnswer); lateContextAnswer = true; }
+      out(answer);
       continue;
     }
     if (turnRunning || lateTurnWaiting) {

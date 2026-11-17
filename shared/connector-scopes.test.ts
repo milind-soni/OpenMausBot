@@ -7,6 +7,7 @@ import {
   isReadOnlyAction,
   normalizeConnectorScopes,
   toolkitOf,
+  widensConnectorScopes,
 } from "./connector-scopes.ts";
 
 describe("toolkitOf", () => {
@@ -134,5 +135,66 @@ describe("grantScopedApps", () => {
     const off = { connectorTools: {} };
     expect(grantScopedApps(off)).toBe(false);
     expect(off.connectorTools).toEqual({});
+  });
+});
+
+describe("per-account limits", () => {
+  const scopes = normalizeConnectorScopes({ apps: { gmail: "write", slack: "read" }, accounts: { gmail: ["ca_work"] } })!;
+
+  it("keeps an account list, and refuses an empty or malformed one", () => {
+    expect(scopes.accounts).toEqual({ gmail: ["ca_work"] });
+    expect(normalizeConnectorScopes({ apps: { gmail: "read" }, accounts: { gmail: [] } })).toBeNull();
+    expect(normalizeConnectorScopes({ apps: { gmail: "read" }, accounts: { gmail: ["bad id"] } })).toBeNull();
+    expect(normalizeConnectorScopes({ apps: { gmail: "read" }, accounts: ["ca_work"] })).toBeNull();
+    expect(normalizeConnectorScopes({ apps: { gmail: "read" }, accounts: {} })).toEqual({ apps: { gmail: "read" } });
+  });
+
+  it("drops a limit for an app the bot may not use", () => {
+    expect(normalizeConnectorScopes({ apps: { slack: "read" }, accounts: { gmail: ["ca_work"] } })).toEqual({ apps: { slack: "read" } });
+  });
+
+  it("allows a call naming an allowed account id", () => {
+    expect(connectorAccessDecision(scopes, [{ slug: "GMAIL_SEND_EMAIL", account: "ca_work" }])).toEqual({ ok: true });
+  });
+
+  it("refuses another account, an alias, or none", () => {
+    const refused = { ok: false, slug: "GMAIL_SEND_EMAIL", toolkit: "gmail", reason: "account", allowed: ["ca_work"] };
+    expect(connectorAccessDecision(scopes, [{ slug: "GMAIL_SEND_EMAIL", account: "ca_home" }])).toEqual(refused);
+    expect(connectorAccessDecision(scopes, [{ slug: "GMAIL_SEND_EMAIL", account: "work" }])).toEqual(refused);
+    expect(connectorAccessDecision(scopes, [{ slug: "GMAIL_SEND_EMAIL", account: "CA_WORK" }])).toEqual(refused);
+    expect(connectorAccessDecision(scopes, [{ slug: "GMAIL_SEND_EMAIL" }])).toEqual(refused);
+  });
+
+  it("leaves apps without a limit, and bots without limits, alone", () => {
+    expect(connectorAccessDecision(scopes, [{ slug: "SLACK_LIST_CHANNELS" }])).toEqual({ ok: true });
+    expect(connectorAccessDecision({ apps: { gmail: "write" } }, [{ slug: "GMAIL_SEND_EMAIL", account: "ca_home" }])).toEqual({ ok: true });
+    expect(connectorAccessDecision(undefined, [{ slug: "GMAIL_SEND_EMAIL" }])).toEqual({ ok: true });
+  });
+
+  it("refuses a whole batch when one call uses a forbidden account", () => {
+    const calls = [{ slug: "GMAIL_FETCH_EMAILS", account: "ca_work" }, { slug: "GMAIL_SEND_EMAIL", account: "ca_home" }];
+    expect(connectorAccessDecision(scopes, calls).ok).toBe(false);
+  });
+
+  it("tells the bot which account to name", () => {
+    expect(describeConnectorScopes(scopes)).toContain('In gmail, use only account id "ca_work", and name it in each call\'s account field.');
+    expect(describeConnectorScopes({ apps: { gmail: "read" } })).not.toContain("account");
+  });
+
+  it("counts a dropped limit or an added account as widening", () => {
+    const two = { apps: { gmail: "write" as const, slack: "read" as const }, accounts: { gmail: ["ca_work", "ca_home"] } };
+    expect(widensConnectorScopes(scopes, two)).toBe(true);
+    expect(widensConnectorScopes(scopes, { apps: { gmail: "write", slack: "read" } })).toBe(true);
+    expect(widensConnectorScopes(two, scopes)).toBe(false);
+    expect(widensConnectorScopes(scopes, { apps: { slack: "read" } })).toBe(false);
+    expect(widensConnectorScopes({ apps: { gmail: "write", slack: "read" } }, scopes)).toBe(false);
+  });
+
+  it("counts removed limits, a new app or read raised to write as widening, and nothing for an unscoped bot", () => {
+    expect(widensConnectorScopes(scopes, undefined)).toBe(true);
+    expect(widensConnectorScopes({ apps: { gmail: "read" } }, { apps: { gmail: "read", slack: "read" } })).toBe(true);
+    expect(widensConnectorScopes({ apps: { gmail: "read" } }, { apps: { gmail: "write" } })).toBe(true);
+    expect(widensConnectorScopes({ apps: { gmail: "write" } }, { apps: { gmail: "read" } })).toBe(false);
+    expect(widensConnectorScopes(undefined, scopes)).toBe(false);
   });
 });

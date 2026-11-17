@@ -19,7 +19,7 @@ export interface RoomJobsDeps {
 }
 
 export function parallelRoomJobsEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.parallelRoomJobs === true;
+  return cfg.features?.parallelRoomJobs !== false;
 }
 
 const live = (n: HandoffView) => n.parentId !== undefined && (n.status === "queued" || n.status === "running");
@@ -54,6 +54,13 @@ export function createRoomJobs({ store, coordinator, cfg, operations, speakerOf,
     return jobs > 1 || coordinator.active().some(n => live(n) && (n.groupId === room.id ? n.threadId === roomThreadId : laneRoomThread(n) === roomThreadId));
   }
 
+  // A job running beside its room still follows the room's shared instructions.
+  function laneBulletin(n: Pick<HandoffView, "botId" | "threadId" | "groupId">): string {
+    const room = store.groupByThread(laneRoomThread(n) ?? "");
+    const bulletin = room?.bulletin.trim();
+    return room && bulletin ? `Room bulletin of "${room.name}" (shared instructions for everyone):\n${bulletin}` : "";
+  }
+
   function openLane(room: GroupRecord, roomThreadId: string, botId: string, sender: { id: string; name: string }, brief: string) {
     const existing = store.workThread(botId, sender.id, roomThreadId, true);
     const snippet = brief.replace(/\s+/g, " ").trim().slice(0, 48);
@@ -81,5 +88,5 @@ export function createRoomJobs({ store, coordinator, cfg, operations, speakerOf,
     return [parallel, sequential].filter(Boolean).join(" ");
   }
 
-  return { roomLineOf, advanceRound, useLanes, openLane, describeRoomJobs };
+  return { roomLineOf, advanceRound, useLanes, laneBulletin, openLane, describeRoomJobs };
 }

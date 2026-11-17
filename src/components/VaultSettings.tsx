@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { ChevronDown, KeyRound, Loader2, LockKeyhole, ShieldCheck, Trash2 } from "lucide-react";
 
-import { loginHeldBackFor, type LoginBots, type LoginSummary, type OnePasswordItemRef, type OnePasswordStatus, type OnePasswordVault } from "../../shared/logins";
+import { loginHeldBackFor, normalizeLoginHost, type LoginBots, type LoginSummary, type OnePasswordItemRef, type OnePasswordStatus, type OnePasswordVault } from "../../shared/logins";
 import type { LinkedSecret, VaultSecret } from "../../shared/vault";
 import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
@@ -62,6 +62,7 @@ export function VaultSettings() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editBots, setEditBots] = useState<LoginBots>("all");
   const [editExact, setEditExact] = useState(false);
+  const [editSite, setEditSite] = useState("");
   const [removeTotp, setRemoveTotp] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,7 +94,7 @@ export function VaultSettings() {
     setAdding(null);
     setDeleting(null);
     setRemoveTotp(false);
-    if (login) { setEditBots(login.bots); setEditExact(login.exactHost); }
+    if (login) { setEditBots(login.bots); setEditExact(login.exactHost); setEditSite(login.hosts[0] ?? login.site); }
     setEditing(id);
   };
   const startAdding = (kind: Adding) => {
@@ -169,10 +170,11 @@ export function VaultSettings() {
       {editing === login.id && login.onePassword && itemEditor(login.onePassword, login.bots)}
       {editing === login.id && !login.onePassword && (
         <div className="ms-6 rounded-lg bg-inset/60 p-3">
-          <LoginForm username={false} replacing submitLabel={t("settings.logins.saveChange")} autoFocus
+          <LoginForm site={{ value: editSite, onChange: setEditSite }} username={false} replacing submitLabel={t("settings.logins.saveChange")} autoFocus
             onCancel={() => setEditing(null)}
             onSubmit={async (fields) => {
-              await changeLogin(login.id, { password: fields.password, totp: fields.totp, removeTotp, bots: editBots, ...(editExact === login.exactHost ? {} : { exactHost: editExact }) });
+              const host = normalizeLoginHost(editSite);
+              await changeLogin(login.id, { ...(host && login.hosts.includes(host) ? {} : { site: editSite }), password: fields.password, totp: fields.totp, removeTotp, bots: editBots, ...(editExact === login.exactHost ? {} : { exactHost: editExact }) });
               setEditing(null);
               await load();
             }}>
@@ -276,7 +278,7 @@ export function VaultSettings() {
           <div data-vault-keys className="contents">
             <SettingsLinkRow title={t("settings.vault.keys.title")} subtitle={t("settings.vault.keys.hintShort", { app: productName() })} onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })} />
           </div>
-          <OnePasswordConnection status={onePassword} disabled={logins === null} bots={bots} botNames={botNames}
+          <OnePasswordConnection status={onePassword} disabled={logins === null} bots={bots} botNames={botNames} team={Boolean(state.config?.team)}
             onChange={async (next) => { setOnePassword(next); await load(); }} />
         </SettingsRows>
       </SettingsGroup>}
@@ -378,9 +380,11 @@ function VaultAccess({ vault, bots, botNames, disabled, onChange }: {
   );
 }
 
-function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
+/** `team`: on a Team Cloud an admin connects it for the whole team, and the row says how to keep that narrow. */
+function OnePasswordConnection({ status, disabled, bots, botNames, team, onChange }: {
   status: OnePasswordStatus;
   disabled: boolean;
+  team: boolean;
   bots: ReadonlyArray<{ id: string; name: string }>;
   botNames: (value: LoginBots) => string;
   onChange: (status: OnePasswordStatus) => Promise<void>;
@@ -415,6 +419,7 @@ function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
           <button type="button" className="ui-button" disabled={disabled || busy !== null} onClick={() => void run("disconnect", disconnectOnePassword)}>{t("settings.logins.onePassword.disconnect")}</button>
         </> : <button type="button" className="ui-button" disabled={disabled} onClick={() => setOpen(true)}>{t("settings.logins.onePassword.connect")}</button>}
       </div>
+      {team && <p className="text-[12px] leading-4 text-ink-tertiary" data-onepassword-team>{t("settings.logins.onePassword.team")}</p>}
       {status.connected && status.error && <p role="alert" className="text-[12px] leading-4 text-danger">{status.error}</p>}
       {status.connected && !!status.vaults?.length && (
         <ul className="divide-y-[0.5px] divide-(--settings-edge)" aria-label={t("settings.logins.onePassword.vaults")}>
@@ -432,6 +437,7 @@ function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
           </>}>
           <form id="onepassword-connect" className="flex flex-col gap-3" onSubmit={(event) => { connect(event); }}>
             <p className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.logins.onePassword.guide")}</p>
+            {team && <p className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.logins.onePassword.team")}</p>}
             <SettingsField label={t("settings.logins.onePassword.token")} hint={t("settings.logins.onePassword.note")}>
               <input name="onePasswordToken" type="password" autoComplete="off" spellCheck={false} maxLength={8192} value={token}
                 onChange={(event) => setToken(event.target.value)} disabled={disabled || busy !== null} className={SETTINGS_INPUT} />

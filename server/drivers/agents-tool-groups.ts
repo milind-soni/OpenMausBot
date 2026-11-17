@@ -6,12 +6,13 @@ import { IMAGE_TOOL_NAMES } from "./agents-image-tools.ts";
 import { MEETING_TOOL_NAMES } from "./agents-meeting-tools.ts";
 import { PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
+import { SHARE_TOOL_NAMES } from "./agents-share-tool.ts";
 
 /** Each group's tools on the agents server, and the whole MCP servers (turn integrations) it stands for. */
 export const TOOL_GROUP_MEMBERS: Readonly<Record<ToolGroup, { tools: ReadonlySet<string>; servers: readonly ("data" | "email")[] }>> = {
   meetings: { tools: MEETING_TOOL_NAMES, servers: [] },
   data: { tools: new Set(), servers: ["data"] },
-  pages: { tools: new Set(["show_html", ...PAGE_TOOL_NAMES, ...HOSTING_TOOL_NAMES]), servers: [] },
+  pages: { tools: new Set(["show_html", ...PAGE_TOOL_NAMES, ...HOSTING_TOOL_NAMES, ...SHARE_TOOL_NAMES]), servers: [] },
   images: { tools: IMAGE_TOOL_NAMES, servers: [] },
   email: { tools: new Set(), servers: ["email"] },
 };

@@ -427,6 +427,25 @@ describe("memory_update", () => {
     expect(isForgotten("The person likes long replies")).toBe(true);
   });
 
+  it("reads a blank old_text on append or prefer as left out, since neither uses it", async () => {
+    const bot = "bot-memory-blank-old-text";
+    const ctx = context({ botId: bot, client: harness(bot) });
+    for (const old_text of ["", "  ", null]) {
+      const saved = await callTool("memory_update", { action: "append", text: `Exam on Friday ${JSON.stringify(old_text)}`, old_text, until: "2026-12-01" }, ctx);
+      expect(saved.isError, saved.text).toBeFalsy();
+    }
+    expect(readMemoryFile(bot).text).toContain("Exam on Friday \"\"");
+    expect(await callTool("memory_update", { action: "replace", old_text: "", text: "x" }, ctx)).toMatchObject({ isError: true, text: expect.stringContaining("old_text must not be empty") });
+  });
+
+  it("says old_text is not used with append instead of a generic error, and saves nothing", async () => {
+    const bot = "bot-memory-append-old-text";
+    const ctx = context({ botId: bot, client: harness(bot) });
+    const refused = await callTool("memory_update", { action: "append", old_text: "exam", text: "Exam on Friday" }, ctx);
+    expect(refused).toEqual({ isError: true, text: "memory_update was not run: old_text is not used with append. Leave it out to add a new note, or use replace or supersede to change the passage it names." });
+    expect(readMemoryFile(bot).text).not.toContain("Exam on Friday");
+  });
+
   it("removes a whole dated entry when only its fact is named, never leaving a note with a date and no text", async () => {
     const bot = "bot-memory-remove";
     writeMemoryFile(bot, '- 2026-10-27 · from chat "Remember" (noticed) · The person prefers short answers\n- Keep this unique fact.\n');

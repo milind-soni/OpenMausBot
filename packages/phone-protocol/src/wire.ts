@@ -589,8 +589,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** A "Sent to" row for work addressed into a room the bot `name` isn't in, so it went to the bot directly. `room`
    * names that room when this row is not in it. Clients say it in their own words; `tool.name` is the English. */
   sentDirectly?: { name: string; room?: string };
-  /** A page the bot published to a public link (publish_page), or why it couldn't. `text` carries the link too. */
-  publishedPage?: PublishedPageCard;
+  /** A page the bot published to a public link (publish_page), or why it couldn't; `template`, a shareable template of the bot or its department (the share tool). `text` says the same in words. */
+  publishedPage?: PublishedPageCard; template?: import("./share-card.ts").TemplateCard;
   /** A published Data result, linked to its bot's main viewer. */
   dataResult?: { botId: string; cardId: string; title: string; kind: "table" | "chart" | "text"; sql?: string };
   /** user messages: the Data result the person was viewing when they sent
@@ -881,9 +881,9 @@ export interface WireGroup {
   /** True while any member (or hand-off) is mid-turn. Computed at
    * projection time, never persisted. */
   working: boolean;
-  /** A direct-message channel's turn limit (minutes without progress). Null on the wire means the
-   * global group limit. Channel conversations store theirs on each task. */
+  /** A direct-message channel's turn limit (minutes without progress). Null on the wire means the global group limit. Channel conversations store theirs on each task. */
   turnTimeoutMinutes?: number | null;
+  /** Turns each member who answers a person's message takes, in order, before the room waits again; absent = 1. The last of several is marked final. */ turnsPerMember?: number;
   /** Members the person stopped in this room ("stop @Bot"), by bot id. A
    * held member gets no turn until it is @mentioned again or resumed. */
   holds?: Record<string, RoomHold>;

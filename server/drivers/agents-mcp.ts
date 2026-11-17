@@ -12,9 +12,10 @@ import { capToolListResult, toolLimitFromEnv } from "../tool-count-limit.ts";
 
 /** What the agents server lists for `env`, before any tool limit. */
 export function agentsToolList(env: NodeJS.ProcessEnv) {
-  const available = availableTools(catalogProfileFromEnv(env));
+  const profile = catalogProfileFromEnv(env);
+  const available = availableTools(profile);
   const bridge = env[TOOL_BRIDGE_ENV] === "1" ? createToolBridge(available) : undefined;
-  return { available, bridge, listed: bridge ? bridge.listed : env[DEFER_TOOLS_ENV] === "1" ? withDeferMarks(available) : available };
+  return { available, bridge, listed: bridge ? bridge.listed : env[DEFER_TOOLS_ENV] === "1" ? withDeferMarks(available, profile.chief) : available };
 }
 
 export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json | undefined> {

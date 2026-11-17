@@ -45,6 +45,11 @@ export class EngineHomes {
     return this.#setup ? this.#thread.run(threadId, start) : start();
   }
 
+  /** The conversation the caller runs in, on a Team Cloud; undefined elsewhere. */
+  thread(): string | undefined {
+    return this.#setup ? this.#thread.getStore() : undefined;
+  }
+
   /** The audience key of the conversation the caller runs in, so engines never share a process across audiences. */
   scope(): string | null {
     const threadId = this.#setup ? this.#thread.getStore() : undefined;

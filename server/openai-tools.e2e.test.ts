@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 // The fixture can only write one fixed file in the launcher's disposable home: provider arguments cannot select a path.
 const MCP_FIXTURE = `
@@ -67,6 +68,7 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
     let body = "";
     for await (const chunk of req) body += chunk;
     const request = JSON.parse(body) as ChatRequest;
+    if (isTitleCall(request)) { res.writeHead(500).end(); return; }
     requests.push(request);
     if (scenario === "tools-off" && "tools" in request) {
       res.writeHead(400, { "content-type": "application/json" });

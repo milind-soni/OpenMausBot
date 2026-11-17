@@ -94,7 +94,7 @@ it("in This computer's own place, the line says it is separate from My Cloud, wh
   await mount(vi.fn().mockResolvedValue({ kind: "profile" }));
   window.ogb = { ...window.ogb, platform: "darwin" } as unknown as typeof window.ogb;
   await vi.waitFor(() => expect(host.querySelector("[data-home-line='profile']")).not.toBeNull());
-  expect(homeLineText({ kind: "profile" })).toBe("This computer starts fresh, separate from My Cloud. The bots you had here are on My Cloud; to bring in an older copy, import its backup in Settings → Backups.");
+  expect(homeLineText({ kind: "profile" })).toBe("This computer starts fresh, separate from My Cloud. The bots you had here are on My Cloud; to bring in an older copy, import its backup in Settings → Import & export.");
   expect(host.querySelector("[data-home-line-ai]")?.textContent, "a fresh place offers connecting an AI while none is ready").toBe("Connect an AI");
   setLocale("pt-br");
   expect(homeLineText({ kind: "profile" })).toMatch(/^Este computador começa do zero/);

@@ -183,8 +183,12 @@ export function connectorUnrecognizedText(invoked: string, reason: string): stri
   ].join(" ");
 }
 
-export function connectorScopeRefusalText(call: ConnectorCall, reason: "app" | "write", bot: string, app: string, tool: string): string {
+export function connectorScopeRefusalText(call: ConnectorCall, reason: "app" | "write" | "account", bot: string, app: string, tool: string, allowed: readonly string[] = []): string {
   if (call.kind === "unrecognized") return connectorUnrecognizedText(call.invoked, call.reason);
+  if (reason === "account") {
+    return `OpenMausBot did not run this: ${bot} may use only account id ${allowed.map((id) => `"${id}"`).join(" or ")} in ${app}. `
+      + "Name one of those in the call's account field, or ask the user to allow another account under the bot's Access settings.";
+  }
   return reason === "app"
     ? `OpenMausBot did not run this: ${bot} has not been given access to ${app}. Ask the user to allow it under the bot's Access settings, and do not retry.`
     : `OpenMausBot did not run this: ${app} is read-only for ${bot}, and ${tool} would write to it. Ask the user before trying again.`;
