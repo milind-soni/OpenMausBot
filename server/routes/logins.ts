@@ -65,7 +65,7 @@ export const LOGIN_ERRORS = {
   notServiceAccount: "That is not a 1Password service account token: those start with ops_. Make one in 1Password under Developer → Service accounts. A Connect token, an account password or a Secret Key does not work here.",
   exactHost: "exactHost must be true or false.",
   readOnly: "This login is in 1Password. Change or remove it there.",
-  bitwardenServer: "Enter the Bitwarden server address, such as https://vault.bitwarden.com or your Vaultwarden address, or leave it empty for bitwarden.com.",
+  bitwardenServer: "Enter the Bitwarden address, such as https://vault.bitwarden.com or your Vaultwarden address, or leave it empty for bitwarden.com.",
   bitwardenKey: "Paste the personal API key from Bitwarden under Settings → Security → Keys → View API key: client_id starts with user., and client_secret is the text below it.",
   bitwardenPassword: "Enter the master password that unlocks this Bitwarden vault.",
   bitwardenReadOnly: "This login is in Bitwarden. Change or remove it there.",

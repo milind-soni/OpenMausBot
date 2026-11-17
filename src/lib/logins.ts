@@ -1,4 +1,4 @@
-import type { LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
+import type { BitwardenStatus, LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
 import type { ComputerHelpRef } from "../../shared/wire";
 import { api } from "@/state/store";
 
@@ -9,8 +9,8 @@ export interface LoginFieldsInput {
   totp: string;
 }
 
-export async function listLogins(): Promise<{ logins: LoginSummary[]; onePassword: OnePasswordStatus }> {
-  return await api<{ logins: LoginSummary[]; onePassword: OnePasswordStatus }>("/api/logins");
+export async function listLogins(): Promise<{ logins: LoginSummary[]; onePassword: OnePasswordStatus; bitwarden?: BitwardenStatus }> {
+  return await api<{ logins: LoginSummary[]; onePassword: OnePasswordStatus; bitwarden?: BitwardenStatus }>("/api/logins");
 }
 
 /** The server checks the token reaches 1Password before keeping it, and never sends it back. */
@@ -24,6 +24,37 @@ export async function refreshOnePassword(): Promise<OnePasswordStatus> {
 
 export async function disconnectOnePassword(): Promise<OnePasswordStatus> {
   return (await api<{ onePassword: OnePasswordStatus }>("/api/logins/1password", { method: "DELETE" })).onePassword;
+}
+
+/** What the Bitwarden form sends: the server checks the key and master password unlock the vault before keeping them,
+ * and never sends them back. */
+export interface BitwardenAccountInput {
+  server: string;
+  clientId: string;
+  clientSecret: string;
+  password: string;
+}
+
+export async function connectBitwarden(account: BitwardenAccountInput): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden", { method: "POST", body: JSON.stringify(account) })).bitwarden;
+}
+
+export async function refreshBitwarden(): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden/refresh", { method: "POST", body: "{}" })).bitwarden;
+}
+
+export async function disconnectBitwarden(): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden", { method: "DELETE" })).bitwarden;
+}
+
+/** Which bots may use what the Bitwarden account holds. */
+export async function grantBitwarden(bots: LoginBots): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden", { method: "PATCH", body: JSON.stringify({ bots }) })).bitwarden;
+}
+
+/** Bots for one Bitwarden item ahead of the account's; null hands it back to the account's choice. */
+export async function grantBitwardenItem(item: string, bots: LoginBots | null): Promise<void> {
+  await api(`/api/logins/bitwarden/items/${encodeURIComponent(item)}`, { method: "PATCH", body: JSON.stringify({ bots }) });
 }
 
 export async function addLogin(site: string, fields: LoginFieldsInput, bots: LoginBots, exactHost = false): Promise<LoginSummary> {
