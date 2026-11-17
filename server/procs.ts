@@ -272,9 +272,8 @@ export function boxedSpawn(resolved: ResolvedSpawn, opts: CliSpawnOptions, owner
   return botBox.wrap({ command: resolved.command, args: resolved.args, cwd, env: opts.env ?? process.env, ...(threadId ? { threadId } : {}), ...(conversationBot ? { conversationBot } : {}), ...turn, ...request, ...home });
 }
 
-/** The turn (crash-guard.ts) of a spawn working outside its bot's folders (a configured project folder, which may be in
- * another bot's folder), so its box gets that bot's own folder and conversation folder too. A conversation folder and a
- * bot's folder itself (a room's turn) already say whose they are. */
+/** A configured project folder can lie inside another bot's folder, so a turn working there still needs its own bot's
+ * folder and conversation folder in its box. */
 function projectFolderTurn(cwd: string | undefined): { botId: string; conversationFolder: string } | null {
   const dataDir = botBox.startOptions()?.dataDir, turn = currentTurn();
   if (!cwd || !dataDir || !turn?.botId) return null;
