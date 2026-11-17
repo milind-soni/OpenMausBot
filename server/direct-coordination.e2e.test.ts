@@ -666,14 +666,13 @@ it("runs an identical call made twice in one turn once, without an extra recipie
 it.each<[string, Record<string, unknown>, string]>([
   ["finished", { reply: "3 tests fail" }, "not sent again: it already finished and its result stands; send it with rework=true to run it again"],
   ["failed", { fail: true }, "not sent again: it failed; send it with rework=true to retry"],
-])("runs an identical brief again only with rework=true once its first run %s", (how, firstRun, refusal) => fixture(async f => {
+])("runs an identical brief again only with rework=true once its first run %s", (_how, firstRun, refusal) => fixture(async f => {
   const brief = "Run the full test suite and report every failure";
   f.plan[f.lead.id] = { turns: [firstRun, { reply: "All tests pass" }] };
   f.plan[f.chief.id] = { turns: [
     { steps: [{ arguments: { bot_ids: [f.lead.id], message: brief } }], reply: "Sent" },
     { steps: [
       { arguments: { bot_ids: [f.lead.id], message: brief }, expectError: true },
-      ...(how === "finished" ? [{ arguments: { bot_ids: [f.lead.id], message: "Thanks, approved" }, expectError: true }] : []),
       { arguments: { bot_ids: [f.lead.id], message: brief, rework: true } },
     ], reply: "Sent again" },
     { reply: "The suite is green" },
@@ -687,7 +686,6 @@ it.each<[string, Record<string, unknown>, string]>([
   const rerun = results.at(-1);
   expect(repeated.isError).toBe(true);
   expect(repeated.content[0].text).toContain(refusal);
-  if (how === "finished") expect(results[2].content[0].text).toContain("Only use rework=true for concrete additional work.");
   const [first, again] = [sent, rerun].map((result: any) => JSON.parse(result.content[0].text).receipts[0]);
   expect(again).toMatchObject({ outcome: "queued", threadId: first.threadId });
   expect(again.requestId).not.toBe(first.requestId);

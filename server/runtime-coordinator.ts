@@ -16,7 +16,6 @@ import { sameRequest } from "./same-request.ts";
 const NOT_RUNNING = "The originating room task is no longer running";
 const WRONG_SPEAKER = "The handoff belongs to a different room speaker";
 const ANCESTOR = "Cannot assign work back to an ancestor; results return automatically";
-const ALREADY_COMPLETED = "This agent already completed your assignment. Do not send acknowledgements or approvals as new work. Finish with your decision; results return automatically. Only use rework=true for concrete additional work.";
 const ROOM_ANCESTOR = "A room request cannot return to an ancestor room; results are returned automatically";
 const DEPTH = "Room handoff depth limit reached";
 const TOTAL_BUDGET = /^Request budget exhausted: \d+ turns in all/;
@@ -275,8 +274,6 @@ export class RuntimeCoordinator implements Coordinator {
     if (existing && !(rework && isTerminal(existing))) return { node: view(existing, parent), duplicate: true };
     const limited = this.handoffLimit?.refusal(target.botId, () => this.live().filter(a => a.parentId !== undefined).length, parent.origin.kind === "person" ? "user" : "outside");
     if (limited) throw new Error(limited);
-    if (mode === "work" && !rework && !own && siblings.some(c => c.mode === "work" && kindOf(c.assignee.destination.groupId, parent) === kind &&
-      c.assignee.destination.groupId === target.groupId && c.assignee.botId === target.botId && c.status === "completed")) throw new Error(ALREADY_COMPLETED);
     if (kind === "work" && target.groupId && lineage.some(n => n.assignee.destination.groupId === target.groupId)) throw new Error(ROOM_ANCESTOR);
     // A bot's own threads wait on it by design and can never ask it back (the ancestor rule above), so no two bots can cross.
     const waiting = own || mode === "notify" || target.groupId !== undefined ? undefined : this.waitingOn(source.botId, target.botId);

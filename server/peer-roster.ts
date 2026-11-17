@@ -181,8 +181,13 @@ export interface WiderReach<T extends RosterMember> {
   refusal(bot: T): string | null;
 }
 
-/** A name resolves only inside reachablePeers, so it can never reach a bot its id could not. `elsewhere(name)`: why no bot
- * here has that name past "no such bot", when one of the person's other places has it, or when they work as one place. */
+/** The fewest characters of an id that name it: a model retyping a 36-character id drops one, and the first 8 have to agree. */
+const ID_PREFIX_MIN = 8;
+
+/** In this order: the id, in any case; a name that only one reachable bot answers to; the start of one id that only one
+ * reachable bot has. Names and id starts resolve only inside reachablePeers, so they can never reach a bot its id could not.
+ * `elsewhere(name)`: why no bot here has that name past "no such bot", when one of the person's other places has it, or when
+ * they work as one place. */
 export function resolveTeammate<T extends RosterMember>(
   bots: readonly T[],
   from: RosterMember,
@@ -192,7 +197,8 @@ export function resolveTeammate<T extends RosterMember>(
   wider?: WiderReach<T>,
 ): { id: string; byName: boolean } | { error: string } {
   const wanted = raw.trim();
-  if (bots.some(bot => bot.id === wanted && !wider?.hides(bot))) return { id: wanted, byName: false };
+  const exact = bots.find(bot => bot.id.toLowerCase() === wanted.toLowerCase() && !wider?.hides(bot));
+  if (exact) return { id: exact.id, byName: false };
   const fold = foldedName, loose = looseName;
   const name = fold(wanted);
   const shown = peerName(wanted) || wanted;
@@ -205,11 +211,17 @@ export function resolveTeammate<T extends RosterMember>(
   }
   const near = reachable.filter(bot => loose(bot.name) === loose(wanted));
   if (near.length === 1) return { id: near[0]!.id, byName: true };
+  const prefix = wanted.length >= ID_PREFIX_MIN && !/\s/u.test(wanted)
+    ? reachable.filter(bot => bot.id.toLowerCase().startsWith(wanted.toLowerCase())) : [];
+  if (prefix.length === 1) return { id: prefix[0]!.id, byName: false };
+  if (prefix.length > 1) {
+    return { error: `${prefix.length} teammates you can reach have an id starting "${shown}", so nothing was sent: ${sharedNameChoices(prefix)}. Send it again with the name of the one you mean.` };
+  }
   const apart = bots.find(bot => bot.id !== from.id && !bot.hidden && !bot.defaultBot && !wider?.hides(bot) && !sameAudience(from.visibility, bot.visibility) && (fold(bot.name) === name || loose(bot.name) === loose(wanted)));
   if (apart) return { error: wider?.refusal(apart) ?? reachRefusal(from, apart, lookedAfterBy)! };
   const away = bots.some(bot => !wider?.hides(bot) && (fold(bot.name) === name || loose(bot.name) === loose(wanted))) ? null : elsewhere(wanted);
   if (away && "where" in away) return { error: away.where };
-  return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable)}${away ? ` ${away.hint}` : ""} ${PEER_ACCESS_HELP}` };
+  return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable)}${away ? ` ${away.hint}` : ""} ${PEER_ACCESS_HELP} A teammate's name is enough in bot_ids, so a long id never has to be copied exactly.` };
 }
 
 const CHOICES_MAX = 12;

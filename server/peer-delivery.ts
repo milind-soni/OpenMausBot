@@ -9,6 +9,9 @@ export interface PeerDeliveryReceipt {
   botName?: string;
   outcome: PeerDeliveryOutcome;
   detail: string;
+  /** A refusal that only says there is nothing left for this message to do: the bot reads it and finishes, and no turn
+   * fails on it. Anything that broke stays absent. */
+  instructionOnly?: true;
   taskId?: string;
   requestId?: string;
   threadId?: string;
@@ -25,6 +28,7 @@ export function peerDeliveryReceipt(receipt: PeerDeliveryReceipt): PeerDeliveryR
     ...(receipt.botName ? { botName: receipt.botName } : {}),
     outcome: receipt.outcome,
     detail: clip(receipt.detail, DETAIL_MAX) || "no detail recorded",
+    ...(receipt.instructionOnly ? { instructionOnly: true as const } : {}),
     ...(receipt.taskId ? { taskId: receipt.taskId } : {}),
     ...(receipt.requestId ? { requestId: receipt.requestId } : {}),
     ...(receipt.threadId ? { threadId: receipt.threadId } : {}),

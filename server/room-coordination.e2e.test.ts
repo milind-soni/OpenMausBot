@@ -199,11 +199,11 @@ it("hands work to a bot in another department, into a room whose readers are in 
   expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
 }), 45_000);
 
-it.each([4000, 4001])("enforces the %i-character request boundary on the real server", length => withRooms(async f => {
+it.each([6_000, 12_000, 12_001])("enforces the %i-character request boundary on the real server", length => withRooms(async f => {
   f.plan[f.sender.id].steps[0].arguments.message = "x".repeat(length);
-  f.plan[f.sender.id].steps[0].expectError = length > 4000;
+  f.plan[f.sender.id].steps[0].expectError = length > 12_000;
   await f.start(); expect((await f.wait()).status).toBe("settled");
-  if (length > 4000) expect(f.handoffs()).toEqual([]);
+  if (length > 12_000) expect(f.handoffs()).toEqual([]);
   else expect(f.nodes().find((n: any) => n.parentId).status).toBe("completed");
 }), 45_000);
 
@@ -372,7 +372,7 @@ it.each([
   else {
     expect(refused.startsWith(`No bot with id or name "${botId}" — call list_bots and copy the exact id from the result. You can reach: `)).toBe(true);
     expect(refused).toContain(`${f.target.name} (id ${f.target.id})`);
-    expect(refused.endsWith(` ${PEER_ACCESS_HELP}`)).toBe(true);
+    expect(refused).toContain(` ${PEER_ACCESS_HELP} A teammate's name is enough in bot_ids, so a long id never has to be copied exactly.`);
   }
 }), 45_000);
 

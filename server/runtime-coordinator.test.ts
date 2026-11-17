@@ -425,15 +425,29 @@ describe("RuntimeCoordinator: refusals in the legacy words", () => {
     expect(own(chief, undefined, { botId: "chief", threadId: "chief-helper-5" }).duplicate).toBe(false);
   });
 
-  it("refuses a second assignment to a teammate that completed one, unless it is rework", async () => {
+  it("hands a teammate a second, different assignment once it has completed one, and only the same words come back as a duplicate", async () => {
     const w = world();
     const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");
     w.coordinator.tick(); await flush();
     expect(w.coordinator.node(node.id)?.status).toBe("completed");
-    expect(() => send(w, chief, "gen-1", undefined, builder, "Thanks, looks good")).toThrow("This agent already completed your assignment. Do not send acknowledgements or approvals as new work. Finish with your decision; results return automatically. Only use rework=true for concrete additional work.");
-    const again = send(w, chief, "gen-1", undefined, builder, "Also add a header row", { rework: true });
-    expect(again).toMatchObject({ duplicate: false, node: { status: "queued", text: "Also add a header row" } });
+    // The same words are the same request: the receipt for the first one, nothing run twice.
+    expect(send(w, chief, "gen-1", undefined, builder, "Build it")).toMatchObject({ duplicate: true, node: { id: node.id } });
+    // A different brief is a second assignment, with no rework needed for it.
+    const second = send(w, chief, "gen-1", undefined, builder, "Also add a header row");
+    expect(second).toMatchObject({ duplicate: false, node: { status: "queued", text: "Also add a header row" } });
+    expect(second.node.id).not.toBe(node.id);
+    expect(send(w, chief, "gen-1", undefined, builder, "Also add a header row")).toMatchObject({ duplicate: true, node: { id: second.node.id } });
+    // rework still resends finished work as its own assignment.
+    const again = send(w, chief, "gen-1", undefined, builder, "Build it", { rework: true });
+    expect(again).toMatchObject({ duplicate: false, node: { status: "queued", text: "Build it" } });
     expect(again.node.id).not.toBe(node.id);
+  });
+
+  it("keeps a brief up to the engine's own limit, and clips one past it instead of refusing it", () => {
+    const w = world();
+    const brief = "x".repeat(6_000);
+    expect(send(w, chief, "gen-1", undefined, builder, brief).node.text).toBe(brief);
+    expect(w.coordinator.node(send(w, chief, "gen-1", undefined, tester, "y".repeat(13_000)).node.id)?.text).toHaveLength(12_000);
   });
 
   it("refuses a room request that returns to an ancestor room", async () => {
@@ -1264,7 +1278,7 @@ describe("RuntimeCoordinator: modes and openers", () => {
     expect(handoff(w, chief, "gen-1", undefined, builder, "Build it", { mode: "consult" })).toMatchObject({ duplicate: true, node: { id: asked.node.id } });
     w.coordinator.tick(); await flush(); w.coordinator.tick(); await flush();
     expect(w.coordinator.node(work.node.id)?.status).toBe("completed");
-    expect(() => handoff(w, chief, "gen-1", undefined, builder, "Thanks", {})).toThrow(/already completed your assignment/);
+    expect(handoff(w, chief, "gen-1", undefined, builder, "Thanks", {}).node).toMatchObject({ mode: "work", status: "queued", text: "Thanks" });
     expect(handoff(w, chief, "gen-1", undefined, builder, "How long did it take?", { mode: "consult" }).node).toMatchObject({ mode: "consult", status: "queued" });
     expect(handoff(w, chief, "gen-1", undefined, builder, "Heads up: release at six", { mode: "notify" }).node).toMatchObject({ mode: "notify", status: "queued" });
   });

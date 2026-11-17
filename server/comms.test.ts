@@ -651,7 +651,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
   );
 
   it(
-    "never quotes a routine's prompt as the user's request, and refuses the resumed turn's repeat work to a finished teammate without rework",
+    "never quotes a routine's prompt as the user's request, and hands the resumed turn's second task to a finished teammate as its own",
     async () => {
       await hideAll();
       const helper = await named("Helper", { modelSelection: HELPER });
@@ -673,11 +673,14 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       expect(envelope).toContain(`[From @Asker (bot) · assignment ${work.id} · `);
       expect(envelope).toContain("A routine run started this work");
       expect(envelope).not.toMatch(/ROUTINE_LINEAGE|asked: "|outside content/);
-      expect(lastText(askerBot.messages).text).toContain("This agent already completed your assignment");
-      expect(assignments(helper.id, asker.id)).toHaveLength(1);
+      // The teammate finished its work, not the request: a second, different task is its own assignment.
+      expect(lastText(askerBot.messages).text).toMatch(/^delegated again: .*"outcome":"queued"/);
+      expect(assignments(helper.id, asker.id).map((node: any) => node.text)).toEqual(["delegated task", "second delegated task"]);
+      await waitUntil(async () => ["completed", "failed", "cancelled"].includes(assignments(helper.id, asker.id)[1]?.status), 45_000, "the second task never settled");
+      expect(assignments(helper.id, asker.id).map((node: any) => node.status)).toEqual(["completed", "completed"]);
+      await waitUntil(async () => (await runState(run.id)).status !== "running" && (await runState(run.id)).status !== "waiting", 45_000, "the routine's run never settled");
       expect((await runState(run.id)).status).toBe("completed");
-      expect((await runState(run.id)).output).toContain("delegated again:");
-      expect((await bot(helper.id)).busy).toBeFalsy();
+      expect((await runState(run.id)).output).toContain("woke after delegation: saw the result");
     },
     60_000,
   );
