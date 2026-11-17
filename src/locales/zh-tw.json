@@ -10164,5 +10164,19 @@
   "remote.tailscale.needsApproval": "這台電腦正在等待你的 Tailscale 網路核准。請在 Tailscale 管理主控台中核准它，然後再試一次。",
   "together.switch.title": "這台電腦和 My Cloud 合在一起",
   "together.switch.line": "預設為關閉。Cloud 上的機器人和這台電腦上的機器人顯示在同一個清單中，各自在所在的位置開啟。",
-  "together.switch.failed": "無法儲存。請再試一次。"
+  "together.switch.failed": "無法儲存。請再試一次。",
+  "imageGen.complexity.label": "細節等級",
+  "imageGen.complexity.help": "GPT-Image-2.6 圖片的細節程度。越低越簡單、越快。",
+  "imageGen.complexity.low": "低",
+  "imageGen.complexity.medium": "中",
+  "imageGen.complexity.high": "高",
+  "activity.tool.team.editImage": "編輯圖片",
+  "voice.deepseek.sharedKey": "DeepSeek 使用此安裝實例現有的 DeepSeek 金鑰。",
+  "voice.deepseek.description": "以 DeepSeek 的 Stella 或 Tide 聲音朗讀回覆和語音訊息。選擇 DeepSeek 後，聽寫和「輪流對話」也會透過 DeepSeek 語音轉文字聽你說話，每段錄音最長約兩分鐘。使用你的 DeepSeek API 金鑰，費用由 DeepSeek 收取。",
+  "voice.deepseek.missingKey": "請在主機的「設定 → API 金鑰」中新增 DeepSeek API 金鑰，才能使用 DeepSeek 聲音。",
+  "voice.deepseek.stella": "Stella（女聲）",
+  "voice.deepseek.tide": "Tide（男聲）",
+  "call.capability.turnsNeedDeepSeekKey": "新增 DeepSeek 金鑰即可在通話中輪流對話",
+  "call.capability.turnsNeedDeepSeekKeyReason": "你的聲音是 DeepSeek，因此「輪流對話」會透過 DeepSeek 語音轉文字聽你說話。請在「設定 → API 金鑰」中新增 DeepSeek 金鑰。",
+  "serverError.voice.deepseekKeyRequired": "請在「設定 → API 金鑰」中新增 DeepSeek API 金鑰，才能用 DeepSeek 聲音和機器人對話。"
 }

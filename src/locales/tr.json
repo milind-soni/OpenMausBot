@@ -5892,5 +5892,19 @@
   "remote.tailscale.needsApproval": "Bu bilgisayar Tailscale ağınızda onay bekliyor. Tailscale yönetici konsolunda onaylayın, ardından tekrar deneyin.",
   "together.switch.title": "Bu bilgisayar ve Cloud'um birlikte",
   "together.switch.line": "Varsayılan olarak kapalı. Cloud'daki botlar ile bu bilgisayardaki botlar tek listede görünür ve her biri bulunduğu yerde açılır.",
-  "together.switch.failed": "Kaydedilemedi. Yeniden deneyin."
+  "together.switch.failed": "Kaydedilemedi. Yeniden deneyin.",
+  "imageGen.complexity.label": "Ayrıntı düzeyi",
+  "imageGen.complexity.help": "GPT-Image-2.6 görsellerinin ne kadar ayrıntılı olacağı. Düşük daha basit ve daha hızlıdır.",
+  "imageGen.complexity.low": "Düşük",
+  "imageGen.complexity.medium": "Orta",
+  "imageGen.complexity.high": "Yüksek",
+  "activity.tool.team.editImage": "Görseli düzenle",
+  "voice.deepseek.sharedKey": "DeepSeek, bu kurulumun mevcut DeepSeek anahtarını kullanır.",
+  "voice.deepseek.description": "Yanıtları ve sesli mesajları DeepSeek’in Stella veya Tide sesiyle okur. DeepSeek’i seçtiğinde dikte ve Sırayla konuş da seni DeepSeek konuşmadan metne dönüştürme ile duyar; kayıt başına yaklaşık iki dakikaya kadar. DeepSeek API anahtarını kullanır ve ücreti DeepSeek tarafından alınır.",
+  "voice.deepseek.missingKey": "DeepSeek sesini kullanmak için ana bilgisayarda Ayarlar → API anahtarları bölümüne bir DeepSeek API anahtarı ekle.",
+  "voice.deepseek.stella": "Stella (kadın)",
+  "voice.deepseek.tide": "Tide (erkek)",
+  "call.capability.turnsNeedDeepSeekKey": "Aramalarda sırayla konuşmak için bir DeepSeek anahtarı ekle",
+  "call.capability.turnsNeedDeepSeekKeyReason": "Sesin DeepSeek olduğu için Sırayla konuş seni DeepSeek konuşmadan metne dönüştürme ile duyar. Ayarlar → API anahtarları bölümüne bir DeepSeek anahtarı ekle.",
+  "serverError.voice.deepseekKeyRequired": "Botlarınla DeepSeek sesiyle konuşmak için Ayarlar → API anahtarları bölümüne bir DeepSeek API anahtarı ekle."
 }

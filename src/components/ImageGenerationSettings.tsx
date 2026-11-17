@@ -4,7 +4,7 @@ import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { IMAGE_DEFAULT_MODELS, IMAGE_MAX_PER_TURN_DEFAULT, IMAGE_MODEL_CHOICES, IMAGE_PROVIDERS, normalizeImageGenerationUrl, type ImageProvider, type ImageProviderTest } from "../../shared/image-generation";
+import { IMAGE_COMPLEXITIES, IMAGE_DEFAULT_MODELS, IMAGE_MAX_PER_TURN_DEFAULT, IMAGE_MODEL_CHOICES, IMAGE_PROVIDERS, normalizeImageGenerationUrl, supportsImageComplexity, type ImageComplexity, type ImageProvider, type ImageProviderTest } from "../../shared/image-generation";
 import { saveCredential } from "./keys/key-save";
 import { LearnMore, SETTINGS_INLINE_INPUT, SETTINGS_INPUT, SettingRow, SettingsField, SettingsGroup, SettingsRows, StatusDot } from "./SettingsPrimitives";
 import { Select } from "./Select";
@@ -132,6 +132,19 @@ export function ImageGenerationSettings() {
               {Array.from({ length: 10 }, (_, index) => index + 1).map((count) => <option key={count} value={count}>{count}</option>)}
             </Select>
           </SettingRow>
+          {[primary, fallback].some((slot) => slot && supportsImageComplexity(slot)) && (
+            <SettingRow title={t("imageGen.complexity.label")} subtitle={t("imageGen.complexity.help")}>
+              <Select
+                data-testid="image-gen-complexity"
+                value={status?.complexity ?? "high"}
+                onChange={(event) => void save({ imageGen: { complexity: event.target.value as ImageComplexity } })}
+                disabled={saving || !state.config}
+                aria-label={t("imageGen.complexity.label")}
+              >
+                {IMAGE_COMPLEXITIES.map((level) => <option key={level} value={level}>{t(`imageGen.complexity.${level}` as LocaleKey)}</option>)}
+              </Select>
+            </SettingRow>
+          )}
         </SettingsRows>
       </SettingsGroup>
 

@@ -10,7 +10,7 @@ import { createTtsRoutes, TRANSCRIBE_MAX_BYTES } from "./tts.ts";
 async function call(method: string, path: string, body: unknown = {}, cfg = {} as AppConfig, req = {} as never) {
   const answers: Array<[number, unknown]> = [];
   const out = await createTtsRoutes({ config: () => cfg })({
-    req, res: {} as never, url: new URL(`http://x${path}`), path: new URL(`http://x${path}`).pathname, method,
+    req, res: { on() {}, off() {}, writableEnded: false } as never, url: new URL(`http://x${path}`), path: new URL(`http://x${path}`).pathname, method,
     auth: { kind: "loopback", scopes: ["admin", "client"] },
     json: ((_res: unknown, status: number, value: unknown) => { answers.push([status, value]); }) as never, readBody: (async () => body) as never,
   });
@@ -103,6 +103,37 @@ describe("transcribe route", () => {
     const { answers } = await call("POST", "/api/tts/transcribe", {}, { tts: { key: "el-own" } } as AppConfig, upload(Buffer.from("RIFF")));
     expect(answers[0]![0]).toBe(502);
     expect((answers[0]![1] as { error: string }).error).toContain("Speech to Text permissions");
+  });
+
+  it("hears through DeepSeek alone while DeepSeek is the voice, even with a Fish key saved", async () => {
+    const recording = Buffer.alloc(44 + 32_000);
+    recording.write("RIFF", 0); recording.writeUInt32LE(36 + 32_000, 4); recording.write("WAVEfmt ", 8);
+    recording.writeUInt32LE(16, 16); recording.writeUInt16LE(1, 20); recording.writeUInt16LE(1, 22);
+    recording.writeUInt32LE(16_000, 24); recording.writeUInt32LE(32_000, 28); recording.writeUInt16LE(2, 32); recording.writeUInt16LE(16, 34);
+    recording.write("data", 36); recording.writeUInt32LE(32_000, 40);
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify({ text: "from deepseek" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const cfg = { deepseek: { key: "ds-key" }, tts: { provider: "deepseek", fishKey: "fish-key" } } as AppConfig;
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, cfg, upload(recording));
+    expect(answers).toEqual([[200, { text: "from deepseek" }]]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toMatch(/\/v1\/tools\/asr$/);
+    expect(new Headers(fetchMock.mock.calls[0]![1].headers).get("authorization")).toBe("Bearer ds-key");
+  });
+
+  it("asks for a DeepSeek key, and tries no other provider, while DeepSeek is the voice without one", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const cfg = { tts: { provider: "deepseek", fishKey: "fish-key" } } as AppConfig;
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, cfg, upload(Buffer.from("RIFF")));
+    expect(answers).toEqual([[409, { error: expect.stringContaining("DeepSeek API key"), errorKey: "serverError.voice.deepseekKeyRequired" }]]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses DeepSeek audio over its 8 MiB limit", async () => {
+    const cfg = { deepseek: { key: "ds-key" }, tts: { provider: "deepseek" } } as AppConfig;
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, cfg, upload(Buffer.alloc(8 * 1024 * 1024 + 1)));
+    expect(answers[0]![0]).toBe(413);
   });
 
   it("refuses audio over the cap", async () => {

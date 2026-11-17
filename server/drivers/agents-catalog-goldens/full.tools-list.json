@@ -741,7 +741,7 @@
     },
     {
       "name": "propose_team_setup",
-      "description": "Chief of Staff only: create specialists and change bots' profiles, models, Chiefs and teams as the person asked, all in ONE plan, with exact ids from list_team_setup. One operation per bot, at most 40 (8 new). A new team goes in newTeams with a specialist in this plan; teams you are not authorized for cannot be included. Models change defaults for new threads; execution permissions never change. It applies at once, with an Undo where possible: read the result before saying it did. It never raises another bot's execution permissions.",
+      "description": "Chief of Staff only: create specialists and change bots' profiles, models, Chiefs and teams as the person asked, all in ONE plan, with exact ids from list_team_setup. One operation per bot, at most 40 (8 new). A new team goes in newTeams with a specialist in this plan; teams you are not authorized for cannot be included. Models change defaults for new threads; mcpServers sets an existing bot's MCP servers; no other execution permission changes. It applies at once, with an Undo where possible: read the result before saying it did.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -833,6 +833,14 @@
                         "instanceId",
                         "model"
                       ]
+                    },
+                    "mcpServers": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "update: the bot's full MCP server list by name."
                     }
                   }
                 }
@@ -1211,6 +1219,32 @@
       }
     },
     {
+      "name": "edit_image",
+      "description": "Change an existing image from a text instruction, optionally guided by a markup PNG: marks (circles, arrows, scribbles) drawn on a transparent background at the image's exact size, which point at where to change. Both files are paths in your working folder. The result is attached to your reply when the turn ends. Needs a GPT-Image-2.6 model on OpenAI.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "What to change, in English. Refer to the marks if there is a markup."
+          },
+          "image": {
+            "type": "string",
+            "description": "Path of the PNG, JPEG or WebP to change."
+          },
+          "markup": {
+            "type": "string",
+            "description": "Path of a transparent PNG with the marks, the same size as the image."
+          }
+        },
+        "required": [
+          "prompt",
+          "image"
+        ]
+      }
+    },
+    {
       "name": "generate_image",
       "description": "Create one image from a text description with the person's image provider; it is attached to your reply when the turn ends, so do not describe or link it again. Write the prompt in English, concrete and visual. Name a provider only when the person asked for that one.",
       "inputSchema": {
@@ -1229,6 +1263,25 @@
               "9:16"
             ],
             "description": "Shape; square when omitted."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "gif"
+            ],
+            "description": "gif makes an animated GIF; only GPT-Image-2.6 models on OpenAI can."
+          },
+          "frames": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 16,
+            "description": "GIF frame count; 9 when omitted."
+          },
+          "frameDurationMs": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 2000,
+            "description": "GIF milliseconds per frame; 200 when omitted."
           },
           "provider": {
             "type": "string",
