@@ -133,6 +133,7 @@ export function createBoatReadiness(overrides: Partial<BoatReadinessDeps> = {}) 
       return answer;
     };
     for (;;) {
+      const sent = deps.now();
       const answered = await deps.probe(cfg, boxId, opts.signal);
       if (opts.signal?.aborted) return done({ ok: false, phase, waitedMs: deps.now() - started });
       if (answered !== false) {
@@ -140,7 +141,8 @@ export function createBoatReadiness(overrides: Partial<BoatReadinessDeps> = {}) 
         return done({ ok: true, waitedMs: deps.now() - started });
       }
       failures += 1;
-      deps.health.unanswered(boxId);
+      // Timed: a probe that ran far past its timeout was held up here, not by the computer, and is not counted against it.
+      deps.health.unanswered(boxId, { elapsedMs: deps.now() - sent, timeoutMs: READY_WAIT.probeTimeoutMs });
       enter(boatSignals(await deps.read(cfg, boxId)).restoring === true ? "restoring" : phase);
       const patience = phase === "restoring" ? READY_WAIT.restorePatienceMs : opts.woke ? READY_WAIT.wakePatienceMs : READY_WAIT.answerPatienceMs;
       const gap = opts.woke ? READY_WAIT.wakeGapsMs[Math.min(failures, READY_WAIT.wakeGapsMs.length) - 1]! : READY_WAIT.probeGapMs;

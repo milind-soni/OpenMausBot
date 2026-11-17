@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { usedByAnotherBot } from "./cloud-computer-users.ts";
 
 const deps = (holders: Record<string, string>, bots: Record<string, string>) => ({
-  holder: (resource: string) => (holders[resource] ? { threadId: holders[resource]! } : undefined),
+  holder: (resource: string) => (holders[resource] ? { threadId: holders[resource]!, generation: "g1" } : undefined),
   botOfThread: (threadId: string) => bots[threadId] ?? null,
 });
 
@@ -17,8 +17,11 @@ describe("a bot's cloud computer held by a running turn", () => {
     expect(usedByAnotherBot("bot-a", "bx_1", deps({ "computer:box:bx_1": "task-a" }, { "task-a": "bot-a" }))).toBe(false);
   });
 
-  it("is not counted as someone else's when the holder is a room's turn, which only the bot itself can be", () => {
-    expect(usedByAnotherBot("bot-a", "bx_1", deps({ "computer:box-bot:bot-a": "room-1" }, {}))).toBe(false);
+  it("counts a room's turn as someone else's, since with room jobs side by side it may be any member, unless it is the turn that asks", () => {
+    const room = deps({ "computer:box-bot:bot-a": "room-1" }, {});
+    expect(usedByAnotherBot("bot-a", "bx_1", room)).toBe(true);
+    expect(usedByAnotherBot("bot-a", "bx_1", room, { threadId: "room-1", generation: "g1" })).toBe(false);
+    expect(usedByAnotherBot("bot-a", "bx_1", room, { threadId: "room-1", generation: "g0" })).toBe(true);
   });
 
   it("is someone else's when another bot's turn holds the computer or the machine", () => {
