@@ -81,6 +81,7 @@ export const TriggersPage = lazyScreen("TriggersPage", async () => (await import
 export const SettingsModal = lazyScreen("SettingsModal", async () => (await import("./SettingsModal")).SettingsModal);
 export const TeamMapPage = lazyScreen("TeamMapPage", async () => (await import("./TeamMapPage")).TeamMapPage);
 export const PublishedAppsPage = lazyScreen("PublishedAppsPage", async () => (await import("./published-apps/PublishedAppsPage")).PublishedAppsPage);
+export const TeamFilesPage = lazyScreen("TeamFilesPage", async () => (await import("./team-files/TeamFilesPage")).TeamFilesPage);
 
 // Rarely opened, so never fetched ahead. The team library is what brings the YAML parser in.
 export const CloudAddDialog = lazyScreen("CloudAddDialog", async () => (await import("./CloudAddDialog")).CloudAddDialog);

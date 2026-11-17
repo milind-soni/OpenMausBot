@@ -10,7 +10,7 @@ import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { openStartupModelCatalog, unconfirmedModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath, findCliCandidates } from "../env-path.ts"; import { BASH_MAX_TIMEOUT_MS } from "../system-prompt.ts";
-import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../engine-stop.ts";
+import { boxAudienceKey, brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../engine-stop.ts";
 import { cliToLaunch, cliVersionProbe } from "../cli-version-probe.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
 import { projectMcpServers } from "./claude-project-mcp.ts";
@@ -1194,7 +1194,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         model: injected.model ?? null,
         base: env.ANTHROPIC_BASE_URL ?? null,
         configDir: env.CLAUDE_CONFIG_DIR ?? null,
-        hooks: Boolean(hooks),
+        hooks: Boolean(hooks), box: boxAudienceKey(cwd),
         toolSearch, mcpOutputTokens: env.MAX_MCP_OUTPUT_TOKENS ?? null,
         botSettings: createHash("sha256").update(JSON.stringify(botSettings)).digest("hex"),
         // Rotating an account's key/helper must not reuse the old process.

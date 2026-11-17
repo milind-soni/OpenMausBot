@@ -24,6 +24,7 @@ import { BotApiCard } from "./BotApiCard";
 import { ToolBudgetLine } from "./ToolBudgetLine";
 import { useCloudPlan } from "../ProIntroduction";
 import { xResearchAction } from "@/lib/cloud-plan";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useBotApps } from "./useBotApps";
 import {
   classifyConnectorTool,
@@ -508,6 +509,28 @@ function ResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: bo
   );
 }
 
+/** On a Team Cloud: whether this bot may add and change the team's shared files, from any chat (an admin's to set). */
+function TeamFilesCard({ bot, patch }: { bot: Bot; patch: (patch: { teamFilesEdit: boolean }) => void }) {
+  const admin = useOwnerOrAdmin();
+  const on = bot.teamFilesEdit === true;
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4" data-testid="access-team-files">
+      <div>
+        <div className="text-[15px] font-medium text-ink">{t("botAccess.teamFiles.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">{t(on ? "botAccess.teamFiles.on" : "botAccess.teamFiles.off")}</div>
+        {!admin && <div className="mt-0.5 text-[12px] text-ink-secondary">{t("botAccess.teamFiles.adminsOnly")}</div>}
+      </div>
+      <Switch
+        checked={on}
+        aria-label={t("botAccess.teamFiles.title")}
+        disabled={!admin}
+        onClick={() => patch({ teamFilesEdit: !on })}
+        className="disabled:cursor-not-allowed"
+      />
+    </div>
+  );
+}
+
 function RecordStepsRow({ on, browserOn, myChrome, onChange }: { on: boolean; browserOn: boolean; myChrome: boolean; onChange: (on: boolean) => void }) {
   return (
     <div className="mt-3 flex items-center justify-between gap-4 border-t border-hairline/40 pt-3">
@@ -665,7 +688,7 @@ function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof
   </>;
 }
 
-export type AccessPart = "worksOn" | "folder" | "apps" | "phone" | "xResearch" | "mcp" | "tools" | "browser" | "webhooks" | "always";
+export type AccessPart = "worksOn" | "folder" | "apps" | "phone" | "xResearch" | "teamFiles" | "mcp" | "tools" | "browser" | "webhooks" | "always";
 
 export function AccessSection({
   bot,
@@ -835,6 +858,8 @@ export function AccessSection({
       </div>}
 
       {!draft && shows("xResearch") && <ResearchCard bot={bot} patch={patch} />}
+
+      {!draft && shows("teamFiles") && state.config?.team && <TeamFilesCard bot={bot} patch={patch} />}
 
       {!draft && shows("webhooks") && <BotApiCard bot={bot} />}
 

@@ -322,6 +322,19 @@ linuxBox("the box plan", () => {
       expect(visibleInBox(ask({ teamReadOnly: true }, { cwd: "/data/projects/site", botId: "bot-a" }), join(team, "MEMORY.md"))).toBe("ro");
     });
 
+    it("every turn has the team's shared folder at /team-files: read-only, or read-write for a bot that may edit it", () => {
+      const source = join(dataDir, "team-files");
+      const read = ask({ teamReadOnly: true, teamFiles: { source, write: false } });
+      expect(visibleInBox(read, "/team-files/payroll/nov.csv")).toBe("ro");
+      expect(visibleInBox(read, join(source, "payroll", "nov.csv")), "only at its own path, never where the server keeps it").toBe("none");
+      const edit = ask({ teamReadOnly: true, teamFiles: { source, write: true } });
+      expect(visibleInBox(edit, "/team-files/payroll/nov.csv")).toBe("rw");
+      expect(edit.writable).toContain("/team-files");
+      expect(writesTeamThings(edit), "editing team files is not writing the bot's own folder").toEqual(["ro", "ro", "ro", "ro"]);
+      expect(bwrapArgs(edit).join(" ")).toContain(`--bind-try ${source} /team-files`);
+      expect(visibleInBox(ask({ teamReadOnly: false }), "/team-files/x")).toBe("none");
+    });
+
     it("a process the bot's conversations share has only the conversations its audience may read", () => {
       const threads = (rw: string[], ro: string[]) => planBox(setup(), { command: "opencode", args: ["acp"], cwd, env: { HOME: home }, botThreads: true, audience: { teamReadOnly: ro.length > 0, threads: { rw, ro } } });
       const mira = threads(["thread-1", "thread-3"], ["thread-team"]);

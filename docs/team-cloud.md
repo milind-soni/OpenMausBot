@@ -546,6 +546,27 @@ On a My Cloud and on a desktop there is one person: every audience is the team's
 every browser keeps its old name and Chrome its old launcher, every engine keeps the server's HOME, and nothing here
 changes what those do.
 
+## Team files
+
+One shared folder per Team Cloud, `team-files/` in its data folder, for everyone on the team and every bot (details in
+[team-files.md](team-files.md); `server/host/team-files.ts`, `server/host/team-files-host.ts`,
+`server/routes/team-files.ts`). Its audience is `team`: every turn reads it, from a private chat too. People use it from
+**Team files** in the Tools menu: upload (100 MB a file, 5 GB in all), folders, download, rename, delete (an admin
+anything, a member what they uploaded) and a preview of text and pictures.
+
+- **In the bot box** it is at `/team-files` in every turn's box (`BoxAudience.teamFiles`), read-only, and each turn's
+  prompt says where and whether it may write. A bot an admin marked **Can edit team files** (`teamFilesEdit`, a bot
+  setting only an admin changes) has it read-write in every chat, members' private chats included: a record written
+  from Mira's private chat with Payroll lands in the team's folder, and its line says *"Changed by Mira with Payroll"*.
+  This is the one place a private chat writes into the team's audience, by an admin's choice; the conversation itself
+  never goes there. The audience rule otherwise holds: the bot's own folder stays read-only in that chat (above).
+- **Who changed what** is kept in `team-files-activity.json`: the page's changes as they happen, a bot's after each turn
+  that could write (the folder's sizes and times compared before and after), with the person the turn worked for (whoever
+  asked, else the person whose private chat it is).
+- **Backups and exports** carry `team-files/` and its activity, as the team's; a link a bot left in the folder is skipped,
+  never followed. **A member who leaves** takes nothing of it: what they uploaded or had a bot write stays the team's.
+- **Off a Team Cloud** there is no folder, no menu entry, no prompt line, and the routes answer 404.
+
 ## Routines
 
 A routine lives where it was made or where it reports (`server/routine-home.ts`). One for a member's own MausBot, or that
@@ -1065,6 +1086,10 @@ opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothin
 - **Someone invited who never opened the team.** The machine first learns of a member at their first pairing, so until
   then they are in no People list, and nothing says they joined (`team.people`): the Admin sends no roster and no
   "joined" of its own.
+- **Team files without a box, and the cap for bots.** Without the bot box nothing keeps Team files read-only for a bot:
+  any bot's shell can write it, and its changes are still recorded. The 5 GB cap holds for the page at every upload, but
+  for a bot only when its turn starts (the folder is then read-only for every bot until someone removes files), so one
+  turn can write past it.
 - **The team's folder without a box, and outside a conversation.** Without the bot box a shell in any chat writes the
   bot's own folder and reads every conversation folder, as it reads engine homes (next). A bot's MCP server the server
   starts outside any conversation (a configured server's probe or its app connections) keeps the bot's own folder

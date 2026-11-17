@@ -12,6 +12,8 @@ export type TeamBoxBots = ReadonlyArray<{ id: string; threadId?: string; tasks?:
 export interface TeamBoxScopeDeps {
   audienceOf(threadId: string): Audience;
   bots(): TeamBoxBots;
+  /** The team's shared folder as this bot's boxes get it (server/host/team-files-host.ts), whatever the audience. */
+  teamFiles?(botId: string | null): BoxAudience["teamFiles"] | null;
 }
 
 /** Every conversation the store has for this bot; one it no longer has (deleted) is never put back. */
@@ -24,7 +26,8 @@ export function botConversations(bots: TeamBoxBots, botId: string): string[] {
 export function createTeamBoxScope(deps: TeamBoxScopeDeps): BoxAudienceScope {
   return ({ threadId, botId, sharedProcess }): BoxAudience => {
     const turn = deps.audienceOf(threadId);
-    const audience: BoxAudience = { teamReadOnly: turn !== TEAM_AUDIENCE };
+    const files = deps.teamFiles?.(botId) ?? null;
+    const audience: BoxAudience = { teamReadOnly: turn !== TEAM_AUDIENCE, ...(files ? { teamFiles: files } : {}) };
     if (!sharedProcess || !botId) return audience;
     const rw: string[] = [], ro: string[] = [];
     for (const other of botConversations(deps.bots(), botId)) {

@@ -88,6 +88,8 @@ export interface BoxRequest {
   relay?: string;
   /** The conversation this spawn runs for, when the caller knows it (a Team Cloud's engine homes do). */
   threadId?: string;
+  /** The bot whose turn that is, for the audience rule only (BoxAudience); unlike `botId` it puts back nothing. */
+  conversationBot?: string;
   /** On a Team Cloud: what the conversation's audience gives the box of the bot's team things (BoxAudience). */
   audience?: BoxAudience;
 }
@@ -102,7 +104,13 @@ export interface BoxAudience {
   /** With `botThreads`: the bot's conversations the shared process may see, in place of all of them. Its own audience's
    * read-write, the team's read-only; another person's never. */
   threads?: { rw: readonly string[]; ro: readonly string[] };
+  /** The Team Cloud's shared folder (team-files/), at TEAM_FILES_IN_BOX in every box of a turn: read-only, or read-write
+   * for a bot an admin marked "Can edit team files" while the folder has room (server/host/team-files.ts). */
+  teamFiles?: { source: string; write: boolean };
 }
+
+/** Where every bot's box has its Team Cloud's shared folder. */
+export const TEAM_FILES_IN_BOX = "/team-files";
 
 /** What stays read-only in a bot's own folder that is a non-team turn's working folder. */
 export const TEAM_FOLDER_KEPT = ["MEMORY.md", "memory", "skills"] as const;
@@ -297,6 +305,13 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
     readOnly.add(full);
     mounts.push({ kind: "ro", source: full, target: full, optional: true });
+  }
+
+  // The team's shared folder, at one path in every box: its own line, as nothing else is bound there.
+  const teamFiles = request.audience?.teamFiles;
+  if (teamFiles) {
+    mounts.push({ kind: teamFiles.write ? "bind" : "ro", source: resolve(teamFiles.source), target: TEAM_FILES_IN_BOX, optional: true });
+    if (teamFiles.write && !writable.includes(TEAM_FILES_IN_BOX)) writable.push(TEAM_FILES_IN_BOX);
   }
 
   const options = ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--hostname", BOX_HOSTNAME];
