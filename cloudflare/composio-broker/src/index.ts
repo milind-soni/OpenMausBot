@@ -17,6 +17,8 @@ import {
   eventInstallation,
   type InstallationRow,
 } from "./common";
+import { eraseInstallation } from "./erase";
+import { requestFileUpload } from "./files";
 import { adoptSharedUser, me, shareUser } from "./sharing";
 import { createTrigger, deleteTrigger, getTriggerType, listTriggers, listTriggerTypes, updateTrigger } from "./triggers";
 
@@ -721,6 +723,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   const appEvents = await appEventRoute(request, url, installation, env, ctx);
   if (appEvents) return appEvents;
   if (request.method === "GET" && url.pathname === "/v1/me") return me(installation);
+  if (request.method === "DELETE" && url.pathname === "/v1/installation") {
+    await limitSessionRequests(installation, env);
+    return eraseInstallation(installation, env);
+  }
   if (request.method === "POST" && url.pathname === "/v1/installation/share") return shareUser(request, installation, env);
   if (request.method === "POST" && url.pathname === "/v1/installation/adopt") {
     const adopted = await adoptSharedUser(request, installation, env);
@@ -728,6 +734,10 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
     return adopted.response;
   }
   if (request.method === "POST" && url.pathname === "/v1/mcp") return proxyMcp(request, installation, env, ctx);
+  if (request.method === "POST" && url.pathname === "/v1/files/upload") {
+    await limitSessionRequests(installation, env);
+    return requestFileUpload(request, installation, env);
+  }
   if (request.method === "GET" && url.pathname === "/v1/catalog") return catalog(env, url);
   if (request.method === "GET" && url.pathname === "/v1/connectors/connected") return connectedServices(installation, env, ctx);
   if (request.method === "GET" && url.pathname === "/v1/connectors") return connectionStatus(url, installation, env, ctx);

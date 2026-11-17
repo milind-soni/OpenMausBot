@@ -228,6 +228,21 @@ describe("the bars", () => {
     flushSync(() => blocked.querySelector<HTMLButtonElement>("[data-usage-check]")!.click());
     await settle();
     expect(fixture.api).toHaveBeenCalledWith("/api/limit-resets?refresh=1");
+    expect(blocked.querySelector("[data-usage-release]"), "a full window: Try again now could not unblock it").toBeNull();
+    leave(spot);
+    await wait(HOVER_MS);
+
+    flushSync(() => serve([windows(100, 80, { blocked: true, held: true })]));
+    hover(spot, "mouse");
+    await wait(HOVER_MS);
+    const held = document.querySelector<HTMLElement>("[data-usage-card]")!;
+    fixture.api.mockClear();
+    fixture.api.mockImplementation(async () => ({ checkedAt: NOW, engines: [windows(100, 80)] }));
+    // the check above keeps both buttons busy until its read settles
+    await vi.waitFor(() => expect(held.querySelector<HTMLButtonElement>("[data-usage-release]")!.disabled).toBe(false));
+    flushSync(() => held.querySelector<HTMLButtonElement>("[data-usage-release]")!.click());
+    await settle();
+    expect(fixture.api, "Try again now ends the hold (emails 1a1c2500, 1a1c136d)").toHaveBeenCalledWith("/api/limit-resets/release", { method: "POST", body: JSON.stringify({ engine: "claude" }) });
     expect(opened).not.toHaveBeenCalled();
   });
 

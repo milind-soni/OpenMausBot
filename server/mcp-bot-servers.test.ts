@@ -125,6 +125,11 @@ describe("existing installs", () => {
     expect(withoutBotMcpServers(raw, "iris")).toEqual({ notes: raw.notes });
     expect(withoutBotMcpServers(raw, "paul")).toBeNull();
   });
+
+  it("drops a deleted bot's own web connection too", () => {
+    const raw = { linear_iris: { type: "http", url: "https://mcp.linear.app/mcp", headers: {}, enabled: true, bot: "iris" }, shared: { type: "http", url: "https://b.example/mcp", headers: {}, enabled: true } };
+    expect(withoutBotMcpServers(raw, "iris")).toEqual({ shared: raw.shared });
+  });
 });
 
 describe("a bot adding a server where bots are boxed", () => {
@@ -144,6 +149,60 @@ describe("a bot adding a server where bots are boxed", () => {
       .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/another bot's folder/) });
     const plain = addBotMcpServer({}, { name: "notes", command: "npx", args: ["-y", "@x/notes-mcp"] }, "iris", data, true);
     expect(plain.ok && plain.server).toEqual({ command: "npx", args: ["-y", "@x/notes-mcp"], env: {}, enabled: false });
+  });
+});
+
+describe("a bot adding its own server when another bot already has 20 of its own", () => {
+  const paulsOwn = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`paul${i}`, { command: "npx", args: [`p${i}`], env: {}, enabled: false, bot: "paul" }]));
+
+  it("counts a server in this bot's own folder as its own, so it fits", () => {
+    const data = dataDir();
+    const script = file(join(data, "workspaces", "iris", "srv", "server.py"));
+    const added = addBotMcpServer(paulsOwn, { name: "linear", ...python(script) }, "iris", data, true);
+    if (!added.ok) throw new Error(added.error);
+    expect(added.server).toMatchObject({ bot: "iris", enabled: false });
+  });
+
+  it("still refuses one every bot would use, and never takes the owner from the request", () => {
+    const data = dataDir();
+    const notes = { name: "notes", command: "npx", args: ["-y", "@x/notes-mcp"] };
+    expect(addBotMcpServer(paulsOwn, notes, "iris", data, true))
+      .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/at most 20 MCP servers/) });
+    expect(addBotMcpServer(paulsOwn, { ...notes, bot: "iris" }, "iris", data, true))
+      .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/at most 20 MCP servers/) });
+    const script = file(join(data, "workspaces", "iris", "srv", "server.py"));
+    expect(addBotMcpServer(paulsOwn, { name: "linear", ...python(script) }, "iris", data, false))
+      .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/at most 20 MCP servers/) });
+  });
+});
+
+describe("a bot adding a server that names the server's own files, where bots are boxed", () => {
+  it("is refused for settings, sessions, the chats and the data folder itself, however the path is written", () => {
+    const data = dataDir();
+    const attempts = [
+      { command: "sh", args: ["-c", 'cat "$1" >&2', "sh", join(data, "config.json")], env: {} },
+      { command: "sh", args: ["-c", "true", "sh", data], env: {} },
+      { command: "cat", args: [join(data, "messages.db")], env: {} },
+      { command: "node", args: [`--config=${join(data, "sessions.json")}`], env: {} },
+      { command: "node", args: ["x.js"], env: { CONFIG: join(data, "logins.json") } },
+      { command: join(data, "config.json"), args: [], env: {} },
+      { command: "cat", args: [join(data, "workspaces", "..", "config.json")], env: {} },
+    ];
+    for (const attempt of attempts) {
+      expect(addBotMcpServer({}, { name: "leak", ...attempt }, "iris", data, true), JSON.stringify(attempt))
+        .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/a file of the server's own/) });
+    }
+  });
+
+  it("still takes its own files, an engine OpenMausBot installed, and paths outside the data folder", () => {
+    const data = dataDir();
+    const own = addBotMcpServer({}, { name: "own", ...python(file(join(data, "workspaces", "iris", "tools", "s.py"))) }, "iris", data, true);
+    expect(own.ok).toBe(true);
+    for (const server of [{ command: "npx", args: ["-y", "@x/files-mcp", "/srv/docs", "/"], env: {} }, python("/opt/tools/server.py")]) {
+      expect(addBotMcpServer({}, { name: "plain", ...server }, "iris", data, true).ok, JSON.stringify(server)).toBe(true);
+    }
+    // Unboxed, every bot is the server's user already: the add is as it was.
+    expect(addBotMcpServer({}, { name: "desk", command: "cat", args: [join(data, "config.json")], env: {} }, "iris", data, false).ok).toBe(true);
   });
 });
 

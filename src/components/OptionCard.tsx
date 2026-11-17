@@ -43,7 +43,12 @@ export function OptionCard({
   const [custom, setCustom] = useState("");
   const card = message.card;
   const bot = state.bots.find((candidate) => candidate.id === botId);
-  const transcript = bot ? visibleMessages(bot) : [];
+  const panel = state.forkPanel;
+  const transcript = panel && panel.threadId === threadId && panel.kind === (groupId ? "group" : "bot") && panel.ownerId === (groupId ?? botId)
+    ? visibleMessages(panel)
+    : groupId
+      ? state.groups.find((group) => group.id === groupId && group.threadId === threadId)?.messages ?? []
+      : bot && (!threadId || bot.threadId === threadId) ? visibleMessages(bot) : [];
   // Full thread, not the mounted window: a search-focus slice can omit the later message that hides this quiz.
   if (!card || shouldHideOnboardingCard(message, transcript) || (card.requestId && card.dismissed && card.answered)) return null;
 

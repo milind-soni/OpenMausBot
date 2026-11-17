@@ -37,6 +37,29 @@ describe("classifyError", () => {
     });
   });
 
+  it.each([
+    [429, "rate_limited"],
+    [500, "server_error"],
+    [502, "server_error"],
+    [503, "server_error"],
+    [504, "server_error"],
+  ])("retries unexpected status %s from both streamed errors and CLI exits", (status, reason) => {
+    const text = `unexpected status ${status}`;
+    expect(classifyError(new Error(text))).toEqual({ transient: true, reason });
+    expect(classifyError({ text })).toEqual({ transient: true, reason });
+    expect(classifyError({ exitCode: 1, stderr: text })).toEqual({ transient: true, reason });
+  });
+
+  it.each([
+    [400, "invalid_request"],
+    [401, "auth"],
+    [403, "auth"],
+    [404, "not_found"],
+    [422, "invalid_request"],
+  ])("keeps unexpected status %s terminal", (status, reason) => {
+    expect(classifyError({ text: `unexpected status ${status}` })).toEqual({ transient: false, reason });
+  });
+
   it("calls Codex's failed workspace routing discovery transient, but not a refused sign-in", () => {
     expect(classifyError({ text: "stream error: workspace routing discovery failed: error sending request" })).toEqual({ transient: true, reason: "server_error" });
     expect(classifyError(new Error("workspace routing discovery timed out"))).toEqual({ transient: true, reason: "server_error" });
@@ -51,6 +74,39 @@ describe("classifyError", () => {
       transient: true,
       reason: "timeout",
     });
+  });
+
+  it.each([
+    ["Internal error: Internal service failure (session/new, ServiceUnavailableError)", "server_error"],
+    ["ServiceUnavailableError: upstream unavailable", "server_error"],
+    ["Internal error: fetchAvailableModels failed: [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1082) (session/new)", "connection_reset"],
+  ])("recognizes provider startup failures without an HTTP status: %s", (text, reason) => {
+    for (const error of [new Error(text), { text }, { exitCode: 1, stderr: text }]) {
+      expect(classifyError(error)).toEqual({ transient: true, reason });
+    }
+  });
+
+  it.each([
+    ["Internal service failure: 401 Unauthorized", "auth"],
+    ["ServiceUnavailableError: quota exceeded", "quota"],
+    ["UNEXPECTED_EOF_WHILE_READING: cancelled by user", "interrupted"],
+    ["Internal service failure: blocked by our safety systems", "provider_safety"],
+    ["SSL: CERTIFICATE_VERIFY_FAILED", "unknown"],
+    ["Internal error: OpenCode service failure", "unknown"],
+  ])("does not make a permanent or unknown failure retryable: %s", (text, reason) => {
+    expect(classifyError({ text })).toEqual({ transient: false, reason });
+  });
+
+  it.each([
+    "ServiceUnavailableError: SSL: CERTIFICATE_VERIFY_FAILED",
+    "Internal service failure: certificate verify failed",
+    "UNEXPECTED_EOF_WHILE_READING: [SSL: CERTIFICATE_VERIFY_FAILED]",
+  ])("keeps wrapped certificate-verification failures terminal: %s", (text) => {
+    for (const error of [new Error(text), { text }, { exitCode: 1, stderr: text }]) {
+      expect(classifyError(error)).toEqual({ transient: false, reason: "unknown" });
+    }
+    expect(classifyError(new Error("ServiceUnavailableError", { cause: new Error(text) })))
+      .toEqual({ transient: false, reason: "unknown" });
   });
 
   it("never retries auth, quota, unknown model, or invalid request", () => {

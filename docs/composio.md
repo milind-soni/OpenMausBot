@@ -22,7 +22,7 @@ A MausBot Cloud plan includes connected apps: there is no key to add. At every s
 - Every later start serves that token at once and checks it with `GET /v1/me`. Only a refusal (401) registers a new installation; an outage or a rate limit keeps the token, so the Cloud's connected accounts are never stranded.
 - While the Cloud has no token (the service is down or refuses new registrations), the server keeps booting and serving, Connected apps says the service is temporarily unavailable, and it tries again after 30 seconds, then 1, 2, 5, 10 and every 30 minutes, with some jitter.
 - The file never goes into a backup or a move to another computer, and a restore keeps the Cloud's own (`server/workspace-backup-policy.ts`): its connected accounts belong to that installation.
-- A Composio project key the owner saves under **Self-host connected apps** still wins; clearing it returns to the included service.
+- A Composio project key the owner saves under **Self-host connected apps** still wins, and while it is saved the server sends the service nothing, not even its start-up check. Clearing it returns to the included service, within about a minute.
 
 The built image uses the default service; `OMB_COMPOSIO_BROKER_URL` names another (a staging service, or a closed port in CI). The server run from source registers only with an explicitly named service, so development and tests never create installations on the real one.
 
@@ -56,6 +56,18 @@ Gmail and other polled apps are checked every 15 minutes, the minimum for Compos
 that uses its own Composio project key cannot watch apps yet: `trigger_info` (`action: "events"`) and the editor say so, and a
 schedule that checks the app, or a webhook, does the job instead.
 
+## Keeping traffic off the managed service
+
+**With your own project key saved**, the desktop app and a Cloud home do not register or check in with OpenMausBot's managed service, and connected apps go to Composio directly. An app-event automation made before the key was saved can still be paused, deleted or restored, but only here: its copy on the service is left alone and removed if you later go back to the service.
+
+**`OMB_COMPOSIO_BROKER=off`** in the environment of the desktop app, a server or a Cloud home turns the service off whether or not a key is saved: no registration, check-in, tool calls or app events. Connected apps then need your own key, and show the setup message until there is one. A saved installation is kept for if the switch is removed. `OMB_COMPOSIO_BROKER_URL` is not a switch: left blank it means the default service.
+
+A Team Cloud's per-person apps (**each person connects their own**) follow the same rule. With the team's key saved, each member is their own Composio user in the team's project (`omb_member_…`, made from the team's id and a hash of the person, never their address), and their connect links, connections, tool calls and disconnects go to Composio with the team's key. A member who leaves has that user's connections removed from the project; if Composio can't be reached then, it is tried again at the next start. App events are not available for them, as for the team's own apps with a key.
+
+Connections do not carry between the service and a project, or between two projects. After the team saves, removes or changes its key, a member's app shows as not connected, their page and their bot say to connect it again, and nothing is an error. An installation a member made on the service before the key was saved is left there, unused and not erased, and is theirs again if the key is removed; the Admin's signed read counts them (`appsLeftOnService`). Connections made in a project stay in that project when its key is removed or replaced.
+
+With the switch off and no key, a member's own apps can't be connected: their page and their bot say an admin needs to add the team's Composio key.
+
 ## Scoped key permissions
 
 A default project API key works without additional configuration. For a least-privilege scoped key, grant:
@@ -76,7 +88,7 @@ COMPOSIO_API_KEY=ak_your_project_key pnpm dev:server
 
 The browser-only development UI can also save a key to the owner-only `~/.openmausbot/config.json` file. Using the environment variable is preferred for headless and shared development machines.
 
-OpenMausBot creates a stable random user identifier for the installation, stores the returned Session identifier, and reuses that Session across launches. No Gmail, GitHub, Slack, or other provider tokens are stored by OpenMausBot; Composio owns their connection lifecycle.
+OpenMausBot creates a stable random user identifier for the installation, stores the returned Session identifier, and reuses that Session across launches. A fresh personal installation that connects a project key uses the Composio user of an earlier OpenMausBot installation in that project when there is exactly one such user and it still has a live connection, so the apps connected there come back after a reinstall or on another computer. A Team Cloud, or a self-hosted server several people sign in to, never does this and does not even list the project's accounts, because every member's bots would then get that person's apps. No Gmail, GitHub, Slack, or other provider tokens are stored by OpenMausBot; Composio owns their connection lifecycle.
 
 Sessions created by older OpenMausBot versions are upgraded in place by creating a multi-account Session for the same stable Composio user. Connected accounts belong to that user, so existing grants remain available while the new Session adds explicit multi-account routing. Each toolkit is capped at five usable accounts.
 
@@ -84,7 +96,7 @@ Sessions created by older OpenMausBot versions are upgraded in place by creating
 
 Yes. Gmail, Google Calendar, Google Drive, and the other Google toolkits can each hold multiple labeled authorizations, and Slack can hold multiple labeled workspace/account authorizations. Accounts are scoped to the OpenMausBot installation's stable Composio user and appear by alias and connected-account ID in **Connected apps**.
 
-If a provider or restricted Composio project policy prevents another authorization, the safe fallback is a separate OpenMausBot installation/configuration with its own Composio user. Re-authorizing the same single-account Session is not a safe workaround: it can change which grant is selected. Do not share raw provider tokens or place them in bot prompts.
+If a provider or restricted Composio project policy prevents another authorization, the safe fallback is a separate OpenMausBot installation/configuration using its own Composio project key, which gives it its own Composio user; a second personal installation on the same project key picks up the earlier installation's user instead. Re-authorizing the same single-account Session is not a safe workaround: it can change which grant is selected. Do not share raw provider tokens or place them in bot prompts.
 
 The hosted/managed connected-apps broker exposes the same account-aware response shape and account-specific removal routes as the self-hosted project-key mode; it does not send broker or provider credentials to the renderer.
 
@@ -106,6 +118,18 @@ To grant the permission:
 OpenMausBot uses your project's own auth config for an app automatically, in place of the Composio-managed one. If there are several enabled ones for the same app, it uses the most recently created, and it skips disabled ones. Google may require your OAuth app to list the added permissions on its consent screen, and to be verified before people outside your organization can grant them.
 
 On a MausBot Cloud plan, connected apps run through OpenMausBot's managed connection service rather than your own Composio project, so you cannot add permissions yourself; ask OpenMausBot support instead.
+
+## Files a tool takes
+
+Composio runs app tools on its own servers, so a tool that takes a file (Google Drive's `GOOGLEDRIVE_UPLOAD_FILE` with `file_to_upload`, a Gmail attachment) reads it from Composio's file storage by `s3key`, never from this computer. A bot gives such a field the full path of a file (`C:\Users\…\report.pdf`, `/Users/…/report.pdf`, or that path as the `s3key` of a `{ name, mimetype, s3key }` object), and the harness (`server/connector-files.ts`) uploads it:
+
+- **Which files.** Only a file in the bot's working folder or Local VM folder, or one attached to this conversation (by its exact path: never the attachment store as a whole, which holds every conversation's and every team member's files). Never a file in a hidden folder (`.ssh`, `.aws`, `.config`, any dotfile) below the bot's folder or the home folder, nor in the app's own data (`DATA_DIR`, the desktop app's data folder) unless the bot's own folder is inside it, as its workspace is. Such a file is refused with the reason and the call does not go out.
+- **Anything else goes as it is.** A value that is not an existing file in those folders (a Dropbox path such as `/Apps/report.pdf`, `/images/logo.png`, text that starts with `/`, anything with a line break) is sent unchanged, with no refusal.
+- **When.** The files are read before the call's checks and listed in full (name, path, size) on a "Send on your behalf?" card, ahead of the arguments it cuts at 400 characters. They are uploaded only after the last check before sending, so a call refused there, or whose permission or turn ended meanwhile, uploads nothing.
+- **Where.** The harness asks for an upload link (`POST /v1/files/upload` on the managed service, which gives one only for a toolkit the installation has a working connection to; Composio's `POST /files/upload/request` with your own project key). It puts the bytes only to an HTTPS link on Composio's storage (`*.composio.dev` or AWS S3; with `OMB_COMPOSIO_API`, that backend's origin), never following a redirect. The call then carries `{ name, mimetype, s3key }`.
+- **Failures.** A failed upload is refused with what failed, and nothing is written to the app. When Composio still cannot fetch a call's file (`Failed to download file with s3key …`), the bot is told to give a local path instead of an invented key. At most 10 files per call. Plain text needs no file: `GOOGLEDRIVE_CREATE_FILE_FROM_TEXT` takes the text itself.
+
+The managed service needs the updated broker as well as the updated app for this.
 
 ## Apps with no Composio-managed sign-in
 
@@ -202,4 +226,4 @@ A bot with no grant record at all keeps the legacy behavior: every tool on every
 
 Grants are enforced on the real tool names at call time (including batches inside the MULTI_EXECUTE meta-tool), the tool list offered to the model is filtered to the granted set, and every allow/deny writes a decision-log row. Refusals do not enumerate what else is granted. Paired phones see each bot's grants read-only in its profile (What this bot does → App tools); grants are assigned on the computer, never from a phone.
 
-Connected-app sends also follow the bot's **Permissions → Sending on your behalf** setting at every access level, including Full access. **Ask every time** requires approval for each send regardless of prompt language. **Send without asking** lets sends go out on their own, with no daily limit. A Full-access bot with no setting here sends without asking. Reading and drafting are not sends; opaque app code execution always requires approval because its effects cannot be read.
+Connected-app sends also follow the bot's **Permissions → Sending on your behalf** setting at every access level, including Full access. **Ask every time** requires approval for each send regardless of prompt language. **Send without asking** lets sends go out on their own, with no daily limit. A Full-access bot with no setting here sends without asking. Reading and drafting are not sends; below Full access, code the app can't read always asks, even under Send without asking; at Full access it goes out without a card unless the rule is Ask every time.

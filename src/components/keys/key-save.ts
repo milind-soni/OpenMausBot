@@ -3,14 +3,26 @@ import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { keyTestResult } from "@/lib/product-events";
 import type { KeyResult } from "@/lib/analytics-allowlist";
-import { keyEntry, type KeyId, type KeyTarget, type TestableProvider } from "./key-catalog";
+import { PROVIDER_CREDENTIAL_TARGETS } from "../../../shared/credential-request";
+import { keyEntry, type DesktopSlot, type DesktopSlotOptions, type KeyId, type KeyTarget, type TestableProvider } from "./key-catalog";
+
+const HOST_SERVER_KEEPS: ReadonlySet<string> = new Set([...PROVIDER_CREDENTIAL_TARGETS, "openaiCompatApiKey"]);
+
+/** Saves into the desktop's encrypted store, or undefined when this page must use the server's config instead: an AI
+ * provider key typed through a desktop paired to another computer belongs to that computer's server, not this store. */
+export function desktopStore(slot: DesktopSlot | null | undefined) {
+  const ogb = window.ogb;
+  if (!slot || !ogb?.setCredential || (ogb.remoteClient?.active === true && HOST_SERVER_KEEPS.has(slot))) return undefined;
+  return (value: string, options?: DesktopSlotOptions) => options ? ogb.setCredential!(slot, value, options) : ogb.setCredential!(slot, value);
+}
 
 /** Saves one credential where this app keeps it ("" removes it): the desktop's encrypted store when the key has a slot
  * there, so Remove also clears the stored copy its boot migration made, else the server's own config, which on a Cloud
  * home stays outside every bot's box. */
 export function saveKey(target: KeyTarget, value: string, firstKey: boolean): Promise<ConfigStatus> {
-  return window.ogb?.setCredential && target.slot
-    ? window.ogb.setCredential(target.slot, value)
+  const store = desktopStore(target.slot);
+  return store
+    ? store(value, target.storeOptions?.(value, firstKey))
     : api("/api/config", { method: "PUT", body: JSON.stringify(target.patch(value, firstKey)) });
 }
 

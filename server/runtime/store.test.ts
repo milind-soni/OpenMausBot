@@ -53,6 +53,17 @@ describe("runtime store", () => {
     expect(() => store.update(assignment("ghost"))).toThrow(/does not exist/);
   });
 
+  it("hands each reader its own copy of a row, and a changed row reads as its new text", () => {
+    const store = open();
+    const root = assignment("root", { status: "running" });
+    store.insert(root, { kind: "enqueued", at: 1_000 });
+    store.get("root")!.status = "failed";
+    expect(store.get("root")?.status).toBe("running");
+    root.status = "completed"; root.outcome = "done"; root.finishedAt = 5_000;
+    store.update(root);
+    expect(store.get("root")).toEqual(root);
+  });
+
   it("filters all() by tree, liveness and requester thread", () => {
     const store = open();
     const a = assignment("a", { status: "completed", outcome: "done", finishedAt: 5_000 });

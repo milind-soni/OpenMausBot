@@ -127,7 +127,7 @@ export function ReactAction({ threadId, message }: { threadId: string; message: 
         <div
           ref={rowRef}
           id={id}
-          role="toolbar"
+          role="toolbar" data-look="popover"
           aria-label={t("chat.reactions")}
           onKeyDown={onKey}
           className={cn(

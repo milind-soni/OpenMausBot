@@ -14,7 +14,7 @@ import { holdsCredential } from "../shared/redact.ts";
 import { parseSkillMd, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 import { importedSkillIntact, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
 import { scanSkillFolder } from "./skill-folder.ts";
-import { importedMcpServerName, isRemoteMcpServer, MAX_MCP_SERVERS, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
+import { importedMcpServerName, isRemoteMcpServer, mcpSharedServerRoom, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 import { parse as parseYaml } from "yaml";
 import { parseToml } from "./toml-lite.ts";
 
@@ -705,7 +705,7 @@ function importTools(machine: SetupMachine, host: SetupHost): NonNullable<SetupI
   try {
     const current = host.mcpServers();
     const { fresh, present, conflicts, refused } = findTools(machine, current, host);
-    const room = Math.max(0, MAX_MCP_SERVERS - Object.keys(current).length);
+    const room = mcpSharedServerRoom(current);
     const adding = fresh.slice(0, room);
     let saved = true;
     if (adding.length) {
@@ -733,7 +733,7 @@ export function detectSetup(machine: SetupMachine, host: SetupHost): SetupDetect
   const index = readImportedSkills();
   const skills = findSkills(machine).filter((skill) => freshSkill(skill, index[skill.name])).map(({ name, source }) => ({ name, source }));
   const current = host.mcpServers();
-  const tools = Object.keys(current).length < MAX_MCP_SERVERS
+  const tools = mcpSharedServerRoom(current) > 0
     ? findTools(machine, current, host).fresh.map(({ name, source }) => ({ name, source }))
     : [];
   return { skills, tools };

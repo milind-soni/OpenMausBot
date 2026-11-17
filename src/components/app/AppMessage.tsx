@@ -9,8 +9,12 @@ import { AppDocumentError, fetchAppDocument, type AppFetchFailure } from "./app-
 import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
 import { AppDone, AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
+import type { AppSelection } from "./app-frame-host";
+import { PageCitationButton } from "../CitationUI";
+import { appendDraftAttachments } from "@/lib/drafts";
+import { useCanWriteIn } from "@/lib/cloud-guest";
 import { closePage, onPageOpened, openPage, openPageFor } from "@/lib/open-page";
-import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePoint, usePageSave, usePageShare, usePageVersion } from "./PageTools";
+import { PAGE_HEIGHT, PAGE_PREVIEW_HEIGHT, PageFullScreen, PageNotes, PagePaneContext, PageToolbar, usePagePin, usePagePoint, usePageSave, usePageShare, usePageVersion } from "./PageTools";
 
 const WIDTH = "max-w-[760px]";
 const DOC_REUSE_MS = 60_000;
@@ -78,7 +82,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   pool?: AppPool;
   room?: boolean;
 }) {
-  const { dispatch } = useStore();
+  const { dispatch, state: store } = useStore();
   const uid = useId();
   const page = payload.source === "html";
   const version = usePageVersion(payload);
@@ -93,6 +97,10 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [fetching, setFetching] = useState(false);
   const [problem, setProblem] = useState<AppFrameProblem | null>(null);
+  // Text the person selected in the page, to cite in the composer as chat text is; never in a room.
+  const [selection, setSelection] = useState<AppSelection | null>(null);
+  const yourAccess = store?.bots?.find((candidate) => candidate.id === botId)?.yourAccess;
+  const canWrite = useCanWriteIn(threadId, yourAccess) !== false;
   const frame = useRef<AppFrameHandle | null>(null);
   const wide = useRef<AppFrameHandle | null>(null);
   const [fullScreen, setFullScreen] = useState(false);
@@ -155,7 +163,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
 
   const current = slot.live ? loaded?.doc : undefined;
   const point = usePagePoint({
-    frame: () => (fullScreen ? wide.current : frame.current)?.iframe,
+    frame: () => (fullScreen ? wide.current : frame.current)?.iframe, view: fullScreen ? "full" : "inline", frameKey: loaded?.key,
     // In the pane the message box stays usable, so the page stays open while the person writes about what they picked.
     threadId, appId: message.id, rev, title: payload.title, picked: () => { if (!pane) setFullScreen(false); },
   });
@@ -167,7 +175,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   }, [paneOpen, threadId, message.id, rev]);
   const share = usePageShare(threadId, message.id, message.publishedPage);
   const save = usePageSave(threadId, message.id, payload.title);
-  const tools = { version, point, share, save, room, ready: Boolean(current), fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
+  const pin = usePagePin({ botId, threadId, messageId: message.id }, payload.title);
+  const tools = { version, point, share, save, room, pin, ready: Boolean(current), fullScreen: { open: fullScreen, pane: Boolean(pane), toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
 
   const reloadNow = () => {
     setProblem(null);
@@ -237,6 +246,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
           onProblem={setProblem}
           onTeardownRequested={onTeardownRequested}
           {...(page ? { maxHeight: PAGE_HEIGHT.cap } : {})}
+          {...(!room ? { onSelection: setSelection } : {})}
         />
       ) : (
         <AppPlaceholder height={boxHeight} loading={slot.live} open={slot.live ? undefined : reloadNow} />
@@ -285,8 +295,17 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
         {payload.done && <AppDone done={payload.done} bordered={bordered} />}
         {strip && <AppStrip text={strip.text} action={strip.action} bordered={bordered} />}
       </div>
+      {!room && canWrite && (
+        <PageCitationButton
+          selection={selection && { text: selection.text, point: { left: selection.left, top: selection.bottom + 8 } }}
+          source={{ ownerType: "bot", ownerId: botId, threadId, messageId: message.id }}
+          onAdd={(citation) => appendDraftAttachments(`bot:${botId}:${threadId}`, [citation])}
+          onDismiss={() => setSelection(null)}
+        />
+      )}
       {page && fullScreen && current && (
-        <PageFullScreen {...tools} title={payload.title} doc={current} botId={botId} threadId={threadId} handle={wide} close={() => setFullScreen(false)} pane={pane} />
+        <PageFullScreen {...tools} title={payload.title} doc={current} botId={botId} threadId={threadId} handle={wide} close={() => setFullScreen(false)} pane={pane}
+          {...(!room ? { onSelection: setSelection } : {})} />
       )}
     </div>
   );

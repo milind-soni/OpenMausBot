@@ -32,8 +32,7 @@ import { HostedMcpIcon } from "./HostedMcpIcon";
 import type { McpMessage } from "./McpResultBudgetField";
 import { McpServerEditor, type McpServerSubmission } from "./McpServerEditor";
 import { isRemoteMcpListing, type McpServerListing } from "./mcp-draft";
-import { HOSTED_KEY_HEADER, HOSTED_MCP_APPS, hostedConnections, hostedMcpApp, hostedServerName, type HostedApp, type HostedConnections, type HostedMcpAppId } from "@/lib/hosted-mcp-apps";
-import { POSTIZ_SERVER } from "../../shared/postiz";
+import { HOSTED_KEY_HEADER, HOSTED_MCP_APPS, hostedConnections, hostedMcpApp, hostedServerName, mcpServerConnected, ownMcpServer, type HostedApp, type HostedConnections, type HostedMcpAppId } from "@/lib/hosted-mcp-apps";
 import { CHAT_TOOL_LIMIT, chatToolBudgetFit } from "../../shared/tool-budget";
 import { openBotSettings } from "./bot-panel/panel-link";
 
@@ -101,6 +100,10 @@ export interface HostedCardsProps {
   /** Whether this app's card shows now (search, filter, category view). A hidden card stays mounted. */
   shown(id: HostedMcpAppId): boolean;
   onConnections(connected: HostedConnections): void;
+  /** Every server listed, for the Connected count. */
+  onServers?(servers: McpServerListing[]): void;
+  /** Set in the Connected view: which of the person's own switched-on servers show as tiles beside the apps. */
+  ownServers?: { shown(server: McpServerListing): boolean; manage(): void };
 }
 
 /** `hostedCards`: render the one-click card of each hosted MCP app (one instance, one server load, one sign-in at a time)
@@ -141,6 +144,8 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   const connections = useMemo(() => servers && hostedConnections(servers), [servers]);
   const onConnections = hostedCards?.onConnections;
   useEffect(() => { if (connections) onConnections?.(connections); }, [connections, onConnections]);
+  const onServers = hostedCards?.onServers;
+  useEffect(() => { if (servers) onServers?.(servers); }, [servers, onServers]);
 
   const listed = (next: McpServerListing[] | undefined) => {
     setServers(next ?? []);
@@ -586,11 +591,44 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     </div>;
   }
 
-  if (hostedCards) {
-    return <>{HOSTED_MCP_APPS.map((app) => <div key={app.id} className={hostedCards.shown(app.id) ? "contents" : "hidden"}>{renderHostedCard(app)}</div>)}</>;
+  function renderOwnServer(server: McpServerListing, manage: () => void) {
+    const needsSignIn = isRemoteMcpListing(server) && server.auth === "needs-sign-in";
+    const result = probe[server.name];
+    const failure = result && !result.ok && !result.auth ? t("mcp.check.failed", { reason: failureReason(server, result) }) : null;
+    const status = needsSignIn ? t("mcp.auth.needsSignIn") : server.offFor?.length ? t("mcp.offFor", { bots: server.offFor.map(botName).join(", ") }) : isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ");
+    return <div key={server.name} data-app-tile={server.name} data-mcp-tile="" className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
+      <div className="flex items-center gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-[8px] bg-raised text-ink-secondary">{isRemoteMcpListing(server) ? <Globe size={19} /> : <ServerCog size={19} />}</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[14px] font-semibold leading-5 text-ink">{server.name}</span>
+            {mcpServerConnected(server) && <Check size={13} strokeWidth={2.5} className="shrink-0 text-success" aria-label={t("apps.connected")} />}
+          </div>
+          <p className={cn("truncate text-[13px] leading-[18px]", needsSignIn ? "text-warning" : "text-ink-secondary")} title={status}>{status}</p>
+        </div>
+        {signingIn === server.name
+          ? <button type="button" onClick={() => signInAbort.current?.abort()} className="inline-flex h-7 shrink-0 items-center rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink">{t("mcp.auth.cancel")}</button>
+          : <button type="button" disabled={needsSignIn && (busy !== null || signingIn !== null || Boolean(server.managedBy))} onClick={() => void (needsSignIn ? signIn(server) : manage())}
+              className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink hover:bg-raised-hover disabled:opacity-40">
+              {t(needsSignIn ? "mcp.auth.signIn" : "apps.mcp.manage")}
+            </button>}
+      </div>
+      <div className="ps-[52px]">
+        {failure && <p role="alert" className="mt-1.5 text-[12px] text-danger">{failure}</p>}
+        {renderSignIn(server)}
+      </div>
+    </div>;
   }
 
-  const visibleServers = servers?.filter((server) => !hideHosted || !isRemoteMcpListing(server) || !(hostedMcpApp(server) || server.name === POSTIZ_SERVER));
+  if (hostedCards) {
+    const own = hostedCards.ownServers;
+    return <>
+      {HOSTED_MCP_APPS.map((app) => <div key={app.id} className={hostedCards.shown(app.id) ? "contents" : "hidden"}>{renderHostedCard(app)}</div>)}
+      {own && servers?.filter((server) => server.enabled && ownMcpServer(server) && own.shown(server)).map((server) => renderOwnServer(server, own.manage))}
+    </>;
+  }
+
+  const visibleServers = servers?.filter((server) => !hideHosted || ownMcpServer(server));
 
   return (
     <section
@@ -677,6 +715,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                       {server.runsOn && <div data-mcp-runs-on className="mt-1 text-[12px] text-ink-secondary">{t("mcp.runsOn", { computer: server.runsOn.label })}</div>}
                       {server.bot && <div data-mcp-own-bot className="mt-1 text-[12px] text-ink-secondary">{t("mcp.ownBot", { bot: botName(server.bot) })}</div>}
                       {server.offFor?.length ? <div data-mcp-off-for className="mt-1 text-[12px] text-ink-secondary">{t("mcp.offFor", { bots: server.offFor.map(botName).join(", ") })}</div> : null}
+                      {server.keyOff && <div data-mcp-key-off className="mt-1 text-[12px] text-warning">{t("mcp.keyOff")}</div>}
                       <div className="mt-1 truncate font-mono text-[12px] text-ink-secondary">{isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}</div>
                       {isRemoteMcpListing(server)
                         ? server.headerKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.headersSaved", { keys: server.headerKeys.join(", ") })}</div>

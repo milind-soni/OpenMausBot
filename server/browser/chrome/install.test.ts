@@ -143,6 +143,8 @@ describe("downloading Chrome for Testing", () => {
   it("downloads from Google's Chrome for Testing bucket, by pinned version and platform", () => {
     expect(chromeForTestingUrl(pin())).toBe("https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.47/mac-arm64/chrome-mac-arm64.zip");
     expect(chromeForTestingPin("darwin", "arm64")).toMatchObject({ platform: "mac-arm64", bytes: 190878359 });
-    expect(chromeForTestingPin("linux", "x64")).toBeNull();
+    expect(chromeForTestingPin("linux", "x64")).toMatchObject({ platform: "linux64", bytes: 195709628 });
+    expect(chromeForTestingPin("linux", "arm64")).toMatchObject({ platform: "linux-arm64", bytes: 195919275 });
+    expect(chromeForTestingPin("win32", "x64")).toBeNull();
   });
 });

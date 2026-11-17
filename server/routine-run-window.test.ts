@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { appRunWindow, NEWEST_RUNS_PER_AUTOMATION, routineRunsFor } from "./routine-run-window.ts";
-import type { RoutineRun } from "./routines.ts";
+import type { Occurrence } from "./routine-ledger.ts";
+import { appRunWindow, NEWEST_RUNS_PER_AUTOMATION, routineHistoryFor, routineRunsFor } from "./routine-run-window.ts";
+import type { Routine, RoutineRun } from "./routines.ts";
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 10, 1);
@@ -38,6 +39,17 @@ describe("the app's run window", () => {
     expect(ids(appRunWindow(runs, NOW - 14 * DAY))).toEqual(runs.slice(0, 11).map((candidate) => candidate.id));
   });
 
+  it.each(["queued", "running", "waiting"] as const)("keeps the failure streak while a newer run is %s", (status) => {
+    const runs = [
+      run("active", "r", 20, status),
+      ...Array.from({ length: 8 }, (_, i) => run(`fail-${i}`, "r", 21 + i, "failed", { seenAt: NOW })),
+      run("ok", "r", 40, "completed"),
+      run("older", "r", 41, "completed"),
+    ];
+
+    expect(ids(appRunWindow(runs, NOW - 14 * DAY))).toEqual(ids(runs.slice(0, -1)));
+  });
+
   it("answers a range, a thread, the window, or everything", () => {
     const runs = [run("a", "r", 1, "completed", { threadId: "t1" }), run("b", "r", 30, "completed")];
     const listRuns = (from?: number, to?: number) => runs.filter((candidate) => (from === undefined || candidate.scheduledFor >= from) && (to === undefined || candidate.scheduledFor <= to));
@@ -45,5 +57,15 @@ describe("the app's run window", () => {
     expect(ids(routineRunsFor(listRuns, new URLSearchParams({ from: String(NOW - 40 * DAY), to: String(NOW - 20 * DAY) })))).toEqual(["b"]);
     expect(ids(routineRunsFor(listRuns, new URLSearchParams({ thread: "t1" })))).toEqual(["a"]);
     expect(ids(routineRunsFor(listRuns, new URLSearchParams({ since: String(NOW - 7 * DAY) })))).toEqual(["a", "b"]);
+  });
+
+  it("adds one routine's occurrences when asked for its history, without the lease or what the asker may not see", () => {
+    const record: Occurrence = { routineId: "r", dueAt: NOW, state: "running", attempts: 1, startedAt: NOW, lastStartAt: NOW, madeAt: NOW, runIds: ["a"], lease: { machine: "host", boot: "boot", until: NOW + 1 } };
+    const manager = { listRoutines: () => [{ id: "r" }, { id: "hidden" }] as Routine[], occurrences: (id: string) => id === "r" ? [record] : [{ ...record, routineId: id }] };
+    const visible = (routine: Routine) => routine.id !== "hidden";
+    expect(routineHistoryFor(manager, new URLSearchParams({ history: "r" }), visible)).toEqual({ occurrences: [{ dueAt: NOW, state: "running", attempts: 1, startedAt: NOW, madeAt: NOW, runIds: ["a"] }] });
+    expect(routineHistoryFor(manager, new URLSearchParams({ history: "hidden" }), visible)).toEqual({});
+    expect(routineHistoryFor(manager, new URLSearchParams({ history: "gone" }), visible)).toEqual({});
+    expect(routineHistoryFor(manager, new URLSearchParams(), visible)).toEqual({});
   });
 });

@@ -227,11 +227,19 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
 `, { mode: 0o755 });
   // The bot's browser engine as the server finds it: it names the Chrome its turns would drive, through the gate.
   // It writes down the egress gate each command's Chrome would go through: the bot's own, for the life of the server.
+  // Its daemon's pid file (where browserDaemonFile looks) says that browser runs until it is closed, so the server's
+  // sweep of ended browsers (host/browser.ts, every minute) leaves its gate open while a case still uses it.
   writeFileSync(join(home, "agent-browser"), `#!${process.execPath}
+const fs = require("node:fs"), path = require("node:path");
 const args = process.argv.slice(2).filter((arg) => arg !== "--json" && arg !== "--no-webmcp");
 if (args[0] === "--version") { console.log("agent-browser 0.37.0"); process.exit(0); }
-if (process.env.AGENT_BROWSER_PROXY) require("node:fs").appendFileSync(${JSON.stringify(join(home, "gates.txt"))}, process.env.AGENT_BROWSER_SESSION + " " + process.env.AGENT_BROWSER_PROXY + "\\n");
-const running = require("node:fs").existsSync(${JSON.stringify(join(home, "browser-running"))});
+const env = process.env, session = env.AGENT_BROWSER_SESSION ?? "";
+const base = env.XDG_RUNTIME_DIR ? path.join(env.XDG_RUNTIME_DIR, "agent-browser") : path.join(env.HOME || require("node:os").homedir(), ".agent-browser");
+const pid = env.AGENT_BROWSER_SOCKET_DIR ? path.join(env.AGENT_BROWSER_SOCKET_DIR, session + ".pid") : path.join(env.AGENT_BROWSER_NAMESPACE ? path.join(base, "namespaces", env.AGENT_BROWSER_NAMESPACE, "run") : base, session + ".pid");
+if (args[0] === "close") fs.rmSync(pid, { force: true });
+else if (env.AGENT_BROWSER_PROXY) { fs.mkdirSync(path.dirname(pid), { recursive: true }); fs.writeFileSync(pid, String(process.pid)); }
+if (env.AGENT_BROWSER_PROXY) fs.appendFileSync(${JSON.stringify(join(home, "gates.txt"))}, session + " " + env.AGENT_BROWSER_PROXY + "\\n");
+const running = fs.existsSync(${JSON.stringify(join(home, "browser-running"))});
 process.stdout.write(JSON.stringify({ success: true, data: args[0] === "session" ? { sessions: running ? [process.env.AGENT_BROWSER_SESSION] : [] } : {} }));
 `, { mode: 0o755 });
   chmodSync(join(home, "agent-browser"), 0o755);

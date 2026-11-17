@@ -46,7 +46,7 @@ instance at it:
   hint instead of failing at first message.
 - **Sign in first.** The driver has no auth flow of its own — run the CLI once
   in a terminal and log in there; OpenMausBot spawns it with your login intact.
-- **Choose models per bot.** Open the bot's model picker and use **Re-detect**
+- **Choose models per bot.** Open the bot's model picker and use **Refresh models**
   to load the models advertised by the agent. Select a model and, when offered,
   its thinking level. Bot defaults and individual conversation overrides are
   saved independently. **Agent default** leaves the native session's model
@@ -129,7 +129,7 @@ a custom ACP engine with your own Command Code sign-in. (Checked with
    is not on the app's `PATH`: `which cmd` on macOS or Linux, or
    `where.exe cmdc` on Windows.
 4. Pick **Command Code** for a bot. Its model menu shows **Agent default**,
-   which runs Command Code's own default model; **Re-detect** lists the models
+   which runs Command Code's own default model; **Refresh models** lists the models
    it advertises once you're signed in.
 
 Without a sign-in the chat shows ``Not authenticated. Run `cmd login` in a
@@ -196,6 +196,26 @@ capabilities or account access.
 
 See [Alibaba Cloud's OpenAI-compatible API guide](https://help.aliyun.com/zh/model-studio/compatibility-of-openai-with-dashscope)
 for current addresses, model availability and region requirements.
+
+### Example: GLM through Z.ai or Zhipu BigModel
+
+Use the `openai-compat` instance above with a general API key from your
+chosen service. Set `config.url` to its OpenAI-compatible base URL:
+
+| Service | Base URL |
+|---|---|
+| Z.ai (international) | `https://api.z.ai/api/paas/v4` |
+| Zhipu BigModel (mainland China) | `https://open.bigmodel.cn/api/paas/v4` |
+
+Set `environment.MY_ENDPOINT_KEY` to that service's API key and keep
+`config.apiKeyEnv` as `MY_ENDPOINT_KEY`. Set `config.model` to an exact model
+ID available to your account, such as `glm-5.3`. The driver appends
+`/chat/completions` to the base URL and attempts `/models` discovery; a
+manually configured model stays selectable if discovery is unavailable.
+
+Both services document this general API setup and their current model IDs
+in their OpenAI compatibility guides. See the [Z.ai guide](https://docs.z.ai/guides/develop/openai/python)
+and the [Zhipu BigModel guide](https://docs.bigmodel.cn/cn/guide/develop/openai/introduction).
 
 ## Notes
 

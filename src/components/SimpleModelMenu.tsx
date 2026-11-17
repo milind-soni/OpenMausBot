@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronRight, ChevronUp, Download, Lightbulb, Loader2, LogIn, RefreshCw, Search, Settings, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Download, Lightbulb, Loader2, LogIn, RefreshCw, Search, Settings, Star, X } from "lucide-react";
 import type { Bot, InstanceInfo } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
 import type { MenuGroup, MenuModelRow, SimpleMenu } from "@/lib/simple-model-menu";
+import { favoriteKey, toggleFavoriteModel, useFavoriteModels } from "@/lib/favorite-models";
 import { modelOptionLabel } from "@/lib/model-label";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -50,29 +51,54 @@ function RowLines({ label, children }: { label: ReactNode; children?: ReactNode 
   );
 }
 
+/** Stays where it is when pressed: the row moves up the next time the menu opens, not under the pointer. The arrow away
+ * from the start of the line moves from its row to it and back (model-menu-keys.ts); it shows while either has keyboard focus. */
+export function FavoriteStar({ instanceId, model, name }: { instanceId: string; model: string; name: string }) {
+  const favorite = useFavoriteModels().has(favoriteKey(instanceId, model));
+  return (
+    <button
+      type="button"
+      data-model-favorite
+      tabIndex={-1}
+      aria-pressed={favorite}
+      aria-label={t(favorite ? "model.favorite.remove" : "model.favorite.add", { name })}
+      title={t(favorite ? "model.favorite.remove" : "model.favorite.add", { name })}
+      onClick={() => toggleFavoriteModel(instanceId, model)}
+      className={cn("absolute end-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-ink-tertiary hover:text-ink",
+        favorite ? "opacity-100" : "opacity-0 group-hover/model:opacity-100 touch:opacity-100 focus-visible:opacity-100 peer-focus-visible/row:opacity-100")}
+    >
+      <Star size={13} aria-hidden="true" className={cn(favorite && "fill-current")} />
+    </button>
+  );
+}
+
 function MenuModel({ instance, row, onPick }: { instance: InstanceInfo; row: MenuModelRow; onPick: SimpleMenuActions["onPick"] }) {
   const { option } = row;
-  const reason = row.blocked ? t("model.orgBlocked") : undefined;
+  const reason = row.blocked ? t(option.needsCliUpdate ? "chat.claudeUpdate.offer" : "model.orgBlocked") : undefined;
   return (
+    <div className="group/model relative">
     <button
       type="button"
       data-menu-row
       data-org-blocked={row.blocked || undefined}
       disabled={row.blocked}
       aria-pressed={row.current}
-      aria-label={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
-      title={[modelOptionLabel(option), option.provider, reason].filter(Boolean).join(" · ")}
+      aria-label={[modelOptionLabel(option), option.provider, row.detail, reason].filter(Boolean).join(" · ")}
+      title={[modelOptionLabel(option), option.provider, row.detail, reason].filter(Boolean).join(" · ")}
       tabIndex={-1}
       onClick={() => onPick(instance, row.model ?? option.id, row.variant)}
-      className={SIMPLE_MENU_ROW}
+      className={cn(SIMPLE_MENU_ROW, "peer/row pe-8")}
     >
       <Gutter />
       <RowLines label={row.label}>
         {row.route && <span data-simple-route className={SIMPLE_MENU_META}>{row.route}</span>}
+        {row.detail && <span data-simple-model-detail className={SIMPLE_MENU_META}>{row.detail}</span>}
         {reason && <span data-simple-org-blocked className={SIMPLE_MENU_META}>{reason}</span>}
       </RowLines>
       {row.current && <Check size={14} className="shrink-0 text-ink" aria-hidden="true" />}
     </button>
+    {!row.blocked && <FavoriteStar instanceId={instance.instanceId} model={option.id} name={modelOptionLabel(option)} />}
+    </div>
   );
 }
 

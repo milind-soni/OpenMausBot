@@ -48,6 +48,14 @@ describe("decodeCodexSelection", () => {
     });
   });
 
+  it("reads a Fast row as its base model on the Fast tier", () => {
+    expect(decodeCodexSelection("gpt-5.6-sol+priority")).toEqual({
+      model: "gpt-5.6-sol",
+      modelProvider: OFFICIAL_CODEX_PROVIDER,
+      serviceTier: "priority",
+    });
+  });
+
   it("splits provider-encoded custom ids", () => {
     expect(decodeCodexSelection("omlx::Qwen3.6-35B-A3B-bf16:qwen3-5-6-n-r-reasoning")).toEqual({
       model: "Qwen3.6-35B-A3B-bf16:qwen3-5-6-n-r-reasoning",
@@ -75,6 +83,24 @@ describe("readCodexModelCatalog", () => {
       default: "gpt-fake-default",
       options: [
         { id: "gpt-fake-default", label: "GPT Fake Default" },
+        { id: "gpt-page-two", label: "GPT Page Two" },
+      ],
+    });
+  });
+
+  it("adds a Fast row after each model that offers Fast and does not already run on it", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const catalog = await readCodexModelCatalog(
+      { HOME: join(tmpdir(), "omb-codex-app-server-tiers"), PATH: process.env.PATH, FAKE_CODEX_TIERS: "1" },
+      fetch,
+      FAKE_CLI,
+    );
+
+    expect(catalog).toEqual({
+      default: "gpt-fake-default",
+      options: [
+        { id: "gpt-fake-default", label: "GPT Fake Default" },
+        { id: "gpt-fake-default+priority", label: "GPT Fake Default · Fast" },
         { id: "gpt-page-two", label: "GPT Page Two" },
       ],
     });

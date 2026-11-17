@@ -95,7 +95,7 @@ export class EngineHomes {
 
 export const engineHomes = new EngineHomes();
 
-/** On a Team Cloud, every turn and keep-warm ping of this instance runs inside its conversation. */
+/** On a Team Cloud, every turn, keep-warm ping and warm summary of this instance runs inside its conversation. */
 export function withEngineHomes(instance: ProviderInstance, homes: EngineHomes = engineHomes): ProviderInstance {
   if (!homes.active()) return instance;
   const adapter = instance.adapter;
@@ -103,7 +103,12 @@ export function withEngineHomes(instance: ProviderInstance, homes: EngineHomes =
   (instance as { adapter: ProviderInstance["adapter"] }).adapter = {
     ...adapter,
     sendTurn: (input) => homes.within(input.threadId, () => adapter.sendTurn(input)),
-    ...(warm ? { cacheKeepWarm: { ...warm, ping: (threadId, options) => homes.within(threadId, () => warm.ping(threadId, options)) } } : {}),
+    ...(warm ? { cacheKeepWarm: {
+      ...warm,
+      ping: (threadId, options) => homes.within(threadId, () => warm.ping(threadId, options)),
+      // A summary forks the conversation's session, which lives in its audience's home, and starts the bot's servers there.
+      ...(warm.compact ? { compact: (threadId, options) => homes.within(threadId, () => warm.compact!(threadId, options)) } : {}),
+    } } : {}),
   };
   return instance;
 }

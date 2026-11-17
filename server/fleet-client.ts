@@ -23,6 +23,7 @@ export function fleetRequest(socketPath: string, method: string, path: string, b
       (res) => {
         let text = "";
         res.setEncoding("utf8");
+        res.on("error", (error: Error) => { reject(new Error(`fleet agent: ${error.message}`)); });
         res.on("data", (chunk: string) => { if (text.length < 1_000_000) text += chunk; });
         res.on("end", () => {
           let parsed: unknown = null;

@@ -10,7 +10,7 @@ const PROFILE: CatalogProfile = { skillAuthoring: false, sharedComputers: false,
 function harness(answer: { ok: boolean; status: number; body: Record<string, unknown> } = { ok: true, status: 201, body: { messageId: "m42" } }) {
   const api = vi.fn<HarnessClient["api"]>(async () => ({}));
   const apiResponse = vi.fn<HarnessClient["apiResponse"]>(async () => answer);
-  const context: ToolCallContext = { botId: "bot-scout", threadId: "thread-scout", depth: 0, externalRuntime: false, sharedComputers: false, client: { api, apiResponse } };
+  const context: ToolCallContext = { botId: "bot-scout", threadId: "thread-scout", externalRuntime: false, sharedComputers: false, client: { api, apiResponse } };
   return { api, apiResponse, context };
 }
 
@@ -36,9 +36,9 @@ describe("the widget tools in the catalog", () => {
       type: "object",
       additionalProperties: false,
       properties: {
-        widget: { type: "object", additionalProperties: true, description: "The widget tree." },
-        fallback_text: { type: "string", description: "Optional plain-text version for clients that cannot draw widgets. Written for you when omitted." },
-        widget_id: { type: "string", description: "Only to replace a widget you showed: the id it returned." },
+        widget: { type: "object", additionalProperties: true },
+        fallback_text: { type: "string", description: "Optional plain text for clients without widgets." },
+        widget_id: { type: "string", description: "Only to replace a widget you showed." },
       },
       required: ["widget"],
     });
@@ -47,7 +47,7 @@ describe("the widget tools in the catalog", () => {
     expect(show.description).toContain("if they type something else instead, that is their answer");
     expect(show.description).not.toMatch(/without being asked/);
     expect(show.description).toMatch(/Never ask for passwords here\. In rooms it is view-only: ask in text there\.$/);
-    expect(show.description).toContain("To replace a widget in place (a progress bar moving, a status changing), call this again with the widget_id it returned (was update_widget); one the person already answered cannot be replaced, so show a new one.");
+    expect(show.description).toContain("Call again with its widget_id to replace it in place, until it is answered.");
     for (const name of ["attach_file", "show_widget"]) expect(tools.get(name), name).not.toHaveProperty("annotations");
   });
 });
@@ -153,10 +153,12 @@ describe("the chat-app tools", () => {
       expect(names.slice(names.indexOf("show_widget"), names.indexOf("show_widget") + 2)).toEqual(["show_widget", "show_html"]);
     }
     const tools = new Map(availableTools(PROFILE).map((tool) => [tool.name, tool as { description: string; inputSchema: { required: string[] }; annotations?: unknown }]));
-    expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page in this chat, where the person watches it appear and can point at a part to change: /);
-    expect(tools.get("show_html")!.description).toContain("or `jsx`, one React component file with a default export");
-    // Its last sentence points a dashboard at the bundled data-dashboards skill.
-    expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. To replace a page you showed, in place, call this again with the app_id it returned and new html, jsx or path \(was update_html\); it reloads, so anything the person did in it is lost\. Never put secrets in it\. In rooms everyone sees it, view-only: send and setContext do nothing\. For a data dashboard, follow the data-dashboards skill\.$/);
+    expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page in this chat, where the person can point at a part to change: /);
+    expect(tools.get("show_html")!.description).toContain("`jsx`, one React component file with a default export");
+    // It points a dashboard at the bundled data-dashboards skill.
+    expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. Call again with its app_id to replace it; it reloads\. Never put secrets in it\. In rooms everyone sees it, view-only\. For a data dashboard, follow the data-dashboards skill\. /);
+    // A claude.ai Artifact needs Claude's own claude.ai sign-in: the bot says so and offers our own pages instead.
+    expect(tools.get("show_html")!.description).toMatch(/Asked for a claude\.ai Artifact\? Those need Claude's own claude\.ai sign-in and are not available to bots here: say so in one line, then make it with this tool, or publish_page for a public link\.$/);
     expect(tools.get("show_html")!.inputSchema).not.toHaveProperty("required");
     expect(Object.keys((tools.get("show_html")!.inputSchema as unknown as { properties: object }).properties)).toEqual(expect.arrayContaining(["html", "jsx", "path", "title", "app_id"]));
     expect(Buffer.byteLength(JSON.stringify(tools.get("show_html")))).toBeLessThan(12 * 1024);

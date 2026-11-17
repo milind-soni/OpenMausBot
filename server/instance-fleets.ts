@@ -32,6 +32,7 @@ export const DEFAULT_FLEET: InstanceConfigMap = {
   githubCopilot: { driver: "copilotAgent" },
   commandCode: { driver: "commandCodeAgent" },
   kiro: { driver: "kiroAgent" },
+  devin: { driver: "devinAgent" },
   claude: { driver: "claudeAgent" },
   codex: { driver: "codex" },
   chatgpt: { driver: "codex", displayName: "ChatGPT plan", config: { authMode: "chatgpt-plan" } },
@@ -39,9 +40,11 @@ export const DEFAULT_FLEET: InstanceConfigMap = {
   opencodeGo: { driver: "opencodeGo" },
   openaiCompat: { driver: "openai-compat" },
   mistral: { driver: "mistral" },
+  mistralVibe: { driver: "mistralVibeAgent" },
   cerebras: { driver: "cerebras" },
   groq: { driver: "groq" },
   greenference: { driver: "greenference" },
+  modelgo: { driver: "modelgo" },
   meta: { driver: "meta" },
   deepseek: { driver: "deepseekAgent" },
   museCode: { driver: "museCode" },
@@ -50,6 +53,7 @@ export const DEFAULT_FLEET: InstanceConfigMap = {
   hermes: { driver: "hermesAgent" },
   cline: { driver: "clineAgent" },
   pi: { driver: "piAgent" },
+  omp: { driver: "ompAgent" },
 };
 
 const CUSTOM_ONLY = {
@@ -57,6 +61,8 @@ const CUSTOM_ONLY = {
   hermes: { driver: "hermesAgent" },
   cline: { driver: "clineAgent" },
   pi: { driver: "piAgent" },
+  omp: { driver: "ompAgent" },
+  mistralVibe: { driver: "mistralVibeAgent" },
 } as const;
 
 /** Added to a saved fleet that holds a product engine (claude, grok or codex), when it lacks them. */
@@ -66,11 +72,13 @@ export const PRODUCT_FLEET_ADDITIONS = {
   githubCopilot: { driver: "copilotAgent" },
   commandCode: { driver: "commandCodeAgent" },
   kiro: { driver: "kiroAgent" },
+  devin: { driver: "devinAgent" },
   openaiCompat: { driver: "openai-compat" },
   mistral: { driver: "mistral" },
   cerebras: { driver: "cerebras" },
   groq: { driver: "groq" },
   greenference: { driver: "greenference" },
+  modelgo: { driver: "modelgo" },
   meta: { driver: "meta" },
   deepseek: { driver: "deepseekAgent" },
   museCode: { driver: "museCode" },

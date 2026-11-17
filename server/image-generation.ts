@@ -212,20 +212,34 @@ export async function generateImageWith(
 
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const cancelled = () => cancel?.aborted === true && !timeoutSignal.aborted;
-  let response: Response;
-  try {
-    response = await fetchImpl(provider.url(cfg), {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      redirect: "error",
-      signal: cancel ? AbortSignal.any([timeoutSignal, cancel]) : timeoutSignal,
+  const send = async (payload: Record<string, unknown>): Promise<Response> => {
+    try {
+      return await fetchImpl(provider.url(cfg), {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        redirect: "error",
+        signal: cancel ? AbortSignal.any([timeoutSignal, cancel]) : timeoutSignal,
+      });
+    } catch (error) {
+      if (cancelled()) fail("Image generation was cancelled", 409);
+      const timedOut = timeoutSignal.aborted || (error instanceof Error && error.name === "TimeoutError");
+      if (timedOut) fail("Image generation timed out", 502);
+      fail(`Could not reach ${provider.name} image generation`, 502, unreached(error));
+    }
+  };
+  let response = await send(body);
+
+  // Some Custom gateways accept only size "auto" and reject every exact size, so a failed exact size gets one retry with "auto".
+  if (!response.ok && slot.provider === "custom" && !NOT_STARTED_STATUSES.has(response.status)) {
+    await response.body?.cancel().catch(() => undefined);
+    // A retry that cannot connect keeps the exact size's error; only cancel and timeout end the call there.
+    const retry = await send({ ...body, size: "auto" }).catch((error: unknown) => {
+      if (cancel?.aborted || timeoutSignal.aborted) throw error;
+      return undefined;
     });
-  } catch (error) {
-    if (cancelled()) fail("Image generation was cancelled", 409);
-    const timedOut = timeoutSignal.aborted || (error instanceof Error && error.name === "TimeoutError");
-    if (timedOut) fail("Image generation timed out", 502);
-    fail(`Could not reach ${provider.name} image generation`, 502, unreached(error));
+    if (retry?.ok) response = retry;
+    else await retry?.body?.cancel().catch(() => undefined);
   }
 
   if (!response.ok) {

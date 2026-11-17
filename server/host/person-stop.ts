@@ -6,6 +6,8 @@ import type { RoutineManager } from "../routines.ts";
 import { serverLine } from "../server-lines.ts";
 import type { Message, Store } from "../store.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
+import type { ResolvedSender } from "../../shared/wire.ts";
+import type { Actor } from "./run-owner.ts";
 
 export interface PersonStopDeps {
   store: Pick<Store, "appendMessage" | "bot" | "botByThread" | "groupByThread" | "taskByThread" | "tasks">;
@@ -16,7 +18,7 @@ export interface PersonStopDeps {
   stopping(botId: string, threadId: string): () => void;
   clearUnattended(threadId: string): void;
   /** Remembers that the person stopped the turn running in this thread, so it ends as their stop. */
-  markStopped(threadId: string): void;
+  markStopped(threadId: string, by?: ResolvedSender): void;
   /** Ends a goal running in this one-on-one chat, so the interrupted turn is its last. */
   stopGoal(threadId: string): void;
   /** A turn runs, or teammates are at work, for this thread. */
@@ -24,6 +26,8 @@ export interface PersonStopDeps {
   /** The bot waits for the person's answer here: a parked question or an open card. */
   asking(threadId: string): boolean;
   language(threadId: string): string | undefined;
+  /** Where several people write, the sentence someone who may not stop this thread's run reads. */
+  stopRefusal?(threadId: string, by: Actor): string | null;
 }
 
 export interface TypedStop {
@@ -38,19 +42,21 @@ export interface TypedStop {
   busy: boolean;
   /** The rest of the person's message row, as the busy branch would have recorded it. */
   row: Pick<Message, "replyToId" | "sendId" | "sender" | "via" | "callId">;
+  /** Who typed it. */
+  by?: Actor;
 }
 
 export function createPersonStop(deps: PersonStopDeps) {
   const { store } = deps;
 
-  async function stopThreadForPerson(botId: string, threadId: string): Promise<void> {
+  async function stopThreadForPerson(botId: string, threadId: string, by?: ResolvedSender): Promise<void> {
     const routines = deps.routines();
     const routine = routines?.activeBotRunForBot(botId);
     const free = deps.stopping(botId, threadId);
     if (routine?.threadId === threadId) await routines!.cancelRun(routine.id);
     else {
       deps.handoffs().stoppedByPerson(threadId);
-      deps.markStopped(threadId);
+      deps.markStopped(threadId, by);
       deps.stopGoal(threadId);
       await deps.interruptDirectThread(botId, threadId);
     }
@@ -65,10 +71,13 @@ export function createPersonStop(deps: PersonStopDeps) {
     if (input.fromApp || (trigger.kind !== "user" && trigger.kind !== "owner") || !isStopCommand(text, store.bot(botId)?.name)) return null;
     const everyone = addressesEveryone(text);
     if (!busy && !everyone && (input.row.via || deps.asking(threadId) || !deps.working(botId, threadId))) return null;
+    const refusal = (id: string) => deps.stopRefusal?.(id, input.by ?? { admin: false }) ?? null;
+    const refused = everyone ? null : refusal(threadId);
+    if (refused) throw Object.assign(new Error(refused), { status: 403, code: "stop_not_yours" });
     if (input.personPresent) deps.clearUnattended(threadId);
     const message = store.appendMessage(threadId, { role: "user", kind: "text", text, ...input.row });
-    const stopping = (everyone ? store.tasks(botId).map((task) => task.threadId) : [threadId]).filter((id) => (id === threadId && busy) || deps.working(botId, id));
-    for (const id of stopping) await stopThreadForPerson(botId, id);
+    const stopping = (everyone ? store.tasks(botId).map((task) => task.threadId) : [threadId]).filter((id) => ((id === threadId && busy) || deps.working(botId, id)) && refusal(id) === null);
+    for (const id of stopping) await stopThreadForPerson(botId, id, input.row.sender);
     if (!stopping.length) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(deps.language(threadId), "server.stop.nothingRunning"), ok: true } });
     return { ok: true as const, threadId, message };
   }

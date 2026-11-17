@@ -6,19 +6,25 @@ import { createHash } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 
-import type { Job, JobError, JobErrorCode, JobType } from "./protocol.ts";
+import type { Job, JobError, JobErrorCode, JobType, ServerMode } from "./protocol.ts";
 
 /** Who asked: the Admin over the connector's connection, or root on this server through `mausbot-connector job`. */
 export type AuditSource = "admin" | "local";
 
 export type AuditEvent =
-  | { event: "connector"; what: "started" | "enrolled"; version: string; image: string | null; boxId?: string }
+  | { event: "connector"; what: "started" | "enrolled"; version: string; image: string | null; boxId?: string; mode?: ServerMode }
+  /** The server's admin paused or resumed remote management (`mausbot-connector pause`, `resume`). */
+  | { event: "management"; what: "paused" | "resumed"; by: "local" }
   | { event: "refused"; by: "admin"; code: JobErrorCode; why: string; id?: string; type?: string }
   | { event: "job"; by: AuditSource; id: string; type: JobType; args: Record<string, unknown> }
   | { event: "result"; by: AuditSource; id: string; type: JobType; ok: true; detail?: Record<string, unknown> }
   | { event: "result"; by: AuditSource; id: string; type: JobType; ok: false; error: JobError }
   | { event: "step"; id: string; type: JobType; step: string; detail?: Record<string, unknown> }
-  | { event: "request"; by: "admin"; method: string; path: string; status: number; member?: { email: string; role: string; device: string | null } };
+  | {
+    event: "request"; by: "admin"; method: string; path: string; status: number; member?: { email: string; role: string; device: string | null };
+    /** A customer-run server refused it: it is not on that mode's list, or remote management is paused. */
+    refused?: "mode" | "paused";
+  };
 
 export type AuditLine = AuditEvent & { seq: number; at: string; prev: string };
 

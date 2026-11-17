@@ -133,11 +133,19 @@ export async function primaryScreen(platform: NodeJS.Platform, env: NodeJS.Proce
   return SERVER_SCREEN;
 }
 
-/** OMB_BROWSER_LANG, else the POSIX locale a server was started with; "C" and "POSIX" name no language. */
-export function browserLanguage(env: NodeJS.ProcessEnv): string | undefined {
+/** Explicit OMB_BROWSER_LANG, app language, then the POSIX locale; "C" and "POSIX" name no language. */
+export function browserLanguage(env: NodeJS.ProcessEnv, configured?: string): string | undefined {
   const named = env.OMB_BROWSER_LANG?.trim();
-  if (named) return /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(named) ? named : undefined;
+  if (named && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(named)) return named;
+  const app = configured?.trim();
+  if (app && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(app)) {
+    try {
+      const canonical = Intl.getCanonicalLocales(app)[0];
+      return canonical?.toLowerCase() === "ko" ? "ko-KR" : canonical;
+    } catch {}
+  }
   const locale = env.LC_ALL?.trim() || env.LC_MESSAGES?.trim() || env.LANG?.trim() || "";
+  if (/^(?:C|POSIX)(?:[.@].*)?$/u.test(locale)) return "en-US";
   const match = /^([a-z]{2,3})(?:_([A-Z]{2}))?(?:[.@]|$)/u.exec(locale);
   return match ? (match[2] ? `${match[1]}-${match[2]}` : match[1]) : undefined;
 }

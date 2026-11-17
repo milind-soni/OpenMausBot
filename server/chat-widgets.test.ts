@@ -200,6 +200,23 @@ describe("show_widget", () => {
     expect(fake.appendMessage).not.toHaveBeenCalled();
   });
 
+  it("refuses a button or option that would tag @devs, and keeps a widget that only tells the person to type it (email 1a1bc2fa)", () => {
+    const fake = fakeStore();
+    const refused = { ok: false, status: 400, error: expect.stringContaining("type @devs") };
+    expect(show(fake, { type: "Card", children: [{ type: "Button", label: "@devs report this", onClickAction: { type: "report" } }] })).toMatchObject(refused);
+    expect(show(fake, { type: "Card", children: [{ type: "Text", value: "Report?" }], confirm: { label: "Send to @devs", action: { type: "send" } } })).toMatchObject(refused);
+    expect(show(fake, { type: "Card", children: [{ type: "Form", onSubmitAction: { type: "pick" }, children: [
+      { type: "RadioGroup", name: "what", label: "What next", options: [{ label: "Tell @devs", value: "@devs it broke" }, { label: "Nothing", value: "none" }] },
+      { type: "Button", label: "Send", submit: true },
+    ] }] })).toMatchObject(refused);
+    expect(fake.appendMessage).not.toHaveBeenCalled();
+    expect(show(fake, { type: "Card", children: [
+      { type: "Text", value: "To report this, type @devs and what went wrong." },
+      { type: "Button", label: "Open docs", onClickAction: { type: "open_url", payload: { url: "https://example.com/@devs" } } },
+      { type: "Button", label: "Retry", onClickAction: { type: "retry" } },
+    ] })).toMatchObject({ ok: true });
+  });
+
   it("uses fallback_text when it is given: trimmed, redacted and held to the limit", () => {
     const fake = fakeStore();
     show(fake, WIDGET_SAMPLES.pullRequests, { fallback_text: `  Three PRs are open. Token ${GITHUB_TOKEN}.  ` });

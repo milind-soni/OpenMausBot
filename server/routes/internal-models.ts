@@ -16,7 +16,7 @@ export interface MenuEngine {
   instanceId: string;
   driverKind: string;
   displayName: string | undefined;
-  models: { default: string; options: ReadonlyArray<{ id: string; label: string; orgBlocked?: true }> };
+  models: { default: string; options: ReadonlyArray<{ id: string; label: string; orgBlocked?: true; needsCliUpdate?: string }> };
   adapter: { capabilities: { effortLevels?: readonly string[] } };
 }
 
@@ -59,7 +59,7 @@ export function modelMenu(input: {
   for (const engine of input.engines) {
     const { instanceId } = engine;
     const name = engine.displayName || engine.driverKind;
-    const labels = new Map(engine.models.options.filter((option) => !option.orgBlocked).map((option) => [option.id, option.label]));
+    const labels = new Map(engine.models.options.filter((option) => !option.orgBlocked && !option.needsCliUpdate).map((option) => [option.id, option.label]));
     const ids = [...new Set([...[input.current, ...input.pinned].filter((pin) => pin.instanceId === instanceId).map((pin) => pin.model), engine.models.default, ...labels.keys()])]
       .filter(Boolean);
     const matching = terms.length ? ids.filter((id) => terms.every((term) => `${name} ${id} ${labels.get(id) ?? ""}`.toLowerCase().includes(term))) : ids;

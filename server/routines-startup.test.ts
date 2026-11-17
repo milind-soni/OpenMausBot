@@ -138,12 +138,26 @@ it("recovers queued/due work and a waiting routine's imported hand-off after res
     }
     expect(runs, readFileSync(logPath, "utf8").slice(-4_000)).toEqual(expect.arrayContaining([
       expect.objectContaining({ routineId: scheduled.id, scheduledFor: dueAt, status: "completed" }),
-      expect.objectContaining({ routineId: cron.id, scheduledFor: cronDueAt, status: "completed" }),
+      expect.objectContaining({ routineId: cron.id, triggerSource: "schedule", status: "completed" }),
+      // Found five minutes late, the every-minute rule runs its newest minute; the ones before it are counted on one row.
+      expect.objectContaining({ routineId: cron.id, scheduledFor: cronDueAt, status: "missed", skipped: expect.objectContaining({ firstAt: cronDueAt }) }),
       expect.objectContaining({ id: queued.id, routineId: manual.id, status: "completed" }),
       expect.objectContaining({ routineId: onStartup.id, triggerSource: "startup", status: "completed" }),
       expect.objectContaining({ id: "interrupted-run", status: "completed" }),
     ]));
     expect(runs.filter(run => run.routineId === onStartup.id)).toHaveLength(1);
+    expect(runs.filter((run) => run.routineId === cron.id && run.status === "completed")).toEqual([expect.objectContaining({ scheduledFor: expect.any(Number) })]);
+    const ranFor = runs.find((run) => run.routineId === cron.id && run.status === "completed")!.scheduledFor;
+    expect(ranFor).toBeGreaterThan(cronDueAt);
+    // The ledger beside routines.json holds one record for the minute that ran and one that counts the minutes before it.
+    const history = (await api("GET", `/api/routines?history=${cron.id}`)).occurrences as Array<Record<string, unknown>>;
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({ dueAt: ranFor, state: "ran", attempts: 1 }),
+      expect.objectContaining({ dueAt: cronDueAt, state: "missed", reason: "computer-off", attempts: 0 }),
+    ]));
+    expect(JSON.stringify(history)).not.toContain("lease");
+    expect(readFileSync(join(dataDir, "routines.ledger.jsonl"), "utf8")).not.toContain("Recover one cron run");
+    expect((await api("GET", "/api/routines")).occurrences).toBeUndefined();
     const resumedRun = runs.find((run) => run.id === "interrupted-run")!;
     expect(resumedRun.error).toBeUndefined();
     expect(resumedRun.finishedAt).toBeGreaterThan(dueAt);

@@ -13,6 +13,7 @@ import { cloudPairingSignature } from "./cloud-home.ts";
 import { CLOUD_CREDIT_INSTANCE } from "./cloud-credit-provider.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 import { TRIAL_CREDIT_OWN_AI, TRIAL_CREDIT_REFUSED } from "./trial-credit.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -245,14 +246,14 @@ describe("the free trial's Claude credit on a Cloud home", { timeout: 90_000 }, 
     const seeded = (await bots()).find((bot) => bot.name !== "From the desktop")!;
     await waitForExit(child, { signal: "SIGTERM" });
     // What a desktop copy installs: the desktop's bots.json, verbatim, on the desktop's own engines.
-    const records = JSON.parse(readFileSync(join(data, "bots.json"), "utf8")) as Array<{ id: string; modelSelection: unknown; tasks?: Array<{ threadId: string; modelSelection?: unknown }> }>;
+    const records = readRegistry(data).bots as Array<{ id: string; modelSelection: unknown; tasks?: Array<{ threadId: string; modelSelection?: unknown }> }>;
     const restored = records.find((record) => record.id === seeded.id)!;
     restored.modelSelection = { instanceId: "codex", model: "gpt-5.5" };
     restored.tasks![0]!.modelSelection = { instanceId: "desktop-endpoint", model: "llama-3" };
-    writeFileSync(join(data, "bots.json"), JSON.stringify(records, null, 2));
+    writeRegistry(data, { bots: records });
     await boot();
     await expect.poll(async () => (await bots()).find((bot) => bot.id === seeded.id)?.modelSelection, { timeout: 20_000, interval: 200 }).toEqual(SONNET);
-    const tasks = (JSON.parse(readFileSync(join(data, "bots.json"), "utf8")) as typeof records).find((record) => record.id === seeded.id)!.tasks!;
+    const tasks = (readRegistry(data).bots as typeof records).find((record) => record.id === seeded.id)!.tasks!;
     expect(tasks.every((task) => task.modelSelection === undefined)).toBe(true);
     expect(moved()[seeded.id]).toEqual({ instanceId: "codex", model: "gpt-5.5" });
     expect(answered(await turn("still here?", seeded))).toBe(true);

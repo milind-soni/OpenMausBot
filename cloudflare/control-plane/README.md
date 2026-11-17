@@ -176,10 +176,11 @@ no configured account acts on (see **Several Cloudflare accounts**) are
 skipped. Rows run five at a time (the Workers limit is six connections
 awaiting headers), and a run stops
 starting new rows in an account as soon as that account's API answers `429`.
-At ten provider calls per row the default is about
-200 calls per run: a sixth of the API token's 1,200 requests per five minutes,
-and far below the Workers Paid limit of 10,000 subrequests per invocation. On
-Workers Free (50 subrequests per invocation) set the limit to 4. Failed
+At up to 14 provider calls per row (four of them only when a forced removal
+meets a tunnel that is still connected) the default is at most about 290 calls per
+run: under a quarter of the API token's 1,200 requests per five minutes, and far
+below the Workers Paid limit of 10,000 subrequests per invocation. On Workers
+Free (50 subrequests per invocation) set the limit to 3. Failed
 scheduled cleanups back off from five minutes through 15 minutes, one hour,
 six hours, and then 24 hours. Once a deletion has been pending for 24 hours,
 each eligible sweep emits a distinct aggregate operator-attention log without
@@ -189,42 +190,81 @@ unbounded scheduled invocation.
 
 ### Phone push relay
 
-Closed-app alerts for the iOS app (harness side: `server/phone-push.ts`,
-wire contract version 1 in `shared/phone-push.ts`; app side:
-`docs/ios-companion.md`). Apple accepts pushes for an App Store or
-TestFlight build only when they are signed with the publishing team's key, and
-a harness may run on a VPS or in a container. So the project's key lives here,
-and a harness asks this Worker to push with the installation credential it
-already holds. Account bearer tokens are refused. All three routes take
-`application/json` and answer with the usual `{ "error": "<code>" }` shape.
+Closed-app alerts for the phone app, on iPhone through APNs and on Android
+through Firebase Cloud Messaging (HTTP v1). The design, the threat model and
+the switch-on steps are in `docs/phone-push.md`; the harness side is
+`server/phone-push.ts`, its wire types `packages/phone-protocol/src/phone-push.ts`.
+Apple accepts pushes for an App Store or TestFlight build only when they are
+signed with the publishing team's key, and Google only from a service account
+of the Firebase project the Android build is registered in. So the project's
+keys live here, and a harness asks this Worker to push with the installation
+credential it already holds. Account bearer tokens are refused. All three
+routes take `application/json` and answer with the usual `{ "error": "<code>" }`
+shape.
 
-- `register` `{ "v": 1, "token": "<lowercase hex>", "environment": "production" | "sandbox" }`
-  stores the APNs device token for this installation (idempotent; it updates
-  the environment). At most 50 tokens per installation (`409
-  push_device_limit`) and 120 registrations per hour. An environment
-  `APNS_ENVIRONMENTS` does not list is `400 push_environment_not_allowed`.
-- `unregister` `{ "v": 1, "token": "…" }` deletes it. `204`.
-- `send` `{ "v": 1, "token": "…", "pairing"?: "…", "notification": { "kind",
-  "title", "botId", "botName", "threadId", "roomId"?, "roomName"? } }` pushes
-  to a token **this** installation registered, else `404
-  push_device_unknown` (the harness then registers and retries once). The
-  schema is strict: `kind` is `[a-z-]`, ids are `[\w-]{1,120}`, `title` is one
-  line of at most 200 characters, names at most 80. Any other field (a
-  `body`, a message) is `400 invalid_request`, never silently dropped, so no
-  message text can reach Apple through this route. `202 { "sent": true }` on
+- `register` `{ "v": 1, "platform"?: "apns", "token": "<lowercase hex>", "environment": "production" | "sandbox" }`
+  or `{ "v": 1, "platform": "fcm", "token": "<FCM registration token>" }`
+  stores the device token for this installation (idempotent; it updates the
+  platform and environment). `platform` defaults to `apns`, so a harness that
+  predates FCM keeps working. An FCM token has no environment (`production`
+  is stored). At most 50 tokens per installation (`409 push_device_limit`)
+  and 120 registrations per hour. An environment `APNS_ENVIRONMENTS` does not
+  list is `400 push_environment_not_allowed`; a platform whose secrets are not
+  set is `503 push_unavailable`.
+- `unregister` `{ "v": 1, "platform"?: …, "token": "…" }` deletes it. `204`.
+- `send` `{ "v": 1, "token": "…", "pairing"?: "…", "collapseId"?: "…",
+  "notification": { "kind", "title", "botId", "botName", "threadId",
+  "roomId"?, "roomName"? } }` pushes to a token **this** installation
+  registered, else `404 push_device_unknown` (the harness then registers and
+  retries once). The schema is strict: `kind` is `[a-z-]`, ids are
+  `[\w-]{1,120}`, `title` is one line of at most 200 characters, names at most
+  80, `collapseId` is `[A-Za-z0-9._:-]{1,64}`. Any other field (a `body`, a
+  message) is `400 invalid_request`, never silently dropped, so no message
+  text can reach Apple or Google through this route. `202 { "sent": true }` on
   success. Limits: 600 sends per installation and 60 per token per hour (`429
   rate_limited`, `Retry-After: 60`).
 
-The APNs request is `POST https://api.push.apple.com/3/device/<token>` (or
+- `register` also takes `"purpose": "activity"` (one Live Activity's update
+  token) or `"activity-start"` (the app's Live Activity push-to-start token) for
+  an APNs token; the default is `alert`. A send is refused (`404
+  push_device_unknown`) for a token registered for another purpose: alerts go
+  to `alert` tokens, a start to the `activity-start` token, an update or end to
+  that activity's own token.
+- `activity` `{ "v": 1, "token", "event": "start" | "update" | "end", "alert"?,
+  "activity": { "botId", "botName", "kind": "needsYou" | "working", "headline",
+  "since", "link", "color", "gradient", "body", "version"?, "ask"?, "status"?,
+  "waiting"? } }` starts, updates or ends a
+  bot's Live Activity on iPhone, or sends an FCM token the data message the
+  Android app turns into its ongoing "working" notification. The schema is as
+  strict as `send`'s: `headline` is one line of at most 120 characters (the
+  phone's own words, "Scout needs you", with the name filled in), `link` must
+  be the app's chat link, colours are `#rrggbb`, and there is no field for a
+  line of text or an answer. `alert` is accepted on a `start` only (`400`
+  elsewhere): an alerting update or end lights the screen and expands the
+  Dynamic Island. `version: 1` with `ask` (`approval` | `question` | `signIn`
+  | `other`), `status` (one line of at most 80, the phone's words without the
+  name) and `waiting` (bots waiting on the person) asks for the phone's
+  content state version 1; all four or none. Same limits and answers as
+  `send`.
+
+`collapseId` is the identifier the phone gives the notification the live
+stream would have posted (`openmaus.<threadId>.<seq>`), so a push and that
+notification replace each other instead of showing twice. Without one, the
+Worker uses the first 32 hex characters of SHA-256(`kind:threadId`).
+
+**APNs.** `POST https://api.push.apple.com/3/device/<token>` (or
 `api.sandbox.push.apple.com` for a `sandbox` token) with `apns-push-type:
 alert`, `apns-priority: 10`, a 24-hour `apns-expiration`, `apns-topic` set to
-the bundle id, and an `apns-collapse-id` derived from the kind and thread, so
-a repeat replaces the older alert. The payload is
-`{ "aps": { "alert": { "title" }, "sound": "default", "thread-id",
+the bundle id, and `apns-collapse-id`. The payload is
+`{ "aps": { "alert": { "title" }, "sound": "default", "thread-id", "category",
 "interruption-level" }, "omb": { "v": 1, "kind", "botId", "botName",
-"threadId", "roomId"?, "roomName"?, "pairing"? } }`; `interruption-level` is
-`time-sensitive` for `approval`, `question`, `sign-in` and `mention`, else
-`active`.
+"threadId", "roomId"?, "roomName"?, "pairing"? }, "body": <the same as omb> }`.
+`category` is the app's `OPENMAUS_APPROVAL`, `OPENMAUS_QUESTION` or
+`OPENMAUS_UPDATE`, so the notification carries the app's buttons.
+`interruption-level` is `time-sensitive` for `approval`, `question`,
+`sign-in` and `mention`, else `active`. `body` repeats `omb` because the
+phone's notification library hands the app only `body` as a remote
+notification's data.
 
 The provider token is an ES256 JWT signed with WebCrypto (no dependency):
 `{ "alg": "ES256", "kid": APNS_KEY_ID }`, `{ "iss": APNS_TEAM_ID, "iat" }`.
@@ -232,19 +272,52 @@ Its `iat` is the start of the current 50-minute window, so every isolate
 signs for the same window and Apple's 20-to-60-minute refresh rule holds
 however many isolates send; each isolate caches its token for the window.
 
-APNs answers are mapped for the harness: `410 Unregistered`,
-`BadDeviceToken` and `DeviceTokenNotForTopic` delete the token for every
-installation that registered it in the same APNs environment (for a `410`,
-only registrations older than Apple's `timestamp`) and return `410
-push_device_unregistered` (the harness drops it too); an expired or invalid provider token is re-signed and retried once,
-then `503 push_unavailable`; APNs `429` is `429 rate_limited`; anything else
-is `502 push_failed`. Failures log the request id, APNs status and reason
-only, never the token or payload.
+**Live Activities.** `POST https://api.push.apple.com/3/device/<token>`
+with `apns-push-type: liveactivity`, `apns-topic: <bundle id>.push-type.liveactivity`,
+priority 10 for a start and 5 otherwise, a 15-minute expiration, and
+`{ "aps": { "timestamp", "event", "content-state": { "name": "BotActivity",
+"props": <the app's BotActivityProps as JSON: version 1 (`version`, `name`,
+`color`, `body`, `mood`, `kind`, `ask`, `status`, `waiting`, `since`, `link`,
+no answers) when asked for, else the earlier shape with `headline`, an empty
+line and no answers> }, "stale-date" (now + 15 min) | "dismissal-date" (an
+end), and for a start only "attributes-type": "LiveActivityAttributes",
+"attributes": { "url" } and the alert ActivityKit requires to start one
+remotely, "alert": { "title": <headline>, "body": <bot name>, "sound" } } }`.
+An update or an end never carries an alert. `BotActivity` and `LiveActivityAttributes` are the
+names the phone app's Live Activity is registered under (expo-widgets). For an
+FCM token: a data-only message `{ "omb_kind": "activity", "event", "bot_id",
+"bot_name", "kind", "headline", "since", "link", "sent_at" }`, priority
+`HIGH` when the bot needs the person or the activity ends, else `NORMAL`.
 
-Without all of the settings below every push route answers `503
-push_unavailable` and harnesses back off for an hour. Revoking an
-installation deletes its tokens. D1 stores, per row, the installation id, the
-token, its SHA-256, the environment and timestamps (`migrations/0008`).
+**FCM.** An OAuth access token from `https://oauth2.googleapis.com/token`
+(the JWT bearer grant: an RS256 assertion signed with the service account's
+key, scope `firebase.messaging`; the file's own `token_uri` is ignored),
+cached per isolate until five minutes before it expires. Then
+`POST https://fcm.googleapis.com/v1/projects/<project_id>/messages:send` with
+a data-only message the phone's notification library presents itself:
+`{ "message": { "token", "data": { "title", "tag": <collapse id>,
+"channelId", "categoryId", "threadIdentifier": <threadId>, "body": <omb as
+JSON> }, "android": { "priority": "HIGH", "ttl": "86400s" } } }`. There is no
+`message` key, so the notification shows its title and nothing else.
+`channelId` is the app's `approval_question` for approvals, questions and
+sign-ins, `routine_failed` for routines and `bot_messages` for the rest.
+
+Provider answers are mapped for the harness. A dead token is deleted for
+every installation that registered it and answers `410
+push_device_unregistered` (the harness drops it too): APNs `410
+Unregistered`, `BadDeviceToken` and `DeviceTokenNotForTopic` (in the same APNs
+environment; for a `410`, only registrations older than Apple's `timestamp`),
+FCM `UNREGISTERED`, `SENDER_ID_MISMATCH`, and an `INVALID_ARGUMENT` about the
+registration token. An expired or refused provider or access token is renewed
+and retried once, then `503 push_unavailable`; a `429` is `429 rate_limited`;
+anything else is `502 push_failed`. Failures log the request id, the
+platform, the provider's status and reason only, never the token or payload.
+
+Without the secrets for a platform its routes answer `503 push_unavailable`
+and harnesses back off for an hour. Revoking an installation deletes its
+tokens. D1 stores, per row, the installation id, the token, its SHA-256, the
+platform, the purpose, the environment and timestamps (`migrations/0008`, `0017`,
+`0018`).
 
 **Secrets the maintainer sets** (all with `wrangler secret put <NAME>
 --config wrangler.jsonc`; none belongs in `vars`, this file, or CI output):
@@ -256,12 +329,14 @@ token, its SHA-256, the environment and timestamps (`migrations/0008`).
 | `APNS_PRIVATE_KEY` | The whole `.p8` file, PEM, e.g. `wrangler secret put APNS_PRIVATE_KEY < AuthKey_XXXXXXXXXX.p8`. Escaped `\n` newlines are accepted too. |
 | `APNS_BUNDLE_ID` | The iOS app's bundle id, which is the APNs topic. |
 | `APNS_ENVIRONMENTS` | Optional. `production` (default), `sandbox`, or `production,sandbox` to also accept development builds' tokens. |
+| `FCM_SERVICE_ACCOUNT` | The whole service-account JSON file of the Firebase project (Project settings → Service accounts → Generate new private key), e.g. `wrangler secret put FCM_SERVICE_ACCOUNT < service-account.json`. Only `project_id`, `client_email` and `private_key` are read. |
 
 They are deliberately not in `secrets.required`: the Worker is complete
-without them, with phone push off, until the Apple key exists. Apply `migrations/0008` before
-deploying the Worker that uses it. For a local trial with `wrangler dev`,
-`.dev.vars` is read only for declared names, so add these names to
-`secrets.required` in a local, uncommitted copy of the config.
+without them, with phone push off, until the keys exist. Apply
+`migrations/0008`, `0017` and `0018` before deploying the Worker that uses them. For
+a local trial with `wrangler dev`, `.dev.vars` is read only for declared
+names, so add these names to `secrets.required` in a local, uncommitted copy
+of the config.
 
 ### Tunnel capacity and idle reclaim
 
@@ -280,7 +355,7 @@ A failure in one account is logged and never stops the others:
    - `inactive` (never ran), with no activation time, created at least two
      days ago; or
    - `down` with its last connection ended at least
-     `OMB_TUNNEL_OFFLINE_RECLAIM_DAYS` (default 21, minimum 3) days ago and no
+     `OMB_TUNNEL_OFFLINE_RECLAIM_DAYS` (default 21, minimum 1) days ago and no
      later activation.
 
    `healthy` and `degraded` tunnels, any reported connection, an unknown
@@ -586,8 +661,8 @@ no new endpoint while another account has room.
 Each account adds two Cloudflare reads to every cron run (a tunnel page and a
 DNS count), and each move two lookups in the old account. Tokens created by
 the same Cloudflare user share its 1,200 requests per five minutes. On
-Workers Free, four accounts with `OMB_CLEANUP_SWEEP_LIMIT` 4 use the whole
-50-subrequest budget, hence at most three extra accounts.
+Workers Free, three accounts with `OMB_CLEANUP_SWEEP_LIMIT` 3 use the whole
+50-subrequest budget; a fourth needs the limit at 2.
 
 ### MausBot Relay
 
@@ -623,8 +698,95 @@ old one; no identifiers) answers:
   the day, the kind and a count; `relay_adoption.first_seen_at`, `token_at` and `e2e_at` tell a request whether its
   installation was already counted today. The stats dashboard (stats.openmausbot.com) charts it. A Worker without the
   migration keeps minting tokens and writing `relay_adoption`, and logs `relay_daily_schema` once per isolate.
-- **Tunnels.** From `RELAY_CAPABLE_MIN_VERSION`, a desktop at that version or later that reports `legacyDevices: 0` gets
-  `409 relay_capable` instead of a new tunnel. An endpoint it already holds keeps working.
+- **Tunnels.** From `RELAY_CAPABLE_MIN_VERSION`, a desktop at that version or later that the relay can carry (it is
+  on, the computer is inside the rollout and not blocked) and that reports `legacyDevices: 0` gets `409 relay_capable`
+  instead of a tunnel, whether it never had one or is coming back after a release or reclaim. An endpoint it already
+  holds keeps working. A desktop the relay cannot carry gets a tunnel as before. See **Releasing tunnels**.
+
+### Releasing tunnels
+
+A running desktop keeps its connector up, so idle reclaim never sees its tunnel as idle. These rules give tunnels back
+once the relay has replaced them. Each switch is off in `wrangler.jsonc`; all need migrations `0015` and `0016`. The cron only
+marks rows `deleting` (at most 20 a run, every reason together) and the cleanup sweep removes them; the row and its
+hostname stay, so a later provisioning call returns the same address.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `RELAY_TUNNEL_RELEASE_PERCENT` | `0` | Share of computers (the relay rollout's stable hash) whose tunnel is released once it is proven on the relay |
+| `RELAY_TUNNEL_RELEASE_DAYS` | `3` | The wait: no old phone reported for this long. Three days outlasts a weekend away, so a phone that still dials the tunnel has had working days to be counted and stop the wait |
+| `TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT` | `0` | Share of relay-served computers that give up their tunnel whatever phones are paired. Old phone apps stop connecting from outside the home network |
+| `TUNNEL_MIN_APP_VERSION` | empty | A desktop below it gets `426 update_required` and its tunnel is removed. A missing version counts as below |
+| `TUNNEL_REASON_MIN_VERSION` | empty | First desktop release that reads `tunnel` on `409 relay_capable` and keeps asking afterwards. Only from it is a full account answered with `relay_capable` |
+| `OMB_TUNNEL_RECLAIM_PREVIEW_DAYS` | empty | Dry run of idle reclaim at another offline period; counted, never acted on |
+
+- **Proven on the relay** means: a relay token in the last two days, a phone report in the last two days with at
+  least one phone on the encrypted connection and no old phone, and no old phone reported for the whole wait
+  (`relay_adoption.legacy_clear_at`, cleared by any report that counts an old phone). A phone that has used the
+  encrypted connection never dials the tunnel again, so such a tunnel carries nothing. The checks are repeated inside
+  the marking SQL, so a report that lands during the run wins.
+- **One rule for "on the relay".** The cron and provisioning both ask `relayAdmits` (`src/relay.ts`): the relay is
+  on, the computer is not blocked, and it is inside `RELAY_ROLLOUT_PERCENT` or named in `RELAY_ALLOW_INSTALLATIONS`.
+  So the cron never marks a tunnel that provisioning would hand straight back. To give up a tunnel that works, a
+  computer must also hold a relay token from the last two days: the cron always requires it, and under the cutoff
+  provisioning requires it whenever the row still holds a tunnel.
+- **The stored release.** `installations.app_version` is refreshed by every relay-token request (hourly on a
+  relay-capable desktop), as well as at registration and on `POST .../endpoint`. The cron applies
+  `TUNNEL_MIN_APP_VERSION` only to a computer that called in the last two days: had it updated to a relay-capable
+  release it would have said so. A computer that has been off is left to idle reclaim. One case is still judged by
+  a stale release: a desktop that updated with the relay route turned off. Its tunnel is removed, its next request
+  reports the real release and the same address comes back.
+- **Online computers.** Cloudflare refuses to delete a tunnel that has active connections (API error 1022, recorded as
+  `cf_tunnel_connected`), and a running desktop's cloudflared is connected. For a release, an owner's delete or a
+  revoked installation, the sweep then drops the tunnel's connections (`DELETE .../cfd_tunnel/{id}/connections`) and
+  deletes again at once, for at most two rounds, the last with `?cascade=true` (what `cloudflared tunnel delete
+  --force` sends; not in the public API reference); a deleted tunnel's connector token no longer connects. Idle reclaim never does this: a tunnel that answers
+  "still connected" is left, and its next attempt finds it connected and cancels.
+- **Backpressure.** A run marks at most what one cleanup sweep removes (`OMB_CLEANUP_SWEEP_LIMIT`, at most 20) minus
+  the rows already waiting for cleanup. While the sweep is failing or rate-limited nothing more is marked. A forced
+  removal still refused as connected after its rounds does not count as waiting: it backs off (5 minutes up to 24
+  hours) and retries while the sweep and the marking go on. A marked row is a final delete: its owner is answered
+  `409 endpoint_busy` until the sweep has removed it.
+- **Self-hosted servers.** A server (`openmausbot serve --tunnel`, a fleet container with `OMB_INSTALLATION_CREDENTIAL`)
+  has no phone relay of its own: its tunnel is its public address (web UI, the desktop app's connection to it,
+  webhooks). Provisioning never answers a server `relay_capable` (no `retired`, no `full`; at the limit it gets
+  `503 endpoint_capacity`), and the cron never marks a server's tunnel for `relay_proven` or `legacy_cutoff`. The
+  version cutoff still applies (`426`, and `min_version`). A server that uses the relay and does not ask for a tunnel
+  simply has none. An installation is a server when it says so: optional `kind: "desktop" | "server"` on
+  `POST /v1/installations`, `POST .../self/endpoint` and `POST .../self/relay-token`, stored in `installations.kind`
+  (migration `0016`; the latest report wins). The request schemas are strict, so this Worker must accept `kind` before
+  any client release sends it. An installation that has never said is judged by what every release up to 0.1.152
+  does: the desktop reports `legacyDevices` whenever its companion runs and asks for relay tokens, a server does
+  neither. So `POST .../endpoint` without `legacyDevices`, from an installation with no `relay_adoption` row, is
+  treated as a server. A desktop that has never asked for a relay token and provisions while its companion is off is
+  treated the same way, and gets a tunnel as before the cutoff.
+- **Coming back.** `POST /v1/installations/self/endpoint` creates a tunnel again, with the same hostname, when the
+  desktop reports an old phone (outside the cutoff), or the relay cannot carry it: `RELAY_DISABLED: "1"`, a lower
+  `RELAY_ROLLOUT_PERCENT`, or `relay_blocked_at`. With the relay switched off the cron releases nothing on the
+  relay's account either, so a relay outage is answered by that one switch.
+- **At the tunnel limit** a desktop the relay carries, at `TUNNEL_REASON_MIN_VERSION` or later, is answered
+  `409 {"error":"relay_capable","tunnel":"full"}` instead of `503 endpoint_capacity`: it pairs new phones over the
+  relay and keeps asking for its old phones. An earlier release takes any `relay_capable` as "nothing more to do"
+  and would stop retrying, so it keeps the 503. Under the old-phone cutoff the answer is `"tunnel":"retired"` for
+  every relay-capable release; the earlier ones carry on without a tunnel and say nothing.
+- **Reading before switching.** `/healthz` reports counts only:
+
+```json
+"tunnelRelease": {
+  "relayProven": { "percent": 0, "days": 3, "eligible": 41 },
+  "legacyPhoneCutoff": { "percent": 0, "eligible": 1630 },
+  "minAppVersion": { "on": false, "eligible": 212 }
+}
+```
+
+  `relayProven.eligible` is what the release clears at 100%; `legacyPhoneCutoff.eligible` what the cutoff clears
+  beyond that (both assume the relay rollout is at 100%); `minAppVersion.eligible` the tunnels of desktops seen in
+  the last two days below `TUNNEL_MIN_APP_VERSION`, or below `RELAY_CAPABLE_MIN_VERSION` while no minimum is set. `capacity.reclaim.preview` is
+  `{ "offlineDays": 1, "eligible": 37 }` once every account has finished a full pass at the preview period (about 50
+  minutes per 1,000 tunnels), and `eligible: null` until then.
+- **Order.** Apply migrations `0015` and `0016` and deploy with everything off. Read `tunnelRelease`. Raise
+  `RELAY_TUNNEL_RELEASE_PERCENT` 10, 50, 100. After the desktop release that explains the cutoff is out, set
+  `TUNNEL_REASON_MIN_VERSION` to that release, then raise `TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT` 10, then 100, and last
+  set `TUNNEL_MIN_APP_VERSION`.
 
 Setup, once:
 
@@ -766,9 +928,9 @@ Before a production deployment, an operator must:
    and added later (see **Several Cloudflare accounts**).
 7. Replace `ALLOWED_ORIGINS` with a comma-separated allow-list of exact HTTPS
    application origins. Wildcards are deliberately unsupported.
-8. Optional, for closed-app phone alerts: apply `migrations/0008`, then set
-   the APNs secrets listed under **Phone push relay**. Without them the push
-   routes answer `503 push_unavailable` and nothing else changes.
+8. Optional, for closed-app phone alerts: apply `migrations/0008`, `0017` and `0018`, then set
+   the APNs and FCM secrets listed under **Phone push relay**. Without them the
+   push routes answer `503 push_unavailable` and nothing else changes.
 9. Deploy the Worker and verify that `GET <BETTER_AUTH_URL>/healthz` returns
    `"ok": true` and `"service": "openmausbot-control-plane"` over HTTPS
    before shipping the desktop build. Electron probes this endpoint and

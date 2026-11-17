@@ -19,7 +19,7 @@ Never forward the harness port yourself. A self-hosted server is reached through
 
 - `--public-url https://…`: your own cloudflared tunnel, Caddy or nginx in front;
 - `--domain HOST`: a managed Caddy that gets the certificate;
-- `--tailscale`: your tailnet, with Tailscale's HTTPS;
+- `--tailscale`: your tailnet, with Tailscale's HTTPS when the tailnet has certificates turned on, otherwise plain http on this machine's own tailnet address;
 - `--lan`: this network only, plain http. It listens on every address, but answers only connections whose two ends are both private;
 - `--tunnel`: a free MausBot web address.
 

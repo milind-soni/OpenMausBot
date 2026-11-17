@@ -75,7 +75,9 @@ export class ChatToolCalls {
   add(value: unknown, streaming: boolean): void {
     if (value === undefined || value === null) return;
     if (!Array.isArray(value)) throw new ChatProtocolError("provider returned invalid tool_calls");
-    const omitted = (field: unknown) => field === undefined || (streaming && field === null);
+    // Streamed continuation chunks may repeat a field as null, or as "" (DashScope/Qwen sends the id only on a call's
+    // first chunk).
+    const omitted = (field: unknown) => field === undefined || (streaming && (field === null || field === ""));
     for (const [position, raw] of value.entries()) {
       const delta = object(raw);
       const index = !streaming ? position : delta?.index ?? this.slotOf(delta?.id);

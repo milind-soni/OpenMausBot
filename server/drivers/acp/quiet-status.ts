@@ -8,6 +8,8 @@ import { closeSync, existsSync, fstatSync, openSync, readdirSync, readFileSync, 
 import { join } from "node:path";
 
 import { redactSecretsInText } from "../../redact.ts";
+// The usage-limit wait (OMB_ACP_LIMIT_QUIET_MS) lives with the failure words, so reading a failure loads no ACP driver.
+import { limitQuietMs, usageLimitWait } from "../engine-errors.ts";
 
 // Prompt silence guard (0 disables). Healthy agents go quiet for minutes: Qwen Code 0.24 sends
 // nothing while it compresses history, backs off a rate limit (60 s up to 5 min per wait) or runs
@@ -312,16 +314,6 @@ export function sampleProcessTree(pid: number, since?: number): Promise<ProcessS
 /** A model request that failed on a usage or rate limit: an engine that then goes quiet is waiting that limit out
  * (OpenCode 1.18 sleeps for the provider's whole retry-after, uncapped, five times over). */
 export const LIMIT_WORDS = /\b429\b|rate.?limit|too many requests|usage limit|quota|GoUsageLimitError|FreeUsageLimitError|insufficient_quota|credits? (?:exhausted|used up)|out of credits/i;
-
-/** How long an engine may stay quiet after a model request failed on a limit before the turn is ended as a usage limit,
- * so the bot carries on with another AI: longer than any retry an engine makes without a provider's retry-after
- * (OMB_ACP_LIMIT_QUIET_MS overrides). */
-export const DEFAULT_LIMIT_QUIET_MS = 2 * 60_000;
-export const limitQuietMs = (): number => knob("OMB_ACP_LIMIT_QUIET_MS", DEFAULT_LIMIT_QUIET_MS);
-
-/** A 429 whose wait is longer than any engine retries on its own is a usage limit, not a short rate limit. */
-export const usageLimitWait = (status: number | null | undefined, waitMs: number | null | undefined): boolean =>
-  status === 429 && (waitMs ?? 0) > limitQuietMs();
 
 /** No open request, no CPU and nothing logged, this long: the engine is stuck, and the turn is stopped
  * (OMB_ACP_NO_SIGNS_STOP_MS overrides). */

@@ -4,7 +4,7 @@ import { cronPresetText, cronText } from "@/lib/cron-text";
 import { clockOptions } from "@/lib/clock-time";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { isRoutineProblemRun, type Routine, type RoutineRun, type RoutineSchedule } from "@/lib/routines";
+import { ROUTINE_HANDOFF_WAIT, isCountedSkip, isRoutineProblemRun, type Routine, type RoutineRun, type RoutineSchedule } from "@/lib/routines";
 import type { WebhookAttempt, WebhookTrigger } from "@/lib/webhooks";
 import type { AppTrigger } from "@/lib/app-triggers";
 import { appProblem, appStatusParts, appWhen, skippedToday } from "@/lib/app-automations";
@@ -35,6 +35,8 @@ export interface Automation {
   checkTroubleCode?: string;
   /** Its runs read and draft only. */
   readsAndDrafts?: boolean;
+  /** Its newest runs in a row whose cloud desktop did not start, while its scheduled runs are spaced out for it. */
+  noStartStreak?: number;
 }
 
 const runTime = (run: RoutineRun) => run.startedAt ?? run.scheduledFor ?? run.createdAt;
@@ -49,7 +51,7 @@ export function automationsFrom(sources: { routines: readonly Routine[]; webhook
       kind: "schedule", id: routine.id, name: routine.name, botId: routine.botId, instructions: routine.prompt, enabled: routine.enabled,
       schedule: routine.schedule, nextRunAt: routine.enabled ? routine.nextRunAt : null, runs: runsOf(routine.id),
       ...(routine.checkedAt !== undefined ? { checkedAt: routine.checkedAt } : {}), ...(routine.checkTrouble ? { checkTrouble: routine.checkTrouble, ...(routine.checkTroubleCode ? { checkTroubleCode: routine.checkTroubleCode } : {}) } : {}),
-      ...(routine.access === "read-and-draft" ? { readsAndDrafts: true } : {}),
+      ...(routine.access === "read-and-draft" ? { readsAndDrafts: true } : {}), ...(routine.noStartStreak ? { noStartStreak: routine.noStartStreak } : {}),
     })),
     ...sources.webhooks.map((webhook): Automation => ({
       kind: "webhook", id: webhook.id, name: webhook.name, botId: webhook.botId, instructions: webhook.prompt, enabled: webhook.enabled,
@@ -237,6 +239,8 @@ export interface AutomationStatus {
 }
 
 const isProblem = (run: RoutineRun) => run.status === "failed" || run.status === "missed";
+/** The automation's newest run that started or was due to: not one still queued, nor a row that only counts skipped occurrences. */
+export const latestRun = (automation: Pick<Automation, "runs">): RoutineRun | undefined => automation.runs.find((run) => run.status !== "queued" && !isCountedSkip(run));
 const SIGNED_OUT = /sign(ed)?[ -]?(in|out)\b|log(ged)?[ -]?(in|out)\b|unauthori[sz]ed|\b401\b|not authenticated|authentication (failed|required)|(token|session|credential)s? (has |have )?expired|expired (token|session|credential)|invalid api key|reconnect/i;
 const OUT_OF_CREDIT = /credit|quota|billing|payment|insufficient|out of tokens|usage limit|rate.?limit|\b429\b|limit (reached|exceeded)|plan limit/i;
 const OUT_OF_TIME = /run limit|time limit|timed out|minute limit/i;
@@ -249,6 +253,15 @@ function ownerFix(run: RoutineRun): { reason: string; fix: AutomationFix } | nul
   return null;
 }
 
+/** A bot's waiting run that waits only on work it handed to teammates: nothing is asked of the person. */
+const waitsOnTeammates = (run: Pick<RoutineRun, "target" | "attention">) => run.target === "bot" && run.attention === ROUTINE_HANDOFF_WAIT;
+
+/** The run whose question the person should answer: the newest run, looking past runs that only wait on teammates. */
+export function runAwaitingAnswer(runs: readonly RoutineRun[]): RoutineRun | undefined {
+  const run = runs.find((candidate) => candidate.status !== "cancelled" && candidate.status !== "queued" && !(candidate.status === "waiting" && waitsOnTeammates(candidate)));
+  return run?.status === "waiting" ? run : undefined;
+}
+
 /** Done when a one-time automation's time has passed, Paused when switched off. Needs you when its last run waits on the
  * person, its app needs reconnecting, failed for a reason only the person can fix, or failed twice running. A run that
  * failed and then recovered is Working. */
@@ -257,9 +270,9 @@ export function automationStatus(automation: Pick<Automation, "enabled" | "runs"
   const app = automation.appTrigger && appProblem(automation.appTrigger);
   if (app) return { state: "needs-you", ...app };
   if (automation.checkTrouble) return { state: "needs-you", reason: routineLineText(automation.checkTroubleCode, automation.checkTrouble), fix: SIGNED_OUT.test(automation.checkTrouble) ? "reconnect" : "run" };
-  const settled = automation.runs.filter((run) => run.status !== "cancelled" && run.status !== "queued");
+  const settled = automation.runs.filter((run) => run.status !== "cancelled" && run.status !== "queued" && !isCountedSkip(run));
   const latest = settled[0];
-  if (latest?.status === "waiting") return { state: "needs-you", reason: t("automations.reason.answer"), fix: "answer" };
+  if (runAwaitingAnswer(settled)) return { state: "needs-you", reason: t("automations.reason.answer"), fix: "answer" };
   if (latest && isProblem(latest)) {
     const owner = ownerFix(latest);
     if (owner) return { state: "needs-you", ...owner };
@@ -303,7 +316,7 @@ export function statusLine(automation: Automation, now = Date.now()): string {
   const first = firstRunLine(automation, now);
   if (first) return automation.readsAndDrafts ? `${first} · ${t("automations.readsAndDrafts")}` : first;
   const status = automationStatus(automation, now);
-  const latest = automation.runs.find((run) => run.status !== "queued");
+  const latest = latestRun(automation);
   const parts = [t(STATUS_WORD[status.state])];
   if (latest?.status === "running") parts.push(t("automations.runningNow"));
   else if (automation.checkedAt !== undefined && (!latest || automation.checkedAt >= (latest.finishedAt ?? runTime(latest)))) parts.push(t("automations.checkedNothingNew", { when: lastWhen(automation.checkedAt, now) }));
@@ -322,7 +335,7 @@ export function runLine(run: RoutineRun, now = Date.now()): { when: string; mark
   const short = (text: string) => (text.length > 110 ? `${text.slice(0, 109).trimEnd()}…` : text);
   const when = capital(lastWhen(runTime(run), now));
   if (run.status === "completed") return { when, mark: "✓", text: run.report?.state === "quiet" ? t("automations.run.nothingNew") : short(firstLine(run.output)) || t("automations.run.done") };
-  if (run.status === "waiting") return { when, mark: "!", text: t("automations.reason.answer") };
+  if (run.status === "waiting") return waitsOnTeammates(run) ? { when, mark: "…", text: t("automations.run.waitingOnTeam") } : { when, mark: "!", text: t("automations.reason.answer") };
   if (run.status === "running" || run.status === "queued") return { when, mark: "…", text: t("automations.runningNow") };
   if (run.status === "cancelled") {
     const reason = short(firstLine(run.error && routineLineText(run.errorCode, run.error, run.errorParams)));

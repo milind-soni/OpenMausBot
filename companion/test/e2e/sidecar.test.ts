@@ -83,6 +83,30 @@ describe("the sidecar's end-to-end connection, through the real relay", () => {
     session.shutdown();
   });
 
+  it("re-pairs a phone in place: the old device and its sessions go, the count stays", async () => {
+    const before = await pairViaRelay(rig);
+    before.session.shutdown();
+    const count = (await state()).devices.length;
+    const oldSession = await rig.direct(await state(), before.token);
+    const pairing = await rig.control("POST", "/pairing");
+    const res = await fetch(`http://127.0.0.1:${rig.companionPort}/api/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ credential: pairing.token, deviceName: "Test Phone", replacesToken: before.token }),
+    });
+    expect(res.status).toBe(201);
+    const after = (await res.json()) as { token: string; device: { id: string } };
+    expect(await oldSession.closed).toBe(4001);
+    const devices = (await state()).devices.map((device) => device.id);
+    expect(devices).toHaveLength(count);
+    expect(devices).toContain(after.device.id);
+    expect(devices).not.toContain(before.id);
+    expect((await fetch(`http://127.0.0.1:${rig.companionPort}/api/bots`, { headers: { authorization: `Bearer ${before.token}` } })).status).toBe(401);
+    const fresh = await rig.direct(await state(), after.token);
+    expect(json(await http(fresh, "GET", "/api/health", { token: after.token }))).toEqual({ app: "openmausbot" });
+    fresh.shutdown();
+  });
+
   it(`waits ${LONG ? 105 : 35} s for headers without a deadline of its own`, async () => {
     rig.harness.provideWaitMs = LONG ? 104_000 : 35_000;
     const session = await rig.viaRelay(await state(), deviceToken);

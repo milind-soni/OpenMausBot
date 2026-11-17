@@ -78,7 +78,7 @@ describe("vitest matrix", () => {
     const count = (os: string) => include.filter((entry) => entry.os === os).length;
     expect([count("ubuntu-latest"), count("windows-latest"), count("macos-latest")]).toEqual([8, 8, 4]);
     expect(include.find((entry) => entry.os === "windows-latest" && entry.shard === 8))
-      .toEqual({ os: "windows-latest", part: "shard 8/8", shard: 8, shards: 8, files: "", e2e: "host", node_tests: false, workers: 1 });
+      .toEqual({ os: "windows-latest", part: "shard 8/8", shard: 8, shards: 8, files: "", e2e: "host", node_tests: false, workers: 2 });
     expect(include.filter((entry) => entry.node_tests).map((entry) => [entry.os, entry.shard]))
       .toEqual([["macos-latest", 1], ["ubuntu-latest", 1], ["windows-latest", 1]]);
     expect(include.filter((entry) => entry.e2e === "all").every((entry) => entry.os === "ubuntu-latest")).toBe(true);
@@ -131,6 +131,12 @@ describe("CI path scope", () => {
 
   it.each([["electron/main.mjs"], ["build/icon.icns"], ["electron-builder.yml"], ["index.html"], ["rail.html"]])("runs the server's checks for the desktop's %j", (file) => {
     expect(selectCiScope([file])).toEqual({ areas: ["desktop"], checks: checks("server") });
+  });
+
+  it("runs nothing beyond static, which validates them, for the announcements file, its schema and pictures", () => {
+    expect(selectCiScope(["announcements/announcements.json", "announcements/announcements.schema.json", "announcements/images/phone.png"]))
+      .toEqual({ areas: ["announcements"], checks: [] });
+    expect(selectCiScope(["announcements/announcements.json", "docs/announcements.md"])).toEqual({ areas: ["announcements", "docs"], checks: ["docs-tests"] });
   });
 
   it("runs only the control-plane job for the control plane", () => {
@@ -188,6 +194,9 @@ describe("CI outputs", () => {
     expect(out.jobs).toEqual(["build", "vitest"]);
     expect(VITEST_SUBSETS["locale-tests"].files).toEqual([
       "src/",
+      "electron/cua-launch.test.mjs",
+      "electron/cua-watch-restart.test.mjs",
+      "electron/cua-windows-isolation.test.mjs",
       "electron/menu.test.mjs",
       "electron/updater.test.mjs",
       "scripts/generate-locale.test.mjs",
@@ -196,7 +205,10 @@ describe("CI outputs", () => {
       "scripts/testing/one-workspace-ui.e2e.test.ts",
       "scripts/testing/rail-profile-ui.e2e.test.ts",
       "scripts/testing/secret-card-descriptions.test.ts",
+      "scripts/testing/team-conversation-share-ui.e2e.test.ts",
       "scripts/testing/team-own-chat.e2e.test.ts",
+      "scripts/testing/team-private-default-ui.e2e.test.ts",
+      "scripts/testing/team-side-switch-ui.e2e.test.ts",
       "server/body-thread-guards.e2e.test.ts",
       "server/client-notifications.e2e.test.ts",
       "server/cloud-connections.e2e.test.ts",
@@ -205,6 +217,7 @@ describe("CI outputs", () => {
       "server/cloud-lending-memory.e2e.test.ts",
       "server/cloud-lending.e2e.test.ts",
       "server/cloud-lent-mcp.e2e.test.ts",
+      "server/cloud-personal-slack.e2e.test.ts",
       "server/cloud-send-kinds.e2e.test.ts",
       "server/cloud-send-move.e2e.test.ts",
       "server/cloud-send-rooms.e2e.test.ts",
@@ -212,24 +225,40 @@ describe("CI outputs", () => {
       "server/cloud-send-store.e2e.test.ts",
       "server/cloud-send.e2e.test.ts",
       "server/cloud-sync.e2e.test.ts",
+      "server/cloud-team-asker-owns.e2e.test.ts",
+      "server/cloud-team-away.e2e.test.ts",
       "server/cloud-team-browser.e2e.test.ts",
       "server/cloud-team-connections.e2e.test.ts",
+      "server/cloud-team-conversation-share.e2e.test.ts",
       "server/cloud-team-engine-homes.e2e.test.ts",
       "server/cloud-team-gateway-mcp.e2e.test.ts",
       "server/cloud-team-inbox.e2e.test.ts",
+      "server/cloud-team-included-hosting.e2e.test.ts",
+      "server/cloud-team-mausbot-reach.e2e.test.ts",
+      "server/cloud-team-member-secrets.e2e.test.ts",
+      "server/cloud-team-new-chat-private.e2e.test.ts",
       "server/cloud-team-open-reach.e2e.test.ts",
+      "server/cloud-team-own-key-apps.e2e.test.ts",
       "server/cloud-team-owners.e2e.test.ts",
       "server/cloud-team-people.e2e.test.ts",
+      "server/cloud-team-per-person.e2e.test.ts",
       "server/cloud-team-phones.e2e.test.ts",
       "server/cloud-team-pictures.e2e.test.ts",
+      "server/cloud-team-presence.e2e.test.ts",
+      "server/cloud-team-privacy-holes.e2e.test.ts",
+      "server/cloud-team-private-default.e2e.test.ts",
       "server/cloud-team-private.e2e.test.ts",
       "server/cloud-team-profile.e2e.test.ts",
+      "server/cloud-team-slack.e2e.test.ts",
+      "server/cloud-team-published-apps.e2e.test.ts",
       "server/cloud-team-requests.e2e.test.ts",
+      "server/cloud-team-routines.e2e.test.ts",
       "server/cloud-team-setup-request.e2e.test.ts",
       "server/cloud-team.e2e.test.ts",
       "server/host/brief-words.test.ts",
       "server/host/lending-lifts.test.ts",
       "server/lent-folders.e2e.test.ts",
+      "server/move-chosen-bots.e2e.test.ts",
       "server/one-home-keep.e2e.test.ts",
       "server/one-home-outdated.e2e.test.ts",
       "server/one-home-retry.e2e.test.ts",
@@ -242,6 +271,7 @@ describe("CI outputs", () => {
       "server/shared-computers.e2e.test.ts",
       "server/shared-computers.gate.test.ts",
       "server/team-move.e2e.test.ts",
+      "server/team-welcome.e2e.test.ts",
       "server/use-my-mac.e2e.test.ts",
       "server/workspace-banner.e2e.test.ts",
       "scripts/server-locale-plugin.test.ts",
@@ -260,6 +290,7 @@ describe("CI outputs", () => {
       "server/chat-notices.test.ts",
       "server/recall-disclosure.test.ts",
       "server/routine-cron-text.test.ts",
+      "server/routine-cron-text-zh.test.ts",
       "server/routine-requests.test.ts",
       "server/cloud-send-arrived.test.ts",
       "server/cloud-team-bot-access.e2e.test.ts",
@@ -275,6 +306,7 @@ describe("CI outputs", () => {
       "server/team-small-fixes.e2e.test.ts",
       "server/team-mausbot-followup.e2e.test.ts",
       "server/team-no-ai.e2e.test.ts",
+      "server/team-phone-data.e2e.test.ts",
       "server/team-refused-handoff.e2e.test.ts",
       "server/two-places.e2e.test.ts",
       "scripts/ci-workflow.test.ts",
@@ -282,10 +314,12 @@ describe("CI outputs", () => {
       "server/host/wait-words.test.ts",
       "server/place-inbox.e2e.test.ts",
       "server/bot-api-team.e2e.test.ts",
+      "server/cloud-team-conversation-share.e2e.test.ts",
       "server/cloud-team-first-look.e2e.test.ts",
       "server/cloud-team-mausbot-own-chat.e2e.test.ts",
       "server/connector-stayed.e2e.test.ts",
       "server/email/host.test.ts",
+      "server/email/inline-images.test.ts",
       "server/host/outside-lineage.test.ts",
       "server/memory-move.test.ts",
       "server/outside-lineage.e2e.test.ts",
@@ -503,7 +537,7 @@ describe("the repository's import graph", () => {
     const frameSmoke = readFileSync(join(ROOT, "scripts/smoke-app-frames.mjs"), "utf8");
     expect(frameSmoke).toContain('resolveDir: join(ROOT, "src/components/app")');
     expect(frameSmoke).toContain("from \\\"./app-frame-host.ts\\\"");
-    const runtime = ["server", "shared", "electron", "companion", "enterprise", "evals", "cloudflare"]
+    const runtime = ["server", "shared", "packages", "electron", "companion", "enterprise", "evals", "cloudflare"]
       .flatMap((directory) => codeFiles(join(ROOT, directory)))
       .filter((file) => !TEST_FILE.test(relative(ROOT, file).split("\\").join("/")));
     expect(runtime.length).toBeGreaterThan(500);
@@ -514,13 +548,14 @@ describe("the repository's import graph", () => {
   });
 
   it("runs every test outside the renderer that reads a translation other than English with the locale tests", () => {
-    const files = ["server", "shared", "electron", "companion", "enterprise", "evals", "scripts", "cloudflare"]
+    const files = ["server", "shared", "packages", "electron", "companion", "enterprise", "evals", "scripts", "cloudflare"]
       .flatMap((directory) => codeFiles(join(ROOT, directory)))
       // The selection names the catalogs without reading them.
       .filter((file) => !/[/\\]ci-scope\.(?:mjs|test\.ts)$/.test(file));
     const mentionsTranslations = (file: string) => {
       const text = readFileSync(file, "utf8");
-      return [...text.matchAll(/locales/g)].some((match) => !/^locales\W{1,6}en\.json/.test(text.slice(match.index, match.index + 24)));
+      // A browser extension's own _locales folder is not one of ours.
+      return [...text.matchAll(/(?<!_)locales/g)].some((match) => !/^locales\W{1,6}en\.json/.test(text.slice(match.index, match.index + 24)));
     };
     const readers = new Set(files.filter(mentionsTranslations));
     const affected = files
@@ -539,7 +574,7 @@ describe("the repository's import graph", () => {
     expect(inStatic).toContain("scripts/testing/verification-docs.test.ts");
     // A docs path a test reads from the repository root: join(ROOT, "docs", ...), new URL("docs/...", ROOT) or read("docs/...").
     const DOCS_READ = /(?:(?:join|resolve)\(\s*ROOT\s*,\s*|new URL\(\s*|\bread\w*\(\s*)["'`]((?:apps\/docs|docs)\b[^"'`]*|[A-Z][A-Z_]+\.md)["'`]/g;
-    const readers = ["server", "shared", "electron", "companion", "enterprise", "evals", "scripts", "src", "cloudflare"]
+    const readers = ["server", "shared", "packages", "electron", "companion", "enterprise", "evals", "scripts", "src", "cloudflare"]
       .flatMap((directory) => codeFiles(join(ROOT, directory)))
       .filter((file) => /\.(?:test|node-test)\.[cm]?[jt]sx?$/.test(file) && !file.endsWith("ci-scope.test.ts"))
       .filter((file) => [...readFileSync(file, "utf8").replace(/(["'`])\s*,\s*(["'`])/g, "/").matchAll(DOCS_READ)]
@@ -550,7 +585,7 @@ describe("the repository's import graph", () => {
   });
 
   it("never loads a test file from other code, so a test under scripts/ affects only the jobs that run it", () => {
-    const code = ["server", "shared", "electron", "companion", "enterprise", "evals", "scripts", "src", "cloudflare"]
+    const code = ["server", "shared", "packages", "electron", "companion", "enterprise", "evals", "scripts", "src", "cloudflare"]
       .flatMap((directory) => codeFiles(join(ROOT, directory)));
     const loaders = code.filter((file) => imports(file).some((target) => /\.test\.[cm]?[jt]sx?$/.test(target)));
     expect(loaders.map((file) => relative(ROOT, file))).toEqual([]);

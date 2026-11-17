@@ -155,7 +155,7 @@ test("a payment the Admin is still confirming shows the setup screen too, at its
   await w.says(settingUp({ step: "reserving" }));
   assert.deepEqual(w.home.view(), { screen: "setup", step: "reserving" });
   await w.says(ready());
-  assert.deepEqual(w.went.at(-1), [`${CLOUD}/?desktop-settings=phone`, CLOUD], "what was asked for (its phone pairing) is what opens");
+  assert.deepEqual(w.went.at(-1), [`${CLOUD}/?desktop-settings=phone&pair=open`, CLOUD], "what was asked for (its phone pairing) is what opens");
   assert.equal(w.cloudLookups(), 3, "looked up only once ready: its look, its session, its page");
 });
 

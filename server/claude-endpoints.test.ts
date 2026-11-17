@@ -78,6 +78,21 @@ describe("custom Claude endpoint", () => {
     expect((instances[instanceId].config as { cli?: string }).cli).toBe("/opt/claude/bin/claude");
   });
 
+  it("never inherits a Bedrock engine's binary; falls back to whichever other account sets one", () => {
+    const bedrockOnly = newClaudeEndpoint({
+      instances: { bedrock: { driver: "claudeAgent", config: { cli: "/opt/bedrock/bin/claude", bedrock: true } } },
+    } as never, BASE);
+    expect((bedrockOnly.instances[bedrockOnly.instanceId].config as { cli?: string }).cli).toBeUndefined();
+
+    const withFallback = newClaudeEndpoint({
+      instances: {
+        bedrock: { driver: "claudeAgent", config: { cli: "/opt/bedrock/bin/claude", bedrock: true } },
+        "claude-work": { driver: "claudeAgent", config: { cli: "/opt/claude/bin/claude" } },
+      },
+    } as never, BASE);
+    expect((withFallback.instances[withFallback.instanceId].config as { cli?: string }).cli).toBe("/opt/claude/bin/claude");
+  });
+
   it("reports only the address and models to a client, never the token", () => {
     const { instanceId, instances } = newClaudeEndpoint(cfg(), BASE);
     const info = claudeEndpointInfo(instances[instanceId]);

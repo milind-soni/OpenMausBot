@@ -32,6 +32,8 @@ export interface DesktopLanguageBridge {
 }
 export interface DesktopPrefs {
   seen(): string[];
+  /** One of DESKTOP_NOTICES, or an announcement card's mark (`announcement:<id>`, `announcement-sponsor:<day>`); anything
+   * else is not kept. */
   markSeen(id: string): void;
   analytics(): boolean | null;
   setAnalytics(enabled: boolean): void;

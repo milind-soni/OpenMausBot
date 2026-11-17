@@ -63,7 +63,7 @@ describe("BotListItem", () => {
     expect(badge).not.toContain("size-3");
     expect(waiting).toContain('aria-hidden="true">!</span>');
     expect(waiting).toContain('class="flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px] font-semibold text-warning"');
-    expect(waiting).toContain('class="truncate">Waiting for you…</span>');
+    expect(waiting).toContain('class="min-w-0 overflow-hidden whitespace-nowrap">Waiting for you…</span>');
 
     const icons = opening(renderRow(bot({ activity: "waiting-on-you" }), "icons"), "waiting-dot");
     expect(icons).toContain("size-5");
@@ -75,7 +75,7 @@ describe("BotListItem", () => {
     const teammateDot = opening(teammate, "teammate-wait-dot");
     expect(teammateDot).toContain("size-2.5");
     expect(teammateDot).not.toContain("size-4");
-    expect(teammate).toContain('class="truncate">Waiting on a teammate…</span>');
+    expect(teammate).toContain('class="min-w-0 overflow-hidden whitespace-nowrap">Waiting on a teammate…</span>');
     expect(teammate).toContain("truncate text-[13px] leading-[18px] text-ink-secondary");
     expect(teammate).not.toContain("font-semibold text-warning");
 
@@ -87,7 +87,7 @@ describe("BotListItem", () => {
     const preview = renderRow(bot({
       messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt", at: 2 }] as Bot["messages"],
     }));
-    expect(preview).toContain('class="truncate">Created notes.txt</span>');
+    expect(preview).toContain('class="min-w-0 overflow-hidden whitespace-nowrap">Created notes.txt</span>');
     expect(preview).toContain("truncate text-[13px] leading-[18px] text-ink-secondary");
     expect(preview).not.toContain("text-warning");
     expect(preview).not.toContain("waiting-dot");
@@ -349,6 +349,46 @@ describe("BotListItem", () => {
     expect(markup).not.toContain('data-testid="working-dot"');
     expect(markup).not.toContain("animate-status-pulse");
     expect(markup).toContain("Waiting on a teammate…");
+  });
+
+  it("marks a bot whose last turn failed with a red dot, kept apart from the orange waiting badge", () => {
+    const failedTurn = [
+      { id: "u1", role: "user", kind: "text", text: "check the site", at: 1 },
+      { id: "e1", role: "bot", kind: "activity", at: 2, tool: { name: "error: The site did not answer.", ok: false } },
+    ] as Bot["messages"];
+    const opening = (markup: string, testId: string) => markup.match(new RegExp(`<span[^>]*data-testid="${testId}"[^>]*>`))?.[0] ?? "";
+    const failed = renderRow(bot({ messages: failedTurn }));
+    const dot = opening(failed, "failed-dot");
+    expect(dot).toContain("bg-danger");
+    expect(dot).toContain('role="status"');
+    expect(dot).toContain('aria-label="Ran into a problem"');
+    expect(dot).toContain("size-2.5");
+    expect(failed).not.toContain('data-testid="waiting-dot"');
+    expect(failed).not.toContain("bg-warning");
+    const icons = renderRow(bot({ messages: failedTurn }), "icons");
+    expect(opening(icons, "failed-dot")).toContain("size-3");
+    expect(icons).toContain('aria-label="Atlas · Ran into a problem"');
+    // An engine that could not start writes the same row in its own thread; another thread's state alone paints nothing.
+    expect(renderRow(bot({ activity: "dead" }))).not.toContain('data-testid="failed-dot"');
+    // A failure outranks a teammate wait, but a question for you or a new turn already running wins.
+    const teammate = renderRow(bot({ messages: failedTurn, waitingForTeammates: true }));
+    expect(teammate).toContain('data-testid="failed-dot"');
+    expect(teammate).not.toContain('data-testid="teammate-wait-dot"');
+    // The preview follows the dot: the failed turn's line, not the teammate wait.
+    expect(teammate).not.toContain("Waiting on a teammate");
+    expect(teammate).toContain("The site did not answer.");
+    const waiting = renderRow(bot({ messages: failedTurn, activity: "waiting-on-you" }));
+    expect(waiting).toContain('data-testid="waiting-dot"');
+    expect(waiting).not.toContain('data-testid="failed-dot"');
+    const retrying = renderRow(bot({ messages: failedTurn, busy: true }));
+    expect(retrying).toContain('data-testid="working-dot"');
+    expect(retrying).not.toContain('data-testid="failed-dot"');
+    expect(renderRow(bot({ messages: [{ ...failedTurn[1]!, tool: { name: "Read", ok: true } }] }))).not.toContain('data-testid="failed-dot"');
+    // A message queued behind the failed turn leaves the preview on the failure, like the dot.
+    const queuedState = { ...initialState, pendingQueued: { "thread-atlas": [{ queueId: "q1", text: "try again" }] } };
+    const queuedBehind = renderToStaticMarkup(createElement(BotListItem, botRowProps(queuedState, vi.fn(), bot({ messages: failedTurn }), { density: "comfortable", query: "", onMenu: vi.fn() })));
+    expect(queuedBehind).toContain('data-testid="failed-dot"');
+    expect(queuedBehind).not.toContain(">Queued<");
   });
 
   it("keeps real sibling work visible while another thread waits for a teammate", () => {

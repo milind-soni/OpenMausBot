@@ -20,7 +20,6 @@ describe("who gets a webhook automation's address", () => {
     const only = "Only Courier, which owns this automation, or a Chief of Staff gets its address.";
     expect(addressRefusal(ask({ id: "peer", section: "Ops" }))).toBe(only);
     expect(addressRefusal(ask({ id: "chief", chiefOfStaff: true, section: "Sales" }))).toBe(only);
-    expect(addressRefusal(ask({ id: "chief", chiefOfStaff: true, section: "Ops", peers: ["someone-else"] }))).toBe(only);
     expect(addressRefusal(ask({ id: "chief", chiefOfStaff: true, section: "Ops", visibility: { people: ["ada@example.com"] } }))).toBe(only);
   });
 

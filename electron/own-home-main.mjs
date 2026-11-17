@@ -46,13 +46,15 @@ export const handSaved = (entry) => record(entry) && entry.kind === "remote" && 
  * @param {typeof fetch} fetchImpl
  */
 export function serverRequests(place, fetchImpl) {
-  const request = (method, route, init = {}) => fetchImpl(`${place.origin}${route}`, {
-    method, redirect: "error", credentials: "include", cache: "no-store", signal: AbortSignal.timeout(120_000), ...init,
+  const request = (method, route, { timeoutMs = 120_000, ...init } = {}) => fetchImpl(`${place.origin}${route}`, {
+    method, redirect: "error", credentials: "include", cache: "no-store", signal: AbortSignal.timeout(timeoutMs), ...init,
     headers: { accept: "application/json", origin: place.origin, ...init.headers },
   });
   return {
     request,
-    call: async (method, route, body) => answer(await request(method, route, body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) })),
+    /** `timeoutMs`: how long this request may take, sized to the work it asks for. */
+    call: async (method, route, body, options) => answer(await request(method, route, { ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+      ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) })),
     async who() {
       const [session, described] = await Promise.all([request("GET", "/api/auth/session").then(answer), request("GET", "/.well-known/openmausbot/environment").then(answer)]);
       const signedIn = session.ok && session.body?.kind === "session";
@@ -120,7 +122,7 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
     },
   };
   const send = createCloudSend({
-    local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }),
+    local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(init?.timeoutMs ?? 30_000) }),
     cloud: {
       origin: () => chosen()?.origin ?? null,
       asleep: () => false,
@@ -133,7 +135,8 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
     t,
   });
   /** The chosen server as the move sees a Cloud: always ready, never ended once home is there, since nothing ends it; until
-   * then, a server forgotten in this app ends the move before anything runs there. */
+   * then, a server forgotten in this app ends the move before anything runs there. Once the move is done the bots' files
+   * stay there: this copy is never deleted, so a later pass must not send them again. */
   const target = () => {
     const picked = chosen();
     if (!picked) return null;
@@ -143,7 +146,13 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
   const home = createOneHome({
     journal,
     cloud: target,
-    send: { move: (options) => send.send({ reason: "move", final: options?.final === true }), check: () => send.check(), switches: () => send.switches(), snapshot: () => send.snapshot() },
+    send: {
+      move(options) {
+        const done = parseJournal(journal.read())?.phase === "done";
+        return send.send({ reason: "move", final: options?.final === true, ...(options?.files === false || done ? { files: false } : {}) });
+      },
+      check: () => send.check(), switches: () => send.switches(), snapshot: () => send.snapshot(),
+    },
     local: {
       ...local,
       freeze: async (origin) => freezeAnswer(await local.call("POST", "/api/move/freeze", { cloud: origin, place: chosen()?.name })),

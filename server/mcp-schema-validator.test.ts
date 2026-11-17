@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileToolSchema } from "./mcp-schema-validator.ts";
+import { compileToolSchema, serverToolValidator } from "./mcp-schema-validator.ts";
 
 describe("compileToolSchema", () => {
   it("accepts the numeric formats Rust's schemars writes and checks their ranges", () => {
@@ -40,5 +40,20 @@ describe("compileToolSchema", () => {
 
   it("still refuses a format it does not know", () => {
     expect(() => compileToolSchema({ type: "object", properties: { x: { type: "string", format: "made-up" } } })).toThrow("could not be validated");
+  });
+});
+
+describe("serverToolValidator", () => {
+  it("remembers the validator it built for a schema, and builds another for a different one", () => {
+    const schema = { type: "object", properties: { name: { type: "string" } } };
+    const first = serverToolValidator(schema);
+    expect(serverToolValidator({ ...schema })).toBe(first);
+    expect(first.check).toBe("full");
+    expect(first.validate({ name: "x" })).toBe(true);
+    expect(first.validate({ name: 1 })).toBe(false);
+    const other = serverToolValidator({ type: "object", properties: { count: { type: "integer" } } });
+    expect(other).not.toBe(first);
+    expect(other.validate({ count: 1 })).toBe(true);
+    expect(other.validate({ name: "x" })).toBe(true);
   });
 });

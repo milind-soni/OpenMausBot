@@ -3,15 +3,17 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { splitConversationalReply } from "../../shared/reply-style";
 import { joinedCorners, SIMPLE_BOT_BUBBLE, type BubbleJoin } from "./chat-bubble";
+import { streamedReply } from "@/state/live-reply";
 
 export { isConversational } from "../../shared/reply-style";
 
 /** A reply that arrives while its thread is open plays its parts in; parts already shown never replay. */
-export function useReplySegments(show: boolean, text: string, at: number, openedAt: number): { segments: string[]; firstNew: number } {
+export function useReplySegments(show: boolean, text: string, at: number, openedAt: number, messageId: string): { segments: string[]; firstNew: number } {
   const segments = useMemo(() => (show ? splitConversationalReply(text) : []), [show, text]);
-  const [fresh] = useState(() => at >= openedAt);
+  const streamed = streamedReply(messageId);
+  const [fresh] = useState(() => at >= openedAt && !streamed);
   const shown = useRef(fresh ? 0 : segments.length);
-  const firstNew = shown.current;
+  const firstNew = streamed ? Number.POSITIVE_INFINITY : shown.current;
   useEffect(() => {
     shown.current = Math.max(shown.current, segments.length);
   }, [segments.length]);

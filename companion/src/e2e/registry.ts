@@ -2,7 +2,6 @@
 // device and the open pairing window, and which device holds which live session over which route.
 import type { Duplex } from "node:stream";
 
-import type { DeviceRegistry } from "../devices.ts";
 import { admission, admissionHash, credentialHash, credentialHashFromHex, keyId, psk } from "./credentials.ts";
 import { descriptorFor, type E2EDescriptor } from "./descriptor.ts";
 import { CLOSE, TRANSPORT_RELAY, type KeyPair, type PskCandidate, type TransportByte } from "./noise.ts";
@@ -23,6 +22,18 @@ export interface RelayIdentity {
   nodes: string[];
 }
 
+/** The paired devices and open pairing windows: the sidecar's DeviceRegistry, or a server's sessions. A server keeps only
+ * a pairing credential's SHA-256 (hex), so a window carries that or its token. */
+export interface E2EDevices {
+  records(): readonly { id: string; tokenHash: string; routes?: "any" | "local" }[];
+  pairingWindows(): readonly ({ token: string } | { tokenHash: string })[];
+  confirm(id: string): void;
+  markE2E(id: string): void;
+}
+
+const windowHash = (window: { token: string } | { tokenHash: string }): Buffer | null =>
+  "token" in window ? credentialHash(window.token) : credentialHashFromHex(window.tokenHash);
+
 interface Live {
   session: E2ESession<Peer>;
   context: E2EContext;
@@ -38,7 +49,7 @@ export const PAIRING_SESSION_MS = 150_000;
 export const MAX_PENDING_HANDSHAKES = 16;
 
 export class E2ERegistry {
-  readonly #devices: DeviceRegistry;
+  readonly #devices: E2EDevices;
   readonly #live = new Set<Live>();
   #key: KeyPair | null = null;
   #relay: RelayIdentity | null = null;
@@ -48,7 +59,7 @@ export class E2ERegistry {
    * reaches the phone before the relay closes it. */
   readonly #held = new Map<string, number>();
 
-  constructor(devices: DeviceRegistry) {
+  constructor(devices: E2EDevices) {
     this.#devices = devices;
   }
 
@@ -85,7 +96,8 @@ export class E2ERegistry {
       if (hash) out.push({ id: { kind: "device", id: device.id }, psk: psk(hash, id) });
     }
     for (const window of this.#devices.pairingWindows()) {
-      const hash = credentialHash(window.token);
+      const hash = windowHash(window);
+      if (!hash) continue;
       const admHash = this.#relay ? admissionHash(admission(hash, this.#relay.hostId)) : null;
       out.push({ id: { kind: "pairing", admHash }, psk: psk(hash, id) });
     }
@@ -102,7 +114,10 @@ export class E2ERegistry {
       const hash = credentialHashFromHex(device.tokenHash);
       if (hash) out.push(admissionHash(admission(hash, hostId)));
     }
-    for (const window of this.#devices.pairingWindows()) out.push(admissionHash(admission(credentialHash(window.token), hostId)));
+    for (const window of this.#devices.pairingWindows()) {
+      const hash = windowHash(window);
+      if (hash) out.push(admissionHash(admission(hash, hostId)));
+    }
     for (const live of this.#live) if (live.pairingAdmission) out.push(live.pairingAdmission);
     out.push(...this.#held.keys());
     return [...new Set(out)].sort();

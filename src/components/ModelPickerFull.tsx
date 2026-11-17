@@ -28,8 +28,10 @@ export function ModelRow({ option, current, defaultId, botModel = false, onPick 
   botModel?: boolean;
   onPick: () => void;
 }) {
-  const blocked = option.orgBlocked === true;
-  const meta = blocked ? t("model.orgBlocked") : [option.provider, option.id === defaultId ? t("model.effort.default") : undefined].filter(Boolean).join(" · ");
+  const needsUpdate = option.needsCliUpdate !== undefined;
+  const blocked = option.orgBlocked === true || needsUpdate;
+  const reason = needsUpdate ? t("chat.claudeUpdate.offer") : t("model.orgBlocked");
+  const meta = needsUpdate ? t("engines.updateClaude") : blocked ? reason : [option.provider, option.id === defaultId ? t("model.effort.default") : undefined].filter(Boolean).join(" · ");
   return (
     <button
       type="button"
@@ -38,8 +40,8 @@ export function ModelRow({ option, current, defaultId, botModel = false, onPick 
       data-org-blocked={blocked || undefined}
       disabled={blocked}
       aria-pressed={current}
-      aria-label={blocked ? `${option.label} · ${t("model.orgBlocked")}` : undefined}
-      title={blocked ? t("model.orgBlocked") : option.provider ? t("model.provider", { name: option.provider }) : undefined}
+      aria-label={blocked ? `${option.label} · ${reason}` : undefined}
+      title={blocked ? reason : option.provider ? t("model.provider", { name: option.provider }) : undefined}
       onClick={onPick}
       className={MENU_ROW}
     >

@@ -2,8 +2,10 @@
 // turn or waits in the queue, and the engine reads a steered message only once the tool call it is in returns: a command
 // that polls CI can keep it unread for ten minutes. So once a tool call has run PERSON_FIRST_MS while the person's message
 // waits unanswered, the turn is stopped and the message runs next, ahead of anything else queued in that chat. Only a
-// person's own message does this: rooms, routines, teammates and apps wait their turn. A turn waiting on the person (a
-// question, a sign-in) or on a computer is never stopped this way.
+// person's own message does this: rooms, routines, teammates and apps wait their turn. Where several people write (a Team
+// Cloud's shared chat), only the person whose request runs does it; anyone else's line waits in the queue
+// and never reaches this. A turn waiting on the person (a question, a sign-in) or on a computer is
+// never stopped this way.
 import type { RuntimeEvent } from "../contracts.ts";
 import { conversationLanguage, serverLine } from "../server-lines.ts";
 

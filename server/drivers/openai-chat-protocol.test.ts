@@ -18,6 +18,30 @@ describe("streamed chat tool calls", () => {
     expect(calls.finish("tool_calls", false)).toEqual([completeCall]);
   });
 
+  it("treats an empty-string id or type on a continuation chunk as absent (DashScope/Qwen)", () => {
+    const calls = new ChatToolCalls();
+    calls.add([{ index: 0, ...completeCall, function: { ...completeCall.function, arguments: "" } }], true);
+    calls.add([{ index: 0, id: "", type: "function", function: { arguments: "{" } }], true);
+    calls.add([{ index: 0, id: "", type: "", function: { name: "", arguments: "}" } }], true);
+
+    expect(calls.finish("tool_calls", false)).toEqual([completeCall]);
+  });
+
+  it("still rejects a streamed call that never gets an id, and an id that changes", () => {
+    const noId = new ChatToolCalls();
+    noId.add([{ index: 0, id: "", type: "function", function: { name: "echo", arguments: "{}" } }], true);
+    expect(() => noId.finish("tool_calls", false)).toThrow(/incomplete or duplicate/);
+
+    const changed = new ChatToolCalls();
+    changed.add([{ index: 0, ...completeCall }], true);
+    expect(() => changed.add([{ index: 0, id: "call_other" }], true)).toThrow(/changed or omitted/);
+  });
+
+  it("still rejects an empty id in a whole, non-streamed reply", () => {
+    const calls = new ChatToolCalls();
+    expect(() => calls.add([{ ...completeCall, id: "" }], false)).toThrow(/changed or omitted/);
+  });
+
   it("still rejects incomplete calls after null-only deltas", () => {
     const calls = new ChatToolCalls();
     calls.add([{ index: 0, id: null, type: null, function: { name: null, arguments: null } }], true);

@@ -175,6 +175,7 @@
   "openAtLogin.set",
   "openAtLogin.state",
   "openExternal",
+  "openFolder",
   "openHtmlInBrowser",
   "openInstallTerminal",
   "openLogsFolder",

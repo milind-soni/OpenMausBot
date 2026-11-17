@@ -78,6 +78,8 @@ describe("welcomeViewer", () => {
     expect(welcomeViewer({ kind: "session", scopes: ["admin", "client"], hosted: true })).toEqual({ hosted: true, canSave: true });
     expect(welcomeViewer({ kind: "session", scopes: ["client"], hosted: true })).toEqual({ hosted: true, canSave: false });
     expect(welcomeViewer({ kind: "session", scopes: ["client"] })).toEqual({ hosted: false, canSave: false });
+    expect(welcomeViewer({ kind: "session", scopes: ["admin", "client"], cloudHome: true, team: { id: "t", name: "Acme", role: "admin" } }))
+      .toEqual({ hosted: false, canSave: true, cloudHome: true, teamRole: "admin" });
     expect(welcomeViewer({ kind: "loopback", scopes: ["client"], trust: "service" })).toEqual({ hosted: false, canSave: false });
     expect(welcomeViewer({})).toEqual(LOCAL_VIEWER);
     expect(welcomeViewer(null)).toEqual(LOCAL_VIEWER);

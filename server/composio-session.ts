@@ -9,11 +9,13 @@ import {
   apiBase,
   canonicalToolkitSlug,
   forgetProjectAuthConfigs,
+  listConnectedAccounts,
   projectAuthConfigs,
   projectHeaders,
   responseError,
   turnOnToolRouter,
   type AuthConfigChoice,
+  type ConnectedAccountResponse,
   type AuthConfigMap,
 } from "./composio-project.ts";
 
@@ -155,10 +157,36 @@ async function createProjectSession(apiKey: string, userId: string, authConfigs:
   return session.session_id;
 }
 
+/** Pages of connected accounts read when looking for an earlier installation's user, which bounds how long setup waits. */
+const EARLIER_USER_PAGES = 4;
+
+/** The one OpenMausBot Composio user in this project, when it still has a live connection, so a fresh installation (a
+ * reinstall, another computer) gets that installation's apps back; null when there is none, more than one (even with
+ * only expired connections, since it can't tell whose is whose), or Composio can't say. */
+async function earlierInstallationUser(apiKey: string): Promise<string | null> {
+  const users = new Set<string>();
+  let pages = 0;
+  const enough = (page: ConnectedAccountResponse[]) => {
+    for (const { user_id } of page) if (user_id?.startsWith("openmausbot_")) users.add(user_id);
+    pages += 1;
+    return users.size > 1 || pages >= EARLIER_USER_PAGES;
+  };
+  try {
+    const accounts = await listConnectedAccounts(apiKey, null, [], enough);
+    // A project too big to read in a few pages can't say there's only one: setup goes on as before, with a new user.
+    if (users.size !== 1 || pages >= EARLIER_USER_PAGES) return null;
+    return accounts.find((account) => account.status === "ACTIVE" && users.has(account.user_id ?? ""))?.user_id ?? null;
+  } catch (error) {
+    console.warn(`[composio] Could not read the project's earlier connections: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 export async function prepareProjectSession(
   apiKey: string,
   current?: { apiKey?: string; userId?: string; sessionId?: string },
   knownAuthConfigs?: AuthConfigMap,
+  options: { reuseEarlierUser?: boolean } = {},
 ): Promise<{ apiKey: string; userId: string; sessionId: string }> {
   const trimmed = apiKey.trim();
   if (!trimmed) throw new Error("Enter a Composio project API key");
@@ -180,9 +208,19 @@ export async function prepareProjectSession(
     priorUserId = existing?.config?.user_id ?? priorUserId;
   }
 
-  const userId = priorUserId ?? `openmausbot_${randomUUID()}`;
+  // Security: the earlier user holds another installation's apps, so only a caller that says this server is one person's may look.
+  const userId = priorUserId ?? (options.reuseEarlierUser ? await earlierInstallationUser(trimmed) : null) ?? `openmausbot_${randomUUID()}`;
   const sessionId = await createProjectSession(trimmed, userId, authConfigs);
   return { apiKey: trimmed, userId, sessionId };
+}
+
+type SessionIds = { userId: string; sessionId: string };
+const sessionKeepers = new WeakMap<object, (ids: SessionIds) => void>();
+
+/** Keeps the Session of a `composio` that is not the saved config's (a Team Cloud member's own Composio user in the
+ * team's project) with `keep`, never in config.json. */
+export function keepSessionWith(composio: NonNullable<AppConfig["composio"]>, keep: (ids: SessionIds) => void): void {
+  sessionKeepers.set(composio, keep);
 }
 
 async function adoptProjectSession(
@@ -194,7 +232,8 @@ async function adoptProjectSession(
   multiAccountUpgradeAttempted.add(sessionId);
   composio.userId = userId;
   composio.sessionId = sessionId;
-  saveConfig({ composio: { userId, sessionId } });
+  const keep = sessionKeepers.get(composio);
+  if (keep) keep({ userId, sessionId }); else saveConfig({ composio: { userId, sessionId } });
   const created = await getProjectSession(apiKey, sessionId);
   if (!created) throw new Error("Composio Session disappeared after creation");
   return created;
@@ -221,15 +260,19 @@ export async function ensureProjectSession(cfg: AppConfig, wanted?: AuthConfigMa
   const apiKey = projectApiKey(cfg);
   if (!composio || !apiKey) throw new Error("No Composio project key configured");
   const configs = wanted ?? (await projectAuthConfigs(apiKey)).configs;
+  const member = sessionKeepers.has(composio);
   if (composio.sessionId) {
     const existing = await getProjectSession(apiKey, composio.sessionId);
-    if (existing && (supportsMultiAccount(existing) || multiAccountUpgradeAttempted.has(existing.session_id))) {
+    // Security: a member's Session is used only while it is their own Composio user's, never the team's or another member's.
+    if (member && existing?.config?.user_id && existing.config.user_id !== composio.userId) delete composio.sessionId;
+    else if (existing && (supportsMultiAccount(existing) || multiAccountUpgradeAttempted.has(existing.session_id))) {
       if (authConfigsReady(existing, configs)) return existing;
       const named = await nameAuthConfigsInPlace(apiKey, existing, configs);
       if (named) return named;
     }
   }
   const prepared = await prepareProjectSession(apiKey, composio, configs);
+  if (member && prepared.userId !== composio.userId) throw new Error("Composio returned a Session for another user");
   return adoptProjectSession(composio, apiKey, prepared.userId, prepared.sessionId);
 }
 

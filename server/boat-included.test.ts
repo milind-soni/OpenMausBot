@@ -275,6 +275,6 @@ describe("waking a sleeping computer", () => {
     state = "archived";
     resumeReplies = [{ status: 401, body: { ok: false, code: "unauthorized", message: "This cloud computer key is not valid." } }];
     await expect(boat.readyBoat({}, botId)).rejects.toThrow("The cloud computers included with your Cloud plan aren't available right now. Try again later.");
-    await expect(boat.readyBoat({ box: { token: "box_own" } }, botId)).rejects.toThrow("boat.dev rejected your Boat API key — paste a current one in Settings → API keys");
+    await expect(boat.readyBoat({ box: { token: "box_own" } }, botId)).rejects.toThrow("boat.dev rejected your Boat API key — paste a current one in Settings → AI → Other services");
   });
 });

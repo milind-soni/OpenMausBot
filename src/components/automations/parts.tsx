@@ -1,6 +1,6 @@
 import { Check, TriangleAlert } from "lucide-react";
 
-import { AUTOMATION_FIX_LABEL, type Automation, type AutomationStatus } from "@/lib/automations";
+import { AUTOMATION_FIX_LABEL, runAwaitingAnswer, type Automation, type AutomationStatus } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
@@ -24,7 +24,7 @@ export function FixButton({ automation, status, actions, onEdit, className }: {
   const { dispatch } = useStore();
   if (status.state !== "needs-you" || !status.fix) return null;
   const fix = status.fix;
-  const waiting = fix === "answer" ? automation.runs.find((run) => run.status === "waiting") : undefined;
+  const waiting = fix === "answer" ? runAwaitingAnswer(automation.runs) : undefined;
   const onClick = () => {
     if (fix === "answer") actions.openRun(automation, waiting);
     else if (fix === "sign-in") actions.openRun(automation, automation.runs.find((run) => run.status !== "queued"));

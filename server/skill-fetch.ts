@@ -85,6 +85,8 @@ function decodedPath(path: string): string | null {
 }
 
 function target(owner: string, repo: string, ref: string | undefined, path: string, extra: Partial<Target> = {}): Target | { error: string } {
+  try { ref = ref === undefined ? undefined : decodeURIComponent(ref); }
+  catch { return { error: "that does not look like a GitHub or skills.sh repository, folder, or SKILL.md URL" }; }
   const decoded = decodedPath(path);
   if (!OWNER_OR_REPO.test(owner) || !OWNER_OR_REPO.test(repo) || [owner, repo].some((part) => /^\.+$/.test(part)) || decoded === null ||
     (ref !== undefined && (!ref || ref === "." || ref === ".." || /[\s?#]/.test(ref)))) {

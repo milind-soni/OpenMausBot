@@ -36,6 +36,17 @@ describe("credential fingerprints a move checks by", () => {
     expect(JSON.stringify(loginFingerprints(NONCE, here))).not.toContain(PASSWORD);
   });
 
+  it("cover saved secrets by value under the key they travel by, never the value itself", () => {
+    const [here, there] = [store(), store()];
+    const id = "66666666-6666-4666-8666-666666666666";
+    here.receiveSecret({ id, name: "Stripe", value: "sk_fake-fingerprinted", source: "card", bots: ["a"] });
+    there.receiveSecret({ id, name: "Stripe (renamed there)", value: "sk_fake-fingerprinted", source: "settings", bots: "all" });
+    expect(loginFingerprints(NONCE, there)[`secret:${id}`]).toBe(loginFingerprints(NONCE, here)[`secret:${id}`]);
+    there.updateSecret(id, { value: "sk_fake-other" });
+    expect(loginFingerprints(NONCE, there)[`secret:${id}`]).not.toBe(loginFingerprints(NONCE, here)[`secret:${id}`]);
+    expect(JSON.stringify(loginFingerprints(NONCE, here))).not.toContain("sk_fake");
+  });
+
   it("cover keys, MCP servers' own secrets and the person's own connected-apps project, never a sign-in that moves once", () => {
     const config = { openrouter: { key: KEY }, composio: { apiKey: "fake-composio-key", userId: "u1" },
       mcpServers: { docs: { type: "http", url: "https://mcp.docs.example.test/mcp", headers: { Authorization: "Bearer fake-docs" }, enabled: true },

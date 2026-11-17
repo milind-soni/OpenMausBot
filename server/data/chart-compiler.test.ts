@@ -67,9 +67,9 @@ describe("compileChart: reductions per chart type and column class", () => {
       spec: { type: "bar", x: "region", y: "amount" },
       method: "topN",
       sql: [
-        'kept AS ( SELECT CAST("region" AS VARCHAR) AS x FROM src GROUP BY ALL ORDER BY sum("amount") DESC NULLS LAST, x LIMIT 20 )',
-        `CASE WHEN CAST("region" AS VARCHAR) IN (SELECT x FROM kept) THEN CAST("region" AS VARCHAR) ELSE 'other' END AS x`,
-        'sum("amount") AS y FROM src GROUP BY ALL ORDER BY x',
+        'kept AS ( SELECT CAST(src."region" AS VARCHAR) AS x FROM src GROUP BY ALL ORDER BY sum(src."amount") DESC NULLS LAST, x LIMIT 20 )',
+        `CASE WHEN CAST(src."region" AS VARCHAR) IN (SELECT x FROM kept) THEN CAST(src."region" AS VARCHAR) ELSE (SELECT label FROM other_bucket) END AS x`,
+        'sum(src."amount") AS y FROM src GROUP BY ALL ORDER BY x',
       ],
       check: (vl) => {
         expect(mark(vl)).toBe("bar");
@@ -82,14 +82,14 @@ describe("compileChart: reductions per chart type and column class", () => {
       name: "bar over a boolean folds too, counting rows by default",
       spec: { type: "bar", x: "paid" },
       method: "topN",
-      sql: ['CAST("paid" AS VARCHAR)', "count(*) AS y", "ORDER BY count(*) DESC NULLS LAST, x LIMIT 20"],
+      sql: ['CAST(src."paid" AS VARCHAR)', "count(*) AS y", "ORDER BY count(*) DESC NULLS LAST, x LIMIT 20"],
       check: (vl) => expect(enc(vl).y).toMatchObject({ title: "count" }),
     },
     {
       name: "bar with a series groups by colour as well",
       spec: { type: "bar", x: "region", y: "amount", color: "channel" },
       method: "topN",
-      sql: ['CAST("channel" AS VARCHAR) AS color, sum("amount") AS y FROM src GROUP BY ALL'],
+      sql: ['CAST(src."channel" AS VARCHAR) AS color, sum(src."amount") AS y FROM src GROUP BY ALL'],
       check: (vl) => {
         expect(enc(vl).color).toMatchObject({ field: "color", type: "nominal", title: "channel" });
         expect(enc(vl).y.stack).toBeUndefined();
@@ -100,10 +100,10 @@ describe("compileChart: reductions per chart type and column class", () => {
       spec: { type: "bar", x: "amount", y: "qty" },
       method: "bins",
       sql: [
-        'bins_x AS ( SELECT min(CAST("amount" AS DOUBLE)) AS lo, CASE WHEN max(CAST("amount" AS DOUBLE)) = min(CAST("amount" AS DOUBLE)) THEN 1 ELSE (max(CAST("amount" AS DOUBLE)) - min(CAST("amount" AS DOUBLE))) / 30 END AS width FROM src )',
-        'bins_x.lo + least(floor((CAST("amount" AS DOUBLE) - bins_x.lo) / bins_x.width), 29) * bins_x.width AS x',
+        'bins_x AS ( SELECT min(CAST(src."amount" AS DOUBLE)) AS lo, CASE WHEN max(CAST(src."amount" AS DOUBLE)) = min(CAST(src."amount" AS DOUBLE)) THEN 1 ELSE (max(CAST(src."amount" AS DOUBLE)) - min(CAST(src."amount" AS DOUBLE))) / 30 END AS width FROM src )',
+        'bins_x.lo + least(floor((CAST(src."amount" AS DOUBLE) - bins_x.lo) / bins_x.width), 29) * bins_x.width AS x',
         "+ 1) * bins_x.width AS x2",
-        'sum("qty") AS y FROM src, bins_x GROUP BY ALL ORDER BY x',
+        'sum(src."qty") AS y FROM src, bins_x GROUP BY ALL ORDER BY x',
       ],
       check: (vl) => {
         expect(enc(vl).x).toMatchObject({ field: "x", type: "quantitative", bin: "binned", title: "amount" });
@@ -121,8 +121,8 @@ describe("compileChart: reductions per chart type and column class", () => {
         "WHEN span <= 1314900000 AND step < 7689600 THEN INTERVAL 1 MONTH",
         "WHEN span <= 3944700000 AND step < 31536000 THEN INTERVAL 3 MONTH ELSE INTERVAL 1 YEAR END AS unit",
         'SELECT epoch(max(v) - min(v)) AS span, coalesce(min(gap), 0) AS step',
-        'SELECT v, epoch(v - lag(v) OVER (ORDER BY v)) AS gap FROM (SELECT DISTINCT CAST("ts" AS TIMESTAMP) AS v FROM src WHERE "ts" IS NOT NULL)',
-        'time_bucket(span_x.unit, "ts") AS x, time_bucket(span_x.unit, "ts") + span_x.unit AS x2, count(*) AS y FROM src, span_x GROUP BY ALL',
+        'SELECT v, epoch(v - lag(v) OVER (ORDER BY v)) AS gap FROM (SELECT DISTINCT CAST(src."ts" AS TIMESTAMP) AS v FROM src WHERE src."ts" IS NOT NULL)',
+        'time_bucket(span_x.unit, src."ts") AS x, time_bucket(span_x.unit, src."ts") + span_x.unit AS x2, count(*) AS y FROM src, span_x GROUP BY ALL',
       ],
       check: (vl) => {
         expect(enc(vl).x).toMatchObject({ field: "x", type: "temporal", title: "ts", axis: { formatType: "time" } });
@@ -142,7 +142,7 @@ describe("compileChart: reductions per chart type and column class", () => {
       name: "a named timeUnit is a literal interval and needs no range",
       spec: { type: "bar", x: "ts", timeUnit: "week" },
       method: "timeBucket",
-      sql: ['time_bucket(INTERVAL 1 WEEK, "ts") AS x, time_bucket(INTERVAL 1 WEEK, "ts") + INTERVAL 1 WEEK AS x2'],
+      sql: ['time_bucket(INTERVAL 1 WEEK, src."ts") AS x, time_bucket(INTERVAL 1 WEEK, src."ts") + INTERVAL 1 WEEK AS x2'],
       notSql: ["span_x"],
       check: (vl) => expect(enc(vl).x.type).toBe("temporal"),
     },
@@ -150,14 +150,14 @@ describe("compileChart: reductions per chart type and column class", () => {
       name: "quarter is three months",
       spec: { type: "line", x: "d", y: "amount", timeUnit: "quarter" },
       method: "timeBucket",
-      sql: ['time_bucket(INTERVAL 3 MONTH, "d") AS x, sum("amount") AS y'],
+      sql: ['time_bucket(INTERVAL 3 MONTH, src."d") AS x, sum(src."amount") AS y'],
       check: (vl) => expect(mark(vl)).toBe("line"),
     },
     {
       name: "line of an aggregate over time buckets without a band end",
       spec: { type: "line", x: "ts", y: "amount", agg: "avg", color: "channel" },
       method: "timeBucket",
-      sql: ['time_bucket(span_x.unit, "ts") AS x, CAST("channel" AS VARCHAR) AS color, avg("amount") AS y'],
+      sql: ['time_bucket(span_x.unit, src."ts") AS x, CAST(src."channel" AS VARCHAR) AS color, avg(src."amount") AS y'],
       notSql: ["AS x2"],
       check: (vl) => {
         expect(mark(vl)).toBe("line");
@@ -170,8 +170,8 @@ describe("compileChart: reductions per chart type and column class", () => {
       spec: { type: "line", x: "ts", y: "amount" },
       method: "m4",
       sql: [
-        'span AS ( SELECT min(epoch_ms(CAST("ts" AS TIMESTAMP))) AS t0, max(epoch_ms(CAST("ts" AS TIMESTAMP))) AS t1 FROM src WHERE "ts" IS NOT NULL AND "amount" IS NOT NULL )',
-        'least(floor(800 * (epoch_ms(CAST("ts" AS TIMESTAMP)) - span.t0) / greatest(span.t1 - span.t0, 1)), 799) AS px',
+        'span AS ( SELECT min(epoch_ms(CAST(src."ts" AS TIMESTAMP))) AS t0, max(epoch_ms(CAST(src."ts" AS TIMESTAMP))) AS t1 FROM src WHERE src."ts" IS NOT NULL AND src."amount" IS NOT NULL )',
+        'least(floor(800 * (epoch_ms(CAST(src."ts" AS TIMESTAMP)) - span.t0) / greatest(span.t1 - span.t0, 1)), 799) AS px',
         "QUALIFY row_number() OVER (PARTITION BY px ORDER BY x) = 1 OR row_number() OVER (PARTITION BY px ORDER BY x DESC) = 1 OR row_number() OVER (PARTITION BY px ORDER BY y, x) = 1 OR row_number() OVER (PARTITION BY px ORDER BY y DESC, x) = 1 ORDER BY x",
       ],
       notSql: ["GROUP BY"],
@@ -224,14 +224,14 @@ describe("compileChart: reductions per chart type and column class", () => {
       name: "histogram honours bins and an aggregate",
       spec: { type: "histogram", x: "amount", y: "qty", agg: "avg", bins: 10 },
       method: "bins",
-      sql: ["/ 10 END AS width", ", 9) * bins_x.width AS x", 'avg("qty") AS y'],
+      sql: ["/ 10 END AS width", ", 9) * bins_x.width AS x", 'avg(src."qty") AS y'],
       check: (vl) => expect(enc(vl).y.title).toBe("avg(qty)"),
     },
     {
       name: "scatter samples a repeatable reservoir",
       spec: { type: "scatter", x: "qty", y: "amount", color: "channel", size: 'we"ird' },
       method: "sample",
-      sql: [`SELECT "qty" AS x, "amount" AS y, "channel" AS color, "we""ird" AS size FROM src USING SAMPLE reservoir(${DATA_LIMITS.chartMaxMarks} ROWS) REPEATABLE (42)`],
+      sql: [`SELECT src."qty" AS x, src."amount" AS y, src."channel" AS color, src."we""ird" AS size FROM src USING SAMPLE reservoir(${DATA_LIMITS.chartMaxMarks} ROWS) REPEATABLE (42)`],
       notSql: ["GROUP BY"],
       check: (vl) => {
         expect(mark(vl)).toBe("point");
@@ -251,7 +251,7 @@ describe("compileChart: reductions per chart type and column class", () => {
       name: "pie slices are the top N categories by the measure",
       spec: { type: "pie", x: "channel", y: "amount" },
       method: "topN",
-      sql: ["LIMIT 20 )", "ELSE 'other' END AS x", 'sum("amount") AS y FROM src GROUP BY ALL ORDER BY y DESC'],
+      sql: ["LIMIT 20 )", "ELSE (SELECT label FROM other_bucket) END AS x", 'sum(src."amount") AS y FROM src GROUP BY ALL ORDER BY y DESC'],
       check: (vl) => {
         expect(mark(vl)).toBe("arc");
         expect(enc(vl).theta).toMatchObject({ field: "y", type: "quantitative" });
@@ -262,14 +262,14 @@ describe("compileChart: reductions per chart type and column class", () => {
       name: "pie treats a numeric x as categories",
       spec: { type: "pie", x: "qty" },
       method: "topN",
-      sql: ['CAST("qty" AS VARCHAR)'],
+      sql: ['CAST(src."qty" AS VARCHAR)'],
       check: (vl) => expect(mark(vl)).toBe("arc"),
     },
     {
       name: "heatmap groups two categories and colours by the measure",
       spec: { type: "heatmap", x: "region", color: "channel" },
       method: "group",
-      sql: ['SELECT CAST("region" AS VARCHAR) AS x, CAST("channel" AS VARCHAR) AS y, count(*) AS color FROM src GROUP BY ALL ORDER BY x, y'],
+      sql: ['SELECT CAST(src."region" AS VARCHAR) AS x, CAST(src."channel" AS VARCHAR) AS y, count(*) AS color FROM src GROUP BY ALL ORDER BY x, y'],
       notSql: ["kept"],
       check: (vl) => {
         expect(mark(vl)).toBe("rect");
@@ -282,7 +282,7 @@ describe("compileChart: reductions per chart type and column class", () => {
       name: "heatmap bins both numeric axes and buckets a date axis",
       spec: { type: "heatmap", x: "amount", color: "d", y: "qty", agg: "avg", bins: 5 },
       method: "group",
-      sql: ["bins_x AS (", "span_y AS (", 'time_bucket(span_y.unit, "d") AS y, time_bucket(span_y.unit, "d") + span_y.unit AS y2, avg("qty") AS color FROM src, bins_x, span_y'],
+      sql: ["bins_x AS (", "span_y AS (", 'time_bucket(span_y.unit, src."d") AS y, time_bucket(span_y.unit, src."d") + span_y.unit AS y2, avg(src."qty") AS color FROM src, bins_x, span_y'],
       check: (vl) => {
         expect(enc(vl).x).toMatchObject({ bin: "binned" });
         expect(enc(vl).x2).toEqual({ field: "x2" });
@@ -329,13 +329,13 @@ describe("compileChart: reductions per chart type and column class", () => {
 describe("compileChart: top-N folding", () => {
   it("keeps the spec's limit", () => {
     const { sql, reduction } = compile({ type: "bar", x: "region", y: "amount", limit: 5 });
-    expect(norm(sql)).toContain("ORDER BY sum(\"amount\") DESC NULLS LAST, x LIMIT 5 )");
+    expect(norm(sql)).toContain("ORDER BY sum(src.\"amount\") DESC NULLS LAST, x LIMIT 5 )");
     expect(reduction.note).toContain("top 5 of region");
   });
 
   it("ranks categories by the chart's own measure", () => {
     const { sql } = compile({ type: "bar", x: "region", y: "amount", agg: "max" });
-    expect(norm(sql)).toContain('ORDER BY max("amount") DESC NULLS LAST, x LIMIT 20 )');
+    expect(norm(sql)).toContain('ORDER BY max(src."amount") DESC NULLS LAST, x LIMIT 20 )');
   });
 
   it("does not fold numbers or dates", () => {
@@ -361,7 +361,7 @@ describe("compileChart: bars that span a range", () => {
 
   it("bins whole numbers in whole steps and labels them without decimals", () => {
     const { sql, vegaLite } = compile({ type: "bar", x: "qty", y: "amount" });
-    expect(norm(sql)).toContain('greatest(1, ceil((max(CAST("qty" AS DOUBLE)) - min(CAST("qty" AS DOUBLE)) + 1) / 30)) AS width');
+    expect(norm(sql)).toContain('greatest(1, ceil((max(CAST(src."qty" AS DOUBLE)) - min(CAST(src."qty" AS DOUBLE)) + 1) / 30)) AS width');
     expect(enc(vegaLite).x).toMatchObject({ bin: "binned", axis: { format: "d" } });
     expect(enc(compile({ type: "bar", x: "amount" }).vegaLite).x.axis).toBeUndefined();
   });
@@ -392,8 +392,8 @@ describe("compileChart: identifiers and the source", () => {
     expect(quoteIdentifier("order")).toBe('"order"');
     expect(quoteIdentifier('we"ird')).toBe('"we""ird"');
     const { sql, vegaLite } = compile({ type: "bar", x: "order", y: 'we"ird' });
-    expect(sql).toContain('CAST("order" AS VARCHAR)');
-    expect(sql).toContain('sum("we""ird") AS y');
+    expect(sql).toContain('CAST(src."order" AS VARCHAR)');
+    expect(sql).toContain('sum(src."we""ird") AS y');
     expect(enc(vegaLite).x.title).toBe("order");
     expect(enc(vegaLite).y.title).toBe('sum(we"ird)');
   });
@@ -444,7 +444,7 @@ describe("compileChart: spec_invalid", () => {
 
   it("allows min/max of a date and types y as temporal", () => {
     const { sql, vegaLite } = compile({ type: "bar", x: "region", y: "ts", agg: "max" });
-    expect(sql).toContain('max("ts") AS y');
+    expect(sql).toContain('max(src."ts") AS y');
     expect(enc(vegaLite).y).toMatchObject({ type: "temporal", title: "max(ts)" });
   });
 });

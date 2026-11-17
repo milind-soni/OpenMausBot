@@ -7,12 +7,17 @@ import { api } from "@/state/store";
 import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/session";
 import { readMembership } from "../lib/membership";
 import { codeUntil, lastSeen } from "../lib/pairing-time";
-import { revealPhonePairing } from "../lib/phone-pairing";
-import { Card, SettingRow, SIMPLE_CARD } from "./SettingsPrimitives";
+import { revealPhonePairing, takePairOnOpen } from "../lib/phone-pairing";
+import { SettingRow, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { Layer } from "./Layer";
+import { DialogTitle, PairRow } from "./PhoneDevicesSection";
+import { Smartphone } from "lucide-react";
+import { productName } from "@/lib/brand";
 import { Select } from "./Select";
 import { cn } from "@/lib/cn";
 import { TeamPhoneCard } from "./TeamPhoneCard";
 import { ComputerNameRow } from "./ComputerNameRow";
+import { isPrivateHost, serverTransport } from "../../electron/server-address.mjs";
 
 export interface PairingOffer {
   id: string;
@@ -20,6 +25,8 @@ export interface PairingOffer {
   expiresAt: number;
   url: string | null;
   hint: string | null;
+  /** False when this server has no phone key, so a paired phone cannot enter secrets here. Absent on older servers. */
+  phoneSecrets?: boolean;
 }
 
 export interface PairedDevice {
@@ -43,14 +50,42 @@ export function pairingBlockedReason(state: SessionState | null): "chat-only" | 
   return state?.kind === "session" && !state.scopes.includes("admin") ? "chat-only" : null;
 }
 
+/** The line a pairing code shows when the phone will not be able to enter secrets on this server. */
+export function phoneSecretNote(offer: Pick<PairingOffer, "phoneSecrets">): string | null {
+  return offer.phoneSecrets === false ? t("remote.serverPairing.noPhoneSecrets") : null;
+}
+
+/** True when a pairing link is a plain http address on a home network: a phone away from that Wi-Fi cannot open it.
+ * Tailscale addresses (100.64/10, fd7a:115c:a1e0::/48, `*.ts.net`) work from anywhere on the tailnet, so they get no note. */
+export function sameWifiOnlyLink(url: string | null): boolean {
+  if (!url) return false;
+  try {
+    const { hostname } = new URL(url);
+    if (serverTransport(url) !== "private-http" || !isPrivateHost(hostname)) return false;
+    const [a, b] = hostname.split(".").map(Number);
+    return !(a === 100 && b >= 64 && b <= 127) && !hostname.startsWith("[fd7a:115c:a1e0:");
+  } catch {
+    return false;
+  }
+}
+
+/** The link another computer pastes into Connect to a server, and the address it names: the server's own link, else one made from the shared address. */
+export function computerLink(offer: Pick<PairingOffer, "url" | "code">, address: string | null): { link: string; address: string } | null {
+  const link = offer.url ?? (address ? `${address}/pair#code=${offer.code}` : null);
+  if (!link) return null;
+  try {
+    return { link, address: new URL(link).origin };
+  } catch {
+    return null;
+  }
+}
+
 export function shownDevices(devices: PairedDevice[], cloudHome: boolean): PairedDevice[] {
   return cloudHome ? devices.filter((device) => device.scopes.includes("admin")) : devices;
 }
 
-const button = "ui-button ui-button-primary";
-const quiet = "ui-button";
 
-export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false }: { initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean }) {
+export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0, team, teamPhoneBlocked = null, simple = false, reveal = true, placeName = "", forComputer = false, address = null }: { placeName?: string; /** True under "Your other computers": the code is for another computer, not a phone. */ forComputer?: boolean; /** Where another computer reaches this one, shown beside its code. */ address?: string | null; initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number; team?: string; teamPhoneBlocked?: string | null; simple?: boolean; /** False where another pairing flow owns the page's focus. */ reveal?: boolean }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
   const [computerName, setComputerName] = useState<string | null>(null);
@@ -90,7 +125,10 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
 
   useEffect(() => {
     if (!focusRequest) revealed.current = 0;
-    else if (revealed.current !== focusRequest && revealPhonePairing(root.current)) revealed.current = focusRequest;
+    else if (revealed.current !== focusRequest && revealPhonePairing(root.current)) {
+      revealed.current = focusRequest;
+      if (canPairDevices(session) && takePairOnOpen()) void create();
+    }
   }, [focusRequest, session]);
 
   useEffect(() => {
@@ -99,6 +137,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     return () => clearInterval(timer);
   }, [offer]);
 
+  const pairLabel = t(forComputer ? "devices.computers.pairButton" : "phone.pair.button");
   if (team && session?.kind === "session" && session.team) {
     return (
       <div ref={root} tabIndex={-1} data-phone-pairing="server" className="scroll-mt-4 rounded-xl focus:outline-none">
@@ -108,14 +147,21 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   }
   if (!canPairDevices(session)) {
     if (pairingBlockedReason(session) !== "chat-only") return null;
+    const reason = t(pairingCodes ? "remote.serverPairing.chatOnlyShort" : "remote.serverPairing.portalChatOnly");
     return (
-      <div ref={root} tabIndex={-1} data-phone-pairing="server" className="scroll-mt-4 rounded-xl focus:outline-none">
-        <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
-          <p data-server-pairing-chat-only className="mt-3 text-[13px] text-ink-secondary">{t(pairingCodes ? "remote.serverPairing.chatOnly" : "remote.serverPairing.portalChatOnly")}</p>
-        </Card>
+      <div ref={root} tabIndex={-1} data-phone-pairing="server" className="flex scroll-mt-4 flex-col gap-6 focus:outline-none">
+        <SettingsGroup block="pair">
+          <SettingsRows>
+            <PairRow reason={reason}>
+              <button type="button" aria-disabled="true" data-phone-pairing-action={reveal ? "" : undefined} data-settings-drop="" title={reason} className="ui-button ui-button-primary opacity-40">{pairLabel}</button>
+            </PairRow>
+          </SettingsRows>
+          <p data-server-pairing-chat-only className="px-4 text-[12px] leading-4 text-ink-secondary">{t(pairingCodes ? "remote.serverPairing.chatOnly" : "remote.serverPairing.portalChatOnly")}</p>
+        </SettingsGroup>
       </div>
     );
   }
+  const dialogTitle = forComputer ? t("devices.computers.pairTitle") : t("phone.pair.dialogTitle", { place: placeName });
   const expired = offer ? offer.expiresAt <= now : false;
   const listed = shownDevices(devices, cloudHome);
 
@@ -144,139 +190,131 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     }
   }
 
+  const forOtherComputer = forComputer && offer ? computerLink(offer, address) : null;
+  const link = forOtherComputer?.link ?? offer?.url ?? null;
   async function copyLink() {
-    if (!offer?.url) return;
-    const result = await copyText(offer.url);
+    if (!link) return;
+    const result = await copyText(link);
     if (result !== "empty") setCopied(result);
   }
 
+  // A code for another computer is typed there, so the phone-only parts (QR, phone notes) stay out.
+  const secretNote = offer && !forComputer ? phoneSecretNote(offer) : null;
+  const sameWifiOnly = !forComputer && sameWifiOnlyLink(offer?.url ?? null);
   const offerPanel = pairingCodes && offer ? (
-        <div className="mt-4 rounded-lg border border-hairline/40 bg-inset p-4">
+    <Layer modal>
+      <div role="dialog" aria-modal="true" aria-label={dialogTitle} data-settings-look="simple" data-pair-dialog="code"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onMouseDown={(event) => event.target === event.currentTarget && setOffer(null)}>
+        <div className="relative flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 shadow-xl">
+          <DialogTitle title={dialogTitle} onClose={() => setOffer(null)} />
           {expired ? (
-            <p className="text-[13px] text-ink-secondary">{t("remote.serverPairing.expired")}</p>
+            <p className="text-[13px] leading-[18px] text-ink-secondary">{t("remote.serverPairing.expired")}</p>
           ) : (
-            <div className="flex flex-wrap items-start gap-5">
-              {offer.url ? (
-                <div className="rounded-md bg-white p-2">
-                  <QRCodeSVG value={offer.url} size={160} level="M" bgColor="#ffffff" fgColor="#111111" />
+            <div className="flex flex-col items-start gap-4">
+              {/* The code is the dialog's centre: the QR sits in the middle, and the words under it run the full width. */}
+              {offer.url && !forComputer ? (
+                <div data-pair-qr="" className="self-center rounded-[12px] bg-white p-3 shadow-[inset_0_0_0_0.5px_var(--settings-edge)]">
+                  <QRCodeSVG value={offer.url} size={200} level="M" bgColor="#ffffff" fgColor="#111111" />
                 </div>
               ) : null}
-              <div className="min-w-[200px] flex-1">
-                <div className="font-mono text-[18px] tracking-[0.14em] text-ink">{offer.code}</div>
-                <div className="mt-1 text-[13px] text-ink-secondary">{codeUntil(offer.expiresAt)}</div>
-                {offer.url ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <code className="break-all text-[12px] text-ink-secondary">{offer.url}</code>
-                    <button type="button" onClick={() => void copyLink()} className={quiet}>
-                      {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
-                    </button>
-                  </div>
-                ) : (
-                  <p className="mt-3 text-[13px] text-ink-secondary">{offer.hint ?? t("remote.serverPairing.noLink")}</p>
-                )}
+              {/* One 14/20 ink instruction, then 12/16 secondary notes. */}
+              <div className="flex flex-col gap-1" data-pair-instructions="">
+                {forComputer ? <p className="text-[14px] leading-5 text-ink">{t("devices.computers.typeCode", { app: productName() })}</p> : offer.url ? <>
+                  <p className="text-[14px] leading-5 text-ink">{t("phone.code.installAndScan", { app: productName() })}</p>
+                  <p className="text-[12px] leading-4 text-ink-secondary">{t("phone.code.notCamera", { app: productName() })}</p>
+                </> : <p className="text-[14px] leading-5 text-ink">{t("phone.code.typeThis", { app: productName() })}</p>}
               </div>
+              {forOtherComputer && (
+                <div className="flex flex-col gap-1">
+                  <div className="text-[12px] leading-4 text-ink-secondary">{t("devices.computers.address")}</div>
+                  <div className="select-text break-all text-[14px] leading-5 text-ink" data-pairing-address="">{forOtherComputer.address}</div>
+                </div>
+              )}
+              <div className="flex flex-col gap-1">
+                {forOtherComputer && <div className="text-[12px] leading-4 text-ink-secondary">{t("connect.code")}</div>}
+                <div className="text-[20px] font-medium leading-7 tracking-[0.08em] text-ink tabular-nums" data-pairing-code="">{offer.code}</div>
+                <div className="text-[12px] leading-4 text-ink-secondary">{codeUntil(offer.expiresAt)}</div>
+              </div>
+              {forComputer && !cloudHome ? null : <p className="text-[12px] leading-4 text-ink-secondary">{t(cloudHome ? "phone.pair.cloudPersonal" : "remote.serverPairing.subtitle", { app: productName() })}</p>}
+              {secretNote ? <p data-pair-no-phone-secrets="" className="text-[12px] leading-4 text-ink-secondary">{secretNote}</p> : null}
+              {sameWifiOnly ? <p data-pair-same-wifi="" className="text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.sameWifiOnly", { app: productName() })}</p> : null}
             </div>
           )}
+          <div className="flex items-center justify-end gap-2">
+            {!expired && link && !forOtherComputer && (
+              <button type="button" onClick={() => void copyLink()} className="ui-button mr-auto">
+                {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
+              </button>
+            )}
+            {expired && <button type="button" className="ui-button" onClick={() => void create()}>{t("remote.serverPairing.create")}</button>}
+            <button type="button" className={cn("ui-button", (expired || !forOtherComputer) && "ui-button-primary")} onClick={() => setOffer(null)}>{t("devices.pair.done")}</button>
+            {!expired && forOtherComputer && (
+              <button type="button" onClick={() => void copyLink()} className="ui-button ui-button-primary" data-copy-link="">
+                {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
+              </button>
+            )}
+          </div>
         </div>
-  ) : null;
-  // Loaded with the config; a personal cloud has no computer of its own to name.
-  const nameRow = (className: string) => pairingCodes && !cloudHome && computerName !== null
-    ? <ComputerNameRow saved={computerName} onSaved={setComputerName} className={className} /> : null;
-  const scopeName = (device: PairedDevice) => t(device.scopes.includes("admin") ? "remote.serverPairing.scope.admin" : "remote.serverPairing.scope.client");
-
-  if (simple) {
-    return (
-      <div ref={root} tabIndex={-1} data-phone-pairing="server" className="flex scroll-mt-4 flex-col gap-1.5 focus:outline-none">
-        <div data-settings-rows="" className={cn(SIMPLE_CARD, "flex flex-col")}>
-          {nameRow("px-4 py-2.5")}
-          <SettingRow title={t("settings.simple.computer.pair")} subtitle={pairingCodes ? cloudHome ? t("remote.serverPairing.cloudPersonal") : undefined : t("remote.serverPairing.portal")}>
-            {pairingCodes ? (
-              <div className="flex items-center gap-2">
-                {cloudHome ? null : (
-                  <Select variant="ghost" value={scope} aria-label={t("remote.serverPairing.title")} onChange={(event) => setScope(event.target.value === "client" ? "client" : "admin")}>
-                    <option value="admin">{t("remote.serverPairing.scope.admin")}</option>
-                    <option value="client">{t("remote.serverPairing.scope.client")}</option>
-                  </Select>
-                )}
-                <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className="ui-button">
-                  {busy ? t("remote.serverPairing.creating") : t("settings.simple.computer.createCode")}
-                </button>
-              </div>
-            ) : null}
-          </SettingRow>
-          {offerPanel ? <div className="px-4 pb-2.5 [&>div]:mt-0">{offerPanel}</div> : null}
-          {listed.length === 0 ? (
-            <p className="px-4 py-2.5 text-[13px] leading-[18px] text-ink-secondary">{t("remote.serverPairing.noDevices")}</p>
-          ) : listed.map((device) => (
-            <div key={device.id} className="flex min-h-11 flex-wrap items-center gap-x-5 gap-y-2 px-4 py-2.5">
-              <span className="min-w-[min(100%,15rem)] flex-1 text-[14px] leading-5 text-ink">
-                {device.label}
-                <span className="text-ink-secondary">
-                  {" · "}{scopeName(device)}{" · "}{t("remote.serverPairing.seen", { when: lastSeen(device.lastSeenAt, now) })}
-                  {device.id === current ? ` · ${t("remote.serverPairing.thisBrowser")}` : ""}
-                </span>
-              </span>
-              {device.id === current ? null : (
-                <button type="button" onClick={() => void signOut(device.id)} className="ui-button ml-auto shrink-0">{t("remote.serverPairing.signOut")}</button>
-              )}
-            </div>
-          ))}
-        </div>
-        {error ? <p className="pl-4 text-[12px] leading-4 text-danger">{error}</p> : null}
       </div>
-    );
-  }
+    </Layer>
+  ) : null;
+  const scopeName = (device: PairedDevice) => t(device.scopes.includes("admin") ? "remote.serverPairing.scope.admin" : "remote.serverPairing.scope.client");
+  const pairButton = (
+    <button type="button" data-phone-pairing-action={reveal ? "" : undefined} data-settings-drop="" onClick={() => void create()} disabled={busy || !pairingCodes}
+      className={cn("ui-button ui-button-primary", !pairingCodes && "opacity-40")}>
+      {busy ? t("remote.serverPairing.creating") : pairLabel}
+    </button>
+  );
+  const choices = !simple && pairingCodes && !cloudHome ? (
+    <Select variant="ghost" value={scope} aria-label={t("remote.serverPairing.title")} onChange={(event) => setScope(event.target.value === "client" ? "client" : "admin")}>
+      <option value="admin">{t("remote.serverPairing.scope.admin")}</option>
+      <option value="client">{t("remote.serverPairing.scope.client")}</option>
+    </Select>
+  ) : null;
+  const nameRow = !simple && pairingCodes && !cloudHome && computerName !== null
+    ? <SettingsRows><ComputerNameRow saved={computerName} onSaved={setComputerName} className="px-4 py-3" /></SettingsRows> : null;
+  const pairRow = forComputer ? (
+    <SettingRow title={t("devices.computers.pairTitle")} subtitle={t("devices.computers.pairLine")} message={pairingCodes ? undefined : t("remote.serverPairing.portalShort")}>
+      {choices}{pairButton}
+    </SettingRow>
+  ) : (
+    <PairRow reason={pairingCodes ? null : t("remote.serverPairing.portalShort")}>
+      {choices}{pairButton}
+    </PairRow>
+  );
 
   return (
-    <div ref={root} tabIndex={-1} data-phone-pairing="server" className="scroll-mt-4 rounded-xl focus:outline-none">
-    <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
-      {pairingCodes && cloudHome ? <p data-server-pairing-personal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.cloudPersonal")}</p> : null}
-      {nameRow("mt-3")}
-      {pairingCodes ? <div className="mt-3 flex flex-wrap items-center gap-3">
-        {cloudHome ? null : <>
-          <label className="flex items-center gap-1.5 text-[13px] text-ink">
-            <input type="radio" name="server-pairing-scope" checked={scope === "admin"} onChange={() => setScope("admin")} />
-            {t("remote.serverPairing.scope.admin")}
-          </label>
-          <label className="flex items-center gap-1.5 text-[13px] text-ink">
-            <input type="radio" name="server-pairing-scope" checked={scope === "client"} onChange={() => setScope("client")} />
-            {t("remote.serverPairing.scope.client")}
-          </label>
-        </>}
-        <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className={button}>
-          {busy ? t("remote.serverPairing.creating") : t("remote.serverPairing.create")}
-        </button>
-      </div> : <p data-server-pairing-portal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
+    <div ref={root} tabIndex={-1} data-phone-pairing="server" className="flex scroll-mt-4 flex-col gap-6 focus:outline-none">
       {offerPanel}
-      <div className="mt-5 text-[13px] font-medium text-ink">{t(pairingCodes ? "remote.serverPairing.devices" : "remote.serverPairing.portalDevices")}</div>
       {listed.length === 0 ? (
-        <p className="mt-1 text-[13px] text-ink-secondary">{t("remote.serverPairing.noDevices")}</p>
+        <SettingsGroup block="pair">
+          <SettingsRows>{pairRow}</SettingsRows>
+          {nameRow}
+          {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
+        </SettingsGroup>
       ) : (
-        <ul className="mt-1 divide-y divide-hairline/40">
-          {listed.map((device) => (
-            <li key={device.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[13px]">
-              <span className="text-ink">
-                {device.label}
-                {device.email ? <span className="text-ink-secondary"> · {device.email}</span> : null}
-                <span className="text-ink-secondary">
-                  {" · "}
-                  {device.scopes.includes("admin") ? t("remote.serverPairing.scope.admin") : t("remote.serverPairing.scope.client")}
-                  {" · "}
-                  {t("remote.serverPairing.seen", { when: lastSeen(device.lastSeenAt, now) })}
-                  {device.id === current ? ` · ${t("remote.serverPairing.thisBrowser")}` : ""}
-                </span>
-              </span>
-              {device.id === current ? null : (
-                <button type="button" onClick={() => void signOut(device.id)} className={quiet}>
-                  {t("remote.serverPairing.signOut")}
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+        <SettingsGroup label={t(pairingCodes ? "devices.paired" : "remote.serverPairing.portalDevices")} block="paired" actions={pairingCodes ? <span className="flex items-center gap-2">{choices}{pairButton}</span> : undefined}>
+            <SettingsRows icons>
+              {listed.map((device) => (
+                <div key={device.id} className="flex min-h-16 items-center gap-3 px-4 py-3" data-paired-device={device.id}>
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Smartphone size={18} strokeWidth={1.75} aria-hidden="true" /></span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate text-[14px] leading-5 text-ink">{device.label}</span>
+                    <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
+                      {[device.email, cloudHome ? null : scopeName(device), t("remote.serverPairing.seen", { when: lastSeen(device.lastSeenAt, now) }), device.id === current ? t("remote.serverPairing.thisBrowser") : null].filter(Boolean).join(" · ")}
+                    </span>
+                  </span>
+                  {device.id === current ? null : (
+                    <button type="button" onClick={() => void signOut(device.id)} data-danger="" className="settings-quiet shrink-0 cursor-pointer">{t("phone.devices.remove")}</button>
+                  )}
+                </div>
+              ))}
+            </SettingsRows>
+            {nameRow}
+            {!pairingCodes && <p data-server-pairing-portal className="px-4 text-[12px] leading-4 text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
+          </SettingsGroup>
       )}
-      {error ? <p className="mt-3 text-[13px] text-danger">{error}</p> : null}
-    </Card>
+      {error ? <p className="px-4 text-[12px] leading-4 text-danger">{error}</p> : null}
     </div>
   );
 }

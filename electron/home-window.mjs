@@ -301,7 +301,11 @@ export function createHomeWindow(deps) {
     if (home.kind === "signin" && !name) return { screen: "signin" };
     const own = ownMove();
     if (own && MOVING.has(own.phase)) return { screen: "moving", name: own.name };
-    return named({ screen: MOVING.has(parseJournal(journal())?.phase ?? "") ? "moving" : "opening" });
+    const moving = MOVING.has(parseJournal(journal())?.phase ?? "");
+    // A frozen copy's way back opens the person's own server: the screen names it, never My Cloud.
+    const parked = !moving && !name && !own && !asked && home.kind === "computer" && !home.clean ? home.frozenPlace?.place : null;
+    if (parked) return { screen: "opening", name: parked };
+    return named({ screen: moving ? "moving" : "opening" });
   }
   const tell = () => { try { publish(view()); } catch {} };
   let splashSaid = null;
@@ -330,6 +334,8 @@ export function createHomeWindow(deps) {
     try { const at = new URL(win.webContents.getURL()); return at.origin === localOrigin() && at.pathname === HOME_SCREEN_PATH; } catch { return false; }
   };
   const clearRetry = () => { if (retry) timers.clear(retry); retry = null; };
+  /** Whatever was being opened for an earlier click stops; the window still shows what it showed. */
+  function stopOpening() { opens++; recovering = null; clearRetry(); screen = null; status = null; }
 
   function goScreen() {
     tell();
@@ -487,7 +493,7 @@ export function createHomeWindow(deps) {
         const look = await answers(origin);
         if (look === "no") return unreachable(place, token);
         if (look === "asleep" && otherPlace(place)) return offline(token);
-        if (look === "asleep") { power.hold(); asleep = true; say("waking"); }
+        if (look === "asleep") { power.hold(); asleep = true; if (wanted(token)) say("waking"); }
       }
       let session = null;
       const signedIn = asleep
@@ -584,6 +590,7 @@ export function createHomeWindow(deps) {
       if (!current.clean && parkedAt && !ownMove() && onOwnPage()) {
         clearRetry(); screen = null; status = null; shown = null; away = false;
         ensureWindow();
+        tell();
         let slow = null;
         const mine = {}; recovering = mine;
         try {
@@ -594,7 +601,7 @@ export function createHomeWindow(deps) {
           timers.clear(slow);
           if (!wanted(token)) return;
           if (back) return;
-          toScreen({ screen: "offline", reason: `Your bots are on ${parkedAt.place}.` });
+          toScreen({ screen: "offline", name: parkedAt.place, reason: `Your bots are on ${parkedAt.place}.` });
           return later();
         } finally { if (recovering === mine) recovering = null; }
       }
@@ -791,7 +798,7 @@ export function createHomeWindow(deps) {
       if (!place && parkedAt?.origin && at === parkedAt.origin) {
         ++opens;
         if (ownMove()) tell();
-        else toScreen({ screen: "offline", reason: `Your bots are on ${parkedAt.place}.` });
+        else { opening = null; toScreen({ screen: "offline", name: parkedAt.place, reason: `Your bots are on ${parkedAt.place}.` }); }
         later();
         return true;
       }
@@ -817,7 +824,10 @@ export function createHomeWindow(deps) {
     },
     /** Signs the team on screen in again now, without moving the page (the timer's own step; also for tests). */
     renew: () => renew(),
-    cancel() { opens++; recovering = null; clearRetry(); screen = null; status = null; shown = null; away = false; },
+    cancel() { stopOpening(); shown = null; away = false; },
+    stopOpening,
+    /** The person chose the place on screen again before the one they'd asked for opened: it stays as it is. */
+    stay() { stopOpening(); profileShown = null; },
     close() { opens++; clearRetry(); clearRenewal(); timers.clear(watcher); },
   };
 }

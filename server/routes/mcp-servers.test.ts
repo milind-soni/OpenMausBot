@@ -29,7 +29,7 @@ afterEach(async () => {
 
 type Bot = { id: string; mcpServers?: string[] };
 
-async function serve(options: { botsPath?: () => BrokerPath | null; bots?: Bot[]; listed?: Record<string, Record<string, unknown>>; probeAs?: (server: { bot?: string }) => { id?: string; cwd?: string } } = {}) {
+async function serve(options: { ownsVault?: boolean; keys?: Parameters<typeof createMcpConfig>[0]["keys"]; botsPath?: () => BrokerPath | null; bots?: Bot[]; listed?: Record<string, Record<string, unknown>>; probeAs?: (server: { bot?: string }) => { id?: string; cwd?: string } } = {}) {
   const cfg: Pick<AppConfig, "mcpServers"> = { mcpServers: {} };
   const changes: string[] = [];
   let busy = false;
@@ -50,10 +50,12 @@ async function serve(options: { botsPath?: () => BrokerPath | null; bots?: Bot[]
     changed: () => {},
     ...(options.botsPath ? { botsPath: options.botsPath } : {}),
     ...(options.probeAs ? { probeAs: options.probeAs } : {}),
+    ...(options.keys ? { keys: options.keys } : {}),
   });
   const route = createMcpServerRoutes({
     cfg, bot: (id) => options.bots?.find((bot) => bot.id === id) ?? null, sessions, mcpOAuth, teamConnections,
     cloudHome: null,
+    ownsVault: () => options.ownsVault ?? true,
     fallbackPublicUrl: null,
     mcpServerResponse,
     savedCustomDomain: () => null,
@@ -84,6 +86,31 @@ it("says when a server is added, imported or removed on purpose, so a Cloud home
   expect((await remove("warehouse")).status).toBe(200);
   expect((await remove("missing")).status).toBe(404);
   expect(changes).toEqual(["added", "added", "removed"]);
+});
+
+it("a server arriving from a move is given the Vault items it names, by id only; nothing else in a request grants one", async () => {
+  const given: Array<[string, readonly string[]]> = [];
+  const { cfg, post, base } = await serve({ keys: { grant: (name: string, items: readonly string[]) => given.push([name, items]), warm: async () => {}, forgetServer: () => {}, resolve: (_n: string, server: object) => ({ ok: true, server }), oauthClient: (_n: string, o: object) => o, usedBy: () => [], given: () => [] } as never });
+  const item = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const added = await post("/api/mcp/servers", { name: "stripe", command: "npx", args: ["x"], env: { KEY: `vault:${item}` }, vaultKeys: [item, "not an id", 7] });
+  expect(added.status, await added.clone().text()).toBe(201);
+  expect(given).toEqual([["stripe", [item]]]);
+  expect((cfg.mcpServers as Record<string, { env: Record<string, string> }>).stripe.env).toEqual({ KEY: `vault:${item}` });
+  given.length = 0;
+  expect((await fetch(`${base}/api/mcp/servers/stripe`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: "npx", args: ["y"], env: { KEY: true } }) })).status).toBe(200);
+  expect(given).toEqual([]);
+  const replaced = await fetch(`${base}/api/mcp/servers/stripe`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: "npx", args: ["y"], env: { KEY: true }, vaultKeys: [item] }) });
+  expect(replaced.status, await replaced.clone().text()).toBe(200);
+  expect(given).toEqual([["stripe", [item]]]);
+});
+
+it("a Team Cloud takes no vaultKeys: an admin's server can't be given a member's saved secret", async () => {
+  const given: Array<[string, readonly string[]]> = [];
+  const { post } = await serve({ ownsVault: false, keys: { grant: (name: string, items: readonly string[]) => given.push([name, items]), warm: async () => {}, forgetServer: () => {}, resolve: (_n: string, server: object) => ({ ok: true, server }), oauthClient: (_n: string, o: object) => o, usedBy: () => [], given: () => [] } as never });
+  const item = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+  const added = await post("/api/mcp/servers", { name: "stripe", command: "npx", args: ["x"], env: { KEY: `vault:${item}` }, vaultKeys: [item] });
+  expect(added.status, await added.clone().text()).toBe(201);
+  expect(given).toEqual([]);
 });
 
 it("adds a command server sent with type stdio, as other MCP clients write it, and keeps the old shape working", async () => {

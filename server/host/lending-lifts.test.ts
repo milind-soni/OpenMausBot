@@ -27,7 +27,7 @@ function world({ room = false, busy = false, owners = true, stopped = false, at 
       activePath: () => lines,
       appendMessage: (_: string, message: any) => { const line = { id: `m${lines.length}`, ...message }; lines.push(line); return line; },
       patchMessage: (_: string, id: string, patch: any) => { const line = lines.find((candidate) => candidate.id === id)!; Object.assign(line, patch); return line; },
-      bot: () => ({ id: "b1", name: "Postmeister", color: "red" }),
+      bot: () => ({ id: "b1", name: "Postmeister", color: "red", threadId: "t1" }),
       botByThread: () => ({ id: "b1" }),
       groupByThread: () => (room ? { id: "g1", name: "Room" } : undefined),
       projectBotForTask: () => ({ busy: false, activity: "working" }),
@@ -66,6 +66,7 @@ function world({ room = false, busy = false, owners = true, stopped = false, at 
   return { lines, state, continued, timers, deps, lifts, answer };
 }
 const input = { botId: "b1", threadId: "t1", requestMessageId: "u1", memoryChanged: true, outside: false };
+const wholeBotCards = (lines: Line[]) => lines.filter((line) => line.card?.lendingLift?.requestMessageId === "whole-bot-memory");
 const cardOf = (lines: Line[]) => lines.filter((line) => line.card?.lendingLift).at(-1)!.card;
 
 describe("the card that lifts a lock on the lent computer (server/host/lending-lifts.ts)", () => {
@@ -266,6 +267,51 @@ describe("the card that lifts a lock on the lent computer (server/host/lending-l
   });
   it("answers only its own cards", () => {
     expect(world().answer("something-else", "allow")).toBeNull();
+  });
+});
+
+describe("the card a bot's lock raises in its own chat", () => {
+  it("names the bot, shows what changed, and notifies once, however often it is told", () => {
+    const { lines, deps, lifts } = world();
+    lifts.memoryLocked("b1");
+    lifts.memoryLocked("b1");
+    expect(wholeBotCards(lines)).toHaveLength(1);
+    expect(deps.notify).toHaveBeenCalledTimes(1);
+    const card = wholeBotCards(lines)[0]!.card;
+    expect(card.title).toBe("Postmeister's notes changed in work you didn't write. Let it keep using your Mac?");
+    expect(card.subtitle).toContain("MEMORY.md");
+    expect(card.lendingLift).toEqual({ requestMessageId: "whole-bot-memory", memoryToken: "t1" });
+  });
+  it("Allow accepts exactly what it showed, and starts no turn", () => {
+    const { lines, state, continued, lifts, answer } = world();
+    lifts.memoryLocked("b1");
+    expect(answer(wholeBotCards(lines)[0]!.card.requestId, "allow")!.status).toBe(200);
+    expect(state.accepted).toEqual(["t1"]);
+    expect(continued).toEqual([]);
+  });
+  it("only the owner's own device answers it", () => {
+    const { lines, state, lifts, answer } = world({ owners: false });
+    lifts.memoryLocked("b1");
+    expect(answer(wholeBotCards(lines)[0]!.card.requestId, "allow")!.status).toBe(403);
+    expect(state.accepted).toEqual([]);
+  });
+  it("Not now holds until the memory changes again; then it asks once more, about what's there now", () => {
+    const { lines, state, lifts, answer } = world();
+    lifts.memoryLocked("b1");
+    answer(wholeBotCards(lines)[0]!.card.requestId, "deny");
+    lifts.memoryLocked("b1");
+    expect(wholeBotCards(lines)).toHaveLength(1);
+    state.token = "t2";
+    state.changed = ["memory/people.md"];
+    lifts.memoryLocked("b1");
+    expect(wholeBotCards(lines)).toHaveLength(2);
+    expect(wholeBotCards(lines)[1]!.card.lendingLift.memoryToken).toBe("t2");
+  });
+  it("a bot that no longer exists raises nothing", () => {
+    const { lines, lifts, deps } = world();
+    (deps.store as unknown as { bot: () => undefined }).bot = () => undefined;
+    lifts.memoryLocked("gone");
+    expect(wholeBotCards(lines)).toEqual([]);
   });
 });
 

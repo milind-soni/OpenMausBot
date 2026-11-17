@@ -38,6 +38,8 @@ export interface QuestionRoutingDeps {
   steer(threadId: string, text: string): Promise<boolean>;
   /** Work the sender's conversation carries may reach this thread: confined work reaches only what is confined already. */
   mayReach(fromThreadId: string, toThreadId: string): boolean;
+  /** Words from a turn that could not use the lent computer are about to reach work in this thread: it stops keeping it. */
+  handedInUnproven(threadId: string): void;
 }
 
 const ENDED: ReadonlySet<HandoffView["status"]> = new Set(["completed", "failed", "cancelled"]);
@@ -92,15 +94,16 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
    * that question, or when it goes to the thread (`threadId`) where work the sender handed on in an earlier turn waits on
    * a question (not on a sign-in only the person can do). Otherwise, to the thread where such work is running, it is
    * handed to that running turn. Work handed out in this very turn (`sentThisTurn`) stays apart: a second assignment is its
-   * own. Undefined when it goes into no work; a failed receipt when `answers` names work that no longer asks. */
+   * own. When the sender chose `threadId` itself (`selected`: a report-back thread it steers), a question it carries from another
+   * thread does not take the message. Undefined when it goes into no work; a failed receipt when `answers` names work that no longer asks. */
   async function relay(input: { sender: BotRecord; senderThreadId: string; senderNode?: HandoffView; target: BotRecord; message: string; answers?: string;
-    threadId?: string; sentThisTurn?: ReadonlySet<string> }): Promise<PeerDeliveryReceipt | undefined> {
+    threadId?: string; selected?: boolean; sentThisTurn?: ReadonlySet<string>; lends?: boolean }): Promise<PeerDeliveryReceipt | undefined> {
     const { sender, target, message } = input;
     const waiting = waitingOn(target).filter((one) => deps.mayReach(input.senderThreadId, one.threadId));
     const ownWork = (node: HandoffView | undefined): node is HandoffView => node !== undefined && node.threadId === input.threadId
       && !input.sentThisTurn?.has(node.id) && handedOnBy(node, sender.id) && deps.mayReach(input.senderThreadId, node.threadId);
     const pick = input.answers !== undefined ? waiting.find((one) => one.node?.id === input.answers)
-      : waiting.find((one) => one.node !== undefined && input.senderNode?.carrying?.includes(one.node.id) === true)
+      : waiting.find((one) => one.node !== undefined && input.senderNode?.carrying?.includes(one.node.id) === true && (!input.selected || one.threadId === input.threadId))
         ?? waiting.find((one) => ownWork(one.node) && (one.card !== undefined || !one.node.cards?.length));
     const refused = () => input.answers === undefined ? undefined : peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed",
       detail: `nothing of ${target.name}'s waits on an answer as ${input.answers}: it was answered or its work ended. Send it without answers if it still needs doing` });
@@ -111,6 +114,8 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
     }
     if (!pick) return refused() ?? await handOn(input, deps.active().find((node) => node.botId === target.id && node.status === "running" && ownWork(node)));
     const by: Answerer = { kind: "bot", botId: sender.id };
+    // Security invariant: first, so what this sender says can never reach a turn still holding the lent computer.
+    if (!input.lends) deps.handedInUnproven(pick.threadId);
     if (pick.card) {
       if (!(await deps.answerLive(pick.threadId, pick.card.card!.requestId!, `@${sender.name} answered: ${message}`))) return refused();
       const card = store.messagesFor(pick.threadId).find((row) => row.id === pick.card!.id)?.card;
@@ -132,8 +137,9 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
 
   /** The sender's message, to the turn running the work it handed on: the turn reads it at its next step, and that work's one
    * result still returns once. Undefined when no such turn runs or its engine cannot take it now. */
-  async function handOn(input: { sender: BotRecord; senderThreadId: string; target: BotRecord; message: string }, running: HandoffView | undefined): Promise<PeerDeliveryReceipt | undefined> {
+  async function handOn(input: { sender: BotRecord; senderThreadId: string; target: BotRecord; message: string; lends?: boolean }, running: HandoffView | undefined): Promise<PeerDeliveryReceipt | undefined> {
     const { sender, target, message } = input;
+    if (running && !input.lends) deps.handedInUnproven(running.threadId);
     if (!running || !(await deps.steer(running.threadId, composeAddition(running.id, sender.name, message, running.origin?.kind === "outside" ? AUTHORITY.info : AUTHORITY.behalf)))) return undefined;
     store.appendMessage(running.threadId, { role: "user", kind: "text", text: escapeNotes(message), peerAsk: { botId: sender.id, name: sender.name }, aside: true, steered: true });
     const title = store.taskByThread(target.id, running.threadId)?.title;
@@ -168,13 +174,14 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
    * Undefined when the thread waits on no question the Chief may answer, so the usual thread rules apply: a sign-in, an
    * approval or a question only the person can answer stays theirs. The card shows the Chief's answer, and the person's own
    * answer still replaces it. */
-  async function answerForPerson(input: { sender: BotRecord; senderThreadId: string; target: BotRecord; threadId: string; message: string }): Promise<PeerDeliveryReceipt | undefined> {
+  async function answerForPerson(input: { sender: BotRecord; senderThreadId: string; target: BotRecord; threadId: string; message: string; lends?: boolean }): Promise<PeerDeliveryReceipt | undefined> {
     const { sender, target, threadId, message } = input;
     const task = store.taskByThread(target.id, threadId);
     if (!task || task.archivedAt !== undefined || task.openedBy?.botId === sender.id) return undefined;
     const asked = forPerson(target.id, threadId);
     if (!asked) return undefined;
     const { row, question } = asked, card = row.card!;
+    if (!input.lends) deps.handedInUnproven(threadId);
     if (!(await deps.answerLive(threadId, card.requestId!, `@${sender.name} answered for the person: ${message}`))) {
       return peerDeliveryReceipt({ botId: target.id, botName: target.name, outcome: "failed", threadId,
         detail: `${target.name}'s question "${question}" was answered or closed meanwhile; nothing was sent` });

@@ -4,8 +4,9 @@ import type { Readable, Writable } from "node:stream";
 import { spawnBotWork } from "../../oom-score.ts";
 import { pipeTransport, type CdpTransport } from "../cdp/transport.ts";
 import { chromeArgs, chromeEnv, type ChromeEnvInput, type ChromeFlagsInput } from "./flags.ts";
-import { diagnoseLaunchFailure } from "./host-setup.ts";
+import { diagnoseLaunchFailure, type BrowserHostError } from "./host-setup.ts";
 import type { ProcessRegistry } from "./processes.ts";
+import { devShmIsSmall } from "./shm.ts";
 
 export interface LaunchOptions extends ChromeFlagsInput, Omit<ChromeEnvInput, "host"> {
   /** A resolved Chrome or Chrome for Testing executable. */
@@ -45,8 +46,9 @@ export interface ChromeProcess {
 export class ChromeLaunchError extends Error {
   readonly output: string;
 
-  constructor(message: string, output: string) {
-    super(message);
+  /** The host setup Chrome needs, when that is why it could not start, is the cause. */
+  constructor(message: string, output: string, host: BrowserHostError | null = null) {
+    super(message, host ? { cause: host } : undefined);
     this.name = "ChromeLaunchError";
     this.output = output;
   }
@@ -97,7 +99,7 @@ function handshake(transport: CdpTransport, exited: Promise<ChromeExit>, timeout
 
 /** Starts Chrome on --remote-debugging-pipe (fd 3 to Chrome, fd 4 back) and waits until it answers. */
 export async function launchChrome(options: LaunchOptions): Promise<ChromeProcess> {
-  const argv = chromeArgs(options);
+  const argv = chromeArgs({ ...options, smallShm: options.smallShm ?? devShmIsSmall() });
   const env = chromeEnv(options.env ?? process.env, {
     host: options.host,
     timezone: options.timezone ?? null,
@@ -129,7 +131,7 @@ export async function launchChrome(options: LaunchOptions): Promise<ChromeProces
     killTree(child, "SIGKILL");
     await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 2_000))]);
     const diagnosis = await diagnoseLaunchFailure({ executable: options.executablePath, output, env }).catch(() => null);
-    throw new ChromeLaunchError(diagnosis?.message ?? (error instanceof Error ? error.message : String(error)), output);
+    throw new ChromeLaunchError(diagnosis?.message ?? (error instanceof Error ? error.message : String(error)), output, diagnosis);
   }
   const wait = (ms: number) => Promise.race([exited, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
   const stop = async (graceMs: number): Promise<ChromeExit> => {

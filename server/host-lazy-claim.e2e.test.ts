@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_REFUSAL_PLAIN, CONTROL_WAITED, controlRefusal, createControlClient } from "./control-client.ts";
 import { computerPersonAwayText } from "./computer-wait.ts";
@@ -12,6 +12,7 @@ import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { answerYourComputer, openYourComputerCard, withAnswer } from "./testing/your-computer.ts";
 import { YOUR_COMPUTER_WAITING } from "./your-computer-consent.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 // A first screen call must clear within ACT_WITHIN_MS, the person's answer to its card and the seat's claim included.
@@ -75,7 +76,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
   const busy = (botId: string, threadId: string) => until(() => threadState(botId, threadId), Boolean);
   const idle = (botId: string, threadId: string) => until(() => threadState(botId, threadId), task => !task?.busy);
   const savedTask = (botId: string, threadId: string) =>
-    (JSON.parse(readFileSync(join(data, "bots.json"), "utf8")) as any[])
+    (readRegistry(data).bots as any[])
       .find((bot: any) => bot.id === botId)?.tasks.find((task: any) => task.threadId === threadId);
 
   async function start(env: Record<string, string> = {}) {
@@ -116,7 +117,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
   // Full access, the default, is the person's grant to use this computer without asking; every other level asks.
   const ASKS = "ask";
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     home = mkdtempSync(join(tmpdir(), "omb-host-lazy-claim-"));
     data = join(home, "data");
     ui = join(home, "static");
@@ -142,7 +143,11 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     await stop();
     if (home) await removeTempDir(home);
   });
-  afterEach(async () => { await stop(); resetTurn(); });
+  afterEach(async () => {
+    await stop();
+    if (home) await removeTempDir(home);
+    home = "";
+  });
 
   itAutoHost("never offers a computer to a call through the Bot API, on Auto, on this computer or on a private desktop", async () => {
     await start({ FAKE_CLAUDE_VERSION: "2.1.284" });
@@ -349,7 +354,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     const first = timed(client.state(true, { app: "Chrome", site: "calendar.google.com" }));
     const card = await openYourComputerCard(base, task.threadId);
     expect(card.title).toBe("I need to use your Chrome where you're signed in to calendar.google.com. Allow once?");
-    expect(card.subtitle).toBe("Host Asking Bot would see your screen and click and type on it, for this request only.");
+    expect(card.subtitle).toBe("Host Asking Bot can use your files and apps here: it sees your screen and clicks and types on it, for this request only.");
     expect((await threadState(bot.id, task.threadId))?.activity).toBe("waiting-on-you");
     // Unanswered, the call is not performed and says why, then waits again.
     const unanswered = await first;
@@ -442,10 +447,10 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "local" });
     await stop();
     // The pin an Auto turn left before the person set Works on to This computer, as bots.json keeps it.
-    const bots = JSON.parse(readFileSync(join(data, "bots.json"), "utf8")) as any[];
+    const bots = readRegistry(data).bots as any[];
     Object.assign(bots.find((one: any) => one.id === bot.id).tasks.find((one: any) => one.threadId === task.threadId),
       { surface: "local", surfaceSource: "auto" });
-    writeFileSync(join(data, "bots.json"), JSON.stringify(bots, null, 2));
+    writeRegistry(data, { bots });
     await start();
     expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "local", surfaceSource: "auto" });
     resetTurn();

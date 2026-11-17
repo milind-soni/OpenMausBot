@@ -10,7 +10,10 @@ vi.mock("@/lib/analytics", () => ({ track: f.track }));
 import { setLocale } from "@/lib/i18n";
 import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT } from "../../shared/grok-import";
 import { ComposerAttachments } from "./ComposerAttachments";
+import { GROK_BOT_MARK_PATH } from "./GrokBotMark";
 import { GrokMoveDialog } from "./GrokMoveDialog";
+import { GrokImportSection } from "./ImportSettings";
+import { SettingsLook } from "./SettingsPrimitives";
 
 const MEMORY = "The door sticks in the rain";
 const WHEN = "Weekdays around 9:00 AM Asia/Calcutta (may run up to 15 min early or 15 min late)";
@@ -159,7 +162,8 @@ describe("Move from Grok Bot", () => {
 
   it("reads nothing on this computer from a browser or a Cloud", async () => {
     await open();
-    expect(f.api.mock.calls.map(([path]) => path)).not.toContain("/api/setup-import/grok");
+    expect(f.api.mock.calls.map(([path]) => path).filter((path) => String(path).startsWith("/api/setup-import/grok"))).toEqual([]);
+    expect(host.querySelector("[data-grok-move-connect]")).toBeNull();
   });
 
   it("on the desktop app looks once it is open, and offers what it found in one tap", async () => {
@@ -173,6 +177,161 @@ describe("Move from Grok Bot", () => {
     await act(async () => button("Use these")!.click());
     await tick();
     expect(host.querySelector('[data-grok-move="preview"]')).not.toBeNull();
+  });
+
+  it("on the desktop app gives a link for Grok Bot, shows the Bots that arrive through it, and ends the link once they are imported", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const openExternal = vi.fn();
+    vi.stubGlobal("ogb", { remoteClient: { active: false }, openExternal });
+    const link = "https://quiet-test-words.trycloudflare.com/mcp/move/abc";
+    let made = false, sent = false;
+    const calls: string[] = [];
+    f.api.mockImplementation(async (path: string, init?: { method?: string }) => {
+      if (path.startsWith("/api/setup-import/grok/connector")) {
+        calls.push(`${init?.method} ${path}`);
+        if (init?.method === "POST") made = true;
+        if (init?.method === "DELETE") made = false;
+        const after = Number(new URL(path, "http://x").searchParams.get("after") ?? 0);
+        return { available: true, ...(made ? { connectorUrl: link } : {}), arrived: made && sent && after < 1 ? [{ seq: 1, at: 5, text: EXPORT }] : [] };
+      }
+      return path.startsWith("/api/teams/import")
+        ? { bots: [{ id: "b1", name: "Job Search", threadId: "t1" }], routines: [], connections: [] }
+        : path === "/api/mcp/servers" ? { servers: [] } : {};
+    });
+    await open();
+    expect(shown()).toContain("Connect Grok Bot");
+    expect(shown()).not.toContain("Add a custom connector");
+    await act(async () => button("Get the link")!.click());
+    await tick();
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="Link for Grok Bot"]')!.value).toBe(link);
+    expect(shown()).toContain("open Connect apps, choose Add a custom connector at the bottom, name it MausBot, paste this as the Server URL, then choose Add plugin");
+    await act(async () => button("Add the MausBot bot in Grok Bot")!.click());
+    expect(openExternal).toHaveBeenCalledWith("https://x.ai/bot/3i4Tvjckmdk05UwntFeNo");
+    expect(host.querySelector("[data-grok-move-arrived]")).toBeNull();
+
+    sent = true;
+    await act(async () => { vi.advanceTimersByTime(3_000); });
+    await tick();
+    expect(shown()).toContain("Arrived from Grok Bot: Job Search");
+    expect(shown()).toContain("The link works for an hour, while MausBot stays open.");
+    await act(async () => { vi.advanceTimersByTime(3_000); });
+    await tick();
+    expect(calls.at(-1)).toBe("GET /api/setup-import/grok/connector?after=1");
+    expect(shown().match(/Arrived from Grok Bot/g)).toHaveLength(1);
+
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-grok-move-use-arrived]")!.click());
+    await tick();
+    expect(host.querySelector('[data-grok-move="preview"]')).not.toBeNull();
+    expect(counts()).toMatchObject({ Skills: 2, Routines: 1 });
+    await importIt();
+    expect(shown()).toContain("Job Search is here");
+    expect(calls.at(-1)).toBe("DELETE /api/setup-import/grok/connector");
+    vi.useRealTimers();
+  });
+
+  it("ends the link when the dialog closes", async () => {
+    vi.stubGlobal("ogb", { remoteClient: { active: false } });
+    const calls: string[] = [];
+    f.api.mockImplementation(async (path: string, init?: { method?: string }) => {
+      if (!path.startsWith("/api/setup-import/grok/connector")) return path === "/api/mcp/servers" ? { servers: [] } : {};
+      calls.push(`${init?.method} ${path}`);
+      return { available: true, connectorUrl: "https://quiet-test-words.trycloudflare.com/mcp/move/abc", arrived: [] };
+    });
+    await open();
+    expect(host.querySelector('input[aria-label="Link for Grok Bot"]')).not.toBeNull();
+    expect(calls).not.toContain("DELETE /api/setup-import/grok/connector");
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    expect(calls.at(-1)).toBe("DELETE /api/setup-import/grok/connector");
+  });
+
+  it("says when the link stopped, keeps the Bots that had arrived, and offers a new link", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    vi.stubGlobal("ogb", { remoteClient: { active: false } });
+    let stopped = false;
+    f.api.mockImplementation(async (path: string) => {
+      if (!path.startsWith("/api/setup-import/grok/connector")) return path === "/api/mcp/servers" ? { servers: [] } : {};
+      const after = Number(new URL(path, "http://x").searchParams.get("after") ?? 0);
+      return { available: true, ...(stopped ? { stopped: true } : { connectorUrl: "https://quiet-test-words.trycloudflare.com/mcp/move/abc" }), arrived: after < 1 ? [{ seq: 1, at: 5, text: EXPORT }] : [] };
+    });
+    await open();
+    expect(shown()).toContain("Arrived from Grok Bot: Job Search");
+    expect(host.querySelector("[data-grok-move-stopped]")).toBeNull();
+    stopped = true;
+    await act(async () => { vi.advanceTimersByTime(3_000); });
+    await tick();
+    expect(host.querySelector("[data-grok-move-stopped]")?.textContent).toBe("The link stopped working. Get a new one and paste it into Grok Bot in place of the old one.");
+    expect(host.querySelector('input[aria-label="Link for Grok Bot"]')).toBeNull();
+    expect(button("Get the link")).toBeDefined();
+    expect(shown().match(/Arrived from Grok Bot: Job Search/g)).toHaveLength(1);
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-grok-move-use-arrived]")!.click());
+    await tick();
+    expect(host.querySelector('[data-grok-move="preview"]')).not.toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("offers no link where the app cannot make one, and says so when making it fails", async () => {
+    vi.stubGlobal("ogb", { remoteClient: { active: false } });
+    await open();
+    expect(host.querySelector("[data-grok-move-connect]")).toBeNull();
+    await act(async () => root.unmount());
+    root = createRoot(host);
+
+    f.api.mockImplementation(async (path: string, init?: { method?: string }) => {
+      if (path.startsWith("/api/setup-import/grok/connector") && init?.method === "POST") throw new Error("502");
+      return path.startsWith("/api/setup-import/grok/connector") ? { available: true, arrived: [] } : {};
+    });
+    await open();
+    await act(async () => button("Get the link")!.click());
+    await tick();
+    expect(host.querySelector('[data-grok-move-connect] [role="alert"]')?.textContent).toBe("Couldn't make the link. Check that you're online and try again.");
+    expect(button("Get the link")).toBeDefined();
+  });
+
+  it("inside Settings it opens in place, with no overlay to end up behind the Settings window", async () => {
+    await act(async () => root.render(createElement(GrokMoveDialog, { onClose: vi.fn(), inline: true })));
+    await tick();
+    expect(host.querySelector("[data-grok-move]")).not.toBeNull();
+    expect(host.querySelector("textarea")).not.toBeNull();
+    expect(host.querySelector(".ui-scrim")).toBeNull();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("Settings leaves Escape to its own window while the move is open in place", async () => {
+    const onClose = vi.fn();
+    await act(async () => root.render(createElement(GrokMoveDialog, { onClose, inline: true })));
+    await tick();
+    await act(async () => { host.querySelector("[data-grok-move]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("the Settings row expands the move, and folding it away keeps what's in progress", async () => {
+    await act(async () => root.render(createElement(GrokImportSection)));
+    const row = host.querySelector<HTMLButtonElement>("[data-grok-move-open]")!;
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("[data-grok-move]")).toBeNull();
+    await act(async () => { row.click(); });
+    await vi.waitFor(() => expect(host.querySelector("[data-grok-move]")).not.toBeNull());
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+    await paste(EXPORT);
+    await act(async () => { row.click(); });
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+    expect(host.querySelector("[data-grok-move]")!.parentElement!.className).toContain("hidden");
+    expect(host.querySelector("[data-grok-move]")!.getAttribute("data-grok-move")).toBe("preview");
+  });
+
+  it("the row in the Settings window is titled Move from Grok Bot, wears the Grok Bot mark and opens the same move in place", async () => {
+    await act(async () => root.render(createElement(SettingsLook.Provider, { value: true }, createElement(GrokImportSection))));
+    const row = host.querySelector<HTMLElement>('[data-settings-block="grok-move"] [data-setting-row]')!;
+    expect(row.textContent).toContain("Move from Grok Bot");
+    expect(row.querySelector("[data-settings-slot] svg path")!.getAttribute("d")).toBe(GROK_BOT_MARK_PATH);
+    const start = row.querySelector<HTMLButtonElement>("[data-grok-move-open]")!;
+    expect(start.textContent).toBe("Start");
+    expect(host.querySelector("[data-grok-move]")).toBeNull();
+    await act(async () => { start.click(); });
+    await vi.waitFor(() => expect(host.querySelector("[data-grok-move]")).not.toBeNull());
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(start.getAttribute("aria-expanded")).toBe("true");
   });
 
   it("scrolls inside the dialog, with its buttons always in view", async () => {
