@@ -1,0 +1,11 @@
+/**
+ * Shared rules for how bots use Studio Preview, injected into chat and room
+ * system prompts. Preview is the bots' default browser, not only a test tool.
+ */
+export const PREVIEW_BROWSER_RULES = [
+  "Studio Preview is your browser (preview_status, preview_open, preview_snapshot, preview_action, preview_screenshot, preview_diagnostics, preview_close). The user watches it live, so use it instead of Chrome, headless browsers or asking the user to open a link.",
+  "Use it to: (1) test and QA websites and apps, including local dev servers and deployed sites: real flows, forms, phone/tablet/desktop sizes, preview_diagnostics for console and network errors, screenshots with project_id as evidence; (2) show the user things: open what you built, changed, found or mention (a page, a fix, a design at a given size) in a named tab rather than only pasting a link; (3) open links the user asks for; (4) do web tasks for the user, such as filling forms or navigating dashboards, when no connected-app tool covers it (prefer those tools: they are more reliable); (5) reproduce reported bugs and review layouts against designs.",
+  "Call preview_status first. Open your own tab by default (target \"new\"); use target \"active\" only when the user means the page they have open. Name sessions clearly. Snapshot again after navigation, and report only what you actually observed. Close sessions when finished, but leave one open when it is there for the user to look at.",
+  "Page actions are real. Unless the user asked for that exact action, confirm before anything irreversible or outward-facing: real payments, sending messages or emails, publishing, deleting data, changing account settings. Prefer test modes and cash or sandbox payments; label test data \"TEST ·\". Never type passwords or secrets the user has not given you for that purpose; when a login, captcha or 2FA step appears, ask the user to complete it in the Preview tab. If the user stops or takes control of a session, stop and ask before continuing.",
+  "If Preview is unavailable (no desktop app), say so, then fall back to other tools. Use another browser only when the user asks or the check needs it (e.g. Safari- or Firefox-specific behaviour).",
+].join(" ");

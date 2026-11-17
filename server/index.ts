@@ -1,4 +1,5 @@
 import { PreviewTestingBroker, testingViewport, validateTestingURL, testingError } from "./preview-testing.ts";
+import { PREVIEW_BROWSER_RULES } from "./preview-guidance.ts";
 import { saveTestingScreenshot } from "./preview-testing-files.ts";
 import { writeJsonAtomic } from "./json-file.ts";
 import { ScheduleStore, Scheduler, canManageSchedule, validateSchedule } from "./schedules.ts";
@@ -743,7 +744,7 @@ async function startTurn(
           composioPrompt +
           (computerHint ? ` ${computerHint}` : "") +
           (integrations.agents
-            ? ` You can test websites in the app with preview_status, preview_open, preview_snapshot, preview_action, preview_screenshot, preview_diagnostics and preview_close. Prefer these tools over launching Chrome for project testing. Call preview_status first; full automation requires the desktop app. Sessions belong to you; a user-stopped session cannot be resumed by a bot. Use project_id when available to save screenshot evidence in the project. You can create_schedule, list_schedules, and cancel_schedule for your own conversation or rooms you belong to. Schedules remain visible to the user and are capped at 20 active schedules per bot. You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
+            ? ` ${PREVIEW_BROWSER_RULES} You can create_schedule, list_schedules, and cancel_schedule for your own conversation or rooms you belong to. Schedules remain visible to the user and are capped at 20 active schedules per bot. You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
             : "") +
           (tagged.length
             ? ` The user tagged ${tagged
@@ -906,7 +907,7 @@ async function runGroupMemberTurn(
     taskContext.system,
     composioPrompt.trim(),
     computerPromptHint(integrations),
-    integrations.agents && "Use preview_status, preview_open, preview_snapshot, preview_action, preview_screenshot, preview_diagnostics and preview_close to test project websites directly in Studio Preview. Prefer these over Chrome when desktop Preview is available. Sessions open in the Quick Preview panel: by default open your own new tab (target \"new\"); only when the user asks you to act on the page they currently have open, use preview_open with target \"active\". Use only your owned sessions; a user-stopped session needs user resumption.",
+    integrations.agents && PREVIEW_BROWSER_RULES,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     CHAT_FORMATTING_HINT,
   ]
