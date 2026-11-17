@@ -5,13 +5,13 @@ import { Check } from "lucide-react";
 import { productName } from "@/lib/brand";
 import { t } from "@/lib/i18n";
 import { makeHome } from "@/lib/places";
+import { byHand, type SavedServer } from "@/lib/saved-servers";
 import { api } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import type { ServerStatus } from "../../electron/server-status.mjs";
 import type { CompanionState, PhoneSetupController } from "./PhoneSetupFlow";
 import { companionRoutesOn } from "./PhoneDevicesSection";
 import { OwnServerLink, RailSheet } from "./PlaceAddSheet";
-import { byHand, type SavedServer } from "./ServerList";
 import { SettingRow, SettingsFoldRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
 
 type Line = { key: LocaleKey; good: boolean };
