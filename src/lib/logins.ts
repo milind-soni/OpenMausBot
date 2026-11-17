@@ -1,4 +1,4 @@
-import type { LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
+import type { BitwardenCredentials, BitwardenStatus, LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
 import type { ComputerHelpRef } from "../../shared/wire";
 import { api } from "@/state/store";
 
@@ -24,6 +24,18 @@ export async function refreshOnePassword(): Promise<OnePasswordStatus> {
 
 export async function disconnectOnePassword(): Promise<OnePasswordStatus> {
   return (await api<{ onePassword: OnePasswordStatus }>("/api/logins/1password", { method: "DELETE" })).onePassword;
+}
+
+export async function connectBitwarden(credentials: BitwardenCredentials): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden", { method: "POST", body: JSON.stringify(credentials) })).bitwarden;
+}
+
+export async function refreshBitwarden(): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden/refresh", { method: "POST", body: "{}" })).bitwarden;
+}
+
+export async function disconnectBitwarden(): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden", { method: "DELETE" })).bitwarden;
 }
 
 export async function addLogin(site: string, fields: LoginFieldsInput, bots: LoginBots, exactHost = false): Promise<LoginSummary> {
