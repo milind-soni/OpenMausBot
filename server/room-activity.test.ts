@@ -68,6 +68,16 @@ posixOnly("room activity runtime", () => {
           environment: { FAKE_ACP_MODE: "happy" },
           config: { cli: fakeCli, fullAuto: false },
         },
+        slow: {
+          driver: "grokAgent",
+          environment: { FAKE_ACP_MODE: "slow", FAKE_ACP_TICKS: "6", FAKE_ACP_TICK_MS: "400" },
+          config: { cli: fakeCli, fullAuto: false },
+        },
+        hang: {
+          driver: "grokAgent",
+          environment: { FAKE_ACP_MODE: "hang" },
+          config: { cli: fakeCli, fullAuto: false },
+        },
       },
     }));
     child = spawn(process.execPath, [join(serverDirectory, "index.ts")], {
@@ -77,6 +87,9 @@ posixOnly("room activity runtime", () => {
         HOME: home,
         USERPROFILE: home,
         GBS_PORT: String(port),
+        // short idle window so the watchdog tests run fast; the slow fake
+        // streams for ~2.4 s, well past it, but never goes quiet
+        GBS_GROUP_TURN_IDLE_MS: "1500",
       },
       stdio: ["ignore", "ignore", "pipe"],
     });
@@ -261,4 +274,31 @@ posixOnly("room activity runtime", () => {
       start,
     );
   }, 20_000);
+
+  it("lets an active room turn run past the idle window and stops one that goes quiet", async () => {
+    const worker = (await api("POST", "/api/bots")).body.bot;
+    const sleeper = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${worker.id}`, { name: "Worker", modelSelection: { instanceId: "slow", model: "fake-model" } });
+    await api("PATCH", `/api/bots/${sleeper.id}`, { name: "Sleeper", modelSelection: { instanceId: "hang", model: "fake-model" } });
+    const group = (await api("POST", "/api/groups", { name: "Long room", memberIds: [worker.id, sleeper.id] })).body.group;
+    const timeoutLine = (frame: any) =>
+      frame.kind === "message" && frame.threadId === group.threadId && /^error: activity/.test(frame.message.tool?.name ?? "");
+
+    const start = frames.length;
+    expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "@Worker build it" })).status).toBe(202);
+    const done = await waitForFrame(
+      (frame) => frame.kind === "runtime" && frame.botId === worker.id && frame.event.type === "turn.completed",
+      "long active turn completes",
+      12_000,
+      start,
+    );
+    expect(done.event.ok).toBe(true);
+    expect(frames.slice(start).some(timeoutLine)).toBe(false);
+
+    const hangStart = frames.length;
+    expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "@Sleeper build it" })).status).toBe(202);
+    const stopped = await waitForFrame(timeoutLine, "quiet turn stopped", 15_000, hangStart);
+    expect(stopped.message.tool.name).toBe("error: activity went quiet for 1 min and was stopped");
+    expect(stopped.message.from.botId).toBe(sleeper.id);
+  }, 30_000);
 });

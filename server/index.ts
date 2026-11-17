@@ -34,6 +34,7 @@ import { ProviderRegistry } from "./harness/registry.ts";
 import { automaticHandoffBots, mentionedBots, Store, type Attachment, type Message } from "./store.ts";
 import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContext } from "./projects.ts";
 import { CHAT_FORMATTING_HINT } from "./chat-formatting.ts";
+import { createTurnWatchdog, formatDuration, type TurnExpiry } from "./turn-watchdog.ts";
 import {
   listProjectPreviewFiles,
   PreviewWatchManager,
@@ -782,7 +783,11 @@ async function startTurn(
 // @mention teammates; those get one chained turn (hop 1), never deeper.
 const groupQueues = new Map<string, Promise<void>>();
 const groupQueueEpoch = new Map<string, number>();
-const GROUP_TURN_TIMEOUT_MS = Math.max(1_000, Number(process.env.GBS_GROUP_TURN_TIMEOUT_MS) || 5 * 60_000);
+// A room turn is stopped only when the bot goes quiet for GROUP_TURN_IDLE_MS
+// (paused while it waits on an approval) or outlives GROUP_TURN_MAX_MS.
+// GBS_GROUP_TURN_TIMEOUT_MS is the legacy name for the idle window.
+const GROUP_TURN_IDLE_MS = Math.max(1_000, Number(process.env.GBS_GROUP_TURN_IDLE_MS ?? process.env.GBS_GROUP_TURN_TIMEOUT_MS) || 20 * 60_000);
+const GROUP_TURN_MAX_MS = Math.max(GROUP_TURN_IDLE_MS, Number(process.env.GBS_GROUP_TURN_MAX_MS) || 3 * 60 * 60_000);
 const GROUP_CONTEXT_MESSAGES = 30;
 const MAX_GROUP_HOPS = 1;
 
@@ -922,31 +927,38 @@ async function runGroupMemberTurn(
   let replyText = "";
   let usageFailure: UsageLimitFailure | undefined;
   activeSelections.set(group.threadId, selection);
-  let timedOut = false;
+  let timedOut: TurnExpiry | null = null;
   await new Promise<void>((resolve) => {
     let done = false;
     let interruptFallback: ReturnType<typeof setTimeout> | undefined;
     const finish = () => {
       if (done) return;
       done = true;
-      clearTimeout(timer);
+      watchdog.stop();
       if (interruptFallback) clearTimeout(interruptFallback);
       unsub();
       resolve();
     };
+    const watchdog = createTurnWatchdog({
+      idleMs: GROUP_TURN_IDLE_MS,
+      maxMs: GROUP_TURN_MAX_MS,
+      onExpire: (reason) => {
+        timedOut = reason;
+        void instance.adapter.interruptTurn(group.threadId)
+          .catch(() => {})
+          .finally(() => {
+            interruptFallback = setTimeout(finish, 6_000);
+          });
+      },
+    });
     const unsub = bus.subscribe((e: RuntimeEvent) => {
       if (e.threadId !== group.threadId) return;
+      if (e.type === "request.opened") watchdog.requestOpened(e.requestId ?? "request");
+      else if (e.type === "request.resolved") watchdog.requestResolved(e.requestId ?? "request");
+      else watchdog.activity();
       if (e.type === "item.completed" && e.itemType === "assistant_text") replyText += `\n${e.text}`;
       else if (e.type === "turn.completed") { usageFailure = !e.ok ? e.failure : undefined; finish(); }
     });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      void instance.adapter.interruptTurn(group.threadId)
-        .catch(() => {})
-        .finally(() => {
-          interruptFallback = setTimeout(finish, 6_000);
-        });
-    }, GROUP_TURN_TIMEOUT_MS);
     instance.adapter
       .sendTurn({ threadId: group.threadId, text, system, model: selection.model, cwd: projectContext.cwd, integrations })
       .catch((err) => {
@@ -972,7 +984,12 @@ async function runGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: "error: activity timed out and was stopped", ok: false },
+      tool: {
+        name: timedOut === "max"
+          ? `error: activity hit the ${formatDuration(GROUP_TURN_MAX_MS)} limit and was stopped`
+          : `error: activity went quiet for ${formatDuration(GROUP_TURN_IDLE_MS)} and was stopped`,
+        ok: false,
+      },
     });
     broadcast({ kind: "message", threadId: group.threadId, message: failure });
   }

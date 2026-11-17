@@ -7,6 +7,8 @@
 //
 //   FAKE_ACP_MODE   happy (default) | exit-early | hang | no-auth | permission
 //                   | mention-beta (reply with a Markdown-formatted @Beta)
+//                   | slow (stream FAKE_ACP_TICKS chunks, FAKE_ACP_TICK_MS
+//                     apart, then complete — a long but active turn)
 //                   | ask-peer (spawn the injected "agents" MCP server from
 //                     session/new's mcpServers, call list_bots + ask_bot on a
 //                     peer, and reply with what the peer said — the comms e2e)
@@ -157,6 +159,18 @@ function handle(msg: any) {
       }
       const complete = () =>
         result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } });
+      if (mode === "slow") {
+        const ticks = Number(process.env.FAKE_ACP_TICKS) || 6;
+        const tickMs = Number(process.env.FAKE_ACP_TICK_MS) || 400;
+        let sent = 0;
+        const tick = setInterval(() => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `step ${++sent} ` } } } });
+          if (sent < ticks) return;
+          clearInterval(tick);
+          complete();
+        }, tickMs);
+        return;
+      }
       if (mode === "mention-beta") {
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "**@Beta** take the next step." } } } });
         complete();
