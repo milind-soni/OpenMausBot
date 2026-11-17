@@ -4010,5 +4010,7 @@
   "server.rooms.linkedEnded": "{place} hat sich 30 Tage lang nicht verbunden, deshalb wurde die Verbindung dorthin beendet. Nicht mehr in diesem Raum: {bots}.",
   "room.members.far.place": "auf {place}",
   "room.members.far.off": "Verbindung ist aus",
-  "room.members.far.missing": "Nicht mehr verfügbar"
+  "room.members.far.missing": "Nicht mehr verfügbar",
+  "chat.newChatHint": "Starte einen neuen Chat, um Tokens zu sparen.",
+  "chat.newChatHintButton": "Neuer Chat"
 }
