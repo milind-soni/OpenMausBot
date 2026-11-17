@@ -437,6 +437,7 @@ describe("createOpenAIChatRuntime tool approvals", () => {
 
   it.each([
     ["not JSON", '{"path":"a.md","content":"cut off', "{}", 'tool arguments are not complete JSON; you sent 33 characters: {"path":"a.md","content":"cut off'],
+    ["a JSON array", '[{"path":"a.md"}]', "{}", 'tool arguments must be a JSON object; you sent 17 characters: [{"path":"a.md"}]'],
     ["empty", "", "{}", undefined],
     ["blank", "   ", "{}", undefined],
     ["led by a byte-order mark", '\uFEFF{"n":1}', '{"n":1}', undefined],

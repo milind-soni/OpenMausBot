@@ -30,7 +30,7 @@ export function toolArguments(text: string): Record<string, unknown> {
   try { args = JSON.parse(text.trim() || "{}"); }
   catch { throw new ChatProtocolError(`tool arguments are not complete JSON; you sent ${text.length} characters: ${shownArguments(text)}`); }
   const found = object(args);
-  if (!found) throw new ChatProtocolError("tool arguments must be a JSON object");
+  if (!found) throw new ChatProtocolError(`tool arguments must be a JSON object; you sent ${text.length} characters: ${shownArguments(text)}`);
   return found;
 }
 
