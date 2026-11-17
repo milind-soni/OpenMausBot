@@ -1,4 +1,4 @@
-// A person's steer in a room where the lead handed out jobs: it never folds into a member's job,
+// A person's steer in a one-at-a-time room where the lead handed out jobs: it never folds into a member's job,
 // and nothing stops; the lead takes the line, on an isolated fixture with the real coordination proxy.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,12 +7,15 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import { request } from "../scripts/mcp-server.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 
-it("an unnamed steer while a member works a handed job stays queued for the lead and stops nothing", async () => {
+it("with parallel room jobs off, an unnamed steer while a member works a handed job stays queued for the lead and stops nothing", async () => {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const env = { OPENMAUSBOT_URL: session.info.url };
   const cli = (...args: string[]) => runControlOmb(args, { env }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, headers: { Origin: session.info.url }, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   try {
+    // Side-by-side room jobs (the default since #6149) run a handed job in its own thread, so the person's line goes to
+    // the lead at once; the one-at-a-time room is where a steer could fold into a member's job.
+    expect((await api("/api/config", { features: { parallelRoomJobs: false } }, "PATCH")).features.parallelRoomJobs).toBe(false);
     const lead = (await cli("new-bot", "--name", "Lead", "--section", "A")).bot;
     const first = (await cli("new-bot", "--name", "First", "--section", "A")).bot;
     const second = (await cli("new-bot", "--name", "Second", "--section", "A")).bot;
