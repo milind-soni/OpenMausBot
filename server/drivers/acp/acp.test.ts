@@ -62,6 +62,10 @@ const EnvPolicyDriver = createAcpDriver({
   },
 });
 
+/** A CLI that needs a newer Node.js than any there is, and one that runs on every Node.js. */
+const NodeTooOldDriver = createAcpDriver({ ...SELECT_MODEL_SUPPORT, driverKind: "nodeTooOldTest", selectModel: undefined, minNodeVersion: "999.0.0" });
+const NodeOkDriver = createAcpDriver({ ...SELECT_MODEL_SUPPORT, driverKind: "nodeOkTest", selectModel: undefined, minNodeVersion: "1.0.0" });
+
 const AsyncAuthDriver = createAcpDriver({
   ...SELECT_MODEL_SUPPORT,
   driverKind: "asyncAuthTest",
@@ -2104,6 +2108,25 @@ describe("ACP turns (fake CLI)", () => {
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: false });
     expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(true);
+  });
+
+  it("an exit before result on a Node.js older than the engine needs names both versions", async () => {
+    await create(NodeTooOldDriver, "exit-early");
+    await instance.adapter.sendTurn({ threadId: "t-old-node", text: "go" });
+    const failed = await recorder.until((e) => e.type === "runtime.error") as { message: string; text?: unknown };
+    expect(failed.text).toEqual({ key: "chat.notice.acpNodeTooOld",
+      params: { provider: SELECT_MODEL_SUPPORT.displayName, needed: "999.0.0", found: expect.stringMatching(/^\d+\.\d+\.\d+$/) } });
+    expect(failed.message).toMatch(/ needs Node\.js 999\.0\.0 or newer, but this computer has Node\.js \d+\.\d+\.\d+\. Update Node\.js/);
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
+  });
+
+  it("an exit before result on a new enough Node.js keeps the exit words", async () => {
+    await create(NodeOkDriver, "exit-early");
+    await instance.adapter.sendTurn({ threadId: "t-ok-node", text: "go" });
+    const failed = await recorder.until((e) => e.type === "runtime.error") as { message: string; text?: unknown };
+    expect(failed.message).toMatch(/ exited 3 before the prompt result/);
+    expect(failed.text).toBeUndefined();
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
   });
 
   it("an engine that aborts says so in plain words, with its last output masked", async () => {

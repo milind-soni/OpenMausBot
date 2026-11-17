@@ -2094,7 +2094,7 @@
     },
     {
       "name": "skill_manage",
-      "description": "Create or update a reusable skill (SKILL.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill. It applies at once, with an Undo where possible: read the result before saying it did. It never raises another bot's execution permissions.",
+      "description": "Create or update a reusable skill (SKILL.md), import one from GitHub or skills.sh (action import with source; same review as create, brings SKILL.md and references/*.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill. It applies at once, with an Undo where possible: read the result before saying it did. It never raises another bot's execution permissions.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -2104,6 +2104,7 @@
             "enum": [
               "create",
               "update",
+              "import",
               "enable",
               "disable",
               "delete"
@@ -2111,7 +2112,7 @@
           },
           "skill_name": {
             "type": "string",
-            "description": "Every action but create: the exact name from skills_list."
+            "description": "Every action but create and import: the exact name from skills_list."
           },
           "skill_md": {
             "type": "string",
@@ -2149,7 +2150,7 @@
           },
           "source": {
             "type": "string",
-            "description": "create or update: the URL, folder or 'conversation' it came from."
+            "description": "create or update: the URL, folder or 'conversation' it came from. import: owner/repo, a GitHub link to the skill's folder or SKILL.md, or a skills.sh link."
           }
         },
         "required": [

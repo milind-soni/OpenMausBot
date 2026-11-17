@@ -34,9 +34,11 @@ const sessionResponseSchema = z.object({
 });
 export type SessionResponse = z.infer<typeof sessionResponseSchema>;
 
+/** Ten accounts per app is the most Composio allows (its range is 2-10). A Session keeps the cap it was made with,
+ * so one made under a lower cap is raised in place before its next sign-in link. */
 export const MULTI_ACCOUNT_CONFIG = {
   enable: true,
-  max_accounts_per_toolkit: 5,
+  max_accounts_per_toolkit: 10,
   require_explicit_selection: true,
 } as const;
 
@@ -88,6 +90,8 @@ function supportsMultiAccount(session: SessionResponse): boolean {
 
 /** Sessions this boot already upgraded once: if Composio still doesn't echo multi-account, it isn't granting it. */
 const multiAccountUpgradeAttempted = new Set<string>();
+/** Sessions this boot already raised to the current account cap. */
+const accountCapRaised = new Set<string>();
 /** Likewise for an `auth_configs` echo Composio leaves out. */
 const authConfigUpgradeAttempted = new Set<string>();
 /** What Composio said when it refused a Session naming an auth config, by config id. */
@@ -253,6 +257,28 @@ async function nameAuthConfigsInPlace(apiKey: string, session: SessionResponse, 
   }
   authConfigUpgradeAttempted.add(authConfigsKey(session.session_id, configs));
   return getProjectSession(apiKey, session.session_id);
+}
+
+/** A Session made under a lower account cap gets the current one, in place, so its MCP endpoint stays. If Composio
+ * refuses or can't be reached, the old cap stays, the next link tries again, and this link goes ahead. */
+export async function raiseAccountCap(apiKey: string, session: SessionResponse): Promise<void> {
+  const cap = session.config?.multi_account?.max_accounts_per_toolkit;
+  if (cap === undefined || cap >= MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit || accountCapRaised.has(session.session_id)) return;
+  const res = await fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(session.session_id)}`, {
+    method: "PATCH",
+    headers: projectHeaders(apiKey, true),
+    body: JSON.stringify({ multi_account: MULTI_ACCOUNT_CONFIG }),
+    signal: AbortSignal.timeout(30_000),
+  }).catch((error: unknown) => {
+    console.warn(`[composio] Could not reach Composio to raise the Session's account cap (${error instanceof Error ? error.message : String(error)})`);
+    return null;
+  });
+  if (!res) return;
+  if (!res.ok) {
+    console.warn(`[composio] Composio would not raise the Session's account cap (${await responseError(res, `HTTP ${res.status}`)})`);
+    return;
+  }
+  accountCapRaised.add(session.session_id);
 }
 
 export async function ensureProjectSession(cfg: AppConfig, wanted?: AuthConfigMap): Promise<SessionResponse> {

@@ -6,7 +6,7 @@ import { openExternalLink } from "@/lib/app-links";
 import { closeAppPreview, useAppPreview } from "@/lib/app-preview";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
-import { PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, useComputerPanelResize } from "../computer-panel-resize";
+import { PANEL_MIN_WIDTH, useComputerPanelResize } from "../computer-panel-resize";
 import { SiteFrame } from "./SiteFrame";
 
 /** The published app a card's Preview or a link in a message opened, beside the conversation where the Computer panel
@@ -26,7 +26,7 @@ export function AppPreviewPanel() {
 
 function PreviewPanel({ url, title, loginOnly }: { url: string; title: string; loginOnly: boolean }) {
   const { dragProps } = useCaptionChrome();
-  const { panelWidth, separatorRef, separatorWidth, onSeparatorKeyDown, onResizeStart, onResizeMove, onResizeEnd } = useComputerPanelResize();
+  const { panelWidth, maxWidth, separatorRef, separatorWidth, onSeparatorKeyDown, onResizeStart, onResizeMove, onResizeEnd } = useComputerPanelResize();
   const [attempt, setAttempt] = useState(0);
   const [dragging, setDragging] = useState(false);
   return (
@@ -38,7 +38,7 @@ function PreviewPanel({ url, title, loginOnly }: { url: string; title: string; l
         aria-orientation="vertical"
         aria-label={t("computer.resizeAria")}
         aria-valuemin={PANEL_MIN_WIDTH}
-        aria-valuemax={PANEL_MAX_WIDTH}
+        aria-valuemax={maxWidth}
         aria-valuenow={separatorWidth ?? undefined}
         tabIndex={0}
         onKeyDown={onSeparatorKeyDown}
