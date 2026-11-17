@@ -119,6 +119,9 @@ healthy || fail "the server does not answer on 127.0.0.1:8799"
 health_test=$(podman inspect -f '{{json .Config.Healthcheck.Test}}' openmausbot)
 # shellcheck disable=SC2016 # the literal text the check must hold
 grep -qF '${OMB_PORT:-8799}/api/health' <<<"$health_test" || fail "the health check does not read OMB_PORT when it runs: $health_test"
+# The mark the app knows this install by (its update command): the folder, as this user writes it.
+# shellcheck disable=SC2016,SC2088 # read in the container; the ~ is text
+[ "$(in_server sh -c 'printf %s "$OMB_PODMAN_SERVICE"')" = "~/.local/share/openmausbot" ] || fail "the server does not see OMB_PODMAN_SERVICE=~/.local/share/openmausbot"
 ss -ltnH >"$OUT/listening.txt"
 grep -q "127.0.0.1:8799 " "$OUT/listening.txt" || fail "nothing listens on 127.0.0.1:8799: $(cat "$OUT/listening.txt")"
 [ -z "$(new_outside)" ] || fail "the server listens beyond this machine without --lan: $(new_outside)"

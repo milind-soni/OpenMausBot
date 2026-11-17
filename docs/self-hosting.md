@@ -237,8 +237,9 @@ that worked. Run it as your user, without `sudo`. The app's **Update server**
 button does not run it on this install yet: run `update.sh` yourself.
 When a rollback cannot find the old version by its digest, it names the
 copy it kept on this machine, `openmausbot-before-update:local`, in the
-unit and in `.env`. Running the installer again keeps that image (it is
-never downloaded) until the next `update.sh`.
+unit and in `.env`. Running the installer again never downloads that name:
+it pins the copy by the digest it came with, or, when it has none, keeps
+it as it is and says so, until the next `update.sh`.
 
 **Uninstall.** Run the same command with `--uninstall`. The data stays.
 Some of its files can belong to the container's other user ids, so remove

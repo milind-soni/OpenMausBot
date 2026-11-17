@@ -125,6 +125,9 @@ describe.skipIf(!posix)("deploy/podman/install.sh", () => {
     expect(box.read(join(box.dir, ".env"))).toBe(`OMB_IMAGE=${DIGEST}\n`);
     expect(done.stdout).toContain("MausBot is running as your user's service (openmausbot), on http://127.0.0.1:8811.");
     expect(done.stdout).toContain("Warning: it shares this machine's network, which isolates less than the Docker install.");
+    expect(done.stdout).toContain("Bots run unboxed, beside the data folder that holds the engines' logins.");
+    expect(done.stdout).toContain("Bots reach every service on this machine's loopback: databases, other programs' admin ports.");
+    expect(done.stdout).toContain("Every account and program on this machine counts as the owner on port 8811, and can attach to Chrome's");
     expect(done.stdout).toContain("It starts at boot, without anyone logged in.");
   });
 
