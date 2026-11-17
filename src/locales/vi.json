@@ -5892,5 +5892,10 @@
   "remote.tailscale.needsApproval": "Máy tính này đang chờ được phê duyệt trên mạng Tailscale của bạn. Hãy phê duyệt trong bảng điều khiển quản trị Tailscale, rồi thử lại.",
   "together.switch.title": "Máy tính này và My Cloud cùng nhau",
   "together.switch.line": "Mặc định là tắt. Bot trên Cloud và bot trên máy tính này hiện trong một danh sách, và mỗi bot mở ở nơi nó đang ở.",
-  "together.switch.failed": "Không lưu được. Hãy thử lại."
+  "together.switch.failed": "Không lưu được. Hãy thử lại.",
+  "imageGen.complexity.label": "Mức chi tiết",
+  "imageGen.complexity.help": "Mức độ chi tiết của ảnh GPT-Image-2.6. Thấp hơn thì đơn giản và nhanh hơn.",
+  "imageGen.complexity.low": "Thấp",
+  "imageGen.complexity.medium": "Trung bình",
+  "imageGen.complexity.high": "Cao"
 }

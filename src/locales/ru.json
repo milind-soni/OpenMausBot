@@ -7154,5 +7154,10 @@
   "remote.tailscale.needsApproval": "Этот компьютер ждёт одобрения в вашей сети Tailscale. Одобрите его в консоли администратора Tailscale, затем попробуйте снова.",
   "together.switch.title": "Этот компьютер и Моё облако вместе",
   "together.switch.line": "По умолчанию выключено. Боты из облака и боты этого компьютера показаны в одном списке, и каждый открывается там, где он находится.",
-  "together.switch.failed": "Не удалось сохранить. Попробуйте ещё раз."
+  "together.switch.failed": "Не удалось сохранить. Попробуйте ещё раз.",
+  "imageGen.complexity.label": "Уровень детализации",
+  "imageGen.complexity.help": "Насколько детализированы изображения GPT-Image-2.6. Ниже — проще и быстрее.",
+  "imageGen.complexity.low": "Низкий",
+  "imageGen.complexity.medium": "Средний",
+  "imageGen.complexity.high": "Высокий"
 }

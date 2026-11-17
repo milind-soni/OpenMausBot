@@ -7938,5 +7938,10 @@
   "remote.tailscale.needsApproval": "このコンピューターは Tailscale ネットワークでの承認を待っています。Tailscale の管理コンソールで承認してから、もう一度お試しください。",
   "together.switch.title": "このコンピューターと My Cloud をまとめる",
   "together.switch.line": "既定ではオフです。Cloud のボットとこのコンピューターのボットを 1 つの一覧に表示し、それぞれがある場所で開きます。",
-  "together.switch.failed": "保存できませんでした。もう一度お試しください。"
+  "together.switch.failed": "保存できませんでした。もう一度お試しください。",
+  "imageGen.complexity.label": "詳細レベル",
+  "imageGen.complexity.help": "GPT-Image-2.6 の画像の詳細さ。低いほどシンプルで高速です。",
+  "imageGen.complexity.low": "低",
+  "imageGen.complexity.medium": "中",
+  "imageGen.complexity.high": "高"
 }

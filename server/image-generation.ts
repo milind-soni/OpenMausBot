@@ -1,7 +1,7 @@
 import type { ReadableStreamReadResult } from "node:stream/web";
 import { z } from "zod";
 
-import { IMAGE_DEFAULT_MODELS, IMAGE_PROVIDERS, looksLikeApiKey, normalizeImageGenerationUrl, type ImageGenerationConfig, type ImageProvider } from "../shared/image-generation.ts";
+import { IMAGE_DEFAULT_MODELS, IMAGE_PROVIDERS, looksLikeApiKey, supportsImageComplexity, normalizeImageGenerationUrl, type ImageGenerationConfig, type ImageProvider } from "../shared/image-generation.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
 
 export const IMAGE_GENERATION_TIMEOUT_MS = 120_000;
@@ -208,7 +208,8 @@ export async function generateImageWith(
   const apiKey = provider.key(cfg)?.trim();
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
-  const body = { model: slot.model, prompt: request.prompt, ...provider.body(request) };
+  const complexity = supportsImageComplexity(slot) ? cfg.imageGen?.complexity : undefined;
+  const body = { model: slot.model, prompt: request.prompt, ...provider.body(request), ...(complexity && { complexity }) };
 
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const cancelled = () => cancel?.aborted === true && !timeoutSignal.aborted;

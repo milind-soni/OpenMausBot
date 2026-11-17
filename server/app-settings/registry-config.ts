@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
-import { IMAGE_PROVIDERS } from "../../shared/image-generation.ts";
+import { IMAGE_COMPLEXITIES, IMAGE_PROVIDERS } from "../../shared/image-generation.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
 import { DEFAULT_WINDOW_MINUTES } from "../cache-keepwarm.ts";
 import { botsTowardLimit } from "../../shared/bot-limit.ts";
@@ -60,8 +60,8 @@ export function configEntries(deps: Pick<RegistryDeps, "cfg" | "saveConfig" | "b
     section({
       id: "ai.images", label: "Image generation", help: "Which provider and model make images, a fallback, and how many images one turn may make. Keys are set with keys.* or in Settings.", where: "images",
       synonyms: ["images", "image generation", "picture", "generate"],
-      value: nonEmpty(withoutKeys(z.object({ primary: imageSlot.optional(), fallback: imageSlot.nullable().optional(), maxPerTurn: z.number().int().min(1).max(10).optional(), customUrl: z.string().trim().max(2048).optional() }).strict())),
-      allowed: `{"primary"?:{"provider","model"?},"fallback"?:{...}|null,"maxPerTurn"?:1-10,"customUrl"?} with provider one of ${IMAGE_PROVIDERS.join(", ")}`,
+      value: nonEmpty(withoutKeys(z.object({ primary: imageSlot.optional(), fallback: imageSlot.nullable().optional(), maxPerTurn: z.number().int().min(1).max(10).optional(), complexity: z.enum(IMAGE_COMPLEXITIES).optional(), customUrl: z.string().trim().max(2048).optional() }).strict())),
+      allowed: `{"primary"?:{"provider","model"?},"fallback"?:{...}|null,"maxPerTurn"?:1-10,"complexity"?:"low"|"medium"|"high" (GPT-Image-2.6 models only),"customUrl"?} with provider one of ${IMAGE_PROVIDERS.join(", ")}`,
       current: () => cfg().imageGen ?? {}, patch: (imageGen) => ({ imageGen }),
       says: (imageGen) => `Image generation: ${fields(imageGen)}. Image prompts go to the chosen provider, off this computer`,
     }),

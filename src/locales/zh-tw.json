@@ -10166,5 +10166,10 @@
   "remote.tailscale.needsApproval": "這台電腦正在等待你的 Tailscale 網路核准。請在 Tailscale 管理主控台中核准它，然後再試一次。",
   "together.switch.title": "這台電腦和 My Cloud 合在一起",
   "together.switch.line": "預設為關閉。Cloud 上的機器人和這台電腦上的機器人顯示在同一個清單中，各自在所在的位置開啟。",
-  "together.switch.failed": "無法儲存。請再試一次。"
+  "together.switch.failed": "無法儲存。請再試一次。",
+  "imageGen.complexity.label": "細節等級",
+  "imageGen.complexity.help": "GPT-Image-2.6 圖片的細節程度。越低越簡單、越快。",
+  "imageGen.complexity.low": "低",
+  "imageGen.complexity.medium": "中",
+  "imageGen.complexity.high": "高"
 }
