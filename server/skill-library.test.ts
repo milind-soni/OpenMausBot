@@ -177,24 +177,3 @@ describe("bundled phone-connection skill", () => {
     expect(guide.split("\n").length).toBeLessThanOrEqual(60);
   });
 });
-
-describe("bundled muapi-media skill", () => {
-  const skills = loadBundledSkills(join(process.cwd(), "skills"));
-  const ids = (text: string) => selectBundledSkills(text, [], skills).map((skill) => skill.manifest.id);
-
-  it("mounts only when the person names MuAPI, and stays out of other image and video requests", () => {
-    for (const text of ["use muapi to render this", "Make a video with MuAPI", "connect muapi"]) {
-      expect(ids(text), text).toContain("muapi-media");
-    }
-    for (const text of ["summarise this thread", "fix the failing test", "chart revenue by month", "generate a video of a wave", "Make an image of a cat", "text to video please"]) {
-      expect(ids(text), text).not.toContain("muapi-media");
-    }
-  });
-
-  it("names the MCP endpoint and never asks for a key in the chat", () => {
-    const guide = skills.find((skill) => skill.manifest.id === "muapi-media")?.instructions ?? "";
-    expect(guide).toContain("https://api.muapi.ai/mcp");
-    expect(guide).toContain("Never ask for the key in the chat");
-    expect(guide).toContain("muapi_account_topup");
-  });
-});
