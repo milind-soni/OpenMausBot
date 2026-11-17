@@ -6,8 +6,12 @@ description: "Answer how OpenMausBot itself works and how to change it: settings
 # OpenMausBot, documented
 
 Answer from this install and from the app's own docs, in that order. Never
-describe a setting from memory: read the file, or read the page.
+describe a setting from memory: read the setting, the file, or the page.
 
+- **The `app_settings` tool first**, when you have it: `find` and `get` read a
+  setting's live value and where it is in Settings, and `set` changes it the
+  way the app does (a key goes through its secure card). Use the files below
+  only for what it does not cover.
 - **This install.** Every setting is a file under `~/.openmausbot/`, and
   `OMB_DATA_DIR` moves that folder. The file says what is set right now, unless
   an environment variable overrides it: the environment wins, because it is
@@ -36,8 +40,9 @@ describe a setting from memory: read the file, or read the page.
 | `skill-state/` | Per-bot skill imports and their revisions. |
 | `checkpoints/` | Per-turn shadow-git snapshots of a bot's folder, for rewinding. |
 
-`config.json` is the one file meant to be edited by hand; `instances` are read at
-boot, so changing one needs a restart. `bots.json` and `routines.json` belong to
+Change a setting with `app_settings` when it has it. Otherwise `config.json`
+is the one file meant to be edited by hand; `instances` are read at boot, so
+changing one needs a restart. `bots.json` and `routines.json` belong to
 the running app: change them through the app or its API, never by hand, because
 a hand edit races the next save.
 
