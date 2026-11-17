@@ -63,8 +63,8 @@ test("Windows: the person's earlier Off is put back when the switch goes off", t
   w.home.set(true);
   assert.deepEqual(w.names(), [CHOSEN]);
   assert.equal(w.declined(), false);
-  w.home.set(false);
-  assert.equal(w.declined(), true);
+  w.make().set(false);
+  assert.equal(w.declined(), true, "what it saved is still known after a restart");
   w.lend(true);
   assert.deepEqual(w.names(), [], "lending still adds nothing, as before the switch");
 });

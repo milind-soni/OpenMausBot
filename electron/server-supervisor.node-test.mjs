@@ -154,6 +154,26 @@ test("an always-on home whose first start never got ready tries again after the 
   assert.equal(f.supervisor.startLater(start), false, "not an always-on home: nothing waits");
 });
 
+test("a first start's retry ends once a server got ready some other way", async (t) => {
+  let starts = 0;
+  const f = fixture(t, { keepTrying: () => true, longRetryMs: 500 });
+  f.supervisor.startLater(async () => { starts++; return false; });
+  f.supervisor.ready(f.spawn());
+  await f.tick(500);
+  await settle();
+  await f.tick(5000);
+  await settle();
+  assert.equal(starts, 0);
+  assert.equal(f.supervisor.startLater(async () => true), false, "nothing to start");
+});
+
+test("main wires the always-on home: lending's own test, the first start's retry and the error page's line", () => {
+  assert.match(MAIN_SOURCE, /installAlwaysOnHome\(\{[^}]*lending: \(\) => computerSharing\?\.lendingSomewhere\(\) === true/);
+  assert.match(MAIN_SOURCE, /keepTrying: \(\) => alwaysOnHome\.on\(\)/);
+  assert.match(MAIN_SOURCE, /if \(!serverReady && !desktopShutdownStarted\) serverSupervisor\.startLater\(startServerPackaged\);/);
+  assert.match(MAIN_SOURCE, /buildErrorPage\(\{ allPortsOccupied: serverStartConflictOnly, logDir: LOG_DIR, keepTrying: alwaysOnHome\.on\(\) \}/);
+});
+
 test("only a stable ready uptime resets the recovery budget", async (t) => {
   const f = fixture(t);
   f.supervisor.ready(f.spawn());

@@ -85,11 +85,11 @@ export function createServerSupervisor({
   /** A first start that never got ready (every port taken after a power cut, say), on an always-on home: `start()`, true
    * once it is ready, again after each long wait while `keepTrying()`; not while an earlier child is still owned. */
   function startLater(start) {
-    if (stopped || paused || timer || !keepTrying()) return false;
+    if (stopped || paused || timer || readySince !== null || !keepTrying()) return false;
     log(`server start: always-on home, trying again in ${longRetryMs}ms`);
     timer = setTimeout(async () => {
       timer = null;
-      if (stopped || paused) return;
+      if (stopped || paused || readySince !== null) return;
       if (current === null) {
         let started = false;
         try { started = await start(); } catch (error) { log(`server start failed: ${error?.message ?? error}`); }
