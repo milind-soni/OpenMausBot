@@ -1210,7 +1210,7 @@
    and a generic family listed later would otherwise win. */
 @font-face {
   font-family: "omb-chat";
-  src: local("Noto Naskh Arabic"), local("Noto Sans Arabic"), local("Geeza Pro"), local("SF Arabic");
+  src: local("Cairo"), local("IBM Plex Sans Arabic"), local("Noto Naskh Arabic"), local("Noto Sans Arabic"), local("Geeza Pro"), local("SF Arabic");
   unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
 }
 @font-face {
@@ -3623,4 +3623,53 @@ button:disabled.bg-danger {
 .fade-end:dir(rtl) {
   -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+
+
+/* =========================================================================
+   Arabic Typography & Bidirectional (RTL) Layout System
+   ========================================================================= */
+
+:root[dir="rtl"],
+html[dir="rtl"],
+[dir="rtl"] {
+  --font-arabic: "Cairo", "IBM Plex Sans Arabic", "Noto Sans Arabic", "Geeza Pro", "SF Arabic", system-ui, sans-serif;
+  font-family: var(--font-arabic);
+}
+
+:root[dir="rtl"] .chat-text,
+:root[dir="rtl"] .chat-md,
+[dir="rtl"] .chat-text,
+[dir="rtl"] .chat-md {
+  font-family: var(--font-arabic), "omb-chat", var(--font-sans);
+  line-height: 1.85;
+}
+
+/* Ensure code blocks, monospace tokens, URLs, and phone numbers remain strictly LTR */
+[dir="rtl"] :is(pre, code, kbd, samp, .font-mono, [data-code-block], .code-block, .chat-code, .chat-table pre) {
+  direction: ltr !important;
+  text-align: left !important;
+  unicode-bidi: isolate;
+  font-family: var(--font-mono) !important;
+}
+
+[dir="rtl"] :is(input[type="tel"], input[type="url"], a[href^="http://"], a[href^="https://"], .url-token, [data-ltr], [data-code-token]) {
+  direction: ltr !important;
+  text-align: left !important;
+  unicode-bidi: isolate;
+}
+
+/* RTL layout adjustments: mirror rail pill indicator and directional chevrons/arrows */
+[dir="rtl"] [data-rail-pill] {
+  left: auto !important;
+  right: -1.5px !important;
+  border-radius: 9999px 0 0 9999px !important;
+}
+
+[dir="rtl"] :is(.lucide-chevron-right, .lucide-chevron-left) {
+  transform: scaleX(-1);
+}
+
+[dir="rtl"] :is(.lucide-arrow-right, .lucide-arrow-left) {
+  transform: scaleX(-1);
 }
