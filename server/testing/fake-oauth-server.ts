@@ -15,7 +15,7 @@ export interface FakeOAuthOptions {
   /** refuse to register a client for a redirect URI this matches */
   refuseRedirect?: (redirectUri: string) => boolean;
   /** answer every registration with this status, JSON body and headers */
-  registerRefusal?: { status: number; body: Record<string, unknown>; headers?: Record<string, string> };
+  registerRefusal?: { status: number; body: unknown; headers?: Record<string, string> };
   /** answer every refresh with invalid_grant */
   rejectRefresh?: boolean;
   /** /authorize answers ?error=access_denied instead of a code */

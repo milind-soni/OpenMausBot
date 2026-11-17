@@ -206,7 +206,7 @@ class RegistrationRefused extends Error {}
 function registrationRefusal(response: Response, description: unknown): string {
   const reason = typeof description === "string" ? description.replace(/\s+/g, " ").trim().slice(0, 300) : "";
   const retryAfter = response.headers.get("retry-after")?.trim().slice(0, 40);
-  const wait = retryAfter ? ` It asked to wait: Retry-After ${retryAfter}.` : "";
+  const wait = retryAfter ? ` It asked to wait: Retry-After ${/^\d+$/.test(retryAfter) ? `${retryAfter} seconds` : retryAfter}.` : "";
   if (!reason && !wait) return "This server would not register OpenMausBot for sign-in. Try again later.";
   return `This server would not register OpenMausBot for sign-in (HTTP ${response.status})${reason ? `: ${reason}` : "."}${wait} Try again later.`;
 }
@@ -512,7 +512,8 @@ export class McpOAuthManager {
       redirect: "error",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    const body = await response.json().catch(() => ({})) as { client_id?: unknown; error_description?: unknown };
+    const parsed: unknown = await response.json().catch(() => null);
+    const body = (parsed && typeof parsed === "object" ? parsed : {}) as { client_id?: unknown; error_description?: unknown };
     if (!response.ok || typeof body.client_id !== "string" || !body.client_id) {
       throw new RegistrationRefused(registrationRefusal(response, body.error_description));
     }
