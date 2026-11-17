@@ -335,7 +335,10 @@ describe("the chat engine on Ollama", () => {
     const instance = await create({ url: `${url}/v1`, apiKeyEnv: "FIXTURE_KEY" }, { FIXTURE_KEY: "fixture-key" });
     try {
       await instance.refreshModels?.();
-      expect(instance.models.options).toEqual([{ id: "llama3.2:latest", label: "llama3.2:latest", custom: true }]);
+      expect(instance.models.options).toEqual([{
+        id: "llama3.2:latest", label: "llama3.2:latest", custom: true,
+        variants: ["low", "medium", "high", "xhigh", "max"].map((id) => ({ id, label: id })),
+      }]);
       expect(await instance.snapshot()).toMatchObject({ state: "available" });
       expect(instanceLook({ driver: "openai-compat", displayName: "Local", config: { url: `${url}/v1` } })).toEqual({});
     } finally { await instance.dispose(); }

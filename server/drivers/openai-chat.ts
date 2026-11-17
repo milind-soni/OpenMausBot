@@ -24,7 +24,7 @@ import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, replaya
 import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
-import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
+import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, selectedReasoningEffort, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { plainFailure } from "./engine-errors.ts";
@@ -37,7 +37,6 @@ import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
 import { FETCH_LIMIT_MS, fetchPastLimit } from "./openai-chat-fetch.ts";
 import { announcesAction } from "./chat-announcement.ts";
-
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | ChatContentPart[] | null;
@@ -52,7 +51,6 @@ interface Usage {
   input: number;
   output: number;
 }
-
 export interface Completion {
   text: string;
   reasoning: string;
@@ -92,6 +90,7 @@ interface RuntimeOptions<Config> {
   apiKey: string;
   apiUrl: string;
   models: () => ModelCatalog;
+  prepareTurn?: (turn: SendTurnInput, signal: AbortSignal) => Promise<void> | undefined;
   requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean, variant?: string, threadId?: string): Record<string, unknown>;
   httpErrorLabel: string;
   /** A refusal this provider words itself: the sentence the person sees instead of the HTTP line, or undefined. */
@@ -278,10 +277,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         : timeoutController.signal;
 
       const served = options.servedModel ? await options.servedModel(model) : model;
+      const requestBody = options.requestBody(served, messages, stream, variant, threadId);
+      const effort = selectedReasoningEffort(requestBody, route, variant);
       const payload = JSON.stringify(route === "responses"
-        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort: options.requestBody(served, messages, stream, variant).reasoning_effort })
+        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort })
         : {
-          ...options.requestBody(served, messages, stream, variant, threadId),
+          ...requestBody,
           ...(route === "chat-reasoning-off" ? (options.reasoningOffBody?.(served) ?? { reasoning_effort: "none" }) : {}),
           ...(tools.length ? { tools } : {}),
         });
@@ -523,7 +524,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const request = messages.at(-1)!;
     const retainImages = chatImageBudget();
     for (const message of messages) retainImages(message.content);
-    const model = turn.model || options.models().default;
+    let model = turn.model || options.models().default;
     const maskable = (value: unknown): value is string => typeof value === "string" && value.length >= 8; // a short placeholder key ("1") would redact every match
     const secrets = [options.apiKey].filter(maskable);
     for (const integration of Object.values(turn.integrations ?? {})) {
@@ -580,7 +581,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const turnEntry = { abort, turnId, done, approval, asides: [] as string[], ending: false };
     active.set(turn.threadId, turnEntry);
     emit({ ...base(turn.threadId, turnId), type: "turn.started" });
-    emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
 
     void (async () => {
       let tools: ChatToolSession | undefined;
@@ -601,6 +601,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const repeats = options.localModel ? new ChatRepeatGuard() : undefined;
       let unreadable = false, askedAgain = false;
       try {
+        const preparation = options.prepareTurn?.(turn, abort.signal);
+        if (preparation) {
+          await preparation;
+          abort.signal.throwIfAborted();
+          model = turn.model || options.models().default;
+        }
+        emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
