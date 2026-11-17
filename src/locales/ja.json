@@ -830,7 +830,6 @@
   "attach.previewVideo": "{name} をプレビュー",
   "attach.loadVideo": "動画を読み込む",
   "attach.closeVideo": "動画プレビューを閉じる",
-  "attach.videoHint": "要求時に読み込み · 最大 25 MB",
   "attach.videoLoading": "動画を読み込んでいます…",
   "attach.videoUnavailable": "この動画はここでは再生できません。コピーの保存は可能です。",
   "attach.previewAudio": "{name} を再生",

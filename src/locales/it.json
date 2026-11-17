@@ -721,7 +721,6 @@
   "attach.previewVideo": "Anteprima di {name}",
   "attach.loadVideo": "Carica il video",
   "attach.closeVideo": "Chiudi anteprima video",
-  "attach.videoHint": "Si carica su richiesta · fino a 25 MB",
   "attach.videoLoading": "Caricamento del video…",
   "attach.videoUnavailable": "Questo video non si riproduce qui. Puoi comunque salvarne una copia.",
   "attach.previewAudio": "Riproduci {name}",

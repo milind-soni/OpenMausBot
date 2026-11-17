@@ -732,7 +732,6 @@
   "attach.previewVideo": "Предпросмотр {name}",
   "attach.loadVideo": "Загрузить видео",
   "attach.closeVideo": "Закрыть предпросмотр видео",
-  "attach.videoHint": "Загружается по запросу · до 25 МБ",
   "attach.videoLoading": "Загрузка видео…",
   "attach.videoUnavailable": "Это видео нельзя воспроизвести здесь. Вы всё равно можете сохранить копию.",
   "attach.previewAudio": "Воспроизвести {name}",

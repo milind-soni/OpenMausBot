@@ -443,7 +443,6 @@
   "attach.previewVideo": "Xem trước {name}",
   "attach.loadVideo": "Tải video",
   "attach.closeVideo": "Đóng xem trước video",
-  "attach.videoHint": "Tải theo yêu cầu · tối đa 25 MB",
   "attach.videoLoading": "Đang tải video…",
   "attach.videoUnavailable": "Không thể phát video này ở đây. Bạn vẫn có thể lưu một bản sao.",
   "attach.previewAudio": "Phát {name}",

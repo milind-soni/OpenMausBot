@@ -1028,7 +1028,6 @@
   "attach.previewVideo": "预览 {name}",
   "attach.loadVideo": "加载视频",
   "attach.closeVideo": "关闭视频预览",
-  "attach.videoHint": "依需求加载 · 最多 25 MB",
   "attach.videoLoading": "正在加载视频…",
   "attach.videoUnavailable": "无法在此播放这部视频，但你仍可保存副本。",
   "attach.previewAudio": "播放 {name}",

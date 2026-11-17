@@ -654,7 +654,6 @@
   "attach.previewVideo": "Vista previa de {name}",
   "attach.loadVideo": "Cargar video",
   "attach.closeVideo": "Cerrar la vista previa del video",
-  "attach.videoHint": "Se carga al pedirlo · hasta 25 MB",
   "attach.videoLoading": "Cargando video…",
   "attach.videoUnavailable": "Este video no se puede reproducir aquí. Aun así, puedes guardar una copia.",
   "attach.previewAudio": "Reproducir {name}",
