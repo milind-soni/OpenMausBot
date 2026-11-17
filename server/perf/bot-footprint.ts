@@ -15,6 +15,8 @@ export interface FootprintOwner {
   /** The bots it serves now. One: that bot's. More, none, or one that is not a bot id: shared. */
   botIds: readonly string[];
   kind: "engine" | "browser";
+  /** It has exited: its pid may be another process's now, but its group and session still name what it left. */
+  exited?: boolean;
 }
 
 export interface BotTally {
@@ -47,6 +49,8 @@ export function attributeRows(rows: readonly ProcessRow[], owners: readonly Foot
   // A leader the list shows with another start is another process now; one the list no longer shows (an engine that
   // exited) still names its group and session: the system gives no new process a number that still names one.
   const roots = new Map<number, { label: string; kind: FootprintOwner["kind"] }>();
+  /** Leaders still running as themselves: only these name the process with their pid; the others name groups and sessions. */
+  const live = new Set<number>();
   for (const owner of owners) {
     const row = byPid.get(owner.pid);
     if (row && owner.start && row.start !== owner.start) continue;
@@ -55,6 +59,7 @@ export function attributeRows(rows: readonly ProcessRow[], owners: readonly Foot
     const known = roots.get(owner.pid);
     // Two records of one pid disagreeing about its bot: shared, never either bot's.
     roots.set(owner.pid, { label: known && known.label !== label ? SHARED : label, kind: owner.kind });
+    if (!owner.exited) live.add(owner.pid);
   }
   const labels = new Map<number, string | null>();
   const labelOf = (row: ProcessRow, depth: number): string | null => {
@@ -63,7 +68,7 @@ export function attributeRows(rows: readonly ProcessRow[], owners: readonly Foot
     labels.set(row.pid, null);
     // Its own record first, then the nearest recorded ancestor, then (for what outlived its parent and was adopted by an
     // init) the session and group it still runs in.
-    let label: string | null = roots.get(row.pid)?.label ?? null;
+    let label: string | null = live.has(row.pid) ? roots.get(row.pid)?.label ?? null : null;
     if (label === null && row.ppid !== row.pid && depth < 64) {
       const parent = byPid.get(row.ppid);
       if (parent) label = labelOf(parent, depth + 1);
@@ -85,7 +90,7 @@ export function attributeRows(rows: readonly ProcessRow[], owners: readonly Foot
     const before = previous?.get(row.pid);
     if (previous) tally.cpuDeltaMs += before && before.start === row.start && row.cpuMs >= before.cpuMs ? row.cpuMs - before.cpuMs : row.cpuMs;
     tally.pids.push(row.pid);
-    const root = roots.get(row.pid);
+    const root = live.has(row.pid) ? roots.get(row.pid) : undefined;
     if (root?.kind === "engine") tally.engines += 1;
     else if (root?.kind === "browser") tally.browsers += 1;
   }

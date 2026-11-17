@@ -472,7 +472,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
    * profile's several bots share. For the per-bot footprint (perf/bot-footprint.ts): one small file read a session. */
   function browserOwners(): Array<{ pid: number; botIds: string[]; kind: "browser" }> {
     return [...usedBrowserSessions].flatMap(([session, spec]) => {
-      if (chromeTarget(session, spec)) return [];
+      // A browser attached to the person's own Chrome is theirs, not a bot's.
+      if (chromeTarget(session, spec) || attachesToChrome(spec.env)) return [];
       let pid: number;
       try { pid = Number(readFileSync(browserDaemonFile(browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }), ".pid"), "utf8").trim()); } catch { return []; }
       if (!Number.isInteger(pid) || pid <= 1) return [];

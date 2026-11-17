@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 
 import { runInTurn } from "../crash-guard.ts";
+import { requiredScope, serviceAllowed } from "../request-auth.ts";
 import { EngineOwners } from "../engine-owners.ts";
 import { footprintOwners } from "../host/bot-footprint-owners.ts";
 import { BOT_FOOTPRINT_PATH, createPerfDiagnosticsRoutes } from "../routes/perf-diagnostics.ts";
@@ -153,18 +154,39 @@ describe("which bot an engine runs for", () => {
     expect(owners.list()[0]?.threads.size).toBe(0);
   });
 
-  it("names a conversation's bot from the store, and an engine with a conversation of no known bot is shared", () => {
+  it("names a conversation's bot from the store; a group's room, a turn of another bot, or no known bot makes it shared", () => {
     const owners = new EngineOwners();
     const child = Object.assign(new EventEmitter(), { pid: 10 });
     owners.track(child, null);
     owners.attach(child, "thread_known");
     const browsers: FootprintOwner[] = [{ pid: 11, botIds: ["bot_z"], kind: "browser" }];
-    const list = footprintOwners({ botOf: (threadId) => (threadId === "thread_known" ? "bot_k" : null), browsers: () => browsers, engines: owners });
+    const botOf = (threadId: string) => (threadId === "thread_known" || threadId === "thread_k2" ? "bot_k" : null);
+    const list = footprintOwners({ botOf, browsers: () => browsers, engines: owners });
     expect(list()).toEqual([{ pid: 10, start: null, kind: "engine", botIds: ["bot_k"] }, browsers[0]]);
     owners.attach(child, "thread_gone");
     expect(list()[0]?.botIds).toEqual(["bot_k", "?"]);
     const rows: ProcessRow[] = [{ pid: 10, ppid: 1, name: "opencode", cpuMs: 0, rssBytes: MB, start: "s" }];
     expect(attributeRows(rows, list()).bots.size).toBe(0);
+    // A group's room: several bots take turns in one conversation, which belongs to no bot.
+    const room = new EngineOwners();
+    runInTurn({ botId: "bot_k", threadId: "group_thread" }, () => room.track(Object.assign(new EventEmitter(), { pid: 20 }), null));
+    expect(footprintOwners({ botOf, browsers: () => [], engines: room })()[0]?.botIds).toEqual(["?", "bot_k"]);
+    // A turn of another bot in a bot's own conversation.
+    const visit = new EngineOwners();
+    runInTurn({ botId: "bot_v", threadId: "thread_k2" }, () => visit.track(Object.assign(new EventEmitter(), { pid: 30 }), null));
+    const visited = footprintOwners({ botOf, browsers: () => [], engines: visit })();
+    expect(visited[0]?.botIds).toEqual(["bot_k", "bot_v"]);
+    expect(attributeRows([{ pid: 30, ppid: 1, name: "claude", cpuMs: 0, rssBytes: MB, start: "s" }], visited).shared.procs).toBe(1);
+  });
+
+  it("never names a process by an exited engine's pid, which may be another process's now", () => {
+    const rows: ProcessRow[] = [
+      { pid: 200, ppid: 1, name: "postgres", cpuMs: 0, rssBytes: MB, start: "ps:200", pgid: 200 },
+      { pid: 201, ppid: 1, name: "sleep", cpuMs: 0, rssBytes: MB, start: "ps:201", pgid: 777 },
+    ];
+    const { bots } = attributeRows(rows, [{ pid: 200, botIds: ["bot_a"], kind: "engine", exited: true }, { pid: 777, botIds: ["bot_a"], kind: "engine", exited: true }]);
+    expect(bots.get("bot_a")?.pids).toEqual([201]);
+    expect(bots.get("bot_a")?.engines).toBe(0);
   });
 });
 
@@ -190,6 +212,9 @@ describe("where the footprint shows", () => {
     const route = createPerfDiagnosticsRoutes({ text: () => "", bots: () => footprints.report() });
     const sent: unknown[] = [];
     const context = (path: string, method = "GET") => ({ path, method, res: { setHeader: () => undefined }, json: (_res: unknown, status: number, body: unknown) => { sent.push({ status, body }); } }) as unknown as RouteContext;
+    // Admin only: never a client session, never a bot's shell on service-trust loopback.
+    expect(requiredScope("GET", BOT_FOOTPRINT_PATH)).toBe("admin");
+    expect(serviceAllowed("GET", BOT_FOOTPRINT_PATH)).toBe(false);
     expect(await route(context(BOT_FOOTPRINT_PATH, "POST"))).toBe(PASS);
     await route(context(BOT_FOOTPRINT_PATH));
     expect(sent).toEqual([{ status: 200, body: { bots: footprints.report() } }]);
