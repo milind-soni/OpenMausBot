@@ -42,12 +42,15 @@ const controllers: AbortController[] = [];
 const schema = { type: "object", properties: { value: { type: "string" } }, required: ["value"], additionalProperties: false };
 
 describe("configured MCP environment", () => {
-  it("replaces an inherited npm cache with a writable default and preserves an explicit override", () => {
-    const inherited = { npm_config_cache: "/data/.npm/_cacache", PATH: "/bin" };
-    const env = chatMcpEnvironment({}, inherited);
-    expect(env.npm_config_cache).toContain("openmausbot-mcp-npm-");
-    expect(env.npm_config_cache).not.toBe(inherited.npm_config_cache);
-    expect(chatMcpEnvironment({ npm_config_cache: "/tmp/custom-npm-cache" }, inherited).npm_config_cache).toBe("/tmp/custom-npm-cache");
+  it("keeps an npm cache that works and preserves an explicit override", () => {
+    const cache = mkdtempSync(join(tmpdir(), "omb-npm-cache-"));
+    try {
+      const inherited = { npm_config_cache: cache, PATH: "/bin" };
+      expect(chatMcpEnvironment({}, inherited).npm_config_cache).toBe(cache);
+      expect(chatMcpEnvironment({ npm_config_cache: "/tmp/custom-npm-cache" }, inherited).npm_config_cache).toBe("/tmp/custom-npm-cache");
+    } finally {
+      rmSync(cache, { recursive: true, force: true });
+    }
   });
 });
 

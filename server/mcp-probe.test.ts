@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -49,14 +49,15 @@ function watch<T>(pending: Promise<T>): { done: boolean; value?: T } {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("custom MCP probe", () => {
-  it("uses a writable default npm cache and preserves a per-server override", () => {
-    const inherited = { npm_config_cache: "/data/.npm/_cacache", PATH: "/bin" };
-    const defaultEnv = probeEnvironment({ env: {} }, inherited);
-    expect(defaultEnv.npm_config_cache).toContain("openmausbot-mcp-npm-");
-    expect(defaultEnv.npm_config_cache).not.toBe(inherited.npm_config_cache);
-
-    const custom = probeEnvironment({ env: { npm_config_cache: "/tmp/custom-npm-cache" } }, inherited);
-    expect(custom.npm_config_cache).toBe("/tmp/custom-npm-cache");
+  it("keeps an npm cache that works and preserves a per-server override", () => {
+    const cache = mkdtempSync(join(tmpdir(), "omb-npm-cache-"));
+    try {
+      const inherited = { npm_config_cache: cache, PATH: "/bin" };
+      expect(probeEnvironment({ env: {} }, inherited).npm_config_cache).toBe(cache);
+      expect(probeEnvironment({ env: { npm_config_cache: "/tmp/custom-npm-cache" } }, inherited).npm_config_cache).toBe("/tmp/custom-npm-cache");
+    } finally {
+      rmSync(cache, { recursive: true, force: true });
+    }
   });
 
   it("performs an MCP handshake and returns the bounded public tool list", async () => {
