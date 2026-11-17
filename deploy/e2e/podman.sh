@@ -132,7 +132,7 @@ python3 -m http.server 8765 --bind 127.0.0.1 --directory "$(mktemp -d)" >/dev/nu
 page_server=$!
 if in_server sh -c 'agent-browser open "data:text/html,<title>podman-e2e</title>" >/dev/null && agent-browser get title' >"$OUT/chrome.txt" 2>&1 &&
   grep -q podman-e2e "$OUT/chrome.txt"; then
-  podman top openmausbot args | grep -iE 'chrom' | grep -v grep | head -n 3 >"$OUT/chrome-argv.txt" || true
+  podman top openmausbot args | awk 'tolower($0) ~ /chrom/ && n < 3 { print; n++ }' >"$OUT/chrome-argv.txt" || true
   in_server agent-browser open http://127.0.0.1:8765/ >>"$OUT/chrome.txt" 2>&1 || fail "the browser did not load a page over http"
   [ -z "$(new_outside)" ] || fail "with Chrome open, something listens beyond this machine: $(new_outside)"
   in_server agent-browser close >/dev/null 2>&1 || true
@@ -154,11 +154,11 @@ probe=(--unshare-user --unshare-pid --unshare-net --unshare-ipc --unshare-uts --
   --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp /bin/true)
 box_rung=""
 seccomp=(--security-opt "seccomp=$ROOT/connector/profiles/seccomp-omb-home.json")
-for rung in default seccomp unmask-proc unmask-all apparmor-unconfined; do
+for rung in default unmask-proc seccomp-unmask-proc unmask-all apparmor-unconfined; do
   extra=()
   case "$rung" in
-    seccomp) extra=("${seccomp[@]}") ;;
-    unmask-proc) extra=("${seccomp[@]}" --security-opt "unmask=/proc/*") ;;
+    unmask-proc) extra=(--security-opt "unmask=/proc/*") ;;
+    seccomp-unmask-proc) extra=("${seccomp[@]}" --security-opt "unmask=/proc/*") ;;
     unmask-all) extra=("${seccomp[@]}" --security-opt unmask=ALL) ;;
     apparmor-unconfined) extra=("${seccomp[@]}" --security-opt unmask=ALL --security-opt apparmor=unconfined) ;;
   esac
@@ -190,7 +190,8 @@ finding "restart: kill -9 of server-launcher; systemd started a new container ($
 
 step "a server that stops answering is stopped by its health check and started again"
 before=$(container_id)
-server=$(podman top openmausbot hpid args | awk '/dist-server\/index.js/ { print $1; exit }')
+# The process that answers on 8799 (the launcher's child): it runs as this user, so ss names it.
+server=$(ss -ltnpH "( sport = :8799 )" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -n 1)
 [ -n "$server" ] || fail "no server process to pause"
 kill -STOP "$server"
 for _ in $(seq 1 120); do [ -n "$(container_id)" ] && [ "$(container_id)" != "$before" ] && break; sleep 3; done
