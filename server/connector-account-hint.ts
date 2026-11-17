@@ -6,13 +6,13 @@
 // something the bot can act on; this one names the other accounts of the same app, so the bot tries them before it
 // tells the person it has no access.
 
-import { withFailedCallHint } from "./connector-scope-hint.ts";
+import { annotateFailedCall } from "./connector-scope-hint.ts";
 
 /** GitHub's wording when the connected account's app installation cannot reach what the call asks for. */
 const ACCOUNT_ERROR = /not accessible by integration/i;
 
-/** What a first pass leaves in a copy of the answer, so the second pass knows which tool the refusal is about. */
-const PROBE = "omb-account-hint-probe:";
+/** Marks the note a frame carries, so a frame that must not get one can be told from one that does. */
+const NOTE = "\u0000omb-account-hint:";
 
 /** A connected account of one app, as the services inventory gives it. */
 export interface ConnectedAccount {
@@ -70,18 +70,26 @@ export function accountsByApp(services: Record<string, { accounts: readonly Conn
   return Object.fromEntries(Object.entries(services).map(([slug, state]) => [slug, state.accounts]));
 }
 
-/** The tools the refusal is about, read out of a copy of the answer the shared helper annotated: the tools it names,
- * or the whole call when it names none. */
-function failedTools(bytes: Uint8Array, contentType: string, slugs: readonly string[]): readonly string[] {
-  const probe = withFailedCallHint(bytes, contentType, ACCOUNT_ERROR, (failed) => `${PROBE}${failed.join(",")}|`, slugs);
-  const text = new TextDecoder().decode(probe);
-  const at = text.indexOf(PROBE);
-  if (at < 0) return [];
-  const end = text.indexOf("|", at);
-  return text.slice(at + PROBE.length, end < 0 ? undefined : end).split(",").filter(Boolean);
+/** The note a frame carries, marked so that a frame which earns none can be recognised afterwards. */
+function markedNote(failed: readonly string[], accounts: ConnectedAccounts): string {
+  return `${NOTE}${accountHint(failed, accounts)}`;
 }
 
-/** Adds the account note to a call refused for the account it used, when that app has another account to try. */
+/** Takes the mark out of a frame: the note stays as it is, and a frame that earned none loses the mark again.
+ * Tells whether the frame carries a note. */
+function unmarked(frame: unknown): boolean {
+  const content = (frame as { result?: { content?: unknown } } | null)?.result?.content;
+  if (!Array.isArray(content) || !content.length) return false;
+  const last = content[content.length - 1] as { text?: unknown };
+  if (typeof last.text !== "string" || !last.text.startsWith(NOTE)) return false;
+  const note = last.text.slice(NOTE.length);
+  if (!note) content.pop();
+  else last.text = note;
+  return Boolean(note);
+}
+
+/** Adds the account note to a call refused for the account it used, when that app has another account to try.
+ * Every frame of an answer gets the note of the app its own refusal names. */
 export async function withAccountHint(
   bytes: Uint8Array,
   contentType: string,
@@ -90,9 +98,26 @@ export async function withAccountHint(
 ): Promise<Uint8Array> {
   if (!ACCOUNT_ERROR.test(new TextDecoder().decode(bytes))) return bytes;
   const accounts = await loadAccounts().catch(() => ({}) as ConnectedAccounts);
-  // The note names the app the refusal is about: the tool the answer names, or the whole call when it names one app.
-  const note = accountHint(failedTools(bytes, contentType, slugs), accounts);
-  // Nothing to say when that app has no other account to try, or when the answer does not say which app it is about.
-  if (!note) return bytes;
-  return withFailedCallHint(bytes, contentType, ACCOUNT_ERROR, () => note, slugs);
+  // The shared helper hands the hint the tools that frame names, so the note is the one of that frame's own app.
+  const hint = (failed: readonly string[]) => markedNote(failed, accounts);
+  let noted = false;
+  try {
+    const text = new TextDecoder().decode(bytes);
+    if (/text\/event-stream/i.test(contentType)) {
+      const lines = text.split("\n").map((line) => {
+        if (!line.startsWith("data:")) return line;
+        const frame = JSON.parse(line.slice(5));
+        if (!annotateFailedCall(frame, ACCOUNT_ERROR, hint, slugs)) return line;
+        noted = unmarked(frame) || noted;
+        return `data: ${JSON.stringify(frame)}`;
+      });
+      return noted ? new TextEncoder().encode(lines.join("\n")) : bytes;
+    }
+    const frame = JSON.parse(text);
+    if (!annotateFailedCall(frame, ACCOUNT_ERROR, hint, slugs)) return bytes;
+    if (!unmarked(frame)) return bytes;
+    return new TextEncoder().encode(JSON.stringify(frame));
+  } catch {
+    return bytes;
+  }
 }

@@ -11,6 +11,14 @@ const refused = {
   id: 7,
   result: { content: [{ type: "text", text: githubError }], isError: true },
 };
+const refusalFor = (slug: string, id: number) => ({
+  jsonrpc: "2.0",
+  id,
+  result: {
+    content: [{ type: "text", text: JSON.stringify({ successful: false, tool_slug: slug, error: JSON.stringify({ message: "Resource not accessible by integration" }) }) }],
+    isError: true,
+  },
+});
 const accounts = {
   github: [
     { id: "github_adrue-sump", alias: "vyrgs", status: "ACTIVE" },
@@ -106,5 +114,26 @@ describe("connector account hint", () => {
     const out = JSON.parse(decode(await withAccountHint(encode(named), "application/json", ["GMAIL_GET_PROFILE", "GITHUB_CREATE_AN_ISSUE"], async () => mixed)));
     expect(out.result.content[1].text).toContain("GitHub");
     expect(out.result.content[1].text).toContain("personal");
+  });
+
+  it("gives each frame of a streamed answer the note of its own app", async () => {
+    const mixed = { github: accounts.github, gmail: [{ id: "gmail_one", alias: "work", status: "ACTIVE" }] };
+    const body = `data: ${JSON.stringify(refusalFor("GITHUB_CREATE_AN_ISSUE", 11))}\n\ndata: ${JSON.stringify(refusalFor("GMAIL_GET_PROFILE", 12))}\n\n`;
+    const out = decode(await withAccountHint(encode(body), "text/event-stream", ["GITHUB_CREATE_AN_ISSUE", "GMAIL_GET_PROFILE"], async () => mixed));
+    const frames = out.split("\n").filter((line) => line.startsWith("data:")).map((line) => JSON.parse(line.slice(5)));
+    expect(frames[0].result.content).toHaveLength(2);
+    expect(frames[0].result.content[1].text).toContain("GitHub refused this");
+    expect(frames[1].result.content).toHaveLength(1);
+  });
+
+  it("gives a frame its note even when the first frame's app has one account only", async () => {
+    const mixed = { github: [{ id: "github_one", alias: "personal", status: "ACTIVE" }], gmail: [{ id: "gmail_one", alias: "work", status: "ACTIVE" }, { id: "gmail_two", alias: "other", status: "ACTIVE" }] };
+    const body = `data: ${JSON.stringify(refusalFor("GITHUB_CREATE_AN_ISSUE", 13))}\n\ndata: ${JSON.stringify(refusalFor("GMAIL_GET_PROFILE", 14))}\n\n`;
+    const out = decode(await withAccountHint(encode(body), "text/event-stream", ["GITHUB_CREATE_AN_ISSUE", "GMAIL_GET_PROFILE"], async () => mixed));
+    const frames = out.split("\n").filter((line) => line.startsWith("data:")).map((line) => JSON.parse(line.slice(5)));
+    expect(frames[0].result.content).toHaveLength(1);
+    expect(frames[1].result.content).toHaveLength(2);
+    expect(frames[1].result.content[1].text).toContain("Gmail refused this");
+    expect(frames[1].result.content[1].text).toContain("work, other");
   });
 });
