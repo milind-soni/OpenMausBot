@@ -1856,11 +1856,15 @@ fine (after `--fix`, fine now) and 8 when a problem is left.
 | Bots and rooms | `bots.json`, `groups.json` | An unreadable file is put back from the whole temp file of a save that was cut short. With no such copy, a copy of the damaged file is kept and you are told how to restore it. |
 | Unfinished saves | `<file>.<pid>.<id>.tmp` at the top of the data folder | Moved into the backup. |
 | Engine-run records | `engine-runs/` | Records with neither a server nor a process to stop are moved into the backup. |
-| Messages database | `messages.db` | A large write-ahead log is folded back into the database. A damaged database is reported, never rewritten. |
+| Messages database | `messages.db` | SQLite's `quick_check`. A write-ahead log over 64 MB is folded back into the database. A damaged database is reported, never rewritten. |
 | Private files | `config.json`, `sessions.json`, `bots.json`, `messages.db`, … | Made owner-only (0600). Not on Windows. |
 | Settings file | `config.json` | Never: it tells you `openmausbot config restore latest` when dated copies exist. |
 
 Before changing anything, a repair copies it into
 `<data>/doctor-backups/<time>/`, with a `manifest.json` that lists what changed
-(for a file mode, the old mode). These copies stay on that computer and are not
-part of a workspace backup. Delete them once the server runs well.
+(for a file mode, the old mode). The ten newest runs' copies are kept. They
+stay on that computer and are not part of a workspace backup.
+
+As a server starts, the doctor reads `messages.db` through and copies it before
+a checkpoint only up to 256 MB, so an update never waits on a large database;
+`openmausbot doctor --data` does both at any size.

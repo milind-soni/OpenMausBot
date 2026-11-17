@@ -10,7 +10,8 @@ const ATOMIC_TEMP = /^(.+)\.([1-9]\d{0,9})\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-
 
 export type LeftoverTemp = { name: string; path: string; of: string; pid: number; mtimeMs: number };
 
-/** The temp files in `dir` (not below it) whose writer is no longer running: never this process's, never a live one's. */
+/** The temp files in `dir` (not below it) whose writer is no longer running: never a live process's, and this process's
+ * pid only for a file older than this process (a restarted container's server is often given its predecessor's pid). */
 export function leftoverTemps(ctx: DoctorContext, dir: string = ctx.dataDir): LeftoverTemp[] {
   let names: string[];
   try { names = readdirSync(dir); } catch { return []; }
@@ -19,11 +20,12 @@ export function leftoverTemps(ctx: DoctorContext, dir: string = ctx.dataDir): Le
     const match = ATOMIC_TEMP.exec(name);
     if (!match) continue;
     const pid = Number(match[2]);
-    if (pid === process.pid || ctx.pidAlive(pid)) continue;
+    if (pid !== process.pid && ctx.pidAlive(pid)) continue;
     const path = join(dir, name);
     try {
       const stat = statSync(path);
-      if (stat.isFile()) found.push({ name, path, of: match[1]!, pid, mtimeMs: stat.mtimeMs });
+      if (!stat.isFile() || (pid === process.pid && stat.mtimeMs >= ctx.startedAt)) continue;
+      found.push({ name, path, of: match[1]!, pid, mtimeMs: stat.mtimeMs });
     } catch {}
   }
   return found;

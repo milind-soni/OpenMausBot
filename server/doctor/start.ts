@@ -46,7 +46,7 @@ export function summaryOf(report: DoctorReport): Omit<DoctorSummary, "thisStart"
     at: report.at,
     version: report.version,
     checked: report.counts.checked,
-    fixed: report.checks.filter((result) => result.fixed !== undefined).map((result) => result.id),
+    fixed: report.checks.filter((result) => result.repaired).map((result) => result.id),
     problems: report.checks.filter((result) => result.status === "problem" || result.status === "failed").map((result) => result.id),
   };
 }

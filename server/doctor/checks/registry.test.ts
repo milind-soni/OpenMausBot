@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -43,10 +43,27 @@ describe("registry check", () => {
     const report = run(data);
     expect(report.checks[0]).toMatchObject({ status: "problem", fixable: false });
     expect(report.checks[0]!.fixed).toContain("kept a copy of the unreadable groups.json");
+    expect(report.checks[0]!.repaired).toBe(false);
+    expect(report.counts.fixed).toBe(0);
     expect(report.checks[0]!.instruction).toContain("./update.sh --rollback");
     expect(readFileSync(join(data, "bots.json"), "utf8")).toBe("{}");
     expect(readFileSync(join(backupFolder(data)!, "bots.json"), "utf8")).toBe("{}");
     expect(existsSync(join(backupFolder(data)!, "groups.json"))).toBe(true);
+  });
+
+  it("never takes a save from before the damaged file was written", () => {
+    const data = dataFolder();
+    writeFileSync(join(data, "bots.json"), "[{\"id\":");
+    const older = join(data, `bots.json.4242.${UUID}.tmp`);
+    writeFileSync(older, "[]");
+    utimesSync(older, new Date(NOW - 86_400_000), new Date(NOW - 86_400_000));
+    utimesSync(join(data, "bots.json"), new Date(NOW), new Date(NOW));
+    expect(registryCheck().check(context(data))).toMatchObject({ status: "problem", fixable: false, keepCopy: true });
+    const report = run(data);
+    expect(report.checks[0]).toMatchObject({ status: "problem", repaired: false });
+    // The older save is not lost either: it goes into the backup with the other unfinished saves.
+    expect(report.checks[1]).toMatchObject({ id: "temp-files", status: "fixed" });
+    expect(readFileSync(join(data, "bots.json"), "utf8")).toBe("[{\"id\":");
   });
 
   it("never takes the temp file of a save still running", () => {

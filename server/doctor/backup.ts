@@ -1,10 +1,12 @@
 // <data>/doctor-backups/<time>/: every fix puts what it is about to change here first, at the same path it has in the
 // data folder, and writes a line in manifest.json. Made on the first fix of a run, so a run that changes nothing leaves
 // no folder. Owner-only: it holds copies of the registries.
-import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 
 export const DOCTOR_BACKUPS_DIR = "doctor-backups";
+/** The newest runs' copies kept; an older run's go when a new run copies something. */
+export const DOCTOR_BACKUPS_KEPT = 10;
 
 export type BackupEntry = { check: string; action: string; path: string; savedAs?: string; mode?: string };
 
@@ -37,6 +39,11 @@ export class DoctorBackup {
     const folder = join(root, name);
     mkdirSync(folder, { mode: 0o700 });
     this.folder = folder;
+    // The names sort by time.
+    const runs = readdirSync(root).filter((entry) => /^\d{4}-\d{2}-\d{2}T/.test(entry)).sort();
+    for (const old of runs.slice(0, Math.max(0, runs.length - DOCTOR_BACKUPS_KEPT))) {
+      try { rmSync(join(root, old), { recursive: true, force: true }); } catch {}
+    }
     return folder;
   }
 

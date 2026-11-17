@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -53,6 +53,19 @@ describe("the doctor at start", () => {
     const summary = doctorAtStart(data, "1.0.0", { checks: [broken], now: () => NOW, log: (line) => lines.push(line) });
     expect(summary).toMatchObject({ problems: ["broken"] });
     expect(lines[0]).toBe("[doctor] broken: The check itself failed: boom");
+  });
+});
+
+describe("doctor-backups", () => {
+  it("keeps the newest ten runs' copies", () => {
+    const data = dataFolder();
+    for (let n = 0; n < 12; n += 1) {
+      stray(data);
+      runDoctor({ dataDir: data, version: "1.0.0", mode: "start", fix: true, now: () => NOW + n * 1000, pidAlive: () => false });
+    }
+    const runs = readdirSync(join(data, "doctor-backups")).sort();
+    expect(runs).toHaveLength(10);
+    expect(runs[0]).toBe("2026-11-17T09-30-02Z");
   });
 });
 

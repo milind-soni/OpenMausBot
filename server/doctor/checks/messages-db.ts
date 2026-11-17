@@ -8,7 +8,8 @@ import { DatabaseSync } from "node:sqlite";
 import type { DoctorCheck } from "../types.ts";
 
 const DB = "messages.db";
-/** Above this, the check at start is skipped (it reads the whole file, and the update waits on the start). */
+/** Above this, the check and the copy before a checkpoint are not done at start: both read the whole file, and an update
+ * waits on the start. `openmausbot doctor --data` does them at any size. */
 export const START_CHECK_MAX_BYTES = 256 * 1024 * 1024;
 /** A log this big is folded back into the database. */
 export const LARGE_WAL_BYTES = 64 * 1024 * 1024;
@@ -28,13 +29,14 @@ export function messagesDbCheck(limits: { startCheckMaxBytes?: number; largeWalB
       const file = join(ctx.dataDir, DB);
       if (!existsSync(file)) return { status: "ok", summary: "Not there yet." };
       const dbBytes = size(file), walBytes = size(`${file}-wal`);
-      const full = ctx.mode === "command";
+      const atStart = ctx.mode === "start";
       let verdict: string | null = null;
-      if (full || dbBytes <= startMax) {
+      if (!atStart || dbBytes <= startMax) {
         let db: DatabaseSync | null = null;
         try {
           db = new DatabaseSync(file, { readOnly: true });
-          const rows = db.prepare(full ? "PRAGMA integrity_check(20)" : "PRAGMA quick_check(20)").all() as Record<string, unknown>[];
+          // SQLite's integrity check without the slow comparison of every index with its table.
+          const rows = db.prepare("PRAGMA quick_check(20)").all() as Record<string, unknown>[];
           const lines = rows.map((row) => String(Object.values(row)[0]));
           verdict = lines.length === 1 && lines[0] === "ok" ? "ok" : `${lines.length} problem${lines.length === 1 ? "" : "s"} (first: ${lines[0]?.slice(0, 160) ?? "unknown"})`;
         } catch (error) {
@@ -51,9 +53,11 @@ export function messagesDbCheck(limits: { startCheckMaxBytes?: number; largeWalB
       if (walBytes > largeWal) {
         const free = freeBytes(ctx.dataDir);
         const room = free === null || free > 2 * (dbBytes + walBytes);
-        return { status: "problem", fixable: room, detail: { file },
+        const now = !atStart || dbBytes + walBytes <= startMax;
+        return { status: "problem", fixable: room && now, detail: { file },
           summary: `${checked}; its write-ahead log is ${Math.round(walBytes / 1024 / 1024)} MB.`,
-          ...(room ? {} : { instruction: "There is not room to copy it first: free some disk, then run openmausbot doctor --data --fix." }) };
+          ...(!room ? { instruction: "There is not room to copy it first: free some disk, then run openmausbot doctor --data --fix." }
+            : !now ? { instruction: "Too large to copy as the server starts: stop the server, then run openmausbot doctor --data --fix." } : {}) };
       }
       return { status: "ok", summary: `${checked}.` };
     },

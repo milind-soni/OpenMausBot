@@ -29,6 +29,7 @@ export interface RunDoctorOptions {
   checks?: DoctorCheck[];
   now?: () => number;
   pidAlive?: (pid: number) => boolean;
+  startedAt?: number;
   /** "command" mode only: takes the data folder's lease for the repairs. */
   acquireLease?: (dataDir: string) => { release(): unknown };
 }
@@ -59,7 +60,8 @@ const wantsFix = (check: DoctorCheck, finding: Finding) => Boolean(check.fix && 
 
 export function runDoctor(options: RunDoctorOptions): DoctorReport {
   const now = options.now ?? Date.now;
-  const ctx: DoctorContext = { dataDir: options.dataDir, version: options.version, mode: options.mode, now, pidAlive: options.pidAlive ?? pidAlive };
+  const ctx: DoctorContext = { dataDir: options.dataDir, version: options.version, mode: options.mode, now, pidAlive: options.pidAlive ?? pidAlive,
+    startedAt: options.startedAt ?? performance.timeOrigin };
   const checks = options.checks ?? defaultChecks();
   const findings = checks.map((check) => look(check, ctx));
   const results = checks.map((check, at) => resultOf(check, findings[at]!));
@@ -83,7 +85,7 @@ export function runDoctor(options: RunDoctorOptions): DoctorReport {
           if (holder?.state === "dead") backup.copy("lease", holder.path, "the lease a dead process left, before it was retired");
           const lease = (options.acquireLease ?? acquireDataDirLease)(options.dataDir);
           release = () => { lease.release(); };
-          if (holder?.state === "dead") Object.assign(results[leaseAt]!, { status: "fixed", fixed: `Retired the lease process ${holder.pid} left.` });
+          if (holder?.state === "dead") Object.assign(results[leaseAt]!, { status: "fixed", fixable: false, repaired: true, fixed: `Retired the lease process ${holder.pid} left.` });
         } catch (error) {
           fix.why = `The data folder's lease could not be taken (${errorText(error)}). Nothing was changed.`;
         }
@@ -107,9 +109,10 @@ export function runDoctor(options: RunDoctorOptions): DoctorReport {
             return;
           }
           const after = look(check, ctx);
+          const repaired = Boolean(fresh.fixable);
           results[at] = after.status === "ok"
-            ? { ...resultOf(check, fresh), status: "fixed", fixable: false, fixed: did }
-            : { ...resultOf(check, after), fixed: did };
+            ? { ...resultOf(check, fresh), status: "fixed", fixable: false, fixed: did, repaired }
+            : { ...resultOf(check, after), fixed: did, repaired };
         });
       } finally {
         try { release?.(); } catch {}
@@ -128,7 +131,7 @@ export function runDoctor(options: RunDoctorOptions): DoctorReport {
     counts: {
       checked: results.length,
       problems,
-      fixed: results.filter((result) => result.fixed !== undefined).length,
+      fixed: results.filter((result) => result.repaired).length,
       blocking: results.filter((result) => result.blocking).length,
     },
   };

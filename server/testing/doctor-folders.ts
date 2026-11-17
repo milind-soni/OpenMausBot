@@ -24,7 +24,7 @@ export function dataFolder(): string {
 }
 
 export function context(dataDir: string, more: Partial<DoctorContext> = {}): DoctorContext {
-  return { dataDir, version: "9.9.9", mode: "command", now: () => NOW, pidAlive: () => false, ...more };
+  return { dataDir, version: "9.9.9", mode: "command", now: () => NOW, startedAt: NOW, pidAlive: () => false, ...more };
 }
 
 /** The pid of a process that has ended. */

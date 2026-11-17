@@ -1,8 +1,8 @@
 // bots.json and groups.json (registry-store.ts). The Store takes one it cannot read for an empty list, and the next save
-// writes over it. Fixed only from a whole copy the server itself wrote: the temp file of a save that was interrupted
-// after it was written and before it was renamed, which is newer than anything else. Otherwise a copy of the damaged
+// writes over it. Fixed only from a whole copy the server itself wrote after the damaged file: the temp file of a save
+// that was interrupted after it was written and before it was renamed. Otherwise a copy of the damaged
 // file goes into the backup before the server starts, so a later save cannot take the last of it.
-import { chmodSync, renameSync } from "node:fs";
+import { chmodSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { leftoverTemps, registryState, type LeftoverTemp } from "../files.ts";
@@ -22,14 +22,17 @@ export function registryCheck(): DoctorCheck {
       for (const file of REGISTRY_FILES) {
         const path = join(ctx.dataDir, file);
         if (registryState(path) !== "unreadable") continue;
-        const copies = leftoverTemps(ctx).filter((temp) => temp.of === file && registryState(temp.path) === "ok").sort((a, b) => b.mtimeMs - a.mtimeMs);
+        // Only a save begun after the damaged file was written: an older one would bring back a list from before it.
+        let damagedAt = Infinity;
+        try { damagedAt = statSync(path).mtimeMs; } catch {}
+        const copies = leftoverTemps(ctx).filter((temp) => temp.of === file && temp.mtimeMs >= damagedAt && registryState(temp.path) === "ok").sort((a, b) => b.mtimeMs - a.mtimeMs);
         damaged.push({ file, path, copy: copies[0] ?? null });
       }
       if (!damaged.length) return { status: "ok", summary: "Both read as lists (or are not there yet)." };
       const lost = damaged.filter((damage) => !damage.copy);
       return {
         status: "problem",
-        fixable: lost.length === 0,
+        fixable: lost.length < damaged.length,
         keepCopy: lost.length > 0,
         summary: damaged.map((damage) => `${damage.file} cannot be read${damage.copy ? ", and a whole copy from an interrupted save is there" : ""}.`).join(" "),
         ...(lost.length ? { instruction: `Stop the server and put back ${lost.map((damage) => damage.file).join(" and ")} from the copy taken before the last update (./update.sh --rollback) or from a workspace backup. Until then the server shows no ${lost.some((damage) => damage.file === "bots.json") ? "bots" : "rooms"}.` } : {}),

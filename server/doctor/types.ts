@@ -10,6 +10,8 @@ export interface DoctorContext {
   /** "start": the server's own run as it starts, holding the lease; "command": `openmausbot doctor --data`. */
   mode: "start" | "command";
   now(): number;
+  /** When this process started (ms): a temp file with its pid from before then is a predecessor's. */
+  startedAt: number;
   /** Whether a process with this pid runs on this machine (EPERM counts as running). */
   pidAlive(pid: number): boolean;
 }
@@ -51,6 +53,8 @@ export type CheckResult = {
   instruction?: string;
   /** What the fix did, when it ran. */
   fixed?: string;
+  /** The fix repaired something (a copy kept of what it could not repair is not a repair). */
+  repaired?: boolean;
 };
 
 export type DoctorReport = {
