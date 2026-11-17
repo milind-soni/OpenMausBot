@@ -206,7 +206,6 @@ const ACCEPTED_AUDIO_MIMES = new Set([
   ...Object.values(AUDIO_MIMES_BY_EXTENSION),
   "audio/x-m4a", "audio/x-wav", "audio/wave", "audio/x-flac",
 ]);
-/** Videos the chat plays inline; one past the upload limit keeps its disk path where the app has one. */
 const VIDEO_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
   mp4: "video/mp4",
   m4v: "video/mp4",
