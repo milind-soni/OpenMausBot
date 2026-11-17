@@ -2,16 +2,10 @@
   "id": "muapi-media",
   "name": "MuAPI Media",
   "version": "0.1.0",
-  "description": "Generate and edit images and short videos with the MuAPI MCP server, with the plan and cost approved first.",
+  "description": "Generate and edit images and short videos with the MuAPI MCP server.",
   "defaultEnabled": true,
   "triggerTerms": [
-    "muapi",
-    "generate an image",
-    "generate a video",
-    "make an image",
-    "make a video",
-    "text to video",
-    "image to video"
+    "muapi"
   ],
   "requiredCapabilities": []
 }

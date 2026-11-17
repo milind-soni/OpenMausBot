@@ -182,11 +182,11 @@ describe("bundled muapi-media skill", () => {
   const skills = loadBundledSkills(join(process.cwd(), "skills"));
   const ids = (text: string) => selectBundledSkills(text, [], skills).map((skill) => skill.manifest.id);
 
-  it("mounts for MuAPI and image or video generation requests, and stays out of other turns", () => {
-    for (const text of ["use muapi to render this", "generate a video of a wave", "Make an image of a cat", "text to video please"]) {
+  it("mounts only when the person names MuAPI, and stays out of other image and video requests", () => {
+    for (const text of ["use muapi to render this", "Make a video with MuAPI", "connect muapi"]) {
       expect(ids(text), text).toContain("muapi-media");
     }
-    for (const text of ["summarise this thread", "fix the failing test", "chart revenue by month"]) {
+    for (const text of ["summarise this thread", "fix the failing test", "chart revenue by month", "generate a video of a wave", "Make an image of a cat", "text to video please"]) {
       expect(ids(text), text).not.toContain("muapi-media");
     }
   });
