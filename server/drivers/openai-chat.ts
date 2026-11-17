@@ -20,7 +20,7 @@ import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
-import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
+import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
@@ -790,7 +790,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             seenCalls.add(call.id);
           }
           if (seenCalls.size > MAX_TURN_TOOL_CALLS) throw new ChatProtocolError(stoppedAfter(`${MAX_TURN_TOOL_CALLS} tool calls`));
-          messages.push(assistantReply(model, completion, completion.text || null, completion.toolCalls));
+          messages.push(assistantReply(model, completion, completion.text || null, replayableToolCalls(completion.toolCalls)));
           // A failure stays pending only until the bot runs tools again: one that went on to use more tools has read the error
           // and reacted (a wrong guess, a bad query, then the right call), so its turn is not failed for it, on any model. The
           // failed step still shows as failed; a failure in the last calls before the answer, or a person's no, still ends it.
@@ -802,10 +802,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             let started = false;
             let fatal: Error | undefined, title = call.function.name, skipRepeatCount = false;
             try {
-              let args: unknown;
-              try { args = JSON.parse(call.function.arguments.trim() || "{}"); } // An empty argument string is a tool with no arguments.
-              catch { throw new ChatProtocolError("tool arguments are not complete JSON"); }
-              if (!object(args)) throw new ChatProtocolError("tool arguments must be a JSON object");
+              const args = toolArguments(call.function.arguments);
               const inputPreview = preview(args);
               if (call.function.name === ASK_USER_TOOL) {
                 if (!questionAllowed || !allowsTool(scope, { kind: "native", name: ASK_USER_TOOL })) throw new Error("Tool selection excludes this tool");
@@ -832,7 +829,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 const refused = repeats?.refuses(call.function.name, call.function.arguments);
                 if (refused) { skipRepeatCount = true; throw new Error(refused); }
                 tools.validate(call.function.name, args);
-                const shown = tools.view(call.function.name, args as Record<string, unknown>); title = shown.title;
+                const shown = tools.view(call.function.name, args); title = shown.title;
                 const shownPreview = shown.input === args ? inputPreview : preview(shown.input);
                 // This runtime has no provider reviewer, so Full access is honoured here.
                 const full = (turn.approvalModeNow?.() ?? turn.approvalMode) === "full";
@@ -845,7 +842,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 });
                 started = true;
                 if (allowed) {
-                  result = await tools.execute(call.function.name, args as Record<string, unknown>, abort.signal);
+                  result = await tools.execute(call.function.name, args, abort.signal);
                   if (result.images?.length && !seesImages(turn)) {
                     const { images: _dropped, ...rest } = result;
                     result = { ...rest, text: `${rest.text}\n${TEXT_ONLY_SCREENSHOT_NOTE}` };

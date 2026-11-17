@@ -24,6 +24,25 @@ export function object(value: unknown): Record<string, unknown> | undefined {
     ? value as Record<string, unknown> : undefined;
 }
 
+/** A call's arguments as its tool gets them. An empty argument string is a tool with no arguments. */
+export function toolArguments(text: string): Record<string, unknown> {
+  let args: unknown;
+  try { args = JSON.parse(text.trim() || "{}"); }
+  catch { throw new ChatProtocolError("tool arguments are not complete JSON"); }
+  const found = object(args);
+  if (!found) throw new ChatProtocolError("tool arguments must be a JSON object");
+  return found;
+}
+
+/** The calls as the next request replays them. Arguments `toolArguments` refuses never ran (the call's result says
+ * so) and go back as `{}`: a strict server refuses the whole request over them ("function.arguments must be valid JSON"). */
+export function replayableToolCalls(calls: ChatToolCall[]): ChatToolCall[] {
+  return calls.map((call) => {
+    try { toolArguments(call.function.arguments); return call; }
+    catch { return { ...call, function: { ...call.function, arguments: "{}" } }; }
+  });
+}
+
 /** Opaque provider reasoning blocks must keep their original order/signatures.
  * OpenRouter streams the sequence as arrays of blocks, not tool-call deltas. */
 export class ChatReasoningDetails {
