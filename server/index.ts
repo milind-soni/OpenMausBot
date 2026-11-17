@@ -1778,6 +1778,12 @@ function rememberLateToolResults(threadId: string, generation: string, turnId: s
     .flatMap((m) => m.kind === "activity" && m.turnId === turnId && m.tool?.itemId && m.tool.fullResult === undefined ? [m.tool.itemId] : [])) });
 }
 
+/** Security invariant: never active, so only the hook route takes it, and only for its ended turn's late tool output. */
+function endedTurnHooks(header: string | string[] | undefined): InternalCapability | null {
+  const holder = lateToolResults.holder(header);
+  return holder && { ...holder, generation: "ended-turn", depth: 0, kind: "hooks", skillAuthoring: false, createdBots: 0, openedThreads: 0, orphanExpiresAt: 0 };
+}
+
 /** Constant-time comparisons, so the check does not leak a matching prefix length. */
 function authorizedInternalCapability(header: string | string[] | undefined): InternalCapability | null {
   const got = Buffer.from(Array.isArray(header) ? "" : (header ?? ""));
@@ -12841,10 +12847,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 201, { token });
     }
     if (path.startsWith("/api/internal/")) {
-      const internalCapability = authorizedInternalCapability(req.headers.authorization);
+      const internalCapability = authorizedInternalCapability(req.headers.authorization) ?? endedTurnHooks(req.headers.authorization);
       if (!internalCapability) {
-        const ended = method === "POST" && path === "/api/internal/hook" ? lateToolResults.holder(req.headers.authorization) : null;
-        return ended ? json(res, 200, ingestEngineHook(ended, await readBody(req), req.headers.authorization, true)) : json(res, 401, { error: "unauthorized" });
+        return json(res, 401, { error: "unauthorized" });
       }
       const internalSender = store.bot(internalCapability.botId);
       if (!internalSender) {
