@@ -1,4 +1,4 @@
-import { AppWindow, FolderOpen, Globe, Puzzle, Rocket, UsersRound, Zap } from "lucide-react";
+import { AppWindow, FolderOpen, FolderTree, Globe, Puzzle, Rocket, UsersRound, Zap } from "lucide-react";
 import { useMemo, type ReactNode } from "react";
 
 import { useAppTriggers } from "@/lib/app-triggers";
@@ -181,6 +181,16 @@ export function SidebarFooterNav({
         icon={(active) => <Rocket size={iconSize} className={tone(active)} />}
         onClick={() => dispatch({ type: "showPublishedApps" })}
       />
+      {state.config?.team && (
+        <NavRow
+          id="team-files"
+          label={t("sidebar.nav.teamFiles")}
+          iconsOnly={iconsOnly || toolbar}
+          active={state.activeView === "team-files"}
+          icon={(active) => <FolderTree size={iconSize} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showTeamFiles" })}
+        />
+      )}
       {advanced && webPanels.map((panel) => (
         <NavRow
           key={panel.id}

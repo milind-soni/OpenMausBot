@@ -7025,6 +7025,7 @@
   "sidebar.update.restartAction": "Uruchom ponownie",
   "sidebar.update.retryAction": "Ponów",
   "sidebar.nav.publishedApps": "Opublikowane aplikacje",
+  "sidebar.nav.teamFiles": "Pliki zespołu",
   "defaultBot.show.subtitle": "Twój pomocnik do wszystkiego w aplikacji. Ukryty dalej pracuje, a wyszukiwanie wciąż go znajduje.",
   "settings.followUp.subtitle": "Włączenie dodaje wiadomość do tego, co bot teraz robi; kolejka uruchamia ją po końcu tury. {key} robi to drugie dla pojedynczej wiadomości, a strzałka obok Wyślij może też zacząć turę od nowa. Tylko na tym urządzeniu.",
   "settings.openAtLogin.subtitle": "Otwiera {app} po zalogowaniu się do tego komputera, aby boty i rutyny były gotowe bez ręcznego otwierania.",

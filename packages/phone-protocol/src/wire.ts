@@ -332,7 +332,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Whether this bot may use the X research tools (x_search and its
    * actions), which spend the workspace's treg balance.
    * Absent/false = off: the person turns it on per bot. */
-  xResearch?: boolean;
+  xResearch?: boolean; /** Team Cloud: an admin let it change the team's shared files from any chat. Absent: it reads them only. */ teamFilesEdit?: boolean;
   /** Whether this bot uses native memory. Absent/true = enabled. */
   memoryEnabled?: boolean;
   /** Built-in tool groups turned off for this bot (shared/tool-groups.ts). Absent or empty: all on. */

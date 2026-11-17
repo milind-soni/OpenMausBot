@@ -232,6 +232,7 @@ describe("CI outputs", () => {
       "server/cloud-team-connections.e2e.test.ts",
       "server/cloud-team-conversation-share.e2e.test.ts",
       "server/cloud-team-engine-homes.e2e.test.ts",
+      "server/cloud-team-files.e2e.test.ts",
       "server/cloud-team-gateway-mcp.e2e.test.ts",
       "server/cloud-team-inbox.e2e.test.ts",
       "server/cloud-team-included-hosting.e2e.test.ts",

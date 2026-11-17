@@ -9900,6 +9900,7 @@
   "accounts.browserOpen": "重新打开浏览器",
   "accounts.signInAgain": "重新登录",
   "sidebar.nav.publishedApps": "已发布的应用",
+  "sidebar.nav.teamFiles": "团队文件",
   "settings.simple.themes.browse": "浏览主题",
   "phone.pair.rowTitle": "你的手机",
   "phone.pair.rowLine": "从 App Store 或 Google Play 在手机上安装 {app}，然后在这里配对。",

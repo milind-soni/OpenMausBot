@@ -3911,6 +3911,7 @@
   "sidebar.update.restartAction": "Neu starten",
   "sidebar.update.retryAction": "Erneut versuchen",
   "sidebar.nav.publishedApps": "Veröffentlichte Apps",
+  "sidebar.nav.teamFiles": "Teamdateien",
   "settings.advancedMode.subtitle": "Zeigt auf diesem Gerät jede technische Einstellung: Nutzung und Tokens, den Inspektor und andere Werkzeuge für Bastler. Schalte ihn für eine einfachere App aus. Gelöscht wird so oder so nichts.",
   "settings.analytics.link": "Alles ansehen, was gesendet wird",
   "settings.analytics.subtitle": "Anonyme Produktereignisse und einmal am Tag eine Zählung dessen, was eingerichtet ist: welche Anbieter einen Schlüssel haben (nie der Schlüssel) und wie viele Bots, Räume, Routinen und Computer. Nie Gespräche, Prompts, Dateiinhalte, Namen oder Adressen. Deine E-Mail wird nur angehängt, wenn du sie bei der Einrichtung geteilt hast oder im Cloud-Pro-Fenster, bei MausBot Cloud angemeldet, Upgrade, Verwalten oder Pläne vergleichen wählst (die E-Mail deines Cloud-Kontos).",
