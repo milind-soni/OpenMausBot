@@ -2789,6 +2789,7 @@
   "homeLine.local": "{name} startet frisch: ein eigener Bereich auf diesem Computer, mit eigenen Bots, Chats und Dateien.",
   "native.places.profileFailed": "Der eigene Bereich dieses Computers wurde nicht geöffnet. Versuch es gleich noch einmal.",
   "chat.notice.devinAccountRefused": "Devin hat diese Anfrage für das angemeldete Konto abgelehnt. Prüfe den Devin-Tarif und das Guthaben und versuche es dann erneut.",
+  "chat.notice.acpNodeTooOld": "{provider} braucht Node.js {needed} oder neuer, aber auf diesem Computer ist Node.js {found}. Aktualisiere Node.js von nodejs.org und sende deine Nachricht dann erneut.",
   "rail.settingUp": "{name}: wird eingerichtet",
   "rail.waiting": "{name}: wartet auf Zahlung",
   "rail.attention": "{name}: braucht dich",
