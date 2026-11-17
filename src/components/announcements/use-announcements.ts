@@ -89,7 +89,7 @@ export function useAnnouncements(now: () => number = Date.now): Announcements {
   const record = state.config?.onboarding;
   const person: PersonRecord = { record, desktopSeen: desktopState?.seen ?? [] };
   const ready = viewer !== null && organization !== null && (!desktop || desktopState !== null) && state.config !== null;
-  const writer: RecordWriter = { team, desktop, saved: config => dispatch({ type: "configStatus", config: config as never }) };
+  const writer: RecordWriter = { team, desktop, saved: config => dispatch({ type: "configStatus", config }) };
   return {
     items, unread: ready && announcementsUnread(items, person), person, writer, viewer, account, cloudBridge: Boolean(bridge),
     markRead: () => markAnnouncementsRead(now(), record, writer),

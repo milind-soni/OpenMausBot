@@ -8,6 +8,7 @@ import type { OnboardingStatus } from "@/lib/onboarding";
 import { BOAT_OFFER_NOTICE, CLOUD_INTRO, dismissNotice, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL,
   TEAMS_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
 import type { LocaleKey } from "@/locales";
+import type { ConfigStatus } from "@/state/config-status";
 import { api } from "@/state/store";
 import { ANNOUNCEMENTS_READ_HINT, announcementsReadAt as readMarkOf } from "../../shared/cloud-hints";
 import { MODELGO_URL } from "../../shared/modelgo";
@@ -139,14 +140,14 @@ export interface RecordWriter {
   team: boolean;
   desktop?: { seen(id: string): Promise<void> };
   /** The place's new record, once saved. */
-  saved: (config: unknown) => void;
+  saved: (config: ConfigStatus) => void;
 }
 
 function savePersonal(hint: string, hintsSeen: string[] | null, writer: RecordWriter): void {
   void writer.desktop?.seen(hint).catch(() => {});
   const saving = writer.team
-    ? api("/api/me/welcome", { method: "PUT", body: JSON.stringify({ hints: [hint] }) }).then(() => api("/api/config"))
-    : hintsSeen ? api("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen } }) }) : null;
+    ? api("/api/me/welcome", { method: "PUT", body: JSON.stringify({ hints: [hint] }) }).then(() => api<ConfigStatus>("/api/config"))
+    : hintsSeen ? api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ onboarding: { hintsSeen } }) }) : null;
   void saving?.then(writer.saved).catch(() => {});
 }
 

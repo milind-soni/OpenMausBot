@@ -329,7 +329,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
 
   if (notice === TEAMS_NOTICE) {
     const action = teamsAction({ team: state.config?.team, viewer, account, canAddCloud: Boolean(bridge) });
-    const done = () => { close(); rememberNoticeSeen(TEAMS_NOTICE, record, { team, desktop, saved: config => dispatch({ type: "configStatus", config: config as never }) }); };
+    const done = () => { close(); rememberNoticeSeen(TEAMS_NOTICE, record, { team, desktop, saved: config => dispatch({ type: "configStatus", config }) }); };
     return <TeamsPopup action={action} onStep={step => reportTeams(step, action)} onDone={done} onStart={() => dispatch({ type: "openCloudAdd", source: WHATS_NEW_SOURCES.team })} />;
   }
 
