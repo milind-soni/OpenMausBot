@@ -187,6 +187,19 @@ describe("the model menu's usage rings", () => {
     expect(document.querySelector("[data-model-picker-content]")).not.toBeNull();
   });
 
+  it("go back to the bot's own AI when the pressed AI stops reporting usage", async () => {
+    remember([usage(38), other("codex", "Codex", 91)]);
+    const menu = await openMenu();
+    flushSync(() => rings(menu)[1]!.click());
+    expect(shownRows(menu)).toEqual(["weekly"]);
+    remember([usage(38)]);
+    expect(menu.querySelector("[data-usage-rings]")).toBeNull();
+    expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
+    remember([usage(38), other("gemini", "Gemini", 50)]);
+    expect(rings(menu).map((ring) => ring.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+    expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
+  });
+
   it("draw less of the ring as the usage runs down, and none at the limit", async () => {
     remember([usage(25), other("codex", "Codex", 75), other("gemini", "Gemini", 100, true)]);
     const menu = await openMenu();

@@ -178,7 +178,7 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
 function UsageOverview({ engine }: { engine: string | undefined }) {
   const limits = useEngineLimits().filter(reportsUsage);
   const [picked, setPicked] = useState<string>();
-  const shown = limits.find((limit) => limit.engine === (picked ?? engine));
+  const shown = limits.find((limit) => limit.engine === picked) ?? limits.find((limit) => limit.engine === engine);
   const now = Date.now();
   return (
     <div className="flex flex-col gap-2.5">
