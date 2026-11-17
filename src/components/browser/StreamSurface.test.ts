@@ -15,6 +15,9 @@ let frame = { width: 3200, height: 2000 };
 let host: HTMLDivElement;
 let root: Root;
 let observers: Array<() => void> = [];
+const nativeLayout = vi.fn();
+let nativeTake: (event: { token: string }) => void;
+let nativeActivity: (event: { token: string }) => void;
 
 class FakeResizeObserver {
   constructor(readonly callback: () => void) { observers.push(callback); }
@@ -25,6 +28,12 @@ class FakeResizeObserver {
 beforeEach(() => {
   frame = { width: 3200, height: 2000 };
   observers = [];
+  nativeLayout.mockReset().mockResolvedValue(undefined);
+  vi.stubGlobal("ogb", { nativeBrowser: {
+    layout: nativeLayout,
+    onTake: (callback: typeof nativeTake) => { nativeTake = callback; return () => {}; },
+    onActivity: (callback: typeof nativeActivity) => { nativeActivity = callback; return () => {}; },
+  } });
   vi.stubGlobal("ResizeObserver", FakeResizeObserver);
   vi.stubGlobal("createImageBitmap", async () => ({ ...frame, close() {} }));
   vi.stubGlobal("devicePixelRatio", 2);
@@ -63,6 +72,7 @@ async function mount(props: Partial<Parameters<typeof StreamSurface>[0]> = {}) {
       events.onConnectedChange(true);
       events.onControl?.(next as PreviewStreamControl);
       events.onFrame(new ArrayBuffer(8));
+      if (props.native) events.onMessage?.({ type: "nativeView", token: "native-page" });
     });
     await flush();
   };
@@ -75,6 +85,42 @@ const pointer = (canvas: HTMLCanvasElement, type: string, x: number, y: number) 
 const button = (label: string) => [...host.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? candidate.textContent) === label)!;
 
 describe("the picture and the page", () => {
+  it("sends a single activity message through the existing input path without reinjecting native page input", async () => {
+    const h = await mount({ native: true, label: "Native page" });
+    await h.show(control("you"));
+    const page = host.querySelector<HTMLElement>('[aria-label="Native page"]')!;
+    await act(async () => {
+      page.dispatchEvent(new PointerEvent("pointerdown", { clientX: 20, clientY: 30, bubbles: true }));
+      page.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+      nativeActivity({ token: "native-page" });
+    });
+    expect(h.input.mock.calls).toEqual([[{ type: "nativeActivity" }]]);
+    expect(h.connect).toHaveBeenCalledTimes(1);
+    const retiredActivity = nativeActivity;
+    await act(async () => h.events().onMessage?.({ type: "nativeView", token: null }));
+    await act(async () => retiredActivity({ token: "native-page" }));
+    expect(h.input).toHaveBeenCalledTimes(1);
+  });
+  it("uses one native connection and an empty viewport without canvas, textarea or synthetic input", async () => {
+    const onTake = vi.fn();
+    const onMessage = vi.fn();
+    const h = await mount({ native: true, onTake, onMessage, label: "Native page" });
+    await h.show(control("agent"));
+    expect(h.connect).toHaveBeenCalledTimes(1);
+    expect(host.querySelector("canvas, textarea, iframe")).toBeNull();
+    const page = host.querySelector<HTMLElement>('[aria-label="Native page"]')!;
+    expect(page.tagName).toBe("DIV");
+    expect(page.childNodes).toHaveLength(0);
+    expect(nativeLayout).toHaveBeenLastCalledWith({ token: "native-page", bounds: { x: 0, y: 0, width: 1600, height: 1000 }, visible: true, canInput: false });
+    await act(async () => {
+      page.dispatchEvent(new PointerEvent("pointerdown", { clientX: 20, clientY: 30, bubbles: true }));
+      page.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+      nativeTake({ token: "native-page" });
+    });
+    expect(h.input).not.toHaveBeenCalled();
+    expect(onTake).toHaveBeenCalledTimes(1);
+    expect(onMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "nativeView" }));
+  });
   it.each([
     ["en", "The browser stopped responding, so it is being restarted. The live view reconnects by itself."],
     ["pt-br", "O navegador parou de responder e está sendo reiniciado. A visualização ao vivo se reconecta sozinha."],
@@ -172,10 +218,10 @@ describe("the picture and the page", () => {
 });
 
 describe("what the page asks of the person", () => {
-  it("offers the page's file picker to the person in control and sends their files to it", async () => {
+  it.each([false, true])("offers the page's file picker to the person in control and sends their files to it (native: %s)", async (native) => {
     const fetches: Array<{ url: string; body: FormData }> = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => { fetches.push({ url, body: init.body as FormData }); return new Response(null, { status: 204 }); }));
-    const { show, events } = await mount();
+    const { show, events } = await mount({ native });
     await show(control("you"));
     await act(async () => events().onFileChooser?.({ multiple: true, accept: ".txt", uploadUrl: "/api/bots/pepper/browser/upload?chooser=c1", credentials: true }));
     const picker = host.querySelector<HTMLInputElement>('input[type="file"]')!;
@@ -197,10 +243,10 @@ describe("what the page asks of the person", () => {
     expect(fetches[1]!.body.getAll("file")).toEqual([]);
   });
 
-  it("offers what the page downloaded, saved from the bot's computer on Save", async () => {
+  it.each([false, true])("offers what the page downloaded, saved from the bot's computer on Save (native: %s)", async (native) => {
     const clicked: Array<{ href: string; download: string }> = [];
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { clicked.push({ href: this.getAttribute("href")!, download: this.download }); });
-    const { show, events } = await mount();
+    const { show, events } = await mount({ native });
     await show(control("you"));
     await act(async () => events().onDownload?.({ fileName: "report.csv", sizeBytes: 8, url: "/api/bots/pepper/browser/download/d1" }));
     expect(host.textContent).toContain("Downloaded report.csv");
@@ -226,8 +272,8 @@ describe("what the page asks of the person", () => {
     expect(writeText).toHaveBeenLastCalledWith("second");
   });
 
-  it("draws a dropdown list where the page has it and sends the option chosen, or nothing on Escape", async () => {
-    const { client, show, events } = await mount();
+  it.each([false, true])("draws a dropdown list where the page has it and sends the option chosen, or nothing on Escape (native: %s)", async (native) => {
+    const { client, show, events } = await mount({ native });
     await show(control("you"));
     const popup = { type: "selectPopup", id: "list-1", options: [{ label: "Apple", disabled: false }, { label: "Banana", disabled: true }, { label: "Cherry", disabled: false }], selectedIndex: 0, rect: { x: 20, y: 100, width: 200, height: 30 } };
     await act(async () => events().onMessage?.(popup));
@@ -246,8 +292,8 @@ describe("what the page asks of the person", () => {
     expect(client.send).not.toHaveBeenCalledWith(expect.objectContaining({ id: "list-2" }));
   });
 
-  it("answers a page's dialog only from the person in control, and shows none of it while another viewer holds the browser", async () => {
-    const { client, show } = await mount();
+  it.each([false, true])("answers a page's dialog only from the person in control, and shows none of it while another viewer holds the browser (native: %s)", async (native) => {
+    const { client, show } = await mount({ native });
     const dialog = { type: "confirm", message: "Leave this page?", defaultValue: "" };
     await show(control("agent", { dialog }));
     expect(host.textContent).toContain("Leave this page?");
@@ -259,8 +305,8 @@ describe("what the page asks of the person", () => {
     expect(host.textContent).not.toContain("Leave this page?");
   });
 
-  it("answers a site's sign-in prompt by the tab and challenge it showed", async () => {
-    const { client, show, events } = await mount();
+  it.each([false, true])("answers a site's sign-in prompt by the tab and challenge it showed (native: %s)", async (native) => {
+    const { client, show, events } = await mount({ native });
     await show(control("agent"));
     await act(async () => events().onMessage?.({ type: "authPrompt", tabId: "t2", id: "c7", origin: "http://intranet.example", realm: "Staff" }));
     await show(control("agent"));

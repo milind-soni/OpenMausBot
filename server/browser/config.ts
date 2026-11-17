@@ -16,7 +16,7 @@ export function isValidCdpTarget(value: unknown): value is string {
   return CDP_URL.test(value);
 }
 
-export type BrowserEngineKind = "agent-browser" | "chrome";
+export type BrowserEngineKind = "agent-browser" | "chrome" | "native";
 
 /** `attachCdpUrl`: a running Chrome that My Chrome profiles attach to. Config only, never env: the ambient environment must not redirect a bot's browser. */
 export const browserEngineConfigSchema = z.object({
@@ -26,15 +26,18 @@ export const browserEngineConfigSchema = z.object({
   egress: browserEgressConfigSchema.optional(),
   /** "chrome" runs the bots' browsers on OpenMausBot's own Chrome driver, an early test; agent-browser is the default. */
   engine: z.enum(["agent-browser", "chrome"]).optional(),
+  nativeDesktop: z.boolean().optional(),
 });
 
 export interface BrowserEngineConfig {
   attachCdpUrl?: string;
   idleTimeoutMinutes?: number;
   egress?: BrowserEgressConfig;
-  engine?: BrowserEngineKind;
+  engine?: "agent-browser" | "chrome";
+  nativeDesktop?: boolean;
 }
 
 export function browserEngineKind(cfg: { browserEngine?: BrowserEngineConfig }): BrowserEngineKind {
-  return cfg.browserEngine?.engine === "chrome" ? "chrome" : "agent-browser";
+  const kind=cfg.browserEngine?.engine;
+  return kind === "chrome" ? cfg.browserEngine?.nativeDesktop === true ? "native" : "chrome" : "agent-browser";
 }

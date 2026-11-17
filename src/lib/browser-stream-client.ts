@@ -103,6 +103,8 @@ const isPreviewStreamDialog = (value: unknown): value is PreviewStreamControl["d
 export type PreviewStreamInput =
   | { readonly type: "takeControl" }
   | { readonly type: "releaseControl" }
+  /** Physical input already ran in the native page; refreshes this viewer's existing hold only. */
+  | { readonly type: "nativeActivity" }
   | { readonly type: "dialog"; readonly accept: boolean; readonly promptText?: string }
   | { readonly type: "viewport"; readonly setting: PreviewViewportSetting }
   | { readonly type: "zoom"; readonly factor: number }

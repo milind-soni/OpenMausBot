@@ -53,8 +53,11 @@ import type { FillLoginDeps } from "../login-fill.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "../proxy-paths.ts";
 import type { Store } from "../store.ts";
 import type { TurnOwner, TurnResources } from "../turn-resources.ts";
+import { DesktopBackend } from "../browser/desktop-backend.ts";
+import { desktopBrowser, type DesktopBrowserClient } from "../browser/desktop-bridge.ts";
 
 export interface BrowserHostDeps {
+  nativeBrowser?: DesktopBrowserClient;
   cfg: AppConfig;
   /** Current application language for every built-in browser launch. */
   language?(): string | undefined;
@@ -148,6 +151,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   } });
   const host: HostKind = DESKTOP_MANAGED ? "desktop" : CLOUD_HOME || existsSync("/.dockerenv") ? "container" : "server";
   const idleMs = () => browserIdleMs(cfg, { cloudHome: Boolean(CLOUD_HOME) });
+  const desktopBackend=DESKTOP_MANAGED&&!CLOUD_HOME&&!deps.HOSTED_WORKSPACE?new DesktopBackend({client:deps.nativeBrowser??desktopBrowser,dataDir:DATA_DIR,egressPort:key=>browserEgress.open(key)}):undefined;
   const chromeEngine = new ChromeEngine({
     dataDir: DATA_DIR,
     host,
@@ -155,6 +159,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
     language: deps.language,
+    desktop:desktopBackend,
+    nativeSelected:()=>browserEngineKind(cfg)==="native",
     held: (session) => !turnResources.free(`browser:${session}`),
     log: (line) => console.warn(line),
   });
@@ -271,7 +277,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       gateTimer = setInterval(() => void releaseGates().catch(() => undefined), 60_000);
       gateTimer.unref?.();
       agentBrowserSweep.start();
-      chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
+      chromeEngine.start({ inUse: browserEngineKind(cfg) !== "agent-browser", prepare: builtInBrowserEnabled(cfg) });
       return browserSweep;
     },
     closeAll: () => {
@@ -370,7 +376,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
   /** The new engine runs a bot's browser when the flag is on, except in the person's own Chrome. */
   function onChrome(profile: string | undefined): boolean {
-    return browserEngineKind(cfg) === "chrome" && !usesMyChrome(browserProfileIdOf(profile));
+    return browserEngineKind(cfg) !== "agent-browser" && !usesMyChrome(browserProfileIdOf(profile));
   }
   function chromeSpec(botId: string, profile: string | undefined, audience: Audience): { session: string; spec: ReturnType<ChromeEngine["spec"]> } {
     const suffix = noted(audience);
@@ -461,8 +467,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         if (!closed) console.warn(`browser ${session}: could not close it after the browser engine changed`);
       });
     }
-    if (browserEngineKind(cfg) !== "chrome") void chromeEngine.service.closeAll().catch(() => undefined);
-    chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
+    void chromeEngine.service.closeAll().catch(() => undefined);
+    chromeEngine.start({ inUse: browserEngineKind(cfg) !== "agent-browser", prepare: builtInBrowserEnabled(cfg) });
   }
   function browserRunning(session: string, spec: Spec | undefined): boolean {
     if (chromeTarget(session, spec)) return chromeEngine.service.runs(session);
@@ -592,11 +598,30 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const proxySaved = typeof proxyValue === "string" && proxyValue.trim().length > 0;
     const proxyConfigured = builtInBrowserEnabled(cfg) && !hostedServer && parseSocks5Proxy(proxyValue) !== null;
     return {
-      ...(engine === "chrome" ? { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), engine } : { ...agentBrowser, engine }),
+      ...(engine !== "agent-browser" ? { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), engine } : { ...agentBrowser, engine }),
       ...serverSites,
       ...(proxyConfigured ? { proxyConfigured: true } : {}),
       ...(proxySaved ? { proxySaved: true } : {}),
     };
+  }
+
+  async function openNativeArtifact(botId: string, threadId: string, path: string, roots: readonly string[], person: string, isCurrent: () => void): Promise<void> {
+    isCurrent();
+    const bot = store.bot(botId);
+    if (!bot) throw new Error("No such bot.");
+    const audience = browserAudience(threadId), selected = chromeSpec(botId, bot.browserProfile, audience);
+    const assertCurrent = () => {
+      isCurrent();
+      const now = store.bot(botId);
+      if (!now || now.browser === false || now.computer === "off" || usesMyChrome(browserProfileIdOf(now.browserProfile)) ||
+        !builtInBrowserEnabled(cfg) || browserEngineKind(cfg) !== "native" || !desktopBackend?.available() ||
+        currentBrowserSession(botId, now.browserProfile, audience) !== selected.session) {
+        throw Object.assign(new Error("Native browser access changed. Open the artifact again from its conversation."), { status: 409 });
+      }
+    };
+    assertCurrent();
+    usedBrowserSessions.set(selected.session, selected.spec);
+    await chromeEngine.service.openArtifact({ session: selected.session, key: selected.spec.args[0]! }, path, roots, person, assertCurrent);
   }
 
   return {
@@ -605,5 +630,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,
     eraseAudienceBrowsers,
+    openNativeArtifact,
   };
 }

@@ -17,7 +17,7 @@ vi.mock("@/lib/browser-pip", () => ({
   useBrowserPictureInPicture: () => "",
 }));
 vi.mock("./browser/StreamSurface", () => ({ StreamSurface: (props: { label: string }) => createElement("div", { "data-stub-surface": props.label }) }));
-vi.mock("./browser/BrowserProfilesManager", () => ({ BrowserProfilesManager: () => null }));
+vi.mock("./BrowserProfilesManager", () => ({ BrowserProfilesManager: () => null }));
 vi.mock("./browser/MoreMenu", () => ({ MoreMenu: () => null }));
 vi.mock("./browser/PasskeyNotice", () => ({ PasskeyNotice: () => null }));
 

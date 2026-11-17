@@ -2377,7 +2377,7 @@ function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): Dir
 const {
   browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions,
   currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, usesMyChrome, lentChromeSummary, browserSessionSpec, browserIntegration,
-  browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, closeBrowser, browserEngineSwitched, eraseDeletedBrowser, engineSummary, browserSessionsOf, signedInSitesTarget, uploadPaths, eraseAudienceBrowsers,
+  browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, closeBrowser, browserEngineSwitched, eraseDeletedBrowser, engineSummary, browserSessionsOf, signedInSitesTarget, uploadPaths, eraseAudienceBrowsers, openNativeArtifact,
 } = createBrowserHost({ cfg, language: appLanguage, store: () => store, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, HOSTED_WORKSPACE, PORT, engineMemory, audienceOf: teamHost.browserAudience, ...(CLOUD_TEAM ? { browserBox: (fd: number, ro: readonly string[]) => botBox.browserBox(fd, ro) } : {}), lendRefusal: (turn) => cloudLendingRefusal({ botId: store.botByThread(turn.threadId)?.id ?? "", threadId: turn.threadId, generation: turn.generation }), device: () => deviceLinks.route(CLOUD_HOME_LENDER) ?? sharedComputers.internetAway(CLOUD_HOME_LENDER) ?? { unshared: true as const }, lentChrome: CLOUD_PERSONAL ? { route: () => deviceLinks.chromeRoute(CLOUD_HOME_LENDER), lender: () => sharedComputers.chromeLender(CLOUD_HOME_LENDER) } : undefined });
 
 const dataSheets = new DataSheetRegistry({
@@ -2412,7 +2412,7 @@ const emailIntegration = (bot: BotRecord, turn: { threadId: string; generation: 
 
 let browserEngineInstall: Promise<void> | null = null;
 let browserEngineInstallError: string | null = null;
-export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; version?: string; chrome?: string; installing?: boolean; installError?: string; myChrome: boolean; proxyConfigured?: boolean; proxySaved?: boolean; myChromeOn?: { name: string; device: "PC" | "Mac" | "computer"; online: boolean }; myChromeLendable?: true; serverSites?: boolean; engine: "agent-browser" | "chrome" } {
+export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; version?: string; chrome?: string; installing?: boolean; installError?: string; myChrome: boolean; proxyConfigured?: boolean; proxySaved?: boolean; myChromeOn?: { name: string; device: "PC" | "Mac" | "computer"; online: boolean }; myChromeLendable?: true; serverSites?: boolean; engine: "agent-browser" | "chrome" | "native" } {
   const status = browserEngineStatus();
   const progress = { myChrome: myChromeAvailable(), ...lentChromeSummary(), ...(browserEngineInstall ? { installing: true } : {}), ...(browserEngineInstallError ? { installError: browserEngineInstallError } : {}) };
   return engineSummary(status.kind === "ready"
@@ -12069,6 +12069,7 @@ ROUTES.push(createThreadRoutes({
   hostedWorkspace: HOSTED_WORKSPACE, sessionCookie: SESSION_COOKIE, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE,
   workspaceAccess: () => workspaceAccess,
   desktopMutationToken: () => desktopMutationToken,
+  nativeArtifact: (auth,botId,threadId,path,roots,isCurrent)=>openNativeArtifact(botId,threadId,path,roots,auth.kind==="session"?actorKey(auth):"local-owner",isCurrent),
   companionMutationToken: () => companionMutationToken,
   cliOwnerToken: () => cliOwnerToken,
   pageSize, messagePage, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,

@@ -4,6 +4,8 @@ import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } fro
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { api, useStore, type ConfigStatus } from "@/state/store";
+import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { Select } from "./Select";
 import { MoreText, SettingRow, Switch } from "./SettingsPrimitives";
 
 /** Saves one config change through PATCH /api/config, one at a time, and shows the server's answer or its error. */
@@ -128,20 +130,34 @@ export function BrowserProxyRow() {
 /** browserEngine.engine: the bots' browsers run on OpenMausBot's own Chrome driver instead of agent-browser. */
 export function NewBrowserSettings() {
   const { state } = useStore();
-  const on = state.config?.browserEngine?.engine === "chrome";
+  const { capabilities } = useDesktopCapabilities();
+  const engine = state.config?.browserEngine?.engine ?? "agent-browser";
+  const on = engine === "chrome" || engine === "native";
+  const native = capabilities.nativeBrowser?.available === true;
   const { saving, error, save } = useConfigSave();
+  const choose = (choice: string) => save({ browserEngine: { engine: choice === "native" ? "chrome" : choice, nativeDesktop: choice === "native" } });
 
   return (
     <div data-testid="new-browser-settings" className="contents">
       <SettingRow title={t("settings.experimental.newBrowser")} tag={t("settings.early.tag")} subtitle={<MoreText short={t("settings.experimental.newBrowserShort")} long={t("settings.experimental.newBrowserDetail")} />}
         message={error ? <span role="alert" className="text-danger">{error}</span> : undefined}>
-        <Switch
+        {native ? <Select
+          value={engine}
+          aria-label={t("settings.experimental.newBrowserAria")}
+          disabled={saving}
+          onChange={(event) => void choose(event.target.value)}
+          size="sm"
+        >
+          <option value="agent-browser">{t("settings.experimental.browserDefault")}</option>
+          <option value="chrome">{t("settings.experimental.newBrowser")}</option>
+          <option value="native">{t("settings.experimental.browserNative")}</option>
+        </Select> : <Switch
           checked={on}
           aria-label={t("settings.experimental.newBrowserAria")}
           disabled={saving}
-          onClick={() => void save({ browserEngine: { engine: on ? "agent-browser" : "chrome" } })}
+          onClick={() => void choose(on ? "agent-browser" : "chrome")}
           className="disabled:cursor-wait disabled:opacity-50"
-        />
+        />}
       </SettingRow>
     </div>
   );

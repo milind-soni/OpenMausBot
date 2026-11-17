@@ -68,7 +68,7 @@ export interface ConfigRouteDeps {
   browserRuntime: Pick<BrowserRuntime, "heldBy">;
   usedBrowserSessions: Pick<Map<string, { command: string; env: Record<string, string> }>, "get" | "delete">;
   closeBrowser(session: string, spec: { command: string; env: Record<string, string> }): Promise<boolean>;
-  /** After browserEngine.engine changed: closes the viewers and the browsers the other engine ran. */
+  /** After the effective browser engine changed: closes the viewers and the browsers the other engine ran. */
   browserEngineSwitched(): void;
   decider: Pick<Decider, "testKey">;
   sharedComputers: Pick<SharedComputers, "close">;
@@ -205,7 +205,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         }
       }
       const disablingBuiltInBrowser = patch.features?.browser === false && builtInBrowserEnabled(cfg);
-      const switchingBrowserEngine = patch.browserEngine?.engine !== undefined && patch.browserEngine.engine !== browserEngineKind(cfg);
+      const nextBrowserEngine = { ...cfg.browserEngine, ...patch.browserEngine };
+      const switchingBrowserEngine = browserEngineKind({ browserEngine: nextBrowserEngine }) !== browserEngineKind(cfg);
       const removedBrowserProfileIds = patch.browserProfiles === undefined
         ? []
         : (cfg.browserProfiles ?? [])

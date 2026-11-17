@@ -43,7 +43,7 @@ export function pagePanelBot(url: string, facts: PageOpenFacts): string | null {
   return engine?.installing || engine?.installError ? null : bot.id;
 }
 
-export interface PanelPage { botId: string; url: string; nonce: number; at: number }
+export interface PanelPage { botId: string; url?: string; nonce: number; at: number }
 /** A request older than this is dropped, so a panel opened much later never opens a page by surprise. */
 const PANEL_PAGE_FRESH_MS = 10_000;
 let pending: PanelPage | null = null, nonce = 0;
@@ -52,6 +52,10 @@ const takers = new Set<() => void>();
 export function requestPanelPage(botId: string, url: string, now = Date.now()): void {
   pending = { botId, url, nonce: ++nonce, at: now };
   for (const take of takers) take();
+}
+
+export function requestBrowserPanel(botId:string,now=Date.now()):void{
+  pending={botId,nonce:++nonce,at:now};for(const take of takers)take();
 }
 
 /** Hands `open` each page asked for this bot's panel, once: the panel shows its browser and opens the page in a new tab. */

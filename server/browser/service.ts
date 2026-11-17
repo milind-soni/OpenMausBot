@@ -64,6 +64,7 @@ export interface BrowserServiceOptions {
   /** How long a person's hold lasts without a hand-back; the standard limits when unset. */
   holdLimits?: HoldLimits;
   log?: (line: string) => void;
+  eraseBackend?(key: string): Promise<void>;
 }
 
 interface Running {
@@ -99,7 +100,8 @@ export class ProfileState {
   constructor(target: BrowserTarget, dataDir: string, hub: (profile: ProfileState) => ViewerHub, takeoverMs: number) {
     this.key = target.key;
     this.session = target.session;
-    this.control = new ProfileControl<Tab>(() => this.tabs.list(), { takeoverMs });
+    this.control = new ProfileControl<Tab>(() => this.tabs.list(), { takeoverMs,withActor:(actor,work)=>this.run?.browser.connection.withActor(actor,work)??work() });
+    this.control.onChange(()=>{void this.run?.opened.native?.control(this.control.owner,this.control.ready).catch(()=>undefined);});
     this.downloadDir = join(browserRoot(dataDir), "downloads", profileHash(workspaceId(dataDir), target.key));
     this.hub = hub(this);
   }
@@ -247,6 +249,14 @@ export class BrowserService {
       for (const page of browser.pages()) await page.ready.then(() => adopt(page, "restored"), () => undefined);
       if (fresh) await this.#onlyBlankTab(profile, browser);
       this.#stillWanted(profile, epoch);
+      if (opened.native) {
+        for (;;) {
+          const { owner, ready } = profile.control;
+          await opened.native.control(owner, ready);
+          this.#stillWanted(profile, epoch);
+          if (profile.control.owner === owner && profile.control.ready === ready) break;
+        }
+      }
     } catch (error) {
       run.closing = true;
       for (const off of run.offs) off();
@@ -311,8 +321,8 @@ export class BrowserService {
         profile.tabs.clear();
         if (reopened) profile.reopened = reopened;
         try {
-          if (erase) this.#erase(profile);
-          else if (profile.temporary) this.#eraseFiles(profile.key);
+          if (erase) await this.#erase(profile);
+          else if (profile.temporary) {await this.#options.eraseBackend?.(profile.key);this.#eraseFiles(profile.key);}
           else rmSync(profile.downloadDir, { recursive: true, force: true });
         } finally {
           profile.control.closing = false;
@@ -328,8 +338,9 @@ export class BrowserService {
     return stopping;
   }
 
-  #erase(profile: ProfileState): void {
+  async #erase(profile: ProfileState): Promise<void> {
     if (this.#profiles.get(profile.key) !== profile) return;
+    await this.#options.eraseBackend?.(profile.key);
     this.#eraseFiles(profile.key);
     this.#profiles.delete(profile.key);
   }
@@ -402,6 +413,7 @@ export class BrowserService {
       await this.#stop(profile, null, { erase: true });
       this.#holds.drop(profile.session);
     } else {
+      await this.#options.eraseBackend?.(key);
       this.#eraseFiles(key);
     }
   }
@@ -643,6 +655,39 @@ export class BrowserService {
     return profile.hub.attach(options, push);
   }
 
+  async openArtifact(target: BrowserTarget, path: string, roots: readonly string[], person: string, isCurrent: () => void): Promise<void> {
+    isCurrent();
+    const profile = this.profile(target);
+    const run = await this.running(profile);
+    isCurrent();
+    if (!run.opened.native) throw new Error("Local artifacts require the native desktop browser.");
+    await profile.control.take(person);
+    try {
+      isCurrent();
+      const url = await run.opened.native.authorizeFile(path, roots);
+      isCurrent();
+      const existing = profile.tabs.list().find(tab => tab.page.url() === url);
+      const tab = existing ?? await this.#openTab(profile, "person");
+      isCurrent();
+      await profile.control.human(person, tab, async () => {
+        if (existing) await tab.page.bringToFront();
+        else await tab.page.openArtifact(url);
+      });
+      isCurrent();
+      profile.hub.tabsChanged();
+      const watched = () => [...profile.hub.viewers].some(viewer => viewer.options.person === person);
+      if (!watched()) {
+        const timer = setTimeout(() => {
+          if (profile.control.owner === person && !watched()) void profile.control.release(person, tab => tab.page.releaseInput().then(() => true, () => false));
+        }, 10_000);
+        timer.unref?.();
+      }
+    } catch (error) {
+      await profile.control.release(person, tab => tab.page.releaseInput().then(() => true, () => false));
+      throw error;
+    }
+  }
+
   heldBy(session: string): string | null {
     return this.#bySession(session)?.control.owner ?? null;
   }
@@ -709,9 +754,12 @@ export class BrowserService {
       running: async () => { await this.running(profile); },
       used: () => { profile.lastUsed = Date.now(); },
       pageLimit: () => (profile.run && !profile.run.closing ? profile.run.opened.pageLimit ?? null : null),
+      nativeView: async (tab: Tab, viewer: Viewer) => profile.run?.opened.native?.grant(tab.page.targetId, viewer.id, viewer.options.person, viewer.options.canOperate) ?? null,
+      revokeNativeView: async(token:string)=>profile.run?.opened.native?.revoke(token),
       take: async (owner: string): Promise<TakeResult> => {
         await this.running(profile);
         const taken = await profile.control.take(owner);
+        await profile.run?.opened.native?.control(profile.control.owner, profile.control.ready);
         for (const tab of profile.tabs.list()) await tab.page.releaseInput().catch(() => undefined);
         return taken;
       },

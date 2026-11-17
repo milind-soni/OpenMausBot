@@ -9,10 +9,12 @@ import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 
 const fixture = vi.hoisted(() => ({
   api: vi.fn(),
+  capabilities: {} as Partial<DesktopCapabilities>,
   state: { config: { browserProfiles: [], browserEngine: { kind: "engine", engine: "chrome" } }, computerControl: {} } as Record<string, any>,
 }));
 vi.mock("@/state/store", async (importOriginal) => ({ ...await importOriginal<typeof import("@/state/store")>(), api: fixture.api, useStore: () => ({ state: fixture.state }) }));
 vi.mock("./BrowserProfilesManager", () => ({ BrowserProfilesManager: () => null }));
+vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: fixture.capabilities }) }));
 const { BrowserPanel, LiveBrowser } = await import("./BrowserPanel");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -63,6 +65,7 @@ beforeEach(() => {
   FakeSocket.instances = [];
   FixtureEventSource.instances = [];
   fixture.api.mockReset().mockResolvedValue({ ok: true });
+  fixture.capabilities = {};
   fixture.state = { config: { browserProfiles: [], browserEngine: { kind: "engine", engine: "chrome" } }, computerControl: {} };
   vi.stubGlobal("WebSocket", FakeSocket);
   vi.stubGlobal("EventSource", FixtureEventSource);
@@ -168,6 +171,189 @@ describe("the browser panel's connection", () => {
     expect((host.querySelector<HTMLInputElement>('input[aria-label="Browser address"]')!).value).toBe("https://example.com/two");
     expect(button("Back").disabled).toBe(false);
     expect(button("Forward").disabled).toBe(true);
+  });
+});
+
+describe("the native desktop browser", () => {
+  const native = () => { fixture.state.config.browserEngine = { kind: "engine", engine: "native" }; };
+  const layout = vi.fn();
+  let take: (event: { token: string }) => void;
+  let activity: (event: { token: string }) => void;
+  beforeEach(() => {
+    layout.mockReset().mockResolvedValue(undefined);
+    vi.stubGlobal("ogb", { nativeBrowser: {
+      layout,
+      onTake: (callback: typeof take) => { take = callback; return () => {}; },
+      onActivity: (callback: typeof activity) => { activity = callback; return () => {}; },
+    } });
+  });
+  async function watching(controller = "agent") {
+    native();
+    fixture.capabilities = { nativeBrowser: { available: true } };
+    await render();
+    const socket = FakeSocket.instances.at(-1)!;
+    await act(async () => {
+      socket.open();
+      socket.control(controller);
+      socket.message({ type: "nativeView", token: "native-tab" });
+      socket.message({ type: "tabs", tabs: [{ tabId: "t1", title: "Example", url: "https://example.test/", active: true }] });
+    });
+    await flush();
+    return socket;
+  }
+
+  it("uses the metadata stream for the capable desktop and the real toolbar's existing control handoff", async () => {
+    const socket = await watching();
+    expect(new URL(socket.url).searchParams.get("native")).toBe("1");
+    expect(FixtureEventSource.instances).toHaveLength(0);
+    expect(host.querySelector("canvas, iframe")).toBeNull();
+    expect(host.querySelector('[aria-label="Browser address"]')).not.toBeNull();
+    expect(host.querySelector<HTMLInputElement>('[aria-label="Browser address"]')?.value).toBe("https://example.test/");
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ token: "native-tab", visible: true, canInput: false }));
+    await act(async () => take({ token: "native-tab" }));
+    expect(socket.sent).toEqual([{ type: "takeControl" }]);
+    await act(async () => socket.control("you"));
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true, canInput: true }));
+    await act(async () => button("Back").click());
+    expect(socket.sent).not.toContainEqual({ type: "history", delta: -1 });
+    await act(async () => socket.message({ type: "nav", url: "https://example.test/next", canGoBack: true, canGoForward: false }));
+    await act(async () => button("Back").click());
+    expect(socket.sent.at(-1)).toEqual({ type: "history", delta: -1 });
+  });
+
+  it("refreshes a resumed native hold on its existing socket without taking control or duplicating page input", async () => {
+    const socket = await watching("you");
+    const beforeActivity = socket.sent.length;
+    const page = host.querySelector<HTMLElement>(`[aria-label="${t("browser.panel.pageLabel", { name: "Pepper" })}"]`);
+    expect(page).not.toBeNull();
+    await act(async () => {
+      page!.dispatchEvent(new PointerEvent("pointerdown", { clientX: 20, clientY: 30, bubbles: true }));
+      page!.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+      activity({ token: "native-tab" });
+    });
+    expect(socket.sent.slice(beforeActivity)).toEqual([{ type: "nativeActivity" }]);
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
+  it("keeps remote and older clients on the image stream even when a native bridge exists", async () => {
+    native();
+    await render();
+    const socket = FakeSocket.instances.at(-1)!;
+    expect(socket).toBeDefined();
+    expect(new URL(socket.url).searchParams.has("native")).toBe(false);
+    expect(host.querySelector("canvas")).not.toBeNull();
+    expect(layout).not.toHaveBeenCalled();
+    fixture.capabilities = { nativeBrowser: { available: false } };
+    await render();
+    expect(host.querySelector("canvas")).not.toBeNull();
+  });
+
+  it("uses the existing live image fallback when a profile has no native v2 stream", async () => {
+    native();
+    fixture.capabilities = { nativeBrowser: { available: true } };
+    await render();
+    await act(async () => FakeSocket.instances.at(-1)!.refuse());
+    await flush();
+    expect(FixtureEventSource.instances).toHaveLength(1);
+    expect(host.querySelector("canvas")).not.toBeNull();
+    expect(host.querySelector("[data-browser-transport]")?.getAttribute("data-browser-transport")).toBe("live");
+  });
+
+  it("routes native file pickers and site sign-in through the same authenticated stream", async () => {
+    const uploads = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", uploads);
+    const socket = await watching("you");
+    await act(async () => socket.message({ type: "fileChooser", id: "file-1", multiple: false, accept: ".txt" }));
+    expect(host.querySelector('[aria-label="Choose files for the page"]')).not.toBeNull();
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
+    await act(async () => button(t("common.cancel")).click());
+    await flush();
+    expect(uploads).toHaveBeenCalledTimes(1);
+    await act(async () => socket.message({ type: "authPrompt", tabId: "t1", id: "auth-1", origin: "https://example.test/", realm: "Fixture" }));
+    const form = host.querySelector<HTMLFormElement>('[aria-label="Sign in to this site"]')!;
+    expect(form).not.toBeNull();
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
+    form.querySelector<HTMLInputElement>('[name="username"]')!.value = "Ada";
+    form.querySelector<HTMLInputElement>('[name="password"]')!.value = "fixture-only";
+    await act(async () => form.requestSubmit());
+    expect(socket.sent).toContainEqual({ type: "authAnswer", tabId: "t1", id: "auth-1", username: "Ada", password: "fixture-only" });
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
+  it("hides the native page under the profile dialog, for another viewer and while the owner is hidden", async () => {
+    const socket = await watching("you");
+    await act(async () => button(t("browser.panel.profiles")).click());
+    await flush();
+    expect(host.querySelector("dialog[open]")).not.toBeNull();
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false, canInput: false }));
+    await act(async () => button(t("browser.panel.closeProfiles")).click());
+    await flush();
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
+    await act(async () => socket.control("another-viewer"));
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
+    await act(async () => socket.control("you"));
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    await flush();
+    expect(socket.readyState).toBe(1);
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false, canInput: false }));
+    visibility.mockReturnValue("visible");
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    await flush();
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true, canInput: true }));
+  });
+
+  it("keeps the typing dialog above the native page and sends its text through the same control", async () => {
+    const socket = await watching("you");
+    await act(async () => button(t("browser.panel.typeTextMenu")).click());
+    await flush();
+    const dialog = host.querySelector<HTMLDialogElement>("dialog[open]")!;
+    expect(dialog).not.toBeNull();
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false, canInput: false }));
+    const input = dialog.querySelector<HTMLInputElement>('input[name="pageText"]')!;
+    input.value = "Ada";
+    await act(async () => dialog.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    await flush();
+    expect(socket.sent).toContainEqual({ type: "text", text: "Ada" });
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true, canInput: true }));
+  });
+
+  it("keeps the existing browser menus above the native page while they are open", async () => {
+    await watching("you");
+    const summary = host.querySelector<HTMLElement>(`summary[aria-label="${t("browser.panel.menu")}"]`)!;
+    const menu = summary.closest("details")!;
+    await act(async () => summary.click());
+    await flush();
+    expect(menu.open).toBe(true);
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: false }));
+    await act(async () => summary.click());
+    await flush();
+    expect(menu.open).toBe(false);
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ visible: true }));
+  });
+
+  it("clears startup on a native-ready message without waiting for an image and presents native notices once", async () => {
+    const socket = await watching();
+    await act(async () => socket.message({ type: "starting" }));
+    expect(host.textContent).toContain(t("browser.panel.starting"));
+    await act(async () => socket.message({ type: "nativeView", token: "native-tab" }));
+    expect(host.textContent).not.toContain(t("browser.panel.starting"));
+    await act(async () => socket.message({ type: "notice", message: "The browser needs to reconnect." }));
+    expect([...host.querySelectorAll('[role="alert"]')].map((alert) => alert.textContent)).toEqual(["The browser needs to reconnect."]);
+  });
+
+  it("retains the team thread scope and drops the former native surface after a profile switch", async () => {
+    fixture.state.config.team = true;
+    const socket = await watching();
+    await render({ bot: { ...bot, threadId: "private-thread" } });
+    const scoped = FakeSocket.instances.at(-1)!;
+    expect(new URL(scoped.url).searchParams.get("threadId")).toBe("private-thread");
+    await act(async () => { scoped.open(); scoped.control("agent"); scoped.message({ type: "nativeView", token: "private-tab" }); });
+    await render({ bot: { ...bot, browserProfile: "guest" } });
+    expect(socket.readyState).toBe(3);
+    expect(scoped.readyState).toBe(3);
+    expect(layout).toHaveBeenLastCalledWith(expect.objectContaining({ token: "private-tab", visible: false }));
   });
 });
 
@@ -400,7 +586,18 @@ describe("what the person does in the panel", () => {
 
 describe("a published page's Open", () => {
   const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
-  const show = (page: { url: string; nonce: number }) => act(async () => root.render(createElement(LiveBrowser, { bot, page })));
+  const show = (page: { url?: string; nonce: number }) => act(async () => root.render(createElement(LiveBrowser, { bot, page })));
+
+  it("reveals a page already opened by the server without taking control, waking or creating a blank tab", async () => {
+    const socket = await streaming("agent");
+    await show({ nonce: 1 });
+    await show({ url: PAGE, nonce: 1 });
+    expect(socket.sent).toEqual([]);
+    await act(async () => socket.message({ type: "asleep" }));
+    await show({ url: "", nonce: 2 });
+    await show({ url: " ", nonce: 3 });
+    expect(socket.sent).toEqual([]);
+  });
 
   it("opens the page in a new tab, once, taking the browser first, so the bot's own tab stays as it was", async () => {
     const socket = await streaming("agent");

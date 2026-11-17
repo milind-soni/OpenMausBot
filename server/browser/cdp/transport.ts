@@ -1,11 +1,14 @@
 import type { Readable, Writable } from "node:stream";
 
+export type BrowserActor = { kind: "agent" | "system" } | { kind: "viewer"; viewerId: string };
+
 /** One CDP connection's bytes: a launched Chrome's pipe, a WebSocket, or the desktop link. */
 export interface CdpTransport {
   send(message: string): void;
   onMessage(listener: (message: string) => void): void;
   onClose(listener: (reason: string) => void): void;
   close(): void;
+  withActor?<T>(actor: BrowserActor, work: () => Promise<T>): Promise<T>;
 }
 
 class Listeners {

@@ -27,6 +27,7 @@ const __APP_VERSION__: string;
   type DesktopLendingActivity = import("../../electron/computer-sharing.mjs").LendingActivityEntry;
 
   type DesktopCapabilities = {
+    nativeBrowser?: { available: boolean; reasonCode?: string };
     host: {
       platform: "darwin" | "linux" | "win32" | "other";
       /** The user's home folder, for showing paths as ~/… */
@@ -289,6 +290,12 @@ const __APP_VERSION__: string;
       };
       confirm(message: string): Promise<boolean>;
       getCapabilities(): Promise<DesktopCapabilities>;
+      nativeBrowser?: {
+        layout(input: { token: string; bounds: DesktopWorkspaceBounds; visible: boolean; canInput: boolean }): Promise<void>;
+        onTake(callback: (event: { token: string }) => void): () => void;
+        onFocusAddress?(callback: (event: { token: string }) => void): () => void;
+        onActivity?(callback: (event: { token: string }) => void): () => void;
+      };
       onCapabilitiesChanged(cb: (capabilities: DesktopCapabilities) => void): () => void;
       remoteClient?: {
         active: boolean;

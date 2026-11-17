@@ -10,7 +10,7 @@ import { clearSingleton, staleSingletonLock, type ProcessRegistry } from "./chro
 import { languageList } from "./chrome/wrapper.ts";
 import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileDir, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.ts";
 
-export type BackendKind = "local" | "my-chrome" | "cdp-url";
+export type BackendKind = "local" | "my-chrome" | "cdp-url" | "desktop";
 
 export interface BackendCaps {
   persistentProfile: boolean;
@@ -41,6 +41,12 @@ export interface OpenedBrowser {
   /** The Chrome version that answered, e.g. 155.0.8059.80. */
   readonly version: string;
   readonly exited: Promise<void>;
+  readonly native?: {
+    grant(targetId: string, viewerId: string, person: string, canOperate: boolean): Promise<string>;
+    revoke(token: string): Promise<void>;
+    control(owner: string | null, ready: boolean): Promise<void>;
+    authorizeFile(path: string, roots: readonly string[]): Promise<string>;
+  };
   /** Chrome's own quit: session restore keeps the tabs and session cookies. */
   close(): Promise<void>;
 }

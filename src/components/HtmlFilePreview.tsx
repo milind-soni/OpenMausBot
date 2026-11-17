@@ -4,6 +4,10 @@ import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } f
 import { TableDialog } from "./RichTable";
 import { readTableResponse } from "./TableFilePreview";
 import { t } from "@/lib/i18n";
+import { useOptionalStoreRef } from "@/state/store-ref";
+import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { nativeArtifactAvailable, requestNativeArtifact } from "@/lib/native-artifact";
+import { requestBrowserPanel } from "@/lib/page-open";
 
 export const HTML_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -49,21 +53,32 @@ export function htmlBrowserBridge(): ((source: string, name: string) => Promise<
 
 /** The preview dialog for an HTML or Markdown file in a message, opened by the eye button or by the file's name. */
 export function useHtmlPreview(path: string, name: string, message?: MessageAttachmentContext) {
+  const store=useOptionalStoreRef(),{capabilities}=useDesktopCapabilities();
+  const [nativeError,setNativeError]=useState("");
+  const opening=useRef<Promise<void>|null>(null);
+  const nativeScope=useRef<symbol|null>(Symbol()),nativeAbort=useRef<AbortController|null>(null);
   const [open, setOpen] = useState(false);
   const opener = useRef<HTMLElement | null>(null);
   const kind = message === undefined ? null
     : isHtmlFile(name) || isHtmlFile(path) ? "html"
       : isMarkdownFile(name) || isMarkdownFile(path) ? "markdown" : null;
   const key = message ? `${message.threadId}:${message.messageId}:${path}` : "";
+  useEffect(()=>{nativeScope.current=Symbol();return()=>{nativeScope.current=null;nativeAbort.current?.abort();};},[key]);
   return {
     opens: kind !== null,
     label: t(kind === "markdown" ? "markdown.preview" : "html.preview", { name }),
     show: (event: { currentTarget: HTMLElement }) => {
       opener.current = event.currentTarget;
+      if(kind==="html"&&message&&store&&nativeArtifactAvailable(store.state(),capabilities)){
+        const current=nativeScope.current;
+        if(!opening.current){nativeAbort.current=new AbortController();opening.current=requestNativeArtifact(path,message,nativeAbort.current.signal).then(botId=>{if(nativeScope.current!==current||store.state().selectedId!==botId)return;requestBrowserPanel(botId);store.dispatch({type:"toggleComputer",open:true});}).catch(error=>{if(nativeScope.current!==current||nativeAbort.current?.signal.aborted)return;setNativeError(error instanceof Error?error.message:t("html.openFailed"));setOpen(true);}).finally(()=>{opening.current=null;});}
+        return;
+      }
       setOpen(true);
     },
     dialog: kind && open && message
       ? <TableDialog title={name} returnFocus={opener.current} onClose={() => setOpen(false)}>
+        {nativeError&&<p role="alert" className="mb-2 text-[12px] text-danger">{nativeError}</p>}
         {kind === "html"
           ? <HtmlFileContent key={key} path={path} name={name} message={message} />
           : <MarkdownPreviewBoundary><Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>}><MarkdownFileContent key={key} path={path} name={name} message={message} /></Suspense></MarkdownPreviewBoundary>}

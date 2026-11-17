@@ -13,6 +13,8 @@ const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
 }));
 const owner = vi.hoisted(() => ({ value: true as boolean | null }));
+const desktop = vi.hoisted(() => ({ capabilities: {} as Partial<DesktopCapabilities> }));
+vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: desktop.capabilities }) }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => owner.value }));
 vi.mock("@/state/store", () => ({
   api: fixture.api,
@@ -26,6 +28,7 @@ const toggle = () => host.querySelector<HTMLButtonElement>('button[aria-label="U
 
 beforeEach(() => {
   vi.clearAllMocks();
+  desktop.capabilities = {};
   setLocale("en");
   fixture.config = { browserEngine: { kind: "engine", engine: "agent-browser" } };
   fixture.dispatch.mockImplementation((action: { type: string; config?: Record<string, unknown> }) => {
@@ -54,7 +57,7 @@ describe("New browser setting", () => {
     await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "configStatus", config: saved }));
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/config", {
       method: "PATCH",
-      body: JSON.stringify({ browserEngine: { engine: "chrome" } }),
+      body: JSON.stringify({ browserEngine: { engine: "chrome", nativeDesktop: false } }),
     });
     render();
     expect(toggle().getAttribute("aria-checked")).toBe("true");
@@ -68,8 +71,44 @@ describe("New browser setting", () => {
     await vi.waitFor(() => expect(host.querySelector('[role="alert"]')?.textContent).toBe("stop Scout's turn before switching the browser"));
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/config", {
       method: "PATCH",
-      body: JSON.stringify({ browserEngine: { engine: "agent-browser" } }),
+      body: JSON.stringify({ browserEngine: { engine: "agent-browser", nativeDesktop: false } }),
     });
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("offers the desktop browser only when the host explicitly advertises that capability", () => {
+    vi.stubGlobal("ogb", { platform: "win32", nativeBrowser: {} });
+    render();
+    expect(host.querySelector("select")).toBeNull();
+    desktop.capabilities = { nativeBrowser: { available: false } };
+    render();
+    expect(host.querySelector("select")).toBeNull();
+    desktop.capabilities = { nativeBrowser: { available: true } };
+    render();
+    expect([...host.querySelectorAll("option")].map((option) => option.value)).toEqual(["agent-browser", "chrome", "native"]);
+    expect(host.querySelector('[role="switch"]')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ["agent-browser", { engine: "agent-browser", nativeDesktop: false }],
+    ["chrome", { engine: "chrome", nativeDesktop: false }],
+    ["native", { engine: "chrome", nativeDesktop: true }],
+  ])("saves the %s choice through the existing config row", async (choice, browserEngine) => {
+    desktop.capabilities = { nativeBrowser: { available: true } };
+    fixture.api.mockResolvedValue({ browserEngine: { kind: "engine", engine: choice } });
+    render();
+    const select = host.querySelector<HTMLSelectElement>("select")!;
+    flushSync(() => { select.value = choice; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalled());
+    expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/config", { method: "PATCH", body: JSON.stringify({ browserEngine }) });
+    render();
+    expect(host.querySelector<HTMLSelectElement>("select")?.value).toBe(choice);
+  });
+
+  it("keeps the streamed browser enabled for a client without native capability", () => {
+    fixture.config = { browserEngine: { kind: "engine", engine: "native" } };
+    render();
     expect(toggle().getAttribute("aria-checked")).toBe("true");
   });
 });

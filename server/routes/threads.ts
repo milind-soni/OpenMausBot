@@ -16,12 +16,12 @@ import type { Coordinator } from "../coordinator.ts";
 import type { WorkspaceAccess } from "../enterprise.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
 import { readMessage, searchMessagesAsync } from "../message-db.ts";
-import { MessageMediaLinks } from "../message-media-links.ts";
+import { mediaViewerKey, MessageMediaLinks } from "../message-media-links.ts";
 import {
   listMessageFolder, MESSAGE_FILE_DOWNLOAD_MAX_BYTES, MESSAGE_FILE_MAX_BYTES, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
   messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName,
 } from "../message-file.ts";
-import { resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
+import { ownerOrAdmin, resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
 import type { queuedSteerSnapshot } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { answerAsleep, backgroundWhileAsleep } from "../cloud-power.ts";
@@ -33,6 +33,7 @@ const UPLOADED_NAME = /^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/;
 export type MessagePage = { messages: Array<Message | Record<string, unknown>>; hasMore?: boolean; activeLeafId: string | null };
 
 export interface ThreadRouteDeps {
+  nativeArtifact?(auth: RequestAuth, botId: string, threadId: string, path: string, roots: readonly string[], isCurrent: () => void): Promise<void>;
   store: Pick<Store,
     | "activeLeaf" | "activePath" | "bot" | "botByThread" | "bots" | "groupByThread" | "groupTaskByThread" | "groups" | "messagesFor"
     | "onChange" | "sections" | "taskByThread" | "tasks">;
@@ -199,6 +200,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const threadId = m[1]!;
+      const originalOwner = mediaViewerKey(auth);
       const directBot = store.botByThread(threadId);
       const group = directBot ? undefined : store.groupByThread(threadId);
       if (!directBot && !group) return json(res, 404, { error: "no such conversation" });
@@ -288,6 +290,34 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       if ((streamsMessageImage || botAttachment?.kind === "image") && !file.mime.startsWith("image/")) {
         await file.handle.close();
         return json(res, 415, { error: "only images can be previewed here" });
+      }
+      if (body?.openNativeBrowser === true) {
+        try {
+          if (!directBot || !deps.nativeArtifact || !ownerOrAdmin(auth)) return json(res, 403, { error: "Native artifacts require this desktop's owner." });
+          if (file.mime.split(";", 1)[0] !== "text/html") return json(res, 415, { error: "Only HTML opens in the native browser." });
+          const assertCurrent = (): RequestAuth => {
+            if (req.aborted || res.destroyed) {
+              throw Object.assign(new Error("The native artifact request was cancelled."), { name: "AbortError", status: 409 });
+            }
+            const current = resolveRequestAuth(req, {
+              sessions, cookieName: SESSION_COOKIE, streamPath: "/api/events", url,
+              loopbackMutationToken: deps.desktopMutationToken(), companionMutationToken: deps.companionMutationToken(),
+              features: { sharedComputers: lendingEnabled() }, loopbackTrust: deps.loopback.trust,
+              cliOwnerToken: deps.cliOwnerToken(), trustLocalBrowser: deps.loopback.localBrowsers,
+            });
+            if (!current.auth || !ownerOrAdmin(current.auth) || mediaViewerKey(current.auth) !== originalOwner ||
+              store.botByThread(threadId)?.id !== directBot.id || !visibleTo(viewerFor(current.auth)).thread(threadId)) {
+              throw Object.assign(new Error("Native artifact access changed."), { status: 403 });
+            }
+            return current.auth;
+          };
+          const current = assertCurrent();
+          await deps.nativeArtifact(current, directBot.id, threadId, file.path, roots, assertCurrent);
+          assertCurrent();
+          return json(res, 200, { nativeBrowserOpened: true, botId: directBot.id });
+        } finally {
+          await file.handle.close();
+        }
       }
       if ((asksMediaLink || mediaGrant) && !STREAMABLE_VIDEO_MIMES.has(file.mime)) {
         await file.handle.close();

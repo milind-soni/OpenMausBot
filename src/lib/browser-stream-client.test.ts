@@ -56,6 +56,21 @@ describe("preview stream control", () => {
     return { client, socket: FakeSocket.current, onFrame, onControl };
   };
 
+  it("sends native activity only while this viewer can operate and controls the browser", () => {
+    const { client, socket } = connect();
+    expect(client.send({ type: "nativeActivity" })).toBe(false);
+    socket.control(agent);
+    expect(client.send({ type: "nativeActivity" })).toBe(false);
+    socket.control({ ...agent, controller: "another-viewer" });
+    expect(client.send({ type: "nativeActivity" })).toBe(false);
+    socket.control({ ...agent, controller: "you", canOperate: false });
+    expect(client.send({ type: "nativeActivity" })).toBe(false);
+    socket.control({ ...agent, controller: "you" });
+    expect(client.send({ type: "nativeActivity" })).toBe(true);
+    expect(socket.sent.map((message) => JSON.parse(message))).toEqual([{ type: "nativeActivity" }]);
+    client.stop();
+  });
+
   it("opens the bot's stream with its frame cap and panel size, and marks passive viewers", () => {
     const { client, socket } = connect();
     expect(socket.url).toBe("ws://omb.test/api/bots/pepper/browser/stream?maxWidth=800&maxHeight=600");

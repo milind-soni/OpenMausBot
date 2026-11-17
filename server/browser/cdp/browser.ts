@@ -18,6 +18,9 @@ export interface BrowserOptions {
   acceptLanguage?: string;
   /** Headless: focus emulation and intercepted file pickers. */
   headless?: boolean;
+  /** Native embedded pages need focus emulation without focusing the person's app window. */
+  focusEmulation?: boolean;
+  interceptFileChooser?: boolean;
   downloadDir?: string | null;
   downloadLimits?: DownloadLimits;
   /** Applies the default permission grants and denials. */
@@ -67,7 +70,7 @@ export class CdpBrowser implements PageHost {
     this.mac = (options.platform ?? process.platform) === "darwin";
     const identity = options.identity ? identityOverride(options.identity, options.acceptLanguage) : null;
     const headless = options.headless ?? true;
-    this.setup = { identity, focusEmulation: headless, interceptFileChooser: headless, handleAuth: options.handleAuth === true, noPasskeys: headless };
+    this.setup = { identity, focusEmulation: options.focusEmulation ?? headless, interceptFileChooser: options.interceptFileChooser ?? headless, handleAuth: options.handleAuth === true, noPasskeys: headless };
     this.#viewport = options.viewport === undefined ? (headless ? VIEWPORT : null) : options.viewport;
     this.downloads = options.downloadDir
       ? new Downloads(connection.root, options.downloadDir, { ownerOf: (frameId) => this.#ownerOf(frameId), ...(options.downloadLimits ? { limits: options.downloadLimits } : {}) })

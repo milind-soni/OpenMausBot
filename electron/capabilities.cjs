@@ -116,6 +116,7 @@ function desktopCapabilities({
   frame = true,
   // A remote server's page: this computer's screen, voice and local control are never on offer.
   remote = false,
+  nativeBrowser,
 } = {}) {
   const hostPlatform = normalizedPlatform(platform);
   const isMac = hostPlatform === "darwin";
@@ -209,6 +210,7 @@ function desktopCapabilities({
 
   return {
     remote: Boolean(remote),
+    ...(typeof nativeBrowser === "boolean" ? { nativeBrowser: { available: !remote && nativeBrowser } } : {}),
     host: {
       platform: hostPlatform,
       label:

@@ -39,6 +39,7 @@ import { t } from "@/lib/i18n";
 import { serverErrorText } from "@/lib/server-error";
 import { AgentCursor } from "./AgentCursor";
 import { AuthPrompt } from "./AuthPrompt";
+import { NativeSurface } from "./NativeSurface";
 import { SelectPopup, type SelectPopupOption } from "./SelectPopup";
 
 export interface StreamSurfaceHandle {
@@ -172,6 +173,9 @@ function save(download: PreviewStreamDownload) {
 
 export function StreamSurface(props: {
   readonly connect: SurfaceConnect;
+  readonly native?: boolean;
+  readonly visible?: boolean;
+  readonly onTake?: () => void;
   /** Page input and toolbar commands, through the panel's control rules. */
   readonly input: (input: PreviewStreamInput) => void;
   readonly label?: string;
@@ -190,9 +194,11 @@ export function StreamSurface(props: {
   readonly ref?: Ref<StreamSurfaceHandle>;
 }) {
   const { connect, ref } = props;
+  const native = props.native === true;
   const propsRef = useRef(props);
   propsRef.current = props;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const keySentRef = useRef(false);
   const clientRef = useRef<PreviewStreamClient | null>(null);
@@ -203,6 +209,7 @@ export function StreamSurface(props: {
   const [control, setControl] = useState<PreviewStreamControl | null>(null);
   const [connected, setConnected] = useState(false);
   const [painted, setPainted] = useState(false);
+  const [nativeToken, setNativeToken] = useState<string | null>(null);
   const [promptText, setPromptText] = useState("");
   const [fileChooser, setFileChooser] = useState<PreviewStreamFileChooser | null>(null);
   const [agentCursor, setAgentCursor] = useState<(ReturnType<typeof mapToSurface> & { phase: PreviewStreamPointer["phase"]; sequence: number }) | null>(null);
@@ -287,12 +294,12 @@ export function StreamSurface(props: {
   const focusInput = () => inputRef.current?.focus({ preventScroll: true });
 
   useImperativeHandle(ref, () => ({
-    canvas: () => (hasFrameRef.current ? canvasRef.current : null),
+    canvas: () => (hasFrameRef.current && !propsRef.current.native ? canvasRef.current : null),
     focusPage: focusInput,
   }), []);
 
   useEffect(() => {
-    const element = canvasRef.current?.parentElement;
+    const element = containerRef.current;
     if (!element || typeof ResizeObserver === "undefined") return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let capTimer: ReturnType<typeof setTimeout> | null = null;
@@ -342,15 +349,17 @@ export function StreamSurface(props: {
     const canvas = canvasRef.current;
     const size = sizeRef.current;
     const cap = capRef.current;
-    if (hostSetup || !capKnown || !cap || !canvas || !size) return;
+    if (hostSetup || !capKnown || !cap || !size || (!native && !canvas)) return;
+    let active = true;
     hasFrameRef.current = false;
     setPainted(false);
-    const painter = createPreviewFramePainter(canvas, () => {
+    setNativeToken(null);
+    const painter = canvas ? createPreviewFramePainter(canvas, () => {
       if (hasFrameRef.current) return;
       hasFrameRef.current = true;
       setPainted(true);
       propsRef.current.onFirstFrame?.();
-    });
+    }) : null;
     const setControlState = (next: PreviewStreamControl | null) => {
       const previous = controlRef.current;
       controlRef.current = next;
@@ -370,8 +379,9 @@ export function StreamSurface(props: {
     const client = connect(
       { maxWidth: cap.width, maxHeight: cap.height, width: size.width, height: size.height },
       {
-        onFrame: (jpeg) => painter.paint(jpeg),
+        onFrame: (jpeg) => { if (active && !native) painter?.paint(jpeg); },
         onProbe: (result) => {
+          if (!active) return;
           if (controlRef.current?.controller !== "you") return;
           lastProbeRef.current = { ...result, at: performance.now() };
           const probe = probeRef.current;
@@ -385,6 +395,7 @@ export function StreamSurface(props: {
           else inputRef.current?.blur();
         },
         onPointer: (pointer) => {
+          if (!active) return;
           const canvasNow = canvasRef.current;
           const viewport = viewportRef.current;
           if (!canvasNow || !viewport || canvasNow.width < 1 || canvasNow.height < 1) return;
@@ -394,14 +405,23 @@ export function StreamSurface(props: {
         },
         // A device may refuse a write that arrives after the key press; the notice's Copy button is a fresh gesture.
         onClipboard: (text) => {
-          void copyText(text).then((result) => { if (result === "failed") notify({ kind: "clipboard", text }); });
+          if (active) void copyText(text).then((result) => { if (active && result === "failed") notify({ kind: "clipboard", text }); });
         },
-        onDownload: (download) => notify({ kind: "download", download }),
+        onDownload: (download) => { if (active) notify({ kind: "download", download }); },
         onPopup: () => undefined,
-        onFileChooser: setFileChooser,
-        onViewport: (viewport) => { viewportRef.current = viewport; },
-        onControl: setControlState,
+        onFileChooser: (chooser) => { if (active) setFileChooser(chooser); },
+        onViewport: (viewport) => { if (active) viewportRef.current = viewport; },
+        onControl: (next) => { if (active) setControlState(next); },
         onMessage: (message) => {
+          if (!active) return;
+          if (native && message.type === "nativeView") {
+            if (message.token !== null && typeof message.token !== "string") return;
+            setNativeToken(message.token);
+            hasFrameRef.current = Boolean(message.token);
+            setPainted(Boolean(message.token));
+            if (message.token) propsRef.current.onFirstFrame?.();
+            return;
+          }
           if (message.type === "selectPopup" && typeof message.id === "string" && Array.isArray(message.options)) {
             const rect = message.rect as SelectState["rect"] | undefined;
             if (rect) setSelect({ id: message.id, options: message.options as SelectPopupOption[], selectedIndex: Number(message.selectedIndex), rect });
@@ -417,33 +437,37 @@ export function StreamSurface(props: {
           propsRef.current.onMessage?.(message);
         },
         onConnectedChange: (next) => {
+          if (!active) return;
           setConnected(next);
           propsRef.current.onConnectedChange?.(next);
           if (next) return;
+          setNativeToken(null);
           setFileChooser(null);
           setSelect(null);
           setAuthPrompt(null);
           setControlState(null);
         },
-        onHostSetup: setHostSetup,
-        onUnauthorized: () => propsRef.current.onUnauthorized?.(),
-        onGone: () => propsRef.current.onGone?.(),
-        onClose: (code, reason) => propsRef.current.onClose?.(code, reason),
+        onHostSetup: (setup) => { if (active) setHostSetup(setup); },
+        onUnauthorized: () => { if (active) propsRef.current.onUnauthorized?.(); },
+        onGone: () => { if (active) propsRef.current.onGone?.(); },
+        onClose: (code, reason) => { if (active) propsRef.current.onClose?.(code, reason); },
       },
     );
     clientRef.current = client;
     propsRef.current.onClient?.(client);
     return () => {
-      painter.stop();
+      active = false;
+      painter?.stop();
       client.stop();
       if (clientRef.current === client) clientRef.current = null;
       propsRef.current.onClient?.(null);
       setControlState(null);
       setConnected(false);
+      setNativeToken(null);
       setAgentCursor(null);
       clearInput();
     };
-  }, [capKnown, clearInput, connect, hostSetup, notify]);
+  }, [capKnown, clearInput, connect, hostSetup, native, notify]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -619,15 +643,26 @@ export function StreamSurface(props: {
 
   const direct = (message: PreviewStreamInput) => clientRef.current?.send(message);
   const canvas = canvasRef.current;
-  const selectAnchor = select && canvas && viewportRef.current && canvas.width > 0
-    ? mapToSurface(select.rect, { width: canvas.clientWidth, height: canvas.clientHeight }, canvas, viewportRef.current)
+  const surfaceBox = native ? sizeRef.current : canvas ? { width: canvas.clientWidth, height: canvas.clientHeight } : null;
+  const surfacePixels = native ? sizeRef.current : canvas;
+  const selectAnchor = select && surfaceBox && surfacePixels && viewportRef.current && surfacePixels.width > 0
+    ? mapToSurface(select.rect, surfaceBox, surfacePixels, viewportRef.current)
     : null;
   const you = control?.controller === "you";
+  const nativeOverlay = Boolean(select || notices.length || hostSetup || control?.dialog || (fileChooser && you) || (authPrompt && you));
 
   return (
     <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden ${props.className ?? ""}`} data-browser-surface>
-      <div className="relative min-h-0 flex-1">
-        <canvas
+      <div ref={containerRef} className="relative min-h-0 flex-1">
+        {native ? <NativeSurface
+          token={nativeToken}
+          control={control}
+          label={props.label ?? t("browser.page.label")}
+          visible={connected && painted && props.visible !== false && !nativeOverlay}
+          onTake={props.onTake}
+          onLeave={props.onLeave}
+          onActivity={() => send({ type: "nativeActivity" })}
+        /> : <><canvas
           ref={canvasRef}
           aria-hidden="true"
           className="block size-full touch-none object-contain"
@@ -673,17 +708,17 @@ export function StreamSurface(props: {
             const text = event.clipboardData.getData("text/plain");
             if (text) send({ type: "text", text });
           }}
-        />
+        /></>}
         {connected && !painted && !hostSetup ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-ink-secondary" aria-hidden="true"><Loader2 size={22} className="animate-spin" /></div>
         ) : null}
-        {select && selectAnchor && canvas ? (
+        {select && selectAnchor && surfaceBox ? (
           <SelectPopup
             key={select.id}
             options={select.options}
             selectedIndex={select.selectedIndex}
             anchor={selectAnchor}
-            bounds={{ width: canvas.clientWidth, height: canvas.clientHeight }}
+            bounds={surfaceBox}
             onChoose={(index) => {
               direct({ type: "selectChoose", id: select.id, index });
               setSelect(null);

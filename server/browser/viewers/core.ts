@@ -8,6 +8,8 @@
 // resize instead of an emulated viewport, one control for the whole profile, a watching viewer may size the page, and
 // input held by a viewer that leaves is released at once.
 import { randomUUID } from "node:crypto";
+import { ACK_PACE_MS } from "./types.ts";
+import type { FrameMetadata, ViewerOutput, ViewerOptions } from "./types.ts";
 
 import type { PointerReporter } from "../cdp/actions.ts";
 import type { AuthChallenge } from "../cdp/auth.ts";
@@ -22,12 +24,11 @@ import { personUrl } from "../dispatch.ts";
 import { extensionInput, type InstalledExtension } from "../extensions.ts";
 import type { HoldLimits } from "../hold.ts";
 import type { Tab } from "../tabs.ts";
-import { ACCEPT_OF, chooseOption, cursorAt, editableAt, selectAt, type SelectPopup } from "./popups.ts";
+import { ACCEPT_OF, chooseOption, cursorAt, editableAt, selectAt } from "./popups.ts";
 import { ViewerHold } from "./hold.ts";
 import { fitsScreen, MIN_WINDOW_WIDTH, requestedSize, VIEWPORT_PRESETS, viewportFor, ZOOM_LIMITS, zoomedLayout, type ViewportSetting } from "./viewport.ts";
 
-/** Chromium keeps three frames unacknowledged, so acking 100 ms after arrival caps a viewer near 30 fps. */
-export const ACK_PACE_MS = { hi: 100, lo: 200 } as const;
+export { ACK_PACE_MS } from "./types.ts";
 export const SETTLE_MS = 200;
 /** Only scrolling sends reduced frames; an animation stays sharp. */
 const MOTION_FRAMES = 4;
@@ -41,65 +42,12 @@ const TEXT_LIMIT = 10_000;
 const HELD_LIMIT = 64;
 const CURSOR_EVERY_MS = 120;
 
-export interface FrameMetadata {
-  deviceWidth: number;
-  deviceHeight: number;
-  offsetTop: number;
-  pageScaleFactor: number;
-  scrollOffsetX: number;
-  scrollOffsetY: number;
-  timestamp?: number;
-}
-
-export type Controller = "agent" | "you" | "another-viewer" | "unclaimed";
-
-export type ViewerOutput =
-  | { type: "frame"; data: Buffer; metadata: FrameMetadata; still: boolean; ack: () => void }
-  | { type: "viewport"; width: number; height: number; setting: ViewportSetting; zoom: number }
-  | { type: "control"; canOperate: boolean; controller: Controller; held: boolean; owned: boolean; controlling: boolean; stale: boolean; generation: number; dialog: { type: string; message: string; defaultValue: string } | null }
-  | { type: "tabs"; tabs: Array<{ tabId: string; title: string; url: string; active: boolean }> }
-  | { type: "url"; url: string }
-  | { type: "nav"; tabId: string; url: string; loading: boolean; canGoBack: boolean; canGoForward: boolean }
-  | { type: "status"; connected: boolean; screencasting: boolean; viewportWidth: number; viewportHeight: number }
-  | { type: "clipboard"; text: string } | { type: "extensions"; extensions: InstalledExtension[] }
-  | { type: "probe"; x: number; y: number; editable: boolean }
-  | { type: "pointer"; phase: "move" | "click"; x: number; y: number; sequence: number }
-  | { type: "fileChooser"; id: string; multiple: boolean; accept: string }
-  | { type: "fileChooserClosed"; id: string }
-  | { type: "download"; id: string; fileName: string; sizeBytes: number }
-  | { type: "popup"; tabId: string }
-  | ({ type: "selectPopup"; id: string } & SelectPopup)
-  | { type: "cursor"; shape: string }
-  | { type: "authPrompt"; tabId: string; id: string; origin: string; realm: string }
-  | { type: "authPromptClosed"; id: string }
-  | { type: "starting" }
-  /** The browser closed unused and the view stays; "awake" when it starts again. */
-  | { type: "asleep" | "awake" }
-  | { type: "gone"; reason: string };
-
-export interface ViewerOptions {
-  /** The session watching, or local-owner. */
-  owner: string;
-  /** Whose hold this view shares, on any device: their account's key, the owner when unset. */
-  person?: string;
-  canOperate: boolean;
-  /** The largest frame this viewer can use, in device pixels. */
-  maxWidth: number;
-  maxHeight: number;
-  quality?: number;
-  pace?: keyof typeof ACK_PACE_MS;
-  /** The panel's size in CSS pixels, which the page fills. */
-  size?: { width: number; height: number } | null;
-  /** The viewer can show a site's HTTP sign-in prompt to its person; the v1 view cannot. */
-  authPrompts?: boolean;
-  /** The viewer draws a page's dropdown lists and its cursor shape; the v1 view cannot, so its presses reach the page. */
-  pagePopups?: boolean;
-  /** The viewer draws the agent's pointer, which the agent's actions wait for; false for the v1 view, which draws none. */
-  pointer?: boolean;
-}
+export type { FrameMetadata, Controller, ViewerOutput, ViewerOptions } from "./types.ts";
 
 /** What a hub needs from the browser service. */
 export interface HubHost {
+  nativeView?(tab: Tab, viewer: Viewer): Promise<string | null>;
+  revokeNativeView?(token: string): Promise<void | undefined>;
   readonly control: ProfileControl<Tab>;
   readonly holdLimits?: HoldLimits;
   browser(): CdpBrowser | null;
@@ -149,6 +97,7 @@ export class Viewer {
   #frameSeen = false;
   #paused = 0;
   #hidden = false;
+  #nativeToken: string | null = null;
   scrolledAt = 0;
   readonly pressedKeys = new Map<string, { key: string; code: string }>();
   readonly pressedButtons = new Map<"left" | "middle" | "right", { x: number; y: number }>();
@@ -173,6 +122,7 @@ export class Viewer {
       authPrompts: options.authPrompts === true,
       pagePopups: options.pagePopups === true,
       pointer: options.pointer !== false,
+      nativeView: options.nativeView === true,
     };
   }
 
@@ -211,6 +161,25 @@ export class Viewer {
       return;
     }
     this.#session = session;
+    if (this.options.nativeView && this.#hub.host.nativeView) {
+      let token: string | null;
+      try {
+        token = await this.#hub.host.nativeView(tab, this);
+      } catch {
+        await this.#unbind();
+        if (!this.closed) this.push({ type: "gone", reason: "native-view-unavailable" });
+        return;
+      }
+      if (this.closed || this.tab !== tab || this.#session !== session || tab.page.closed) {
+        if (token) await this.#hub.host.revokeNativeView?.(token)?.catch(() => undefined);
+        return;
+      }
+      this.#nativeToken = token;
+      if (token) {
+        this.push({ type: "nativeView", token });
+        return;
+      }
+    }
     this.#frameSeen = false;
     session.on("Page.screencastFrame", (params) => this.#frame(session, params));
     if (this.#hidden) return;
@@ -220,6 +189,12 @@ export class Viewer {
   }
 
   async #unbind(): Promise<void> {
+    if (this.#nativeToken) {
+      const token = this.#nativeToken;
+      this.#nativeToken = null;
+      this.push({ type: "nativeView", token: null });
+      await this.#hub.host.revokeNativeView?.(token)?.catch(() => undefined);
+    }
     const session = this.#session;
     this.#session = null;
     if (this.#settle) clearTimeout(this.#settle);
@@ -232,6 +207,7 @@ export class Viewer {
   }
 
   #start(scale: number): Promise<void> {
+    if (this.#nativeToken) return Promise.resolve();
     this.#scale = scale;
     const session = this.#session;
     this.#params = this.#params.then(async () => {
@@ -342,6 +318,7 @@ export class Viewer {
 
   /** A picture of the page as it is now, at this viewer's size; a scaled one pauses every viewer of the tab. */
   async pushStill(): Promise<void> {
+    if(this.#nativeToken)return;
     const tab = this.tab;
     const session = this.#session;
     if (!tab || !session || session.detached || this.#hidden || this.closed) return;
@@ -829,6 +806,8 @@ export class ViewerHub {
     }
     this.#hold.used();
     switch (message.type) {
+      case "nativeActivity":
+        return;
       case "dialog":
         if (typeof message.accept === "boolean") await tab.page.answerDialog({ accept: message.accept, ...(typeof message.promptText === "string" ? { promptText: message.promptText.slice(0, 4_000) } : {}) });
         this.broadcastControl();
