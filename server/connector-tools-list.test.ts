@@ -113,3 +113,64 @@ describe("tools/list fallback cache", () => {
   });
 
 });
+
+
+describe("paginated tools/list fallback", () => {
+  const page = (id: string, cursor?: string) => ({ jsonrpc: "2.0", id, method: "tools/list", params: cursor === undefined ? {} : { cursor } });
+  const reply = (id: string, name: string, nextCursor?: string) => Response.json({ jsonrpc: "2.0", id, result: { tools: [{ name }], ...(nextCursor === undefined ? {} : { nextCursor }) } });
+
+  it("keeps first and continuation pages separate during a backend outage", async () => {
+    const backend = "pages-outage";
+    await withToolsListFallback(backend, page("seed-first"), async () => reply("seed-first", "read", "second"));
+    await withToolsListFallback(backend, page("seed-second", "second"), async () => reply("seed-second", "write"));
+    const first = await withToolsListFallback(backend, page("retry-first"), async () => new Response(null, { status: 503 }));
+    expect(await first.json()).toEqual({ jsonrpc: "2.0", id: "retry-first", result: { tools: [{ name: "read" }], nextCursor: "second" } });
+    const second = await withToolsListFallback(backend, page("retry-second", "second"), async () => new Response(null, { status: 429 }));
+    expect(await second.json()).toEqual({ jsonrpc: "2.0", id: "retry-second", result: { tools: [{ name: "write" }] } });
+  });
+
+  it("does not substitute a cached first page for a never-seen cursor", async () => {
+    const backend = "unseen-page";
+    await withToolsListFallback(backend, page("seed"), async () => reply("seed", "read", "missing"));
+    const response = await withToolsListFallback(backend, page("missing", "missing"), async () => new Response("unavailable", { status: 503 }));
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe("unavailable");
+  });
+
+  it("does not suppress a network failure using another page", async () => {
+    const backend = "unseen-network-page";
+    await withToolsListFallback(backend, page("seed"), async () => reply("seed", "read", "missing"));
+    const error = new Error("network disconnected");
+    await expect(withToolsListFallback(backend, page("missing", "missing"), async () => { throw error; })).rejects.toBe(error);
+  });
+
+  it("replays the matching continuation page after a transport failure", async () => {
+    const backend = "matching-network-page";
+    await withToolsListFallback(backend, page("seed", "second"), async () => reply("seed", "write"));
+    const response = await withToolsListFallback(backend, page("retry", "second"), async () => { throw new Error("offline"); });
+    expect(await response.json()).toEqual({ jsonrpc: "2.0", id: "retry", result: { tools: [{ name: "write" }] } });
+  });
+
+  it("treats an empty cursor as a distinct opaque continuation token", async () => {
+    const backend = "empty-page-cursor";
+    await withToolsListFallback(backend, page("first"), async () => reply("first", "read", ""));
+    await withToolsListFallback(backend, page("empty", ""), async () => reply("empty", "write"));
+    const response = await withToolsListFallback(backend, page("first-again"), async () => new Response(null, { status: 503 }));
+    expect((await response.json()).result).toEqual({ tools: [{ name: "read" }], nextCursor: "" });
+  });
+
+  it("does not serve fallback pages for invalid cursor values", async () => {
+    const backend = "invalid-page-cursor";
+    await withToolsListFallback(backend, page("seed"), async () => reply("seed", "read"));
+    for (const cursor of [null, 1, {}, []]) {
+      const response = await withToolsListFallback(backend, { ...page("invalid"), params: { cursor } }, async () => new Response("bad cursor", { status: 503 }));
+      expect(response.status).toBe(503);
+    }
+  });
+
+  it("never shares cached pages between backend identities", async () => {
+    await withToolsListFallback("page-owner-A", page("seed", "second"), async () => reply("seed", "private_tool"));
+    const response = await withToolsListFallback("page-owner-B", page("read", "second"), async () => new Response(null, { status: 503 }));
+    expect(response.status).toBe(503);
+  });
+});
