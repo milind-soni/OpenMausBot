@@ -1292,14 +1292,16 @@ the day or month rolls over, and cuts nothing off mid-turn.
 
 When a turn ends on a usage limit (a subscription's 5-hour or weekly limit,
 one model's own weekly window, a model's extra usage credits), the bot carries
-on by itself with another AI the person has set up until that limit resets,
-and the person hears it once for that stretch of the limit, as a notification:
-"Codex reached its limit until 14:00, so Kai is using Claude meanwhile." With
-no AI to carry on, it says the bot waits instead. Nobody is asked.
+on by itself with a backup the person chose until that limit resets, and the
+person hears it once for that stretch of the limit, as a notification: "Codex
+reached its limit until 14:00, so Kai is using Claude meanwhile." With no
+chosen backup that can carry on, the bot waits for the reset and the
+notification says so ("…no backup you chose can take over"); no other AI is
+picked for it. Nobody is asked.
 
 - **Which AI.** For one model's own limit, the same AI's default model first;
-  then the backups chosen for the bot or in Automatic recovery; then the AI a
-  new bot would get. Only an AI that can run a turn now (installed, signed in,
+  then the backups chosen for the bot or in Automatic recovery, in that order.
+  Only an AI that can run a turn now (installed, signed in,
   allowed by your organisation, not limited itself) with the tools and the
   working folder the current one has, and one the conversation's approval level
   can move to without asking (Auto-accept edits stays on an AI that has it).

@@ -6565,6 +6565,7 @@
   "botAccess.scopes.empty": "尚未連線任何應用程式。先連線一個，再到這裡允許它。",
   "botAccess.scopes.notConnected": "未連線",
   "botAccess.scopes.accessLabel": "{app} 存取權",
+  "botAccess.scopes.accountsLabel": "這個機器人可使用的帳號",
   "botAccess.phone.title": "手機 App",
   "botAccess.phone.subtitle": "這個機器人在 {phone} 上可以做的事",
   "botAccess.phone.notOnPhone": "手機上未允許",

@@ -178,6 +178,34 @@ describe("whose mailbox", () => {
     expect(await codes.offerConnect(bot, turn)).toEqual({ shown: false, line });
   });
 
+  it("reads only the accounts a bot's limit allows, naming each, in an app with an account limit", async () => {
+    const { codes, deps, fake } = await setup();
+    deps.composio.connectedServices = async () => ({ gmail: { connected: true, accounts: [{ id: "ca_work", status: "ACTIVE" }, { id: "ca_home", status: "ACTIVE" }] } }) as never;
+    fake.emails = [gmailMail()];
+    const limited = { ...bot, connectorScopes: { apps: { gmail: "read" as const }, accounts: { gmail: ["ca_home"] } } };
+    expect(await codes.find(limited, turn, ask(), () => true)).toMatchObject({ kind: "code", code: CODE });
+    expect(fake.calls.length).toBeGreaterThan(0);
+    expect(new Set(fake.calls.map((call) => call.item.account))).toEqual(new Set(["ca_home"]));
+  });
+
+  it("names the allowed account even when it is the app's only one", async () => {
+    const { codes, deps, fake } = await setup();
+    deps.composio.connectedServices = async () => ({ gmail: { connected: true, accounts: [{ id: "ca_home", status: "ACTIVE" }] } }) as never;
+    fake.emails = [gmailMail()];
+    const limited = { ...bot, connectorScopes: { apps: { gmail: "read" as const }, accounts: { gmail: ["ca_home"] } } };
+    expect(await codes.find(limited, turn, ask(), () => true)).toMatchObject({ kind: "code", code: CODE });
+    expect(new Set(fake.calls.map((call) => call.item.account))).toEqual(new Set(["ca_home"]));
+  });
+
+  it("reads nothing when none of the allowed accounts is connected", async () => {
+    const { codes, deps, fake } = await setup();
+    deps.composio.connectedServices = async () => ({ gmail: { connected: true, accounts: [{ id: "ca_work", status: "ACTIVE" }] } }) as never;
+    fake.emails = [gmailMail()];
+    const limited = { ...bot, connectorScopes: { apps: { gmail: "read" as const }, accounts: { gmail: ["ca_home"] } } };
+    expect(await codes.find(limited, turn, ask({ via: "unknown" }), () => true)).toEqual({ kind: "skip" });
+    expect(fake.calls).toEqual([]);
+  });
+
   it("respects a bot's own switches", async () => {
     const { codes, fake } = await setup();
     fake.emails = [gmailMail()];

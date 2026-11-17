@@ -12,6 +12,8 @@ export const APP_TOOLS_ENV = "OMB_CONNECTOR_APP_TOOLS";
  * dot in a tool name, and they show the same name either way. */
 export const APP_TOOL_NAMES_ENV = "OMB_CONNECTOR_APP_TOOL_NAMES";
 const MULTI_EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
+/** Every app tool takes the connected account to use, which a bot limited to some accounts must name. */
+const ACCOUNT = { type: "string", description: "Connected account id to use. Needed when this bot may use only certain accounts of the app." };
 
 type Input = Record<string, unknown>;
 interface AppTool {
@@ -210,7 +212,7 @@ export function appToolEntries(names: readonly string[], style: "dotted" | "plai
   return APP_TOOLS.filter((tool) => names.includes(tool.name)).map((tool) => ({
     name: style === "dotted" ? tool.name : plainName(tool.name),
     description: tool.description,
-    inputSchema: { type: "object", additionalProperties: false, properties: tool.properties, ...(tool.required ? { required: tool.required } : {}) },
+    inputSchema: { type: "object", additionalProperties: false, properties: { ...tool.properties, account: ACCOUNT }, ...(tool.required ? { required: tool.required } : {}) },
     annotations: { readOnlyHint: isReadOnlyAction(tool.slug, appOf(tool)) },
   }));
 }
@@ -219,10 +221,12 @@ export function appToolEntries(names: readonly string[], style: "dotted" | "plai
 export function appToolCall(name: string, input: unknown): { slug: string; frame(id: unknown): Record<string, unknown> } | null {
   const tool = BY_NAME.get(name.trim().toLowerCase());
   if (!tool) return null;
-  const args = tool.args(input && typeof input === "object" && !Array.isArray(input) ? input as Input : {});
+  const fields = input && typeof input === "object" && !Array.isArray(input) ? input as Input : {};
+  const args = tool.args(fields);
+  const account = text(fields.account);
   return {
     slug: tool.slug,
-    frame: (id) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name: MULTI_EXECUTE, arguments: { tools: [{ tool_slug: tool.slug, arguments: args }] } } }),
+    frame: (id) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name: MULTI_EXECUTE, arguments: { tools: [{ tool_slug: tool.slug, arguments: args, ...(account ? { account } : {}) }] } } }),
   };
 }
 
