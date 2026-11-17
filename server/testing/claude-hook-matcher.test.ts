@@ -29,6 +29,10 @@ describe("hookMatches", () => {
     expect(hookMatches("PreCompact", "auto", { trigger: "manual" })).toBe(false);
   });
 
+  it("skips a hook whose expression does not compile", () => {
+    expect(hookMatches("PostToolUse", "[", tool("Bash"))).toBe(false);
+  });
+
   it("ignores a matcher on an event that has none", () => {
     expect(hookMatches("Stop", "Bash", { stop_hook_active: false })).toBe(true);
   });

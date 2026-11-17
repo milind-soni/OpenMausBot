@@ -96,7 +96,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { hookMatches } from "./claude-hook-matcher.ts";
+import { hookMatches, type FakeHookEvent } from "./claude-hook-matcher.ts";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 import { playStreamScript, streamScript } from "./stream-script.ts";
 
@@ -255,7 +255,7 @@ const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ ty
     return {};
   }
 })();
-function runHooks(event: string, payload: Record<string, unknown>): string {
+function runHooks(event: FakeHookEvent, payload: Record<string, unknown>): string {
   let stdout = "";
   for (const entry of settingsHooks[event] ?? []) {
     if (!hookMatches(event, entry.matcher, payload)) continue;
