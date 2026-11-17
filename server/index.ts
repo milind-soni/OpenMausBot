@@ -12829,7 +12829,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 201, { token });
     }
     if (path.startsWith("/api/internal/")) {
-      const internalCapability = authorizedInternalCapability(req.headers.authorization) ?? lateToolResults.endedTurnCapability(req.headers.authorization);
+      const internalCapability: InternalCapability | null = authorizedInternalCapability(req.headers.authorization) ?? lateToolResults.endedTurnCapability(req.headers.authorization);
       if (!internalCapability) {
         return json(res, 401, { error: "unauthorized" });
       }
