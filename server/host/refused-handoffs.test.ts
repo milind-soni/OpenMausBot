@@ -74,7 +74,10 @@ describe("a routine's refused hand-off", () => {
     const apart: RosterMember = { id: "2cb14697-4805-4a1e-9a54-0f1f5f6d3c11", name: "Bookkeeping", visibility: "admins" };
     const near: RosterMember = { id: "2cb14697-1111-4a1e-9a54-0f1f5f6d3c11", name: "Writer", visibility: B };
     const roster = [rooms, hours, near, apart, mausbot];
-    expect(resolveTeammate(roster, rooms, "2cb14697")).toMatchObject({ error: expect.stringContaining("More than one bot has an id starting") });
+    // The start names neither of them, and one of them is out of the caller's audience, so it answers as unknown: it
+    // names no candidate at all, and still resolves nothing.
+    expect(resolveTeammate(roster, rooms, "2cb14697")).toMatchObject({ error: expect.stringContaining('No bot with id or name "2cb14697"') });
+    expect(resolveTeammate(roster, rooms, "2cb14697")).not.toEqual({ id: near.id, byName: false });
     expect(resolveTeammate(roster, rooms, near.id)).toEqual({ id: near.id, byName: false });
     const { refused } = fixture({ roster });
     refused.settled("t", rooms, ["Bookkeeping"], 403);

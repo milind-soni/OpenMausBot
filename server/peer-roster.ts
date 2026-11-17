@@ -188,16 +188,18 @@ export interface WiderReach<T extends RosterMember> {
 /** The fewest characters of an id that name it: a model retyping a 36-character id drops one, and the first 8 have to agree. */
 const ID_PREFIX_MIN = 8;
 
-/** In this order: the id, exactly as written; the id in any case when exactly one bot's id matches it that way; a name
- * that only one reachable bot answers to; the start of one id that only one reachable bot has. Names and id starts resolve
- * only inside reachablePeers, so they can never reach a bot its id could not. An id never resolves to a bot when another
- * bot's id differs from what was written only by its case: two bots can carry ids that differ only by case (one brought in
- * from another place, or one here from before admission compared ids that way), and case-folding both would let a brief
- * meant for one land on the other.
+/** In this order, and identity before any name: the id, exactly as written; the id in any case when exactly one bot's
+ * id matches it that way; then, before names either, the start of an id; then a name that only one reachable bot
+ * answers to. An id or id start that names a bot the caller cannot see is refused at once, never narrowed to whichever
+ * candidate is visible and never left to fall through to a name: two bots can carry ids that differ only by case (one
+ * brought in from another place, or one here from before admission compared ids that way), and a brief meant for one
+ * must not land on the other, nor on a visible bot named after that id.
  * Identity is settled before visibility: who an id names is decided across every bot on the roster, and only then is
  * whether this caller may reach that bot asked. Hiding a bot from its caller (wider.hides, an archived bot, another
  * audience) must never turn that bot's own id into a different bot's, so an id, or an id start, that names a bot the
  * caller cannot see is refused rather than narrowed to whichever candidate is visible.
+ * A refusal names only what the caller may already see: when any candidate is invisible the answer is the words a
+ * truly unknown id gets — no count, no candidates, no roles, no ids — so probing an id cannot confirm a hidden bot.
  * `elsewhere(name)`: why no bot here has that name past "no such bot", when one of the person's other places has it, or when
  * they work as one place. */
 export function resolveTeammate<T extends RosterMember>(
@@ -210,34 +212,62 @@ export function resolveTeammate<T extends RosterMember>(
 ): { id: string; byName: boolean } | { error: string } {
   const wanted = raw.trim();
   const shown = peerName(wanted) || wanted;
+  const fold = foldedName, loose = looseName;
+  const name = fold(wanted);
+  /** What a caller is told about an id that names nothing it may be shown: the words a truly unknown id gets. */
+  const unknownId = `No bot with id "${shown}" — call list_bots and copy the exact id from the result`;
   /** May this caller see and reach `bot` at all (itself always, so the route can say "Choose a teammate, not yourself"). */
   const exposed = (bot: T): boolean => bot.id === from.id ||
     (!bot.hidden && !wider?.hides(bot) && (canReach(from, bot) || wider?.reaches(bot) === true));
-  /** The id names one bot the caller cannot reach: refuse, in that bot's own refusal words, never another bot's. */
-  const outOfReach = (bot: T): string => {
-    if (wider?.hides(bot)) return wider.refusal(bot) ?? `No bot with id "${shown}" — call list_bots and copy the exact id from the result`;
-    if (bot.hidden) return goneIdRefusal(bot.id);
-    return wider?.refusal(bot) ?? reachRefusal(from, bot, lookedAfterBy) ??
-      `No bot with id "${shown}" — call list_bots and copy the exact id from the result`;
+  const reachable = reachablePeers(bots, from, wider?.reaches);
+  /** The answer a spelling that names no bot the caller may be shown gets, identical to a truly unknown id's: it can
+   * only list the teammates it could have been shown (`exposed`) — never an archived bot, one its reach hides, or one
+   * in another audience — so no count, candidate, role, id or owner of an invisible bot is in it. Asked only when a
+   * spelling names nothing, so a resolution that succeeds never reads the person's other places. */
+  const unknownTarget = (): { error: string } => {
+    const away = bots.some(bot => !wider?.hides(bot) && (fold(bot.name) === name || loose(bot.name) === loose(wanted))) ? null : elsewhere(wanted);
+    if (away && "where" in away) return { error: away.where };
+    return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable.filter(bot => exposed(bot)))}${away ? ` ${away.hint}` : ""} ${PEER_ACCESS_HELP} A teammate's name is enough in bot_ids, so a long id never has to be copied exactly.` };
   };
+  /** The id names one bot the caller cannot reach: refuse in that bot's own refusal words, never another bot's.
+   * A bot the caller may not be told of at all (the reach hides it, or it is archived) is never named here: no name,
+   * role, owner or count, and never its stored id's casing either — those refusals repeat only what the caller typed.
+   * A bot in another audience keeps the words it has always had ("… is shared with different people …", and, on a
+   * Team Cloud, who looks after it): that is the answer its name gets too, and server/team-small-fixes.e2e.test.ts
+   * and server/thread-aware-bots.e2e.test.ts pin it for its id as well. */
+  const outOfReach = (bot: T): string => {
+    if (wider?.hides(bot)) return unknownId;
+    if (bot.hidden) return goneIdRefusal(shown);
+    return wider?.refusal(bot) ?? reachRefusal(from, bot, lookedAfterBy) ?? unknownId;
+  };
+  // Identity is settled first, and completely: an id that names a bot the caller cannot see is refused here, so it
+  // can never fall through to a name that happens to look like that id.
   const sameId = bots.filter(bot => bot.id.toLowerCase() === wanted.toLowerCase());
   const exact = sameId.find(bot => bot.id === wanted);
   if (exact) {
     if (exposed(exact)) return { id: exact.id, byName: false };
     return { error: outOfReach(exact) };
   }
-  if (sameId.length > 1) {
-    // Every candidate is counted, whoever can see it, so a spelling can never be narrowed to the visible one;
-    // only the candidates this caller can see are identified.
+  if (sameId.length) {
+    if (sameId.length === 1) {
+      const only = sameId[0]!;
+      return exposed(only) ? { id: only.id, byName: false } : { error: outOfReach(only) };
+    }
+    // Ids that differ only by case. An all-visible set may be described: every candidate is listed and the caller
+    // picks one. But one candidate the caller cannot see makes the whole spelling unknown, because naming the rest
+    // would confirm a bot the caller may not be told of, and counting them would say how many there are.
     const identified = sameId.filter(exposed);
-    const choices = identified.length ? `: ${sharedNameChoices(identified)}` : "";
-    return { error: `${sameId.length} bots differ only by the case of their ids, so nothing was sent${choices}. Send it again with the exact id of the one you mean, copied from list_bots.` };
+    if (identified.length !== sameId.length) return unknownTarget();
+    return { error: `${sameId.length} bots differ only by the case of their ids, so nothing was sent: ${sharedNameChoices(identified)}. Send it again with the exact id of the one you mean, copied from list_bots.` };
   }
-  if (sameId.length === 1 && exposed(sameId[0]!)) return { id: sameId[0]!.id, byName: false };
-  const fold = foldedName, loose = looseName;
-  const name = fold(wanted);
-  if (!name) return { error: `No bot with id "${shown}" — call list_bots and copy the exact id from the result` };
-  const reachable = reachablePeers(bots, from, wider?.reaches);
+  if (!name) return { error: unknownId };
+  // An id start is settled before any name too, for the same reason: a visible bot whose name looks like the start
+  // of an id the caller cannot see must not answer for it. Every bot whose id starts with it is counted; if the
+  // caller cannot see them all, the start names nothing it may be told.
+  const started = wanted.length >= ID_PREFIX_MIN && !/\s/u.test(wanted)
+    ? bots.filter(bot => bot.id.toLowerCase().startsWith(wanted.toLowerCase())) : [];
+  const startedSeen = started.filter(exposed);
+  if (startedSeen.length !== started.length) return unknownTarget();
   const matches = reachable.filter(bot => fold(bot.name) === name);
   if (matches.length === 1) return { id: matches[0]!.id, byName: true };
   if (matches.length > 1) {
@@ -245,23 +275,14 @@ export function resolveTeammate<T extends RosterMember>(
   }
   const near = reachable.filter(bot => loose(bot.name) === loose(wanted));
   if (near.length === 1) return { id: near[0]!.id, byName: true };
-  // An id start is matched across every bot too: one the caller cannot see still rules the start out, so a start that
-  // could mean a hidden or out-of-audience bot is refused instead of being narrowed to the visible one.
-  const started = wanted.length >= ID_PREFIX_MIN && !/\s/u.test(wanted)
-    ? bots.filter(bot => bot.id.toLowerCase().startsWith(wanted.toLowerCase())) : [];
-  const startedSeen = started.filter(exposed);
-  if (started.length === 1 && startedSeen.length === 1) return { id: started[0]!.id, byName: false };
+  // Every candidate of the start is visible here (an invisible one refused it above), so it may be described.
+  if (started.length === 1) return { id: started[0]!.id, byName: false };
   if (started.length > 1) {
-    if (startedSeen.length === started.length) {
-      return { error: `${started.length} teammates you can reach have an id starting "${shown}", so nothing was sent: ${sharedNameChoices(startedSeen)}. Send it again with the name of the one you mean.` };
-    }
-    return { error: `More than one bot has an id starting "${shown}", and not all of them can be reached from here, so nothing was sent. Send the exact id of the one you mean, copied from list_bots.` };
+    return { error: `${started.length} teammates you can reach have an id starting "${shown}", so nothing was sent: ${sharedNameChoices(startedSeen)}. Send it again with the name of the one you mean.` };
   }
   const apart = bots.find(bot => bot.id !== from.id && !bot.hidden && !bot.defaultBot && !wider?.hides(bot) && !sameAudience(from.visibility, bot.visibility) && (fold(bot.name) === name || loose(bot.name) === loose(wanted)));
   if (apart) return { error: wider?.refusal(apart) ?? reachRefusal(from, apart, lookedAfterBy)! };
-  const away = bots.some(bot => !wider?.hides(bot) && (fold(bot.name) === name || loose(bot.name) === loose(wanted))) ? null : elsewhere(wanted);
-  if (away && "where" in away) return { error: away.where };
-  return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable)}${away ? ` ${away.hint}` : ""} ${PEER_ACCESS_HELP} A teammate's name is enough in bot_ids, so a long id never has to be copied exactly.` };
+  return unknownTarget();
 }
 
 const CHOICES_MAX = 12;
