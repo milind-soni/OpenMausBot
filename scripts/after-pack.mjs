@@ -1,4 +1,5 @@
 import { chmod, lstat, readFile, readdir } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { LICENSE_FILES } from "./cua-linux-release.mjs";
 import {
@@ -55,6 +56,12 @@ async function validateCloudflared(resources, platform, required) {
   }[platform];
   if (!allowed?.has(target)) {
     throw new Error(`Packaged ${platform} app contains the wrong cloudflared target: ${target}`);
+  }
+  // A freshly copied binary can miss the 10 s version check while macOS assesses
+  // it for the first time. One long-timeout run here absorbs that delay; the
+  // real check below stays unchanged.
+  if (target === `${process.platform}-${process.arch}`) {
+    spawnSync(executable, ["version"], { timeout: 30_000, stdio: "ignore" });
   }
   verifyCloudflaredExecutable(executable, target);
 

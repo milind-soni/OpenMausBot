@@ -18,7 +18,9 @@ import { installOneHome } from "../../electron/one-home-main.mjs";
 import type { OneHomeView } from "../../electron/one-home.mjs";
 import { cloudPairingSignature, cloudRequestSignature } from "../../server/cloud-home.ts";
 import type { TeamMember } from "../../server/cloud-team.ts";
+import { bitwardenCliPath } from "../../server/host/bitwarden-cli.ts";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
+import type { FakeBwAccount } from "../../server/testing/fake-bw.ts";
 import { freePortBlock } from "../../server/testing/ports.ts";
 
 const SERVER_DIR = fileURLToPath(new URL("../../server/", import.meta.url));
@@ -149,16 +151,35 @@ export interface CloudTeamFixture {
 
 const TEAM_MACHINE_ID = "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a";
 
-function fakeOnePassword(at: string, token: string): string {
+/** The fake `bw` where the server installs the real one (server/host/bitwarden-cli.ts), so it is used as installed. */
+function installFakeBw(dataDir: string, account: FakeBwAccount): void {
+  const tool = bitwardenCliPath(dataDir, { asset: "fake", bytes: 0, sha256: "", executable: process.platform === "win32" ? "bw.exe" : "bw" });
+  mkdirSync(join(tool, ".."), { recursive: true });
+  const vault = join(tool, "..", "fake-bw-vault.json");
+  writeFileSync(vault, JSON.stringify(account));
+  writeFileSync(tool, `#!/usr/bin/env node
+process.env.FAKE_BW_VAULT = ${JSON.stringify(vault)};
+import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-bw-process.ts")).href)});
+`, { mode: 0o755 });
+}
+
+/** One item in the fake 1Password's one vault, in the SDK's shapes (no website: a secret, not a login). */
+export interface FakeOnePasswordItem { id: string; title: string; category: string; fields: Array<{ id: string; title: string; fieldType: string; value: string }> }
+
+function fakeOnePassword(at: string, token: string, items: readonly FakeOnePasswordItem[] = []): string {
   const sdk = join(at, "node_modules", "@1password", "sdk");
   mkdirSync(sdk, { recursive: true });
   writeFileSync(join(sdk, "package.json"), JSON.stringify({ name: "@1password/sdk", version: "0.5.0", main: "index.js" }));
   writeFileSync(join(sdk, "index.js"), `"use strict";
+const ITEMS = ${JSON.stringify(items)};
 exports.createClient = async ({ auth }) => {
   if (auth !== ${JSON.stringify(token)}) throw new Error("error authenticating: invalid service account token");
   return {
     vaults: { list: async () => [{ id: "v1", title: "Shared with OpenMausBot" }] },
-    items: { list: async () => [], getAll: async () => ({ individualResponses: [] }) },
+    items: {
+      list: async () => ITEMS.map(({ id, title, category }) => ({ id, title, category, websites: [] })),
+      getAll: async (vaultId, ids) => ({ individualResponses: ITEMS.filter((item) => ids.includes(item.id)).map(({ id, fields }) => ({ content: { id, fields } })) }),
+    },
   };
 };
 `);
@@ -171,8 +192,12 @@ exports.createClient = async ({ auth }) => {
  * with an installation of its own as the desktop app registers one, My Cloud registering itself as a Cloud home does.
  * `env`: more of both servers' environment. `cloudEngine`: lines run at the start of My Cloud's synthetic Claude CLI, to
  * script its turns (fake-claude-cli.ts). */
-export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true, team }: {
+export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, onePasswordItems = [], bitwarden, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true, team }: {
   onePasswordToken: string; cloudOnePasswordToken?: string; toolCalls?: number;
+  /** A fake Bitwarden tool already in each server's data folder, holding this one account (no download, no network). */
+  bitwarden?: FakeBwAccount;
+  /** What every server's fake 1Password vault ("Shared with OpenMausBot") holds; empty by default. */
+  onePasswordItems?: readonly FakeOnePasswordItem[];
   /** A Team Cloud too (OMB_CLOUD_ROLE=team), with its own environment and synthetic Claude CLI lines. */
   team?: { id: string; name: string; env?: NodeJS.ProcessEnv; engine?: string; noAi?: boolean;
     /** Scopes of this checkout's node_modules (`@duckdb`) linked into the Team Cloud's native tree before it starts: the
@@ -203,6 +228,7 @@ export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswor
     const home = join(root, name);
     const dataDir = join(home, ".openmausbot");
     mkdirSync(dataDir, { recursive: true });
+    if (bitwarden) installFakeBw(dataDir, bitwarden);
     const cli = join(home, "fixture-claude.mjs");
     const tools = calls ? JSON.stringify(Array.from({ length: calls }, (_, i) => ({ name: "Bash", input: { command: `echo step ${i}` } }))) : "";
     writeFileSync(cli, `#!/usr/bin/env node
@@ -221,7 +247,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const child = spawn(process.execPath, ["--import", offline, ...extra, join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir,
-        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_DUCKDB_DIR: fakeOnePassword(join(home, "native"), acceptedToken), ...env, ...own },
+        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_DUCKDB_DIR: fakeOnePassword(join(home, "native"), acceptedToken, onePasswordItems), ...env, ...own },
       stdio: ["ignore", "pipe", "pipe", ...(ipc ? ["ipc" as const] : [])],
     });
     children.add(child);

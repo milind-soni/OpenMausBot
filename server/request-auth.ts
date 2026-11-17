@@ -358,6 +358,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/compact$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/start-fresh$/ },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/context$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/helper-followup$/ }, // MausBot's own person only: see mayFollowUp
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/read$/ },
@@ -492,6 +493,11 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // what the viewer's own bots put online, from conversations they can read; the handler deletes only what is theirs
   { methods: ["GET"], path: /^\/api\/published-apps(?:\/framing)?$/ },
   { methods: ["POST"], path: /^\/api\/published-apps\/delete$/ },
+  // a Team Cloud's shared folder: every member reads and adds; the handler lets a member delete or rename only what they
+  // uploaded (routes/team-files.ts); off a Team Cloud they answer 404
+  { methods: ["GET"], path: /^\/api\/team-files(?:\/file)?$/ },
+  { methods: ["PUT"], path: /^\/api\/team-files\/file$/ },
+  { methods: ["POST"], path: /^\/api\/team-files\/(?:folder|rename|delete)$/ },
   // Slack for Clouds: the Admin calls these with the member's own session, and the handler answers each as that member
   // alone, on a personal Cloud its owner alone (routes/team-slack.ts); off a Cloud they answer 404
   { methods: ["GET"], path: /^\/api\/slack\/team\/bots$/ },

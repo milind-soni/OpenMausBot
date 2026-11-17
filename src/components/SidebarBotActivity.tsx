@@ -7,6 +7,7 @@ import { t } from "@/lib/i18n";
 import { isArchived, orderedSidebarThreads, orderedThreadList, threadRecency, threadUpdatedLabel } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { localizedTaskTitle } from "@/lib/task-title";
+import { endedOnFailure } from "@/lib/mascot";
 
 export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
   const tasks = bot.tasks ?? [{
@@ -29,12 +30,15 @@ export function runningRoutineRuns(bot: Bot): Array<Task & { queued: boolean }> 
   return orderedThreadList((bot.tasks ?? []).filter(runningRoutineRun).map((task) => ({ ...task, queued: false })));
 }
 
-export function sidebarBotStatus(bot: Bot, queued: Record<string, unknown[]>) {
+/** `visible` is the bot's shown conversation: when it ended on an error (a turn that failed, or an engine that could not
+ * start, both end on the failed-turn row), the bot is `failed` (red), kept apart from `waiting` (orange, it needs your answer). */
+export function sidebarBotStatus(bot: Bot, queued: Record<string, unknown[]>, visible?: Bot["messages"]) {
   const tasks = sidebarBotActivityTasks(bot, queued);
   const waiting = bot.activity === "waiting-on-you" || tasks.some((task) => task.activity === "waiting-on-you");
   const working = !waiting && (Boolean(bot.busy) || tasks.some((task) => task.busy || task.activity === "working"));
-  const teammateWait = !waiting && !working && (Boolean(bot.waitingForTeammates) || tasks.some((task) => Boolean(task.waitingForTeammates)));
-  return { waiting, working, teammateWait, queued: tasks.some((task) => task.queued) };
+  const failed = !waiting && !working && endedOnFailure(visible);
+  const teammateWait = !waiting && !working && !failed && (Boolean(bot.waitingForTeammates) || tasks.some((task) => Boolean(task.waitingForTeammates)));
+  return { waiting, working, failed, teammateWait, queued: tasks.some((task) => task.queued) };
 }
 
 export function threadsWhenTreeHidden(bot: Bot, queued: Record<string, unknown[]>) {

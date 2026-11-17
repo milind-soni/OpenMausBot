@@ -15,6 +15,9 @@
 //   FAKE_CLAUDE_DUMP  path for the latest turn's {argv, env, cwd, prompt, systemPrompt, mcpConfig}
 //   FAKE_CLAUDE_ELICIT  JSON request body: a "hang" turn (or a failing FAKE_CLAUDE_TRANSIENTS launch) first asks it
 //     as control_request "elicit-1"
+//   FAKE_CLAUDE_CONTEXT_USAGE  JSON answered to a get_context_usage control_request; unset, the request is refused as
+//     unsupported, like any other control_request
+//   FAKE_CLAUDE_CONTEXT_USAGE_LATE  1: the first get_context_usage is answered only when the next control_request arrives
 //   FAKE_CLAUDE_CONTROL_LOG  JSON-lines file every control_response the host writes is appended to
 //   FAKE_CLAUDE_EXIT_AFTER_TURN  1: exit once the turn is answered, so later turns relaunch with --resume
 //   FAKE_CLAUDE_AUTH_AFTER_TURN  1: from the second turn, answer as not-logged-in; FAKE_CLAUDE_AUTH_AFTER_WORK  1: not-logged-in
@@ -564,6 +567,7 @@ const tools = [...new Set([...(toolsFlag ? toolsFlag.split(",") : ["Bash", "Read
   ...(process.env.FAKE_CLAUDE_KEEP_BASH === "1" ? ["Bash"] : [])])];
 let launchFiles: Record<string, unknown> | null = null;
 let turnRunning = false;
+let lateContextAnswer: object | true | null = null;
 let steered: string[] = [];
 let steeredMessages: JsonValue[] = [];
 const replayUserMessages = argv.includes("--replay-user-messages");
@@ -1347,6 +1351,17 @@ process.stdin.on("data", (c) => {
     }
     if ((prompt as { type?: unknown } | null)?.type === "control_response") {
       if (process.env.FAKE_CLAUDE_CONTROL_LOG) appendFileSync(process.env.FAKE_CLAUDE_CONTROL_LOG, `${line}\n`);
+      continue;
+    }
+    const control = prompt as { type?: unknown; request_id?: unknown; request?: { subtype?: unknown } } | null;
+    if (control?.type === "control_request") {
+      const usage = control.request?.subtype === "get_context_usage" ? process.env.FAKE_CLAUDE_CONTEXT_USAGE : undefined;
+      const answer = { type: "control_response", response: usage
+        ? { subtype: "success", request_id: control.request_id, response: JSON.parse(usage) }
+        : { subtype: "error", request_id: control.request_id, error: `Unsupported control request subtype: ${String(control.request?.subtype)}`, error_code: "unsupported_request" } };
+      if (usage && process.env.FAKE_CLAUDE_CONTEXT_USAGE_LATE === "1" && !lateContextAnswer) { lateContextAnswer = answer; continue; }
+      if (lateContextAnswer && lateContextAnswer !== true) { out(lateContextAnswer); lateContextAnswer = true; }
+      out(answer);
       continue;
     }
     if (turnRunning || lateTurnWaiting) {

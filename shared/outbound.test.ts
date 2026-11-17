@@ -142,6 +142,13 @@ describe("trimOutboundPolicy", () => {
 });
 
 describe("connectorCallsIn", () => {
+  it("keeps the account a multi-execute item names", () => {
+    const calls = connectorCallsIn("COMPOSIO_MULTI_EXECUTE_TOOL", {
+      tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: {}, account: " work " }, { tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }],
+    });
+    expect(calls).toEqual([{ slug: "GMAIL_SEND_EMAIL", arguments: {}, account: "work" }, { slug: "GMAIL_FETCH_EMAILS", arguments: {} }]);
+  });
+
   // Composio's session exposes a handful of meta tools; the app tools run
   // inside them. The gate has to see through the wrapper or it sees nothing.
   it("returns a direct app tool as itself", () => {

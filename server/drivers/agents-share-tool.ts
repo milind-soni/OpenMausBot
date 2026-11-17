@@ -9,15 +9,18 @@ export const SHARE_TOOL_DEFINITIONS = [
   {
     name: "share",
     description:
-      "Share yourself (or, as Chief, your department) as a template: no chats, memory or keys. export shows a card; publish puts it on the community GitHub; import adds one the person linked.",
+      "Share yourself (or, as Chief, your department) as a template, no chats, memory or keys: export shows a card; publish to the community GitHub, publish_to_repo to repo (path: its folder), add_to_team_library; import a link the person gave, list_team_library, import_from_team_library.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        action: { type: "string", enum: ["export", "publish", "import"] },
+        action: { type: "string", enum: ["export", "publish", "publish_to_repo", "add_to_team_library", "import", "list_team_library", "import_from_team_library"] },
         department: { type: "boolean" },
         url: { type: "string" },
         path: { type: "string" },
+        slug: { type: "string" },
+        repo: { type: "string" },
+        direct: { type: "boolean" },
       },
       required: ["action"],
     },

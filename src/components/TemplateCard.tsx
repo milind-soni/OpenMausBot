@@ -2,16 +2,17 @@
 // (the Details sheet, also Import's preview), and the card's actions.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ArrowUpRight, Check, ChevronDown, Copy, FolderDown, Github, Loader2, MoreHorizontal, RefreshCw, Trash2, Upload } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, Copy, FolderDown, Github, Library, Loader2, MoreHorizontal, RefreshCw, Trash2, Upload } from "lucide-react";
 
-import { COMMUNITY_UPLOAD_URL, TEMPLATE_UPDATE_MESSAGE, type TemplateAvatar, type TemplateCard, type TemplateDetails } from "../../shared/share-card";
+import { COMMUNITY_UPLOAD_URL, TEMPLATE_UPDATE_MESSAGE, type TemplateAvatar, type TemplateCard, type TemplateDetails, type TemplateRepoPublish } from "../../shared/share-card";
 import { botBodyId } from "../../shared/bot-body";
 import { MAUS_COLOR_NAMES, type MausColor } from "../../shared/wire";
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { askBot, countsLine, deleteTemplate, publishTemplate, saveTemplateFolder, templateDetails } from "@/lib/template-share";
+import { addToTeamTemplates, askBot, countsLine, deleteTemplate, githubConnection, publishTemplate, publishToRepo, saveTemplateFolder, templateDetails } from "@/lib/template-share";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { useStore, type Message } from "@/state/store";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_PRIMARY_BUTTON } from "./AskCard";
@@ -73,9 +74,10 @@ export function TemplateCardBody({ card }: { card: TemplateCard }) {
 /** What the card's buttons do. The card shown is the latest the server answered, until the message brings a newer one. */
 export function useTemplateActions(initial: TemplateCard) {
   const [card, setCard] = useState(initial);
-  const [busy, setBusy] = useState<"publish" | "save" | "delete" | null>(null);
+  const [busy, setBusy] = useState<"publish" | "save" | "delete" | "team" | null>(null);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState<string | null>(null);
+  const [teamNote, setTeamNote] = useState<string | null>(null);
   useEffect(() => setCard(initial), [initial]);
   const run = async (kind: NonNullable<typeof busy>, work: () => Promise<void>) => {
     if (busy) return;
@@ -90,7 +92,13 @@ export function useTemplateActions(initial: TemplateCard) {
     }
   };
   return {
-    card, busy, error, saved,
+    card, busy, error, saved, teamNote,
+    /** Adds it to the Team Cloud's own templates, replacing one of the same name there. */
+    addToTeam: (team: string) => run("team", async () => {
+      setTeamNote(null);
+      const added = await addToTeamTemplates(card.id);
+      setTeamNote(t(added.replaced ? "template.replacedInTeam" : "template.addedToTeam", { team }));
+    }),
     publish: () => run("publish", async () => {
       setCard((current) => ({ ...current, status: "publishing", error: undefined }));
       try {
@@ -161,13 +169,29 @@ export function TemplateButtons({ actions, primary, view, extra }: {
 
 /** One line under the buttons: why Publish isn't offered, the publish error, the last action's error, or where the folder went. */
 export function TemplateNotes({ actions }: { actions: TemplateActions }) {
-  const { card, error, saved } = actions;
+  const { card, error, saved, teamNote } = actions;
   return <>
     {card.fallback && <p className="mt-1.5 text-[12px] text-ink-secondary">{t(card.fallback === "sign_in" ? "template.signInToPublish" : "template.publishUnavailable")}</p>}
     {card.status === "failed" && card.error && <p role="alert" dir="auto" className="mt-1.5 text-[12px] text-danger">{card.error}</p>}
     {error && <p role="alert" dir="auto" className="mt-1.5 text-[12px] text-danger">{error}</p>}
     {saved && <p role="status" dir="auto" className="mt-1.5 truncate text-[12px] text-ink-secondary" title={saved}>{t("template.savedTo", { path: saved })}</p>}
+    {teamNote && <p role="status" dir="auto" className="mt-1.5 text-[12px] text-ink-secondary">{teamNote}</p>}
   </>;
+}
+
+/** On a Team Cloud, its name when the person is its owner or an admin, who add templates to its library; else null. */
+export function useTeamTemplatesOwner(): string | null {
+  const { state } = useStore();
+  const admin = useOwnerOrAdmin();
+  const team = state.config?.team?.name;
+  return team && admin === true ? team : null;
+}
+
+/** Publishing to one's own repository goes through Share's routes, which a Team Cloud keeps for its owner and admins. */
+export function useRepoPublishOffered(): boolean {
+  const { state } = useStore();
+  const admin = useOwnerOrAdmin();
+  return !state.config?.team || admin === true;
 }
 
 /** The template card a bot posts in its chat. `botId` and `threadId` are this chat's, for Update; a group chat leaves them out. */
@@ -175,9 +199,14 @@ export function TemplateChatCard({ message, botId, threadId }: { message: Messag
   const { dispatch } = useStore();
   const actions = useTemplateActions(message.template!);
   const [details, setDetails] = useState(false);
+  const [repo, setRepo] = useState(false);
+  const team = useTeamTemplatesOwner();
+  const repoOffered = useRepoPublishOffered();
   const { card } = actions;
   const overflow: SidebarMenuItem[] = card.status === "gone" ? [] : [
     ...(botId ? [{ key: "update", label: t("template.update"), icon: <RefreshCw size={16} />, onSelect: () => askBot(dispatch, botId, threadId, TEMPLATE_UPDATE_MESSAGE) }] : []),
+    ...(team ? [{ key: "team", label: t("template.addToTeam", { team }), icon: <Library size={16} />, onSelect: () => void actions.addToTeam(team) }] : []),
+    ...(repoOffered ? [{ key: "repo", label: t("template.publishToRepo"), icon: <Github size={16} />, onSelect: () => setRepo(true) }] : []),
     ...(card.fallback ? [] : [{ key: "save", label: t("template.saveFolder"), icon: <FolderDown size={16} />, onSelect: () => void actions.save() }]),
     { key: "delete", label: t("template.delete"), icon: <Trash2 size={16} />, separatorBefore: true, onSelect: () => void actions.remove() },
   ];
@@ -193,6 +222,7 @@ export function TemplateChatCard({ message, botId, threadId }: { message: Messag
         </>} />
       <TemplateNotes actions={actions} />
       {details && <TemplateDetailsSheet id={card.id} name={card.name} onClose={() => setDetails(false)} />}
+      {repo && <TemplateRepoPublishDialog card={card} onClose={() => setRepo(false)} />}
     </div>
   );
 }
@@ -297,6 +327,103 @@ export function TemplateDetailsSheet({ id, name, onClose }: { id: string; name: 
       {details ? <TemplateDetailsBody details={details} />
         : error ? <p role="alert" className="text-[13px] text-danger">{error}</p>
         : <p role="status" className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={14} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />{t("template.loading")}</p>}
+    </TemplateModal>
+  );
+}
+
+/** Share's second GitHub target: the person's own repository, through the GitHub connection in Apps. A pull request from
+ * a new branch, or one commit on the default branch when they tick it. */
+
+/** `missing`: connect GitHub in Apps; `refused`: the server's own sentence (the team's Rules, Apps unreachable, no access). */
+type Connection = { state: "checking" } | { state: "connected" } | { state: "missing" } | { state: "refused"; error: string };
+
+const repoField = "h-8 w-full min-w-0 rounded-lg border border-hairline bg-inset px-2.5 text-[13px] text-ink focus:border-focus focus:outline-none";
+const repoSpinner = <Loader2 size={14} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />;
+
+export function TemplateRepoPublishDialog({ card, onClose }: { card: Pick<TemplateCard, "id" | "name">; onClose: () => void }) {
+  const { dispatch } = useStore();
+  const [connection, setConnection] = useState<Connection>({ state: "checking" });
+  const [repo, setRepo] = useState("");
+  const [folder, setFolder] = useState("");
+  const [direct, setDirect] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState<TemplateRepoPublish | null>(null);
+  const titleId = useId(), repoId = useId(), folderId = useId();
+
+  useEffect(() => {
+    let live = true;
+    githubConnection().then((answer) => {
+      if (!live) return;
+      setConnection(answer.connected ? { state: "connected" } : answer.reason === "not_connected" || !answer.error ? { state: "missing" } : { state: "refused", error: answer.error });
+    }, (cause: unknown) => { if (live) setConnection({ state: "refused", error: cause instanceof Error && cause.message ? cause.message : t("template.failed") }); });
+    return () => { live = false; };
+  }, []);
+
+  const publish = async () => {
+    if (busy || !repo.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      setDone(await publishToRepo(card.id, { repo: repo.trim(), ...(folder.trim() ? { folder: folder.trim() } : {}), direct }));
+    } catch (cause) {
+      setError(cause instanceof Error && cause.message ? cause.message : t("template.failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openApps = () => {
+    dispatch({ type: "togglePlugins", open: true });
+    onClose();
+  };
+
+  const footer = done ? <>
+    <button type="button" className="ui-button ui-button-md" onClick={onClose}>{t("common.close")}</button>
+    <button type="button" className="ui-button ui-button-md ui-button-primary" onClick={() => void openExternalLink(done.url).catch(() => {})}>
+      <ArrowUpRight size={14} aria-hidden="true" />{t(done.kind === "pull_request" ? "template.viewPullRequest" : "template.viewOnGithub")}
+    </button>
+  </> : connection.state === "missing" ? <>
+    <button type="button" className="ui-button ui-button-md" onClick={onClose}>{t("common.cancel")}</button>
+    <button type="button" data-template-open-apps className="ui-button ui-button-md ui-button-primary" onClick={openApps}>{t("template.repo.openApps")}</button>
+  </> : connection.state === "refused" ? (
+    <button type="button" className="ui-button ui-button-md" onClick={onClose}>{t("common.close")}</button>
+  ) : <>
+    <button type="button" className="ui-button ui-button-md" onClick={onClose} disabled={busy}>{t("common.cancel")}</button>
+    <button type="submit" form={titleId} data-template-repo-publish className="ui-button ui-button-md ui-button-primary" disabled={busy || connection.state !== "connected" || !repo.trim()}>
+      {busy && repoSpinner}{t(busy ? "template.repo.working" : direct ? "template.repo.commit" : "template.repo.openPullRequest")}
+    </button>
+  </>;
+
+  return (
+    <TemplateModal title={t("template.repo.title")} labelledBy={`${titleId}-title`} onClose={() => { if (!busy) onClose(); }} footer={footer}>
+      <div data-template-repo={card.id}>
+        {done ? (
+          <p role="status" dir="auto" className="text-[13px] text-ink-secondary">{t(done.kind === "pull_request" ? "template.repo.pullRequestOpened" : "template.repo.committed", { branch: done.branch })}</p>
+        ) : connection.state === "checking" ? (
+          <p role="status" className="flex items-center gap-2 text-[13px] text-ink-secondary">{repoSpinner}{t("template.repo.checking")}</p>
+        ) : connection.state === "missing" ? (
+          <p role="alert" dir="auto" className="text-[13px] text-ink-secondary">{t("template.repo.connectFirst")}</p>
+        ) : connection.state === "refused" ? (
+          <p role="alert" dir="auto" className="text-[13px] text-ink-secondary">{connection.error}</p>
+        ) : (
+          <form id={titleId} onSubmit={(event) => { event.preventDefault(); void publish(); }} className="flex flex-col gap-3">
+            <div>
+              <label htmlFor={repoId} className="text-[13px] font-medium text-ink">{t("template.repo.repoLabel")}</label>
+              <input id={repoId} dir="ltr" autoFocus value={repo} onChange={(event) => setRepo(event.target.value)} placeholder={t("template.repo.repoPlaceholder")} spellCheck={false} className={`mt-1.5 ${repoField}`} />
+            </div>
+            <div>
+              <label htmlFor={folderId} className="text-[13px] font-medium text-ink">{t("template.repo.folderLabel")}</label>
+              <input id={folderId} dir="ltr" value={folder} onChange={(event) => setFolder(event.target.value)} spellCheck={false} className={`mt-1.5 ${repoField}`} />
+            </div>
+            <label className="flex items-center gap-2 text-[13px] text-ink">
+              <input type="checkbox" checked={direct} onChange={(event) => setDirect(event.target.checked)} />{t("template.repo.direct")}
+            </label>
+            <p className="text-[12px] text-ink-tertiary">{t("template.repo.note")}</p>
+          </form>
+        )}
+        {error && <p role="alert" dir="auto" className="mt-3 text-[13px] text-danger">{error}</p>}
+      </div>
     </TemplateModal>
   );
 }

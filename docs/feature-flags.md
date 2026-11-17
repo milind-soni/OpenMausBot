@@ -54,7 +54,7 @@ text and extra work can increase token usage.
 | `autoRecall` | On | Recalls matching memory passages into turns. | Recalled text uses context. Disabling this does not disable memory storage or upkeep; see [Memory](memory.md). |
 | `skillsLibrary` | Off | Enables the shared skills store and its Skills settings. | Enables the library, not automatic conversation review. Skill use follows assignments and permissions. |
 | `roomMemoryCapture` | Off | Lets memory upkeep also read a member bot's room turns. | Extends the material processed by memory upkeep. |
-| `parallelRoomJobs` | Off | Runs jobs assigned to several room members side by side, each in its own thread. | Allows concurrent engine work rather than sequential jobs. |
+| `parallelRoomJobs` | On | Runs jobs assigned to several room members side by side, each in its own thread. Set to `false` to run them one at a time in the room's thread. | Allows concurrent engine work rather than sequential jobs. |
 | `acpPlanLines` | Off | Shows an ACP agent's plan as activity lines. | Each emitted line counts as a tool call wherever tool calls are counted; environment override below. |
 | `agentsToolBridge` | Off, except eligible local-model turns | Lists a smaller tool catalog with `find_tool` and `use_tool`. | Tool lookup can add model calls; smaller initial context is not a guaranteed saving. See [Agents tool bridge](agents-tool-bridge.md) for eligibility and measurements. |
 | `savedSteps` | On | Allows saving and repeating computer tasks from their steps on a supported host. | Currently requires a Mac server. Enabling it does not add host support. |

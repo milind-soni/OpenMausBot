@@ -41,21 +41,35 @@ export function syntheticToolNames(prefix: string, count: number): string[] {
 }
 
 const CATALOG_SERVER = `
+import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 const names = JSON.parse(process.env.CATALOG_TOOLS);
+const after = JSON.parse(process.env.CATALOG_AFTER ?? "[]");
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+const started = (since = Date.now()) => new Promise((resolve) => {
+  const check = () => {
+    if (after.every((path) => existsSync(path))) setTimeout(resolve, Number(process.env.CATALOG_START_MS ?? 0));
+    else if (Date.now() - since > 30_000) {
+      process.stderr.write("catalog server: never saw " + after.filter((path) => !existsSync(path)).join(", ") + "\\n");
+      process.exit(1);
+    } else setTimeout(check, 10);
+  };
+  check();
+});
 createInterface({ input: process.stdin }).on("line", (line) => {
   const request = JSON.parse(line);
-  if (request.method === "initialize") reply(request.id, { protocolVersion: "2024-11-05", capabilities: { tools: {} } });
+  if (request.method === "initialize") void started().then(() => reply(request.id, { protocolVersion: "2024-11-05", capabilities: { tools: {} } }));
   else if (request.method === "tools/list") reply(request.id, { tools: names.map((name) => ({ name, description: "Synthetic " + name, inputSchema: { type: "object" } })) });
   else if (request.id !== undefined) reply(request.id, { content: [{ type: "text", text: "ran " + request.params?.name }] });
 });
 `;
 
-/** A stdio MCP server, as a turn's integrations take it, that lists exactly `names`. Remove `dir` when done. */
-export function catalogServer(names: readonly string[]): { dir: string; server: { command: string; args: string[]; env: Record<string, string> } } {
+/** A stdio MCP server, as a turn's integrations take it, that lists exactly `names`. It answers `initialize` once every file
+ * in `after` exists, then `startMs` later; if they are not all there within 30 s it exits with an error, so it never
+ * starts out of order. Remove `dir` when done. */
+export function catalogServer(names: readonly string[], { startMs = 0, after = [] }: { startMs?: number; after?: readonly string[] } = {}): { dir: string; server: { command: string; args: string[]; env: Record<string, string> } } {
   const dir = mkdtempSync(join(tmpdir(), "omb-catalog-mcp-"));
   const script = join(dir, "catalog.mjs");
   writeFileSync(script, CATALOG_SERVER);
-  return { dir, server: { command: process.execPath, args: [script], env: { CATALOG_TOOLS: JSON.stringify(names) } } };
+  return { dir, server: { command: process.execPath, args: [script], env: { CATALOG_TOOLS: JSON.stringify(names), CATALOG_START_MS: String(startMs), CATALOG_AFTER: JSON.stringify(after) } } };
 }

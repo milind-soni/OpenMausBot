@@ -12,7 +12,7 @@ import { finishSpeech, speechBusy, startSpeech, stopSpeech } from "./speech.mjs"
 import { installTalk, isTalkPanel } from "./talk-main.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { linuxDisablesGpu, SOFTWARE_RENDERING_ARG } from "./linux-gpu.mjs";
-import { pasteMenuItem } from "./paste-menu-item.mjs";
+import { contextMenuTemplate, createMediaDownloads } from "./context-menu.mjs";
 import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState, reopenedOutOfSight, quietSignals } from "./updater.mjs";
 import {
   appendDesktopCrashRecord,
@@ -1924,36 +1924,10 @@ async function forgetEnvironment(id, purge = false, confirmed = false) {
 }
 
 function showContextMenu(win, params) {
-  if (!params.isEditable && !params.linkURL && !params.misspelledWord && !params.selectionText) return;
-  const menuItems = [];
-  if (params.misspelledWord) {
-    for (const suggestion of params.dictionarySuggestions.slice(0, 5)) {
-      menuItems.push({
-        label: suggestion,
-        click: () => win.webContents.replaceMisspelling(suggestion),
-      });
-    }
-    if (menuItems.length) menuItems.push({ type: "separator" });
-  }
-  if (params.linkURL) {
-    menuItems.push(
-      { label: nativeT("native.context.copyLink"), click: () => clipboard.writeText(params.linkURL) },
-      { type: "separator" },
-    );
-  }
-  menuItems.push(
-    { label: nativeT("native.role.undo"), role: "undo", enabled: params.editFlags.canUndo },
-    { label: nativeT("native.role.redo"), role: "redo", enabled: params.editFlags.canRedo },
-    { type: "separator" },
-    { label: nativeT("native.role.cut"), role: "cut", enabled: params.editFlags.canCut },
-    { label: nativeT("native.role.copy"), role: "copy", enabled: params.editFlags.canCopy },
-    pasteMenuItem(params, clipboard, win.webContents, nativeT),
-    { label: nativeT("native.role.pasteAndMatchStyle"), role: "pasteAndMatchStyle", enabled: params.editFlags.canPaste },
-    { type: "separator" },
-    { label: nativeT("native.role.selectAll"), role: "selectAll", enabled: params.editFlags.canSelectAll },
-  );
-  Menu.buildFromTemplate(menuItems).popup({ window: win, frame: params.frame });
+  Menu.buildFromTemplate(contextMenuTemplate(params, { webContents: win.webContents, clipboard, downloads: mediaDownloads, t: nativeT })).popup({ window: win, frame: params.frame });
 }
+const mediaDownloads = createMediaDownloads({ dialog, shell, t: (...args) => nativeT(...args), log: slog,
+  openDir: () => path.join(app.getPath("temp"), "openmausbot-open-media"), downloadsDir: () => app.getPath("downloads") });
 
 function createWindow({ deferNavigation = false } = {}) {
   const waitsForSkinSync = process.platform === "win32";
@@ -2840,6 +2814,7 @@ app.whenReady().then(async () => {
   await startupScreen?.ready;
   if (desktopShutdownStarted) return;
   session.defaultSession.on("will-download", (_event, item) => {
+    if (mediaDownloads.claim(item)) return;
     item.setSavePath(collisionFreeDownloadPath(app.getPath("downloads"), item.getFilename()));
     revealDownloadWhenDone(item, (filePath) => shell.showItemInFolder(filePath));
   });

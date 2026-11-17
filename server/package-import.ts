@@ -353,7 +353,7 @@ function runImport(source: ImportSource, options: PackageImportOptions, deps: Pa
         const added = org
           ? deps.skills.installOrg!(created.id, `org:${org.ref}@${pkg!.release}`, skill.instructions,
               { installId: org.installId, key: skill.name, release: pkg!.release, ...pair(skill.instructions, skill.instructions) })
-          : deps.skills.install(created.id, skill.source ?? `package:${pkg!.id}`, [{ path: "SKILL.md", content: skill.instructions }]);
+          : deps.skills.install(created.id, skill.source ?? `package:${pkg!.id}`, [{ path: "SKILL.md", content: skill.instructions }, ...(skill.files ?? [])]);
         if ("error" in added) throw new Error(`Package skill "${skillName}" could not be imported: ${added.error}`);
       }
       for (const [path, text] of Object.entries(agent?.seed?.memory ?? {})) {
