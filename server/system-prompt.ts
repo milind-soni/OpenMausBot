@@ -161,7 +161,8 @@ const SECRET_NAMES_SHOWN = 40;
 const SECRET_NAME_SHOWN_MAX = 80;
 
 /** Names only, never a value. */
-export function savedSecretsPrompt(secrets: ReadonlyArray<{ name: string; refOnly?: true }>): string {
+/** `references`: the bot may use secrets from 1Password, so a reference a person gives works as a label too. */
+export function savedSecretsPrompt(secrets: ReadonlyArray<{ name: string; refOnly?: true }>, references = false): string {
   const names = new Map<string, string>();
   for (const secret of [...secrets].sort((a, b) => Number(Boolean(a.refOnly)) - Number(Boolean(b.refOnly)))) {
     const name = secret.name.replace(/[\p{Cc}\s]+/gu, " ").trim().slice(0, SECRET_NAME_SHOWN_MAX);
@@ -171,7 +172,8 @@ export function savedSecretsPrompt(secrets: ReadonlyArray<{ name: string; refOnl
   if (!names.size) return "";
   const shown = [...names.values()].slice(0, SECRET_NAMES_SHOWN);
   const more = names.size > shown.length ? ` and ${names.size - shown.length} more` : "";
-  return ` Secrets in the Vault you may use: ${shown.join(", ")}${more}. To use one, call request_credential with its name as the label: OpenMausBot hands it over at once with no card, and you never see the value.`;
+  const reference = references ? " A 1Password reference the person gives you (op://vault/item/field) works as the label too." : "";
+  return ` Secrets in the Vault you may use: ${shown.join(", ")}${more}. To use one, call request_credential with its name as the label: OpenMausBot hands it over at once with no card, and you never see the value.${reference}`;
 }
 
 export function computerPrompt(kind: ComputerPromptKind | null): string {
