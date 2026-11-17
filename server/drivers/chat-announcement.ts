@@ -15,9 +15,13 @@ function announcesChineseAction(prose: string): boolean {
 const ACTION_VERBS = "execute|send|type|press|launch|open|check|inspect|read|fetch|run|create|write|verify|pull|look|search|navigate|load";
 const ANNOUNCING_SENTENCE = new RegExp(`^(?:now,?\\s+)?(?:let me|i['\\u2019]ll|i will|i(?:['\\u2019]m| am) going to)\\s+(?:now\\s+)?(?:${ACTION_VERBS})\\b`, "i");
 
+const WAITS_FOR_USER = /\b(?:after|once|when|if|until|before)\s+you\b|\bwait(?:ing)?\s+for\s+you\b/i;
+
 function endsWithAnnouncingSentence(reply: string): boolean {
-  const sentences = reply.split(/(?<=[.!])\s+/);
-  return sentences.length > 1 && ANNOUNCING_SENTENCE.test(sentences.at(-1)!);
+  const sentences = blankCode(reply).trim().split(/(?<=[.!])\s+/);
+  if (sentences.length < 2) return false;
+  const last = sentences.at(-1)!.replace(/^[*_]+/, "");
+  return ANNOUNCING_SENTENCE.test(last) && !WAITS_FOR_USER.test(last);
 }
 
 export function announcesAction(text: string): boolean {
