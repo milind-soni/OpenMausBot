@@ -12,9 +12,12 @@ import { OutboundRequestService } from "./outbound-requests.ts";
 type HoldBot = Parameters<OutboundHold["hold"]>[0]["bot"];
 
 const dirs: string[] = [];
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs.splice(0)) {
+    await flushDecisionLog(dir);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 const calls = [{ slug: "GMAIL_SEND_EMAIL", arguments: { to: "ana@example.com", subject: "Hello" } }];
@@ -182,13 +185,19 @@ describe("Full access with no sending rule of its own", () => {
     expect(allowing.appended).toEqual([]);
   });
 
-  it("sends a call it cannot inspect without a card, while Send without asking still asks for one", async () => {
+  it("at Full access sends a call it cannot inspect without a card, with no rule or Send without asking", async () => {
     const held = setup(bot(undefined));
     for (let sent = 0; sent < 30; sent++) await expect(send(held, { fullAccess: true, opaque: true })).resolves.toEqual({ ok: true, approved: false });
     expect(held.appended).toEqual([]);
 
+    const allowingFull = setup(bot({ policy: "allow" }));
+    await expect(send(allowingFull, { fullAccess: true, opaque: true })).resolves.toEqual({ ok: true, approved: false });
+    expect(allowingFull.appended).toEqual([]);
+  });
+
+  it("below Full access, Send without asking still asks before a call it cannot inspect", async () => {
     const allowing = setup(bot({ policy: "allow" }));
-    const pending = allowing.hold.hold({ ...allowing.input, opaque: true, fullAccess: true, active: () => true });
+    const pending = allowing.hold.hold({ ...allowing.input, opaque: true, fullAccess: false, active: () => true });
     expect(allowing.appended).toHaveLength(1);
     allowing.outboundRequests.resolve({ threadId: "t1", requestId: allowing.appended[0].message.card!.requestId as string, behavior: "deny" });
     await expect(pending).resolves.toMatchObject({ ok: false });

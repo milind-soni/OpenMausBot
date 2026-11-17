@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Search, SquarePen } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 import { activeLocale, t } from "@/lib/i18n";
 import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
 import { api, currentTaskBot, openBotThread, useStore, visibleMessages, type Bot, type Message } from "@/state/store";
 import { lastLine } from "../sidebar-preview";
 import { isArchived, orderedThreadList, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow } from "../SidebarThreadRow";
 import { filterTasks } from "../TaskPicker";
+import { useConversationSide } from "../TeamSideSwitch";
+import { tasksOfSide } from "@/state/team-side";
 import { CardLabel, panelActionCls } from "./rows";
 
 export const CONVERSATIONS_SHOWN = 3;
@@ -61,13 +62,14 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const [searching, setSearching] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const generatedTitles = llmThreadTitlesEnabled(state.config);
   const actions = useMemo(() => {
-    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch, generatedTitles);
+    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch);
     return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
-  }, [bot.id, dispatch, generatedTitles]);
+  }, [bot.id, dispatch]);
 
-  const threads = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
+  const side = useConversationSide(bot);
+  const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }];
+  const threads = (side ? tasksOfSide({ ...bot, tasks }, side) : tasks)
     .filter((task) => !task.routineRunId)
     .map((task) => {
       const thread = currentTaskBot(bot, task.threadId);
@@ -135,7 +137,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
         </button>
       )}>{t("botPanel.conversations.title")}</CardLabel>
       <div className={cn("flex items-center gap-2", listed && "mb-2")}>
-        {bot.yourAccess !== "view" && (
+        {bot.yourAccess !== "view" && side !== "team" && (
           <button
             type="button"
             data-conversations-new

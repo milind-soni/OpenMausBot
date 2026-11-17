@@ -78,19 +78,19 @@ afterEach(() => {
   setTeamPeople(null);
 });
 
-it("lists each team bot once with who looks after it and a plain summary, leaving out each person's own MausBot", async () => {
+it("lists each team bot once with its owner and a plain summary, leaving out each person's own MausBot", async () => {
   await overview();
   expect(botRows().map((row) => row.dataset.accessRow)).toEqual(["helpdesk", "payroll"]);
-  expect(document.querySelector('[data-access-row="payroll"]')!.textContent).toContain("Looked after by Cara");
+  expect(document.querySelector('[data-access-row="payroll"]')!.textContent).toContain("Owner: Cara");
   expect(summaryOf("payroll")).toBe("Only people added");
   expect(summaryOf("helpdesk")).toBe("Everyone can use it");
   expect(document.querySelector("[data-access-overview] table, [data-access-overview] select")).toBeNull();
 });
 
-it("says nobody looks after a bot nobody owns yet", async () => {
+it("says a bot nobody owns has no owner yet", async () => {
   server.bots = [bot({ id: "orphan", name: "Orphan", createdBy: undefined, access: { everyone: "view", people: {} } })];
   await overview();
-  expect(document.querySelector('[data-access-row="orphan"]')!.textContent).toContain("Nobody looks after it yet");
+  expect(document.querySelector('[data-access-row="orphan"]')!.textContent).toContain("No owner yet");
   expect(summaryOf("orphan"), "one column: a stored level reads the same").toBe("Everyone can use it");
 });
 
@@ -162,7 +162,7 @@ it("shows a person's bots with a Remove on each they were added to, Undo after i
   expect(document.activeElement).toBe(document.querySelector(`[data-access-person="${BOB.email}"]`));
 });
 
-it("offers no Remove for access that comes from everyone, and says who looks after the bots they own", async () => {
+it("offers no Remove for access that comes from everyone, and marks the bots they own", async () => {
   await overview();
   await byPerson();
   await openPerson(BOB.email);
@@ -173,7 +173,7 @@ it("offers no Remove for access that comes from everyone, and says who looks aft
   await settle();
   await openPerson(CARA.email);
   const owned = document.querySelector('[data-access-person-bot="payroll"]')!;
-  expect(owned.textContent).toContain("Looks after it");
+  expect(owned.textContent).toContain("Owner");
   expect(owned.querySelector("button")).toBeNull();
 });
 

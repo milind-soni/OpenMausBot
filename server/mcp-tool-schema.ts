@@ -142,7 +142,8 @@ export function fitToolListResult(result: unknown, profile: ToolSchemaProfile | 
 }
 
 /** Every listed schema gets a plain object root; under a profile each is also fitted to it. */
-export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (line: string) => void): {
+/** `ownTools`: listed after the child's on its last page, in place of any child tool of the same name. */
+export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (line: string) => void, ownTools: readonly JsonObject[] = []): {
   observeRequest: (line: string) => void;
   rewriteResponse: (line: string) => string;
 } {
@@ -173,13 +174,17 @@ export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (lin
       if (!isObject(frame) || "method" in frame || !pending.delete(idKey(frame.id))) return line;
       if (!isObject(frame.result) || !Array.isArray(frame.result.tools)) return line;
 
-      const listed: unknown[] = frame.result.tools;
+      const own = frame.result.nextCursor ? [] : ownTools;
+      const ownNames = new Set(own.map((tool) => tool.name));
+      const listed: unknown[] = own.length
+        ? [...frame.result.tools.filter((tool: unknown) => !isObject(tool) || !ownNames.has(tool.name)), ...own]
+        : frame.result.tools;
       const tools = profile ? fitToolList(listed, profile, log) : listed.map((tool: unknown) => {
         if (!isObject(tool)) return tool;
         const inputSchema = providerSafeInputSchema(tool.inputSchema);
         return inputSchema === tool.inputSchema ? tool : { ...tool, inputSchema };
       });
-      const changed = tools.length !== listed.length || tools.some((tool, index) => tool !== listed[index]);
+      const changed = own.length > 0 || tools.length !== listed.length || tools.some((tool, index) => tool !== listed[index]);
       return changed ? JSON.stringify({ ...frame, result: { ...frame.result, tools } }) : line;
     },
   };

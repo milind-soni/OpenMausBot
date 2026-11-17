@@ -3,13 +3,15 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { cpus, totalmem } from "node:os";
 import { join } from "node:path";
 import type * as DuckDB from "@duckdb/node-api";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
 import { botFolder as defaultBotFolder } from "../bot-folder.ts";
+import { boxCpus } from "../box-cpus.ts";
+import { boxMemory } from "../box-memory.ts";
 import { DATA_DIR } from "../config.ts";
+import { tableIdentifierParts } from "./identifiers.ts";
 import {
   DataFailure,
   type BotDatabase,
@@ -68,15 +70,17 @@ function loadBinding(directory: string | null): Binding {
   return nativeRequire(directory)("@duckdb/node-api") as Binding;
 }
 
-/** DuckDB's defaults assume it owns the machine (80 % of RAM, every core), and a native OOM takes the server down. */
-export function instanceSettings(folder: string, dataDir: string, duckdbVersion: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const quarterOfRam = Math.floor(totalmem() / 4);
+/** DuckDB's defaults assume it owns the machine (80 % of RAM, every core), and a native OOM takes the server down. A
+ * container's limits count, not its host's: each thread also counts against the container's pids limit. */
+export function instanceSettings(folder: string, dataDir: string, duckdbVersion: string, env: NodeJS.ProcessEnv = process.env,
+  box: { cpus: number; memoryBytes: number } = { cpus: boxCpus(), memoryBytes: boxMemory().bytes }): Record<string, string> {
+  const quarterOfRam = Math.floor(box.memoryBytes / 4);
   const memoryMiB = Math.max(256, Math.floor(Math.min(2 * 1024 ** 3, quarterOfRam) / 1024 ** 2));
   return {
     memory_limit: env.OMB_DUCKDB_MEMORY_LIMIT || `${memoryMiB}MiB`,
     temp_directory: join(folder, DATA_TMP_DIR),
     max_temp_directory_size: env.OMB_DUCKDB_MAX_TEMP_SIZE || "20GB",
-    threads: String(Math.max(1, Math.min(4, cpus().length || 1))),
+    threads: String(Math.max(1, Math.min(4, Math.floor(box.cpus) || 1))),
     // Extensions are tied to the exact DuckDB version.
     extension_directory: join(dataDir, "duckdb-extensions", duckdbVersion),
     autoinstall_known_extensions: "false",
@@ -450,7 +454,7 @@ class BotDb implements BotDatabase {
   }
 
   private async lookup(name: string): Promise<CatalogEntry> {
-    const parts = this.splitIdentifier(name.trim()).slice(-2);
+    const parts = (tableIdentifierParts(name) ?? this.splitIdentifier(name.trim())).slice(-2);
     const table = parts[parts.length - 1];
     const schema = parts.length === 2 ? parts[0] : null;
     if (!table) throw new DataFailure({ code: "invalid_input", message: "A table name is required." });
@@ -519,8 +523,10 @@ class BotDb implements BotDatabase {
 
   private async source(target: string): Promise<string> {
     const text = target.trim().replace(/;+\s*$/, "");
-    const looksLikeName = /^[\w."$ -]+$/.test(text) && !/\s(?:from|select|with|values)\s/i.test(text) && !/^(?:select|with|from|values|pivot|unpivot|show|describe)\b/i.test(text);
-    if (looksLikeName) return this.resolveTable(text);
+    // Keep accepting the display names callers could pass before quoted SQL
+    // identifiers were recognized here (for example, Order Items).
+    const displayName = /^[\w."$ -]+$/.test(text) && !/\s(?:from|select|with|values)\s/i.test(text) && !/^(?:select|with|from|values|pivot|unpivot|show|describe)\b/i.test(text);
+    if (tableIdentifierParts(text) || displayName) return this.resolveTable(text);
     return `(${text}) AS omb_described`;
   }
 
@@ -576,10 +582,11 @@ class BotDb implements BotDatabase {
     const result: DataHistogram = { table: this.displayName(entry), column: found.name, bins: [] };
 
     if (numeric || temporal) {
-      const value = numeric ? `CAST(${id} AS DOUBLE)` : `epoch(CAST(${id} AS TIMESTAMP))`;
-      const sql = `WITH omb_range AS (SELECT min(${value}) AS lo, max(${value}) AS hi FROM ${from} WHERE ${id} IS NOT NULL)
-SELECT coalesce(LEAST(floor((${value} - omb_range.lo) / nullif(omb_range.hi - omb_range.lo, 0) * ${bins}), ${bins - 1}), 0)::INTEGER AS bin, count(*) AS n, min(omb_range.lo), min(omb_range.hi)
-FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
+      const sourceId = `omb_source.${id}`;
+      const value = numeric ? `CAST(${sourceId} AS DOUBLE)` : `epoch(CAST(${sourceId} AS TIMESTAMP))`;
+      const sql = `WITH omb_range AS (SELECT min(${value}) AS lo, max(${value}) AS hi FROM ${from} AS omb_source WHERE ${sourceId} IS NOT NULL)
+SELECT LEAST(coalesce(floor((${value} - omb_range.lo) / nullif(omb_range.hi - omb_range.lo, 0) * ${bins}), 0), ${bins - 1})::INTEGER AS bin, count(*) AS n, min(omb_range.lo), min(omb_range.hi)
+FROM ${from} AS omb_source, omb_range WHERE ${sourceId} IS NOT NULL GROUP BY bin ORDER BY bin`;
       const rows = (await this.statement("panel", sql, options, (o, conn) => this.read(o, conn, sql))).rows;
       if (!rows.length) return result;
       const lo = Number(rows[0][2]);

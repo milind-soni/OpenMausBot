@@ -10,6 +10,7 @@ import {
   hasNativeAutoReview,
   isEmergencyApprovalDowngrade,
   isApprovalMode,
+  levelWithin,
 } from "../shared/approval-mode.ts";
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { createApprovalModeSupport } from "./harness-capabilities.ts";
@@ -177,5 +178,17 @@ describe("approval support bound to a registry", () => {
         expect(supports({ driverKind }, mode)).toBe(supportsApprovalMode(driverKind, mode));
       }
     }
+  });
+});
+
+describe("a level within another", () => {
+  it("a level is within itself and any looser one; custom compares only to itself", () => {
+    expect(levelWithin("ask", "full")).toBe(true);
+    expect(levelWithin("full", "full")).toBe(true);
+    expect(levelWithin("full", "ask")).toBe(false);
+    expect(levelWithin("auto", "edits")).toBe(false);
+    expect(levelWithin("custom", "custom")).toBe(true);
+    expect(levelWithin("custom", "full")).toBe(false);
+    expect(levelWithin("ask", "custom")).toBe(false);
   });
 });

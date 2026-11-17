@@ -671,10 +671,15 @@ describe("WebhookManager", () => {
 describe("turning a webhook back on, Run now, and a deleted bot's webhooks", () => {
   it("turns a paused webhook back on, and Run now works while it is paused, like a schedule's", () => {
     const h = harness();
-    const { webhook } = create(h.manager);
+    const { webhook, secret } = create(h.manager);
     expect(h.manager.update(webhook.id, { enabled: false, verificationPending: false })).toMatchObject({ enabled: false });
     expect(h.manager.test(webhook.id)).toMatchObject({ runId: "run-1", duplicate: false });
+    // The person's own test: a usage cap lets it run as it lets a routine started by hand; an outside delivery is not.
+    expect(h.queued.at(-1)).toMatchObject({ byPerson: true });
     expect(h.manager.update(webhook.id, { enabled: true, verificationPending: false })).toMatchObject({ enabled: true });
+    h.manager.receive(webhook.endpointId, secret, { payload: { lead: "Ada" }, deliveryId: "outside-1" });
+    expect(h.queued).toHaveLength(2);
+    expect(h.queued.at(-1)?.byPerson).toBeUndefined();
   });
 
   it("removes a deleted bot's webhooks for good, with their calls, and cancels their queued work", () => {
@@ -735,5 +740,21 @@ describe("wrong-secret calls, counted", () => {
       [start + 60_000, "Invalid webhook URL or secret"],
       [start + 61 * 60_000, "Invalid webhook URL or secret (2 requests)"],
     ]);
+  });
+});
+
+describe("webhook that keeps one conversation", () => {
+  it("saves the option, hands it to each run, and turns it off again", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({ name: "Leads", prompt: "Handle it", botId: "maus-1", sameConversation: true });
+    expect(webhook.sameConversation).toBe(true);
+    h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "one" });
+    expect(h.queued.at(-1)).toMatchObject({ webhookId: webhook.id, sameConversation: true });
+    expect(h.manager.update(webhook.id, { name: "Renamed" })?.sameConversation).toBe(true);
+    expect(new WebhookManager(h.options).list().find((candidate) => candidate.id === webhook.id)?.sameConversation).toBe(true);
+
+    expect(h.manager.update(webhook.id, { sameConversation: false })).not.toHaveProperty("sameConversation");
+    h.manager.receive(webhook.endpointId, secret, { payload: {}, deliveryId: "two" });
+    expect(h.queued.at(-1)?.sameConversation).toBeUndefined();
   });
 });

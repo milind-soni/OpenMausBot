@@ -102,6 +102,8 @@ function mergeRow(into: TurnNode, row: UsageRow): void {
   into.tokens.input += other.tokens.input;
   into.tokens.cachedInput += other.tokens.cachedInput;
   into.tokens.output += other.tokens.output;
+  if (finite(other.tokens.cacheWrite)) into.tokens.cacheWrite = (into.tokens.cacheWrite ?? 0) + other.tokens.cacheWrite;
+  if (finite(other.tokens.reasoning)) into.tokens.reasoning = (into.tokens.reasoning ?? 0) + other.tokens.reasoning;
   into.endedAt = Math.max(into.endedAt ?? 0, other.endedAt ?? 0);
 }
 
@@ -113,6 +115,8 @@ function nodeFromLive(turn: LiveTurnView, bot: LiveBot | null): TurnNode {
     tokens.input += step.tokens?.input ?? 0;
     tokens.cachedInput += step.tokens?.cachedInput ?? 0;
     tokens.output += step.tokens?.output ?? 0;
+    if (finite(step.tokens?.cacheWrite)) tokens.cacheWrite = (tokens.cacheWrite ?? 0) + step.tokens.cacheWrite;
+    if (finite(step.tokens?.reasoning)) tokens.reasoning = (tokens.reasoning ?? 0) + step.tokens.reasoning;
   }
   return {
     key: turnKey(turn.threadId, turn.turnId),

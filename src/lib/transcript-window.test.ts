@@ -7,6 +7,7 @@ import {
   followWindowStart,
   resolveTranscriptWindow,
   tailWindowStart,
+  withRestingCard,
 } from "./transcript-window";
 
 const thread = (total: number): number[] => Array.from({ length: total }, (_, i) => i);
@@ -164,5 +165,25 @@ describe("focusWindowRange", () => {
 
   it("uses the full short transcript", () => {
     expect(focusWindowRange(20, 10)).toEqual({ start: 0, end: 20 });
+  });
+});
+
+describe("withRestingCard", () => {
+  const rows = thread(300);
+  const range = resolveTranscriptWindow(rows, tailWindowStart(rows.length));
+
+  it("puts the newest resting card back on top when the range has left it behind", () => {
+    const shown = withRestingCard(rows, range.visible, range.startIndex, (row) => row === 10 || row === 40);
+    expect(shown[0]).toBe(40);
+    expect(shown.slice(1)).toEqual(range.visible);
+  });
+
+  it("adds nothing when the newest resting card is already in the range", () => {
+    expect(withRestingCard(rows, range.visible, range.startIndex, (row) => row === 10 || row === 250)).toBe(range.visible);
+  });
+
+  it("adds nothing when no card rests on the person", () => {
+    expect(withRestingCard(rows, range.visible, range.startIndex, () => false)).toBe(range.visible);
+    expect(withRestingCard(rows, range.visible, range.startIndex)).toBe(range.visible);
   });
 });

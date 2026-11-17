@@ -4,11 +4,12 @@ import { execFile } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, join } from "node:path";
+import { homeProgramsDistrusted, serverMayRunFrom } from "./bot-box/program-trust.ts";
 import { resolvePortableHermes } from "./portable-hermes.ts";
 
-function nvmBinDirs(): string[] {
+function nvmBinDirs(home: string): string[] {
   try {
-    const base = join(homedir(), ".nvm", "versions", "node");
+    const base = join(home, ".nvm", "versions", "node");
     return readdirSync(base)
       .filter((v) => v.startsWith("v"))
       .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
@@ -23,8 +24,7 @@ export function sealedFixture(): boolean {
   return process.env.OMB_TEST_SEALED_PATH === "1";
 }
 
-function knownDirs(): string[] {
-  const home = homedir();
+function knownDirs(home: string = homedir()): string[] {
   return [
     join(home, ".local", "bin"), // claude installer default
     join(home, ".npm-global", "bin"), // npm prefix ~/.npm-global (claude, opencode)
@@ -42,7 +42,7 @@ function knownDirs(): string[] {
     join(home, ".local", "share", "mise", "shims"), // mise installer
     join(home, ".deno", "bin"),
     join(home, "bin"),
-    ...nvmBinDirs(),
+    ...nvmBinDirs(home),
     // Mac Local VM runtimes: Docker Desktop's per-user CLI install and Podman's official pkg.
     ...(process.platform === "darwin" ? [
       join(home, ".docker", "bin"),
@@ -103,23 +103,31 @@ export function resetPathCache(): void {
   probed = false;
 }
 
+/** The folders under `home` that CLI installers put programs in, which exist: a boxed process's own PATH keeps them. */
+export function homeProgramDirs(home: string): string[] {
+  return (process.platform === "win32" ? [] : knownDirs(home)).filter((dir) => dir.startsWith(`${home}/`) && existsSync(dir));
+}
+
 export function augmentedPath(): string {
-  if (cached === null) {
-    const fallback = fallbackDirs.filter((d) => existsSync(d));
-    cached = mergePaths([
-      ...registeredDirs.filter((d) => existsSync(d)),
-      ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
-      ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
-      // Keep the last login-shell result while a rescan re-probes, or rc-only CLIs vanish for the response that triggered it.
-      ...(loginShellPath ? loginShellPath.split(delimiter) : []),
-      ...(process.platform === "win32" ? windowsKnownDirs() : knownDirs()).filter((d) => existsSync(d)),
-    ].filter((d) => !fallback.includes(d)).concat(fallback));
-  }
-  if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32") {
+  if (cached === null) cached = buildPath();
+  // The login shell reads its rc files from HOME, which a boxed bot can write.
+  if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32" && !homeProgramsDistrusted()) {
     probed = true;
     probeLoginShellPath();
   }
   return cached;
+}
+
+function buildPath(): string {
+  const fallback = fallbackDirs.filter((d) => existsSync(d));
+  return mergePaths([
+    ...registeredDirs.filter((d) => existsSync(d)),
+    ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
+    ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
+    // Keep the last login-shell result while a rescan re-probes, or rc-only CLIs vanish for the response that triggered it.
+    ...(loginShellPath ? loginShellPath.split(delimiter) : []),
+    ...(process.platform === "win32" ? windowsKnownDirs() : knownDirs()).filter((d) => existsSync(d)),
+  ].filter((d) => !fallback.includes(d)).concat(fallback).filter(serverMayRunFrom));
 }
 
 function mergePaths(parts: string[]): string {
@@ -138,9 +146,7 @@ function probeLoginShellPath(): void {
       const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
       if (!m || !m[1]) return;
       loginShellPath = m[1];
-      // Fallback dirs stay last, behind what the person's shell adds.
-      const fallback = fallbackDirs.filter((d) => existsSync(d));
-      cached = mergePaths([...(cached ?? "").split(delimiter).filter((d) => !fallback.includes(d)), ...m[1].split(delimiter), ...fallback]);
+      cached = buildPath();
     },
   );
 }
@@ -191,6 +197,7 @@ export function findCliCandidates(name: string, path: string = augmentedPath()):
 export interface ResolvedSpawn {
   command: string;
   args: string[];
+  env?: NodeJS.ProcessEnv;
 }
 
 /** A mini tokenizer, never a shell: quotes group segments; no escapes, no substitution, nothing evaluated. */
@@ -331,6 +338,18 @@ function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | nu
     return null;
   }
   const dir = dirname(shim);
+  if (basename(shim).toLowerCase() === "dsh.cmd" && /^set "ELECTRON_RUN_AS_NODE=1"\r?$/im.test(text)) {
+    const desktop = /^"%~dp0([^"\r\n]+\.exe)" --expose-internals "%~dp0((?:[^"\r\n]+\\)?app\.asar)\\([^"\r\n]+\.js)" %\*\r?$/im.exec(text);
+    if (desktop) {
+      const command = join(dir, desktop[1]);
+      const archive = join(dir, desktop[2]);
+      const script = join(archive, desktop[3]);
+      if (isFile(command) && isFile(archive)) {
+        return { command, args: ["--expose-internals", script], env: { ELECTRON_RUN_AS_NODE: "1" } };
+      }
+    }
+    return null;
+  }
   const portableHermes = resolvePortableHermes(shim, text);
   if (portableHermes) return portableHermes;
   // npm's own npm.cmd/npx.cmd name their entry as SET "NPX_CLI_JS=%~dp0\…"; a launcher switch to a global npm is not followed.
@@ -383,7 +402,7 @@ function resolveWord(cli: string, args: string[], env?: NodeJS.ProcessEnv): Reso
   const ext = extname(file).toLowerCase();
   if (ext === ".cmd" || ext === ".bat") {
     const direct = parseCmdShim(file, env);
-    return direct ? { command: direct.command, args: [...direct.args, ...args] } : { command: file, args };
+    return direct ? { ...direct, args: [...direct.args, ...args] } : { command: file, args };
   }
   if (ext === ".exe" || ext === ".com") return { command: file, args };
   const viaNode = parseNodeShebang(file, env);

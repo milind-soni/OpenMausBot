@@ -154,6 +154,27 @@ test("the rail's channels: the list only for the rail's own page, a circle only 
   assert.deepEqual(r.sent.slice(2), ["page:workspaces:changed", "rail:workspaces:changed"], "the rail came beside the page (or went): the page reads it again");
 });
 
+test("a circle's click goes through main's list of what is being opened, the rail's page reads it, and it hears when it changes", async () => {
+  const asked = [], w = { trusted: true }, sent = [];
+  let target = null;
+  const handlers = new Map();
+  const installed = installCloudRail({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, guard: handler => handler, trusted: () => w.trusted,
+    places: () => [{ id: "a", name: "Client A", color: null, kind: "cloud", opens: true }], open: async id => { asked.push(["open", id]); return "opened"; }, add: { choices: () => ({ cloud: false, link: false, address: false }), run: () => {} }, account: () => null, clipboard: {}, openCloud: () => {},
+    targets: () => [{ send: channel => sent.push(channel), isDestroyed: () => false }], ask: async (id, run) => { asked.push(["ask", id]); return run(); }, switching: () => target });
+  const call = (channel, ...args) => handlers.get(channel)({}, ...args);
+  assert.equal(await call("workspaces:open", "a"), "opened");
+  assert.deepEqual(asked, [["ask", "a"], ["open", "a"]], "the click is listed before main switches");
+  assert.equal(call("workspaces:places").switching, undefined, "nothing being opened: nothing said");
+  installed.changed();
+  target = { id: "a", waking: true };
+  assert.deepEqual(call("workspaces:places").switching, { id: "a", waking: true });
+  sent.length = 0;
+  installed.changed();
+  assert.deepEqual(sent, ["workspaces:changed"], "the rail's page reads the list again");
+  installed.changed();
+  assert.deepEqual(sent, ["workspaces:changed"], "and only when it changed");
+});
+
 test("Settings → Servers on this computer's own page looks a server up and connects to it; a page main doesn't vouch for can't", () => {
   const r = rail();
   r.w.lists = false;

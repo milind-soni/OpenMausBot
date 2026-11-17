@@ -15,6 +15,7 @@ import type { RoutineRequestSchedule } from "../../shared/routine-request";
 import { isSkillSwitchAction, type SkillShareRecord } from "../../shared/skill-request";
 import { cardAutomation } from "@/lib/automations";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { useCloudGuest } from "@/lib/cloud-guest";
 import { yourComputerAsk } from "@/lib/your-computer";
 import { computerAskWords } from "@/lib/computer-ask";
 import { mcpRequestActionLabel } from "@/lib/mcp-request-label";
@@ -159,6 +160,8 @@ function plainWhen(schedule: RoutineRequestSchedule): string {
 }
 
 export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean; cancels?: boolean } | undefined {
+  const setting = card.appSettingRequest;
+  if (setting) return { line: t("approval.applied.appSetting", { name, title: `${setting.label}: ${approvalDetailText(card)}` }), canUndo: true };
   const routine = card.routineRequest;
   if (routine) {
     const operation = routine.operation;
@@ -437,6 +440,13 @@ function CompactApprovalRow({
   );
 }
 
+/** A guest on someone's My Cloud sees why the card waits: only that Cloud's owner may answer it. `guest` overrides the session. */
+export function CloudGuestApprovalNote({ guest, className }: { guest?: boolean; className?: string }) {
+  const known = useCloudGuest();
+  if (!(guest ?? known)) return null;
+  return <p data-cloud-guest-note className={cn("text-[13px] text-ink-secondary", className)}>{t("chat.cloudGuest.ownerApproves")}</p>;
+}
+
 export function ApprovalCard({
   bot,
   message,
@@ -518,7 +528,7 @@ export function ApprovalCard({
         answeredBelow={Boolean(card.requestId && card.tool && !card.dismissed)}
       />
     );
-    return waiting && card.requestId && card.tool ? <div className="flex w-full flex-col gap-1">{row}<CardHint id="spot.approval" /></div> : row;
+    return waiting && card.requestId && card.tool ? <div className="flex w-full flex-col gap-1">{row}<CloudGuestApprovalNote /><CardHint id="spot.approval" /></div> : row;
   }
 
   return (
@@ -582,6 +592,7 @@ export function ApprovalCard({
           </>
         )}
       </div>
+      {!outcome && <CloudGuestApprovalNote className="mt-2" />}
     </div>
   );
 }

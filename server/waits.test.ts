@@ -90,6 +90,52 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
 }
 
 describe("WaitManager", () => {
+  it("keeps work a bot handed on to one open wait per assignment, across a restart, until it ends", async () => {
+    const h = harness();
+    const handed = (assignmentId: string) => h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" }, assignmentId });
+    const first = await handed("a1");
+    expect(first).toMatchObject({ state: "created", wait: { assignmentId: "a1" } });
+    const id = (first as { wait: WaitRecord }).wait.id;
+    expect(h.waitOf(id).assignmentId).toBe("a1");
+    const again = await handed("a1");
+    expect(again).toMatchObject({ state: "refused", status: 409 });
+    expect((again as { error: string }).error).toMatch(/^Work handed to you keeps one wait at a time, and this work already has one:\n- /);
+    expect(await handed("a2")).toMatchObject({ state: "created" });
+    expect(await h.create({ kind: "file_exists", path: "/r.txt" })).toMatchObject({ state: "created" });
+    h.reload();
+    expect(await handed("a1")).toMatchObject({ state: "refused", status: 409 });
+    expect(h.manager.cancel(id, "bot-1")).toMatchObject({ id });
+    expect(await handed("a1")).toMatchObject({ state: "created" });
+  });
+
+  it("stores no handed-on wait when the work ends while its first check is still running", async () => {
+    const h = harness();
+    let open!: () => void, running = true;
+    h.pageGate = new Promise((resolve) => { open = resolve; });
+    const pending = h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the page", condition: { kind: "url_contains", url: "https://example.com/", text: "done" }, assignmentId: "a1", stillAllowed: () => (running ? null : "ended") });
+    await vi.waitFor(() => expect(h.pageCalls).toBe(1));
+    running = false;
+    open();
+    expect(await pending).toEqual({ state: "refused", status: 403, error: "ended" });
+    expect(h.manager.list("bot-1")).toEqual([]);
+    expect(h.showCard).not.toHaveBeenCalled();
+    h.pageGate = null;
+    const kept = await h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" }, assignmentId: "a2", stillAllowed: () => null });
+    expect(kept).toMatchObject({ state: "created", wait: { assignmentId: "a2" } });
+    expect(h.waitOf((kept as { wait: WaitRecord }).wait.id)).not.toHaveProperty("stillAllowed");
+  });
+
+  it("lets handed-on work set a new wait once its wait has ended, even before the ending is posted", async () => {
+    const h = harness();
+    const handed = () => h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" }, assignmentId: "a1" });
+    const first = await handed();
+    const id = (first as { wait: WaitRecord }).wait.id;
+    h.stamp = { size: 1, mtimeMs: 1 }; h.postOk = false; h.advance(5_000); await h.manager.tick();
+    expect(h.waitOf(id).ending).toMatchObject({ status: "fired" });
+    h.stamp = null;
+    expect(await handed()).toMatchObject({ state: "created", wait: { assignmentId: "a1" } });
+  });
+
   it("creates a wait with a 24-hour default and its first check due, and keeps it across a restart", async () => {
     const h = harness();
     const created = await h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" } });

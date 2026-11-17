@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import en from "../src/locales/en.json";
 import {
-  cloudRefusal, PLACE_EN, PLACE_STATES, PLACE_WORDS, placeRowText, placeRowView, placeState, placeView, placeViewOf,
+  cloudLimitFromBody, cloudLimitSentence, cloudRefusal, PLACE_EN, PLACE_STATES, PLACE_WORDS, placeRowText, placeRowView, placeState, placeView, placeViewOf,
   type PlaceFacts, type PlaceParams, type PlaceSource, type PlaceState,
 } from "./place-view.ts";
 
@@ -89,6 +89,9 @@ describe("U1: one line and at most one action for every state", () => {
     // A refusal known only by its code still reads whole.
     expect(placeViewOf("cc-at-once", { plan: "Pro", max: 2 }, admin).line).toBe("All the cloud desktops your plan includes are in use.");
     expect(placeViewOf("cc-no-hours", {}, admin).line).toBe("This month's cloud desktop hours are used up.");
+    expect(placeViewOf("cc-no-hours", { trial: true }, admin)).toMatchObject({
+      line: "The free trial's cloud desktop hours are used up. The full allowance starts with the first payment.", action: { id: "see-plan" },
+    });
     expect(placeViewOf("cc-unavailable", {}, admin)).toMatchObject({
       short: "Not available now", line: "Cloud desktops can't start right now. It isn't anything you did.", action: { id: "try-again" },
     });
@@ -202,5 +205,62 @@ describe("cloudRefusal reads the Admin's refusals", () => {
     expect(cloudRefusal({ message: "Start the $20/month Boat plan to create sandboxes.", status: 402 }, false))
       .toEqual({ state: "cc-provider", params: { words: "Start the $20/month Boat plan to create sandboxes." } });
     expect(included("something new").state).toBe("cc-no-start");
+  });
+
+  it("reads a free trial's own words, so a trial gets its card too", () => {
+    expect(included("Your Pro free trial's 20 cloud computer hours are used up. Your full allowance starts with your first payment on 14 Nov.", "limit_reached", 429))
+      .toEqual({ state: "cc-no-hours", params: { trial: true } });
+    expect(included("Your Pro free trial includes 2 cloud computers at once. Delete one to start another.", "limit_reached", 429))
+      .toEqual({ state: "cc-at-once", params: { plan: "Pro", max: 2 } });
+  });
+
+  it("goes by the Admin's reason when it sends one, whatever its words say", () => {
+    const limited = (limit: Parameters<typeof cloudRefusal>[0]["limit"], message = "Words this app doesn't know.") =>
+      cloudRefusal({ message, code: "limit_reached", status: 429, limit }, true);
+    expect(limited({ reason: "hours_used", plan: "Pro", limit: 200, used: 200.4, resetsAt: "2026-12-01T00:00:00.000Z" }))
+      .toEqual({ state: "cc-no-hours", params: { plan: "Pro", hours: 200, month: "December" } });
+    expect(limited({ reason: "hours_used", trial: true, plan: "Pro", limit: 20, resetsAt: "2026-11-14T09:00:00.000Z" })).toEqual({ state: "cc-no-hours", params: { trial: true } });
+    expect(limited({ reason: "at_once", plan: "Max", limit: 4, used: 4 })).toEqual({ state: "cc-at-once", params: { plan: "Max", max: 4 } });
+    expect(limited({ reason: "at_once" }, "Your Pro plan includes 2 cloud computers at once.")).toEqual({ state: "cc-at-once", params: {} });
+    expect(limited({ reason: "too_many_starts", window: "hour" }, "Your Pro plan's 50 cloud computer hours for October are used up. They reset on 1 November.").state).toBe("cc-unavailable");
+    expect(cloudRefusal({ message: "x", code: "usage_unavailable", status: 503, limit: { reason: "usage_unavailable" } }, true).state).toBe("cc-unavailable");
+  });
+});
+
+describe("the Admin's limit, read and told to the bot", () => {
+  it("reads `reason` and its numbers at a body's top or in its error, and nothing it doesn't know", () => {
+    const fields = { reason: "hours_used", trial: true, plan: "Pro", limit: 20, used: 20.1, resetsAt: "2026-11-14T09:00:00.000Z" };
+    expect(cloudLimitFromBody({ ok: false, code: "limit_reached", message: "…", ...fields, error: { code: "limit_reached", ...fields } })).toEqual(fields);
+    expect(cloudLimitFromBody({ ok: false, error: { code: "limit_reached", reason: "too_many_starts", limit: 3, used: 3, window: "minute" } }))
+      .toEqual({ reason: "too_many_starts", limit: 3, used: 3, window: "minute" });
+    expect(cloudLimitFromBody({ reason: "at_once", trial: "yes", plan: 7, limit: -1, used: "2", resetsAt: "soon", window: "week" })).toEqual({ reason: "at_once" });
+    expect(cloudLimitFromBody({ ok: false, code: "limit_reached", message: "Your Pro plan includes 2 cloud computers at once." })).toBeUndefined();
+    expect(cloudLimitFromBody({ reason: "some_new_reason" })).toBeUndefined();
+    expect(cloudLimitFromBody(null)).toBeUndefined();
+  });
+
+  it("names the kind of limit in one fixed sentence, from the reason or from today's words", () => {
+    const told = (limit: Parameters<typeof cloudLimitSentence>[0]["limit"], message = "", code?: string) => cloudLimitSentence({ message, code, limit });
+    expect(told({ reason: "hours_used", limit: 200, resetsAt: "2026-12-01T00:00:00.000Z" })).toBe("This Cloud's cloud computer hours for this month are used up; they reset on 1 December.");
+    expect(told(undefined, "Your Pro plan's 50 cloud computer hours for October are used up. They reset on 1 November."))
+      .toBe("This Cloud's cloud computer hours for this month are used up; they reset on 1 November.");
+    expect(told({ reason: "hours_used", trial: true, resetsAt: "2026-11-14T09:00:00.000Z" }))
+      .toBe("This Cloud's free trial cloud computer hours are used up; they come back on 14 Nov.");
+    expect(told(undefined, "Your Pro free trial's 20 cloud computer hours are used up. Your full allowance starts with your first payment on 14 Nov."))
+      .toBe("This Cloud's free trial cloud computer hours are used up; they come back on 14 Nov.");
+    expect(told({ reason: "hours_used" })).toBe("This Cloud's cloud computer hours for this month are used up.");
+    for (const message of ["Your Personal plan includes 1 cloud computer at once. Delete one to start another.", "Your Pro free trial includes 2 cloud computers at once. Delete 2 to start one again."]) {
+      expect(told(undefined, message)).toBe("This Cloud already has as many cloud computers running as its plan allows.");
+    }
+    expect(told({ reason: "at_once", limit: 2 })).toBe("This Cloud already has as many cloud computers running as its plan allows.");
+    expect(told({ reason: "too_many_starts", window: "hour" })).toBe("Cloud computers were started too often; try again in an hour.");
+    expect(told(undefined, "Your cloud computers were woken too often. Try again tomorrow.")).toBe("Cloud computers were started too often; try again tomorrow.");
+    expect(told(undefined, "Your cloud computer was woken too often. Try again in a minute.")).toBe("Cloud computers were started too often; try again in a minute.");
+    expect(told({ reason: "usage_unavailable" })).toBe("Cloud computer use can't be checked right now.");
+    expect(told(undefined, "Cloud computer use can't be checked right now, so new starts are paused. Try again later.", "usage_unavailable"))
+      .toBe("Cloud computer use can't be checked right now.");
+    // Anything else is no plan limit: the bot hears the computer's own words instead.
+    expect(told(undefined, "Cloud computers are busy right now. Try again in a few minutes.", "rate_limited")).toBeNull();
+    expect(told(undefined, "box did not become ready within 90s")).toBeNull();
   });
 });

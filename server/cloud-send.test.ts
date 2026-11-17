@@ -70,6 +70,16 @@ describe("what a server reports for Send to My Cloud", () => {
   });
 });
 
+describe("saved Vault secrets in the comparison", () => {
+  it("go by their id here, with when they changed: never a value, and never on a bot's move into a team", () => {
+    const secrets = () => [{ id: "s1", name: "Stripe secret key", updatedAt: 9 }];
+    const items = cloudSendSummary(sources({ secrets })).items.filter((item) => item.kind === "secret");
+    expect(items).toEqual([{ key: "secret:s1", kind: "secret", label: "Stripe secret key", id: "s1", parts: { saved: partHash(9) } }]);
+    expect(itemKey.secret("s1")).toBe("secret:s1");
+    expect(cloudSendSummary(sources({ secrets }), { move: true, bot: "ember-0001" }).items.some((item) => item.kind === "secret")).toBe(false);
+  });
+});
+
 describe("a bot sent from the person's other computer keeps its id", () => {
   const store = { bot: (id: string) => (id === "taken-0001" ? ({} as BotRecord) : null), botByThread: (id: string) => (id === "thread-taken" ? ({} as BotRecord) : null), groupByThread: () => undefined };
   it("takes the server's own id form, only while nothing here uses it", () => {

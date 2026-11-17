@@ -19,6 +19,7 @@ import type { OpenFileChooser } from "../cdp/files.ts";
 import { editingCommands, keyDescription, US_KEYBOARD } from "../cdp/keyboard.ts";
 import type { ProfileControl, TakeResult } from "../control.ts";
 import { personUrl } from "../dispatch.ts";
+import { extensionInput, type InstalledExtension } from "../extensions.ts";
 import type { HoldLimits } from "../hold.ts";
 import type { Tab } from "../tabs.ts";
 import { ACCEPT_OF, chooseOption, cursorAt, editableAt, selectAt, type SelectPopup } from "./popups.ts";
@@ -60,7 +61,7 @@ export type ViewerOutput =
   | { type: "url"; url: string }
   | { type: "nav"; tabId: string; url: string; loading: boolean; canGoBack: boolean; canGoForward: boolean }
   | { type: "status"; connected: boolean; screencasting: boolean; viewportWidth: number; viewportHeight: number }
-  | { type: "clipboard"; text: string }
+  | { type: "clipboard"; text: string } | { type: "extensions"; extensions: InstalledExtension[] }
   | { type: "probe"; x: number; y: number; editable: boolean }
   | { type: "pointer"; phase: "move" | "click"; x: number; y: number; sequence: number }
   | { type: "fileChooser"; id: string; multiple: boolean; accept: string }
@@ -116,6 +117,7 @@ export interface HubHost {
   closeTab(tab: Tab): Promise<void>;
   showTab(tab: Tab): Promise<void>;
   download(id: string): Download | undefined;
+  extensions(): InstalledExtension[]; // installed in this browser's profile with a page to open; empty where OMB keeps none
 }
 
 const num = (value: unknown, fallback = 0) => (typeof value === "number" && Number.isFinite(value) ? value : fallback);
@@ -960,6 +962,7 @@ export class ViewerHub {
         if (url) await tab.page.navigate(url, { readiness: "none", timeoutMs: 15_000 });
         return;
       }
+      case "extensions": case "openExtension": return extensionInput(message, this.host.extensions(), viewer, tab.page);
       case "history":
         await (num(message.delta) < 0 ? tab.page.back({ readiness: "none" }) : tab.page.forward({ readiness: "none" }));
         return;

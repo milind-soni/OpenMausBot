@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({ effect: null as EffectCallback | null, text: "", dispatch: vi.fn() }));
 vi.mock("react", () => ({ useEffect: (effect: EffectCallback) => { fixture.effect = effect; } }));
+vi.mock("@/state/store-select", async () => (await import("@/testing/plain-store-select")).plainStoreSelect());
 vi.mock("@/state/store", () => ({
   api: vi.fn(),
   useStore: () => ({ state: { focusMessage: { threadId: "thread", messageId: "message", matchText: fixture.text, nonce: 1, consumed: false } }, dispatch: fixture.dispatch }),
@@ -49,6 +50,15 @@ function focus(text: string) {
 }
 
 describe("search match highlighting", () => {
+  it("locates a copied message inside the viewed transcript", () => {
+    const scoped = { querySelector: vi.fn(() => ({ lastElementChild: target })) };
+    fixture.text = "";
+    useFocusMessage("thread", true, { current: scoped as unknown as HTMLElement });
+    cleanup = fixture.effect!() as () => void;
+    expect(scoped.querySelector).toHaveBeenCalledWith('[data-mid="message"]');
+    expect(target.scrollIntoView).toHaveBeenCalledOnce();
+  });
+
   it.each(["", " ", "\t\r\n"])("does not create an empty range for %j", (text) => {
     focus(text);
     expect(ranges).toEqual([]);

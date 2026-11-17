@@ -12,6 +12,8 @@
 // OpenMausBot's fold.
 import type { IdleCompactResult } from "../contracts.ts";
 import { isContextMessage, type HandedState } from "../delta-context.ts";
+import { sinceFreshStart } from "../fresh-start.ts";
+import { backgroundTextSlots, type JobSlots } from "../job-slots.ts";
 import { wakeHoldOf } from "../routine-due.ts";
 import type { Routine, RoutineRun } from "../routines.ts";
 import { serverLine } from "../server-lines.ts";
@@ -32,6 +34,8 @@ export const PRESENCE_HOLD_MS = 10 * 60_000;
 type CompactFn = (threadId: string, options: { instructions: string; session?: string; signal?: AbortSignal }) => Promise<IdleCompactResult>;
 
 export interface WarmSummaryHostDeps {
+  /** How many background engine jobs run at once, across bots (job-slots.ts). */
+  slots?: JobSlots;
   store: Pick<Store, "taskByThread" | "botByThread" | "groupByThread" | "activePath" | "appendMessage" | "setResumeCursor" | "setHandedMessages">;
   instance(instanceId: string): { adapter: { cacheKeepWarm?: { compact?: CompactFn; hold(threadId: string, until: number | null): boolean } } } | null | undefined;
   /** Off with `context.autoCompact: false` or OMB_WARM_SUMMARY=0. */
@@ -99,14 +103,14 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
     const compact = deps.instance(instanceId)?.adapter.cacheKeepWarm?.compact;
     const session = store.taskByThread(botId, threadId)?.resumeCursors[instanceId];
     if (!compact || typeof session !== "string") return { ok: false, reason: "the conversation has no session to summarize" };
-    const result = await compact(threadId, { instructions: summaryInstructions(store.activePath(threadId)), session, signal: control.signal });
+    const result = await compact(threadId, { instructions: summaryInstructions(sinceFreshStart(store.activePath(threadId))), session, signal: control.signal });
     if (!result.ok) return { ok: false, reason: result.reason, retry: result.busy === true && !control.signal.aborted };
     deps.book(target, result);
     // Applied only to the conversation as it was: on the same session, and with no turn begun since (but the one waiting).
     const task = store.taskByThread(botId, threadId);
     if (task?.resumeCursors[instanceId] !== result.sessionBefore) return { ok: false, reason: "the conversation moved to another session" };
     if (control.signal.aborted || (!control.awaited() && deps.busy(botId, threadId))) return { ok: false, reason: "a turn started while summarizing" };
-    const { state, exchanges } = keptAfterSummary(store.activePath(threadId), result.session, task.handedMessages?.[instanceId]);
+    const { state, exchanges } = keptAfterSummary(sinceFreshStart(store.activePath(threadId)), result.session, task.handedMessages?.[instanceId]);
     store.setResumeCursor(botId, instanceId, result.session, threadId);
     store.setHandedMessages(botId, threadId, instanceId, state);
     store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(deps.language?.(threadId), "server.warmSummary.summarized"), ok: true } });
@@ -143,9 +147,16 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
       }
       return null;
     },
-    run: async (target, plan, control) => {
-      if (plan.way === "native") return native(target, control);
-      return await deps.fold(target, control.signal) ? { ok: true } : { ok: false, reason: "the conversation does not need a summary yet" };
+    // Each summary is an engine process (a fork, or the one-shot summary call): a few at once across bots, and one a turn
+    // now waits on starts at once. One that had to wait looks again: the cache may have gone cold, or a turn begun, meanwhile.
+    run: (target, plan, control) => {
+      let waited = false;
+      return (deps.slots ?? backgroundTextSlots).run(async () => {
+        const stale = waited && !control.awaited() ? control.stale() : null;
+        if (stale) return { ok: false, reason: `${stale.reason} (after waiting for a free slot)`, retry: stale.retry };
+        if (plan.way === "native") return native(target, control);
+        return await deps.fold(target, control.signal) ? { ok: true } : { ok: false, reason: "the conversation does not need a summary yet" };
+      }, { signal: control.signal, urgent: control.awaited, onWait: () => { waited = true; } });
     },
     log: deps.log,
   });

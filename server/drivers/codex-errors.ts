@@ -13,7 +13,7 @@ export type CodexRoute = "plan" | "own" | "other";
 export const CODEX_MISSING_CREDENTIALS = /missing bearer or basic authentication/i;
 
 export function codexNotSignedIn(): string {
-  return `Codex isn't signed in on this computer.${cloudHomeConfigured() ? " Sign-ins don't copy over when you move to My Cloud." : ""} Sign in to Codex in Settings → Model providers → Codex.`;
+  return `Codex isn't signed in on this computer.${cloudHomeConfigured() ? " Sign-ins don't copy over when you move to My Cloud." : ""} Sign in to Codex in Settings → AI → Providers, on Codex.`;
 }
 
 /** Codex's own words name ChatGPT's plans ("Upgrade to Pro"), which read as MausBot's. codex-cli 0.160.1 ends them
@@ -88,7 +88,7 @@ export function codexUserError(value: string, route: CodexRoute, codexErrorInfo?
   if (value.includes("provider_not_configured")) {
     return route === "plan"
       ? "provider_not_configured: ChatGPT has not enabled this model for the selected account. Refresh models or reconnect ChatGPT plan in Settings. API billing will not be used."
-      : "provider_not_configured: This Codex account cannot use the selected route. For the new ChatGPT plan models, choose ChatGPT plan in Settings → Engines and Continue with ChatGPT, then select a model from that account.";
+      : "provider_not_configured: This Codex account cannot use the selected route. For the new ChatGPT plan models, choose ChatGPT plan in Settings → AI → Providers and Continue with ChatGPT, then select a model from that account.";
   }
   return value.slice(0, 400);
 }
@@ -107,7 +107,7 @@ export function codexSignInRefused(error: unknown): boolean {
   return typeof message === "string" && CODEX_SIGN_IN_REFUSED.test(message);
 }
 
-export const CODEX_SIGN_IN_EXPIRED = "Codex's ChatGPT sign-in has expired. Sign in again in Settings → Model providers → Codex.";
+export const CODEX_SIGN_IN_EXPIRED = "Codex's ChatGPT sign-in has expired. Sign in again in Settings → AI → Providers, on Codex.";
 
 export function codexSignInExpired(raw: string): string {
   return `${CODEX_SIGN_IN_EXPIRED} Codex said: ${raw.slice(0, 300)}`;

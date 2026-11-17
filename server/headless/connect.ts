@@ -1,5 +1,5 @@
 // The token is written to a file only you can read and never printed: pass the file to other verbs with --token-file.
-import { closeSync, existsSync, fchmodSync, fstatSync, openSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fchmodSync, fstatSync, lstatSync, openSync, writeSync } from "node:fs";
 import { isatty } from "node:tty";
 
 import { parseServerInput } from "../../electron/server-address.mjs";
@@ -64,6 +64,7 @@ function target(ctx: VerbContext): { candidates: string[]; secret: string | null
 export async function connectVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const out = flag(ctx.flags, "out")?.trim();
   if (!out) throw usageError("--out FILE is required: where to keep the script key");
+  if (ctx.flags.force !== true && lstatSync(out, { throwIfNoEntry: false })) throw usageError(`${out} already exists`, "pass --force to replace it");
   const { candidates, secret } = target(ctx);
   let origin = candidates[0]!;
   let described: { status: number; body: Rec } | null = null;

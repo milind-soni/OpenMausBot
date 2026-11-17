@@ -1,11 +1,13 @@
 // What a person types or pastes to reach a MausBot server: a pairing link, an address, an address and a code typed
 // apart, or a code on its own. One reader for the desktop's Connect sheet, `openmausbot connect` and the MCP bridge.
+import { isTailnetHost, isTailnetName } from "./tailnet.mjs";
 
 export const PAIRING_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const PAIRING_CODE_LENGTH = 12;
 const PAIRING_CREDENTIAL = /^omb_pair_[A-Za-z0-9_-]{43}$/;
-/** The port `openmausbot serve` listens on, used in examples only. */
-export const EXAMPLE_ADDRESS = "http://192.168.1.20:8799";
+/** The port `openmausbot serve` and the desktop app listen on. */
+export const DEFAULT_PORT = 8799;
+export const EXAMPLE_ADDRESS = `http://192.168.1.20:${DEFAULT_PORT}`;
 
 const bareHost = (host) => String(host ?? "").trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
 
@@ -41,10 +43,12 @@ export function isPrivateHost(host) {
   return !name.includes(".") && /^[a-z0-9-]+$/.test(name);
 }
 
-/** How a saved server is reached, for the line under its name. */
+/** How a saved server is reached, for the line under its name. A MagicDNS name is Tailscale over http too: WireGuard
+ * encrypts it. A bare 100.64/10 address may be carrier NAT or another VPN, so it is only a private address. */
 export function serverTransport(origin) {
   const url = new URL(origin);
-  if (url.protocol === "https:") return url.hostname.endsWith(".ts.net") ? "tailscale" : "https";
+  if (isTailnetName(bareHost(url.hostname))) return "tailscale";
+  if (url.protocol === "https:") return "https";
   return isLoopbackHost(url.hostname) ? "loopback" : "private-http";
 }
 
@@ -57,6 +61,32 @@ export function allowedServerOrigin(origin) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Saved servers reached over plain http on a private network. Chromium treats their pages as insecure and hides the
+ * microphone (navigator.mediaDevices) from them, so a Live call there could not start; the desktop app vouches for
+ * these origins at launch. Loopback is already secure, and an http address on the open internet is never vouched for.
+ */
+export function plainHttpServerOrigins(environments) {
+  const origins = new Set();
+  for (const env of environments ?? []) {
+    if (typeof env?.origin !== "string" || !allowedServerOrigin(env.origin)) continue;
+    const url = new URL(env.origin);
+    // Chromium splits the switch on commas: a host holding one would vouch for a different, public host too.
+    if (url.protocol === "http:" && !isLoopbackHost(url.hostname) && !url.hostname.includes(",")) origins.add(url.origin);
+  }
+  return [...origins];
+}
+
+const INSECURE_AS_SECURE = "unsafely-treat-insecure-origin-as-secure";
+
+/** Vouches for plainHttpServerOrigins, keeping any origin already given on the command line. Chromium reads the switch
+ * only at launch (Electron 43), so a server saved later counts from the next start. */
+export function vouchForPlainHttpServers(commandLine, environments) {
+  const origins = plainHttpServerOrigins(environments);
+  if (origins.length === 0) return;
+  commandLine.appendSwitch(INSECURE_AS_SECURE, [commandLine.getSwitchValue(INSECURE_AS_SECURE), ...origins].filter(Boolean).join(","));
 }
 
 export function normalizePairingCode(input) {
@@ -149,7 +179,9 @@ export function parseServerInput(addressInput, codeInput = "") {
   const privateHost = isPrivateHost(url.hostname);
   if (url.protocol === "http:" && schemed && !privateHost) return { ok: false, problem: "publicHttp", host: url.host };
   const https = `https://${url.host}`, http = `http://${url.host}`;
-  const candidates = schemed ? [url.origin] : privateHost ? [https, http] : [https];
+  // A tailnet name typed alone may be a computer sharing itself on the tailnet, which listens on its own port.
+  const shared = !schemed && !url.port && isTailnetHost(bareHost(url.hostname)) ? [`http://${url.host}:${DEFAULT_PORT}`] : [];
+  const candidates = schemed ? [url.origin] : privateHost ? [https, http, ...shared] : [https];
   return {
     ok: true,
     candidates,

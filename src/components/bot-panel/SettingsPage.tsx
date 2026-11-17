@@ -25,6 +25,7 @@ import { useBotApps } from "../bot-settings/useBotApps";
 import { useSlackManagementUrl } from "../bot-settings/useSlackManagement";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { useThreadApproval } from "../thread-approval";
+import { AdvancedSettingsRow } from "./AdvancedSettingsRow";
 import { BackupAis } from "./BackupAis";
 import { HeavyBotRow } from "./HeavyBotRow";
 import { SoulChanges } from "./SoulChanges";
@@ -280,6 +281,8 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
           />
         )}
       </Card>
+
+      <AdvancedSettingsRow />
 
       <BotApiCard bot={bot} webhooksLink className="mt-3.5" />
 

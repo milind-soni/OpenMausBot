@@ -283,3 +283,76 @@ export async function keepAuthConfigPick(apiKey: string, toolkit: string, id: st
   writeFileAtomic(picksFile(), `${JSON.stringify({ version: 1, projects: picks }, null, 2)}\n`, { mode: 0o600 });
   forgetProjectAuthConfigs(apiKey);
 }
+
+const connectedAccountResponseSchema = z.object({
+  id: z.string().optional(),
+  user_id: z.string().optional(),
+  alias: z.string().nullable().optional(),
+  status: z.string().optional(),
+  updated_at: z.string().optional(),
+  toolkit: z.object({ slug: z.string().optional() }).optional(),
+});
+export type ConnectedAccountResponse = z.infer<typeof connectedAccountResponseSchema>;
+
+const connectedAccountsPageSchema = z.object({
+  items: z.array(connectedAccountResponseSchema),
+  next_cursor: z.string().nullable().optional(),
+});
+
+export const MAX_CONNECTED_ACCOUNT_PAGES = 100;
+
+/** The project's connected accounts, newest first: one Composio user's, or every user's when `userId` is null. `stop`
+ * sees each page and ends the listing early by returning true. */
+export async function listConnectedAccounts(
+  apiKey: string,
+  userId: string | null,
+  slugs: string[],
+  stop?: (page: ConnectedAccountResponse[]) => boolean,
+): Promise<ConnectedAccountResponse[]> {
+  const accounts: ConnectedAccountResponse[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MAX_CONNECTED_ACCOUNT_PAGES; page += 1) {
+    const params = new URLSearchParams({
+      limit: "50",
+      order_by: "updated_at",
+      order_direction: "desc",
+    });
+    if (userId !== null) params.set("user_ids", userId);
+    if (slugs.length) params.set("toolkit_slugs", slugs.join(","));
+    if (cursor) params.set("cursor", cursor);
+    const response = await fetch(`${apiBase()}/connected_accounts?${params}`, {
+      headers: projectHeaders(apiKey),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(await responseError(response, `Composio accounts: HTTP ${response.status}`));
+    const body = connectedAccountsPageSchema.parse(await response.json());
+    accounts.push(...body.items);
+    if (stop?.(body.items)) return accounts;
+    const next = body.next_cursor || undefined;
+    if (!next) return accounts;
+    if (seenCursors.has(next)) throw new Error("Composio account inventory contains a pagination cursor cycle");
+    seenCursors.add(next);
+    cursor = next;
+  }
+  throw new Error("Composio account inventory exceeded the pagination safety limit");
+}
+
+export async function deleteConnectedAccount(apiKey: string, id: string) {
+  const removed = await fetch(
+    `${apiBase()}/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`,
+    { method: "DELETE", headers: projectHeaders(apiKey), signal: AbortSignal.timeout(30_000) },
+  );
+  if (!removed.ok) throw new Error(await responseError(removed, `Composio disconnect: HTTP ${removed.status}`));
+}
+
+/** Revokes and deletes every connected account of one Composio user in the project; how many went. */
+export async function removeUserConnections(apiKey: string, userId: string): Promise<number> {
+  const accounts = await listConnectedAccounts(apiKey, userId, []);
+  // Security: only an account Composio names as this user's is deleted.
+  if (accounts.some((account) => account.user_id !== userId)) throw new Error("Composio listed a connected account without naming this user as its owner");
+  let removed = 0;
+  for (const { id } of accounts) if (id) { await deleteConnectedAccount(apiKey, id); removed += 1; }
+  return removed;
+}

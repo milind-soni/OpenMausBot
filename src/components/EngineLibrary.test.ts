@@ -19,6 +19,12 @@ describe("engine library", () => {
       expect(html).toContain("ink");
     }
   });
+  it("draws Cursor's cube mark for the Cursor engine, not a pointer arrow", () => {
+    const html = renderToStaticMarkup(createElement(InstanceProviderMark, { instance: instance({ driverKind: "cursorAgent" }) }));
+    expect(html).toContain('viewBox="0 0 466.73 532.09"');
+    expect(html).toContain("fill-[var(--color-ink)]");
+    expect(html).not.toContain("M4 2.2");
+  });
   it("uses an instance icon without changing the driver's default mark", () => {
     const preset = renderToStaticMarkup(createElement(InstanceProviderMark, { instance: instance({ icon: { kind: "preset", preset: "azure" } }) }));
     const custom = renderToStaticMarkup(createElement(InstanceProviderMark, { instance: instance({ icon: { kind: "custom", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" } }) }));

@@ -247,8 +247,8 @@ export function createSetupSuggestions(deps: SetupSuggestionsDeps) {
   async function ask(writer: SideJobText, basis: SuggestionBasis, apps: SuggestionApps, stop: AbortSignal): Promise<{ choices: string[] | null; outcome: Outcome }> {
     const started = Date.now();
     const expiry = new AbortController();
-    const timer = setTimeout(() => expiry.abort(), SETUP_SUGGESTIONS_DEADLINE_MS);
-    timer.unref?.();
+    const arm = (ms: number) => { const armed = setTimeout(() => expiry.abort(), ms); armed.unref?.(); return armed; };
+    let timer = arm(SETUP_SUGGESTIONS_DEADLINE_MS);
     const signal = AbortSignal.any([expiry.signal, stop]);
     const ended = new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(new Error("ended")), { once: true }));
     ended.catch(() => undefined);
@@ -257,7 +257,11 @@ export function createSetupSuggestions(deps: SetupSuggestionsDeps) {
       if (!worthAsking(basis, { known: named })) return { choices: null, outcome: "nothing to go on" };
       const prompt = setupSuggestionPrompt({ ...basis, apps: named });
       const remaining = Math.max(1, SETUP_SUGGESTIONS_DEADLINE_MS - (Date.now() - started));
-      const reply = await Promise.race([writer.generateText(prompt, { signal, timeoutMs: remaining }), ended]);
+      // Waiting for a free slot (other bots' background calls) does not count: the deadline is the writing's own.
+      let paused = false;
+      const reply = await Promise.race([writer.generateText(prompt, { signal, timeoutMs: remaining,
+        waiting: () => { paused = true; clearTimeout(timer); },
+        started: () => { if (paused) timer = arm(remaining); } }), ended]);
       const choices = parseSetupSuggestions(reply, basis.languageCode);
       return { choices, outcome: choices ? "shown" : "unusable reply" };
     } catch {

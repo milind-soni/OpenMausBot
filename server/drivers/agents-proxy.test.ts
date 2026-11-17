@@ -54,6 +54,7 @@ let computerRequests: { method: string; url: string; body: unknown }[] = [];
 let computerResponse: unknown = { current: "local", available: ["local", "vm"] };
 let computerStatus = 200;
 let lastCreateBody: any = null;
+let createBotExtra: Record<string, unknown> = {};
 let lastCreateRoomBody: unknown = null;
 let lastManageRoomBody: unknown = null;
 let lastCredentialBody: any = null;
@@ -299,7 +300,7 @@ beforeAll(async () => {
       req.on("end", () => {
         lastCreateBody = JSON.parse(data);
         res.writeHead(201, { "content-type": "application/json" });
-        res.end(JSON.stringify({ id: "bot-designer", name: "Pixel", section: "Work", modelSelection: lastCreateBody.modelSelection }));
+        res.end(JSON.stringify({ id: "bot-designer", name: "Pixel", section: "Work", modelSelection: lastCreateBody.modelSelection, ...createBotExtra }));
       });
       return;
     }
@@ -469,7 +470,6 @@ beforeAll(async () => {
       OMB_BOT_ID: "bot-asker",
       OMB_THREAD_ID: "thread-asker-routine",
       OMB_COMMS_TOKEN: TOKEN,
-      OMB_TURN_DEPTH: "0",
       OMB_SKILL_AUTHORING_ENABLED: "1",
       OMB_SHARED_COMPUTERS_ENABLED: "1",
       // A Chief's turn, so the Chief-only team tools are mounted too.
@@ -511,12 +511,9 @@ describe("agents-proxy MCP surface", () => {
         expect(description).toContain("If applied, continue the requested work without another confirmation");
         expect(description).toContain("Only a pending result requires ending the turn");
       } else {
-        expect(description).toContain("it applies immediately at every access level, and the person sees it with an Undo where possible");
-        expect(description).toContain("If applied, continue the work without another confirmation");
-        expect(description).toContain("Only a pending result (a Cloud conversation its owner did not drive)");
+        expect(description).toContain("It applies at once, with an Undo where possible: read the result before saying it did.");
+        expect(description).toContain("It never raises another bot's execution permissions.");
       }
-      expect(description).toContain("Never claim success without an applied result");
-      expect(description).toContain("does not elevate another bot's execution permissions");
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
     expect(credential.description).toContain("you resume when they save or decline");
@@ -646,7 +643,9 @@ describe("agents-proxy MCP surface", () => {
       "select_computer",
       "list_threads",
       "close_thread",
+      "rename_thread",
       "start_thread",
+      "burst",
       "list_models",
       "vm_exec",
       "attach_file",
@@ -655,6 +654,7 @@ describe("agents-proxy MCP surface", () => {
       "publish_page",
       "unpublish_page",
       "post_to_room",
+      "post_to_thread",
       "create_bot",
       "list_team_setup",
       "list_team_library",
@@ -668,6 +668,7 @@ describe("agents-proxy MCP surface", () => {
       "extract",
       "message_person",
       "report_bug",
+      "share",
       "memory_update",
       "retry_thread",
       "memory_log",
@@ -684,15 +685,17 @@ describe("agents-proxy MCP surface", () => {
       "skills_list",
       "skill_manage",
       "mcp_server",
+      "app_settings",
     ]);
     const tool = (name: string) => list.result.tools.find((entry: { name: string }) => entry.name === name);
     const coordinate = tool("coordinate_bots");
     expect(coordinate.description).toContain("The one way to hand work on");
-    expect(coordinate.description).toContain("consult true asks a question");
-    expect(coordinate.description).toContain('reply "none" is a one-way notice');
-    expect(coordinate.description).toContain("never call assignment_status in the same turn");
-    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers"]);
-    expect(coordinate.inputSchema.properties.thread).toEqual({ type: "string", description: expect.stringContaining("new: a new thread on the teammate") });
+    expect(coordinate.description).toContain("Results return here and resume you, so end your turn after sending");
+    expect(coordinate.description).toContain("Never target whoever assigned you this work or anyone above it");
+    expect(coordinate.inputSchema.properties.reply.description).toContain("one-way notice");
+    expect(coordinate.inputSchema.properties.consult.description).toContain("acting on nothing");
+    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers", "files"]);
+    expect(coordinate.inputSchema.properties.thread).toEqual({ type: "string", description: expect.stringContaining("new (its own history and run)") });
     expect(coordinate.inputSchema.properties.reply.enum).toEqual(["resume", "none"]);
     expect(coordinate.inputSchema.properties.consult.type).toBe("boolean");
     const status = tool("assignment_status");
@@ -801,7 +804,7 @@ describe("agents-proxy MCP surface", () => {
     expect(schedule.properties.expression.description).toContain("0 9 L * *");
     expect(schedule.properties.expression.description).toContain("MON#2");
     expect(schedule.properties.timeZone.description).toContain("IANA");
-    expect(create.description).toContain("never ask for confirmation first");
+    expect(create.description).toContain("Create it in this turn, without asking to confirm");
     expect(fullInputSchema("trigger")).toMatchObject({ properties: { timeout_minutes: { minimum: 5, maximum: 240 }, schedule: { properties: { every_minutes: { minimum: 5, maximum: 1_440 } } } } });
     expect(schedule.properties.weekdays.items.enum).toEqual([
       "monday",
@@ -813,18 +816,18 @@ describe("agents-proxy MCP surface", () => {
       "sunday",
     ]);
     expect(create.inputSchema.properties).not.toHaveProperty("duration_minutes");
-    expect(create.inputSchema.properties.timeout_minutes.description).toContain("from 5 to 240 minutes");
+    expect(create.inputSchema.properties.timeout_minutes.description).toContain("5 to 240");
     expect(create.inputSchema.properties.continuity).toMatchObject({ type: "boolean" });
     expect(create.inputSchema.properties.run_on_startup).toMatchObject({ type: "boolean" });
     expect(create.inputSchema.properties.clear_timeout.type).toBe("boolean");
-    expect(schedule.properties.every_minutes.description).toContain("from 5 to 1440");
+    expect(schedule.properties.every_minutes.description).toContain("5 to 1440");
     expect(schedule.properties.window_start.type).toBe("string");
     expect(schedule.properties.window_end.type).toBe("string");
     expect(schedule.properties.ends_at.type).toBe("string");
     expect(schedule.properties.every_day.type).toBe("boolean");
     expect(schedule.properties.all_day.type).toBe("boolean");
     expect(schedule.properties.never_ends.type).toBe("boolean");
-    expect(create.description).toContain("Edit, Pause and Undo");
+    expect(create.description).toContain("delete_trigger only at the person's request");
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {
@@ -997,7 +1000,7 @@ describe("agents-proxy MCP surface", () => {
       expect(text).toContain("do not check or wait for it in this turn");
       expect(text).not.toMatch(/Deprecated|alias/);
       expect(lastThreadBody).toEqual({
-        fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "QA: PR #9", message: "Review the login fix.", depth: 0, toBotId: "bot-helper",
+        fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "QA: PR #9", message: "Review the login fix.", toBotId: "bot-helper",
       });
     } finally {
       threadResponse = previous;
@@ -1026,7 +1029,7 @@ describe("agents-proxy MCP surface", () => {
       expect(text).toContain("its result comes back to this conversation and resumes you automatically (assignment id: asg-own-1)");
       expect(text).toContain("finish your turn");
       expect(lastThreadBody).toEqual({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "Review: GPT", message: "Review the diff.",
-        depth: 0, modelSelection, reportBack: true });
+        modelSelection, reportBack: true });
     } finally {
       threadResponse = previous;
     }
@@ -1043,7 +1046,6 @@ describe("agents-proxy MCP surface", () => {
       fromThreadId: "thread-asker-routine",
       title: "QA: PR #1",
       message: "Review the login fix.",
-      depth: 0,
     });
     threadResponse = { threadId: "thread-two", title: "QA: PR #2", botId: "bot-asker", botName: "Asker", self: true, state: "queued", position: 2, limit: 3 };
     const queued = await callTool("start_thread", { title: "QA: PR #2", message: "Review the signup fix.", folder: "QA" });
@@ -1093,6 +1095,21 @@ describe("agents-proxy MCP surface", () => {
       role: "Product designer",
       instructions: "Design and review the user experience.",
     });
+  });
+
+  it("tells the Chief when the new bot has no cloud computer yet, so handed work runs without one", async () => {
+    const plain = await callTool("create_bot", { name: "Pixel", role: "Product designer", instructions: "Design." });
+    expect(plain.result.content[0].text).not.toContain("cloud computer");
+    createBotExtra = { noCloudComputerYet: true };
+    try {
+      const res = await callTool("create_bot", { name: "Pixel", role: "Product designer", instructions: "Design." });
+      const text = res.result.content[0].text;
+      expect(text).toContain("Created @Pixel in Work");
+      expect(text).toContain("@Pixel has no cloud computer yet");
+      expect(text).toContain("tell the person");
+    } finally {
+      createBotExtra = {};
+    }
   });
 
   it("passes an explicit specialist model selection intact and reports the applied model", async () => {
@@ -1738,6 +1755,24 @@ describe("agents-proxy MCP surface", () => {
     });
   });
 
+  it("tells a one-time routine given a timeZone that its zone is the offset in at", async () => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("create_trigger", { when: "schedule",
+      name: "One check",
+      instructions: "Check the release page.",
+      schedule: { type: "once", at: "2026-09-01T09:00:00+08:00", timeZone: "Asia/Shanghai" },
+    });
+    expect(res.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+    const text = res.result.content[0].text;
+    expect(text).toContain('A once schedule takes no "timeZone"');
+    expect(text).toContain('offset inside "at"');
+    expect(text).not.toContain("Weekly and daily times");
+    const list = await rpc("tools/list");
+    const routine = list.result.tools.find((entry: { name: string }) => entry.name === "trigger");
+    expect(routine.inputSchema.properties.schedule.properties.timeZone.description).toMatch(/^Only for cron/);
+  });
+
   it("proposes an interval routine with an optional start anchor", async () => {
     await callTool("create_trigger", { when: "schedule",
       name: "Frequent check",
@@ -1987,7 +2022,7 @@ describe("agents-proxy MCP surface", () => {
     lastProfileRequestBody = null;
     const res = await callTool("propose_profile", { reason: "asked" });
     expect(res.result.isError).toBe(true);
-    expect(res.result.content[0].text).toContain("needs at least one of name, title, description, soul, cwd, notifications, or speakReplies");
+    expect(res.result.content[0].text).toContain("needs at least one of name, title, description, soul, cwd, notifications, speakReplies, or browserProfile");
     expect(lastProfileRequestBody).toBeNull();
   });
 
@@ -2180,7 +2215,7 @@ describe("standing external runtime", () => {
   beforeAll(async () => {
     external = spawn(process.execPath, [PROXY], {
       env: { ...childEnv(), OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`, OMB_BOT_ID: "bot-asker",
-        OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN, OMB_TURN_DEPTH: "0",
+        OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN,
         OMB_EXTERNAL_RUNTIME: "1", OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1",
         OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1" },
       stdio: ["pipe", "pipe", "inherit"],
@@ -2278,7 +2313,6 @@ describe("with computer sharing off and no Chief of Staff (the defaults)", () =>
         OMB_BOT_ID: "bot-asker",
         OMB_THREAD_ID: "thread-asker-routine",
         OMB_COMMS_TOKEN: TOKEN,
-        OMB_TURN_DEPTH: "0",
         OMB_SKILL_AUTHORING_ENABLED: "1",
         // deliberately no OMB_SHARED_COMPUTERS_ENABLED or OMB_CHIEF_OF_STAFF
       },
@@ -2382,7 +2416,7 @@ describe("coordinate_bots arguments", () => {
       lastCoordinateBody = null;
       const res = await callTool("coordinate_bots", args);
       expect(res.result.isError, JSON.stringify(args)).toBe(true);
-      expect(res.result.content[0].text).toContain('thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional');
+      expect(res.result.content[0].text).toContain('thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when, answers and files (an array of at most 5 file paths) are optional');
       expect(lastCoordinateBody).toBeNull();
     }
   });
@@ -2408,7 +2442,7 @@ describe("coordinate_bots arguments", () => {
     });
     expect(res.result.isError).toBe(true);
     const text = res.result.content[0].text;
-    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when", "answers"]) {
+    for (const field of ["bot_ids", "message", "group_id", "reason", "rework", "thread", "reply", "consult", "in_my_folder", "done_when", "answers", "files"]) {
       expect(text).toContain(field);
     }
     expect(text).toContain("botIds");
@@ -2430,7 +2464,7 @@ describe("tool bridge", () => {
     const proxy = spawn(process.execPath, [PROXY], {
       env: {
         ...childEnv(), TZ: "Asia/Kolkata", OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`, OMB_BOT_ID: "bot-asker",
-        OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN, OMB_TURN_DEPTH: "0", ...env,
+        OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN, ...env,
       },
       stdio: ["pipe", "pipe", "inherit"],
     });
@@ -2461,7 +2495,7 @@ describe("tool bridge", () => {
   /** The main child's switches: a Chief with skills and shared computers. */
   const CHIEF = { OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1" };
   const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
-  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "message_person", "memory_update"];
+  const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "post_to_thread", "request_credential", "request_sign_in", "fill_login", "message_person", "share", "memory_update"];
   let chief: Rpc;
   let plain: Rpc;
   let off: Rpc;

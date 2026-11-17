@@ -211,6 +211,9 @@ describe("preview stream downloads, uploads and messages", () => {
     FakeSocket.current.closeWith(4503, JSON.stringify({ need: "sandbox", command: "sudo openmausbot browser setup" }));
     expect(onHostSetup).toHaveBeenLastCalledWith({ need: "sandbox" });
     createPreviewStreamClient(target, events({ onHostSetup }));
+    FakeSocket.current.closeWith(4503, JSON.stringify({ need: "container" }));
+    expect(onHostSetup).toHaveBeenLastCalledWith({ need: "container", command: "OMB_BROWSER_SANDBOX=0" });
+    createPreviewStreamClient(target, events({ onHostSetup }));
     FakeSocket.current.closeWith(4503, "not json");
     expect(onHostSetup).toHaveBeenLastCalledWith({ need: "sandbox" });
     createPreviewStreamClient(target, events({ onUnauthorized }));

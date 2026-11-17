@@ -1,6 +1,7 @@
 // A bot's widget tree is normalised, scrubbed of secrets and given its text fallback here, once; everything after reads the stored message.
+import { tagsDevs } from "../shared/devs-mention.ts";
 import {
-  parseWidgetInput, resolveWidgetAction, widgetActions, widgetFields, widgetToText, WIDGET_LIMITS,
+  parseWidgetInput, resolveWidgetAction, widgetActions, widgetFieldOptions, widgetFields, widgetToText, WIDGET_LIMITS,
   type WidgetAction, type WidgetNode, type WidgetPayload, type WidgetRoot, type WidgetSettled,
 } from "../shared/widget.ts";
 import type { MausColor } from "../shared/wire.ts";
@@ -70,6 +71,14 @@ function stillDistinct(root: WidgetRoot): boolean {
   return new Set(labels).size === labels.length && new Set(names).size === names.length;
 }
 
+const DEVS_TAP_REFUSAL = "widget: a tap can't tag @devs; only words the person types send a bug report to the MausBot team. Show no button or option for it: ask them in your message to type @devs and what went wrong.";
+
+/** A press is recorded as the person's message, but a tap is never their own @devs tag: a bot asks them to type it instead. */
+function offersDevsTap(root: WidgetRoot): boolean {
+  if (widgetActions(root).some((entry) => !entry.client && tagsDevs(entry.label))) return true;
+  return widgetFields(root).some((field) => widgetFieldOptions(field.node).some((option) => tagsDevs(String(option.label ?? "")) || tagsDevs(String(option.value ?? ""))));
+}
+
 function stable(value: unknown): string {
   return JSON.stringify(value, (_key, inner: unknown) => (isRecord(inner)
     ? Object.fromEntries(Object.entries(inner).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
@@ -96,6 +105,7 @@ function canonicalWidget(input: Record<string, unknown>): CanonicalWidget {
   if (!stillDistinct(root)) {
     return { ok: false, status: 400, error: "widget: two actions or fields read the same once secrets were removed; give each a plain, distinct label and name." };
   }
+  if (offersDevsTap(root)) return { ok: false, status: 400, error: DEVS_TAP_REFUSAL };
   const text = clip(redactSecretsInText(given?.trim() || widgetToText(root)));
   // The bot is told when the scrub changed what it wrote: a payload field it named `key` for an id reads back masked.
   return { ok: true, root, text: text || EMPTY_FALLBACK, masked: stable(root) !== stable(parsed.value) };

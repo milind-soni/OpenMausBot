@@ -22,8 +22,21 @@ function mcpStartFailure(message: string, provider: string) {
   return server === "composio" ? noticeFailure("chat.notice.acpMcpAppsFailed", { provider }) : noticeFailure("chat.notice.acpMcpServerFailed", { server, provider });
 }
 
+/** A failure the agent reported as an ordinary reply, already in the words the person reads. */
+export class AcpReportedFailure extends Error {
+  readonly facts: { message: string; text?: ServerText; limitResetsAt?: number };
+  readonly acpUsageLimit: boolean;
+
+  constructor(facts: { message: string; text?: ServerText; limitResetsAt?: number }, usageLimit: boolean) {
+    super(facts.message);
+    this.facts = facts;
+    this.acpUsageLimit = usageLimit;
+  }
+}
+
 export function acpRuntimeFailure(error: unknown, provider: string, account?: { message?: string; text?: ServerText }) {
   if (account?.message !== undefined) return { message: account.message, text: account.text };
+  if (error instanceof AcpReportedFailure) return error.facts;
   const message = error instanceof Error ? error.message : String(error);
   // Account wording, when given, wins over the MCP rewrite.
   const mcp = account?.text ? null : mcpStartFailure(message, provider);

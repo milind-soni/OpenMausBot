@@ -224,13 +224,13 @@ describe("Computer panel tabs", () => {
   it("shows Screen, Browser, Data and Files in Simple mode, and Android after Screen while a phone is connected", () => {
     expect(tabs(render(makeBot()))).toEqual(["Screen", "Browser", "Data", "Files"]);
     fixture.android = true;
-    expect(tabs(render(makeBot()))).toEqual(["Screen", "Android", "Browser", "Data", "Files"]);
+    expect(tabs(render(makeBot()))).toEqual(["Screen", "Phone", "Browser", "Data", "Files"]);
   });
 
   it("keeps the Advanced tabs unchanged", () => {
     fixture.advanced = true;
     fixture.android = true;
-    expect(tabs(render(makeBot()))).toEqual(["Screen", "Routines", "Android", "Browser", "Data"]);
+    expect(tabs(render(makeBot()))).toEqual(["Screen", "Routines", "Phone", "Browser", "Data"]);
     fixture.config = {};
     fixture.android = false;
     expect(tabs(render(makeBot()))).toEqual(["Screen", "Routines", "Browser", "Data"]);
@@ -675,16 +675,14 @@ describe("Technical controls", () => {
     expect(advanced.nodes.some((node) => node.type === SimpleVpsChoices)).toBe(false);
   });
 
-  it("offers a bot that picks its own place auto-start beside a stopped VPS, and the VPS's settings where Simple has no fix", () => {
+  it("offers a bot that picks its own place auto-start beside a stopped VPS, and Advanced's switch where Simple has no fix", () => {
     fixture.seed = { phase: "vps-unconfigured", resolved: { botId: "scout", threadId: "thread-scout", computer: undefined, cloudBackend: "vps" } };
     const simple = render(makeBot({ cloudBackend: "vps" }));
     expect(simple.html).toContain("Start VPS automatically");
     expect(simple.button("Start the desktop on your VPS")).toBeUndefined();
     (simple.nodes.find((node) => node.type === SimpleVpsChoices)!.props.onAutoStart as () => void)();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateBot", botId: "scout", patch: { autoStartVps: true } });
-    expect(simple.button("Show advanced controls")).toBeUndefined();
-    (simple.button("Open VPS settings")!.props.onClick as () => void)();
-    expect(fixture.setAdvancedMode).not.toHaveBeenCalled();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
+    (simple.button("Show advanced controls")!.props.onClick as () => void)();
+    expect(fixture.setAdvancedMode).toHaveBeenCalledWith(true);
   });
 });

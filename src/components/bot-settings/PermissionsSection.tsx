@@ -18,7 +18,7 @@ import { ProposalStatus } from "./ProposalStatus";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 import { useBotEditor } from "./BotEditorContext";
 
-export type PermissionsPart = "chief" | "peers" | "approval" | "outbound";
+export type PermissionsPart = "chief" | "approval" | "outbound";
 
 export function PermissionsSection({
   bot,
@@ -105,30 +105,6 @@ export function PermissionsSection({
         {bot.chiefOfStaff && <ProposalStatus bot={bot} kind="owner" />}
       </div>}
 
-      {shows("peers") && <div className="rounded-xl bg-card p-4">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <div className="text-[15px] font-medium text-ink">{t("permissions.peers.title")}</div>
-            <div className="mt-0.5 text-[13px] text-ink-secondary">
-              {bot.approvePeerComms
-                ? t("permissions.peers.on")
-                : t("permissions.peers.off")}
-            </div>
-            <ProposalStatus bot={bot} kind="owner" />
-          </div>
-          <Switch
-            checked={Boolean(bot.approvePeerComms)}
-            aria-label={t("permissions.peers.title")}
-            disabled={!bot.approvePeerComms && !canCoordinate}
-            onClick={() => patch({ approvePeerComms: !bot.approvePeerComms })}
-            title={!bot.approvePeerComms && !canCoordinate ? t("permissions.cannotCoordinate") : undefined}
-            className="disabled:cursor-not-allowed"
-          />
-        </div>
-        {Array.isArray(bot.peers) && <PeersListNote peers={bot.peers} bots={state.bots}
-          onOpen={() => patch({ peers: null, acknowledgePeerScope: true })} />}
-      </div>}
-
       {shows("approval") && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">{t("permissions.approval.title")}</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">
@@ -177,16 +153,6 @@ export function PermissionsSection({
           dispatch({ type: "updateBot", botId: target, patch: { approvalMode: "auto", acknowledgeLocalAuto: true } });
         }}
       />
-    </div>
-  );
-}
-
-function PeersListNote({ peers, bots, onOpen }: { peers: readonly string[]; bots: readonly Bot[]; onOpen: () => void }) {
-  const names = peers.flatMap((id) => bots.find((other) => other.id === id && !other.hidden)?.name ?? []);
-  return (
-    <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t border-hairline/40 pt-3 text-[13px] text-ink-secondary">
-      <span>{names.length ? t("permissions.peers.limited", { names: names.join(", ") }) : t("permissions.peers.none")}</span>
-      <button type="button" className="text-accent hover:underline" onClick={onOpen}>{t("permissions.peers.everyone")}</button>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
-import { closeInbox, readInboxLine, readInboxRow, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
+import { closeInbox, markAllInboxRead, readInboxLine, readInboxRow, useInboxMarkingAll, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
 import { InboxActive } from "./InboxActive";
 import { InboxReading } from "./InboxReading";
 import { InboxRowItem } from "./InboxRow";
@@ -19,6 +19,7 @@ import { roundButtonCls } from "../bot-panel/rows";
 export function InboxPanel() {
   const view = useInboxView();
   const panel = useInboxPanel();
+  const markingAll = useInboxMarkingAll();
   const phone = useMediaQuery(PHONE_LAYOUT);
   const simple = !useAdvancedMode();
   const { run } = useInboxActions(view);
@@ -67,6 +68,12 @@ export function InboxPanel() {
           <span className="min-w-0 truncate font-medium text-ink">{t("inbox.panel.title")}</span>
           {count > 0 && <span data-inbox-tab-count className="shrink-0 tabular-nums text-ink-tertiary">{count}</span>}
         </div>
+        {view?.rows.some((row) => row.unread) && (
+          <button type="button" data-inbox-mark-all onClick={markAllInboxRead} disabled={markingAll}
+            className="mt-[9px] shrink-0 whitespace-nowrap text-[12px] text-accent hover:underline disabled:opacity-50 disabled:hover:no-underline">
+            {t("inbox.markAllRead")}
+          </button>
+        )}
         {!phone && (
           <button type="button" onClick={() => widenInbox(!panel.wide)} aria-pressed={Boolean(panel.wide)} aria-label={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")}
             title={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")} className={roundButtonCls}>
@@ -120,7 +127,7 @@ export function InboxPanel() {
     );
   }
   return (
-    <aside aria-label={t("inbox.panel.title")} data-inbox-panel="side" data-wide={panel.wide ? "" : undefined} onKeyDown={onKeyDown}
+    <aside aria-label={t("inbox.panel.title")} data-inbox-panel="side" data-look="inbox" data-wide={panel.wide ? "" : undefined} onKeyDown={onKeyDown}
       className={cn("animate-panel-in motion-reduce:animate-none flex h-full max-w-full shrink-0 flex-col max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30",
         simple ? "border-l-[0.5px] border-ink/[0.06] bg-app" : "border-l border-hairline/40 bg-panel",
         panel.wide ? "w-[min(640px,60vw)]" : simple ? "w-[320px]" : "w-[380px]")}>

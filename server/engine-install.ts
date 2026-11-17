@@ -9,6 +9,7 @@ import { npmEnginesPrefix } from "./engine-roots.ts";
 import { registerStandaloneBinDirs, standaloneAssetFor, standaloneRunEnv } from "./engine-standalone.ts";
 import { STANDALONE_RELEASES } from "./standalone-releases.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCache } from "./env-path.ts";
+import { botBox } from "./bot-box/box.ts";
 import { execCli, killCliTree, spawnCli } from "./procs.ts";
 
 const MAX_OUTPUT = 64 * 1024;
@@ -128,7 +129,16 @@ export function npmRunning(pkg: string, baseDir = DATA_DIR): boolean {
   return running.has(`${baseDir} ${pkg}`);
 }
 
-export function npmEnvironment(base: NodeJS.ProcessEnv = process.env, path: string = augmentedPath()): NodeJS.ProcessEnv {
+/** npm's own HOME, config files and cache in the data folder, which no boxed bot can write. */
+export function npmServerHome(baseDir = DATA_DIR): { home: string; userconfig: string; globalconfig: string; cache: string } {
+  const home = join(baseDir, "tools", "npm-home");
+  return { home, userconfig: join(home, ".npmrc"), globalconfig: join(home, "npmrc-global"), cache: join(home, "cache") };
+}
+
+/** Security: while the bot box is on (`boxed`), a boxed bot can write the server's HOME, so npm, the install scripts it
+ * runs and the CLI checked after it never read a config, a cache or anything else from there: `script-shell`, a
+ * registry or a cached package a bot left would otherwise run, or be installed, outside the box. */
+export function npmEnvironment(base: NodeJS.ProcessEnv = process.env, path: string = augmentedPath(), boxed = botBox.enabled(), baseDir = DATA_DIR): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...base,
     PATH: path,
@@ -139,6 +149,12 @@ export function npmEnvironment(base: NodeJS.ProcessEnv = process.env, path: stri
   };
   // Workspace credentials (xai/box/voice keys) are not npm's to see.
   stripWorkspaceCredentialEnv(env as Record<string, string | undefined>);
+  if (boxed) {
+    const own = npmServerHome(baseDir);
+    mkdirSync(own.cache, { recursive: true, mode: 0o700 });
+    for (const name of Object.keys(env)) if (/^npm_config_(?:userconfig|globalconfig|cache|script_shell)$/i.test(name)) delete env[name];
+    Object.assign(env, { HOME: own.home, npm_config_userconfig: own.userconfig, npm_config_globalconfig: own.globalconfig, npm_config_cache: own.cache });
+  }
   return env;
 }
 
@@ -152,7 +168,7 @@ export function npmInstallArgs(prefix: string, pkg: string, version = "latest"):
 export async function npmLatestVersion(pkg: string, baseDir = DATA_DIR): Promise<string> {
   const prefix = enginesPrefix(baseDir);
   mkdirSync(prefix, { recursive: true });
-  const result = await runNpm(["view", `${pkg}@latest`, "version", "--loglevel=error"], npmEnvironment(), prefix, PROBE_TIMEOUT_MS * 2);
+  const result = await runNpm(["view", `${pkg}@latest`, "version", "--loglevel=error"], npmEnvironment(process.env, augmentedPath(), botBox.enabled(), baseDir), prefix, PROBE_TIMEOUT_MS * 2);
   const version = stripVTControlCharacters(result.output).split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1);
   if (result.code !== 0 || !version || !/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version)) {
     throw new Error(`npm could not look up the newest ${pkg}.${tail(result.output)}`);
@@ -163,7 +179,7 @@ export async function npmLatestVersion(pkg: string, baseDir = DATA_DIR): Promise
 async function installOnce(pkg: string, options: InstallOptions): Promise<void> {
   const prefix = enginesPrefix(options.baseDir);
   mkdirSync(prefix, { recursive: true });
-  const env = npmEnvironment(options.env, options.path);
+  const env = npmEnvironment(options.env, options.path, botBox.enabled(), options.baseDir);
   const args = npmInstallArgs(prefix, pkg, options.version);
   const timeoutMs = options.timeoutMs ?? NPM_INSTALL_TIMEOUT_MS;
   await runInstall(pkg, args, env, prefix, timeoutMs);

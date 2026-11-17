@@ -1,26 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
 
-import { PHONE_CAPABILITIES, PHONE_PLATFORMS } from "../../shared/phone-apps.ts";
+import { phoneRegistration, type PhoneRegistration } from "../../shared/phone-jobs.ts";
 import { writeFileAtomic } from "../atomic.ts";
 
-const KNOWN_CAPABILITIES: readonly string[] = PHONE_CAPABILITIES;
-/** Only the apps this server knows: a newer phone's extra app is dropped, never a reason to refuse the rest. */
-const knownCapabilities = (value: unknown) => (value && typeof value === "object" && !Array.isArray(value)
-  ? Object.fromEntries(Object.entries(value).filter(([capability]) => KNOWN_CAPABILITIES.includes(capability)))
-  : value);
-
-/** The phones ship on their own schedule, so a field this server does not know yet is stripped, not refused. */
-export const phoneRegistration = z.object({
-  installId: z.string().regex(/^[\w-]{8,64}$/),
-  name: z.string().min(1).max(120),
-  platform: z.enum(PHONE_PLATFORMS),
-  appVersion: z.string().max(40),
-  timeZone: z.string().max(64),
-  /** Capability → the OS grant the phone holds ("full", "limited", "when_in_use", "send", "listener"); present means allowed. */
-  capabilities: z.preprocess(knownCapabilities, z.partialRecord(z.enum(PHONE_CAPABILITIES), z.string().min(1).max(32))),
-});
-export type PhoneRegistration = z.infer<typeof phoneRegistration>;
+export { phoneRegistration, type PhoneRegistration };
 
 const KEY = z.string().min(1).max(300);
 const recordSchema = z.object({

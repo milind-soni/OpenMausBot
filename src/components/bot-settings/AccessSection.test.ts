@@ -314,7 +314,7 @@ describe("Research (treg) card", () => {
   it("with neither a treg key nor a plan, asks for a treg key, opens API keys, and offers no switch", () => {
     fixture.config = { xResearch: { included: false }, treg: { configured: false } } as Partial<ConfigStatus>;
     const html = render(makeBot());
-    expect(html).toContain("Add your treg key in Settings → API keys to let bots research X, companies, people and more.");
+    expect(html).toContain("Add your treg key in Settings → AI → Other services to let bots research X, companies, people and more.");
     expect(html).toMatch(new RegExp(`${SWITCH}[^>]* disabled=""`));
     expect(html).toMatch(new RegExp(`${SWITCH}[^>]*aria-checked="false"`));
     const open = capture(makeBot()).card.find((node) => node.type === "button" && typeof node.props.onClick === "function")!;
@@ -328,7 +328,7 @@ describe("Research (treg) card", () => {
     expect(html).toMatch(new RegExp(`${SWITCH}[^>]*aria-checked="true"`));
     expect(html).not.toMatch(new RegExp(`${SWITCH}[^>]* disabled=""`));
     expect(html).toContain("through your treg key. Calls are billed to your treg balance.");
-    expect(html).not.toContain("Open API keys");
+    expect(html).not.toContain("Open AI › Other services");
   });
 
   it("is on by default with a Cloud plan, and turns off for one bot with one patch", () => {
@@ -359,7 +359,7 @@ describe("a VPS bot's own server", () => {
     const vpsBot = makeBot({ computer: "cloud", cloudBackend: "vps", vpsAlias: "alpha-vps" });
     const saved = render(vpsBot);
     expect(saved).toContain("Server (SSH alias)");
-    expect(saved).toContain("Leave empty to use production-vps from Settings → API keys.");
+    expect(saved).toContain("Leave empty to use production-vps from Settings → AI → Other services.");
     expect(saved).toContain('value="alpha-vps"');
     expect(render(makeBot({ computer: "cloud", cloudBackend: "box" }))).not.toContain("Server (SSH alias)");
     const { BotEditorContext } = await import("./BotEditorContext");

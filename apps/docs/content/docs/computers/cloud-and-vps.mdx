@@ -51,6 +51,8 @@ your own Boat key and with the cloud computers included in a Cloud plan.
 
 ## Bring your own VPS
 
+Follow [Your own VPS (BYO)](/docs/computers/byo-vps) for the setup steps, where to select the backend, and the existing-bot workaround for 0.1.151 and 0.1.152. This keeps the agent on the MausBot host; [deploying the whole server](/docs/self-hosting/deploy-vps) is a different setup.
+
 MausBot can control Docker on an x86_64 Linux server through an SSH config alias. The agent process stays on your local machine; only Docker commands and the managed desktop container run on the VPS.
 
 Your SSH alias should include connection multiplexing, keepalives, and a connect timeout. Connect manually once to approve the host key, then verify:

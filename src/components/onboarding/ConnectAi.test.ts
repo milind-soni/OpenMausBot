@@ -8,7 +8,7 @@ import type { InstanceInfo } from "@/state/store";
 
 const f = vi.hoisted(() => ({
   instances: [] as InstanceInfo[], dispatch: vi.fn(), row: null as null | { bridge: unknown; onOpenSettings: () => void },
-  check: (): Promise<object> => Promise.resolve({ ok: true }), checks: [] as string[], fail: false,
+  check: (): Promise<object> => Promise.resolve({ ok: true }), checks: [] as string[], fail: false, config: {} as Record<string, unknown>, brand: "default", opened: [] as string[],
 }));
 vi.mock("@/state/store", () => ({
   api: async (path: string) => {
@@ -17,8 +17,11 @@ vi.mock("@/state/store", () => ({
     f.checks.push(path);
     return f.check();
   },
-  useStore: () => ({ state: { instances: f.instances }, dispatch: f.dispatch }),
+  useStore: () => ({ state: { instances: f.instances, config: f.config }, dispatch: f.dispatch }),
 }));
+vi.mock("@/lib/analytics", () => ({ track: vi.fn(), emailGateDone: () => false }));
+vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ source: f.brand }), productName: () => "MausBot" }));
+vi.mock("@/lib/app-links", async (original) => ({ ...await original<typeof import("@/lib/app-links")>(), openExternalLink: async (url: string) => { f.opened.push(url); } }));
 vi.mock("@/components/EngineSetup", async () => {
   const { createElement: h } = await import("react");
   return { EngineSetup: ({ instance, intent, description }: { instance: InstanceInfo; intent: string; description?: string }) =>
@@ -29,6 +32,7 @@ vi.mock("./beats/OrganisationRow", () => ({ OrganisationRow: (props: NonNullable
 const { ConnectAi, ConnectAiDialog } = await import("./ConnectAi");
 const { useWelcomeAi } = await import("./welcome-ai");
 const { useStore } = await import("@/state/store");
+const { track } = await import("@/lib/analytics");
 
 /** As the first screen has it: the AI it stands on, tested once, handed to the block. */
 function FirstScreenAi({ hosted = false }: { hosted?: boolean }) {
@@ -57,7 +61,8 @@ beforeEach(() => {
   f.check = () => Promise.resolve({ ok: true });
   f.checks = [];
   f.instances = [engine("grok", "grokAgent", "Grok", false), engine("claude", "claudeAgent", "Claude", false), engine("codex", "codex", "Codex", false)];
-  f.dispatch.mockReset();
+  f.dispatch.mockReset(); f.config = {}; f.brand = "default"; f.opened = [];
+  vi.mocked(track).mockClear();
   f.row = null;
   f.fail = false;
   vi.stubGlobal("ogb", undefined);
@@ -239,5 +244,40 @@ describe("connecting an AI on the first screen", () => {
     expect(onClose).toHaveBeenCalledTimes(2);
     await act(async () => { dialog.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
     expect(onClose, "a click inside stays").toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the ModelGo option", () => {
+  const URL_EXACT = "https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=app&campaign_id=openmausbot&ad_group_id=app";
+  const option = () => host.querySelector("[data-modelgo-option]");
+  const events = () => vi.mocked(track).mock.calls.filter(([name]) => name === "modelgo_offer").map(([, props]) => props);
+  const provider = (ready = false) => engine("modelgo", "modelgo", "ModelGo (API)", ready);
+
+  it("sits among the other ways, labelled a sponsor, and its link opens exactly the sponsor's address", async () => {
+    f.instances.push(provider());
+    await show();
+    expect(option()?.textContent).toContain("ModelGo"); expect(option()?.textContent).toContain("Sponsor");
+    expect(option()?.textContent).toContain("One API key, every model.");
+    expect(host.querySelectorAll("[data-modelgo-option]")).toHaveLength(1);
+    expect(events()).toEqual([{ action: "shown", place: "onboarding" }]);
+    const link = [...option()!.querySelectorAll("button")].find(button => button.textContent?.includes("Get a key"))!;
+    await act(async () => { link.click(); });
+    expect(f.opened).toEqual([URL_EXACT]);
+    expect(events().at(-1)).toEqual({ action: "get_key", place: "onboarding" });
+  });
+
+  it("opens to its key field, and counts that as starting to add a key", async () => {
+    f.instances.push(provider());
+    await show();
+    await act(async () => { option()!.querySelector<HTMLButtonElement>("button[aria-expanded]")!.click(); });
+    expect(option()!.querySelector('[data-engine-setup="modelgo"]')).toBeTruthy();
+    expect(events().at(-1)).toEqual({ action: "add_key", place: "onboarding" });
+  });
+
+  it("is not added on a white-label build, a desktop whose organization refuses it, or a hosted workspace; nor once connected", async () => {
+    f.brand = "file"; await show(); expect(option()).toBeNull();
+    f.brand = "default"; f.config = { managedPolicy: { companyModelsOnly: false, allowedEngines: ["codex"] } }; await show(); expect(option()).toBeNull();
+    f.config = {}; await show({ hosted: true }); expect(option()).toBeNull();
+    f.instances.push(provider(true)); await show(); expect(option()).toBeNull();
   });
 });

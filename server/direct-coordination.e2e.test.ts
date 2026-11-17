@@ -78,7 +78,7 @@ it("sends cross-bot work onward without resuming either sender", () => fixture(a
   const sentThread = (botId: string) => JSON.parse(sendOf(botId).content[0].text).receipts[0].threadId;
   await expect.poll(async () => (await f.api("/api/bots?messages=0")).bots
     .find((bot: any) => bot.id === f.specialist.id)?.busy, { timeout: 15_000 }).toBe(true);
-  await f.api(`/api/bots/${f.lead.id}`, { peers: [] }, "PATCH");
+  await f.api(`/api/bots/${f.lead.id}`, { visibility: "admins" }, "PATCH");
   writeFileSync(gate, "finish detached work");
   await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.specialist.id).length, { timeout: 15_000 }).toBe(1);
   const bots = (await f.api("/api/bots")).bots;
@@ -412,6 +412,24 @@ it("lets the opener find and close the completed task", () => fixture(async f =>
   const closedLead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
   expect(closedLead.tasks.find((task: any) => task.threadId === child.threadId).closedBy).toMatchObject({ botId: f.chief.id });
   expect((await f.messages(child.threadId)).some((message: any) => message.text === "Implemented and reviewer confirmed checks")).toBe(true);
+}), 45_000);
+
+it("lets a bot rename only the thread it is working in", () => fixture(async f => {
+  f.plan[f.chief.id] = {
+    steps: [{ tool: "rename_thread", arguments: { title: "Acme: carousel design" } }],
+    reply: "Renamed this thread",
+  };
+  f.save();
+  const before = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks.find((task: any) => task.threadId === f.chief.activeTaskId).title;
+  await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Terminei o design e a skill de carrossel pra cliente Acme, pode dar um nome melhor a esta conversa?");
+  expect((await f.wait()).status).toBe("settled");
+  const step = f.evidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "rename_thread");
+  expect(step.response.result.isError).toBeFalsy();
+  expect(step.response.result.content[0].text).toContain("#Acme: carousel design");
+  const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
+  const renamed = chief.tasks.find((task: any) => task.threadId === f.chief.activeTaskId);
+  expect(renamed.title).toBe("Acme: carousel design");
+  expect(renamed.title).not.toBe(before);
 }), 45_000);
 
 it("does not treat self-opened work or an abandoned human branch as new human authority", () => fixture(async f => {
@@ -870,7 +888,7 @@ it("withholds direct results when the sender's peers list cuts the teammate off 
   f.plan[f.lead.id] = { readyFile: ready, gateFile: gate, reply: "PRIVATE_ENGINEERING_RESULT" };
   await f.start();
   await expect.poll(() => existsSync(ready), { timeout: 15_000 }).toBe(true);
-  await f.api(`/api/bots/${f.chief.id}`, { peers: [] }, "PATCH");
+  await f.api(`/api/bots/${f.chief.id}`, { visibility: "admins" }, "PATCH");
   writeFileSync(gate, "finish the private work after the teammate was cut off");
   expect((await f.wait()).status).toBe("settled");
   const resumed = f.evidence().find((turn: any) => turn.botId === f.chief.id && turn.resumed);
@@ -895,7 +913,7 @@ it("retains returned direct reports for follow-up turns but rechecks reach befor
   await f.api(`/api/bots/${f.chief.id}/messages/${followup.id}/edit`, { threadId: f.chief.activeTaskId, text: "Check the earlier engineering report" });
   expect((await f.wait()).status).toBe("settled");
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id).at(-1).prompt.message.content).toContain("PRIVATE_ENGINEERING_FACT_8347");
-  await f.api(`/api/bots/${f.chief.id}`, { peers: [] }, "PATCH");
+  await f.api(`/api/bots/${f.chief.id}`, { visibility: "admins" }, "PATCH");
   f.plan[f.chief.id] = { reply: "Access removed", expectContextIncludes: ["Teammate result withheld"] };
   f.save();
   const edited = (await f.messages(f.chief.activeTaskId)).findLast((message: any) => message.role === "user");
@@ -986,8 +1004,8 @@ it("continues a teammate's step cap in place and stops it once it makes no progr
     expect(leads).toHaveLength(1);
     const child = leads[0];
     expect(child).toMatchObject({ status: "failed", outcome: "stalled", executions: 2,
-      result: expect.stringMatching(/^Stopped after 64 steps without a final answer\./) });
-    expect(child.outcomeDetail).toMatch(/^Stopped after 2 continuations without progress: Stopped after 64 steps without a final answer\./);
+      result: expect.stringMatching(/^Stopped after 200 tool calls without a final answer\./) });
+    expect(child.outcomeDetail).toMatch(/^Stopped after 2 continuations without progress: Stopped after 200 tool calls without a final answer\./);
     expect(child.result).not.toContain("assign what is left");
     expect(f.eventsOf(child.id).filter((kind: string) => kind === "continued")).toHaveLength(1);
     expect(f.eventsOf(child.id)).toContain("stalled");
@@ -995,11 +1013,11 @@ it("continues a teammate's step cap in place and stops it once it makes no progr
     expect(resumed.prompt.message.content).toContain("Stopped after 2 continuations without progress");
     expect(resumed.prompt.message.content).not.toContain("assign what is left");
     const chip = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.roomRequest?.phase === "result");
-    expect(chip.tool.name).toContain("Engineering lead — failed: Stopped after 64 steps without a final answer");
+    expect(chip.tool.name).toContain("Engineering lead — failed: Stopped after 200 tool calls without a final answer");
     expect((await f.messages(f.chief.activeTaskId)).filter((message: any) => message.roomRequest?.phase === "result")).toHaveLength(1);
     const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
     expect(lead.tasks.map((task: any) => task.title).filter((title: string) => title.startsWith("Continue:"))).toEqual([]);
-    expect(calls).toBe(128);
+    expect(calls).toBe(402);
   } finally { await close(); }
 }), 90_000);
 

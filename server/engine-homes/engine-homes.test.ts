@@ -60,17 +60,22 @@ describe("engine homes at run time", () => {
     expect(existsSync(join(dataDir, "engine-homes", ".migrated"))).toBe(true);
   });
 
-  it("wrap every turn and keep-warm ping in its conversation", async () => {
+  it("wrap every turn, keep-warm ping and warm summary in its conversation", async () => {
     const homes = new EngineHomes();
     homes.start(setup());
     const seen: Array<string | null> = [];
     const instance = withEngineHomes({ adapter: {
       sendTurn: async () => { await new Promise((resolve) => setTimeout(resolve, 1)); seen.push(homes.scope()); return { turnId: "x" }; },
-      cacheKeepWarm: { ping: async () => { seen.push(homes.scope()); return { ok: false, reason: "test" }; }, hold: () => false },
+      cacheKeepWarm: {
+        ping: async () => { seen.push(homes.scope()); return { ok: false, reason: "test" }; }, hold: () => false,
+        compact: async () => { seen.push(homes.scope()); return { ok: false, reason: "test" }; },
+      },
     } } as unknown as ProviderInstance, homes);
     await instance.adapter.sendTurn({ threadId: "t-bob", text: "hi" });
     await instance.adapter.cacheKeepWarm!.ping("t-main");
-    expect(seen).toEqual([expect.stringMatching(/^member-[0-9a-f]{16}$/), "team"]);
+    await instance.adapter.cacheKeepWarm!.compact!("t-owner", { instructions: "" });
+    expect(seen).toEqual([expect.stringMatching(/^member-[0-9a-f]{16}$/), "team", expect.stringMatching(/^member-[0-9a-f]{16}$/)]);
+    expect(seen[2]).not.toBe(seen[0]);
   });
 });
 

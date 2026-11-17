@@ -43,3 +43,26 @@ test("leaves main frames and frames with a real origin alone", () => {
   assert.equal(appFrameNavigationAllowed(null), true);
   assert.equal(appFrameNavigationAllowed(undefined), true);
 });
+
+// A frame that has not loaded anything yet reads "null" too. Electron 43.7.9 reports the parent as the initiator when
+// the page that holds the frame gives it its address, and the frame (or a sandboxed parent) when an app moves itself.
+const appPage = { frameTreeNodeId: 1, origin: "http://127.0.0.1:5199" };
+const newFrame = (url, initiator, parent = appPage) => ({ isMainFrame: false, url, frame: { origin: "null", url: "", parent }, initiator });
+
+test("a new frame may load the address the app page gives it (a published site beside the chat)", () => {
+  assert.equal(appFrameNavigationAllowed(newFrame("https://abc.mausbot.page/", { frameTreeNodeId: 1, origin: "http://127.0.0.1:5199" })), true);
+});
+
+test("an app frame still may not go anywhere by itself or through a frame of its own", () => {
+  const app = { frameTreeNodeId: 2, origin: "null" };
+  // Meta refresh: the app frame starts its own navigation.
+  assert.equal(appFrameNavigationAllowed(newFrame("http://127.0.0.1:9/meta", app)), false);
+  // An iframe inside the app: its parent is the app frame, whose origin is opaque.
+  assert.equal(appFrameNavigationAllowed(newFrame("http://127.0.0.1:9/inner", app, app)), false);
+  // No initiator, or one from elsewhere, is not the app page.
+  assert.equal(appFrameNavigationAllowed(newFrame("http://127.0.0.1:9/x", undefined)), false);
+  assert.equal(appFrameNavigationAllowed(newFrame("http://127.0.0.1:9/x", { frameTreeNodeId: 3, origin: "https://example.com" })), false);
+  assert.equal(appFrameNavigationAllowed(newFrame("http://127.0.0.1:9/x", { origin: "http://127.0.0.1:5199" }, { origin: "http://127.0.0.1:5199" })), false);
+  const gone = { get frameTreeNodeId() { throw new Error("Render frame was disposed before WebFrameMain could be accessed"); }, origin: "http://127.0.0.1:5199" };
+  assert.equal(appFrameNavigationAllowed(newFrame("http://127.0.0.1:9/x", gone)), false);
+});

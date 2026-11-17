@@ -1,4 +1,5 @@
 import { liveSavePatch } from "../live-config.ts";
+import { signInEnvRefusal } from "../sign-in-env.ts";
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot, retireDeletedBoatCreate } from "../boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "../boat-delete-journal.ts";
@@ -27,7 +28,8 @@ import {
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
-import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
+import { TEAM_PERSONAL_HINTS } from "../../shared/cloud-hints.ts";
+import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderBorrowedKey, type Decider } from "../decider/index.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
@@ -73,6 +75,10 @@ export interface ConfigRouteDeps {
   sharedComputerControl: Pick<SharedComputerControl, "close">;
   hostedModels: boolean;
   cloudHome: boolean;
+  /** A Team Cloud shares one browser egress policy across every member. */
+  cloudTeam?: boolean;
+  /** Security: a Team Cloud never takes over another installation's Composio user, since every member's bots would then get that person's apps. */
+  sharedMembership: () => boolean;
   lendingEnabled(): boolean;
   providerConfigs(): InstanceConfigMap;
   localVmIdleMs(): number;
@@ -81,6 +87,8 @@ export interface ConfigRouteDeps {
   localVmLifecycleBusy: { readonly size: number };
   localVmImageBusy: Pick<BusyFlag, "get">;
   localVmModeChangeBusy: Pick<BusyFlag, "set">;
+  /** Called before a Local VM mode change is saved; once it is saved, the returned call ends the holds no path reads any more. */
+  localVmModeChanging(): () => void;
   providerConfigBusy: BusyFlag;
   computerProviderConfigTransitions: Pick<Set<RemoteComputerProvider>, "add" | "delete">;
   managedBoatOwners(): boat.ManagedBoatOwner[];
@@ -95,6 +103,9 @@ export interface ConfigRouteDeps {
   /** A Team Cloud only: Settings → Profile saves the signed-in person's own profile, never the server's. False: nobody
    * signed in to save it for. */
   ownProfile?(auth: RequestAuth, profile: { name?: string; avatarUrl?: string; aboutMe?: string }): boolean;
+  /** On a Team Cloud: the welcome's own hints (TEAM_PERSONAL_HINTS) go to this person's record, never the team's; false
+   * for a caller with no team session. */
+  ownHints?(auth: RequestAuth, hints: string[]): boolean;
   resyncOpenCodeProviderKeys(): void;
   revokeEngineCapabilities(engines: ReadonlySet<string>): void;
   reloadProviders(before: Record<string, unknown>): Promise<void>;
@@ -107,11 +118,11 @@ export interface ConfigRouteDeps {
 export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
-    closeBrowser, browserEngineSwitched, sharedComputers, sharedComputerControl, hostedModels, cloudHome: CLOUD_HOME, lendingEnabled, providerConfigs,
-    localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy,
+    closeBrowser, browserEngineSwitched, sharedComputers, sharedComputerControl, hostedModels, cloudHome: CLOUD_HOME, sharedMembership, lendingEnabled, providerConfigs,
+    localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy, localVmModeChanging,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
-    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz,
+    configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, ownHints, postiz,
   } = deps;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     // API keys are never echoed back: booleans only.
@@ -120,8 +131,11 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
-      if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
+      if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatchForPerson(body);
+      if (deps.cloudTeam && patch.browserEngine?.egress?.proxy !== undefined && !(auth.kind === "session" && auth.session.teamRole === "owner")) {
+        return json(res, 403, { error: "Only the Team Cloud owner can configure the browser proxy." });
+      }
       if (patch.profile && ownProfile) {
         // The address is the verified claim's; a profile names no other.
         const { email: _email, ...own } = patch.profile;
@@ -132,9 +146,20 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           return json(res, 200, configForAccess(configStatus(), auth));
         }
       }
+      if (patch.onboarding?.hintsSeen && ownHints) {
+        const mine = patch.onboarding.hintsSeen.filter((hint) => TEAM_PERSONAL_HINTS.has(hint));
+        if (mine.length && ownHints(auth, mine)) {
+          // The team's record keeps what it had of these; only this person's changes.
+          const kept = (cfg.onboarding?.hintsSeen ?? []).filter((hint) => TEAM_PERSONAL_HINTS.has(hint));
+          patch.onboarding = { ...patch.onboarding, hintsSeen: [...new Set([...patch.onboarding.hintsSeen.filter((hint) => !TEAM_PERSONAL_HINTS.has(hint)), ...kept])] };
+        }
+      }
       if (CLOUD_HOME && (patch.signIn?.admins?.length || patch.signIn?.members?.length)) {
         return json(res, 403, { ...userError("serverError.cloud.personal"), code: "cloud_personal" });
       }
+      // Saved, it would be overruled by the environment at once: say so instead of answering 200 with nothing changed.
+      const signInPinned = signInEnvRefusal(patch.signIn);
+      if (signInPinned) return json(res, 409, { error: signInPinned, code: "signin_env" });
       if (patch.newBotDefaults) {
         if (patch.newBotDefaults.profile.modelSelection) {
           const checked = checkedModelSelection(patch.newBotDefaults.profile.modelSelection);
@@ -161,7 +186,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (patch.decider) {
-        const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderSharedKeyUsable(cfg) });
+        const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderBorrowedKey(cfg) });
         if (!planned.ok) return json(res, 400, refusalBody(planned));
         patch.decider = planned.patch;
       }
@@ -358,7 +383,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (requestedComposioKey !== undefined) {
         if (requestedComposioKey.trim()) {
           try {
-            const prepared = await composio.prepareProjectSession(requestedComposioKey, cfg.composio);
+            const prepared = await composio.prepareProjectSession(requestedComposioKey, cfg.composio, undefined, { reuseEarlierUser: !sharedMembership() });
             patch.composio = { ...patch.composio, ...prepared };
           } catch (error) {
             return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
@@ -518,6 +543,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       });
       let configWriteCommitted = false;
       const enginesBefore = engineLaunches(providerConfigs());
+      const localVmModeChanged = changingLocalVmMode ? localVmModeChanging() : null;
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
       try {
         if (patch.live) patch.live = liveSavePatch(cfg.live, patch.live);
@@ -526,6 +552,17 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         if (externalSecretStorage) {
           // Supplied credentials are already in the OS-encrypted store: tombstone them so no older plaintext survives the merge.
           const persisted = structuredClone(patch);
+          if (persisted.openai?.key !== undefined) persisted.openai.key = "";
+          if (persisted.anthropic?.key !== undefined) persisted.anthropic.key = "";
+          if (persisted.openrouter?.key !== undefined) persisted.openrouter.key = "";
+          if (persisted.mistral?.key !== undefined) persisted.mistral.key = "";
+          if (persisted.cerebras?.key !== undefined) persisted.cerebras.key = "";
+          if (persisted.groq?.key !== undefined) persisted.groq.key = "";
+          if (persisted.greenference?.key !== undefined) persisted.greenference.key = "";
+          if (persisted.modelgo?.key !== undefined) persisted.modelgo.key = "";
+          if (persisted.meta?.key !== undefined) persisted.meta.key = "";
+          if (persisted.deepseek?.key !== undefined) persisted.deepseek.key = "";
+          if (persisted.openaiCompat?.key !== undefined) persisted.openaiCompat.key = "";
           if (persisted.xai?.key !== undefined) persisted.xai.key = "";
           if (persisted.composio?.apiKey !== undefined) persisted.composio.apiKey = "";
           if (persisted.box?.token !== undefined) persisted.box.token = "";
@@ -536,6 +573,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.decider?.key !== undefined) persisted.decider.key = "";
           if (persisted.decider?.openrouterKey !== undefined) persisted.decider.openrouterKey = "";
           if (persisted.decider?.workersAiToken !== undefined) persisted.decider.workersAiToken = "";
+          if (persisted.decider?.customKey !== undefined) persisted.decider.customKey = "";
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           if (persisted.imageGen?.geminiKey !== undefined) persisted.imageGen.geminiKey = "";
@@ -565,6 +603,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         throw error;
       }
       for (const key of resetKeys) if (key) forgetKey(key);
+      localVmModeChanged?.();
       postiz?.configSaved(patch);
       // A saved key reaches an engine through the environment its status read uses, often with no reload.
       registry.forgetSnapshots();

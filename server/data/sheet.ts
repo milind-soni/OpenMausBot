@@ -84,9 +84,13 @@ export class DataSheetStore {
   private save(): void {
     const stored = this.load();
     stored.updatedAt = this.now();
-    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
-    writeFileAtomic(join(this.dir, SHEET_FILE), JSON.stringify(stored, null, 2), { mode: 0o600 });
+    this.persist();
     this.deps.broadcast?.({ kind: "data", botId: this.botId, sheet: this.sheet() });
+  }
+
+  private persist(): void {
+    mkdirSync(this.dir, { recursive: true, mode: 0o700 });
+    writeFileAtomic(join(this.dir, SHEET_FILE), JSON.stringify(this.load(), null, 2), { mode: 0o600 });
   }
 
   sheet(): DataSheet {
@@ -109,6 +113,9 @@ export class DataSheetStore {
   nextResultName(prefix = "q"): string {
     const stored = this.load();
     stored.seq += 1;
+    // data_sql can materialise a persistent table without ever saving a card.
+    // Reserve its name on disk before the query can replace an older result.
+    this.persist();
     return `${prefix}_${stored.seq}`;
   }
 

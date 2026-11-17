@@ -114,13 +114,18 @@ export async function withSavableFile(
 
 // Untrusted path: nothing here opens, reads or runs it. Network shares are refused, since merely looking one up can hand
 // this computer's sign-in to whoever runs that server.
-export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathApi = path }) {
+function localTarget(rawPath, pathApi) {
   const local = (value) => !/^[\\/]{2}/.test(value) && pathApi.isAbsolute(value);
   if (typeof rawPath !== "string" || rawPath.includes("\0") || /^[a-z][a-z\d+.-]+:/i.test(rawPath) || !local(rawPath)) {
-    return "invalid";
+    return null;
   }
   const target = pathApi.normalize(rawPath);
-  if (!local(target)) return "invalid";
+  return local(target) ? target : null;
+}
+
+export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathApi = path }) {
+  const target = localTarget(rawPath, pathApi);
+  if (!target) return "invalid";
   let stats;
   try {
     stats = await fsp.stat(target);
@@ -130,6 +135,42 @@ export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathA
   if (!stats.isFile() && !stats.isDirectory()) return "invalid";
   reveal(target);
   return "shown";
+}
+
+// shell.openPath runs whatever it is given, so only a plain folder may reach it: never a file, a Mac app bundle
+// (Name.app, or a folder with Contents/Info.plist), a network share, or a link to any of them.
+// A dead network mount can leave these checks pending: past checkMs the link falls back, and a late answer opens nothing.
+// xdg-open can stay running after the file manager shows the folder, so an open still pending after openMs counts as done.
+export async function openFolder(rawPath, { open, fsp = fs.promises, pathApi = path, checkMs = 3_000, openMs = 10_000 }) {
+  const target = localTarget(rawPath, pathApi);
+  if (!target) return "invalid";
+  const checked = await settleWithin(plainFolder(target, fsp, pathApi), checkMs, { problem: "not-folder" });
+  if (checked.problem) return checked.problem;
+  let error = "";
+  try { error = await settleWithin(Promise.resolve(open(checked.real)), openMs, ""); } catch (failure) { error = failure?.message ?? String(failure); }
+  return error ? "failed" : "opened";
+}
+
+async function settleWithin(promise, ms, fallback) {
+  let timer;
+  return Promise.race([promise, new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), ms); })]).finally(() => clearTimeout(timer));
+}
+
+const absent = (error) => error?.code === "ENOENT" || error?.code === "ENOTDIR";
+
+async function plainFolder(target, fsp, pathApi) {
+  let real;
+  let stats;
+  try {
+    real = await fsp.realpath(target);
+    if (/^[\\/]{2}/.test(real)) return { problem: "not-folder" };
+    stats = await fsp.stat(real);
+  } catch {
+    return { problem: "missing" };
+  }
+  if (!stats.isDirectory() || /.\.[^.]+$/.test(pathApi.basename(real))) return { problem: "not-folder" };
+  const bundle = await fsp.stat(pathApi.join(real, "Contents", "Info.plist")).then(() => true, (error) => !absent(error));
+  return bundle ? { problem: "not-folder" } : { real };
 }
 
 /** This app's own logs folder in Explorer or Finder, made first if nothing has been logged yet. The folder is main's

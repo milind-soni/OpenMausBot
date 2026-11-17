@@ -199,10 +199,13 @@ describe("chat transcript rows", () => {
       await rowRendersAfter((current) => reducer(current, { type: "toggleSettings", open: false }));
     };
     try {
+      const barButtons = () => document.querySelectorAll(`[data-testid="message-actions"] > button[aria-label="${t("chat.speak.read")}"]`).length;
       await switchTo("system");
-      expect(await speak()).toEqual([t("chat.speak.read"), t("chat.speak.read")]);
+      expect(await speak()).toEqual([]);
+      expect(barButtons()).toBe(2);
       await switchTo("host");
       expect(await speak()).toEqual([`${t("chat.speak.needsKey")} (off)`, `${t("chat.speak.needsKey")} (off)`]);
+      expect(barButtons()).toBe(0);
     } finally {
       window.ogb = bridge;
     }

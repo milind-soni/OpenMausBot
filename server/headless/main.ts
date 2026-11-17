@@ -74,14 +74,14 @@ openmausbot doctor --host [--data-dir DIR] [--port 8799] [--domain HOST]
   "team export": "openmausbot team export [--team NAME]… --out FILE\n  Write the workspace (or some teams) as a team file; skills go beside it, keys as placeholders,\n  and a key written into a soul, brief or skill is taken out.",
   engine: "openmausbot engine set KIND … | engine list   (see help engine set)",
   "engine set": `openmausbot engine set KIND (--key-env VAR | --key-file FILE) [--base-url URL] [--only-claude-api] [--install] [--rotate] [--dry-run]
-  Give the workspace an engine key: claude, openai, openrouter, openai-compatible, xai, groq, greenference, mistral or cerebras.
+  Give the workspace an engine key: claude, openai, openrouter, openai-compatible, xai, groq, greenference, modelgo, mistral or cerebras.
   The key is never printed. One already set is kept unless --rotate. --install installs the engine's
   command if it is not running already, so a script can run this on every start.
   claude: the key runs every Claude bot; --only-claude-api keeps it to "Claude (API key)" bots.`,
   "engine list": "openmausbot engine list\n  The engines, whether each is ready, and which keys are set (never their values).",
   connect: `openmausbot connect [URL] [--code CODE] --out FILE [--label NAME] [--client] [--force]
   Get a token for a workspace you reach over the network, saved to FILE (only you can read it).
-  On this computer's own server the code is made for you; elsewhere, get one from Settings → Phone.
+  On this computer's own server the code is made for you; elsewhere, get one from Settings → Phone & devices.
   Then use it: --url URL --token-file FILE (or OPENMAUSBOT_URL and OPENMAUSBOT_TOKEN).`,
   mcp: "openmausbot mcp\n  Serve the OpenMausBot MCP tools on stdin and stdout, for an agent (docs/mcp-server.md).",
   token: "openmausbot token create NAME --out FILE … | token list | token revoke ID   (see help token create)",

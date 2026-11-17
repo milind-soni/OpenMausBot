@@ -60,7 +60,8 @@ function splitPhone(source) {
       }
     }
     const phone = source.slice(start, end);
-    if (phone.includes("[data-skin=")) return { desktop: source.slice(0, start) + source.slice(end), phone };
+    // A skin's own token block (`:is([data-skin="x"]) {`), not a rule that only scopes by skin, like the settings sheet's.
+    if (/\[data-skin="[a-z-]+"\]\)?\s*\{/.test(phone)) return { desktop: source.slice(0, start) + source.slice(end), phone };
   }
   return { desktop: source, phone: "" };
 }
@@ -190,8 +191,6 @@ const PAIRS = [
   ["--color-inset", "--color-card", 1.04],
   ["--color-card", "--color-app", 1.04],
   ["--color-panel", "--color-app", 1.03],
-  // The app's card is told from the frame round it.
-  ["--color-frame", "--color-app", 1.05],
 ];
 
 const skins = parseSkins(css);
@@ -247,6 +246,17 @@ for (const [id, tokens] of skins) {
   }
   if (skinFailed) failed = true;
 }
+
+// The window's frame is the sidebar's colour in every skin, so the top bar, the rail and the sidebar read as one field;
+// the chat in the app's card is told from it by --color-panel on --color-app above. The rail of places is a page 36px
+// wide, so it renders the phone tokens beside a full-width page: there too its frame must be the desktop sidebar's.
+const tokenHex = (id, token) => resolve(skins.get(id)?.[token] ?? "", skins.get(id) ?? {}).toLowerCase();
+const frameMisses = [...skins.keys()].filter((id) => tokenHex(id, "--color-frame") !== tokenHex(id.replace(/ \(phone\)$/, ""), "--color-panel"));
+for (const id of frameMisses) {
+  console.log(`✗ ${id} frame — ${tokenHex(id, "--color-frame") || "undefined"}, not the sidebar's ${tokenHex(id.replace(/ \(phone\)$/, ""), "--color-panel")}`);
+}
+if (frameMisses.length) failed = true;
+else console.log(`✓ frame — the sidebar's colour in all ${skins.size} skins, phone widths included`);
 
 // The inverted bubbles (Daylight's ink-black, Pop's ink) have
 // their own inherited context: the editor, labels, quotes and file chips
@@ -312,6 +322,24 @@ if (!night) {
     }
     if (!schemeFailed) console.log(`✓ night card (${scheme}) — its text and close button clear the sky behind them`);
   }
+}
+
+// Settings' off switch: a light fill and a 1 px ink outline that must read as a control (3:1 against the card). Two
+// fixed cases pin the Daylight and Midnight values, so a token change can't quietly undo them; every skin is measured too.
+for (const [label, outline, card] of [["Daylight off-switch outline (ink 50% on #ffffff)", "#1c1c1c80", "#ffffff"], ["Midnight off-switch outline (ink 40% on #1f1f1f)", "#f5f5f566", "#1f1f1f"]]) {
+  const ratio = contrast(outline, card);
+  if (ratio === null || ratio < 3) { failed = true; console.log(`✗ ${label}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 3:1)`); }
+  else console.log(`✓ ${label}: ${ratio.toFixed(2)}:1`);
+}
+for (const [id, tokens] of skins) {
+  if (id.endsWith("(phone)")) continue;
+  const ink = resolve(tokens["--color-ink"] ?? "", tokens).trim();
+  const card = resolve(tokens["--color-menu"] ?? "", tokens);
+  const alpha = id === "midnight" ? "66" : "80";
+  const ratio = /^#[0-9a-f]{6}$/i.test(ink) ? contrast(`${ink}${alpha}`, card) : null;
+  if (ratio === null) { console.log(`~ ${id} off-switch outline — not measurable here (${ink} on ${card})`); continue; }
+  if (ratio < 3) { failed = true; console.log(`✗ ${id} off-switch outline: ${ratio.toFixed(2)}:1 (needs 3:1)`); }
+  else console.log(`✓ ${id} off-switch outline: ${ratio.toFixed(2)}:1`);
 }
 
 process.exit(failed ? 1 : 0);

@@ -45,10 +45,10 @@ afterEach(async () => { await Promise.all(hosts.splice(0).map((host) => host.bro
 
 const turn = { threadId: "thread-1", generation: "gen-1" };
 
-function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, server = false, hosted = false, device, lendRefusal, holder, audienceOf, bots: botIds = ["scout"], browserBox, lentChrome, turnResources }: {
+function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, server = false, hosted = false, device, lendRefusal, holder, audienceOf, bots: botIds = ["scout"], browserBox, lentChrome, turnResources, browsersAtOnce }: {
   cloudHome?: boolean; server?: boolean; hosted?: boolean; device?: BrowserHostDeps["device"]; lendRefusal?: BrowserHostDeps["lendRefusal"]; holder?: (resource: string) => TurnOwner | undefined;
   audienceOf?: BrowserHostDeps["audienceOf"]; bots?: string[]; browserBox?: BrowserHostDeps["browserBox"];
-  lentChrome?: BrowserHostDeps["lentChrome"]; turnResources?: BrowserHostDeps["turnResources"];
+  lentChrome?: BrowserHostDeps["lentChrome"]; turnResources?: BrowserHostDeps["turnResources"]; browsersAtOnce?: BrowserHostDeps["browsersAtOnce"];
 } = {}) {
   const cfg = {
     features: { browser: true },
@@ -75,6 +75,7 @@ function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = fal
     audienceOf,
     browserBox,
     lentChrome,
+    browsersAtOnce,
   });
   hosts.push(host);
   return { cfg, host, minted, bots };
@@ -151,11 +152,25 @@ describe("the bots' browser host with browserEngine.engine set to chrome", () =>
     expect(host.signedInSitesRefusal("work")).toContain("does not list signed-in sites yet");
   });
 
-  it("says in the status which engine runs the bots' browsers", () => {
+  it("reports saved and active proxy status for both built-in browser engines", () => {
     const { cfg, host } = setup("chrome");
-    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({ engine: "chrome", myChrome: true });
-    cfg.browserEngine = { engine: "agent-browser" };
-    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toEqual({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true, engine: "agent-browser" });
+    cfg.browserEngine = { engine: "chrome", egress: { proxy: "socks5://127.0.0.1:1080" } };
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({
+      engine: "chrome", myChrome: true, proxySaved: true, proxyConfigured: true,
+    });
+    cfg.browserEngine = { engine: "agent-browser", egress: { proxy: "socks5://127.0.0.1:1080" } };
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({
+      kind: "unavailable", engine: "agent-browser", proxySaved: true, proxyConfigured: true,
+    });
+    cfg.browserEngine = { engine: "chrome", egress: { proxy: "invalid" } };
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({
+      engine: "chrome", proxySaved: true,
+    });
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true }).proxyConfigured).toBeUndefined();
+    cfg.features!.browser = false;
+    cfg.browserEngine = { engine: "chrome", egress: { proxy: "socks5://127.0.0.1:1080" } };
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({ proxySaved: true });
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true }).proxyConfigured).toBeUndefined();
   });
 
   it("offers the owner's local-sites switch on a self-hosted server, but never on a shared company workspace", () => {
@@ -605,6 +620,93 @@ describe("a deleted bot's browser", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(closed()).toEqual([]);
     await host.browserSweep.closeAll();
+  });
+});
+
+describe("a running turn's agent-browser browser", () => {
+  const ENGINE = "/usr/local/bin/agent-browser";
+  const HOUR = 3_600_000;
+  const folders: string[] = [];
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.mocked(Date.now).mockRestore?.();
+    for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
+  });
+  function ready() {
+    vi.mocked(browserEngineStatus).mockImplementation(() => ({ kind: "ready", binaryPath: ENGINE, version: "0.37.0", managed: false }));
+    vi.mocked(closeBrowserSession).mockClear().mockResolvedValue(true);
+    vi.mocked(runningBrowserSessionNames).mockClear();
+  }
+  function daemons(sessions: string[]) {
+    const folder = mkdtempSync(join(tmpdir(), "omb-host-room-"));
+    folders.push(folder);
+    mkdirSync(join(folder, "agent-browser"));
+    for (const session of sessions) writeFileSync(join(folder, "agent-browser", `${session}.pid`), "0");
+    vi.stubEnv("XDG_RUNTIME_DIR", folder);
+    vi.mocked(runningBrowserSessionNames).mockResolvedValue(sessions);
+  }
+  /** Every browser's clock an hour on: each one has sat unused past a Cloud home's 3 minutes. */
+  function anHourLater() {
+    const real = Date.now.bind(Date);
+    vi.spyOn(Date, "now").mockImplementation(() => real() + HOUR);
+  }
+  const holding = (sessions: string[]): BrowserHostDeps["turnResources"] => ({
+    free: (resource) => !sessions.some((session) => resource === `browser:${session}`), holder: () => undefined, onClaim: () => () => {},
+  });
+  const closedSessions = () => vi.mocked(closeBrowserSession).mock.calls.map(([, env]) => env.AGENT_BROWSER_SESSION);
+  const keepsSignIns = { command: ENGINE, env: { AGENT_BROWSER_RESTORE_SAVE: "auto" } };
+  const temporary = { command: ENGINE, env: { AGENT_BROWSER_RESTORE_SAVE: "never" } };
+
+  it("is never closed by the idle sweep, however long it sat unused, while one no turn holds is", async () => {
+    for (const held of [true, false]) {
+      ready();
+      daemons(["bot-scout"]);
+      const { host } = setup(undefined, { cloudHome: true, turnResources: holding(held ? ["bot-scout"] : []) });
+      host.usedBrowserSessions.set("bot-scout", keepsSignIns);
+      expect(await host.browserRuntime.closeIfIdle("bot-scout", HOUR * 1_000, keepsSignIns)).toBe(false);
+      anHourLater();
+      host.browserSweep.start();
+      if (held) {
+        await vi.waitFor(() => expect(runningBrowserSessionNames).toHaveBeenCalled());
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(closedSessions()).toEqual([]);
+      } else {
+        await vi.waitFor(() => expect(closedSessions()).toEqual(["bot-scout"]));
+      }
+      vi.mocked(Date.now).mockRestore();
+      vi.mocked(closeBrowserSession).mockClear();
+      await host.browserSweep.closeAll();
+    }
+  });
+
+  it("is closed for a bot waiting on a full limit only once it sat unused for the idle time and keeps its sign-ins", async () => {
+    ready();
+    const { host } = setup(undefined, { cloudHome: true, turnResources: holding(["bot-a", "bot-t"]), browsersAtOnce: () => 2 });
+    for (const [session, spec] of [["bot-a", keepsSignIns], ["bot-t", temporary]] as const) {
+      expect(await host.browserRoom.enter(session, Date.now() + 1_000)).toBeNull();
+      expect(await host.browserRuntime.closeIfIdle(session, HOUR * 1_000, spec)).toBe(false);
+    }
+    // Just used: the waiting bot is told why, and the turn keeps both.
+    expect(await host.browserRoom.enter("bot-b", Date.now() + 100)).toMatch(/^2 browsers are already open/);
+    expect(closedSessions()).toEqual([]);
+    anHourLater();
+    expect(await host.browserRoom.enter("bot-b", Date.now() + 1_000)).toBeNull();
+    // The temporary browser would lose its sign-ins, so the turn keeps it.
+    expect(closedSessions()).toEqual(["bot-a"]);
+    expect(host.browserRoom.open).toBe(2);
+  });
+
+  it("counts toward the limit when a person's view started it, but not the person's own Chrome", async () => {
+    ready();
+    const { host } = setup(undefined, { cloudHome: true, browsersAtOnce: () => 1 });
+    // The live view tells agent-browser's runtime directly; the router hides it, so it is found through a call.
+    const closing = vi.spyOn(BrowserRuntime.prototype, "closeIfIdle");
+    await host.browserRuntime.closeIfIdle("bot-viewed", 1);
+    const agentBrowser = closing.mock.contexts[0] as BrowserRuntime;
+    closing.mockRestore();
+    await agentBrowser.launched("bot-viewed", keepsSignIns);
+    await agentBrowser.launched("bot-mine", { command: ENGINE, env: { AGENT_BROWSER_CDP: "http://127.0.0.1:9222" } });
+    expect(host.browserRoom.open).toBe(1);
   });
 });
 

@@ -1,11 +1,13 @@
 import { userError } from "../user-errors.ts";
 import { basename, join } from "node:path";
 
-import type { WireBot, WireGroup } from "../../shared/wire.ts";
+import type { BotsResponse, SearchResponse, WireBot, WireGroup } from "../../shared/wire.ts";
+import { NO_SUCH_BOT } from "../../shared/bot-read.ts";
 import {
   ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
   parseAudioRange, readAttachment, saveFile, saveImageUpload, validateAttachmentUploadId, type SavedAttachment,
 } from "../attachments.ts";
+import { saveXmindUpload, XMIND_MIME } from "../xmind.ts";
 import { deliveredCopy } from "../bot-attachment.ts";
 import { memberBot, memberGroup, type Viewer, type VisibleSet } from "../bot-visibility.ts";
 import type { ComputerControl } from "../computer-control.ts";
@@ -14,6 +16,7 @@ import type { Coordinator } from "../coordinator.ts";
 import type { WorkspaceAccess } from "../enterprise.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
 import { readMessage, searchMessagesAsync } from "../message-db.ts";
+import { MessageMediaLinks } from "../message-media-links.ts";
 import {
   listMessageFolder, MESSAGE_FILE_DOWNLOAD_MAX_BYTES, MESSAGE_FILE_MAX_BYTES, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
   messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName,
@@ -21,6 +24,7 @@ import {
 import { resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
 import type { queuedSteerSnapshot } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
+import { answerAsleep, backgroundWhileAsleep } from "../cloud-power.ts";
 import { createJobRoutes } from "./jobs.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
@@ -58,6 +62,8 @@ export interface ThreadRouteDeps {
   viewerFor(auth: RequestAuth): Viewer;
   /** A room's unread mark as this person has read it (a Team Cloud); the room as it is anywhere else. */
   groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
+  /** The bots in this person's own order (a Team Cloud's User); the team's order anywhere else. */
+  botOrderFor?(auth: RequestAuth, bots: readonly BotRecord[]): readonly BotRecord[];
   visibleTo(viewer: Viewer): VisibleSet;
   /** A Team Cloud: gives a member their own MausBot once, before their first list of bots. */
   memberDefaultBot?(email: string): unknown;
@@ -68,6 +74,9 @@ export interface ThreadRouteDeps {
   keptAttachments?(): ReadonlySet<string> | null;
 }
 
+/** The types the chat's video player accepts; anything else is never streamed inline. */
+const STREAMABLE_VIDEO_MIMES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/x-m4v"]);
+
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
   const {
     store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
@@ -75,6 +84,14 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     pageSize, messagePage, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
     botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo,
   } = deps;
+  const mediaLinks = new MessageMediaLinks();
+  // tasks stays explicit: clients expect [] where wireBot() would omit the key.
+  const shownBot = (bot: BotRecord, visible: VisibleSet, limit: number | undefined) => {
+    const wired = wireBot(bot);
+    // Narrowed first: on a Team Cloud the selected conversation may be someone else's, and its words never go out.
+    const shown = memberBot({ ...wired, tasks: wired.tasks ?? [] }, visible);
+    return { ...shown, ...(typeof shown.threadId === "string" ? messagePage(shown.threadId, limit) : { messages: [], hasMore: false, activeLeafId: null }) };
+  };
   const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions });
   const handle = async ({ req, res, url, path, method, auth, json, readBody }: RouteContext): Promise<unknown> => {
     let m: RegExpMatchArray | null = null;
@@ -86,19 +103,14 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     const companionMutationToken = deps.companionMutationToken();
     const cliOwnerToken = deps.cliOwnerToken();
     if (method === "GET" && path === "/api/bots") {
+      if (backgroundWhileAsleep(path, req.headers)) return answerAsleep(res, json);
       try { groupUsageReader.refresh(); } catch { }
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
-      // tasks stays explicit: clients expect [] where wireBot() would omit the key.
-      const shownBots = store.bots.filter((bot) => visible.bot(bot.id));
+      const shownBots = (deps.botOrderFor?.(auth, store.bots) ?? store.bots).filter((bot) => visible.bot(bot.id));
       const queued = publicBotQueuedMessages();
       return json(res, 200, {
-        bots: shownBots.map((bot) => {
-          const wired = wireBot(bot);
-          // Narrowed first: on a Team Cloud the selected conversation may be someone else's, and its words never go out.
-          const shown = memberBot({ ...wired, tasks: wired.tasks ?? [] }, visible);
-          return { ...shown, ...(typeof shown.threadId === "string" ? messagePage(shown.threadId, limit) : { messages: [], hasMore: false, activeLeafId: null }) };
-        }),
+        bots: shownBots.map((bot) => shownBot(bot, visible, limit)),
         botQueuedMessages: visible.everything ? queued : Object.fromEntries(Object.entries(queued).filter(([threadId]) => visible.thread(threadId))),
         sections: visible.sections(store.sections),
         groups: store.groups.filter((g) => visible.group(g.id)).map((g) => {
@@ -114,7 +126,17 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
             return [bot.id, { held: snapshot.held, helpReason: snapshot.helpReason, ...(snapshot.help ? { help: snapshot.help } : {}) }];
           }),
         ),
-      });
+        together: { newBot: true },
+      } satisfies BotsResponse<MessagePage["messages"][number]>);
+    }
+
+    m = path.match(/^\/api\/bots\/([\w-]+)$/);
+    if (m && method === "GET") {
+      const bot = store.bot(m[1]);
+      if (!bot || !visible.bot(bot.id)) return json(res, 404, { error: NO_SUCH_BOT });
+      const limit = pageSize(url.searchParams.get("messages"));
+      if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
+      return json(res, 200, { bot: shownBot(bot, visible, limit) });
     }
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
@@ -170,7 +192,9 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     const streamsMessageImage = Boolean(
       m && method === "GET" && url.searchParams.get("preview") === "1",
     );
-    if (m && (method === "POST" || streamsMessageImage)) {
+    // A <video> element can only GET, so a POST first trades its body for a link id.
+    const mediaId = m && method === "GET" && !streamsMessageImage ? url.searchParams.get("media") : null;
+    if (m && (method === "POST" || streamsMessageImage || mediaId)) {
       if (method === "POST" && !String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
@@ -185,14 +209,20 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         return json(res, 403, { error: "that message does not share this file" });
       }
       const messageText = message.text ?? "";
+      // Only this viewer's link for this message; every check below runs again on what it stands for.
+      const mediaGrant = mediaId ? mediaLinks.use(mediaId, threadId, message.id, auth) : null;
+      if (mediaId && !mediaGrant) return json(res, 404, { error: "that video link has expired", code: "media_link_expired" });
       const body = method === "POST" ? await readBody(req) : null;
+      const asksMediaLink = body?.media === true;
       const rawReference = streamsMessageImage ? url.searchParams.get("ref") : null;
       if (streamsMessageImage && (!rawReference || !/^\d+$/.test(rawReference))) {
         return json(res, 400, { error: "ref must identify a rendered image" });
       }
-      const href = method === "POST"
-        ? (typeof body.path === "string" ? body.path : "")
-        : messageImageTargetAt(messageText, Number(rawReference));
+      const href = mediaGrant
+        ? mediaGrant.path
+        : method === "POST"
+          ? (typeof body.path === "string" ? body.path : "")
+          : messageImageTargetAt(messageText, Number(rawReference));
       if (!href) return json(res, 400, { error: "path is required" });
 
       let roots: string[];
@@ -223,9 +253,11 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         roots = [...new Set([...messageFileRootsForThread(senderId, threadId), ...fromRun])];
       }
 
-      const folderEntry = method === "POST" && body.entry !== undefined
-        ? messageFolderEntryName(body.entry)
-        : undefined;
+      const folderEntry = mediaGrant
+        ? mediaGrant.entry
+        : method === "POST" && body.entry !== undefined
+          ? messageFolderEntryName(body.entry)
+          : undefined;
       if (folderEntry === null) return json(res, 400, { error: "entry must be one file name" });
       // An inline image is read whole by the browser; a saved file is streamed below, so it may be larger.
       const maxBytes = streamsMessageImage ? MESSAGE_FILE_MAX_BYTES : MESSAGE_FILE_DOWNLOAD_MAX_BYTES;
@@ -240,7 +272,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         const name = message.role === "bot" && !botAttachment && !folderEntry && (code === "outside_workspace" || status === 404)
           ? referencedFileName(href)
           : null;
-        const copy = name ? deliveredCopy(store.messagesFor(threadId), message, name) : null;
+        const copy = name ? deliveredCopy(store.messagesFor(threadId), message, name, href) : null;
         if (copy) {
           file = await openMessageFile(copy.path, [ATTACHMENTS_DIR], maxBytes);
           downloadName = copy.name;
@@ -257,10 +289,32 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         await file.handle.close();
         return json(res, 415, { error: "only images can be previewed here" });
       }
-      res.writeHead(200, {
+      if ((asksMediaLink || mediaGrant) && !STREAMABLE_VIDEO_MIMES.has(file.mime)) {
+        await file.handle.close();
+        return json(res, 415, { error: "only videos can be played here" });
+      }
+      if (asksMediaLink) {
+        await file.handle.close();
+        const id = mediaLinks.issue({ threadId, messageId: message.id, path: href, ...(folderEntry ? { entry: folderEntry } : {}) }, auth);
+        res.setHeader("x-openmausbot-media", "1");
+        res.setHeader("cache-control", "private, no-store");
+        return json(res, 200, { url: `/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(message.id)}/file?media=${id}`, mime: file.mime, bytes: file.bytes });
+      }
+      const inline = streamsMessageImage || Boolean(mediaGrant);
+      const rawRange = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
+      const range = mediaGrant ? parseAudioRange(rawRange, file.bytes) : { kind: "none" as const };
+      if (range.kind === "unsatisfiable") {
+        await file.handle.close();
+        res.writeHead(416, { "content-range": `bytes */${file.bytes}`, "cache-control": "private, no-store", "x-content-type-options": "nosniff" });
+        return res.end();
+      }
+      const [start, end] = range.kind === "range" ? [range.start, range.end] : [0, file.bytes - 1];
+      res.writeHead(range.kind === "range" ? 206 : 200, {
         "content-type": file.mime,
-        "content-length": String(file.bytes),
-        ...(streamsMessageImage
+        "content-length": String(end - start + 1),
+        ...(range.kind === "range" ? { "content-range": `bytes ${start}-${end}/${file.bytes}` } : {}),
+        ...(mediaGrant ? { "accept-ranges": "bytes" } : {}),
+        ...(inline
           ? { "content-disposition": "inline" }
           : { "content-disposition": messageFileDisposition(messageFileDownloadName(downloadName, file.name)) }),
         "cache-control": "private, no-store",
@@ -269,7 +323,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         pragma: "no-cache",
         vary: "Authorization",
         "x-content-type-options": "nosniff",
-        ...(streamsMessageImage
+        ...(inline
           ? {
               "cross-origin-resource-policy": "same-origin",
               "referrer-policy": "no-referrer",
@@ -280,7 +334,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         await file.handle.close();
         return res.end();
       }
-      const stream = file.handle.createReadStream({ start: 0, end: file.bytes - 1, autoClose: true });
+      const stream = file.handle.createReadStream({ start, end, autoClose: true });
       stream.on("error", () => res.destroy());
       res.on("close", () => stream.destroy());
       stream.pipe(res);
@@ -375,7 +429,9 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       try {
         // Returning must not destroy the socket: the caller still sends the 4xx when the byte count crosses the limit.
         const chunks = req.iterator({ destroyOnReturn: false }) as AsyncIterable<Buffer>;
-        const saved = await saveFile(chunks, name, rawType ?? "", { uploadId, expectedBytes: declaredLength });
+        const saved = rawType?.split(";")[0]!.trim().toLowerCase() === XMIND_MIME
+          ? await saveXmindUpload(chunks, name, { uploadId })
+          : await saveFile(chunks, name, rawType ?? "", { uploadId, expectedBytes: declaredLength });
         deps.uploads.note(auth, basename(saved.path));
         return json(res, 201, saved);
       } catch (error) {
@@ -482,7 +538,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
           return null;
         })
         .filter((hit): hit is NonNullable<typeof hit> => hit !== null);
-      return json(res, 200, { hits });
+      return json(res, 200, { hits } satisfies SearchResponse);
     }
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/export$/);

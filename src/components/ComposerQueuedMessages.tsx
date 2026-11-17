@@ -20,6 +20,10 @@ export function composerCanSteerQueuedMessages(
   return busy && !locked && !approvalPending && pendingCount > 0;
 }
 
+export function roomSteersQueued(busyEngineCanSteer: boolean, busyBotId: string | null | undefined): boolean {
+  return busyEngineCanSteer || !busyBotId;
+}
+
 export const DOUBLE_ENTER_STEER_WINDOW_MS = 1_500;
 
 export function doubleEnterSteerWindowExpiresAt(
@@ -48,6 +52,7 @@ export function QueuedComposerMessages({
   steerMode = "all",
   steering = false,
   steerInterrupts = false,
+  held = false,
   onCancel,
   onEdit,
   oneThreadPerBot = false,
@@ -60,6 +65,7 @@ export function QueuedComposerMessages({
   steerMode?: "all" | "next";
   steering?: boolean;
   steerInterrupts?: boolean;
+  held?: boolean;
   onCancel: (queueId: string) => void;
   onEdit?: (queueId: string) => void;
 }) {
@@ -68,11 +74,15 @@ export function QueuedComposerMessages({
   const multiple = items.length > 1;
   const steerLabel = steering
     ? t("composer.queued.steering")
-    : multiple
-      ? steerMode === "all"
-        ? t("composer.queued.steerAll")
-        : t("composer.queued.steerNext")
-      : t("composer.queued.steer");
+    : steerInterrupts
+      ? multiple
+        ? t(steerMode === "all" ? "composer.queued.stopAndSendAll" : "composer.queued.stopAndSendNext")
+        : t("composer.queued.stopAndSend")
+      : multiple
+        ? steerMode === "all"
+          ? t("composer.queued.steerAll")
+          : t("composer.queued.steerNext")
+        : t("composer.queued.steer");
   const steerDescription = steerInterrupts
     ? multiple
       ? steerMode === "all"
@@ -95,6 +105,7 @@ export function QueuedComposerMessages({
       }
       aria-live="polite"
     >
+      {held && <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.roomHeld")}</p>}
       {items.some((item) => item.reason === "group-turn") && (
         <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.groupTurn")}</p>
       )}
@@ -122,7 +133,7 @@ export function QueuedComposerMessages({
                 type="button"
                 onClick={onSteer}
                 disabled={steering}
-                aria-label={steering ? t("composer.queued.steeringAria") : steerDescription}
+                aria-label={steering ? t("composer.queued.steeringAria") : steerInterrupts ? steerLabel : steerDescription}
                 title={steerDescription}
                 className="flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[13px] font-medium text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-wait disabled:opacity-60"
               >

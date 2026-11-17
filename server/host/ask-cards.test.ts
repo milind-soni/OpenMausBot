@@ -57,6 +57,7 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
       return { ok: true as const };
     }),
     answeredIn: (threadId, requestId) => (threadId === "inbox" && requestId.startsWith("req") ? "work" : threadId),
+    now: () => 0,
     answerNode: (id, text) => {
       const parked = nodes.get(id);
       if (!parked || parked.status !== "waiting") return false;
@@ -68,7 +69,7 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
   const cards = createAskCards(deps);
   const node = (over: Partial<HandoffView> = {}): HandoffView => {
     const made = { id: "as_1", rootId: "root", parentId: "root", threadId: "work", botId: "ledger", key: "ledger", text: "Fix it", createdAt: 1_000,
-      startedAt: 1_000, status: "waiting", result: "", reported: false, executions: 1, lastProgressAt: 1_000, approvalGranted: false, kind: "work",
+      startedAt: 1_000, status: "waiting", result: "", reported: false, executions: 1, lastProgressAt: 1_000, kind: "work",
       restarts: 0, mode: "work", reply: "resume", ...over } as HandoffView;
     nodes.set(made.id, made);
     return made;
@@ -358,6 +359,28 @@ describe("a typed line answers a question card", () => {
     w.refuse({ status: 403, error: "This question is Ben's to answer." });
     expect(await w.cards.typed(AUTH, "work", "Yes", undefined, {})).toEqual({ status: 403, error: "This question is Ben's to answer." });
     expect(w.rows("work").filter((row) => row.role === "user")).toEqual([]);
+  });
+});
+
+describe("a reminder of work parked on the person", () => {
+  const closesAt = 2 * 24 * 60 * 60_000;
+
+  it("names the question and when it closes, and adds no second row", () => {
+    const w = world();
+    const node = w.node({ status: "waiting", question: "Which region?\nDefault: eu-west" });
+    w.cards.remind(node, closesAt);
+    expect(w.notified).toHaveLength(1);
+    expect(w.notified[0]).toMatchObject({ kind: "question", botId: "ledger", threadId: "work", body: expect.stringContaining("Which region?") });
+    expect(w.notified[0]!.body).toContain("2 days");
+    expect(w.notified[0]!.body).not.toContain("eu-west");
+    expect(w.rows("work")).toEqual([]);
+  });
+
+  it("does not read a card's internal wait description to the person", () => {
+    const w = world();
+    w.cards.remind(w.node({ status: "waiting", question: "Waiting on the person: provide API key", cards: ["m1"] }), closesAt);
+    expect(w.notified[0]!.body).not.toContain("Waiting on the person");
+    expect(w.notified[0]!.body).toContain("2 days");
   });
 });
 

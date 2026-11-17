@@ -7,6 +7,7 @@ import { lstat, mkdir, readdir, rename, rm, rmdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { shellQuote } from "./browser/chrome/wrapper.ts";
 import type { ContainerComputerStatus, LocalVmTarget } from "./container-computer.ts";
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 
@@ -15,6 +16,17 @@ const PROFILE_IN_CONTAINER = "/home/cua/.mozilla";
 const APPS_IN_CONTAINER = "/home/cua/.local";
 // docker: "Could not find the file … in container"; podman: "… could not be found on container …: no such file or directory".
 const NOT_IN_CONTAINER = /could not (?:be )?f(?:ou|i)nd|no such file/iu;
+const PERMISSION_DENIED = /EACCES|EPERM|permission denied|operation not permitted/iu;
+
+/** A desktop made before cua took the host's ids ran as uid 1000 and may have left folders this server cannot change.
+ * The update then names the one command that hands them back instead of a bare EACCES. */
+function withOwnershipStep(error: unknown, workspaceDir: string): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!PERMISSION_DENIED.test(message) || !process.getuid || !process.getgid) return error instanceof Error ? error : new Error(message);
+  return new Error(
+    `an older desktop left files this app (uid ${process.getuid()}) cannot change; run sudo chown -R ${process.getuid()}:${process.getgid()} ${shellQuote(workspaceDir)} and it retries on its own (${message.slice(0, 80)})`,
+  );
+}
 
 async function isEmptyDirectory(path: string): Promise<boolean> {
   try {
@@ -32,7 +44,9 @@ export async function rescueFirefoxProfile(runtime: string, target: LocalVmTarge
   await mkdir(profiles, { recursive: true, mode: 0o700 });
   const existing = await lstat(durable).catch(() => null);
   if (existing && !(existing.isDirectory() && await isEmptyDirectory(durable))) return "kept";
-  const staging = join(profiles, `.mozilla-rescue-${randomBytes(6).toString("hex")}`);
+  // Staged in the workspace root, which this server made: an older desktop may own .browser-profiles, and a desktop whose
+  // ~/.mozilla is already a link into the workspace must update without writing there.
+  const staging = join(target.workspaceDir, `.mozilla-rescue-${randomBytes(6).toString("hex")}`);
   try {
     const { command, args } = resolveCliSpawn(runtime, ["cp", `${target.containerName}:${PROFILE_IN_CONTAINER}`, staging]);
     try {
@@ -62,7 +76,7 @@ export async function keepFirefoxProfileBeforeRemove(
 ): Promise<"rescued" | "kept" | "none"> {
   if (!status.runtime || status.container === "missing" || !status.managed || status.imageMatches) return "none";
   if (status.container === "running") await stop();
-  return rescueFirefoxProfile(status.runtime, target);
+  return rescueFirefoxProfile(status.runtime, target).catch((error: unknown) => { throw withOwnershipStep(error, target.workspaceDir); });
 }
 
 /** User-installed desktop applications conventionally live in ~/.local. Rescue that directory before replacing a legacy
@@ -72,7 +86,7 @@ export async function rescueInstalledApps(runtime: string, target: LocalVmTarget
   const durable = join(apps, "local");
   await mkdir(apps, { recursive: true, mode: 0o700 });
   const existing = await lstat(durable).catch(() => null);
-  const staging = join(apps, `.local-rescue-${randomBytes(6).toString("hex")}`);
+  const staging = join(target.workspaceDir, `.local-rescue-${randomBytes(6).toString("hex")}`); // the root, as for Firefox
   try {
     const { command, args } = resolveCliSpawn(runtime, ["cp", `${target.containerName}:${APPS_IN_CONTAINER}`, staging]);
     try {
@@ -107,5 +121,5 @@ export async function keepInstalledAppsBeforeRemove(
 ): Promise<"rescued" | "kept" | "none"> {
   if (!status.runtime || status.container === "missing" || !status.managed || status.imageMatches) return "none";
   if (status.container === "running") await stop();
-  return rescueInstalledApps(status.runtime, target);
+  return rescueInstalledApps(status.runtime, target).catch((error: unknown) => { throw withOwnershipStep(error, target.workspaceDir); });
 }

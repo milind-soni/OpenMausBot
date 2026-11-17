@@ -24,6 +24,9 @@ export interface CloudAccountState {
   machine?: import("./cloud-home.mjs").CloudMachine;
   /** Connected: the teams this account is in, each with its Cloud; absent while it is in none. */
   teams?: import("./cloud-home.mjs").CloudTeam[];
+  /** Connected, with no Cloud of the account's own: the team it was invited into, which opens first, before any plan is
+   * offered (the Admin's `landing`). */
+  landing?: { teamId: string };
   /** Connected to an Admin that lists every Cloud of the person's (contract v1 `clouds`): each of them, My Cloud first.
    * Absent from an older Admin, whose `machine` and `teams` say everything. */
   clouds?: import("./cloud-list.mjs").CloudListEntry[];

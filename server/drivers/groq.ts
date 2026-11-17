@@ -44,7 +44,7 @@ export const GroqDriver: ProviderDriver<GroqConfig> = {
   install: {
     docsUrl: "https://console.groq.com/docs/overview",
     settings: "connections",
-    signInCommand: "Save a Groq API key in Settings → API keys, or set GROQ_API_KEY on the server.",
+    signInCommand: "Save a Groq API key in Settings → AI → Providers, or set GROQ_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
@@ -90,8 +90,8 @@ export const GroqDriver: ProviderDriver<GroqConfig> = {
       reasoningReplayField: "reasoning", computerUse: true, imageInput: () => false,
       requestBody: (model, messages, stream) => ({ model, messages, stream }),
       httpErrorLabel: "Groq",
-      missingKeyError: "Save a Groq API key in Settings → API keys, or set GROQ_API_KEY.",
-      unavailableReason: "No Groq API key — open Settings → API keys.",
+      missingKeyError: "Save a Groq API key in Settings → AI → Providers, or set GROQ_API_KEY.",
+      unavailableReason: "No Groq API key — open Settings → AI → Providers.",
       timeoutMs: 180_000, billing: "metered", includeUsageInCompleted: true,
       nativeLog: {
         source: "groq.chat.completions",

@@ -37,11 +37,20 @@ export function createOwnThreads(deps: {
       const reason = chosen && cannotRun(chosen, bot);
       return reason ? `${reason} Nothing ran on another model in its place; open it again on a model list_models offers.` : null;
     },
-    /** `answers` names a question one of `botId`'s own threads waits on: the one message a bot may address to itself. */
+    /** `thread` is a report-back thread `botId` opened from `fromThreadId`: its opener may steer it or send it follow-ups. */
+    steersOwn(thread: string, botId: string, fromThreadId: string): boolean {
+      const openedBy = thread === "new" || thread === "standing" ? undefined : store.taskByThread(botId, thread)?.openedBy;
+      return openedBy?.botId === botId && openedBy.threadId === fromThreadId && openedBy.kind === undefined && !openedBy.roomLane;
+    },
+    /** `answers` names a question one of `botId`'s own threads waits on: with steersOwn, the only messages a bot may address to itself. */
     answersOwn(answers: string | undefined, botId: string): boolean {
       const asked = answers === undefined ? undefined : deps.node(answers);
       const requester = asked?.parentId === undefined ? undefined : deps.node(asked.parentId);
       return Boolean(asked && requester && requester.botId === botId && own(requester, asked));
+    },
+    /** "ask" when running on `selection` crosses to an engine where this bot's permission level does not carry over. */
+    approvalFor(bot: BotRecord, selection: ModelSelection): "ask" | undefined {
+      return modelSwitchNeedsAsk(approvalModeFor(bot), deps.registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, deps.registry.cliTarget(selection.instanceId)?.driverKind) ? "ask" : undefined;
     },
     inherited(botId: string, parentThreadId: string): { modelSelection?: ModelSelection; approvalMode?: "ask" } {
       const bot = store.bot(botId);

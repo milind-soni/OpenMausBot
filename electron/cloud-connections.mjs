@@ -57,7 +57,7 @@ export function parseConnections(value) {
       ...(typeof item.installationId === "string" && INSTALLATION.test(item.installationId) ? { installationId: item.installationId } : {}),
     }));
   return { computer: { environmentId, label: label.trim().slice(0, 120) }, connections, engines: strings(value.engines, ENGINE, 200), commands: strings(value.commands, LAUNCHER, 40),
-    ...(value.managedApps === false ? { managedApps: false } : {}) };
+    ...(value.managedApps === false ? { managedApps: false } : {}), ...(value.vaultKeys === true ? { vaultKeys: true } : {}) };
 }
 
 /** This computer's connections, by name only, and the computer they are on. */
@@ -191,16 +191,19 @@ export async function sendConnections(collected, target, { local, release = true
     },
     async mcp(item) {
       const { connection, digest } = await secrets(local, item);
-      const { name, server, signIn } = record(connection.mcp) ? connection.mcp : {};
+      const { name, server, signIn, keys } = record(connection.mcp) ? connection.mcp : {};
       if (typeof name !== "string" || !record(server)) throw new ConnectionMoveError("local", `${item.label} could not be read on this computer.`);
+      // A Cloud too old to read a `vault:<id>` key would save the pointer as the key itself: it goes once the Cloud has updated.
+      if (Array.isArray(keys) && keys.length && !cloud.vaultKeys) throw new ConnectionMoveError("outdated", "My Cloud needs an update before it can take this computer's apps and keys. It updates by itself.");
       const { enabled, runsOn: marked, ...definition } = pick(server, MCP_FIELDS);
       const missing = item.launcher && !cloud.commands.includes(item.launcher) ? item.launcher : null;
       const runsOn = record(marked) ? marked : item.runsHere || missing ? collected.computer : null;
+      const keysField = Array.isArray(keys) && keys.length ? { vaultKeys: keys } : {};
       let saved;
       if (cloud.connections.some((theirs) => theirs.id === item.id)) {
-        saved = await target.call("PUT", `/api/mcp/servers/${name}`, { ...definition, enabled: enabled === true, runsOn });
+        saved = await target.call("PUT", `/api/mcp/servers/${name}`, { ...definition, enabled: enabled === true, runsOn, ...keysField });
       } else {
-        saved = await target.call("POST", "/api/mcp/servers", { name, ...definition, ...(runsOn ? { runsOn } : {}) });
+        saved = await target.call("POST", "/api/mcp/servers", { name, ...definition, ...(runsOn ? { runsOn } : {}), ...keysField });
         if (saved.ok && enabled === true) saved = await target.call("PATCH", `/api/mcp/servers/${name}`, { enabled: true });
       }
       if (!saved.ok) throw refused(saved, `My Cloud did not take ${item.label}.`);

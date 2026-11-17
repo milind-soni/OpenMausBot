@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 let child: ChildProcess;
@@ -25,6 +26,7 @@ type ChatMessage = { role: string; content?: unknown; tool_call_id?: string; too
 type ChatRequest = { messages: ChatMessage[]; tools?: Array<{ function: { name: string } }> };
 const requests: ChatRequest[] = [];
 let pendingSelect: { surface: string } | null = null;
+let pendingCall: { name: string; arguments: unknown } | null = null;
 
 const frame = (delta: unknown, finish_reason: string | null) =>
   `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
@@ -105,11 +107,16 @@ beforeAll(async () => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
     const request = JSON.parse(raw || "{}") as ChatRequest;
+    if (isTitleCall(request)) { res.statusCode = 500; return res.end(); }
     requests.push(request);
     const toolResult = request.messages?.some(message => message.role === "tool");
     res.writeHead(200, { "content-type": "text/event-stream" });
     if (toolResult) {
       res.end(frame({ content: "Selection acknowledged; waiting for the new surface." }, "stop") + "data: [DONE]\n\n");
+    } else if (pendingCall) {
+      const call = { index: 0, id: "pending-call", type: "function", function: { name: pendingCall.name, arguments: JSON.stringify(pendingCall.arguments) } };
+      pendingCall = null;
+      res.end(frame({ tool_calls: [call] }, "tool_calls") + "data: [DONE]\n\n");
     } else if (pendingSelect) {
       const call = { index: 0, id: "select-call", type: "function", function: { name: "agents_select_computer", arguments: JSON.stringify({ surface: pendingSelect.surface }) } };
       pendingSelect = null;
@@ -223,6 +230,38 @@ describe("openai-compat Local VM tools", () => {
     expect(toolNames(continuation)).toContain("agents_select_computer");
     const shown = (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id).messages;
     expect(shown.filter((message: any) => message.card)).toEqual([]);
+  }, 60_000);
+
+  // An API model on its Private desktop, asked for the person's OneDrive folder, sent them to a settings screen that does not exist.
+  it("offers an API model on its Private desktop the switch to This computer for the person's own files", async () => {
+    // The command runs as written; only its failure carries the switch.
+    vmState({ containers: [], execResult: { exitCode: 1, stdout: "", stderr: "mkdir: cannot create directory: Permission denied", timedOut: false } });
+    requests.length = 0;
+    const hostPath = process.platform === "win32" ? "C:\\Users\\ana\\OneDrive\\Reports"
+      : process.platform === "darwin" ? "/Users/ana/OneDrive/Reports" : "/home/ana/OneDrive/Reports";
+    const { bot } = await api("POST", "/api/bots", { name: "Ada" });
+    await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm" });
+    await api("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "openaiCompat", model: "fixture-model" });
+    pendingCall = { name: "agents_vm_exec", arguments: { command: `mkdir -p "${hostPath}"` } };
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: `Save the report into ${hostPath}.` });
+    await until(() => requests.length, count => count >= 2);
+    await idle(bot.id);
+    const text = (content: unknown) => typeof content === "string" ? content : JSON.stringify(content);
+    // The place rules change turn to turn, so they ride the person's message as its context note, not the system message.
+    const system = requests[0]!.messages.map(message => text(message.content)).join("\n");
+    expect(toolNames(requests[0])).toContain("agents_select_computer");
+    expect(system).toContain("A file or folder on the person's own computer");
+    expect(system).toContain("This bot works on its Private desktop, not on this computer. To use files on this computer, switch it to This computer: say so in one line, call select_computer with surface \"local\"");
+    expect(system).not.toContain("Settings → Computers");
+    const answer = JSON.parse(text(requests[1]!.messages.find(message => message.role === "tool")?.content)) as { ok: boolean; result: string };
+    expect(answer.ok).toBe(false);
+    const result = answer.result;
+    expect(result).toContain("exit code 1");
+    expect(result).toContain("mkdir: cannot create directory");
+    expect(result).toContain("--- note ---\nThat path is on this computer, and vm_exec runs only inside this bot's Private desktop. This bot works on its Private desktop, not on this computer. To use files on this computer, switch it to This computer: say so in one line, call select_computer with surface \"local\", then end your turn");
+    expect(result).toContain(`When the person asks you to keep using this computer, also keep it there: app_settings set, id "bots.settings", value {"botId":"${bot.id}","computer":"local"}`);
+    expect(result).toContain("open Bot's screen in this chat and choose This computer under “Where Ada works”");
+    vmState({ containers: [] });
   }, 60_000);
 
   it("fails the turn when the Local VM lists no tools, instead of running without them", async () => {

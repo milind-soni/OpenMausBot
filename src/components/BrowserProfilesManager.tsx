@@ -1,4 +1,6 @@
-import { useEffect, useId, useState } from "react";
+import { useContext, useEffect, useId, useState } from "react";
+import { SETTINGS_INPUT, SettingRow, SettingsEmptyRow, SettingsField, SettingsGroup, SettingsLook, SettingsRows } from "./SettingsPrimitives";
+import { SettingsDialog } from "./settings/SettingsDialog";
 import { Globe, Plus, Trash2 } from "lucide-react";
 import { api, ApiError, useStore, type Bot, type BotAnnouncement, type BrowserProfile, type ConfigStatus } from "@/state/store";
 import { browserProfileDeletionBlockReason, browserProfilesMutation, newBrowserProfileId } from "@/lib/browser-profiles";
@@ -16,6 +18,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
   disabled?: boolean;
 }) {
   const { state, dispatch, flushBotPatches } = useStore();
+  const settingsLook = useContext(SettingsLook);
   const profiles = state.config?.browserProfiles ?? [];
   const myChrome = state.config?.browserEngine?.myChrome === true;
   const myChromeOn = state.config?.browserEngine?.myChromeOn;
@@ -26,6 +29,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
   const fieldId = useId();
   const locked = busy || disabled || canManage !== true;
@@ -157,6 +161,60 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
     {myChromeOn && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.profiles.myChromeLent", { name: myChromeOn.name, device: computerDeviceText(myChromeOn.device) })}</p>}
     {myChromeOn?.online === false && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.profiles.myChromeLentOffline", { name: myChromeOn.name })}</p>}
   </>;
+  if (settingsLook && !currentBot) {
+    return (
+      <SettingsGroup label={t("settings.profiles.title")} block="profiles"
+        actions={<button type="button" disabled={locked || profiles.length >= 20} className="ui-button ui-button-md rounded-full" data-profile-add="" onClick={() => { setAdding(true); setName(""); setError(""); }}>{t("settings.profiles.add")}</button>}>
+      <div className="flex min-w-0 flex-col gap-2" aria-busy={busy}>
+        <SettingsRows>
+          {!profiles.length && <SettingsEmptyRow>{t("settings.profiles.noneYet")}</SettingsEmptyRow>}
+          {profiles.map((profile) => {
+            const users = usersOf(profile.id);
+            const blocked = browserProfileDeletionBlockReason(bots, profile.id);
+            const chrome = usesMyChrome(profile);
+            return renaming?.id === profile.id ? (
+              <form key={profile.id} className="flex items-center gap-2 px-4 py-3" onSubmit={(event) => { event.preventDefault(); void rename(); }}>
+                <input autoFocus value={renaming.name} onChange={(event) => setRenaming({ id: profile.id, name: event.target.value })} maxLength={40} required disabled={locked} className={SETTINGS_INPUT} aria-label={t("settings.profiles.nameAria")} />
+                <button type="button" disabled={busy} onClick={() => setRenaming(null)} className="ui-button shrink-0">{t("common.cancel")}</button>
+                <button type="submit" disabled={locked || !renaming.name.trim()} className="ui-button shrink-0">{t("common.save")}</button>
+              </form>
+            ) : (
+              <SettingRow key={profile.id} title={profile.name} subtitle={users.length ? t("settings.profiles.usedBy", { names: users.join(", ") }) : t("settings.profiles.notInUse")}
+                message={<span className="flex flex-col gap-2 pt-1">
+                  <span className="flex items-center gap-2">{t("settings.profiles.browserLabel")}
+                    <Select size="sm" value={profile.browser ?? ""} disabled={locked} onChange={(event) => void setBrowser(profile, event.target.value)} aria-label={t("settings.profiles.browserLabel")}>
+                      <option value="">{t("settings.profiles.builtIn")}</option>
+                      <option value="chrome" disabled={!myChrome}>{t("settings.profiles.myChrome")}</option>
+                    </Select>
+                  </span>
+                  {chrome ? chromeNote : <SignedInSites target={{ profile: profile.id }} sharedBy={users} disabled={locked} />}
+                </span>}>
+                <button type="button" disabled={locked} onClick={() => { setRenaming({ id: profile.id, name: profile.name }); setError(""); }} className="settings-quiet cursor-pointer">{t("settings.profiles.rename")}</button>
+                <button type="button" onClick={() => void remove(profile)} disabled={locked || Boolean(blocked)} title={blocked ?? t("settings.profiles.deleteTitle")} aria-label={`${t("common.delete")} ${profile.name}`} data-danger="" className="settings-quiet cursor-pointer">{t("common.delete")}</button>
+              </SettingRow>
+            );
+          })}
+        </SettingsRows>
+        {profiles.length >= 20 && <p className="px-4 text-[12px] leading-4 text-ink-secondary">{t("settings.profiles.limit")}</p>}
+        {error && !adding && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{error}</p>}
+      </div>
+      {adding && (
+        <SettingsDialog title={t("settings.profiles.addTitle")} onClose={() => setAdding(false)}
+          footer={<>
+            <button type="button" className="ui-button ui-button-md rounded-full" onClick={() => setAdding(false)}>{t("common.cancel")}</button>
+            <button type="submit" form={`${fieldId}-new-form`} disabled={locked || !name.trim()} className="ui-button ui-button-md ui-button-primary rounded-full">{t("settings.profiles.add")}</button>
+          </>}>
+          <form id={`${fieldId}-new-form`} className="flex flex-col gap-2" onSubmit={(event) => { event.preventDefault(); void create().then(() => setAdding(false)); }}>
+            <SettingsField label={t("settings.profiles.newName")}>
+              <input id={`${fieldId}-new`} value={name} onChange={(event) => setName(event.target.value)} maxLength={40} required disabled={locked} className={SETTINGS_INPUT} />
+            </SettingsField>
+            {error && <p role="alert" className="text-[12px] leading-4 text-danger">{error}</p>}
+          </form>
+        </SettingsDialog>
+      )}
+      </SettingsGroup>
+    );
+  }
   return (
     <div className="flex min-w-0 flex-col gap-3" aria-busy={busy}>
       {currentBot && (

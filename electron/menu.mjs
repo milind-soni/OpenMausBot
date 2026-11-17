@@ -126,7 +126,7 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
     label: app.name,
     submenu: [
       role(t, "about", "native.role.about", { app: app.name }),
-      { label: t("native.menu.preferences"), accelerator: "CmdOrCtrl+,", click: () => onOpenSettings() },
+      { label: t("native.menu.settings"), accelerator: "CmdOrCtrl+,", click: () => onOpenSettings() },
       ...atLogin,
       { type: "separator" },
       role(t, "hide", "native.role.hide", { app: app.name }),

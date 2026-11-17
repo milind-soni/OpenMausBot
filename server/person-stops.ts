@@ -2,16 +2,25 @@
 // turn they stopped; a Stop that names a turn already over (the second click of a double click) reaches nothing,
 // so it can never land on the queued message that started next.
 import { isStoppedTurnName, PERSON_STOPPED_TURN_NAME, STOPPED_TURN_NAME } from "../shared/client-cancel.ts";
+import type { ResolvedSender } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 
 export class PersonStops {
   readonly #byThread = new Map<string, string | undefined>();
+  readonly #by = new Map<string, ResolvedSender>();
 
   /** The person pressed Stop on the thread's live turn; `turnId` is undefined while that turn is still being
    * dispatched. A Stop that found nothing running or dispatching is no stop of anything. */
-  stop(threadId: string, turnId: string | undefined, dispatching: boolean): void {
+  stop(threadId: string, turnId: string | undefined, dispatching: boolean, by?: ResolvedSender): void {
     if (turnId === undefined && !dispatching) return;
     this.#byThread.set(threadId, turnId);
+    if (by) this.#by.set(threadId, by);
+    else this.#by.delete(threadId);
+  }
+
+  /** Who pressed that Stop, where several people use the server. */
+  stopper(threadId: string): ResolvedSender | undefined {
+    return this.#byThread.has(threadId) ? this.#by.get(threadId) : undefined;
   }
 
   stopped(threadId: string, turnId: string | undefined): boolean {
@@ -23,14 +32,19 @@ export class PersonStops {
   /** A turn started: a mark for any other turn on the thread is over (even if that turn's end was lost), and a mark
    * made during a dispatch is dropped at this start too, since it named no turn. */
   turnStarted(threadId: string, turnId: string | undefined): void {
-    if (this.#byThread.has(threadId) && this.#byThread.get(threadId) !== turnId) this.#byThread.delete(threadId);
+    if (this.#byThread.has(threadId) && this.#byThread.get(threadId) !== turnId) this.#forget(threadId);
   }
 
   /** A turn ended: its own stop goes, and so does one pressed during a dispatch; another turn's end leaves it be. */
   turnEnded(threadId: string, turnId: string | undefined): void {
     if (!this.#byThread.has(threadId)) return;
     const stopped = this.#byThread.get(threadId);
-    if (stopped === undefined || stopped === turnId) this.#byThread.delete(threadId);
+    if (stopped === undefined || stopped === turnId) this.#forget(threadId);
+  }
+
+  #forget(threadId: string): void {
+    this.#byThread.delete(threadId);
+    this.#by.delete(threadId);
   }
 }
 
@@ -45,11 +59,12 @@ export function stoppedTurnRow(
   messages: readonly Message[],
   turnId: string | undefined,
   byPerson: boolean,
+  by?: ResolvedSender,
 ): Omit<Message, "id" | "at"> | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i]!;
     if (message.role === "user") break;
     if (message.kind === "activity" && isStoppedTurnName(message.tool?.name ?? "") && message.turnId === turnId) return null;
   }
-  return { role: "bot", kind: "activity", tool: { name: byPerson ? PERSON_STOPPED_TURN_NAME : STOPPED_TURN_NAME, ok: true }, turnId };
+  return { role: "bot", kind: "activity", tool: { name: byPerson ? PERSON_STOPPED_TURN_NAME : STOPPED_TURN_NAME, ok: true }, turnId, ...(byPerson && by ? { stoppedBy: by } : {}) };
 }

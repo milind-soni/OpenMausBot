@@ -72,7 +72,7 @@ it("the update note shows only for a server behind this app, with the command th
   expect(notes[0]!.textContent).toContain("Copy update command");
   await click(buttonIn(notes[0]!, "Hide this note"));
   expect(host.querySelector("[data-server-behind]")).toBeNull();
-  expect(updateCommand("docker", "0.1.147")).toBe("docker compose pull && docker compose up -d");
+  expect(updateCommand("docker", "0.1.147")).toBe("git pull && ./update.sh");
   expect(updateCommand("npx", "0.1.147")).toBe("npx openmausbot@0.1.147 serve");
   expect(updateCommand(null, "0.1.147")).toBe("npx openmausbot@0.1.147 serve");
   expect(updateCommand("global", "0.1.147")).toBe("npm install -g openmausbot@0.1.147");
@@ -83,6 +83,7 @@ it("Pair again opens the Connect sheet with the address locked and the code fiel
   await click(buttonIn(row("mac").querySelector("[data-server-state]")!, "Pair again"));
   const form = document.querySelector('[data-place-add="own-server"]')!;
   expect(form.textContent).toContain("Pair again with Mac at home");
+  expect(host.contains(form), "the sheet sits on body, outside Settings' blurred pane that would clip it").toBe(false);
   const address = form.querySelector("[data-own-server-link]") as HTMLInputElement;
   expect([address.value, address.readOnly]).toEqual(["https://mac.tail1234.ts.net", true]);
   expect(document.activeElement).toBe(form.querySelector("[data-own-server-code]"));

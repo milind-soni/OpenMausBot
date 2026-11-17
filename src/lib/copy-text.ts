@@ -116,17 +116,17 @@ export function createCopyFeedback({
   };
 }
 
-export function useCopyFeedback(text: string) {
+export function useCopyFeedback(text: string, write: (text: string) => Promise<CopyResult> = copyText) {
   const [state, setState] = useState<CopyFeedback>("idle");
   const controller = useRef<ReturnType<typeof createCopyFeedback> | null>(null);
   useEffect(() => {
-    const next = createCopyFeedback({ copy: copyText, onChange: setState });
+    const next = createCopyFeedback({ copy: write, onChange: setState });
     controller.current = next;
     return () => {
       next.dispose();
       controller.current = null;
     };
-  }, []);
+  }, [write]);
   const copy = useCallback(() => void controller.current?.click(text), [text]);
   return { state, copy };
 }

@@ -10,7 +10,7 @@ import {
   decodeBase64,
   PACKAGE_FORMAT,
   PACKAGE_MAX_SKILLS,
-  PACKAGE_VERSION,
+  packageVersionFor,
   PackageFormatError,
   parsePackageDocument,
   pictureMatchesMime,
@@ -688,7 +688,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
   if (connections.length) definition.connections = connections;
 
   const { document: redactedDocument, redacted } = redactPackageSecrets({
-    format: PACKAGE_FORMAT, version: PACKAGE_VERSION, package: definition,
+    format: PACKAGE_FORMAT, version: packageVersionFor(definition), package: definition,
   } as PackageDocument);
   let document: PackageDocument;
   try {
@@ -797,7 +797,7 @@ export function createLibraryPackageExport(input: LibraryExportInput): LibraryEx
   };
   if (packageSkills.size) definition.skills = { version: 1, entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
   const { document: redactedDocument, redacted } = redactPackageSecrets({
-    format: PACKAGE_FORMAT, version: PACKAGE_VERSION, package: definition,
+    format: PACKAGE_FORMAT, version: packageVersionFor(definition), package: definition,
   } as PackageDocument);
   let document: PackageDocument;
   try {

@@ -1,6 +1,7 @@
 import { notificationTrayPinned } from "@/lib/notification-preferences";
 import type { Action, AppState } from "./store";
 import { openOwnTeamChat, teamChats } from "./team-chats";
+import { teamThreadToOpen } from "./team-side";
 
 interface NotificationThreadOwner {
   id: string;
@@ -17,9 +18,11 @@ interface NotificationRoutingState {
 }
 
 export function visibleNotificationThread(
-  state: NotificationRoutingState & Pick<AppState, "activeView" | "selectedId">,
+  state: NotificationRoutingState & Pick<AppState, "activeView" | "selectedId" | "forkPanel">,
+  threadId?: string,
 ): string | null {
   if (state.activeView !== "chat") return null;
+  if (threadId && state.forkPanel?.threadId === threadId && state.forkPanel.ownerId === state.selectedId) return threadId;
   return (
     state.bots.find((candidate) => candidate.id === state.selectedId)?.threadId ??
     state.groups.find((candidate) => candidate.id === state.selectedId)?.threadId ??
@@ -36,12 +39,15 @@ export function awayFromMainThread(bot: Pick<NotificationThreadOwner, "threadId"
   return !threadsShown && botOpensTo(bot, false) !== bot.threadId;
 }
 
-/** On a team's Cloud, the person's own conversation with the bot, never the team's main chat (team-chats.ts). */
+/** On a team's Cloud, the bot's conversation on the side the sidebar shows: the person's own with it under "Just me", its
+ * shared chat under "Team". */
 export function openBot(
   dispatch: (action: Action) => void,
   bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks"> & { yourAccess?: string },
   threadsShown: boolean,
 ) {
+  const shared = teamThreadToOpen(bot, teamChats());
+  if (shared) return openBotThread(dispatch, bot, shared, threadsShown);
   if (openOwnTeamChat(dispatch, bot, (threadId) => openBotThread(dispatch, bot, threadId, threadsShown))) return;
   const opened = botOpensTo(bot, threadsShown);
   if (opened === bot.threadId) dispatch({ type: "select", id: bot.id });

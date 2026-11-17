@@ -34,10 +34,10 @@ export type BotPatch = Partial<
     | "replyStyle"
     | "memoryEnabled"
     | "xResearch"
+    | "toolsOff"
     | "voice"
     | "chiefOfStaff"
     | "managedSections"
-    | "approvePeerComms"
     | "composio"
     | "browser"
     | "recordBrowserSteps"
@@ -49,7 +49,6 @@ export type BotPatch = Partial<
   connectorTools?: Bot["connectorTools"] | null;
   connectorScopes?: Bot["connectorScopes"] | null;
   phoneApps?: Bot["phoneApps"] | null;
-  peers?: string[] | null;
   acknowledgeLocalAuto?: boolean;
   acknowledgePeerScope?: boolean;
 };

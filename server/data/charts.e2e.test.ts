@@ -80,6 +80,48 @@ describe("charts end to end on DuckDB", () => {
     expect(new Set(reduced.rows.map((r) => r[1]))).toEqual(new Set(["web", "shop"]));
   });
 
+  it.each(["bar", "pie"] as const)("%s: keeps a real other category separate from the folded tail", async (type) => {
+    const table = `other_${type}`;
+    await connection.run(`CREATE TABLE ${table} AS
+      SELECT * FROM (VALUES ('other', 100), ('alpha', 90), (NULL, 1)) t(category, amount)`);
+    const { compiled, reduced } = await chart({ type, x: "category", y: "amount", limit: 1, sort: "x" }, table);
+    expect(reduced.rows.map(([x, y]) => [x, Number(y)])).toEqual([["other", 100], ["other (2)", 91]]);
+    const svg = await chartRenderer.svg(compiled.vegaLite, reduced.rows, reduced.columns, { theme: "light" });
+    expect(svg).toContain("other (2)");
+  });
+
+  it("uses a tail label distinct from every retained category, including numbered other names", async () => {
+    await connection.run(`CREATE TABLE numbered_other AS
+      SELECT * FROM (VALUES ('other', 100), ('other (2)', 90), ('other (3)', 80), ('tail', 10)) t(category, amount)`);
+    const { reduced } = await chart({ type: "bar", x: "category", y: "amount", limit: 3, sort: "x" }, "numbered_other");
+    expect(reduced.rows.map(([x, y]) => [x, Number(y)])).toEqual([
+      ["other", 100], ["other (2)", 90], ["other (3)", 80], ["other (4)", 10],
+    ]);
+  });
+
+  it("uses the same distinct tail label for every color series", async () => {
+    await connection.run(`CREATE TABLE colored_other AS
+      SELECT * FROM (VALUES ('other', 'web', 100), ('other', 'shop', 90), ('tail', 'web', 1), ('tail', 'shop', 2)) t(category, channel, amount)`);
+    const { reduced } = await chart({ type: "bar", x: "category", y: "amount", color: "channel", limit: 1 }, "colored_other");
+    expect(reduced.rows.map(([x, color, y]) => [x, color, Number(y)])).toEqual(expect.arrayContaining([
+      ["other", "web", 100], ["other", "shop", 90], ["other (2)", "web", 1], ["other (2)", "shop", 2],
+    ]));
+    expect(reduced.rows).toHaveLength(4);
+  });
+
+  it("aggregates the raw tail rows after choosing a distinct label", async () => {
+    await connection.run(`CREATE TABLE averaged_other AS
+      SELECT * FROM (VALUES ('other', 100), ('a', 1), ('b', 3), ('b', 5)) t(category, amount)`);
+    const { reduced } = await chart({ type: "pie", x: "category", y: "amount", agg: "avg", limit: 1, sort: "x" }, "averaged_other");
+    expect(reduced.rows.map(([x, y]) => [x, Number(y)])).toEqual([["other", 100], ["other (2)", 3]]);
+  });
+
+  it("does not invent a tail when the only category is named other", async () => {
+    await connection.run(`CREATE TABLE only_other AS SELECT 'other' AS category, 100 AS amount`);
+    const { reduced } = await chart({ type: "pie", x: "category", y: "amount", limit: 1 }, "only_other");
+    expect(reduced.rows.map(([x, y]) => [x, Number(y)])).toEqual([["other", 100]]);
+  });
+
   it("line: picks hour buckets for a 3.5-day range, day buckets for a 400-day one", async () => {
     const hours = await chart({ type: "line", x: "ts", y: "amount", agg: "avg" }, "sales");
     expect(hours.compiled.reduction.method).toBe("timeBucket");

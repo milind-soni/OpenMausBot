@@ -99,6 +99,21 @@ describe("+ New", () => {
 });
 
 describe("the automation panel", () => {
+  it("explains an unread failure older than the recent runs and keeps it visible after marking it seen", () => {
+    const runs = Array.from({ length: 6 }, (_, index) => ({ id: `success-${index}`, routineId: webhook.id, botId: botA.id, status: "completed", createdAt: now - index * 1_000, scheduledFor: now - index * 1_000, output: "Nothing new." }));
+    const failure = { id: "old-failure", routineId: webhook.id, botId: botA.id, status: "failed", createdAt: now - 60_000, scheduledFor: now - 60_000, error: "Provider disconnected." };
+    const [automation] = automationsFrom({ routines: [], webhooks: [webhook] as never, runs: [...runs, failure] as never });
+    const props = { automation: automation!, sentence: "s", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() };
+    const container = mount(createElement(AutomationPanel, props));
+    expect(container.textContent).toContain("Provider disconnected.");
+    expect(container.querySelectorAll("section ul li")).toHaveLength(6);
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "markRoutineRunSeen", runId: failure.id });
+    const seen = { ...automation!, runs: automation!.runs.map((run) => ({ ...run, seenAt: now })) };
+    flushSync(() => root!.render(createElement(AutomationPanel, { ...props, automation: seen })));
+    expect(container.textContent).toContain("Provider disconnected.");
+    expect(fixture.dispatch).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the sentence, the status, an address to paste with Copy address, the recent runs and the four actions, in plain words", () => {
     fixture.state.routineRuns = [{ id: "run-1", routineId: "hook-1", botId: "bot-a", status: "completed", scheduledFor: now - 60_000, startedAt: now - 60_000, createdAt: now - 60_000, output: "Drafted a follow-up for Ada.", threadId: "exec-1" }];
     const [automation] = automationsFrom({ routines: [], webhooks: [webhook] as never, runs: fixture.state.routineRuns as never });
@@ -233,6 +248,20 @@ describe("the Automations list switch", () => {
     expect(row("routine-1").querySelector("button")!.textContent).toBe("Morning summary");
     expect(row("routine-1").textContent).toContain("sends you a summary of your inbox");
     expect(row("unnamed").querySelector("button")!.textContent).toContain("sends you a summary of your inbox");
+  });
+
+  it("explains an old unread failure on its automation and acknowledges it only when the panel opens", () => {
+    fixture.state.routines = [routine];
+    fixture.state.routineRuns = [
+      ...Array.from({ length: 6 }, (_, index) => ({ id: `success-${index}`, routineId: routine.id, botId: botA.id, status: "completed", createdAt: now - index * 1_000, scheduledFor: now - index * 1_000 })),
+      { id: "old-failure", routineId: routine.id, botId: botA.id, status: "failed", createdAt: now - 60_000, scheduledFor: now - 60_000, error: "Provider disconnected." },
+    ];
+    mountPage();
+    expect(row(routine.id).textContent).toContain("Provider disconnected.");
+    expect(fixture.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "markRoutineRunSeen" }));
+    flushSync(() => row(routine.id).querySelector("button")!.click());
+    expect(container.querySelector('aside[aria-label="Automation"]')!.textContent).toContain("Provider disconnected.");
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "markRoutineRunSeen", runId: "old-failure" });
   });
 
   it("offers no switch for a one-time automation that already happened, and lists no automation whose bot is gone", () => {

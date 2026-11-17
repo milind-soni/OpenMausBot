@@ -60,7 +60,13 @@ export interface RailPlace {
 /** `local`: a new workspace of this computer's own. */
 export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean; organization?: boolean; account?: boolean; local?: boolean }
 /** `beside`: a place's page, which never reads the list, learns that the window's rail stands beside it. */
-export interface RailState { places: RailPlace[]; add: RailAddChoices; beside?: true }
+export interface RailState {
+  places: RailPlace[];
+  add: RailAddChoices;
+  beside?: true;
+  /** The place a click on this rail is opening, until its page has loaded; `waking` while My Cloud is being woken for it. */
+  switching?: { id: string; waking?: true };
+}
 /** Buying another Cloud as a page sees it: what the sheet says, never the account, an address or the checkout page. */
 export type AddCloudView =
   | { signedIn: false }

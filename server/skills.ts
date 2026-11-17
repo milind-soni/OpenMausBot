@@ -27,7 +27,7 @@ import {
   githubSkillOriginSchema, prepareSkillFolder, skillFolderDigest, skillFolderRecordSchema, writeSkillFolder, type GitHubSkillOrigin, type SkillFolderFile,
 } from "./skill-folder.ts";
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
-import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills, type LibrarySkillListing } from "./skill-library.ts";
+import { libraryDescriptionsAt, librarySkillFilePath, librarySkillsForBot, librarySkillsToOffer, type LibrarySkillListing } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
 import {
   directoryEntryState, entryExistsWithoutFollowing, formatKb, isSkillReferencePath, learnedSkillDirectoryMatches, publishReviewedRevision,
@@ -1307,8 +1307,7 @@ export function resolveBotSkills(botId: string, assignedLibrary: readonly string
   const own = listSkills(botId);
   if (assignedLibrary === undefined) return own; // the library is off: no every-bot skills either
   const ownNames = new Set(own.map((skill) => skill.name));
-  const assigned = new Set(assignedLibrary);
-  return [...own, ...listLibrarySkills().filter((skill) => (skill.everyBot || assigned.has(skill.name)) && !ownNames.has(skill.name))];
+  return [...own, ...librarySkillsForBot(botId, new Set(assignedLibrary), ownNames)];
 }
 
 export interface BotSkillWithOrigin extends SkillListing {
@@ -1326,7 +1325,7 @@ export function listBotSkillsWithOrigin(
     ...skill,
     origin: ownNames.has(skill.name) ? ("private" as const) : ("library" as const),
   }));
-  const library = listLibrarySkills().filter((entry) => !ownNames.has(entry.name) && !entry.everyBot && !assigned.has(entry.name));
+  const library = librarySkillsToOffer(botId, assigned, ownNames);
   return { skills, library };
 }
 

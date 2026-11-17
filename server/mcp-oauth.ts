@@ -1,7 +1,7 @@
 // Engines never see this, only an Authorization header. Callbacks: one pending sign-in per server, state
-// compared in constant time, single-valued parameters, and a listener that lives only until the sign-in settles.
+// compared in constant time, single-valued parameters, and a listener that lives only until its last sign-in settles.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import type { McpServerSpec } from "./contracts.ts";
 import { discoverMcpAuth, type McpAuthMetadata } from "./mcp-oauth-discovery.ts";
@@ -37,15 +37,32 @@ export class McpOAuthError extends Error {
 
 export type McpAuthState = "signed-in" | "needs-sign-in" | "none";
 
+/** How a token refresh ended: a new token, refused for good (the sign-in ended), nothing could refresh an expired token, or
+ * no answer from the authorization server. */
+export type McpRefreshOutcome = "refreshed" | "rejected" | "expired" | "unreachable";
+/** A server refused a sign-in's token on a real call: a refresh got a new one, the sign-in has ended, the server refused
+ * a token renewed moments ago (the sign-in lacks something), or nothing could be learned. */
+export type McpTokenRefusal = "refreshed" | "ended" | "again" | "unknown";
+
 /** The owner of a sign-in started from a chat's Sign in card: any device that can see the card may follow it. */
 export const cardOwner = (threadId: string, messageId: string) => `card:${threadId}:${messageId}`;
 
 const DEFAULT_LIFETIME_MS = 5 * 60_000;
 const REFRESH_MARGIN_MS = 2 * 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
+/** A token a server refused is renewed at most this often: one refused right after a renewal is not an expired one. */
+const REFUSED_RENEW_MS = 60_000;
 export const MCP_OAUTH_CALLBACK_PATH = "/mcp-oauth/callback";
 const CALLBACK_PATH = MCP_OAUTH_CALLBACK_PATH;
 const DISCARDED = "discarded";
+
+/** The address a sign-in returns to. The connections to one server share it: every callback carries its own state. */
+interface Listener {
+  server: Server;
+  port: number;
+  flows: Set<Flow>;
+  reserved: number;
+}
 
 interface Flow {
   owner: string;
@@ -57,7 +74,7 @@ interface Flow {
   redirectUri: string;
   client: ClientAuth;
   meta: McpAuthMetadata;
-  server: Server | null;
+  listener: Listener | null;
   consumed: boolean;
   expiry: ReturnType<typeof setTimeout>;
 }
@@ -191,21 +208,26 @@ export class McpOAuthManager {
   private readonly lifetimeMs: number;
   private readonly isOwnerLive: (owner: string) => boolean;
   private readonly flows = new Map<string, Flow>();
+  private readonly listeners = new Map<number, Promise<Listener>>();
   private readonly starting = new Map<string, StartingFlow>();
-  private readonly refreshing = new Map<string, Promise<string | null>>();
+  private readonly refreshing = new Map<string, Promise<{ token: string | null; outcome: McpRefreshOutcome | null }>>();
+  private readonly renewedAfterRefusal = new Map<string, number>();
   private readonly clients: (name: string, url: string) => McpOAuthClientConfig | undefined;
   private readonly onSettled: (name: string, phase: McpSignInPhase, owner: string) => void;
+  private readonly onRefresh: (name: string, outcome: McpRefreshOutcome) => void;
   private disposed = false;
 
   /** `clients` is read when needed: an app's secret is never copied into this store. `onSettled` hears each sign-in end
-   * once, except when the server shuts down. */
+   * once, except when the server shuts down. `onRefresh` hears how each refresh ended. */
   constructor(options: {
     file: string; lifetimeMs?: number; clients?: (name: string, url: string) => McpOAuthClientConfig | undefined; isOwnerLive?: (owner: string) => boolean;
     onSettled?(name: string, phase: McpSignInPhase, owner: string): void;
+    onRefresh?(name: string, outcome: McpRefreshOutcome): void;
   }) {
     this.store = new McpOAuthStore(options.file);
     this.isOwnerLive = options.isOwnerLive ?? (() => true);
     this.onSettled = options.onSettled ?? (() => {});
+    this.onRefresh = options.onRefresh ?? (() => {});
     this.lifetimeMs = options.lifetimeMs ?? DEFAULT_LIFETIME_MS;
     this.clients = options.clients ?? (() => undefined);
   }
@@ -280,7 +302,7 @@ export class McpOAuthManager {
   /** The sign-in this owner is waiting on for a server, and whether it comes back to this computer's loopback listener. */
   waiting(name: string, owner: string): { loopback: boolean } | null {
     const flow = this.flows.get(name);
-    return flow?.owner === owner && flow.status.phase === "waiting" ? { loopback: flow.server !== null } : null;
+    return flow?.owner === owner && flow.status.phase === "waiting" ? { loopback: flow.listener !== null } : null;
   }
 
   status(name: string, flowId: string, owner = "loopback"): McpSignInStatus | undefined {
@@ -333,7 +355,7 @@ export class McpOAuthManager {
     let match: Flow | undefined;
     for (const flow of this.flows.values()) {
       const expected = new URL(flow.redirectUri);
-      if (!flow.server && expected.host === host?.trim().toLowerCase() && sameSecret(state, flow.state)) match = flow;
+      if (!flow.listener && expected.host === host?.trim().toLowerCase() && sameSecret(state, flow.state)) match = flow;
     }
     if (!match) return { status: 400, text: "Invalid sign-in callback. Return to OpenMausBot and try again." };
     return this.answer(match, new URL(`${new URL(match.redirectUri).origin}${CALLBACK_PATH}${search.startsWith("?") ? search : ""}`));
@@ -360,11 +382,26 @@ export class McpOAuthManager {
     if (!record || record.state !== "signed-in" || !record.tokens) return Promise.resolve(null);
     const { tokens } = record;
     if (!tokens.expiresAt || tokens.expiresAt > Date.now() + REFRESH_MARGIN_MS) return Promise.resolve(tokens.access);
-    const pending = this.refreshing.get(name);
-    if (pending) return pending;
-    const refreshed = this.refresh(name, record).finally(() => this.refreshing.delete(name));
-    this.refreshing.set(name, refreshed);
-    return refreshed;
+    return this.renew(name, record, false).then((renewed) => renewed.token);
+  }
+
+  /** When this sign-in ends for good: its token's expiry, when nothing can refresh it; null otherwise. */
+  endsAt(name: string, url: string): number | null {
+    const record = this.store.get(name, url);
+    if (!record || record.state !== "signed-in" || !record.tokens?.expiresAt) return null;
+    return this.renewable(name, record) ? null : record.tokens.expiresAt;
+  }
+
+  /** The server refused this sign-in's token on a real call (HTTP 401): it is refreshed now, or, when nothing can refresh
+   * it, the sign-in has ended. A token refused again right after a refresh is left as it is. */
+  async tokenRefused(name: string, url: string): Promise<McpTokenRefusal> {
+    const record = this.store.get(name, url);
+    if (!record || record.state !== "signed-in" || !record.tokens) return record?.state === "needs-sign-in" ? "ended" : "unknown";
+    const renewed = this.renewedAfterRefusal.get(name);
+    if (renewed !== undefined && Date.now() - renewed < REFUSED_RENEW_MS) return "again";
+    this.renewedAfterRefusal.set(name, Date.now());
+    const { outcome } = await this.renew(name, record, true);
+    return outcome === "refreshed" ? "refreshed" : outcome === "rejected" || outcome === "expired" ? "ended" : "unknown";
   }
 
   dispose(): void {
@@ -372,16 +409,42 @@ export class McpOAuthManager {
     for (const pending of this.starting.values()) pending.cancelled = true;
     for (const flow of this.flows.values()) this.finish(flow, "cancelled", "Sign-in cancelled.");
     this.flows.clear();
+    for (const opening of this.listeners.values()) {
+      void opening.then((listener) => {
+        listener.server.close();
+        listener.server.closeIdleConnections();
+      }).catch(() => undefined);
+    }
+    this.listeners.clear();
   }
 
-  private async refresh(name: string, record: McpOAuthRecord): Promise<string | null> {
+  private renewable(name: string, record: McpOAuthRecord): boolean {
+    return Boolean(record.tokens?.refresh && record.tokenEndpoint && this.recordClient(name, record));
+  }
+
+  /** One refresh at a time per server. `forced`: a server refused the token, so it is renewed whatever its expiry says, and
+   * a token nothing can renew has ended. */
+  private renew(name: string, record: McpOAuthRecord, forced: boolean): Promise<{ token: string | null; outcome: McpRefreshOutcome | null }> {
+    const pending = this.refreshing.get(name);
+    if (pending) return pending;
+    const renewed = this.refresh(name, record, forced).then((result) => {
+      if (result.outcome) {
+        try { this.onRefresh(name, result.outcome); } catch (error) { console.error("mcp sign-in: onRefresh failed", error); }
+      }
+      return result;
+    }).finally(() => this.refreshing.delete(name));
+    this.refreshing.set(name, renewed);
+    return renewed;
+  }
+
+  private async refresh(name: string, record: McpOAuthRecord, forced: boolean): Promise<{ token: string | null; outcome: McpRefreshOutcome | null }> {
     const tokens = record.tokens!;
-    const stillValid = tokens.expiresAt !== undefined && tokens.expiresAt > Date.now();
+    const stillValid = !forced && tokens.expiresAt !== undefined && tokens.expiresAt > Date.now();
     const client = this.recordClient(name, record);
     if (!tokens.refresh || !record.tokenEndpoint || !client) {
-      if (stillValid) return tokens.access;
+      if (stillValid) return { token: tokens.access, outcome: null };
       this.markNeedsSignIn(name, record.url);
-      return null;
+      return { token: null, outcome: "expired" };
     }
     let answer: Awaited<ReturnType<typeof postForm>>;
     try {
@@ -391,20 +454,20 @@ export class McpOAuthManager {
         resource: record.url,
       }, client);
     } catch {
-      return stillValid ? tokens.access : null;
+      return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
     }
     const next = answer.status >= 200 && answer.status < 300 ? tokensFrom(answer.body, tokens) : null;
     if (!next) {
       const dead = (answer.status === 400 || answer.status === 401)
         && (answer.body.error === "invalid_grant" || answer.body.error === "invalid_client");
-      if (!dead) return stillValid ? tokens.access : null;
+      if (!dead) return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
       this.markNeedsSignIn(name, record.url);
-      return null;
+      return { token: null, outcome: "rejected" };
     }
     // the entry may have been removed or re-pointed while this was in flight
-    if (!this.store.get(name, record.url)) return null;
+    if (!this.store.get(name, record.url)) return { token: null, outcome: null };
     this.store.put(name, { ...record, state: "signed-in", tokens: next });
-    return next.access;
+    return { token: next.access, outcome: "refreshed" };
   }
 
   private async challenge(url: string): Promise<string | null> {
@@ -466,35 +529,96 @@ export class McpOAuthManager {
       if (clientId) return { ...this.open(name, url, starting, meta, redirectUri, { id: clientId, method: "none" }, null, meta.scopes).status };
     }
 
-    const server = createServer();
+    const listener = await this.listener(preferredPort(url), registered !== undefined);
     try {
-      await listen(server, preferredPort(url));
-    } catch {
-      if (registered) {
-        throw new McpOAuthError("port-busy", `Port ${preferredPort(url)} on this computer is in use, and sign-ins for this server's app return there. Close what is using it and try again.`);
-      }
-      await listen(server, 0);
-    }
-    try {
-      const address = server.address();
-      if (!address || typeof address === "string") throw new Error("The sign-in listener could not start.");
-      const redirectUri = `http://127.0.0.1:${address.port}${CALLBACK_PATH}`;
+      const redirectUri = `http://127.0.0.1:${listener.port}${CALLBACK_PATH}`;
       const client: ClientAuth = registered
         ? { id: registered.clientId, ...(registered.clientSecret ? { secret: registered.clientSecret } : {}), method: tokenAuthMethod(meta, registered.clientSecret) }
         : { id: await this.register(meta, redirectUri), method: "none" };
       const scopes = registered?.scopes?.length ? registered.scopes : meta.scopes;
-      const flow = this.open(name, url, starting, meta, redirectUri, client, server, scopes);
-      server.on("request", (request, response) => void this.callback(flow, request, response));
+      const flow = this.open(name, url, starting, meta, redirectUri, client, listener, scopes);
+      listener.reserved -= 1;
+      listener.flows.add(flow);
       return { ...flow.status };
+    } catch (error) {
+      listener.reserved -= 1;
+      this.closeListener(listener);
+      throw error;
+    }
+  }
+
+  /** The address a sign-in returns to. The connections to one server share it: every callback carries its own state. */
+  private async listener(port: number, registered: boolean): Promise<Listener> {
+    const pending = this.listeners.get(port);
+    if (pending) {
+      const listener = await pending;
+      listener.reserved += 1;
+      return listener;
+    }
+    const opening = this.openListener(port);
+    this.listeners.set(port, opening);
+    let listener: Listener;
+    try {
+      listener = await opening;
+    } catch {
+      this.listeners.delete(port);
+      if (registered) {
+        throw new McpOAuthError("port-busy", `Port ${port} on this computer is in use, and sign-ins for this server's app return there. Close what is using it and try again.`);
+      }
+      listener = await this.openListener(0);
+      this.listeners.set(listener.port, Promise.resolve(listener));
+    }
+    listener.reserved += 1;
+    return listener;
+  }
+
+  private async openListener(port: number): Promise<Listener> {
+    const server = createServer();
+    try {
+      await listen(server, port);
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("The sign-in listener could not start.");
+      const listener: Listener = { server, port: address.port, flows: new Set(), reserved: 0 };
+      server.on("request", (request, response) => void this.dispatch(listener, request, response));
+      return listener;
     } catch (error) {
       server.close();
       throw error;
     }
   }
 
+  /** The callback belongs to the sign-in whose state it carries. */
+  private dispatch(listener: Listener, request: IncomingMessage, response: ServerResponse): void {
+    const state = new URL(request.url ?? "/", "http://127.0.0.1").searchParams.get("state") ?? "";
+    let match: Flow | undefined;
+    for (const flow of listener.flows) if (sameSecret(state, flow.state)) match = flow;
+    if (!match) {
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("Content-Type", "text/plain; charset=utf-8");
+      response.writeHead(400).end("Invalid sign-in callback. Return to OpenMausBot and try again.");
+      return;
+    }
+    void this.callback(match, request, response);
+  }
+
+  /** A listener lives while a sign-in waits on it. */
+  private release(flow: Flow): void {
+    const listener = flow.listener;
+    if (!listener) return;
+    listener.flows.delete(flow);
+    this.closeListener(listener);
+  }
+
+  private closeListener(listener: Listener): void {
+    if (listener.flows.size || listener.reserved) return;
+    this.listeners.delete(listener.port);
+    listener.server.close();
+    listener.server.closeIdleConnections();
+  }
+
   private open(
     name: string, url: string, starting: StartingFlow, meta: McpAuthMetadata, redirectUri: string,
-    client: ClientAuth, server: Server | null, scopes: string[] | undefined,
+    client: ClientAuth, listener: Listener | null, scopes: string[] | undefined,
   ): Flow {
     if (starting.cancelled || !this.isOwnerLive(starting.owner)) throw new McpSignInError("Sign-in cancelled because the session or server changed.", 409);
     const state = randomBytes(32).toString("base64url");
@@ -514,10 +638,10 @@ export class McpOAuthManager {
       flowId: randomUUID(),
       authorizationUrl: authorize.toString(),
       expiresAt: new Date(Date.now() + this.lifetimeMs).toISOString(),
-      ...(server && starting.browser.remote ? { pasteBack: true } : {}),
+      ...(listener && starting.browser.remote ? { pasteBack: true } : {}),
     };
     const flow: Flow = {
-      owner: starting.owner, name, url, status, state, verifier, redirectUri, client, meta, server, consumed: false,
+      owner: starting.owner, name, url, status, state, verifier, redirectUri, client, meta, listener, consumed: false,
       expiry: setTimeout(() => this.finish(flow, "expired", "Sign-in expired. Start again."), this.lifetimeMs),
     };
     flow.expiry.unref();
@@ -626,8 +750,7 @@ export class McpOAuthManager {
   private finish(flow: Flow, phase: McpSignInPhase, message?: string): void {
     if (flow.status.phase !== "waiting") return;
     clearTimeout(flow.expiry);
-    flow.server?.close();
-    flow.server?.closeIdleConnections();
+    this.release(flow);
     flow.status = { ...flow.status, phase, authorizationUrl: null, ...(message ? { message } : {}) };
     if (this.disposed) return;
     // A listener's fault must neither escape the expiry timer nor turn a sign-in already stored into a failed callback.

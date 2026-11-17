@@ -3,7 +3,8 @@ import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { WorkingTimer } from "@/components/WorkingIndicator";
 import { phraseAt, phraseHoldMs } from "@/lib/live-activity";
-import { quietText } from "@/lib/now-steps";
+import { quietText, silenceText } from "@/lib/now-steps";
+import { silentSince } from "@/state/turn-status";
 import { t } from "@/lib/i18n";
 import { formatElapsed } from "@/lib/working-time";
 import type { StepQuiet } from "../../shared/turn-progress";
@@ -69,6 +70,17 @@ function QuietPart({ quiet }: { quiet: StepQuiet }) {
   return <><Dot /><span data-turn-quiet="" className="text-[12px] text-ink-tertiary">{quietText(quiet, now)}</span></>;
 }
 
+/** "nothing new for 5 min" when the whole turn has gone silent, counted from the last frame this window saw. */
+function SilencePart({ threadId }: { threadId: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(timer);
+  }, []);
+  const text = silenceText(silentSince(threadId), now);
+  return text ? <><Dot /><span data-turn-silent="" className="text-[12px] text-ink-tertiary">{text}</span></> : null;
+}
+
 /** The turn's live status line: "Working · 1m 12s · Running scrape.py · busy, no output yet". The lead word and the
  * timer stay for the whole turn; `phrases` say what is happening now and rotate through their alternates; `size` is how
  * much of the file is written; `quiet` is how a long step is doing. With nothing to say the line is the lead and the timer
@@ -88,6 +100,7 @@ export function TurnPresence({
   detail,
   hover,
   quiet,
+  threadId,
   card,
   cardLabel,
   className,
@@ -107,6 +120,8 @@ export function TurnPresence({
   /** The whole command, query or address behind the phrase. */
   hover?: string;
   quiet?: StepQuiet;
+  /** The thread whose live frames tell whether the turn has gone silent. */
+  threadId?: string;
   card?: ReactNode;
   cardLabel?: string;
   className?: string;
@@ -165,7 +180,7 @@ export function TurnPresence({
     <span id={statusId} className="flex min-w-0 items-baseline gap-x-1.5 text-[14px] leading-[22px] text-ink-tertiary" data-turn-status>
       <span className="turn-phrase turn-phrase-quiet relative grid min-w-0" title={hover} data-turn-now={now ? "" : undefined}>
         {now ? (
-          <ShimmerPhrase key={`in:${current}`} text={current} className={cn("truncate", previous !== null && "turn-phrase-in")} />
+          <ShimmerPhrase key={`in:${current}`} text={label ? `${label} · ${current}` : current} className={cn("truncate", previous !== null && "turn-phrase-in")} />
         ) : (
           <span>{label ?? t("chat.typing")}</span>
         )}
@@ -201,6 +216,7 @@ export function TurnPresence({
           {quiet && <QuietPart quiet={quiet} />}
         </>
       )}
+      {threadId && !quiet && <SilencePart threadId={threadId} />}
     </span>
   ) : null;
   return (

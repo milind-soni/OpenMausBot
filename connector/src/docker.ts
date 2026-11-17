@@ -27,6 +27,8 @@ export interface ImageInfo {
 export interface ContainerInfo {
   Id: string;
   Name: string;
+  /** The id of the image the container was made from. */
+  Image?: string;
   Created: string;
   Config: { Image: string; Env: string[] | null; Labels: Record<string, string> | null; Cmd: string[] | null; Entrypoint: string[] | null };
   HostConfig: Record<string, unknown>;
@@ -110,6 +112,8 @@ export interface Docker {
   /** Waits for the container to exit and returns its exit code. */
   waitContainer(name: string, timeoutMs: number): Promise<number>;
   logs(name: string, tail: number): Promise<string>;
+  /** Runs `command` in the running container `name` as its own user, without a terminal or input; its exit code and output. */
+  exec(name: string, command: string[], timeoutMs: number): Promise<{ code: number; output: string }>;
   volumeInspect(name: string): Promise<VolumeInfo | null>;
   createVolume(name: string, labels: Record<string, string>): Promise<void>;
   removeVolume(name: string): Promise<void>;
@@ -335,6 +339,16 @@ export class SocketDocker implements Docker {
     await this.ready();
     const response = await this.call("GET", `/containers/${encodeURIComponent(name)}/logs?stdout=1&stderr=1&tail=${tail}`);
     return response.status === 200 ? demuxLogs(response.body) : "";
+  }
+
+  async exec(name: string, command: string[], timeoutMs: number): Promise<{ code: number; output: string }> {
+    const created = await this.json<{ Id: string }>("POST", `/containers/${encodeURIComponent(name)}/exec`, { body: { Cmd: command, AttachStdout: true, AttachStderr: true, Tty: false }, ok: [201] });
+    const id = created!.Id;
+    // Without a terminal Docker frames the output like a log stream, and ends the answer when the command exits.
+    const response = await this.call("POST", `/exec/${id}/start`, { body: { Detach: false, Tty: false }, timeoutMs });
+    if (response.status !== 200) throw new DockerError(response.status, `Docker could not run a command in ${name}`);
+    const state = await this.json<{ ExitCode: number | null }>("GET", `/exec/${id}/json`);
+    return { code: state?.ExitCode ?? -1, output: demuxLogs(response.body) };
   }
 
   async volumeInspect(name: string): Promise<VolumeInfo | null> {

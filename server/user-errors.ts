@@ -21,6 +21,7 @@ export const USER_ERROR = {
   "serverError.model.accountUpdating": "this provider account is being updated — try again shortly",
   "serverError.chat.busyEdit": "the thread is working — stop it before editing",
   "serverError.chat.busyVersion": "the thread is working — stop it before switching versions",
+  "serverError.chat.busyFresh": "the thread is working — stop it before starting fresh",
   "serverError.chat.questionGone": "this question is no longer available",
   "serverError.chat.askerGone": "the bot that asked this question is no longer available",
   "serverError.chat.routineElsewhere": "this bot is running a routine in another conversation",
@@ -30,6 +31,7 @@ export const USER_ERROR = {
   "serverError.team.personalMove": "Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into {team}.",
   "serverError.team.memberLogin": "On {team} only an admin can save a login, and it is then used by every bot in {team}.",
   "serverError.team.signInFirst": "Sign in to {team} in the app first.",
+  "serverError.team.ownAppsNeedKey": "Your own apps can't be connected on {team} yet. Ask an admin to add the team's Composio key.",
   "serverError.chat.ownerOrAdmin": "Only the owner or an admin can do that.",
   "serverError.routine.checks": "Choose checks from calendar, mail and runs",
   "serverError.routine.checksRepeat": "Checks need a bot routine that repeats",
@@ -67,12 +69,13 @@ export const USER_ERROR = {
   "serverError.decider.jevRejected": "Jev rejected this key. Check it at typesafe.ai and paste it again.",
   "serverError.decider.workersRejected": "Cloudflare rejected this token. Check that it has Workers AI permission and belongs to this account ID.",
   "serverError.decider.routerRejected": "OpenRouter rejected this key. Check it at openrouter.ai/keys and paste it again.",
+  "serverError.decider.customRejected": "Your endpoint rejected this key. Check it with the endpoint's owner and paste it again.",
+  "serverError.decider.baseUrlRequired": "Add the endpoint's base URL (https, or http to this machine) with the key.",
   "serverError.decider.accountId": "A Cloudflare account ID is 32 letters and digits.",
   "serverError.decider.accountFormat": "decider.workersAiAccountId a Cloudflare account ID is 32 letters and digits",
   "serverError.voice.utteranceTooLong": "voice utterances are limited to 500 characters",
   "serverError.goal.alreadyRunning": "A goal is already running in this chat. Stop it before starting another.",
   "serverError.chat.missingConversation": "no such conversation",
-  "serverError.department.confirmPeers": "Letting a bot talk to more bots requires confirming it first (acknowledgePeerScope)",
   "serverError.department.chiefResponsibility": "Only a Chief of Staff can be made responsible for additional departments",
   "serverError.department.confirmResponsibility": "Confirm which additional departments this Chief is responsible for (acknowledgePeerScope)",
   "serverError.owner.teamOnly": "Only a team's bots report to someone.",
@@ -183,6 +186,7 @@ export const USER_ERROR = {
   "serverError.postiz.addressAsText": "Send the Postiz address as text.",
   "serverError.secret.localService": "A local service cannot enter a secret. Enter it in OpenMausBot.",
   "serverError.secret.cloudOwnerOnly": "Only the owner of this Cloud can enter this secret.",
+  "serverError.card.cloudOwnerOnly": "Only the owner of this Cloud can answer this card. Chats started by other people always ask the owner first, whatever the bot's access level.",
   "serverError.secret.conversationOwnerOnly": "Only the person this conversation belongs to can enter this secret.",
   "serverError.secret.credentialSavingFromPhone": "this credential is currently being saved from a phone",
   "serverError.secret.credentialDismissed": "this credential request was dismissed",
@@ -197,14 +201,27 @@ export const USER_ERROR = {
   "serverError.attachment.alreadyInMessage": "This file is already in a message, so it stays.",
   "serverError.engine.signedOut": "{name} is signed out.",
   "serverError.bot.viewOnly": "You can view {bot}, not chat with it.",
+  "serverError.bot.alwaysAllowFull": "This bot already always-allows {max} tools. Remove one under Access in its settings, then try again.",
+  "serverError.share.ownBot": "Chats with your own MausBot stay yours, so they can't be shared.",
+  "serverError.share.alreadyTeam": "This conversation is already shared with the team.",
+  "serverError.share.notYours": "Only the person this conversation belongs to can share it.",
+  "serverError.share.notTeammate": "{name} isn't on this team.",
+  "serverError.share.alreadyWith": "This conversation is already shared with {name}.",
+  "serverError.share.cantUse": "{name} can't chat with {bot}, so you can't share this with them.",
+  "serverError.share.busy": "{bot} is still working here. Share it once it's done.",
+  "serverError.share.routine": "A routine is tied to this conversation. Delete the routine first, then share.",
+  "serverError.teamMemory.outside": "This conversation came in from outside the team, so nothing from it goes into team memory.",
+  "serverError.teamMemory.empty": "Write what to save first.",
+  "serverError.teamMemory.notYours": "Only the person who saved this, or an admin, can remove it.",
   "serverError.secret.mailboxAlreadyConnected": "this mailbox was already connected",
   "serverError.secret.emailAndPassword": "Enter your email address and its password.",
   "serverError.secret.emailUnavailable": "Email can't be connected here.",
   "serverError.mailbox.adminOnly": "Only the owner or an admin can manage the mailboxes.",
   "serverError.mailbox.addressAndPassword": "Enter your email address and password.",
   "serverError.mailbox.outgoingFields": "Check the outgoing server: a name like mail.example.com, a port from 1 to 65535, and SSL/TLS or STARTTLS.",
-  "serverError.voice.fishKeyRequired": "Add a Fish Audio key in Settings → API keys to talk to your bots here.",
+  "serverError.voice.fishKeyRequired": "Add a Fish Audio or ElevenLabs key in Settings → AI → Other services to talk to your bots here.",
   "serverError.voice.fishTranscribeConnection": "Couldn't reach Fish Audio to hear you — check your connection.",
+  "serverError.voice.elevenLabsTranscribeConnection": "Couldn't reach ElevenLabs to hear you — check your connection.",
   "serverError.file.tooLarge": "This file is {size}, over the {limit} limit for opening files from chat. The file itself is still saved as {name}.",
 } as const;
 
@@ -229,6 +246,12 @@ export function userErrorFields(value: unknown): Pick<ServerErrorBody, "errorKey
   const params = errorParams && typeof errorParams === "object" && !Array.isArray(errorParams)
     ? redactParams(errorParams as ServerTextParams) : undefined;
   return { errorKey, ...(params ? { errorParams: params } : {}) };
+}
+
+/** A refusal another module words in English, with its language-pack key when it is one of these lines word for word. */
+export function refusalText(error: string): ServerErrorBody {
+  const key = (Object.keys(USER_ERROR) as UserErrorKey[]).find((candidate) => USER_ERROR[candidate] === error);
+  return key ? userError(key) : { error };
 }
 
 export function refusalBody(refusal: { error: string; errorKey?: string; errorParams?: ServerTextParams }): ServerErrorBody {

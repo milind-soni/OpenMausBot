@@ -15,6 +15,7 @@ import { Transcript } from "./GroupView";
 import { DefaultResponderSelect } from "./RoomHeader";
 import { Select } from "./Select";
 import { RoutedByLine } from "./RoomQueueList";
+import { loadLocale, setLocale } from "@/lib/i18n";
 
 const members = [
   { id: "maya", name: "Maya" },
@@ -38,17 +39,31 @@ beforeEach(() => {
 });
 
 describe("room responder selector", () => {
-  it("offers Auto (Jev) and shows it selected on an Auto room", () => {
+  it.each(["jev", "workersai", "openrouter", "custom"] as const)("describes automatic routing without naming a different provider (%s)", (provider) => {
+    fixture.config = { ...jev(true), decider: { ...jev(true).decider, provider } } as ConfigStatus;
     const markup = renderToStaticMarkup(createElement(DefaultResponderSelect, { group: room({ kind: "auto" }), members }));
-    expect(markup).toContain('<option value="auto" selected="">Auto (Jev)</option>');
-    expect(markup).toContain("Jev picks who answers each plain message");
+    expect(markup).toContain('<option value="auto" selected="">Auto</option>');
+    expect(markup).toContain("The decision model picks who answers each plain message");
   });
 
-  it("reads plain Auto, and names who answers, while Jev is off", () => {
+  it("reads plain Auto, and names who answers, while the decision model is off", () => {
     fixture.config = jev(false);
     const markup = renderToStaticMarkup(createElement(DefaultResponderSelect, { group: room({ kind: "auto", fallbackBotId: "theo" }), members }));
     expect(markup).toContain('<option value="auto" selected="">Auto</option>');
-    expect(markup).toContain("Jev is off, so plain messages go to Theo");
+    expect(markup).toContain("The decision model is off, so plain messages go to Theo");
+  });
+
+  it("uses the neutral wording in the Chinese selector with Workers AI", async () => {
+    fixture.config = { ...jev(true), decider: { ...jev(true).decider, provider: "workersai" } } as ConfigStatus;
+    await loadLocale("zh");
+    try {
+      const markup = renderToStaticMarkup(createElement(DefaultResponderSelect, { group: room({ kind: "auto" }), members }));
+      expect(markup).toContain('<option value="auto" selected="">自动</option>');
+      expect(markup).toContain("由决策模型挑选谁回复每一条普通消息");
+      expect(markup).not.toContain("Jev");
+    } finally {
+      setLocale("en");
+    }
   });
 
   it("switching a lead room to Auto keeps the lead as its fallback", () => {

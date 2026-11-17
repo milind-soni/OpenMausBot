@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, LogOut, Plus, UserRound, X } from "lucide-react";
 import type { AccountsView, AccountSwitchResult, RailOpenResult } from "../../electron/cloud-account.mjs";
 import { cn } from "@/lib/cn";
@@ -7,6 +7,8 @@ import { t } from "@/lib/i18n";
 import { usePlaces } from "@/lib/places";
 import { CLOSE, Heading, PRIMARY, QUIET, SCREEN, SHEET } from "./cloud-buy/parts";
 import { codeDigits, SignInScreen } from "./cloud-buy/SignInScreen";
+import { Layer } from "./Layer";
+import { useModalDialog } from "../hooks/use-modal-dialog";
 import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 
 export interface AccountsAccess {
@@ -72,13 +74,14 @@ export function cloudRowLabel(view: AccountsView | null): string {
  * in its ＋; with no rail beside this page (nothing to list but This computer, or the person hid it) it is here. On another page,
  * one row that opens the sheet, with no address. Signed out: nothing, as Settings has the sign-in. */
 export function accountMenuItems({ view, openSheet, noRail, signOut, add }: AccountsAccess): SidebarMenuItem[] {
-  if (openSheet) return [{ key: "accounts-sheet", label: t("accounts.manage"), icon: <UserRound size={18} />, onSelect: openSheet }];
+  if (openSheet) return [{ key: "accounts-sheet", label: t("accounts.manage"), icon: <UserRound size={16} />, onSelect: openSheet }];
   const active = view?.active;
   if (!active) return [];
+  // The menu's header already names the account in use: its own row shows only when it needs signing in again.
   return [
-    { key: "accounts-active", heading: t("accounts.heading"), label: active.email, title: active.email, checked: true, icon: <Check size={18} />, disabled: !active.signIn, ...(active.signIn ? { subtitle: t("accounts.needsSignIn") } : {}), onSelect: () => { if (active.signIn) add(active.email); } },
-    ...(noRail ? [{ key: "accounts-add", label: t("accounts.add"), icon: <Plus size={18} />, onSelect: () => add() }] : []),
-    { key: "accounts-sign-out", label: t("accounts.signOut"), icon: <LogOut size={18} />, onSelect: () => signOut(active.id) },
+    ...(active.signIn ? [{ key: "accounts-active", label: active.email, title: active.email, icon: <Check size={16} />, subtitle: t("accounts.needsSignIn"), onSelect: () => add(active.email) }] : []),
+    ...(noRail ? [{ key: "accounts-add", label: t("accounts.add"), icon: <Plus size={16} />, onSelect: () => add() }] : []),
+    { key: "accounts-sign-out", label: t("accounts.signOut"), icon: <LogOut size={16} />, onSelect: () => signOut(active.id) },
   ];
 }
 
@@ -161,8 +164,10 @@ export function AccountsSheet({ onClose, adding = null, note: given = null }: { 
     }, () => setNote(t("accounts.failed")));
   };
   const active = view?.active ?? null;
-  return <div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <div role="dialog" aria-modal="true" aria-labelledby="cloud-add-title" data-accounts-sheet className={cn(SHEET, "relative w-full max-w-[420px]")}>
+  const dialog = useRef<HTMLDivElement>(null);
+  useModalDialog(dialog, onClose);
+  return <Layer modal><div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="cloud-add-title" data-accounts-sheet className={cn(SHEET, "relative w-full max-w-[420px] outline-none")}>
       <button type="button" onClick={onClose} aria-label={t("accounts.close")} className={cn(CLOSE, "absolute end-4 top-4 z-10")}><X size={16} /></button>
       {add !== null
         ? <AddAccount start={add} onBack={() => (adding !== null ? onClose() : setAdd(null))} onDone={(said) => { setAdd(null); if (said) setNote(said); else onClose(); }} />
@@ -173,7 +178,7 @@ export function AccountsSheet({ onClose, adding = null, note: given = null }: { 
           {active && !given && <button type="button" data-accounts-sign-out className={PRIMARY} onClick={() => signOut(active.id)}>{t("accounts.signOut")}</button>}
         </div>}
     </div>
-  </div>;
+  </div></Layer>;
 }
 
 /** The sheet as the rail's page keeps it: asked for by main, from the person's click on the page beside the rail. */

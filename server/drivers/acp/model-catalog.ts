@@ -5,7 +5,8 @@ export interface AcpModelCatalog {
   models: ModelCatalog;
   /** The models the signed-in account offers, once the engine has listed them. */
   accountModels: ReadonlySet<string> | null;
-  /** True while the list is the driver's fixed one or a failed read's leftover, not one the engine gave. */
+  /** True while this process has not been given the list by the engine: the driver's fixed one, a saved stand-in,
+   * or a failed read's leftover. */
   readonly unconfirmed: boolean;
   /** A read already under way is shared; a fresh one waits for a cached one under way, then reads again. */
   refresh(fresh?: boolean): Promise<void>;
@@ -20,7 +21,8 @@ export function acpModelCatalog(input: {
   const { instanceId, resolve } = input;
   const saved = resolve ? readStartupModelCacheEntry(instanceId) : null;
   let models = input.startFromSaved ? saved?.catalog ?? input.fixed : input.fixed;
-  let readFromEngine = Boolean(saved?.checkedAt);
+  // A previous run's checkedAt only lets the file stand in. This process confirms the ids when its own read returns them.
+  let readFromEngine = false;
   let accountModels: ReadonlySet<string> | null = saved?.checkedAt ? idsOf(saved.catalog) : null;
   let current: { fresh: boolean; done: Promise<void> } | null = null;
 

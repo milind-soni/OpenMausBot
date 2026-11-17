@@ -9,6 +9,7 @@ import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 import { ensureMemoryIndex } from "./message-db-memory-index.ts";
+import { cjkSearchText, cjkTokenParts, ensureSearchIndex, ftsPhrase, hasCjk, withoutSearchMarks } from "./cjk-search.ts";
 import { attentionSelect } from "./message-db-attention.ts";
 import { MessageSearchWorker } from "./message-search-worker.ts";
 import { searchMessagesInDatabase, type SearchHit } from "./message-search-query.ts";
@@ -21,6 +22,10 @@ const DB_FILE = () => join(DATA_DIR, "messages.db");
 const WORK_KINDS = "kind IN ('activity', 'digest', 'options')";
 const CARD_KINDS = "kind IN ('secret', 'signin', 'connector')";
 const FAILED_CALL = "kind = 'activity' AND instr(json, '\"ok\":false') > 0";
+/** The rows that order the thread list and the time each one counts at. SQLite uses messages_thread_order only for a
+ * statement whose WHERE and MAX repeat these texts exactly. */
+const ORDERING_ROW = "((role = 'user' AND json_extract(json, '$.peerAsk') IS NULL) OR (role = 'bot' AND kind = 'text' AND (json_extract(json, '$.turnTerminal') = 1 OR json_extract(json, '$.turnId') IS NULL)))";
+const ORDERING_AT = "COALESCE(json_extract(json, '$.turnCompletedAt'), at)";
 
 let handle: DatabaseSync | null = null;
 let handlePath: string | null = null;
@@ -59,9 +64,14 @@ function open(): DatabaseSync {
     -- open, including a database that already has messages.
     CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
     -- Partial, so no other query's plan can move onto them: only a statement that repeats the WHERE may use one.
+    CREATE INDEX IF NOT EXISTS messages_thread_order ON messages(thread_id, ${ORDERING_AT}) WHERE ${ORDERING_ROW};
     CREATE INDEX IF NOT EXISTS messages_work_at ON messages(kind, at) WHERE ${WORK_KINDS};
     CREATE INDEX IF NOT EXISTS messages_cards_at ON messages(kind, at) WHERE ${CARD_KINDS};
     CREATE INDEX IF NOT EXISTS messages_failed_at ON messages(at) WHERE ${FAILED_CALL};
+    -- For the periodic scans, whose WHERE clauses no index above repeats.
+    CREATE INDEX IF NOT EXISTS messages_goal_run ON messages(at) WHERE kind = 'goal.run';
+    CREATE INDEX IF NOT EXISTS messages_app ON messages(at) WHERE kind = 'app';
+    CREATE INDEX IF NOT EXISTS messages_open_rescue ON messages(at) WHERE kind = 'activity' AND json_extract(json, '$.tool.rescue') IS NOT NULL AND json_extract(json, '$.tool.rescue.settled') IS NULL AND json_extract(json, '$.tool.rescue.over') IS NULL;
     CREATE TABLE IF NOT EXISTS thread_state (
       thread_id TEXT PRIMARY KEY,
       active_leaf_id TEXT
@@ -99,7 +109,7 @@ function open(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS notification_log_at ON notification_log(at);
   `);
   const notificationColumns = db.prepare("PRAGMA table_info(notification_log)").all() as Array<{ name: string }>;
-  if (!notificationColumns.some((column) => column.name === "for_person")) db.exec("ALTER TABLE notification_log ADD COLUMN for_person TEXT");
+  for (const added of ["for_person", "read_by"]) if (!notificationColumns.some((column) => column.name === added)) db.exec(`ALTER TABLE notification_log ADD COLUMN ${added} TEXT`);
   ensureRecallIndex(db);
   ensureMemoryIndex(db);
   return db;
@@ -115,38 +125,20 @@ export function describeMissingFts5(error: unknown): Error | null {
 }
 
 function ensureRecallIndex(db: DatabaseSync): void {
-  const existed = db
-    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
-    .get();
   try {
-    db.exec(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-        text, content='messages', content_rowid='rowid', tokenize='unicode61'
-      );
-    `);
+    ensureSearchIndex(db, { table: "messages", fts: "messages_fts", view: "messages_search", triggerPrefix: "messages_fts" });
   } catch (error) {
     throw describeMissingFts5(error) ?? error;
   }
-  db.exec(`
-    CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
-      INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
-    END;
-    CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
-      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
-    END;
-    CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
-      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
-      INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
-    END;
-  `);
-  if (!existed) db.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
 }
 
 // INSERT OR REPLACE skips the delete trigger (SQLite fires it only with recursive triggers on), so upsert to keep FTS in step.
 const UPSERT_MESSAGE =
-  "INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+  "INSERT INTO messages (thread_id, id, at, role, kind, text, json, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?) " +
   "ON CONFLICT(thread_id, id) DO UPDATE SET at = excluded.at, role = excluded.role, kind = excluded.kind, " +
-  "text = excluded.text, json = excluded.json";
+  "text = excluded.text, json = excluded.json, search_text = excluded.search_text";
+const messageRow = (threadId: string, message: Message) =>
+  [threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), cjkSearchText(message.text)] as const;
 
 const ACTIVE_LEAF = "SELECT active_leaf_id FROM thread_state WHERE thread_id = ?";
 function db(): DatabaseSync {
@@ -167,7 +159,7 @@ function db(): DatabaseSync {
 }
 
 /** One prepared statement per SQL text for the life of the open database. */
-function prepared(sql: string): StatementSync {
+export function prepared(sql: string): StatementSync {
   const database = db();
   let statement = statements.get(sql);
   if (!statement) statements.set(sql, statement = database.prepare(sql));
@@ -321,16 +313,17 @@ export function logNotification(notification: Notification): NotificationLogEntr
   return entry;
 }
 
-export function recentNotificationLog(limit = NOTIFICATION_LOG_LIMIT): NotificationLogEntry[] {
-  const rows = db().prepare(
-    "SELECT id, at, kind, bot_id, bot_name, thread_id, group_id, title, body, avatar_url, for_person, read FROM notification_log ORDER BY at DESC, rowid DESC LIMIT ?",
-  ).all(limit) as Array<Parameters<typeof rowToNotificationLogEntry>[0]>;
+export function recentNotificationLog(limit = NOTIFICATION_LOG_LIMIT, reader?: string): NotificationLogEntry[] {
+  const read = reader === undefined ? "read" : "(read = 1 OR EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?)) AS read";
+  const rows = db().prepare(`SELECT id, at, kind, bot_id, bot_name, thread_id, group_id, title, body, avatar_url, for_person, ${read} FROM notification_log ORDER BY at DESC, rowid DESC LIMIT ?`)
+    .all(...(reader === undefined ? [] : [reader]), limit) as Array<Parameters<typeof rowToNotificationLogEntry>[0]>;
   return rows.map(rowToNotificationLogEntry);
 }
-
-export function markNotificationLogRead(ids: readonly string[]): void {
-  db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0 AND id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids));
+export function markNotificationLogRead(ids: readonly string[], reader?: string): void {
+  if (reader === undefined) db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0 AND id IN (SELECT value FROM json_each(?))").run(JSON.stringify(ids));
+  else db().prepare("UPDATE notification_log SET read_by = json_insert(coalesce(read_by, '[]'), '$[#]', ?1) WHERE id IN (SELECT value FROM json_each(?2)) AND NOT EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?1)").run(reader, JSON.stringify(ids));
 }
+export function forgetNotificationReader(person: string): void { db().prepare("UPDATE notification_log SET read_by = (SELECT json_group_array(value) FROM json_each(read_by) WHERE value <> ?1) WHERE EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?1)").run(person); }
 
 export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
   writeFollowups((connection) => connection.prepare(
@@ -424,9 +417,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
   const insert = db().prepare(UPSERT_MESSAGE);
   db().exec("BEGIN");
   try {
-    for (const message of messages) {
-      insert.run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
-    }
+    for (const message of messages) insert.run(...messageRow(threadId, message));
     setActiveLeaf(threadId, activeLeafId);
     db().exec("COMMIT");
   } catch (error) {
@@ -443,7 +434,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
 }
 
 export function insertMessage(threadId: string, message: Message): void {
-  prepared(UPSERT_MESSAGE).run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
+  prepared(UPSERT_MESSAGE).run(...messageRow(threadId, message));
 }
 
 /** `relinked`: adds `messages` to a conversation that has rows; each row it names changes only its parentId, and an id it already has fails the whole import. */
@@ -453,9 +444,9 @@ export function importThread(threadId: string, messages: Message[], activeLeafId
         database.prepare("SELECT 1 FROM thread_state WHERE thread_id = ?").get(threadId))) {
       throw new Error("Cannot import over an existing conversation");
     }
-    const insert = relinked && database.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    const insert = relinked && database.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json, search_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     for (const message of messages) {
-      if (insert) insert.run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
+      if (insert) insert.run(...messageRow(threadId, message));
       else insertMessage(threadId, message);
     }
     const link = database.prepare("UPDATE messages SET json = json_set(json, '$.parentId', ?) WHERE thread_id = ? AND id = ?");
@@ -472,7 +463,7 @@ export function appendMessage(threadId: string, message: Message): void {
 }
 
 export function updateMessage(threadId: string, message: Message): void {
-  prepared("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ? WHERE thread_id = ? AND id = ?").run(message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), threadId, message.id);
+  prepared("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ?, search_text = ? WHERE thread_id = ? AND id = ?").run(message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), cjkSearchText(message.text), threadId, message.id);
 }
 
 export function workingGoalRunMessages(): Array<{ threadId: string; message: Message }> {
@@ -630,7 +621,7 @@ export function lastRowAt(threadId: string): number | undefined {
 
 export function latestMessageAts(threadIds: readonly string[], forOrdering = false): Map<string, number> {
   return forOrdering
-    ? newestAts(threadIds, "AND ((role = 'user' AND json_extract(json, '$.peerAsk') IS NULL) OR (role = 'bot' AND kind = 'text' AND (json_extract(json, '$.turnTerminal') = 1 OR json_extract(json, '$.turnId') IS NULL)))", "COALESCE(json_extract(json, '$.turnCompletedAt'), at)")
+    ? newestAts(threadIds, `AND ${ORDERING_ROW}`, ORDERING_AT, "INDEXED BY messages_thread_order")
     : newestAts(threadIds, "");
 }
 
@@ -639,19 +630,15 @@ export function latestPersonLineAts(threadIds: readonly string[]): Map<string, n
     "AND json_extract(json, '$.peerAsk') IS NULL AND json_extract(json, '$.relayed') IS NULL");
 }
 
-function newestAts(threadIds: readonly string[], where: string, at = "at"): Map<string, number> {
+/** One MAX per thread, so SQLite reads the newest entry of an index on (thread_id, value) instead of every row. */
+function newestAts(threadIds: readonly string[], where: string, at = "at", index = ""): Map<string, number> {
   const ids = [...new Set(threadIds.filter((id) => id.length > 0))];
   const out = new Map<string, number>();
-  const chunk = 400;
-  for (let i = 0; i < ids.length; i += chunk) {
-    const slice = ids.slice(i, i + chunk);
-    const placeholders = slice.map(() => "?").join(", ");
-    const rows = db()
-      .prepare(`SELECT thread_id, MAX(${at}) AS at FROM messages WHERE thread_id IN (${placeholders}) ${where} GROUP BY thread_id`)
-      .all(...slice) as Array<{ thread_id: string; at: number }>;
-    for (const row of rows) {
-      if (typeof row.at === "number" && Number.isFinite(row.at)) out.set(row.thread_id, row.at);
-    }
+  if (ids.length === 0) return out;
+  const rows = prepared(`SELECT value AS thread_id, (SELECT MAX(${at}) FROM messages ${index} WHERE thread_id = value ${where}) AS at FROM json_each(?)`)
+    .all(JSON.stringify(ids)) as Array<{ thread_id: string; at: number | null }>;
+  for (const row of rows) {
+    if (typeof row.at === "number" && Number.isFinite(row.at)) out.set(row.thread_id, row.at);
   }
   return out;
 }
@@ -679,7 +666,7 @@ export function deleteThreads(threadIds: readonly string[], beforeCommit?: () =>
 export function optionCardsForTools(tools: readonly string[]): Array<{ threadId: string; messageId: string }> {
   if (tools.length === 0) return [];
   const rows = db()
-    .prepare(`SELECT thread_id, id FROM messages WHERE kind = 'options' AND json_extract(json, '$.card.tool') IN (${tools.map(() => "?").join(", ")}) ORDER BY rowid`)
+    .prepare(`SELECT thread_id, id FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' AND json_extract(json, '$.card.tool') IN (${tools.map(() => "?").join(", ")}) ORDER BY rowid`)
     .all(...tools) as Array<{ thread_id: string; id: string }>;
   return rows.map((row) => ({ threadId: row.thread_id, messageId: row.id }));
 }
@@ -744,12 +731,13 @@ function ftsQuery(query: string, mode: SearchMode = "all"): string | null {
     const terms = recallTerms(query).map(recallMatchTerm).filter(Boolean);
     return terms.length ? terms.join(" OR ") : null;
   }
-  return (content.length ? content : tokens).map((token) => `"${token}"`).join(" ");
+  return (content.length ? content : tokens).map(ftsPhrase).join(" ");
 }
 
 /** FTS5's unicode61 tokenizer cannot tell "-10" from "10" or "c++" from "c", even quoted, so punctuation terms are skipped. */
 export function recallMatchTerm(term: string): string | null {
   if (!/^[\p{L}\p{N}]+$/u.test(term)) return null;
+  if (hasCjk(term)) return ftsPhrase(term);
   if (!/^\p{L}{4,}$/u.test(term)) return `"${term}"`;
   const stem = term.length > 4 && term.endsWith("s") && !term.endsWith("ss") ? term.slice(0, -1) : term;
   return `"${stem}"*`;
@@ -761,16 +749,23 @@ const RECALL_FILLER = new Set(
   "about again also any anything can could does don't know me my please remember remind should tell there they us would hi hello hey thanks thank ok okay yes yeah no i'm im i've i'll i'd you're quick just".split(" "),
 );
 
+const trimToken = (raw: string) => raw.replace(/"/g, "").replace(/^[\s.,;:!?()[\]{}'`“”‘’]+|[\s.,;:!?()[\]{}'`“”‘’]+$/g, "").toLowerCase();
+
+/** Words first, then the CJK bigrams, each list capped on its own so a long Chinese message cannot crowd out the words. */
 export function recallTerms(query: string): string[] {
   const out: string[] = [];
+  const bigrams: string[] = [];
   for (const raw of query.split(/[\s、。！？；：，（）【】《》〈〉「」『』]+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
-    const token = raw.replace(/"/g, "").replace(/^[\s.,;:!?()[\]{}'`“”‘’]+|[\s.,;:!?()[\]{}'`“”‘’]+$/g, "").toLowerCase();
-    if (token.length < 2 && !/\d/.test(token)) continue;
-    if (!/[\p{L}\p{N}]/u.test(token)) continue;
-    if (STOP_WORDS.has(token) || RECALL_FILLER.has(token)) continue;
-    if (!out.includes(token)) out.push(token);
+    const parts = hasCjk(raw) ? cjkTokenParts(raw.toLowerCase()) : { other: [raw], bigrams: [] };
+    for (const pair of parts.bigrams) if (!bigrams.includes(pair)) bigrams.push(pair);
+    for (const token of parts.other.map(trimToken)) {
+      if (token.length < 2 && !/\d/.test(token)) continue;
+      if (!/[\p{L}\p{N}]/u.test(token)) continue;
+      if (STOP_WORDS.has(token) || RECALL_FILLER.has(token)) continue;
+      if (!out.includes(token)) out.push(token);
+    }
   }
-  return out.slice(0, 16);
+  return [...out.slice(0, 16), ...bigrams.slice(0, 24)];
 }
 
 const SNIPPET_TOKENS = 48;
@@ -853,7 +848,7 @@ export function recallMessages(query: string, threadIds: readonly string[], limi
       at: row.at,
       role: row.role,
       ...(row.kind === "digest" ? { kind: "digest" as const } : {}),
-      snippet: row.snippet.replace(/\s+/g, " ").trim(),
+      snippet: withoutSearchMarks(row.snippet).replace(/\s+/g, " ").trim(),
       ...(row.from_name ? { from: row.from_name } : {}),
       ...(peer ? { peer } : {}),
     };
@@ -935,10 +930,11 @@ export interface MemoryFileStat {
 export function indexMemoryFile(botId: string, path: string, text: string, stat: { mtimeMs: number; bytes: number }): void {
   db()
     .prepare(
-      "INSERT INTO memory_files (bot_id, path, text, mtime_ms, bytes) VALUES (?, ?, ?, ?, ?) " +
-        "ON CONFLICT(bot_id, path) DO UPDATE SET text = excluded.text, mtime_ms = excluded.mtime_ms, bytes = excluded.bytes",
+      "INSERT INTO memory_files (bot_id, path, text, mtime_ms, bytes, search_text) VALUES (?, ?, ?, ?, ?, ?) " +
+        "ON CONFLICT(bot_id, path) DO UPDATE SET text = excluded.text, mtime_ms = excluded.mtime_ms, bytes = excluded.bytes, " +
+        "search_text = excluded.search_text",
     )
-    .run(botId, path, text, Math.trunc(stat.mtimeMs), stat.bytes);
+    .run(botId, path, text, Math.trunc(stat.mtimeMs), stat.bytes, cjkSearchText(text));
 }
 
 export function removeMemoryFile(botId: string, path: string): void {
@@ -977,7 +973,7 @@ export function recallMemory(query: string, botId: string, limit = 12, mode: Sea
     )
     // SAFETY: the SELECT names exactly these three columns; snippet() is never null
     .all(match, botId, limit) as Array<{ path: string; mtime_ms: number; snippet: string }>;
-  return rows.map((row) => ({ file: row.path, at: row.mtime_ms, snippet: row.snippet.replace(/\s+/g, " ").trim() }));
+  return rows.map((row) => ({ file: row.path, at: row.mtime_ms, snippet: withoutSearchMarks(row.snippet).replace(/\s+/g, " ").trim() }));
 }
 
 /** Await before maintenance replaces the database or shutdown releases its lease. */
