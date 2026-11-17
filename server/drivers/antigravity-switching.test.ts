@@ -508,6 +508,9 @@ describe("Antigravity Proxy & Auto Switching", () => {
       });
       createdInstances.push(driverInstance);
 
+      const events: RuntimeEvent[] = [];
+      driverInstance.adapter.onEvent((ev) => events.push(ev));
+
       baseSendTurn.mockResolvedValueOnce({ turnId: "turn-cancel-1" });
       await driverInstance.adapter.sendTurn({
         threadId: "thread-cancel",
@@ -533,6 +536,9 @@ describe("Antigravity Proxy & Auto Switching", () => {
 
       // Must NOT resend turn because it was canceled
       expect(baseSendTurn).toHaveBeenCalledTimes(1);
+
+      // Must emit a cancelled completion event so the caller is never left hanging
+      expect(events.some((e) => e.type === "turn.completed" && e.turnId === "turn-cancel-1")).toBe(true);
     });
 
     it("broadcasts single event stream to multiple onEvent listeners with remapping", async () => {

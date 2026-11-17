@@ -234,8 +234,6 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         await runtimeProcesses.stopped(input.instanceId).catch(() => {});
       }
       noteAntigravitySignedIn(antigravityTokenPath(input.instanceId));
-      watcher.clearCachedRefreshToken();
-      void watcher.syncCredentials().catch(() => {});
       void base.refreshModels?.();
     });
     const auth = new AntigravityAuthController(() => {
@@ -285,15 +283,32 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
 
         void (async () => {
           try {
+            const finishCanceledRecovery = () => {
+              activeTurns.delete(threadId);
+              const completion = tracked.suppressedEvents.find((e) => e.type === "turn.completed");
+              if (completion) {
+                broadcast(completion);
+              } else {
+                broadcast({
+                  type: "turn.completed",
+                  threadId,
+                  turnId: tracked.originalTurnId,
+                  createdAt: new Date().toISOString(),
+                  ok: false,
+                  stopReason: "cancelled",
+                } as any);
+              }
+            };
+
             const switched = await handleQuotaExhaustedWithAutoSwitch(watcher);
             if (tracked.canceled) {
-              activeTurns.delete(threadId);
+              finishCanceledRecovery();
               return;
             }
             if (switched) {
               await base.adapter.stopAll().catch(() => {});
               if (tracked.canceled) {
-                activeTurns.delete(threadId);
+                finishCanceledRecovery();
                 return;
               }
               const retriedAck = await base.adapter.sendTurn(tracked.turn);
@@ -429,6 +444,9 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       signOut: async () => {
         auth.cancel();
         stopAntigravityWatcher(input.instanceId);
+        for (const tracked of activeTurns.values()) {
+          tracked.canceled = true;
+        }
         activeTurns.clear();
         turnIdRemap.clear();
         await base.adapter.stopAll();
@@ -441,6 +459,9 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       dispose: async () => {
         auth.cancel();
         stopAntigravityWatcher(input.instanceId);
+        for (const tracked of activeTurns.values()) {
+          tracked.canceled = true;
+        }
         activeTurns.clear();
         turnIdRemap.clear();
         await base.dispose();
