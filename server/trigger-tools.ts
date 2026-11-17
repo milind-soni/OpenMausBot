@@ -9,6 +9,8 @@ import { redactSecretsInText } from "./redact.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookTrigger } from "./webhooks.ts";
 
+export const NO_SUCH_TRIGGER = "No trigger with that id belongs to this bot. Call trigger_info without trigger_id to see its ids.";
+
 const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"] as const;
 const INSTRUCTIONS_SHOWN = 2_000;
 const FIRES_SHOWN = 10;
@@ -134,6 +136,8 @@ export interface TriggerListing {
   triggers?: AgentTrigger[];
   trigger?: AgentTrigger & { recentFires: Array<ReturnType<typeof agentRun>> };
   error?: string;
+  /** The id asked for is not this bot's: a plain answer, not a failed call. */
+  missing?: boolean;
 }
 
 /** One bot's triggers of every kind, or one trigger with its recent fires. Runs are listed newest first. */
@@ -159,7 +163,7 @@ export function listTriggers(input: {
     const routine = routines.find((candidate) => candidate.id === input.triggerId);
     const webhook = webhooks.find((candidate) => candidate.id === input.triggerId);
     const app = apps.find((candidate) => candidate.id === input.triggerId);
-    if (!routine && !webhook && !app) return { ...header, error: "No trigger with that id belongs to this bot. Call trigger_info without trigger_id to see its ids." };
+    if (!routine && !webhook && !app) return { ...header, error: NO_SUCH_TRIGGER, missing: true };
     const fires = input.runs.filter((run) => run.routineId === input.triggerId).slice(0, FIRES_SHOWN).map(agentRun);
     const shown = routine ? agentRoutine(routine, latest.get(routine.id)) : webhook ? agentWebhook(webhook, latest.get(webhook.id)) : agentAppTrigger(app!, latest.get(app!.id));
     const prompt = (routine ?? webhook ?? app)!.prompt;
