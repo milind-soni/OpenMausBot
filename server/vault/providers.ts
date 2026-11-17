@@ -21,8 +21,9 @@ export interface VaultProvider {
   fresh(): Promise<void>;
   /** Every item and the bots that may use it, never a value. */
   items(): LinkedItem[];
-  /** A login's password and 2FA key, or a secret's main value (or its `field`), read from the manager now. */
-  read(itemId: string, field?: string): Promise<LinkedValue>;
+  /** A login's password and 2FA key, or a secret's main value (or its `field`), read from the manager now. `pageHost` is
+   * the page a login was picked for, for a manager whose items can change where they fill between the pick and the read. */
+  read(itemId: string, field?: string, pageHost?: string): Promise<LinkedValue>;
   markUsed(itemId: string): void;
 }
 
@@ -38,7 +39,7 @@ export function linkedCandidates(provider: VaultProvider, pageHost: string, bots
   return logins(provider, bots).filter((login) => loginMatchesHost(login, pageHost)).map((login) => ({
     id: login.id, site: login.site, hosts: [...login.hosts], exactHost: login.exactHost, username: login.username, source: login.source,
     secrets: async () => {
-      const { password, totp } = await provider.read(login.id);
+      const { password, totp } = await provider.read(login.id, undefined, pageHost);
       if (!password) throw new Error(`This login is no longer in ${provider.label}, or has no password there.`);
       return { password, totp: totp ?? null };
     },

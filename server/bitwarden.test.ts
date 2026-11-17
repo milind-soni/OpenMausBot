@@ -297,6 +297,23 @@ describe("Bitwarden review fixes", () => {
     expect(linkedCandidates(bitwarden, "accounts.example.com", "bot-1")).toHaveLength(1);
   });
 
+  it("leaves out a host address kept to a port of its own, since a place cannot keep the port", () => {
+    expect(bitwardenLoginPlaces(login([{ uri: "https://accounts.example.com:4000", match: 1 }]))).toEqual([]);
+    expect(bitwardenLoginPlaces(login([{ uri: "https://accounts.example.com:443/login", match: 1 }]))).toEqual([{ site: "example.com", hosts: ["accounts.example.com"], exactHost: true }]);
+  });
+
+  it("gives a password only to the page its candidate was picked for, even after a refresh narrows the item", async () => {
+    const items = [login([{ uri: "https://example.com" }])];
+    const { bitwarden } = setup({ items });
+    await bitwarden.refresh();
+    const [picked] = linkedCandidates(bitwarden, "shop.example.com", "bot-1");
+    items[0] = login([{ uri: "https://accounts.example.com", match: 1 }]);
+    await bitwarden.refresh();
+    await expect(picked!.secrets()).rejects.toThrow("no longer in Bitwarden");
+    const [now] = linkedCandidates(bitwarden, "accounts.example.com", "bot-1");
+    expect(await now!.secrets()).toMatchObject({ password: "fake-matched-pass" });
+  });
+
   it("gives a password only where its item still fills now, not where it was listed", async () => {
     const items = [login([{ uri: "https://accounts.example.com" }])];
     const { bitwarden } = setup({ items });
@@ -365,5 +382,32 @@ describe("Bitwarden review fixes", () => {
     expect(await read).toEqual({ connected: false });
     account = ACCOUNT;
     expect(slow.items(), "the list read before Disconnect was dropped").toEqual([]);
+  });
+
+  it("does not let a check queued behind another bw use run after Disconnect", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((done) => { release = done; });
+    let account: BitwardenAccount | null = ACCOUNT;
+    const connects: string[] = [];
+    const bitwarden = new BitwardenLogins({
+      account: () => account,
+      connect: async (one) => {
+        connects.push(one.clientId);
+        return { items: async () => ITEMS, item: async (id) => { await gate; return ITEMS.find((item) => item.id === id) ?? null; } };
+      },
+    });
+    await bitwarden.refresh();
+    const reading = bitwarden.read("bitwarden:a1:example.com");
+    const checking = bitwarden.refresh({ ...ACCOUNT, clientId: "user.fake-queued" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    account = null;
+    const forgotten = bitwarden.forget();
+    release();
+    await expect(checking).rejects.toThrow(BITWARDEN_DISCONNECTED);
+    expect(await reading).toEqual({});
+    await forgotten;
+    expect(connects, "the queued check never signed in to bw").toEqual([ACCOUNT.clientId]);
+    account = ACCOUNT;
+    expect(bitwarden.items(), "nothing listed after Disconnect").toEqual([]);
   });
 });

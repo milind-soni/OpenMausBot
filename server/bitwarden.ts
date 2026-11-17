@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 
 import type { BitwardenStatus, LoginBots, LoginPlace, LoginSummary, OnePasswordItemRef } from "../shared/logins.ts";
-import { loginSite, normalizeLoginHost } from "../shared/logins.ts";
+import { loginMatchesHost, loginSite, normalizeLoginHost } from "../shared/logins.ts";
 import { parseTotpKey } from "./totp.ts";
 import type { LinkedItem, LinkedValue, VaultProvider } from "./vault/providers.ts";
 
@@ -201,15 +201,25 @@ function bySite(hosts: Iterable<string>): Map<string, string[]> {
 const MATCH_DOMAIN = 0;
 const MATCH_HOST = 1;
 
+/** Whether a saved address names a port of its own (not its scheme's default), which a host match keeps to. */
+function namesPort(raw: string): boolean {
+  try {
+    return new URL(raw.includes("://") ? raw : `https://${raw}`).port !== "";
+  } catch {
+    return false;
+  }
+}
+
 /** Where a login item may be filled, keeping each saved address's match rule: a base-domain address opens its whole
- * site, a host address only that host. Starts-with, exact, regular-expression and never addresses are left out: a
- * place here is a site or hosts, and could not keep their limits. */
+ * site, a host address only that host. Starts-with, exact, regular-expression and never addresses are left out, and so
+ * is a host address with its own port: a place here is a site or hosts, and could not keep their limits. */
 export function bitwardenLoginPlaces(item: BitwardenItem): LoginPlace[] {
   const open = new Set<string>();
   const exact = new Set<string>();
   for (const uri of item.login?.uris ?? []) {
     const match = uri.match ?? MATCH_DOMAIN;
-    const host = match === MATCH_DOMAIN || match === MATCH_HOST ? normalizeLoginHost(uri.uri) : null;
+    const kept = match === MATCH_DOMAIN || (match === MATCH_HOST && !namesPort(uri.uri?.trim() ?? ""));
+    const host = kept ? normalizeLoginHost(uri.uri) : null;
     if (host) (match === MATCH_DOMAIN ? open : exact).add(host);
   }
   const places = [...bySite(open)].map(([site, hosts]): LoginPlace => ({ site, hosts, exactHost: false }));
@@ -298,11 +308,12 @@ export class BitwardenLogins implements VaultProvider {
     return { connected: true, server: bitwardenServer(account.server) ?? account.server, items: this.itemCount, bots: this.grants(), ...(this.error ? { error: this.error } : {}) };
   }
 
-  private async clientFor(account: BitwardenAccount): Promise<BitwardenClient> {
+  /** `generation` is the one the use was asked under: a sign-in that ends after a disconnect is not kept. */
+  private async clientFor(account: BitwardenAccount, generation: number): Promise<BitwardenClient> {
     const same = this.client && (["server", "clientId", "clientSecret", "password"] as const).every((key) => this.client!.account[key] === account[key]);
     if (same) return this.client!.client;
     const client = await this.connect(account);
-    this.client = { account, client };
+    if (generation === this.generation) this.client = { account, client };
     return client;
   }
 
@@ -324,17 +335,19 @@ export class BitwardenLogins implements VaultProvider {
   /** Reads the vault again; with `account`, checks that one first and throws the person's words when it fails. */
   refresh(account?: BitwardenAccount): Promise<BitwardenStatus> {
     if (!account && this.refreshing) return this.refreshing;
-    const run = this.queued(() => this.load(account)).finally(() => { if (this.refreshing === run) this.refreshing = null; });
+    // Taken now, not when its turn comes: a Disconnect while it waits behind another use of `bw` drops it.
+    const generation = this.generation;
+    const run = this.queued(() => this.load(generation, account)).finally(() => { if (this.refreshing === run) this.refreshing = null; });
     if (!account) this.refreshing = run;
     return run;
   }
 
-  private async load(candidate?: BitwardenAccount): Promise<BitwardenStatus> {
+  private async load(generation: number, candidate?: BitwardenAccount): Promise<BitwardenStatus> {
+    if (generation !== this.generation) return this.dropped(candidate);
     const account = candidate ?? this.account();
     if (!account) { this.clear(); return this.status(); }
-    const generation = this.generation;
     try {
-      const listed = await (await this.clientFor(account)).items();
+      const listed = await (await this.clientFor(account, generation)).items();
       if (generation !== this.generation) return this.dropped(candidate);
       const entries: Entry[] = [];
       const secrets: SecretEntry[] = [];
@@ -380,6 +393,7 @@ export class BitwardenLogins implements VaultProvider {
    * keeps nothing it finds, and the copy is removed once that read's `bw` is done with it. */
   forget(): Promise<void> {
     this.generation += 1;
+    this.refreshing = null;
     this.clear();
     return this.queued(async () => {
       this.client = null;
@@ -416,12 +430,12 @@ export class BitwardenLogins implements VaultProvider {
   }
 
   private itemOf(itemId: string): Promise<BitwardenItem | null> {
+    const generation = this.generation;
     return this.queued(async () => {
       const account = this.account();
-      if (!account) return null;
-      const generation = this.generation;
+      if (!account || generation !== this.generation) return null;
       try {
-        const item = await (await this.clientFor(account)).item(itemId);
+        const item = await (await this.clientFor(account, generation)).item(itemId);
         if (generation !== this.generation) { this.client = null; return null; }
         return item;
       } catch (error) {
@@ -431,12 +445,15 @@ export class BitwardenLogins implements VaultProvider {
     });
   }
 
-  async read(id: string, field?: string): Promise<LinkedValue> {
+  async read(id: string, field?: string, pageHost?: string): Promise<LinkedValue> {
     const login = this.entries.find((entry) => entry.id === id);
     if (login) {
       const item = await this.itemOf(login.itemId);
-      // The item may have moved to another website since it was listed; its password goes only where it fills now.
-      if (!item?.login?.password || !stillFills(login, bitwardenLoginPlaces(item))) return {};
+      // The item may have moved to another website since it was listed or picked; its password goes only where it
+      // fills now, and only to the page it was picked for.
+      const places = item ? bitwardenLoginPlaces(item) : [];
+      const fills = stillFills(login, places) && (pageHost === undefined || places.some((place) => loginMatchesHost(place, pageHost)));
+      if (!item?.login?.password || !fills) return {};
       return { password: item.login.password, totp: item.login.totp ? parseTotpKey(item.login.totp) : null };
     }
     const secret = this.secrets.find((entry) => entry.id === id);

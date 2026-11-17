@@ -30,7 +30,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-async function serve(options: { bitwarden?: boolean; gate?: Promise<void> } = {}) {
+async function serve(options: { bitwarden?: boolean; gate?: Promise<void>; checking?: () => void } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-bitwarden-routes-"));
   dirs.push(dir);
   const store = new VaultStore({ dataDir: dir });
@@ -40,6 +40,7 @@ async function serve(options: { bitwarden?: boolean; gate?: Promise<void> } = {}
     account: () => store.bitwardenAccount(), grants: () => store.bitwardenGrants(), itemGrants: () => store.bitwardenItemGrants(),
     connect: async (account) => {
       connects.push(account);
+      options.checking?.();
       await options.gate;
       if (account.password !== MASTER) throw new Error("Invalid master password.");
       return {
@@ -127,9 +128,11 @@ describe("Settings → Logins: Bitwarden", () => {
 
   it("does not let a connect still being checked undo a Disconnect", async () => {
     let release = () => {};
-    const { store, call } = await serve({ gate: new Promise<void>((done) => { release = done; }) });
+    let checking = () => {};
+    const started = new Promise<void>((done) => { checking = done; });
+    const { store, call } = await serve({ gate: new Promise<void>((done) => { release = done; }), checking });
     const connecting = call("POST", "/api/logins/bitwarden", CONNECT);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await started;
     expect((await call("DELETE", "/api/logins/bitwarden")).body.bitwarden).toEqual({ connected: false });
     release();
     expect(await connecting).toEqual({ status: 400, body: { error: BITWARDEN_DISCONNECTED } });
