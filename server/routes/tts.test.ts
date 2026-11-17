@@ -49,6 +49,14 @@ describe("voice routes", () => {
     }
   });
 
+  it("prepares configuration instructions without changing their literal names", async () => {
+    const { answers } = await call("POST", "/api/tts/prepare", { text: "Set **API_KEY** and `API_URL` in my_config_file.json." });
+    expect(answers[0]![0]).toBe(200);
+    expect((answers[0]![1] as { utterances: string[] }).utterances).toEqual([
+      "Set API_KEY and API_URL in my_config_file.json.",
+    ]);
+  });
+
   it("list no voices, and say why, when no voice provider is set up", async () => {
     const { answers } = await call("GET", "/api/tts/voices?q=calm");
     expect(answers).toHaveLength(1);
