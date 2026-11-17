@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { writeFileAtomic } from "./atomic.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 let child: ChildProcess;
@@ -106,6 +107,7 @@ beforeAll(async () => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
     const request = JSON.parse(raw || "{}") as ChatRequest;
+    if (isTitleCall(request)) { res.statusCode = 500; return res.end(); }
     requests.push(request);
     const toolResult = request.messages?.some(message => message.role === "tool");
     res.writeHead(200, { "content-type": "text/event-stream" });

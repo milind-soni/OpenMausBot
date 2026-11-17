@@ -10,6 +10,7 @@ import { z } from "zod";
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "./bot-profile.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { normalizeCronSchedule } from "./routine-schedule.ts";
+import { isToolGroup } from "./tool-groups.ts";
 import { MAUS_COLOR_NAMES } from "./wire.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES } from "./skill-md.ts";
 
@@ -33,6 +34,8 @@ export const TEAM_BRIEF_MAX_BYTES = 24_000, RELEASE_NOTES_MAX = 4_000;
 export const PACKAGE_V1_VERSION = 1;
 export const PACKAGE_V1_MAX_SKILLS = 20;
 export const BOTMRR_MARKDOWN_VERSION = 1;
+/** A template folder's bot.md or team.md (shared/share-folder.ts): v2 package fields, with skills and pictures in files. */
+export const BOTMRR_FOLDER_VERSION = 2;
 const BOTMRR_MARKDOWN_MAX_BYTES = 1_000_000;
 
 export const NEWER_PACKAGE_MESSAGE = "This file was made by a newer OpenMausBot. Update the app, then import it again.";
@@ -357,6 +360,10 @@ const agentSchema = z.object({
   skills: z.array(skillName).max(AGENT_MAX_SKILLS).optional(),
   connections: z.array(connKey).max(PACKAGE_MAX_CONNECTIONS).optional(),
   seed: seedSchema.optional(),
+  /** Tool groups the bot has switched off. It only narrows what the bot is shown; a group this app doesn't know is dropped. */
+  tools: z.object({
+    off: z.array(z.string({ error: "must be text" }).max(40)).max(20).transform((groups) => [...new Set(groups.filter(isToolGroup))]),
+  }).optional(),
 });
 
 const routineSchema = z.object({
@@ -815,7 +822,8 @@ export function downgradeToV1(document: PackageDocument):
   for (const preset of pkg.presets ?? []) dropped.push(`presets[${preset.key}]`);
   for (const connection of pkg.connections ?? []) dropped.push(`connections[${connection.key}]`);
   const agents = pkg.agents.map((agent) => {
-    const { approval, connections, seed, appearance, ...kept } = agent;
+    const { approval, connections, seed, appearance, tools, ...kept } = agent;
+    if (tools?.off.length) dropped.push(`agents[${agent.key}].tools`);
     const { avatar, ...look } = appearance;
     if (avatar) dropped.push(`agents[${agent.key}].appearance.avatar`);
     if (approval !== undefined) dropped.push(`agents[${agent.key}].approval`);

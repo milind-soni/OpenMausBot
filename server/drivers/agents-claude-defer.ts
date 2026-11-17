@@ -3,26 +3,32 @@
 // still makes the CLI connect the server before the first request (checked on 2.1.321). An older CLI ignores the mark
 // and loads every tool, and with tool search off every tool loads whatever the mark says.
 
-/** The proxy's switch, set by the Claude driver: "1" marks every tool outside CLAUDE_ALWAYS_LOADED_TOOL_NAMES deferred. */
+/** The proxy's switch, set by the Claude driver: "1" marks every tool outside claudeAlwaysLoaded deferred. */
 export const DEFER_TOOLS_ENV = "OMB_AGENTS_DEFER_TOOLS";
 
 /** Sent whole on every Claude request: tools most turns call, or must call without a search first. list_bots stays
- * because a deferred list_bots loses to Claude Code's own ListAgents when the bot inherits this machine's setup. */
+ * because a deferred list_bots loses to Claude Code's own ListAgents when the bot inherits this machine's setup. Tools a
+ * turn calls only now and then (memory_update, attach_file, send_voice_note) are deferred: the prompt names them, and
+ * one ToolSearch loads one when it is needed. */
 export const CLAUDE_ALWAYS_LOADED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "tool_result_read",
   "list_bots",
-  "attach_file",
-  "memory_update",
   "message_person",
-  "send_voice_note",
   "create_options_card",
 ]);
 
+/** A Chief hands work out on most turns: a deferred coordinate_bots costs every hand-off a ToolSearch request first. */
+export const CLAUDE_CHIEF_ALWAYS_LOADED_TOOL_NAMES: ReadonlySet<string> = new Set([...CLAUDE_ALWAYS_LOADED_TOOL_NAMES, "coordinate_bots"]);
+
 export const ALWAYS_LOAD_META = "anthropic/alwaysLoad";
 
+/** The tools a Claude turn of this bot sends whole. */
+export const claudeAlwaysLoaded = (chief: boolean): ReadonlySet<string> => chief ? CLAUDE_CHIEF_ALWAYS_LOADED_TOOL_NAMES : CLAUDE_ALWAYS_LOADED_TOOL_NAMES;
+
 /** `tools` with every tool outside the always-loaded set marked deferred. */
-export function withDeferMarks<Tool extends { name: string; _meta?: Record<string, unknown> }>(tools: readonly Tool[]): Tool[] {
-  return tools.map((tool) => CLAUDE_ALWAYS_LOADED_TOOL_NAMES.has(tool.name)
+export function withDeferMarks<Tool extends { name: string; _meta?: Record<string, unknown> }>(tools: readonly Tool[], chief = false): Tool[] {
+  const loaded = claudeAlwaysLoaded(chief);
+  return tools.map((tool) => loaded.has(tool.name)
     ? tool
     : { ...tool, _meta: { ...tool._meta, [ALWAYS_LOAD_META]: false } });
 }
