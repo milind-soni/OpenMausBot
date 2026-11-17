@@ -234,6 +234,34 @@ describe("resolveTeammate", () => {
     expect(resolveTeammate(twins, self, "Design Ops")).toEqual({ id: "2cb14697-1111-4eea-ac52-2249dfd0020d", byName: true });
   });
 
+  it("never lets a case-variant twin take a brief meant for either bot", () => {
+    const real: RosterMember = { id: "2cb14697-4805-4eea-ac52-2249dfd0020d", name: "Design Lead", section: "Work" };
+    const twin: RosterMember = { id: "2CB14697-4805-4eea-ac52-2249dfd0020d", name: "Design Ops", section: "Work" };
+    const ids = [...fleet, real, twin];
+    // An exact-case id wins, and is never overridden by the other bot's spelling of the same letters.
+    expect(resolveTeammate(ids, self, real.id)).toEqual({ id: real.id, byName: false });
+    expect(resolveTeammate(ids, self, twin.id)).toEqual({ id: twin.id, byName: false });
+    // Spelled in neither bot's case, the id names both: nothing is sent and the candidates are named.
+    expect(resolveTeammate(ids, self, "2Cb14697-4805-4EEA-ac52-2249dfd0020d")).toEqual({
+      error: "2 bots differ only by the case of their ids, so nothing was sent: "
+        + `Design Lead (id ${real.id}); Design Ops (id ${twin.id}). `
+        + "Send it again with the exact id of the one you mean, copied from list_bots.",
+    });
+    // The start of that id is ambiguous the same way, so the twin cannot be reached through a prefix either.
+    expect(resolveTeammate(ids, self, "2CB14697-4805")).toMatchObject({ error: expect.stringContaining("2 teammates you can reach have an id starting") });
+  });
+
+  it("resolves an id in another case only when exactly one bot's id can match it", () => {
+    const only: RosterMember = { id: "9fd4a1c2-0000-4eea-ac52-2249dfd0020d", name: "Analyst", section: "Work" };
+    expect(resolveTeammate([...fleet, only], self, "9FD4A1C2-0000-4EEA-AC52-2249DFD0020D")).toEqual({ id: only.id, byName: false });
+    // An id already names a hidden bot on its own (see above), so a hidden twin makes another case of the id ambiguous
+    // too: nothing is sent rather than picking one of the two.
+    const hiddenTwin: RosterMember = { id: "9FD4A1C2-0000-4eea-ac52-2249dfd0020d", name: "Ghost", hidden: true, section: "Work" };
+    expect(resolveTeammate([...fleet, only, hiddenTwin], self, "9Fd4a1c2-0000-4eea-ac52-2249dfd0020d")).toMatchObject({
+      error: expect.stringContaining("2 bots differ only by the case of their ids, so nothing was sent"),
+    });
+  });
+
   it("never resolves an id start to a bot the id could not reach", () => {
     const ids = [...fleet, { id: "9f9f9f9f-0000-4eea-ac52-2249dfd0020d", name: "Secret plan", hidden: true, section: "Work" }];
     expect(resolveTeammate(ids, self, "9f9f9f9f")).toMatchObject({ error: expect.stringContaining("No bot with id or name") });

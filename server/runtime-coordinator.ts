@@ -296,7 +296,9 @@ export class RuntimeCoordinator implements Coordinator {
       ...(fanOut ? { fanOut } : {}),
     });
     if (!result.ok) {
-      if (result.outcome === "budget") throw new Error(TOTAL_BUDGET.test(result.reason) ? totalRefusal(this.runtime.limits.totalExecutions) : budgetRefusal(this.runtime.limits.requests));
+      if (result.outcome === "budget") throw new Error(TOTAL_BUDGET.test(result.reason)
+        ? totalRefusal(root.origin.kind === "person" ? this.runtime.limits.totalTurns : this.runtime.limits.totalExecutions)
+        : budgetRefusal(this.runtime.limits.requests));
       throw new Error(RUNTIME_DEPTH.test(result.reason) ? DEPTH : result.reason);
     }
     return { node: view(result.assignment, parent), duplicate: result.duplicate };

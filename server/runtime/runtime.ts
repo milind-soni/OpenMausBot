@@ -67,6 +67,12 @@ type TerminalStatus = "completed" | "failed" | "cancelled";
  * it alone. A person's request always gets its requester's turn to react. */
 const unattendedRoot = (root: Assignment | undefined): boolean => root !== undefined && root.origin.kind !== "person";
 
+/** Turns one root's tree may start in all. Progress never renews it, and neither does a child completing (renew() keeps
+ * the count): a person's request gets its own ceiling because every other budget is renewed by completion, so without one
+ * a teammate's output could ask for differently worded work without end. */
+const totalCeiling = (root: Assignment | undefined, limits: Limits): number =>
+  root !== undefined && root.origin.kind === "person" ? limits.totalTurns : limits.totalExecutions;
+
 export class Runtime {
   readonly limits: Limits;
   private readonly store: RuntimeStore;
@@ -230,9 +236,10 @@ export class Runtime {
       if (existing && !(req.rework && isTerminal(existing))) return { ok: true, assignment: existing, duplicate: true };
       if (parent.depth + 1 > this.limits.depth) return refuse(`Assignment depth limit reached (${this.limits.depth})`);
       sameCall = req.fanOut !== undefined && siblings.some(c => c.fanOut === req.fanOut);
-      if (!sameCall && unattendedRoot(root) && root?.budgets && (root.budgets.total ?? 0) >= this.limits.totalExecutions) {
+      const ceiling = totalCeiling(root, this.limits);
+      if (!sameCall && root?.budgets && (root.budgets.total ?? 0) >= ceiling) {
         this.store.update(root, { kind: "budget", at: now, detail: `turns: ${root.budgets.total} in all` });
-        return refuse(`Request budget exhausted: ${this.limits.totalExecutions} turns in all`, "budget");
+        return refuse(`Request budget exhausted: ${ceiling} turns in all`, "budget");
       }
       if (!sameCall && root?.budgets && root.budgets.requests + 1 > this.limits.requests) {
         this.store.update(root, { kind: "budget", at: now, detail: `requests: ${root.budgets.requests} since last progress` });
@@ -392,8 +399,9 @@ export class Runtime {
       const resumed = n.status === "resume";
       const root = n.parentId ? this.store.get(n.rootId) : n;
       // The root's own resume is let through: it wraps up what came back, and can start nothing more.
-      if (unattendedRoot(root) && !(resumed && root?.id === n.id) && root?.budgets && (root.budgets.total ?? 0) + 1 > this.limits.totalExecutions) {
-        this.cancelTree(root, `${this.limits.totalExecutions} turns in all, the most one request may take`, "failed", "budget");
+      const ceiling = totalCeiling(root, this.limits);
+      if (!(resumed && root?.id === n.id) && root?.budgets && (root.budgets.total ?? 0) + 1 > ceiling) {
+        this.cancelTree(root, `${ceiling} turns in all, the most one request may take`, "failed", "budget");
         continue;
       }
       if (!resumed) {

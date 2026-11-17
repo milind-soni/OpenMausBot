@@ -2212,4 +2212,34 @@ describe("failed hand-offs spend no more of a request than they must", () => {
     expect(get(w, root.id)).toMatchObject({ status: "completed", result: "Built; nothing left." });
     invariants(w);
   });
+
+  it("a person's request hands out no more turns than its own total, however many of them complete", async () => {
+    const w = world({ ...COORDINATOR_LIMITS, totalTurns: 4 });
+    const root = beginChief(w);
+    w.runner.script("dev", ...Array.from({ length: 50 }, () => complete("built")));
+    // Each brief is different, and each hand-off completes: completion renews requests and executions, never the total.
+    for (const brief of ["Step one", "Step two", "Step three"]) {
+      ok(enqueueFrom(w, root, workFor("dev", brief)));
+      await drain(w, 50);
+    }
+    expect(get(w, root.id).budgets?.total).toBe(4);
+    const over = refused(enqueueFrom(w, root, workFor("dev", "Step four")));
+    expect(over).toMatchObject({ outcome: "budget", reason: "Request budget exhausted: 4 turns in all" });
+    invariants(w);
+  });
+
+  it("work already queued does not start past a person's total either: the tree stops, saying the total is spent", async () => {
+    const w = world({ ...COORDINATOR_LIMITS, totalTurns: 3 });
+    const root = beginChief(w);
+    w.runner.script("dev", complete("built"), complete("built again"), complete("never asked for"));
+    ok(enqueueFrom(w, root, workFor("dev", "Step one")));
+    ok(enqueueFrom(w, root, workFor("dev", "Step two")));
+    ok(enqueueFrom(w, root, workFor("dev", "Step three")));
+    await drain(w, 200);
+
+    // The root's own turn is 1, so two hand-offs run and the third is never started.
+    expect(w.runner.runs().filter((call) => call.a?.assignee.botId === "dev")).toHaveLength(2);
+    expect(get(w, root.id)).toMatchObject({ status: "failed", outcome: "budget", result: "3 turns in all, the most one request may take" });
+    invariants(w);
+  });
 });

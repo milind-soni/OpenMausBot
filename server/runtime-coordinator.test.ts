@@ -269,6 +269,21 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     expect(w.coordinator.active().filter(n => n.parentId).map(n => n.botId)).toEqual(["builder", "helper"]);
   });
 
+  it("a person's request stops at its own total of turns, and a completed hand-off never reopens it", async () => {
+    const w = world(undefined, { totalTurns: 4 });
+    w.host.chiefs.add("chief-chat");
+    // The root's own first turn is turn 1 of its total; each hand-off that runs is one more.
+    for (const step of ["Build step 1", "Build step 2", "Build step 3"]) {
+      send(w, chief, "gen-1", undefined, builder, step);
+      w.coordinator.tick(); await flush();
+    }
+    expect(w.coordinator.node("gen-1")?.status).toBe("source");
+    expect(() => send(w, chief, "gen-1", undefined, builder, "Build step 4")).toThrow(
+      "This request has started 4 turns in all, the most one request may take, so this one was not sent. Nobody can reset that, the person included, so don't ask them to, and don't send it another way. Finish with what you have and say what is left undone.");
+    // The total is spent, not the wording: another brief to another teammate is refused the same way.
+    expect(() => send(w, chief, "gen-1", undefined, tester, "Something else entirely")).toThrow("has started 4 turns in all");
+  });
+
   it("runningIn() is active()'s running nodes in that thread", async () => {
     const w = world(hold);
     const same = () => { for (const threadId of ["chief-chat", node.threadId, "nobody"]) expect(w.coordinator.runningIn(threadId)).toEqual(w.coordinator.active().filter(n => n.threadId === threadId && n.status === "running")); };

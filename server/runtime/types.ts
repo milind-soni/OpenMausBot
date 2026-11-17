@@ -354,6 +354,9 @@ export interface Limits {
   wakes: number;
   /** Turns one root's tree may start in all; progress does not renew it. */
   totalExecutions: number;
+  /** Turns one root's tree may start in all whatever started it, a person's request included: completing a child
+   * renews the other budgets, so this one is what a root can never spend past. */
+  totalTurns: number;
   /** Handed-off work that may fail in a row, with none completing between, before the root's tree is stopped. */
   failedInARow: number;
   /** A queued assignment that never started within this is expired. */
@@ -377,6 +380,10 @@ export const DEFAULT_LIMITS: Limits = {
   executions: 48,
   wakes: 48,
   totalExecutions: 300,
+  // Above the 96 turns a root may legitimately spend before any progress returns (the coordinator's EXECUTIONS_PER_ROOT),
+  // plus one 24-turn request window (DEFAULT_LIMITS.requests), and less than the 300 unattended work gets. Completing a
+  // child renews every per-window budget, so this is the only thing a person's request cannot renew.
+  totalTurns: 120,
   failedInARow: 5,
   queueMs: 24 * 60 * 60_000,
   stallMs: 4 * 60 * 60_000,

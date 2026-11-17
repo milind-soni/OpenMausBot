@@ -184,8 +184,12 @@ export interface WiderReach<T extends RosterMember> {
 /** The fewest characters of an id that name it: a model retyping a 36-character id drops one, and the first 8 have to agree. */
 const ID_PREFIX_MIN = 8;
 
-/** In this order: the id, in any case; a name that only one reachable bot answers to; the start of one id that only one
- * reachable bot has. Names and id starts resolve only inside reachablePeers, so they can never reach a bot its id could not.
+/** In this order: the id, exactly as written; the id in any case when exactly one bot's id matches it that way; a name
+ * that only one reachable bot answers to; the start of one id that only one reachable bot has. Names and id starts resolve
+ * only inside reachablePeers, so they can never reach a bot its id could not. An id never resolves to a bot when another
+ * bot's id differs from what was written only by its case: two bots can carry ids that differ only by case (one brought in
+ * from another place, or one here from before admission compared ids that way), and case-folding both would let a brief
+ * meant for one land on the other.
  * `elsewhere(name)`: why no bot here has that name past "no such bot", when one of the person's other places has it, or when
  * they work as one place. */
 export function resolveTeammate<T extends RosterMember>(
@@ -197,8 +201,13 @@ export function resolveTeammate<T extends RosterMember>(
   wider?: WiderReach<T>,
 ): { id: string; byName: boolean } | { error: string } {
   const wanted = raw.trim();
-  const exact = bots.find(bot => bot.id.toLowerCase() === wanted.toLowerCase() && !wider?.hides(bot));
+  const folded = bots.filter(bot => bot.id.toLowerCase() === wanted.toLowerCase() && !wider?.hides(bot));
+  const exact = folded.find(bot => bot.id === wanted);
   if (exact) return { id: exact.id, byName: false };
+  if (folded.length === 1) return { id: folded[0]!.id, byName: false };
+  if (folded.length > 1) {
+    return { error: `${folded.length} bots differ only by the case of their ids, so nothing was sent: ${sharedNameChoices(folded)}. Send it again with the exact id of the one you mean, copied from list_bots.` };
+  }
   const fold = foldedName, loose = looseName;
   const name = fold(wanted);
   const shown = peerName(wanted) || wanted;
