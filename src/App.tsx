@@ -4,6 +4,7 @@ import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/s
 import { nextShortcutBot, shortcutBots, shownBotIds } from "@/lib/sidebar-shortcut-order";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useWelcomeViewer, WelcomeGate } from "@/components/onboarding/WelcomeGate";
+import { OtechPlanGate } from "@/components/onboarding/OtechPlanGate";
 import { ObotWelcome } from "@/components/ObotWelcome";
 import { NewBotNameHost } from "@/components/NewBotName";
 import { MemberApps } from "@/components/MemberApps";
@@ -488,6 +489,7 @@ function Application() {
         <ThreadRefsProvider>
           <Shell viewer={viewer} />
         </ThreadRefsProvider>
+        <OtechPlanGate />
         <WelcomeGate viewer={viewer} />
         <ObotWelcome viewer={viewer} />
         <NewBotNameHost />

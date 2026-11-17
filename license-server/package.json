@@ -1,0 +1,12 @@
+{
+  "name": "otech-license-server",
+  "version": "1.0.0",
+  "description": "OTECH Standalone License Server for Hetzner",
+  "main": "server.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "admin": "node admin.mjs"
+  },
+  "dependencies": {}
+}
