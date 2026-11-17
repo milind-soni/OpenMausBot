@@ -34,13 +34,16 @@ Electron binary in the desktop app). Only two replies change what the engine
 does: the hint for a timed-out Bash call (`PostToolUseFailure`, matcher
 `Bash`) and the digests re-sent after a compaction (`SessionStart`, matcher
 `compact`). `PostToolUse` only saves the full output, so it runs `async` with
-a 60 s timeout; there is no `Stop` hook. A `PostToolUse` that lands after its
-turn has ended finds the turn's hook token revoked: that row keeps its
-preview, as it would with `OMB_HOOKS=0`, and the digest says "from tool
-previews".
+a 60 s timeout; there is no `Stop` hook. A `PostToolUse` can land after its
+turn has ended. For 60 s after that, the ended turn's hook token is honoured
+for one thing only: saving the full output of that turn's own tool calls not
+yet saved, each once. The digest was written at the turn's end, so it still
+says "from tool previews". `server/hooks.e2e.test.ts` plays this with
+`FAKE_CLAUDE_HOOKS_AFTER_TURN_MS`.
 
 To see the difference with the real CLI, run `claude -p` in an empty folder
-with `--settings` holding `claudeHookSettings(...)`'s output and
+with `--settings` pointing at a file holding
+`{ "hooks": claudeHookSettings(helperPath) }` and
 `ELECTRON_RUN_AS_NODE=1`, ask for a few Bash calls, and compare each
 `tool_use` to its `tool_result` in the stream-json output against the same run
 with every hook synchronous.

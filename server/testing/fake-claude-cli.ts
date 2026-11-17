@@ -48,6 +48,8 @@
 //   FAKE_CLAUDE_CONNECT_APPS  toolkits (gmail,slack): first call COMPOSIO_MANAGE_CONNECTIONS via `composio`
 //   FAKE_CLAUDE_HOOKS  1: run the --settings hooks like the CLI (PostToolUse per tool_result, PostToolUseFailure for
 //     an ok:false call with its additionalContext echoed into the reply, Stop at the end)
+//   FAKE_CLAUDE_HOOKS_AFTER_TURN_MS  with FAKE_CLAUDE_HOOKS: run each `async` hook this many ms after its turn's result,
+//     as the CLI does when a hook's start outlasts the model's last reply (unset: async hooks run in place, like the rest)
 //   FAKE_CLAUDE_COMPACT  1: from the second turn, play a compaction (PreCompact, compact_boundary, then SessionStart "compact")
 //   FAKE_CLAUDE_TURN_STATE  counter file keeping FAKE_CLAUDE_COMPACT's turn count across respawns
 //   FAKE_CLAUDE_CONTEXT_GROWTH  "<start>:<per turn>": a session starts at <start> tokens and each turn's work adds <per turn>,
@@ -244,7 +246,7 @@ const replyForPrompt = (prompt: JsonValue): string[] | null => {
 };
 
 const argv = process.argv.slice(2);
-const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ type?: string; command?: string; args?: string[]; timeout?: number }> }>> = (() => {
+const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ type?: string; command?: string; args?: string[]; timeout?: number; async?: boolean }> }>> = (() => {
   if (process.env.FAKE_CLAUDE_HOOKS !== "1") return {};
   const i = argv.indexOf("--settings");
   if (i === -1) return {};
@@ -255,6 +257,12 @@ const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ ty
     return {};
   }
 })();
+const hooksAfterTurnMs = Number(process.env.FAKE_CLAUDE_HOOKS_AFTER_TURN_MS);
+const hooksAfterTurn: Array<() => unknown> = [];
+const runHooksAfterTurn = () => {
+  const due = hooksAfterTurn.splice(0);
+  if (due.length) setTimeout(() => { for (const run of due) run(); }, hooksAfterTurnMs);
+};
 function runHooks(event: FakeHookEvent, payload: Record<string, unknown>): string {
   let stdout = "";
   for (const entry of settingsHooks[event] ?? []) {
@@ -262,7 +270,7 @@ function runHooks(event: FakeHookEvent, payload: Record<string, unknown>): strin
     for (const hook of entry.hooks ?? []) {
       if (hook.type !== "command" || !hook.command) continue;
       // Like Claude Code: a hook with `args` starts `command` itself; otherwise `command` is a shell line.
-      const result = spawnSync(hook.command, hook.args ?? [], {
+      const run = () => spawnSync(hook.command!, hook.args ?? [], {
         shell: !hook.args,
         input: JSON.stringify({ hook_event_name: event, session_id: "fake-session", cwd: process.cwd(), ...payload }),
         env: process.env,
@@ -270,7 +278,8 @@ function runHooks(event: FakeHookEvent, payload: Record<string, unknown>): strin
         stdio: ["pipe", "pipe", "pipe"],
         encoding: "utf8",
       });
-      stdout += result.stdout ?? "";
+      if (hook.async && hooksAfterTurnMs >= 0) hooksAfterTurn.push(run);
+      else stdout += run().stdout ?? "";
     }
   }
   return stdout;
@@ -649,6 +658,7 @@ const finishIfDone = () => {
 const finishTurn = () => {
   runHooks("Stop", { stop_hook_active: false });
   out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
+  runHooksAfterTurn();
   turnRunning = false;
   finishIfDone();
 };
@@ -1129,6 +1139,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
       modelUsage: runningCost.modelUsage,
       ...(queued === "zero" ? { queued_turn_count: 0 } : queued === "count" ? { queued_turn_count: lateSteers.length } : {}),
     });
+    runHooksAfterTurn();
     turnRunning = false;
     finishIfDone();
   };

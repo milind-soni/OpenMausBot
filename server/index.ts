@@ -649,7 +649,7 @@ import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
 import { connectorFileDeps, connectorFileScope, prepareConnectorFiles, withMissingFileHint } from "./connector-files.ts";
 import { createConnectorCards } from "./host/connector-cards.ts";
-import { createLoginMailCodes } from "./host/login-mail-codes.ts";
+import { createLoginMailCodes } from "./host/login-mail-codes.ts"; import { createLateToolResults } from "./host/late-tool-results.ts";
 import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
@@ -1619,6 +1619,7 @@ const MAX_CREATED_BOT_INSTRUCTIONS = 4_000;
 // Only an orphan backstop: normal terminal paths revoke a capability synchronously.
 const INTERNAL_CAPABILITY_ORPHAN_MS = 30 * 24 * 60 * 60_000;
 const internalCapabilities = new Map<string, InternalCapability>();
+const lateToolResults = createLateToolResults();
 const activeInternalGenerationByThread = new Map<string, string>();
 const turnCallSignals = createTurnCallSignals(internalCapabilityIsActive);
 const internalGenerationByProviderTurn = new ProviderTurnGenerationRegistry();
@@ -1742,13 +1743,13 @@ function revokeEarlierTurnCapabilities(threadId: string): void {
 
 /** Also retires the thread's bearers, so nothing that still holds one is honoured again. */
 function revokeInternalCapabilitiesForThread(threadId: string): void {
-  revokeEarlierTurnCapabilities(threadId);
+  revokeEarlierTurnCapabilities(threadId); lateToolResults.forgetThread(threadId);
   sessionCredentials.delete(threadId);
 }
 
 function revokeAllInternalCapabilities(): void {
   computerSelectionTurns.clear();
-  internalCapabilities.clear();
+  internalCapabilities.clear(); lateToolResults.clear();
   sessionCredentials.clear();
   // foreignTurns stays: a foreign turn can still write while its engine is torn down, and only its own end judges it.
   activeInternalGenerationByThread.clear();
@@ -1766,6 +1767,9 @@ function revokeInternalCapabilityForProviderEvent(event: RuntimeEvent): void {
   if (!event.turnId) return;
   const owner = internalGenerationByProviderTurn.complete(event.threadId, event.turnId);
   if (!owner) return;
+  const hooks = [...internalCapabilities].find(([, capability]) => capability.kind === "hooks" && capability.threadId === owner.threadId && capability.generation === owner.generation);
+  if (hooks) lateToolResults.turnEnded({ threadId: owner.threadId, botId: hooks[1].botId, turnId: event.turnId, token: hooks[0], toolUseIds: new Set(store.activePath(owner.threadId)
+    .flatMap((m) => m.kind === "activity" && m.turnId === event.turnId && m.tool?.itemId && m.tool.fullResult === undefined ? [m.tool.itemId] : [])) });
   revokeInternalCapabilityGeneration(owner.threadId, owner.generation);
 }
 
@@ -5415,11 +5419,12 @@ const TOOL_RESULTS_DIR = join(DATA_DIR, "tool-results");
 const TOOL_RESULT_SPILL_MAX = 512 * 1024;
 
 const DIGESTS_AFTER_COMPACTION = 2;
-function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: boolean; ignored?: string; context?: string; hookSpecificOutput?: unknown } {
+function ingestEngineHook(capability: Pick<InternalCapability, "botId" | "threadId">, body: unknown, turnEnded = false): { ok: boolean; ignored?: string; context?: string; hookSpecificOutput?: unknown } {
   const event = body && typeof body === "object" ? (body as { event?: unknown; payload?: unknown }) : {};
   const name = typeof event.event === "string" ? event.event : "";
   const payload = event.payload && typeof event.payload === "object" ? (event.payload as Record<string, unknown>) : {};
   const threadId = capability.threadId;
+  if (turnEnded && name !== "PostToolUse") return { ok: true, ignored: `${name || "unknown"} after its turn ended` };
   const chip = (text: string) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: text, ok: true } });
   if (name === "PreCompact" || (name === "SessionStart" && payload.source === "compact")) roomSessions.distrust(threadId, capability.botId);
   if (name === "PreCompact") {
@@ -5443,8 +5448,9 @@ function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: 
   if (!Object.hasOwn(payload, "tool_response")) return { ok: true, ignored: "hook did not include a tool response" };
   const response = payload.tool_response;
   const text = typeof response === "string" ? response : JSON.stringify(response ?? null, null, 2);
-  const turnId = liveTurnByThread.get(threadId);
-  const row = store.activePath(threadId).findLast((m) => m.kind === "activity" && m.turnId === turnId && m.tool?.itemId === toolUseId);
+  const rows = store.activePath(threadId), toolRow = (turn: string | null | undefined) => turn ? rows.findLast((m) => m.kind === "activity" && m.turnId === turn && m.tool?.itemId === toolUseId) : undefined;
+  let turnId: string | null | undefined = turnEnded ? undefined : liveTurnByThread.get(threadId), row = toolRow(turnId);
+  if (!row) row = toolRow(turnId = lateToolResults.claim(threadId, capability.botId, toolUseId));
   if (!turnId || !row?.tool) return { ok: true, ignored: "tool not observed in this turn" };
   const key = `${threadId}:${turnId}:${toolUseId}`;
   if (!commandReceipt("hook.ingest", key)) {
@@ -12830,7 +12836,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (path.startsWith("/api/internal/")) {
       const internalCapability = authorizedInternalCapability(req.headers.authorization);
       if (!internalCapability) {
-        return json(res, 401, { error: "unauthorized" });
+        const ended = method === "POST" && path === "/api/internal/hook" ? lateToolResults.holder(req.headers.authorization) : null;
+        return ended ? json(res, 200, ingestEngineHook(ended, await readBody(req), true)) : json(res, 401, { error: "unauthorized" });
       }
       const internalSender = store.bot(internalCapability.botId);
       if (!internalSender) {
