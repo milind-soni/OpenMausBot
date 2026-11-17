@@ -26,6 +26,25 @@ another fake engine. The multi-engine and older hook suites currently run on
 POSIX; the shared-control test is cross-platform. CI must establish Windows
 behavior rather than treating a local macOS run as Windows verification.
 
+## Hooks that do not hold the engine
+
+Claude Code waits for a synchronous hook before it hands a tool's result back
+to the model, and each hook starts the helper as its own process (the whole
+Electron binary in the desktop app). Only two replies change what the engine
+does: the hint for a timed-out Bash call (`PostToolUseFailure`, matcher
+`Bash`) and the digests re-sent after a compaction (`SessionStart`, matcher
+`compact`). `PostToolUse` only saves the full output, so it runs `async` with
+a 60 s timeout; there is no `Stop` hook. A `PostToolUse` that lands after its
+turn has ended finds the turn's hook token revoked: that row keeps its
+preview, as it would with `OMB_HOOKS=0`, and the digest says "from tool
+previews".
+
+To see the difference with the real CLI, run `claude -p` in an empty folder
+with `--settings` holding `claudeHookSettings(...)`'s output and
+`ELECTRON_RUN_AS_NODE=1`, ask for a few Bash calls, and compare each
+`tool_use` to its `tool_result` in the stream-json output against the same run
+with every hook synchronous.
+
 ## Shell calls that hit their time limit
 
 Claude Code stops a Bash call after 2 minutes unless the call passes a larger

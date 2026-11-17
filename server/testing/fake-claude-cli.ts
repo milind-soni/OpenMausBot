@@ -243,7 +243,7 @@ const replyForPrompt = (prompt: JsonValue): string[] | null => {
 };
 
 const argv = process.argv.slice(2);
-const settingsHooks: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string; args?: string[]; timeout?: number }> }>> = (() => {
+const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ type?: string; command?: string; args?: string[]; timeout?: number }> }>> = (() => {
   if (process.env.FAKE_CLAUDE_HOOKS !== "1") return {};
   const i = argv.indexOf("--settings");
   if (i === -1) return {};
@@ -254,9 +254,14 @@ const settingsHooks: Record<string, Array<{ hooks?: Array<{ type?: string; comma
     return {};
   }
 })();
+// Like Claude Code: a matcher tests the tool name, a session's source or a compaction's trigger; "" and "*" match all.
+const HOOK_MATCHED_FIELD: Record<string, string> = { PostToolUse: "tool_name", PostToolUseFailure: "tool_name", SessionStart: "source", PreCompact: "trigger" };
+const hookMatches = (matcher: string | undefined, value: unknown) =>
+  !matcher || matcher === "*" || new RegExp(`^(?:${matcher})$`).test(String(value ?? ""));
 function runHooks(event: string, payload: Record<string, unknown>): string {
   let stdout = "";
   for (const entry of settingsHooks[event] ?? []) {
+    if (!hookMatches(entry.matcher, payload[HOOK_MATCHED_FIELD[event] ?? ""])) continue;
     for (const hook of entry.hooks ?? []) {
       if (hook.type !== "command" || !hook.command) continue;
       // Like Claude Code: a hook with `args` starts `command` itself; otherwise `command` is a shell line.
