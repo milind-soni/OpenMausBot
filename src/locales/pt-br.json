@@ -10079,7 +10079,7 @@
   "native.home.bringUnavailable": "Não é possível reunir seus bots lá agora.",
   "chat.notice.memoryReclaimedBrowser": "Faltou memória, então fechei o navegador para manter o restante funcionando.",
   "chat.notice.memoryReclaimedTask": "Faltou memória, então interrompi esta tarefa para manter o restante funcionando.",
-  "chat.notice.botMemoryCap": "{bot} usou mais memória do que este servidor permite para um bot ({used} MB de {cap} MB), então interrompi esta tarefa para manter os outros bots funcionando. Envie a mensagem de novo para recomeçar; se continuar acontecendo, dê menos trabalho de uma vez a esta tarefa ou mais memória ao servidor.",
+  "chat.notice.botMemoryCap": "{bot} usou mais memória do que este computador permite para um bot ({used} MB de {cap} MB), então interrompi esta tarefa para manter os outros bots funcionando. Envie a mensagem de novo para recomeçar; se continuar acontecendo, dê menos trabalho de uma vez a esta tarefa ou mais memória a este computador.",
   "chat.notice.memoryReclaimedBrowserDetail": "Faltou memória, então fechei o navegador para manter o restante funcionando. ({detail})",
   "chat.notice.memoryReclaimedTaskDetail": "Faltou memória, então interrompi esta tarefa para manter o restante funcionando. ({detail})",
   "chat.notice.outOfProcesses": "Não há espaço para iniciar outro programa ({code}), então esta tarefa não pôde rodar. Nada foi enviado à IA. Ela começa de novo sozinha quando houver espaço.",

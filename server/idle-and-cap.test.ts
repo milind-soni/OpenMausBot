@@ -338,8 +338,8 @@ describe("a memory cap per bot", () => {
     emit({ threadId: "tb", turnId: "t", type: "runtime.error", message: "the process running this turn's AI ended" });
     emit({ threadId: "tb", turnId: "t", type: "turn.completed", ok: false, stopReason: "exit_before_result" });
     emit({ threadId: "ta", turnId: "t", type: "runtime.error", message: "something else" });
-    const line = "Researcher used more memory than this server allows for one bot (1700 MB of 1000 MB), so I stopped this task to keep the other bots running. "
-      + "Send the message again to start over; if it keeps happening, give this task less to do at once, or give the server more memory.";
+    const line = "Researcher used more memory than this computer allows for one bot (1700 MB of 1000 MB), so I stopped this task to keep the other bots running. "
+      + "Send the message again to start over; if it keeps happening, give this task less to do at once, or give this computer more memory.";
     expect(shown()).toEqual([line, "turn.completed", "something else"]);
     expect(seen[0]).toMatchObject({ text: { key: "chat.notice.botMemoryCap", params: { bot: "Researcher", used: "1700", cap: "1000" } } });
     // A fault a retry cannot fix: no automatic retry or Chief retry starts the bot into the same cap again.

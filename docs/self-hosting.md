@@ -603,7 +603,7 @@ twice its fair share of the server's memory (the memory over the turns that
 may run at once), at least 1,900 MB and at most 80% of it. A bot over that
 for two checks in a row (every 5 seconds), or 50% over it once, has its
 engine stopped and its own browser closed; its running turn ends with a line
-saying which bot used more memory than this server allows for one bot.
+saying which bot used more memory than this computer allows for one bot.
 Engines and browsers several bots share are never stopped this way. Set
 `OMB_BOT_MEMORY_MAX_MB` to a number of MB, or to `off`; the desktop app has
 no cap unless it is set. The server enforces the cap itself by reading its

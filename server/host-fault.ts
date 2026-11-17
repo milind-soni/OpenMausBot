@@ -20,7 +20,7 @@ const OUT_OF_ROOM = new RegExp(
   String.raw`|\bexited null\b|\bexited 137\b|\(signal SIGKILL\)|\bkilled by (?:the kernel|signal SIGKILL)\b` +
   String.raw`|\b(?:never sent|sent nothing|did not send) (?:its|a|any) first (?:frame|event|output|message)\b`, "i");
 /** bot-memory-cap.ts's own line (chat.notice.botMemoryCap), after the bot's name. */
-const BOT_MEMORY = /\bused more memory than this server allows for one bot\b/i;
+const BOT_MEMORY = /\bused more memory than this computer allows for one bot\b/i;
 const DISK_FULL = /\bno space left on device\b|\bENOSPC\b|\bdisk quota exceeded\b|\bEDQUOT\b/i;
 const TOOL_SERVER = new RegExp(
   String.raw`\bMCP server\b[^\n]*\b(?:could not start|couldn't be set up|failed to start|exited|input closed|stdin (?:is )?closed|is not connected|session expired|needs (?:a sign-in|authentication)|refused the sign-in)\b` +
@@ -59,5 +59,5 @@ export const HOST_FAULT_WHY: Readonly<Record<HostFault, string>> = {
   disk_full: "this server's disk is full",
   tool_server: "one of its tool servers is not running or not signed in",
   signed_out: "its AI is signed out",
-  bot_memory: "it used more memory than this server allows for one bot",
+  bot_memory: "it used more memory than this computer allows for one bot",
 };
