@@ -46,6 +46,7 @@ export interface LinkedSecret {
   lastUsedAt?: number;
   /** From 1Password: its item, and whether its bots are its own choice rather than its vault's. */
   onePassword?: OnePasswordItemRef;
+  bitwarden?: OnePasswordItemRef;
 }
 
 /** A saved item a secure card offers under "Use a saved one": its name only. Picking it lets the asking bot use it. */

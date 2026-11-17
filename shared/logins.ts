@@ -8,7 +8,7 @@ import { getDomain } from "tldts";
 
 /** Where a login came from: the sign-in card's Save, Settings, or the person's
  * 1Password vault (read-only here). */
-export type LoginSource = "card" | "settings" | "1password";
+export type LoginSource = "card" | "settings" | "1password" | "bitwarden";
 
 /** Which bots may use a login: every bot, or the ones named. */
 export type LoginBots = "all" | string[];
@@ -39,6 +39,8 @@ export interface LoginSummary extends LoginPlace {
   lastUsedAt?: number;
   /** A 1Password login's item, and whether its bots are its own choice rather than its vault's. */
   onePassword?: OnePasswordItemRef;
+  /** Set when the login comes from Bitwarden: the item it is read from, and whether it has its own bots. */
+  bitwarden?: OnePasswordItemRef;
 }
 
 /** One 1Password item: `<vault id>:<item id>`, and whether it has bots of its own instead of its vault's. */
@@ -64,6 +66,16 @@ export interface OnePasswordStatus {
   vaults?: OnePasswordVault[];
   /** How many items have a website and a password, across every vault. */
   items?: number;
+  error?: string;
+}
+
+export interface BitwardenStatus {
+  connected: boolean;
+  /** The server the account lives on: bitwarden.com, bitwarden.eu or a self-hosted Vaultwarden. */
+  server?: string;
+  /** How many logins and secrets can be read. */
+  items?: number;
+  bots?: LoginBots;
   error?: string;
 }
 
