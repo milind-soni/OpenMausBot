@@ -31,7 +31,7 @@ const fieldsSchema = z.object({
   modelSelection: z.object({ instanceId: z.string().trim().min(1), model: z.string().trim().min(1), effort: z.string().optional(), variant: z.string().optional() }).strict().optional(),
   mcpServers: z.array(z.string()).max(MAX_MCP_SERVERS, `Select at most ${MAX_MCP_SERVERS} MCP servers.`).optional(),
 }).strict();
-/** A Chief may never apply a bot's MCP servers on its own: the owner confirms them on a card. */
+/** The card says which execution permission a plan changes when it changes a bot's MCP servers. */
 const touchesMcp = (request: TeamSetupRequest) => request.operations.some((operation) => operation.fields.mcpServers !== undefined);
 const planSchema = z.object({
   reason: z.string().trim().min(1).max(500),
@@ -289,10 +289,9 @@ export class TeamSetupRequestService {
   proposeDeletion(args: DeletionArgs) { return this.card(this.prepareDeletion(args), args.from); }
 
   async submit(args: SetupArgs & SubmitAuthority) {
-    const request = this.prepare(args);
-    const grant = touchesMcp(request) ? null : this.options.autoApply?.(args.botId, args.threadId) ?? null;
-    if (grant) return { ...await this.applyImmediately(request, args.from, args.canCommit), appliedBy: grant };
-    return { ...this.card(request, args.from), applied: false, state: "pending" as const };
+    const grant = this.options.autoApply?.(args.botId, args.threadId) ?? null;
+    if (grant) return { ...await this.applyImmediately(this.prepare(args), args.from, args.canCommit), appliedBy: grant };
+    return { ...this.propose(args), applied: false, state: "pending" as const };
   }
 
   async submitDeletion(args: DeletionArgs & SubmitAuthority) {

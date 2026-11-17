@@ -10,7 +10,7 @@ export interface TeamSetupFields {
   section?: string;
   modelSelection?: ModelSelection;
   chiefOfStaff?: boolean;
-  /** Update only: the bot's MCP servers by name. Always confirmed by the owner on a card, never applied on its own. */
+  /** Update only: the bot's MCP servers by name. Applies like the plan's other changes. */
   mcpServers?: string[];
 }
 
@@ -29,7 +29,7 @@ export interface TeamSetupResult {
   error?: string;
 }
 
-/** The complete, reviewed operation. It never accepts executable permissions; an MCP server list waits for the owner's card. */
+/** The complete, reviewed operation. Of the execution permissions it changes only a bot's MCP server list. */
 export interface TeamSetupRequest {
   version: 1;
   requestId: string;

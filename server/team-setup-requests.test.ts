@@ -601,21 +601,24 @@ describe("team setup that applies on its own", () => {
 });
 
 describe("a bot's MCP servers in team setup", () => {
-  it("waits on the owner's card even under Full Access, then applies the list they confirmed", async () => {
+  it("applies under Full Access like the plan's other changes, and Undo gives back every enabled server", async () => {
     const h = harness(); h.autoApply.mockReturnValue("full-access");
     const response = await h.submit([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["linear", "hindsight", "linear"] } }]);
-    expect(response).toMatchObject({ applied: false, state: "pending" });
+    expect(response).toMatchObject({ applied: true, state: "applied" });
     expect(response.detail).toContain("MCP servers it can use: every enabled server → linear, hindsight");
     expect(response.detail).toContain("Other execution permissions are unchanged.");
+    expect(h.peer.mcpServers).toEqual(["linear", "hindsight"]);
+    expect(await h.service.undo({ botId: h.chief.id, threadId: h.chief.threadId, requestId: response.requestId })).toMatchObject({ state: "undone" });
+    expect(Array.isArray(h.apply.mock.calls.at(-1)![0].operations[0].fields.mcpServers)).toBe(false);
+  });
+  it("waits on the person's card below Full Access, like the plan's other changes, then applies the list they confirmed", async () => {
+    const h = harness();
+    const response = await h.submit([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["hindsight"] } }]);
+    expect(response).toMatchObject({ applied: false, state: "pending" });
     expect(h.apply).not.toHaveBeenCalled();
-    expect(h.peer.mcpServers).toBeUndefined();
     expect(h.messages[0].card?.options).toEqual(["Apply setup", "Cancel"]);
     expect(await h.resolve(response.requestId)).toMatchObject({ result: { state: "applied" } });
-    expect(h.peer.mcpServers).toEqual(["linear", "hindsight"]);
-  });
-  it("keeps a plan without MCP servers applying on its own", async () => {
-    const h = harness(); h.autoApply.mockReturnValue("full-access");
-    expect(await h.submit([{ action: "update", botId: h.peer.id, fields: { title: "Researcher" } }])).toMatchObject({ applied: true });
+    expect(h.peer.mcpServers).toEqual(["hindsight"]);
   });
   it("cancels when the bot's list changed after the card was shown", async () => {
     const h = harness();
