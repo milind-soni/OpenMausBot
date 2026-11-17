@@ -51,10 +51,13 @@ export function parseTopicHeader(text: string): TopicHeader {
       // list so commas inside that item retain their meaning.
       const flow = raw.startsWith("[") ? raw : `[${raw}]`;
       try {
-        const parsed = parseDocument(flow, { schema: "failsafe" });
+        const parsed = parseDocument(flow, { schema: "failsafe", keepSourceTokens: true });
         if (parsed.errors.length || !isSeq(parsed.contents)) throw new Error("not an alias list");
-        for (const item of parsed.contents.items) {
-          if (isScalar(item) && typeof item.value === "string") items.push(item.value);
+        const source = parsed.contents.srcToken;
+        for (const [index, item] of parsed.contents.items.entries()) {
+          const prefix = source?.type === "flow-collection" ? source.items[index]?.start.find((token) => token.type === "anchor" || token.type === "tag") : undefined;
+          if (prefix && isNode(item) && item.range) items.push(flow.slice(prefix.offset, item.range[1]));
+          else if (isScalar(item) && typeof item.value === "string") items.push(item.value);
           // Older writers emitted unquoted aliases such as support: tier 2.
           // Preserve their exact spelling even when YAML sees a mapping.
           else if (isNode(item) && item.range) items.push(flow.slice(item.range[0], item.range[1]));

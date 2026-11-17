@@ -51,4 +51,17 @@ describe("quoted memory topic aliases", () => {
     const merged = mergeTopicText(existing, { title: "Food", aliases: ["dinner"], lines: ["- New note."] });
     expect(parseTopicHeader(merged).aliases).toEqual(["San Francisco, CA", "support: tier 2", "lunch", "dinner"]);
   });
+
+  it.each(["&priority work", "!!str urgent", "!topic urgent", '&priority "deep work"'])("preserves literal legacy metadata %s through parsing and merges", (alias) => {
+    const existing = `---\naliases: [${alias}, lunch]\n---\n`;
+    expect(parseTopicHeader(existing).aliases).toEqual([alias, "lunch"]);
+    const merged = mergeTopicText(existing, { title: "Work", aliases: ["dinner"], lines: ["- New note."] });
+    expect(parseTopicHeader(merged).aliases).toEqual([alias, "lunch", "dinner"]);
+  });
+
+  it("preserves literal legacy metadata after quoted aliases containing commas", () => {
+    const existing = '---\naliases: ["San Francisco, CA", !!str &priority work]\n---\n';
+    const merged = mergeTopicText(existing, { title: "Work", aliases: ["dinner"], lines: ["- New note."] });
+    expect(parseTopicHeader(merged).aliases).toEqual(["San Francisco, CA", "!!str &priority work", "dinner"]);
+  });
 });
