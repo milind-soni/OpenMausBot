@@ -255,12 +255,10 @@ const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ ty
     return {};
   }
 })();
-// Like Claude Code: a matcher tests the tool name, a session's source or a compaction's trigger.
-const HOOK_MATCHED_FIELD: Record<string, string> = { PostToolUse: "tool_name", PostToolUseFailure: "tool_name", SessionStart: "source", PreCompact: "trigger" };
 function runHooks(event: string, payload: Record<string, unknown>): string {
   let stdout = "";
   for (const entry of settingsHooks[event] ?? []) {
-    if (!hookMatches(entry.matcher, payload[HOOK_MATCHED_FIELD[event] ?? ""])) continue;
+    if (!hookMatches(event, entry.matcher, payload)) continue;
     for (const hook of entry.hooks ?? []) {
       if (hook.type !== "command" || !hook.command) continue;
       // Like Claude Code: a hook with `args` starts `command` itself; otherwise `command` is a shell line.
