@@ -1,11 +1,15 @@
 // A routine's run that tried to hand work to a bot it may not reach. coordinate_bots refuses while the turn runs, and the
 // model may say anything after, so the run keeps who it was refused and ends saying so plainly, instead of "completed":
 // nothing arrived. The person who wrote the routine reads it in their inbox, whoever else the bot's failures reach.
-import { namesTeammateId, unreachableTeammate, type RosterMember } from "../peer-roster.ts";
+import { unreachableTeammate, type RosterMember } from "../peer-roster.ts";
 import { serverLine } from "../server-lines.ts";
 import type { Delivery } from "./person-inbox.ts";
 
 type Refused = { target: RosterMember; from: RosterMember };
+
+/** One receipt from the call this bookkeeping is fed: the id the call really delivered to, and whether it arrived. The
+ * text the model wrote is never used to decide that, since an id prefix can be shared. */
+export interface HandoffReceipt { botId: string; outcome: string }
 
 export interface RefusedHandoffDeps {
   bots(): readonly RosterMember[];
@@ -36,15 +40,18 @@ export function createRefusedHandoffs(deps: RefusedHandoffDeps) {
   }
 
   return {
-    /** A coordinate_bots call in a routine's run came back: remembers the bots it could not reach, and forgets one it has reached since. */
-    settled(threadId: string, from: RosterMember, named: readonly string[], status: number): void {
+    /** A coordinate_bots call in a routine's run came back: remembers the bots it could not reach, and forgets one this
+     * call's own receipts say it reached since, by the id the roster resolved to. */
+    settled(threadId: string, from: RosterMember, named: readonly string[], status: number, receipts: readonly HandoffReceipt[] = []): void {
       if (!deps.runOf(threadId)) return;
       const seen = refused.get(threadId) ?? new Map<string, Refused>();
       for (const raw of named) {
         const target = status >= 400 ? unreachableTeammate(deps.bots(), from, raw, (bot) => deps.hides?.(from, bot) === true) : null;
         if (target) seen.set(target.id, { target, from });
-        if (status < 400) for (const [id, was] of seen) if (namesTeammateId(was.target, raw)) seen.delete(id);
       }
+      // Which bot a retry went to comes from the delivery itself: a receipt's canonical id, never the text the model wrote.
+      // Text matching here let one bot's id prefix clear a refusal for a bot nothing was ever sent to.
+      for (const { botId, outcome } of receipts) if (outcome === "queued" || outcome === "injected") seen.delete(botId);
       if (seen.size) refused.set(threadId, seen);
       else refused.delete(threadId);
     },

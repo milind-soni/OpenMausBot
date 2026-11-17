@@ -16,7 +16,6 @@ import {
   peerName,
   peerRosterSystemPrompt,
   peerStatus,
-  namesTeammateId,
   reachablePeers,
   reachRefusal,
   renderRoster,
@@ -220,18 +219,6 @@ describe("resolveTeammate", () => {
     expect(resolveTeammate(ids, self, "2cb14697-4805")).toEqual({ id: "2CB14697-4805-4eea-ac52-2249dfd0020d", byName: false });
     // Seven characters are too little to be sure of, so they name nobody.
     expect(resolveTeammate(ids, self, "2cb1469")).toMatchObject({ error: expect.stringContaining('No bot with id or name "2cb1469"') });
-  });
-
-  it("reads, for the bookkeeping that clears a refusal, every form resolveTeammate resolves to that bot", () => {
-    const ids = [...fleet, { id: "2CB14697-4805-4eea-ac52-2249dfd0020d", name: "Design Lead", section: "Work" }];
-    const lead = { id: "2CB14697-4805-4eea-ac52-2249dfd0020d", name: "Design Lead" };
-    for (const raw of ["2cb14697-4805-4eea-ac52-2249dfd0020d", "2CB14697", "design lead", "Design-Lead"]) {
-      expect(resolveTeammate(ids, self, raw), raw).toMatchObject({ id: lead.id });
-      expect(namesTeammateId(lead, raw), raw).toBe(true);
-    }
-    // Too short to name an id, and a name that is nobody's, clear nothing.
-    expect(namesTeammateId(lead, "2cb1469")).toBe(false);
-    expect(namesTeammateId(lead, "Somebody Else")).toBe(false);
   });
 
   it("names every teammate an ambiguous id start could have meant, and says a name is enough", () => {

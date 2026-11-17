@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { RosterMember } from "../peer-roster.ts";
+import { resolveTeammate, type RosterMember } from "../peer-roster.ts";
 import { createRefusedHandoffs } from "./refused-handoffs.ts";
 import type { Delivery } from "./person-inbox.ts";
 
@@ -41,26 +41,43 @@ describe("a routine's refused hand-off", () => {
   it("forgets a refusal once the same bot was reached after all", () => {
     const { refused } = fixture();
     refused.settled("t", rooms, ["Bookkeeping"], 403);
-    refused.settled("t", rooms, ["books"], 202);
+    refused.settled("t", rooms, ["books"], 202, [{ botId: "books", outcome: "injected" }]);
     expect(refused.take("t")).toBeNull();
   });
 
   it("forgets a refusal once the retry named the bot by the start of its id, or its id in another case", () => {
     const long: RosterMember = { id: "2cb14697-4805-4a1e-9a54-0f1f5f6d3c11", name: "Bookkeeping", visibility: "admins" };
     const roster = [rooms, hours, long, mausbot];
-    // The retry resolved (resolveTeammate takes an id prefix of 8 or more, and an id in any case), so the run was not
-    // left believing nothing was sent.
+    // A refusal recorded while the bot was apart clears when a later retry reaches it, whether the model names it by the
+    // start of its id or by the whole id in another case: resolveTeammate resolves both to the id the receipt carries.
     for (const retry of ["2cb14697", "2CB14697-4805-4A1E-9A54-0F1F5F6D3C11"]) {
+      long.visibility = "admins";
       const { refused } = fixture({ roster });
       refused.settled("t", rooms, ["Bookkeeping"], 403);
-      refused.settled("t", rooms, [retry], 202);
+      long.visibility = B; // shared with them since, so this retry went through
+      expect(resolveTeammate(roster, rooms, retry), retry).toEqual({ id: long.id, byName: false });
+      refused.settled("t", rooms, [retry], 202, [{ botId: long.id, outcome: "queued" }]);
       expect(refused.take("t"), retry).toBeNull();
     }
     // A success that names someone else leaves the refusal standing: only that bot's own retry clears it.
+    long.visibility = "admins"; // apart again, so this refusal is one the routine keeps
     const { refused } = fixture({ roster });
     refused.settled("t", rooms, ["Bookkeeping"], 403);
-    refused.settled("t", rooms, ["Staff Hours"], 202);
+    refused.settled("t", rooms, ["Staff Hours"], 202, [{ botId: hours.id, outcome: "injected" }]);
     expect(refused.take("t")).toContain("Bookkeeping");
+  });
+
+  it("leaves a refusal standing when the success went to a different bot that shares its id prefix", () => {
+    // The review's case: two teammates whose ids start alike. "2cb14697" can only mean the one the sender may reach, so
+    // the success is the reachable bot's and nothing was ever sent to the other: its refusal has to stay.
+    const apart: RosterMember = { id: "2cb14697-4805-4a1e-9a54-0f1f5f6d3c11", name: "Bookkeeping", visibility: "admins" };
+    const near: RosterMember = { id: "2cb14697-1111-4a1e-9a54-0f1f5f6d3c11", name: "Writer", visibility: B };
+    const roster = [rooms, hours, near, apart, mausbot];
+    expect(resolveTeammate(roster, rooms, "2cb14697")).toEqual({ id: near.id, byName: false });
+    const { refused } = fixture({ roster });
+    refused.settled("t", rooms, ["Bookkeeping"], 403);
+    refused.settled("t", rooms, ["2cb14697"], 200, [{ botId: near.id, outcome: "injected" }]);
+    expect(refused.take("t")).toBe("Rooms couldn't hand this to Bookkeeping, because they're shared with different people. Nothing was sent.");
   });
 
   it("keeps nothing for a conversation that isn't a routine's run", () => {
