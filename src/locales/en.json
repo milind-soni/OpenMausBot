@@ -2660,6 +2660,8 @@
   "chat.compactionTitle": "Earlier context summarized",
   "chat.engineCompactionTitle": "Chat condensed into a summary",
   "chat.engineCompactionHint": "The AI summarized earlier messages to make room. Your full conversation is still here, but the agent may not recall older details exactly.",
+  "chat.newChatHint": "Start a new chat to save tokens.",
+  "chat.newChatHintButton": "New chat",
   "chat.compactionHint": "Your full conversation is still here. The agent uses this summary and recent messages when continuing.",
   "chat.startFresh": "Start fresh",
   "chat.startFresh.hint": "Starts a new session for this chat. Every message stays visible, and the bot's instructions, skills and memory don't change.",

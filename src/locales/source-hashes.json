@@ -4013,7 +4013,9 @@
       "room.routedBy.gemini": "488da2a6e7c26e4a09b8ed8cdd65ff8237685317f18f9dacede1994658db498c",
       "devices.computers.title": "700633b6d9e8d3cebf611ff7642fd356d5febbf3d625fa63691063bc87bdf5f5",
       "cloudBuy.promise.teamPlan": "cc700a83e92de4a0be260f4cea4f9fa96a4117c58e6d4e0592f6682b09152f2e",
-      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2"
+      "webPanels.bar.label": "ffe911248c62dd97ede1343e7fd7f23291c1ee2b8f696d7d46ef05da5c0491b2",
+      "chat.newChatHint": "f50b2919941dfdd3337f86015f98c770cb22ed01d7060235415abe8c39a06ee0",
+      "chat.newChatHintButton": "db18382a249e0206bc28514931d423b77d55dce180c1eb8e4bf35f861c9a50ec"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -36792,7 +36794,9 @@
       "room.queue.busyElsewhere": "ecdbe34c1cca24d6d0365a04bf672203b437647795ac4e358fbcf671ef345b97",
       "room.queue.busyInAfter": "a944c189ff63871adf83e91509d65f6ec8044478de1969f5a8874a11d2f15847",
       "room.queue.busyElsewhereAfter": "3432832abb792772c22e30806a674a4edcd22f660ee53d47ba4e2075121a79e8",
-      "room.queue.aTeammate": "1ca7804e31164a622443afee44c7ab79a97c1fb2e169b4df211bff0c10bd4a30"
+      "room.queue.aTeammate": "1ca7804e31164a622443afee44c7ab79a97c1fb2e169b4df211bff0c10bd4a30",
+      "chat.newChatHint": "f50b2919941dfdd3337f86015f98c770cb22ed01d7060235415abe8c39a06ee0",
+      "chat.newChatHintButton": "db18382a249e0206bc28514931d423b77d55dce180c1eb8e4bf35f861c9a50ec"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
