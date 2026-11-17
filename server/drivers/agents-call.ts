@@ -919,16 +919,16 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         text: `A confirmation card is now visible to the user to ${verb} skill “${skillName}”. Nothing changes until they approve it. End this turn and wait for the decision.`,
       };
     }
-    if (args.action !== "create" && args.action !== "update") {
-      return { text: `skill_manage action must be "create", "update", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
+    if (args.action !== "create" && args.action !== "update" && args.action !== "import") {
+      return { text: `skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
-    if (!skillMd.trim()) {
+    if (!skillMd.trim() && args.action !== "import") {
       return { text: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter, e.g. "---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n".', isError: true };
     }
     const source = typeof args.source === "string" ? args.source.trim() : "";
     if (!source) {
-      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill.', isError: true };
+      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill (for import, the GitHub or skills.sh link).', isError: true };
     }
     const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
     if (args.action === "update" && !skillName) {
