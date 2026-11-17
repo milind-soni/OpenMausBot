@@ -113,7 +113,7 @@ import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boatCreateRecoverySnapshot } from "./boat-create-idempotency.ts";
 import { boatDeletionSnapshot } from "./boat-delete-journal.ts";
 import { liveDecisionRefusal } from "../shared/live-approval.ts"; import type { PersonWaitKind } from "../shared/person-wait.ts";
-import { vpsLeftBehindNotice } from "./cloud-backend.ts";
+import { vpsLeftBehindNotice, vpsNotChosenReason } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { appSandboxRule, connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { signInCardText } from "./connector-card-text.ts";
@@ -6031,8 +6031,8 @@ async function selectableComputers(bot: BotRecord) {
           canStart = lifecycle === "wake";
           canCreate = lifecycle === "provision";
         } else {
-          reason = (cloudPlaceRefusal(cloudEngine(instance, bot.modelSelection.model), "works-on", bot.name)
-            ?? boatNotConfigured(bot, "works-on")).message;
+          reason = cloudPlaceRefusal(cloudEngine(instance, bot.modelSelection.model), "works-on", bot.name)?.message
+            ?? vpsNotChosenReason(bot.name, vpsSshAliasForBot(cfg, bot)) ?? boatNotConfigured(bot, "works-on").message;
         }
       } else if (surface === "vm" && caps?.computerMcp) {
         const target = localVmTargetForStatus(bot.id);
