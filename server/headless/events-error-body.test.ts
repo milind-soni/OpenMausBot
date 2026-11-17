@@ -11,7 +11,7 @@ afterEach(() => vi.useRealTimers());
 
 function context(response: () => Response, onProgress: () => void = () => undefined) {
   const controller = new AbortController();
-  const raw = vi.fn(async () => response());
+  const raw = vi.fn<HeadlessClient["raw"]>(async () => response());
   const client: HeadlessClient = {
     baseUrl: "http://127.0.0.1:1", explicit: true,
     json: async <T>() => ({} as T), tool: async () => ({}), raw,
@@ -110,12 +110,17 @@ describe("event failure response bodies", () => {
     let failure: unknown;
     const running = eventsVerb(f.ctx).catch((error: unknown) => { failure = error; });
     try {
+      await vi.advanceTimersByTimeAsync(0);
+      const signal = f.raw.mock.calls[0]?.[1]?.signal;
+      expect(signal).toBeDefined();
+      expect(signal).not.toBe(f.controller.signal);
+      expect(getEventListeners(signal!, "abort")).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(5_000);
       expect(failure).toMatchObject({ status: 403 });
       expect(f.raw).toHaveBeenCalledTimes(1);
       expect(cancel).toHaveBeenCalledTimes(1);
       expect(response.body?.locked).toBe(false);
-      expect(getEventListeners(f.controller.signal, "abort")).toHaveLength(0);
+      expect(getEventListeners(signal!, "abort")).toHaveLength(0);
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       f.controller.abort();
