@@ -56,14 +56,14 @@ function unused(dir: string, name: string, taken: Set<string>): string {
 
 export function exportFolder(dir: string, force: boolean): string {
   const out = resolve(dir);
-  if (!existsSync(out) || force) return out;
+  if (!existsSync(out)) return out;
   let entries: string[];
   try {
     entries = readdirSync(out);
   } catch (error) {
     throw usageError(`${out} cannot be written into (${(error as NodeJS.ErrnoException).code ?? "error"})`, "choose a folder");
   }
-  if (entries.length) throw usageError(`${out} already has files in it`, "choose an empty folder, or pass --force to write into it");
+  if (entries.length && !force) throw usageError(`${out} already has files in it`, "choose an empty folder, or pass --force to write into it");
   return out;
 }
 
