@@ -5,6 +5,8 @@
 # back, an update to the next release, an update that cannot start and is rolled back, and an uninstall that keeps the
 # data. It also records whether the bots' sandbox (bubblewrap) can run in a rootless container, and with what.
 # The files the installer places (update.sh) come from this checkout.
+# ONLY ON A THROWAWAY HOST (a CI runner): it writes into this user's ~/.local/share/openmausbot and removes it at the
+# end, and restarts this user's systemd. It refuses to start where a MausBot Podman install already exists.
 #   OUT=<evidence folder> bash deploy/e2e/podman.sh
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -17,6 +19,10 @@ DIR="$HOME/.local/share/openmausbot"
 UNIT="$HOME/.config/containers/systemd/openmausbot.container"
 INSTALL=(env "OMB_INSTALL_SOURCE=file://$ROOT" sh "$ROOT/deploy/podman/install.sh")
 FINDINGS="$OUT/findings.txt"
+if [ -e "$DIR" ] || [ -e "$UNIT" ]; then
+  echo "This user already has a MausBot Podman install ($DIR or $UNIT). This test replaces and removes it: run it on a throwaway host." >&2
+  exit 2
+fi
 : >"$FINDINGS"
 
 step() { printf '\n== %s\n' "$*"; }
@@ -85,7 +91,8 @@ exec /usr/bin/loginctl "$@"
 STUB
 printf '#!/bin/sh\necho "sudo $*" >>"%s/sudo-called"\nexit 97\n' "$stubs" >"$stubs/sudo"
 chmod 755 "$stubs/loginctl" "$stubs/sudo"
-PATH="$stubs:$PATH" OMB_INSTALL_IMAGE="$REPO:v$OLD_VERSION" "${INSTALL[@]}" >"$OUT/install-no-linger.txt" 2>&1 || { cat "$OUT/install-no-linger.txt"; fail "the install without linger failed"; }
+# Piped, as the one-line install runs it.
+PATH="$stubs:$PATH" OMB_INSTALL_IMAGE="$REPO:v$OLD_VERSION" OMB_INSTALL_SOURCE="file://$ROOT" sh -s -- <"$ROOT/deploy/podman/install.sh" >"$OUT/install-no-linger.txt" 2>&1 || { cat "$OUT/install-no-linger.txt"; fail "the install without linger failed"; }
 contains "$OUT/install-no-linger.txt" "  sudo loginctl enable-linger $(id -un)" "the install did not print the linger line"
 [ ! -e "$stubs/sudo-called" ] || fail "the installer ran sudo: $(cat "$stubs/sudo-called")"
 rm -rf "$stubs"
@@ -215,6 +222,9 @@ step "--lan: other devices on this network reach it, and must pair; --local take
 "${INSTALL[@]}" --lan >"$OUT/install-lan.txt" 2>&1 || { cat "$OUT/install-lan.txt"; fail "the --lan run failed"; }
 healthy_again
 address=$(ip -4 -o route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+# The pairing command the installer prints, without a terminal: a code, and a link on this network's address.
+in_server openmausbot pair >"$OUT/pair-lan.txt" 2>&1 || { cat "$OUT/pair-lan.txt"; fail "pair failed"; }
+contains "$OUT/pair-lan.txt" "http://$address:8799/pair#code=" "pair did not give a link on this network's address"
 ss -ltnH | grep -qE "(0\.0\.0\.0|\*):8799 " || fail "the server does not listen beyond loopback with --lan"
 ss -ltnH | grep -E ":8800 " >"$OUT/lan-8800.txt" || true
 from_lan=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$address:8799/api/bots" || true)
@@ -225,6 +235,7 @@ from_here=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.
 healthy_again
 [ -z "$(new_outside)" ] || fail "--local left something listening beyond loopback: $(new_outside)"
 finding "lan: webhook port with --lan: $(awk '{ print $4 }' "$OUT/lan-8800.txt" | tr '\n' ' ')"
+finding "pair: under --lan, openmausbot pair in the container gave a code and a link on http://$address:8799"
 finding "lan: with --lan, $address got $from_lan and 127.0.0.1 got $from_here on /api/bots; --local went back to loopback"
 
 step "update to $NEW_VERSION, through update.sh"

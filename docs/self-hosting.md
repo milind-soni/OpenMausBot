@@ -217,7 +217,9 @@ button does not run it on this install yet: run `update.sh` yourself.
 
 **Uninstall.** Run the same command with `--uninstall`. The data stays.
 Some of its files can belong to the container's other user ids, so remove
-it through Podman: `podman unshare rm -rf ~/.local/share/openmausbot`.
+it through Podman: `podman unshare rm -rf ~/.local/share/openmausbot`. The
+copy of the data the last update kept is a Podman volume:
+`podman volume ls --filter label=com.mausbot.role=update-backup`.
 
 **What rootless does not do.**
 

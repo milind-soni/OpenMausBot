@@ -812,6 +812,7 @@ fi
 # A fresh record for this update: nothing of a journal read above carries over.
 J_phase="" J_target="" J_target_id="" J_version="" J_engine="" J_caddy="" J_started=""
 CID=$(container)
+if [ -z "$CID" ] && [ -n "$UNIT" ]; then refuse "The server is not running. Start it first: systemctl --user start $SERVER_UNIT"; fi
 [ -n "$CID" ] || refuse "This install has no server yet. Start it once first: docker compose up -d"
 J_previous_id=$(inspect '{{.Image}}' "$CID")
 J_previous=$(published_ref "$J_previous_id")

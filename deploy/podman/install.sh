@@ -392,6 +392,7 @@ run_uninstall() {
   say "MausBot's service is stopped and removed. Your data stays in $DATA_DIR."
   say "To remove the data too (some files belong to the container's other ids, so through Podman):"
   say "  podman unshare rm -rf $INSTALL_DIR"
+  say "The copies of the data update.sh kept: podman volume ls --filter label=com.mausbot.role=update-backup"
   say "The downloaded images: podman image ls ghcr.io/milind-soni/openmausbot"
 }
 
