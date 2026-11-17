@@ -191,7 +191,7 @@ export function writeSkillFolder(
   }
 }
 
-function readNoFollow(path: string): Buffer | null {
+export function readNoFollow(path: string): Buffer | null {
   let fd: number | null = null;
   try {
     fd = openSync(path, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW));

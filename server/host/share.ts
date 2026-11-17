@@ -13,7 +13,7 @@ import { createShareHost, type ShareHostDeps } from "../share.ts";
 import { createCommunityPublisher } from "../share-publish.ts";
 import type { BotRecord, GroupRecord } from "../store.ts";
 
-export interface ShareWiringDeps extends Pick<ShareHostDeps, "dataDir" | "groups" | "brief" | "botFolder" | "collectTeamSkills"> {
+export interface ShareWiringDeps extends Pick<ShareHostDeps, "dataDir" | "groups" | "brief" | "botFolder" | "collectTeamSkills" | "skillFiles"> {
   bots(): readonly BotRecord[];
   routines(): readonly Routine[];
   access(): PagesAccess | null;
@@ -41,7 +41,7 @@ function botPicture(bot: BotRecord): string | undefined {
 export function createShareWiring(deps: ShareWiringDeps) {
   const host = createShareHost({
     dataDir: deps.dataDir, bots: deps.bots, groups: deps.groups, routines: deps.routines, brief: deps.brief, botFolder: deps.botFolder,
-    collectTeamSkills: deps.collectTeamSkills, picture: botPicture,
+    collectTeamSkills: deps.collectTeamSkills, skillFiles: deps.skillFiles, picture: botPicture,
     publisher: createCommunityPublisher({ access: deps.access, notOffered: deps.notOffered, selfHosted: deps.selfHosted }),
     patch: (threadId, messageId, text, template) => deps.patchMessage(threadId, messageId, { text, template }),
   });
