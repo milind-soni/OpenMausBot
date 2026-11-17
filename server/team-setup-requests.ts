@@ -164,7 +164,11 @@ export class TeamSetupRequestService {
     if (confirming && teamSetupRevision(chief, this.requesterScope(request)) !== request.requesterRevision) throw new TeamSetupError("The Chief's settings changed. This setup was cancelled; review a new proposal.", 409);
     const existingTeams = new Set(this.options.teams().map(section));
     if (new Set([...(chief.managedSections ?? []), ...request.newTeams]).size > 100) throw new TeamSetupError("A Chief may coordinate at most 100 additional teams", 409);
-    for (const name of request.newTeams) if (existingTeams.has(name)) throw new TeamSetupError(`Team ${JSON.stringify(name)} now exists. Review a new proposal.`, 409);
+    for (const name of request.newTeams) if (existingTeams.has(name)) throw new TeamSetupError(confirming
+      ? `Team ${JSON.stringify(name)} now exists. Review a new proposal.`
+      // At proposal time no card exists yet, so the stale-card wording above reads as "a review is pending".
+      : `Team ${JSON.stringify(name)} already exists, so it can't be a new team. ${this.options.hasTeamAuthority(chief, name)
+        ? "Leave it out of newTeams and use it as an existing team." : outsideDepartmentReason(chief, { section: name })} Nothing was proposed.`, 409);
     const allowed = (name?: string) => request.newTeams.includes(section(name)) || this.options.hasTeamAuthority(chief, name);
     const targets = new Set<string>();
     const projected = this.options.store.bots.map((bot) => ({ id: bot.id, name: bot.name, section: section(bot.section), chiefOfStaff: bot.chiefOfStaff, hidden: bot.hidden, createdBy: bot.createdBy, reportsTo: bot.reportsTo }));

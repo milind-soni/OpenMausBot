@@ -98,6 +98,16 @@ describe("reviewed Chief team setup", () => {
     expect(card.detail).not.toContain("peer coordination");
     expect(card.detail).not.toContain("approval levels");
   });
+  it("explains at proposal time that a team listed as new already exists, instead of the stale-card message", async () => {
+    const h = harness();
+    const before = h.messages.length;
+    expect(() => h.propose([specialist("Mira", "Private")], ["Private"]))
+      .toThrow(/^Team "Private" already exists, so it can't be a new team\. That is the Private department, which Clive is not in charge of\. .*Nothing was proposed\.$/);
+    expect(() => h.propose([specialist("Mira", "Engineering")], ["Engineering"]))
+      .toThrow(/^Team "Engineering" already exists, so it can't be a new team\. Leave it out of newTeams and use it as an existing team\. Nothing was proposed\.$/);
+    await expect(h.submit([specialist("Mira", "Private")], ["Private"])).rejects.toThrow(/already exists/);
+    expect(h.messages.length).toBe(before);
+  });
   it("creates a Chief in a new team and permits explicit replacement regardless of operation order", async () => {
     const h = harness();
     const next = specialist("Mira", "Research");
