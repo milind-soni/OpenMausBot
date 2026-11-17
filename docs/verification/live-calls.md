@@ -236,8 +236,7 @@ fake engines and the fake GPT-Live, starts calls the way a client does
 and hangs up (`POST /api/live/call/end`). It checks the call id on a new turn,
 a steered line, a queued line (also one lifted from the queue by Steer) and a
 late answer; one row per call that went live, and none for a call that never
-did or whose bot was deleted; the title patch with generated titles on, and
-none while they are off; the row's absence from the next call's startup
+did or whose bot was deleted; the title patch; the row's absence from the next call's startup
 history; and that the row and the server log hold none of the spoken words and
 neither the log nor the event stream holds the key.
 `server/chat-followups-restart.test.ts` kills a fixture server in the middle of
@@ -280,9 +279,7 @@ no `title`, because nothing was asked; and the snapshot's transcript has
 - `pnpm control:omb messages` projects a fixed set of fields: it shows the
   row's `kind` and its text, but not `via`, `callId` or `call`. Read the last
   command above for those.
-- Only generated thread titles name a call (`features.llmThreadTitles`; see
-  [Chat UI](chat-ui.md) for `ui flag --set`), and only from what was asked on
-  it: a call where nothing was asked is never titled.
+- A call is titled only from what was asked on it: a call where nothing was asked is never titled.
 - The fixture's fake engine answers a title one-shot from
   `FAKE_CLAUDE_TEXT_ROUTES`, which crosses into the fixture like the other
   `FAKE_CLAUDE_*` variables. Without a route it answers "fake generated text".

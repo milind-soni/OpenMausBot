@@ -332,7 +332,7 @@ import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } f
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
 import { extractReplayImages, extractTurnImages, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
-import { generateThreadTitle, llmThreadTitlesEnabled } from "./thread-title-generate.ts";
+import { generateThreadTitle } from "./thread-title-generate.ts";
 import { engineCommandCpuMs, engineProcessExited, engineProcessGone, ENGINE_EXIT_STALL_MS, stallLimitMs, stallNotice, TurnWatchdog } from "./turn-watchdog.ts"; import { createIdleThreads } from "./host/idle-threads.ts";
 import { TurnResources, type TurnOwner } from "./turn-resources.ts";
 import { createPhoneHold } from "./phone-screen/hold.ts"; import { createPhoneGate } from "./routes/phone-gate.ts";
@@ -7598,9 +7598,9 @@ async function beginTurn(
   else quietTurnThreads.delete(threadId);
   if (resolvedImages.text.trim() && !opts?.cardContinuation && !opts?.replyTo?.reactedWith) {
     const titled = store.titleTaskFromFirstMessage(bot.id, resolvedImages.text, threadId);
-    const snippet = titled?.title;
-    if (titled && snippet && !titled.openedBy?.botId && llmThreadTitlesEnabled(cfg) && instance.generateText) {
-      void generateThreadTitle(instance, resolvedImages.text)
+    const snippet = titled?.title, titleGate = titled && snippet && !titled.openedBy?.botId ? threadTitleGate(bot) : null;
+    if (snippet && titleGate?.ok) {
+      void generateThreadTitle(titleGate.instance, resolvedImages.text)
         .then((title) => {
           if (title) store.retitleTask(bot.id, threadId, snippet, title);
         })
@@ -10813,10 +10813,10 @@ function startGroupTurn(
 
   const titleText = extractTurnImages(text).text;
   const startTitle = (titleBot: (typeof members)[number]) => {
-    const titleInstance = registry.get(titleBot.modelSelection.instanceId);
-    // An engine the organisation disallows never receives the text, even for a title.
-    if (titled && snippet && titleText.trim() && llmThreadTitlesEnabled(cfg) && titleInstance?.generateText && !policyModelRefusal(titleInstance)) {
-      void generateThreadTitle(titleInstance, titleText)
+    // An engine the organisation or the hosted plan disallows, or a workspace at its spend cap, never sends the text, even for a title.
+    const titleGate = titled && snippet && titleText.trim() ? threadTitleGate(titleBot) : null;
+    if (snippet && titleGate?.ok) {
+      void generateThreadTitle(titleGate.instance, titleText)
         .then((title) => {
           if (title) store.retitleGroupTask(group.id, threadId, snippet, title);
         })
@@ -11733,7 +11733,7 @@ function configStatus() {
       autoRecall: autoRecallEnabled(cfg),
       roomMemoryCapture: roomMemoryCaptureEnabled(cfg),
       parallelRoomJobs: parallelRoomJobsEnabled(cfg),
-      llmThreadTitles: llmThreadTitlesEnabled(cfg), savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(),
+      savedSteps: savedStepsEnabled(cfg), savedStepsHere: savedSteps.here(),
       usbPhoneTakeover: HAS_USB_PORT ? usbPhoneTakeoverEnabled(cfg) : undefined,
     },
     onboarding: {
@@ -12403,7 +12403,7 @@ function liveSignedIn(auth: RequestAuth): boolean {
 /** On the bot's own engine, which already saw the requests, so nothing new reaches OpenAI. */
 function liveCallTitle(botId: string, threadId: string, excerpt: string): Promise<string | null> | null {
   const bot = store.projectBotForTask(botId, threadId);
-  if (!bot || !llmThreadTitlesEnabled(cfg)) return null;
+  if (!bot) return null;
   const gate = threadTitleGate(bot);
   return gate.ok ? generateThreadTitle(gate.instance, excerpt, "call") : null;
 }
