@@ -131,13 +131,13 @@ const refusal = async (response: Response | null): Promise<string> =>
 
 export async function exportJob(client: HeadlessClient, options: ExportOptions, output: Output): Promise<Rec> {
   const out = exportFolder(options.out, options.force === true);
-  if (options.force) removeEarlierExport(out);
   const maxFiles = options.maxFiles ?? 200;
   const maxScreens = options.maxScreens ?? 100;
   const maxBytes = options.maxBytes ?? 500_000_000;
   const job = await readJob(client, options.threadId, { since: String(options.since ?? 0), full: "1" });
   const nodes: Rec[] = (job.nodes ?? []).filter((node: Rec) => !options.root || node.rootId === options.root);
   if (options.root && !nodes.length) throw usageError(`no job with root ${options.root} in this conversation`, "openmausbot export TARGET without --root writes all of it");
+  if (options.force) removeEarlierExport(out);
   for (const dir of ["transcripts", "files", "screens"]) mkdirSync(join(out, dir), { recursive: true });
 
   const threads = new Map<string, string>([[options.threadId, "conversation"]]);
