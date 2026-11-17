@@ -443,6 +443,27 @@ work, `session_search` (memory of the layer and the team's; conversations the tu
 turn's layer folder back read-write for that conversation's boxes only (`botBox.lend`). Member layers are sibling
 folders of the bot's own, never inside it, so no other turn of that bot can read them.
 
+**In the bot box.** The box is where the rule holds against a bot with a shell (`server/host/team-box-scope.ts`, which
+the Team Cloud host registers with the box; `BoxAudience` in `server/bot-box/plan.ts`). It learns each spawn's
+conversation from its working folder or, for one that runs elsewhere (a room's turn), from the conversation its engine
+home runs in, and:
+
+- **A turn that is not the team's** (a member's private chat, a conversation shared with one person, a room) has the
+  bot's own folder (`workspaces/<bot>`: the team's MEMORY.md, `memory/`, `skills/`) **read-only**, bound after every
+  read-write line so nothing the turn is lent makes it writable. Its own layer stays read-write (`botBox.lend`), and so
+  does its conversation folder. A write to the team's folder fails with *Read-only file system*; the turn goes on, and
+  its system prompt says so beforehand (*"Your shared folder (…) holds Acme's notes and skills: in this conversation they
+  are read-only…"*, `sharedNotesPrompt`). A room's turn works in the bot's own folder unless the room has a folder of
+  its own: there it can still make files, and only MEMORY.md, `memory/` and `skills/` are read-only.
+- **The team's chat** (the bot's main chat, a conversation nobody or a routine opened) writes the bot's own folder as
+  before.
+- **A process the bot's conversations share** (OpenCode's, `botThreads`) has only the conversation folders, and their
+  uploads, whose audience its own may read: its own audience's read-write, the team's read-only, another person's or
+  room's not at all. A conversation made after the process started is in no running box, so it gets a process of its
+  own (the shared-process key carries the set, `sharedBoxScope`).
+- What the server writes for a turn is not the box's: **Save to team memory** (below) and `skill_manage` go through the
+  server and keep their own rules.
+
 The same request to one bot from two requesters is answered once only where the same people see both conversations
 (`shareAnswer`, see `docs/runtime-contract.md`): two bots working for Mira get one answer, while Mira's private work
 never gets the answer Ben's got, so each of them is answered on its own.
@@ -1026,6 +1047,11 @@ opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothin
 - **Someone invited who never opened the team.** The machine first learns of a member at their first pairing, so until
   then they are in no People list, and nothing says they joined (`team.people`): the Admin sends no roster and no
   "joined" of its own.
+- **The team's folder without a box, and outside a conversation.** Without the bot box a shell in any chat writes the
+  bot's own folder and reads every conversation folder, as it reads engine homes (next). A bot's MCP server the server
+  starts outside any conversation (a configured server's probe or its app connections) keeps the bot's own folder
+  read-write. A room's turn that works in the bot's own folder can still add files beside the team's notes, which every
+  turn of that bot can then read.
 - **Engine homes without a box, and engines outside the list.** Without the bot box (bubblewrap refused, or switched
   off) a shell reaches every file of the server's user, engine homes included; only the box keeps them apart. An engine
   whose sign-in file is not named in `engine-homes/layout.ts` starts signed out in every audience's home. Engines

@@ -11,11 +11,13 @@ import { ensureWorkspace, loadMemory, workspaceDir } from "../workspace.ts";
 import type { EngineHomes } from "../engine-homes/engine-homes.ts";
 import { storeThreads, type StoreBotThreads } from "../engine-homes/migrate.ts";
 import type { ConversationShares } from "./conversation-shares.ts";
+import { createTeamBoxScope, type TeamBoxBots } from "./team-box-scope.ts";
+import type { BoxAudienceScope } from "../bot-box/box.ts";
 
 export interface CloudTeamHostDeps {
   team: CloudTeam | null;
   dataDir: string;
-  store: { groupByThread(threadId: string): { id: string } | undefined; readonly bots?: StoreBotThreads };
+  store: { groupByThread(threadId: string): { id: string } | undefined; readonly bots?: StoreBotThreads & TeamBoxBots };
   starters: { get(threadId: string): string | undefined };
   /** Keys that name no person (nobody, outside). */
   markers: ReadonlySet<string>;
@@ -27,6 +29,8 @@ export interface CloudTeamHostDeps {
   serverProfile?: { read(): ServerProfile | undefined; clear(): void };
   /** Started on a team: each audience's engines get their own home (server/engine-homes). */
   engineHomes?: Pick<EngineHomes, "start">;
+  /** Given the audience rule on a team, for every box (server/host/team-box-scope.ts). */
+  box?: { scopeAudiences(scope: BoxAudienceScope | null): void };
 }
 
 export interface TeamSessionInfo { id: string; name: string; role: TeamRole }
@@ -51,6 +55,7 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
     return person && !deps.shares?.isShareKey(person) ? person : null;
   };
   if (team) deps.engineHomes?.start({ dataDir: deps.dataDir, audienceOf, threads: () => storeThreads(deps.store.bots ?? []) });
+  if (team) deps.box?.scopeAudiences(createTeamBoxScope({ audienceOf, bots: () => deps.store.bots ?? [] }));
   /** The layer a turn in this conversation writes into: the bot's own folder off a team or for the team's conversations,
    * a sibling folder for a room's or a member's. The folder exists before the turn starts, so the box can bind it. */
   const layer = (botId: string, threadId: string): string => {
@@ -124,12 +129,14 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
       const turn = audienceOf(threadId);
       return (other) => mayRead(audienceOf(other), turn);
     },
-    /** The team's notes, read-only, for a turn that writes elsewhere (a room's or a member's layer). */
+    /** The team's notes, read-only, for a turn that writes elsewhere (a room's or a member's layer), and that the box
+     * keeps the team's folder read-only for it, so a refused write there is never a surprise. */
     sharedNotesPrompt(botId: string, threadId: string): string {
       if (!team || layer(botId, threadId) === botId) return "";
+      const readOnly = `\n\nYour shared folder (${workspaceDir(botId)}) holds ${team.name}'s notes and skills: in this conversation they are read-only, and writing there fails. Save what you learn here with your memory tools, and make files in your working folder.`;
       const shared = loadMemory(botId);
-      if (!shared) return "";
-      return `\n\n${team.name}'s shared notes with you (read-only here; what you save in this conversation stays with it):\n${shared.text}`;
+      if (!shared) return readOnly;
+      return `${readOnly}\n\n${team.name}'s shared notes with you (read-only here; what you save in this conversation stays with it):\n${shared.text}`;
     },
     /** "About the user" for a turn: on a team only a member's own, with their name, in their own conversations; the
      * server's profile otherwise. */
