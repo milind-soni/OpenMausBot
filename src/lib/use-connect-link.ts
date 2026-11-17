@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 
 import type { Action } from "@/state/store";
-import { takeConnectRequest } from "./connect-link";
+import { takeConnectRequest, type TeamAdminSection } from "./connect-link";
 import { useOwnerOrAdmin } from "./use-owner-or-admin";
 
 /** Opens the page a `/?connect=` link asks for, once, and leaves the address clean. A page only a team's admin is
  * shown opens when this person is known to be one, and never for anyone else. */
 export function useConnectLink(dispatch: (action: Action) => void, team: boolean): void {
   const admin = useOwnerOrAdmin();
-  const [adminSection, setAdminSection] = useState<"botAccess" | null>(null);
+  const [adminSection, setAdminSection] = useState<TeamAdminSection | null>(null);
   useEffect(() => {
     const request = takeConnectRequest(window.location.href);
     if (!request) return;

@@ -278,7 +278,7 @@ export function VaultSettings() {
           <div data-vault-keys className="contents">
             <SettingsLinkRow title={t("settings.vault.keys.title")} subtitle={t("settings.vault.keys.hintShort", { app: productName() })} onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })} />
           </div>
-          <OnePasswordConnection status={onePassword} disabled={logins === null} bots={bots} botNames={botNames}
+          <OnePasswordConnection status={onePassword} disabled={logins === null} bots={bots} botNames={botNames} team={Boolean(state.config?.team)}
             onChange={async (next) => { setOnePassword(next); await load(); }} />
         </SettingsRows>
       </SettingsGroup>}
@@ -380,9 +380,11 @@ function VaultAccess({ vault, bots, botNames, disabled, onChange }: {
   );
 }
 
-function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
+/** `team`: on a Team Cloud an admin connects it for the whole team, and the row says how to keep that narrow. */
+function OnePasswordConnection({ status, disabled, bots, botNames, team, onChange }: {
   status: OnePasswordStatus;
   disabled: boolean;
+  team: boolean;
   bots: ReadonlyArray<{ id: string; name: string }>;
   botNames: (value: LoginBots) => string;
   onChange: (status: OnePasswordStatus) => Promise<void>;
@@ -417,6 +419,7 @@ function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
           <button type="button" className="ui-button" disabled={disabled || busy !== null} onClick={() => void run("disconnect", disconnectOnePassword)}>{t("settings.logins.onePassword.disconnect")}</button>
         </> : <button type="button" className="ui-button" disabled={disabled} onClick={() => setOpen(true)}>{t("settings.logins.onePassword.connect")}</button>}
       </div>
+      {team && <p className="text-[12px] leading-4 text-ink-tertiary" data-onepassword-team>{t("settings.logins.onePassword.team")}</p>}
       {status.connected && status.error && <p role="alert" className="text-[12px] leading-4 text-danger">{status.error}</p>}
       {status.connected && !!status.vaults?.length && (
         <ul className="divide-y-[0.5px] divide-(--settings-edge)" aria-label={t("settings.logins.onePassword.vaults")}>
@@ -434,6 +437,7 @@ function OnePasswordConnection({ status, disabled, bots, botNames, onChange }: {
           </>}>
           <form id="onepassword-connect" className="flex flex-col gap-3" onSubmit={(event) => { connect(event); }}>
             <p className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.logins.onePassword.guide")}</p>
+            {team && <p className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.logins.onePassword.team")}</p>}
             <SettingsField label={t("settings.logins.onePassword.token")} hint={t("settings.logins.onePassword.note")}>
               <input name="onePasswordToken" type="password" autoComplete="off" spellCheck={false} maxLength={8192} value={token}
                 onChange={(event) => setToken(event.target.value)} disabled={disabled || busy !== null} className={SETTINGS_INPUT} />

@@ -3895,6 +3895,7 @@
   "settings.logins.signsInOn": "Also signs in on {hosts}",
   "settings.logins.removeTotp": "Remove the saved 2FA key",
   "settings.logins.limits": "Bots get the password typed into the page, never as text, and it is hidden from anything they read back. A screenshot of the page can still show what a site displays, so save logins only for sites you trust your bots with.",
+  "settings.logins.onePassword.team": "For the whole team: its bots use it in shared and private chats. Use a dedicated vault and a read-only service account.",
   "settings.logins.onePassword.title": "1Password",
   "settings.logins.onePassword.guide": "Let bots use logins, keys and secrets from 1Password. In 1Password, create a service account that can read one vault only, such as “Shared with {app}”, then paste its token here.",
   "settings.logins.onePassword.token": "Service account token",

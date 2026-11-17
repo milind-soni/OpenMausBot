@@ -1,15 +1,18 @@
+export type TeamAdminSection = "botAccess" | "logins";
+
 /** A bot on My Cloud links to `/?connect=<id>` for a connection that needs the person there: an MCP server's sign-in
  * opens the MCP servers, where its Sign in is; any other id opens the apps. The Admin's Team admin pages link a team's
- * admins to `/?connect=mcp`, `keys` (the keys in Settings), `ai` (the engines in Settings) or `bots` (Bot access in
- * Settings, which only a team's admin is shown). It only opens the page; it never signs in by itself. Null for any
- * other address. */
-export function takeConnectRequest(href: string): ({ rest: string } & ({ surface: "mcp" | "apps" } | { section: "connections" | "engines" } | { teamAdminSection: "botAccess" })) | null {
+ * admins to `/?connect=mcp`, `keys` (the keys in Settings), `ai` (the engines in Settings), or `bots` (Bot access) and
+ * `vault` (the Vault, the team's keys and passwords) in Settings, which only a team's admin is shown there. It only opens
+ * the page; it never signs in by itself. Null for any other address. */
+export function takeConnectRequest(href: string): ({ rest: string } & ({ surface: "mcp" | "apps" } | { section: "connections" | "engines" } | { teamAdminSection: TeamAdminSection })) | null {
   const url = new URL(href);
   const id = url.searchParams.get("connect");
   if (id === null) return null;
   url.searchParams.delete("connect");
   const rest = `${url.pathname}${url.search}${url.hash}`;
   if (id === "bots") return { rest, teamAdminSection: "botAccess" };
+  if (id === "vault") return { rest, teamAdminSection: "logins" };
   if (id === "keys" || id === "ai") return { rest, section: id === "keys" ? "connections" : "engines" };
   return { rest, surface: /^mcp(?::[a-z][a-z0-9_-]{0,31})?$/u.test(id) ? "mcp" : "apps" };
 }

@@ -86,6 +86,17 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   see and delete it in Settings → Vault, which shows a member their own secrets only; an Admin's Vault, exports and
   backups never list it, and leaving the team deletes it. A secret an Admin saves in Settings → Vault, or one typed into a
   card in a shared chat or a group chat, is the team's. One saved before this rule is the team's.
+- **1Password for the team.** An Admin connecting 1Password in Settings → Vault connects it for the whole team: the row
+  says so, with the setup to use (*Use a dedicated vault and a read-only service account.*). Its secrets serve every
+  team bot the vault (or item) is kept to, in shared, group and private chats alike, the same way a secret an Admin
+  saved does: a bot asks `request_credential` by the item's name ("Stripe secret key", "Acme OAuth client_secret") or
+  by its 1Password reference, `op://<vault>/<item>[/<section>]/<field>`, with vault and item by title or id (a bot that
+  may use any 1Password secret is told a reference works as a label; references longer than a label's 80 characters
+  don't resolve). The value
+  is read from 1Password at that moment and handed over as a ref or a file, never as text, and masked in transcripts.
+  A reference reaches only what a name does: a Login's username, password and one-time code never, an item two items'
+  titles fit is refused, and one kept to other bots is not found. A member sees and changes none of it: their Vault
+  shows only their own secrets and `onePassword: { connected: false }`, and every `/api/logins` route answers them 403.
 - **Browsers.** Each private chat with a bot drives that person's own browser of the bot, each group chat the group
   chat's, and the bot's main chat the team's: separate Chrome profiles, saved sign-ins and live views, so a site one
   member signed in to in their chat never opens signed in for another member. The live view shows the browser of the
@@ -264,6 +275,13 @@ this server shares with every bot. It exists only on a Team Cloud.
     `state` `connected` | `needs-sign-in` | `not-connected`, for every member the Admin paired here and only for those
     connections: whether they connected what an admin asked everyone to connect, never when or how they used it, nor
     any other connection of theirs. A member who left is not listed.
+- **The team's Vault** (`server/host/team-vault-report.ts`), additive: `vault: { secrets: [{ name, addedAt, usedBy }],
+  providers: [{ kind: "1password", connected, label, lastError? }] }`. `secrets` are the team's saved secrets (an
+  Admin's, or a shared or group chat's card), never a member's own; `usedBy` names the team bots that may use each (each
+  member's own MausBot left out). `label` is the 1Password vaults the token reads ("" while not connected); `lastError`
+  a fixed class (`refused`, `rate-limited`, `cant-connect`, `unavailable`, `unreadable`). 1Password's own items and
+  saved logins are not listed. Never a value, the token or a header. The Admin's Apps page shows it as *Keys &
+  passwords*, read-only, with *Manage in the app* opening Settings → Vault here (`/?connect=vault`, an admin's only).
 - Changes are never signed calls of their own. The Admin pairs as the admin making the change (the usual signed pairing
   with their `member` claim: an `owner` or `admin` gets the admin scope) and uses that session with the routes the app
   uses: `PATCH /api/config` for a key, `/api/mcp/servers` to add, test, sign in to and remove a server,

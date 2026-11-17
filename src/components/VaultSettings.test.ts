@@ -249,6 +249,23 @@ describe("Settings → Vault: logins", () => {
     expect(document.body.querySelector("[data-settings-dialog] [role=alert]")?.textContent).toBe("1Password did not accept the token.");
   });
 
+  it("on a Team Cloud, has an admin connect 1Password for the whole team, with the setup to use in one line", async () => {
+    const hint = "Use a dedicated vault and a read-only service account.";
+    fixture.config = { team: { id: "acme", name: "Acme" } };
+    fixture.api.mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF });
+    await render();
+    expect(host.querySelector("[data-onepassword-team]")!.textContent).toBe(`For the whole team: its bots use it in shared and private chats. ${hint}`);
+    await click("Connect 1Password");
+    expect(document.body.querySelector("[data-settings-dialog]")!.textContent).toContain(hint);
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    fixture.config = null;
+    fixture.api.mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF });
+    await render();
+    expect(host.querySelector("[data-onepassword]"), "off a team: the same row").not.toBeNull();
+    expect(host.textContent, "off a team").not.toContain(hint);
+  });
+
   it("is for admins only", async () => {
     fixture.admin = false;
     await render();

@@ -7,6 +7,7 @@ import { receiveLoginHandoff, type ConnectionHandoffAnswer, type ConnectionHando
 import type { VaultReader, VaultStore } from "./vault-store.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import type { LoginRouteDeps } from "./routes/logins.ts";
+import { savedSecretsPrompt } from "./system-prompt.ts";
 import { findLinkedSecret, linkedCandidates, linkedSecretNames, linkedSecrets, linkedSites, readLinkedSecret, type VaultProvider } from "./vault/providers.ts";
 
 const linkedItemId = (secretId: string, field: string | undefined) => `linked-${createHash("sha256").update(`${secretId}\0${field ?? ""}`).digest("hex").slice(0, 32)}`;
@@ -115,6 +116,11 @@ export class BotLogins {
   secretNamesFor(botId: string, reader: VaultReader): Array<{ name: string; refOnly?: true }> {
     const linked = this.providers.flatMap((provider) => linkedSecrets(provider, botId).flatMap((secret) => linkedSecretNames(secret).map(({ name }) => ({ name }))));
     return [...this.store.secretNamesFor(botId, reader), ...linked];
+  }
+
+  /** The Vault's sentence in the bot's prompt: the names it may ask for, and that 1Password references work while it may use any. */
+  secretsPrompt(botId: string, reader: VaultReader): string {
+    return savedSecretsPrompt(this.secretNamesFor(botId, reader), linkedSecrets(this.onePassword, botId).length > 0);
   }
 
   /** A secret a linked manager holds for the bot by this name, read from it now; its id is safe as a file name. */
