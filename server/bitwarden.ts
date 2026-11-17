@@ -288,8 +288,8 @@ export class BitwardenLogins implements VaultProvider {
       const listed = await (await this.clientFor(account)).items();
       const entries: Entry[] = [];
       const secrets: SecretEntry[] = [];
-      let items = 0;
-      // Every value in this answer is dropped here and read again when a bot uses it.
+      // Every value in this answer is dropped here and read again when a bot uses it. An item counts once, as a login,
+      // a secret or both.
       for (const item of listed.filter((one) => one.type === LOGIN || one.type === NOTE).slice(0, MAX_ITEMS)) {
         const fields = bitwardenSecretFields(item);
         if (fields.has("")) secrets.push({ id: `${ID_PREFIX}${item.id}`, itemId: item.id, name: item.name.trim() || "Bitwarden item", fields: [...fields.keys()].filter(Boolean) });
@@ -297,7 +297,6 @@ export class BitwardenLogins implements VaultProvider {
         if (!login?.password) continue;
         const hosts = new Set((login.uris ?? []).flatMap((uri) => normalizeLoginHost(uri.uri) ?? []));
         if (!hosts.size) continue;
-        items++;
         for (const [site, siteHosts] of bySite(hosts)) {
           entries.push({ id: `${ID_PREFIX}${item.id}:${site}`, itemId: item.id, site, hosts: siteHosts, exactHost: false,
             username: login.username ?? "", hasTotp: Boolean(login.totp && parseTotpKey(login.totp)) });
@@ -306,7 +305,7 @@ export class BitwardenLogins implements VaultProvider {
       if (candidate) this.lastUsed.clear();
       this.entries = entries.sort((a, b) => a.site.localeCompare(b.site) || a.username.localeCompare(b.username));
       this.secrets = secrets.sort((a, b) => a.name.localeCompare(b.name));
-      this.itemCount = items;
+      this.itemCount = new Set([...entries, ...secrets].map((entry) => entry.itemId)).size;
       this.refreshedAt = this.now();
       this.error = undefined;
       return this.status(account);

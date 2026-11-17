@@ -55,7 +55,7 @@ describe("BitwardenLogins", () => {
   it("lists website logins by site and secrets by name, never a value", async () => {
     const { bitwarden } = setup();
     const status = await bitwarden.refresh();
-    expect(status).toEqual({ connected: true, server: "https://vault.example.test", items: 3, bots: "all" });
+    expect(status).toEqual({ connected: true, server: "https://vault.example.test", items: 4, bots: "all" });
     const listed = bitwarden.items();
     expect(listed.filter((item) => item.kind === "login").map((item) => item.kind === "login" && `${item.site} ${item.username} ${item.hasTotp}`))
       .toEqual(["example.com alice@example.com true", "example.io deployer false", "example.net team false", "example.org team false"]);
@@ -117,7 +117,7 @@ describe("BitwardenLogins", () => {
     fail.error = new Error("Invalid master password.");
     await expect(bitwarden.refresh(ACCOUNT)).rejects.toThrow(BITWARDEN_PASSWORD_REFUSED);
     fail.error = null;
-    expect(await bitwarden.refresh(ACCOUNT)).toMatchObject({ connected: true, items: 3 });
+    expect(await bitwarden.refresh(ACCOUNT)).toMatchObject({ connected: true, items: 4 });
   });
 
   it("keeps the last list with an error when a later read fails, and reads again once it is stale", async () => {
