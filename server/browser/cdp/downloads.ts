@@ -31,13 +31,23 @@ export interface DownloadLimits {
 export const DOWNLOAD_LIMITS: DownloadLimits = { maxBytes: 1024 ** 3, perOwner: 20 };
 
 const UNSAFE_NAME = /[\p{Cc}<>:"/\\|?*]/gu;
+const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|conin\$|conout\$|clock\$|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3]) *(?:\..*)?$/iu;
 
+/** Return a basename within the 255-byte UTF-8 limit, with Windows device names escaped and whole code points retained. */
 export function safeFileName(suggested: string): string {
   const base = suggested.split(/[\\/]/).pop() ?? "";
   const cleaned = base.replace(UNSAFE_NAME, "_").replace(/^[.\s]+|[.\s]+$/g, "");
-  let name = cleaned || "download";
-  while (Buffer.byteLength(name, "utf8") > 255) name = name.slice(0, -1);
-  return name;
+  const maxBytes = WINDOWS_DEVICE.test(cleaned) ? 254 : 255;
+  let name = "";
+  let bytes = 0;
+  for (const character of cleaned || "download") {
+    const size = Buffer.byteLength(character, "utf8");
+    if (bytes + size > maxBytes) break;
+    name += character;
+    bytes += size;
+  }
+  name = name.replace(/[.\s]+$/g, "") || "download";
+  return WINDOWS_DEVICE.test(name) ? `_${name}` : name;
 }
 
 /** Downloads land as `<dir>/<id>/<name>`: Chrome writes `<dir>/<guid>` (allowAndName) and the finished file moves. */
@@ -154,7 +164,7 @@ export class Downloads {
       rmSync(written, { force: true });
       return;
     }
-    const kept = this.list(download.owner ?? undefined).filter((entry) => entry.state === "completed" && entry.path);
+    const kept = this.list().filter((entry) => entry.owner === download.owner && entry.state === "completed" && entry.path);
     for (const evicted of kept.slice(0, Math.max(0, kept.length - this.#limits.perOwner))) {
       rmSync(join(this.dir, evicted.id), { recursive: true, force: true });
       this.#byGuid.delete(evicted.guid);

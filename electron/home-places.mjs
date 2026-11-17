@@ -5,7 +5,15 @@
 // Admin's session's, read by main. Who can see a team's private chats is said by the team's own page, in the chat (T2's
 // TeamPrivateChatsLine), not here.
 import environments from "./environments.cjs";
-import { listedColors, ownCloudPlaces } from "./cloud-list.mjs";
+import { homeLook, listedColors, ownCloudPlaces } from "./cloud-list.mjs";
+
+/** My Cloud's saved place under the name the Admin lists it by now, so a rename there (Settings → Name and colour) reaches
+ * the switcher and the top bar too, not only at setup (cloud-home.mjs withCloudHome). Only the entry that is home. */
+function withHomeName(state, session) {
+  const look = homeLook(session), origin = environments.normalizeOrigin(session?.machine?.origin);
+  if (!look || !origin || !state.environments.some((entry) => entry.home === true && entry.origin === origin)) return state;
+  return environments.withEnvironmentLook(state, origin, { name: look.name });
+}
 
 const idOf = (value) => (typeof value === "string" && value ? value : null);
 /** What home-place.json may name: a team's Cloud, another Cloud of the person's own, a workspace of this computer's own
@@ -19,11 +27,13 @@ const KINDS = Object.freeze(["team", "cloud", "profile", "server"]);
  *   persist(state: unknown): void,
  *   makeId(): string,
  *   homeOrigin(): string | null,
+ *   synced?(state: any): void,
  *   log?(line: string): void,
  * }} deps `store`: this app's home-place.json (`{ team }` or `{ cloud }`); `environments()` / `persist()`: the saved
- * places and their file; `homeOrigin()`: My Cloud's verified origin, the place the window falls back to.
+ * places and their file; `homeOrigin()`: My Cloud's verified origin, the place the window falls back to. `synced(state)`: each sign-in state as it
+ * comes, after the places follow it (a team the person just joined opens from there: team-join-main.mjs).
  */
-export function createHomePlaces({ store, environments: read, persist, makeId, homeOrigin, log = () => {} }) {
+export function createHomePlaces({ store, environments: read, persist, makeId, homeOrigin, synced = () => {}, log = () => {} }) {
   let cached = null;
   const pending = [];
   /** One kind of place at most: the first of KINDS the record names. */
@@ -81,12 +91,16 @@ export function createHomePlaces({ store, environments: read, persist, makeId, h
      * (one it no longer lists is gone; a team with its name for the line), in the colours the Admin keeps for them;
      * anything else changes nothing. An Admin that lists no Clouds leaves the Cloud places as they were. */
     sync(state) {
+      try { places.follow(state); } finally { synced(state); }
+    },
+    follow(state) {
       if (state?.status !== "connected") return;
       const teams = Array.isArray(state.teams) ? state.teams : [];
       const { state: withTeams, left } = environments.reconcileTeams(read(), teams, makeId, homeOrigin());
       const clouds = Array.isArray(state.clouds) ? ownCloudPlaces(state.clouds) : null;
       const owned = environments.reconcileOwnClouds(withTeams, clouds, makeId, homeOrigin());
-      const next = clouds ? environments.withListedColors(owned, listedColors(state.clouds), homeOrigin()) : owned;
+      const coloured = clouds ? environments.withListedColors(owned, listedColors(state.clouds), homeOrigin()) : owned;
+      const next = withHomeName(coloured, state);
       if (next !== read()) persist(next);
       for (const name of left) places.left(name);
       if (current().team && !teams.some((team) => team?.id === current().team)) places.remember(null);

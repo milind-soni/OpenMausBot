@@ -53,9 +53,10 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
     groupByThread: (threadId: string) => groups.find((group) => group.threadId === threadId),
     tasks: (botId: string) => bots.find((bot) => bot.id === botId)?.tasks ?? [],
     taskByThread: (botId: string, threadId: string) => bots.find((bot) => bot.id === botId)?.tasks.find((task) => task.threadId === threadId),
-    createTask: (botId: string, title: string) => {
+    createTask: (botId: string, title: string, ...rest: unknown[]) => {
       const task = { threadId: `made-${++made}`, title };
       bots.find((bot) => bot.id === botId)!.tasks.push(task);
+      (rest[6] as ((made: { threadId: string }) => void) | undefined)?.(task);
       return task;
     },
     appendMessage: (threadId: string, message: Omit<Message, "id" | "at">) => {

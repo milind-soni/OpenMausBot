@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  botsMissingConnectedApps,
   botsWithLimitedServiceTools,
-  hasUsableConnectedApps,
   connectorSetupNotice,
   disconnectAccountConfirmation,
 } from "./PluginsPanel";
@@ -60,43 +58,6 @@ describe("bots whose connected-app tools are limited by grants", () => {
       bot("grok", { ...grant, modelSelection: { instanceId: "grok" } as Bot["modelSelection"] }),
     ];
     expect(botsWithLimitedServiceTools(bots, instances, "gmail")).toEqual([]);
-  });
-});
-
-describe("connected apps a bot cannot see", () => {
-  const instances = [engine("claude", true), engine("grok", false)];
-
-  it("only offers grants after catalog and inventory confirm a usable account", () => {
-    const active = { calendar: { connected: true, pending: false, status: "ACTIVE" } };
-    expect(hasUsableConnectedApps(true, "ready", false, active)).toBe(true);
-    expect(hasUsableConnectedApps(false, "ready", false, active)).toBe(false);
-    expect(hasUsableConnectedApps(true, "loading", false, active)).toBe(false);
-    expect(hasUsableConnectedApps(true, "error", false, active)).toBe(false);
-    expect(hasUsableConnectedApps(true, "ready", true, active)).toBe(false);
-    expect(hasUsableConnectedApps(true, "ready", false, { calendar: { connected: false, pending: false, status: "EXPIRED" } })).toBe(false);
-  });
-
-  it("names the bots whose own grant is off, and only those", () => {
-    const bots = [
-      bot("allowed"),
-      bot("off", { composio: false }),
-      bot("also-off", { composio: false }),
-    ];
-    expect(botsMissingConnectedApps(bots, instances).map((b) => b.id)).toEqual(["off", "also-off"]);
-  });
-
-  it("treats an absent grant as allowed, the way every turn does", () => {
-    expect(botsMissingConnectedApps([bot("fresh"), bot("explicit", { composio: true })], instances)).toEqual([]);
-  });
-
-  it("leaves out a bot whose engine could never mount the tools", () => {
-    const bots = [bot("grok-bot", { composio: false, modelSelection: { instanceId: "grok" } as Bot["modelSelection"] })];
-    expect(botsMissingConnectedApps(bots, instances)).toEqual([]);
-    expect(botsMissingConnectedApps([bot("orphan", { composio: false, modelSelection: { instanceId: "gone" } as Bot["modelSelection"] })], instances)).toEqual([]);
-  });
-
-  it("leaves out hidden bots, which the person cannot act on from here", () => {
-    expect(botsMissingConnectedApps([bot("ghost", { composio: false, hidden: true })], instances)).toEqual([]);
   });
 });
 

@@ -62,7 +62,7 @@ describe("remembering exact command approvals", () => {
     const result = view();
     expect(result.html).toContain("Always allow this command");
     expect(result.html).toContain("/work/project");
-    expect(result.html).not.toContain("Always allow this session");
+    expect(result.html).not.toContain("Allow for this session");
     result.buttons.find((button) => button.props["aria-label"] === "Always allow this command")!.props.onClick!();
     expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       type: "decideRequest", threadId: "thread-1", requestId: "request-1", behavior: "allow", rememberCommand: true,
@@ -84,15 +84,32 @@ describe("remembering exact command approvals", () => {
     fixture.admin = admin;
     const result = view();
     expect(result.html).not.toContain("Always allow this command");
-    expect(result.html).toContain("Always allow this session");
+    expect(result.html).toContain("Allow for this session");
     expect(result.html).toContain("Allow once");
   });
 
   it("preserves session approval for requests without an exact command", () => {
-    view({ commandAllowlist: undefined }).buttons.find((button) => button.props["aria-label"] === "Always allow this session")!.props.onClick!();
+    view({ commandAllowlist: undefined }).buttons.find((button) => button.props["aria-label"] === "Allow for this session")!.props.onClick!();
     expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       behavior: "allow", always: true, rememberCommand: undefined,
     }));
+  });
+
+  it("says Always allow only when the grant is saved, and names the session when it lasts no longer than that", () => {
+    const quiet = (extra: Parameters<typeof view>[0]) => view(extra).buttons.find((button) => button.props.onClick && !["Allow once", "Deny", "Cancel turn"].includes(String(button.props.children)))!;
+    const saved = quiet({ commandAllowlist: undefined, allowKey: "provider-tool:claude:linear:list_issues:0123456789abcdef" });
+    expect(saved.props.children).toBe("Always allow");
+    const command = quiet({});
+    expect(command.props.children).toBe("Always allow");
+    expect(command.props["aria-label"]).toBe("Always allow this command");
+    const session = view({ commandAllowlist: undefined });
+    const button = quiet({ commandAllowlist: undefined });
+    expect(button.props.children).toBe("Allow for this session");
+    expect(button.props["aria-label"]).toBe("Allow for this session");
+    expect(session.html).not.toContain("Always allow");
+    expect(session.html).toContain("until the session ends");
+    button.props.onClick!();
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ behavior: "allow", always: true, alwaysAllow: undefined, rememberCommand: undefined }));
   });
 
   it("keeps peer grants separate from provider command rules", () => {

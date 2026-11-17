@@ -288,7 +288,7 @@ describe("OpenRouter failures in plain words", () => {
       await recorder.until((event) => event.type === "turn.completed" && event.threadId === "free");
       expect(errorFor("paid")).toBe(OPENROUTER_FAILURES.credits);
       expect(errorFor("free")).toBe(OPENROUTER_FAILURES.freeLimit);
-      expect(bodies.map((body) => body.model)).toEqual(["deepseek/deepseek-v4.1-flash-1017", PREFERRED]);
+      expect(bodies.map((body) => body.model)).toEqual(["deepseek/deepseek-v4.1-flash-1017", PREFERRED, PREFERRED, PREFERRED]);
     } finally {
       recorder.stop();
       await instance.dispose();

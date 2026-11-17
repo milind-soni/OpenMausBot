@@ -54,6 +54,15 @@ export function CompactionChip({ message }: { message: Message }) {
       <p className="mt-1">{t("chat.engineCompactionHint")}</p>
     </div>
   ) : null;
+  if (message.compaction.fresh) {
+    return (
+      <div role="separator" data-testid="fresh-start-divider" className="flex w-full items-center gap-3 py-1 text-[12px] text-ink-secondary">
+        <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
+        <span className="text-center"><span className="font-medium">{t("chat.startFresh.divider")}</span> · {t("chat.startFresh.dividerHint")}</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
+      </div>
+    );
+  }
   const excerpts = message.compaction.summary.startsWith(EXCERPT_SUMMARY_HEADER);
   return (
     <details className={COMPACTION_CHIP} data-testid="compaction-chip">

@@ -30,6 +30,12 @@ export type DeviceRoutes = "any" | "local";
 
 export type PublicDevice = Omit<DeviceRecord, "tokenHash">;
 
+/** A refused `POST /api/pair`: `code` is one of the phone protocol's PairingErrorCode values. */
+export interface PairingRefusal {
+  error: string;
+  code: "pairing_bad_request" | "pairing_not_open" | "pairing_too_many" | "pairing_code_wrong" | "pairing_device_limit" | "pairing_failed";
+}
+
 /** `token` rides in the QR, has enough entropy to stand alone and is never
  * persisted. `code` is six digits, so it lives two minutes and dies after a
  * few wrong guesses. Redeeming either burns both. */
@@ -115,6 +121,7 @@ export class DeviceRegistry {
   /** Paired in this run and not yet used; a restart forgets these, and such a device then stays until removed. */
   private unconfirmed = new Map<string, ReturnType<typeof setTimeout>>();
   private droppedListeners = new Set<(id: string) => void>();
+  private replacedListeners = new Set<(id: string) => void>();
   private window: PairingWindow | null = null;
   /** The window a renewal replaced: still valid until its own expiry, so a phone mid-scan never misses. */
   private previousWindow: PairingWindow | null = null;
@@ -271,13 +278,30 @@ export class DeviceRegistry {
     this.replayExpiryTimer = null;
   }
 
+  /** A device replaced by a re-pairing, after the save that removed it. */
+  onReplaced(listener: (id: string) => void): void {
+    this.replacedListeners.add(listener);
+  }
+
+  private deviceWithToken(token: unknown): DeviceRecord | undefined {
+    if (typeof token !== "string" || !token) return undefined;
+    const hash = sha256(token);
+    return this.devices.find((d) => sameDigest(d.tokenHash, hash));
+  }
+
   /** A client that supplies a request id may repeat the same redemption until
-   * the window's original expiry. There is no general token-read endpoint. */
+   * the window's original expiry. There is no general token-read endpoint.
+   *
+   * `replacesToken`: the token this phone already holds here. Its device is removed in the same save, so re-pairing
+   * never grows the list. Security: it acts only after a valid pairing credential, and only for a holder of that
+   * token, who could already use everything that device can; the new device starts with a fresh pairing's grants.
+   * An unknown token is ignored and the reply is the same either way. */
   redeem(
     credential: string,
     name: unknown,
     pairRequestId?: unknown,
-  ): { device: PublicDevice; token: string } | { error: string } {
+    replacesToken?: unknown,
+  ): { device: PublicDevice; token: string } | PairingRefusal {
     const presented = String(credential ?? "");
     const requestId =
       typeof pairRequestId === "string" && /^[A-Za-z0-9._-]{16,128}$/.test(pairRequestId)
@@ -296,19 +320,22 @@ export class DeviceRegistry {
 
     const windows = this.pairingWindows();
     const window = windows.find((candidate) => sameCredential(candidate.code, presented) || sameCredential(candidate.token, presented));
-    if (windows.length === 0) return { error: "no pairing is in progress — open Phone settings on your computer" };
+    if (windows.length === 0) return { error: "no pairing is in progress — open Phone settings on your computer", code: "pairing_not_open" };
     if (!window) {
       // Every open window pays for a wrong guess: without burning them, six digits is seconds of guessing.
       for (const open of windows) open.attemptsLeft -= 1;
       if (windows.some((open) => open.attemptsLeft <= 0)) {
         this.closePairing();
-        return { error: "too many incorrect codes — start pairing again" };
+        return { error: "too many incorrect codes — start pairing again", code: "pairing_too_many" };
       }
-      return { error: "that pairing credential is not right" };
+      return { error: "that pairing credential is not right", code: "pairing_code_wrong" };
     }
     // After the code check: a full fleet must not answer wrong guesses, which
     // would leak state and cost no attempts.
-    if (this.devices.length >= MAX_DEVICES) return { error: "too many paired devices — remove one first" };
+    const replaced = this.deviceWithToken(replacesToken);
+    if (this.devices.length - (replaced ? 1 : 0) >= MAX_DEVICES) {
+      return { error: "too many paired devices — remove an old phone on your computer first", code: "pairing_device_limit" };
+    }
     // Consume every open window without clearing a replay; `closePairing` clears both.
     this.window = null;
     this.previousWindow = null;
@@ -322,18 +349,25 @@ export class DeviceRegistry {
       lastSeenAt: Date.now(),
       cloudDesktopAccess: false,
       browserControlAccess: false,
-      routes: "any",
+      // The owner's restriction carries over; a grant never does.
+      routes: replaced?.routes ?? "any",
     };
-    this.devices.push(device);
+    const previous = this.devices;
+    this.devices = [...previous.filter((d) => d !== replaced), device];
     // Unlike lastSeenAt, a failed write rolls the registration back: a device
     // only in memory is paired until the next restart, then silently is not.
     try {
       this.persist();
     } catch (e) {
-      this.devices.pop();
-      return { error: `could not save the pairing: ${(e as Error).message}` };
+      this.devices = previous;
+      return { error: `could not save the pairing: ${(e as Error).message}`, code: "pairing_failed" };
+    }
+    if (replaced) {
+      this.lastSeenWrites.delete(replaced.id);
+      this.confirm(replaced.id);
     }
     this.changed();
+    if (replaced) for (const listener of this.replacedListeners) listener(replaced.id);
     const unconfirmed = setTimeout(() => {
       this.unconfirmed.delete(device.id);
       try {

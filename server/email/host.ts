@@ -18,6 +18,7 @@ import { EMAIL_CANT_SEND_PROMPT, EMAIL_CANT_SEND_TEXT, EMAIL_INSTRUCTIONS, EMAIL
 import { sendingProblem, type EmailService } from "./service.ts";
 import type { EmailAccount } from "./store.ts";
 import { EMAIL_TOOLS, emailError, emailText, emailToolCallProblem, isEmailRead, isEmailToolName, type EmailTool, type EmailToolResult } from "./tools.ts";
+import { serverTurnedOff } from "../drivers/agents-tool-groups.ts";
 
 export const EMAIL_INTERNAL_MCP_PATH = "/api/internal/email/mcp";
 
@@ -28,6 +29,7 @@ export interface EmailBot {
   composio?: boolean;
   connectorTools?: Record<string, ConnectorToolGrant>;
   connectorScopes?: ConnectorScopes;
+  toolsOff?: readonly string[];
 }
 
 export interface EmailHostDeps {
@@ -83,7 +85,8 @@ export function createEmailHost(deps: EmailHostDeps) {
   });
   const run = { listMailboxes, listMessages, readMessage, searchMessages, sendMessage, ...deps.run };
   const allowedHere = () => deps.appAllowed?.() ?? true;
-  const mounts = (bot: EmailBot) => allowedHere() && service.mounted() && emailAllowedFor(bot);
+  const shown = (bot: EmailBot) => emailAllowedFor(bot) && !serverTurnedOff(bot.toolsOff, "email");
+  const mounts = (bot: EmailBot) => allowedHere() && service.mounted() && shown(bot);
 
   function account(address: unknown): EmailAccount | EmailToolResult {
     const accounts = service.store.list();
@@ -107,21 +110,26 @@ export function createEmailHost(deps: EmailHostDeps) {
         let threading = {};
         if (args.reply_to_uid) {
           const original = await run.readMessage(mailbox, guard, { mailbox: box, uid: args.reply_to_uid });
-          if (original.messageId) threading = { inReplyTo: original.messageId };
+          // RFC 5322 section 3.6.4: keep the parent's ancestors, then append its own ID.
+          const ancestors = original.references ?? (original.inReplyTo && /^<[^<>\s]+>$/u.test(original.inReplyTo) ? [original.inReplyTo] : []);
+          const references = [...ancestors, ...(original.messageId ? [original.messageId] : [])];
+          threading = { ...(original.messageId ? { inReplyTo: original.messageId } : {}), ...(references.length ? { references: references.join(" ") } : {}) };
         }
-        return emailText({ account: from, ...await run.sendMessage(mailbox, guard, { to: args.to, subject: args.subject, text: args.text, ...pick(args, ["cc", "bcc"]), ...threading }) });
+        return emailText({ account: from, ...await run.sendMessage(mailbox, guard, { to: args.to, subject: args.subject, text: args.text, ...pick(args, ["cc", "bcc", "html", "inline_images"]), ...threading }) });
       }
     }
   }
 
   return {
     mounts,
+    /** A mailbox is connected here, so a bot can be given the Email tools. */
+    available: () => allowedHere() && service.mounted(),
     integration(bot: EmailBot, mint: () => string, harnessUrl: string): { command: string; args: string[]; env: Record<string, string> } | null {
       if (!mounts(bot)) return null;
       return { command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, EMAIL_MCP_SERVER], env: { ...AGENTS_NODE_FLAG, [harnessMcpTokenEnv("email")]: mint(), OMB_HARNESS_URL: harnessUrl } };
     },
     prompt(bot: EmailBot): string {
-      if (!allowedHere() || service.status().state === "unavailable" || !emailAllowedFor(bot)) return "";
+      if (!allowedHere() || service.status().state === "unavailable" || !shown(bot)) return "";
       if (!service.mounted()) return EMAIL_TO_CONNECT_PROMPT;
       const scopes = bot.connectorScopes ? { apps: { [EMAIL_SLUG]: bot.connectorScopes.apps[EMAIL_SLUG]! } } : undefined;
       const grant = bot.connectorTools?.[EMAIL_SLUG];

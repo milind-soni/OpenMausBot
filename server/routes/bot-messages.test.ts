@@ -10,12 +10,14 @@ import { createAgentCard } from "../chat-widgets.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import { json, readBody } from "../harness/http.ts";
+import { createRunOwners } from "../host/run-owner.ts";
 import { promptWithReply } from "../replies.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { acceptedSendMatch, sendFingerprint, SendSequencer } from "../send-idempotency.ts";
 import { _queuedCount, drainSteeredMessages, queuedSteeredMessage, queueSteeredMessage } from "../steer-queue.ts";
 import { Store, type Message } from "../store.ts";
 import { typedWords } from "../typed-sends.ts";
+import { USER_ERROR } from "../user-errors.ts";
 import { createBotMessageRoutes, type BotMessageRouteDeps } from "./bot-messages.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -176,6 +178,68 @@ describe("editing a message with no AI", () => {
     const { store, threadId, edit } = await fixture({ registry: { get: () => undefined }, noAiRefusal: () => null });
     const sent = store.appendMessage(threadId, { role: "user", kind: "text", text: "Hello" });
     expect((await edit(sent.id, { threadId, text: "Hello again" })).body.error).toContain("is unavailable");
+  });
+});
+
+describe("running a request again where several people write", () => {
+  const PRIYA = "p_priyapriyapriyapriyapr", TOM = "p_tomtomtomtomtomtomtomt";
+  const team = (by: { person?: string; admin: boolean }, shared = true) => ({
+    runOwners: createRunOwners({ shared: () => shared, directRequest: () => undefined, roomRequestMessageId: () => undefined, isRoom: () => false,
+      messages: () => [], personName: () => undefined, language: () => undefined }),
+    runActor: () => by,
+  });
+  const asked = (store: Store, threadId: string) => store.appendMessage(threadId, { role: "user", kind: "text", text: "Draft the launch post", sender: { name: "Priya", id: PRIYA } });
+
+  it("lets the person who asked, and an admin, retry it", async () => {
+    for (const by of [{ person: PRIYA, admin: false }, { person: TOM, admin: true }]) {
+      const { store, threadId, state, edit } = await fixture(team(by));
+      const request = asked(store, threadId);
+      expect((await edit(request.id, { threadId, text: request.text })).status).toBe(202);
+      expect(state.started).toMatchObject([{ text: "Draft the launch post", opts: { editedMessageId: request.id } }]);
+    }
+  });
+
+  it("refuses another member who calls the route directly, with the same words or new ones", async () => {
+    const { store, threadId, state, edit } = await fixture(team({ person: TOM, admin: false }));
+    const request = asked(store, threadId);
+    const refusal = { status: 403, body: { error: "Only Priya or an admin can run this request again.", code: "retry_not_yours" } };
+    expect(await edit(request.id, { threadId, text: request.text })).toEqual(refusal);
+    expect(await edit(request.id, { threadId, text: "Draft something else" })).toEqual(refusal);
+    expect(state.started).toEqual([]);
+  });
+
+  it("lets anyone there retry a request no person wrote", async () => {
+    const { store, threadId, edit } = await fixture(team({ person: TOM, admin: false }));
+    const request = store.appendMessage(threadId, { role: "user", kind: "text", text: "From the API" });
+    expect((await edit(request.id, { threadId, text: request.text })).status).toBe(202);
+  });
+
+  it("decides by who wrote the request, not by who started the conversation, and after a restart cut the run off", async () => {
+    const startedByOther = { cloudThreadRefusal: () => "On this Cloud you can only change conversations you started." };
+    for (const [by, text] of [[PRIYA, "Draft the launch post"], [PRIYA, "Draft the launch note"]] as const) {
+      const { store, threadId, state, edit } = await fixture({ ...team({ person: by, admin: false }), ...startedByOther });
+      const request = asked(store, threadId);
+      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "turn interrupted — OpenMausBot restarted", ok: false } });
+      expect((await edit(request.id, { threadId, text })).status).toBe(202);
+      expect(state.started).toMatchObject([{ text, opts: { editedMessageId: request.id } }]);
+    }
+    const { store, threadId, edit } = await fixture({ ...team({ person: TOM, admin: false }), ...startedByOther });
+    expect((await edit(asked(store, threadId).id, { threadId, text: "Draft the launch post" })).body).toEqual({ error: "Only Priya or an admin can run this request again.", code: "retry_not_yours" });
+  });
+
+  it("leaves a private chat to whoever started it", async () => {
+    const { store, threadId, state, edit } = await fixture({ ...team({ person: PRIYA, admin: false }, false), cloudThreadRefusal: () => "On this Cloud you can only change conversations you started." });
+    const request = asked(store, threadId);
+    expect(await edit(request.id, { threadId, text: request.text })).toEqual({ status: 403, body: { error: "On this Cloud you can only change conversations you started." } });
+    expect(state.started).toEqual([]);
+  });
+
+  it("changes nothing in a private chat or on a personal install", async () => {
+    for (const over of [team({ person: TOM, admin: false }, false), {}]) {
+      const { store, threadId, edit } = await fixture(over);
+      const request = asked(store, threadId);
+      expect((await edit(request.id, { threadId, text: request.text })).status).toBe(202);
+    }
   });
 });
 
@@ -481,6 +545,15 @@ describe("POST /api/bots/:id/messages with widgetAction", () => {
     expect((await post({ threadId, text: "Hold off until Monday", replyToId: widgetId })).status).toBe(202);
     expect(sent().map((message) => [message.text, message.replyToId])).toEqual([["Hello", undefined], ["Hold off until Monday", widgetId]]);
     expect(state.accepted.map((input) => input.replyTo?.id)).toEqual([undefined, widgetId]);
+  });
+});
+
+describe("a typed answer to a card the server refuses", () => {
+  it("returns the refusal with its language-pack key, like a pressed card's", async () => {
+    const error = USER_ERROR["serverError.card.cloudOwnerOnly"];
+    const { threadId, post, sent } = await fixture({ typedCardAnswer: async () => ({ status: 403, error }) });
+    expect(await post({ threadId, text: "allow" })).toEqual({ status: 403, body: { error, errorKey: "serverError.card.cloudOwnerOnly" } });
+    expect(sent()).toEqual([]);
   });
 });
 

@@ -12,6 +12,7 @@ import { automationsFrom, automationStatus } from "@/lib/automations";
 import type { RoutineRun } from "@/lib/routines";
 import { api, useStore } from "@/state/store";
 import { useRoutineRunsFrom } from "@/state/older-routine-runs";
+import { schedulableBots, useTeamPeople } from "@/state/team-people";
 import { CalendarGrid, EventDetails, EventEditor, QuickComposer, type CalendarEventItem, type EventKind, type EventSeed } from "../RoutineCalendarPage";
 import type { ResetDrop } from "../routines/LimitResetMarkers";
 
@@ -34,6 +35,7 @@ export function AutomationsCalendar({ botFilter, department = "all", selectedAut
   const [selected, setSelected] = useState<CalendarEventItem | null>(null);
   const [error, setError] = useState("");
   const visibleBots = state.bots.filter((bot) => !bot.hidden);
+  const routineBots = schedulableBots(visibleBots, useTeamPeople(), editor?.botIds[0]);
   const rangeStart = days === 7 ? startOfWeek(anchor) : startOfDay(anchor);
   const rangeEnd = addDays(rangeStart, days);
   useRoutineRunsFrom(rangeStart);
@@ -157,8 +159,8 @@ export function AutomationsCalendar({ botFilter, department = "all", selectedAut
           </div>
         )}
       </div>
-      {quick && <><div className="fixed inset-0 z-40 bg-black/25" onMouseDown={() => setQuick(null)} /><QuickComposer seed={quick} bots={visibleBots} routinesOnly={routinesOnly} onClose={() => setQuick(null)} onMore={(seed) => { setQuick(null); setEditor(seed); }} onSavedRoutine={(routine) => dispatch({ type: "routinePatched", routine })} onSavedCall={upsertCall} /></>}
-      {editor && <EventEditor seed={editor} bots={visibleBots} routinesOnly={routinesOnly} onClose={() => setEditor(null)} onSavedCall={upsertCall} />}
+      {quick && <><div className="fixed inset-0 z-40 bg-black/25" onMouseDown={() => setQuick(null)} /><QuickComposer seed={quick} bots={routineBots} routinesOnly={routinesOnly} onClose={() => setQuick(null)} onMore={(seed) => { setQuick(null); setEditor(seed); }} onSavedRoutine={(routine) => dispatch({ type: "routinePatched", routine })} onSavedCall={upsertCall} /></>}
+      {editor && <EventEditor seed={editor} bots={routineBots} routinesOnly={routinesOnly} onClose={() => setEditor(null)} onSavedCall={upsertCall} />}
     </div>
   );
 }

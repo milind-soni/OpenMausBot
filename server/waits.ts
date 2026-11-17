@@ -21,7 +21,7 @@ import {
   type ProcessEntry,
 } from "./wait-probes.ts";
 
-export const WAIT_LIMITS = { perBot: 10, total: 50 } as const;
+export const WAIT_LIMITS = { perBot: 10, total: 50, perAssignment: 1 } as const;
 export const WAIT_TICK_MS = 5_000, URL_CHECK_MS = 60_000, URL_BACKOFF_MAX_MS = 15 * 60_000;
 /** A sleeping Cloud wakes this often while a wait is open, to check it; checks pause in between. */
 export const WAIT_WAKE_MS = 30 * 60_000;
@@ -43,15 +43,20 @@ export type WaitCondition =
 export interface WaitNotice { status: "fired" | "expired" | "stopped"; text: string }
 export interface WaitRecord {
   id: string; botId: string; threadId: string; label: string; condition: WaitCondition; followUp?: string;
+  assignmentId?: string;
   createdAt: number; expiresAt: number; nextCheckAt: number; errors: number; cardMessageId?: string;
   /** Decided and saved first; posted once its chat is free. */
   ending?: WaitNotice;
 }
-export interface NewWait { botId: string; threadId: string; label: string; condition: NewWaitCondition; followUp?: string; hours?: number }
+export interface NewWait {
+  botId: string; threadId: string; label: string; condition: NewWaitCondition; followUp?: string; hours?: number; assignmentId?: string;
+  /** Asked again right before the wait is stored, after the checks `create` awaits; a refusal text stores nothing, so work stopped meanwhile leaves no wait behind. Never saved. */
+  stillAllowed?: () => string | null;
+}
 export type CreateWaitResult =
   | { state: "created"; wait: WaitRecord; note?: string }
   | { state: "already"; text: string }
-  | { state: "refused"; status: 400 | 409; error: string };
+  | { state: "refused"; status: 400 | 403 | 409; error: string };
 export interface WaitProbes { page(url: string): Promise<PageResult>; stamp(path: string): Promise<FileStamp | null>; processes(): Promise<ProcessEntry[]> }
 export interface WaitManagerOptions {
   file?: string; now?: () => number; probes?: Partial<WaitProbes>;
@@ -81,6 +86,7 @@ const recordSchema = z.object({
   label: z.string(),
   condition: conditionSchema,
   followUp: z.string().optional(),
+  assignmentId: z.string().optional(),
   createdAt: z.number(),
   expiresAt: z.number(),
   nextCheckAt: z.number(),
@@ -173,6 +179,11 @@ export class WaitManager {
     }
   }
 
+  /**
+   * Makes a wait once its first check shows the condition is not met yet. Limits are checked before
+   * and after that check, and `input.stillAllowed` last of all, since the check can take seconds and
+   * the work that asked for the wait can end meanwhile.
+   */
   async create(input: NewWait): Promise<CreateWaitResult> {
     const full = this.limitRefusal(input);
     if (full) return full;
@@ -184,6 +195,8 @@ export class WaitManager {
     if (verdict.met) return { state: "already", text: `${describeCondition(condition)} already. Nothing was set up: tell the person now.` };
     const crowded = this.limitRefusal(input);
     if (crowded) return crowded;
+    const ended = input.stillAllowed?.();
+    if (ended) return { state: "refused", status: 403, error: ended };
     const now = this.now();
     const wait: WaitRecord = {
       id: randomUUID(),
@@ -192,6 +205,7 @@ export class WaitManager {
       label: input.label,
       condition,
       ...(input.followUp ? { followUp: input.followUp } : {}),
+      ...(input.assignmentId ? { assignmentId: input.assignmentId } : {}),
       createdAt: now,
       expiresAt: now + (input.hours ?? WAIT_HOURS.default) * 3_600_000,
       nextCheckAt: now + interval(condition.kind, 0),
@@ -212,7 +226,11 @@ export class WaitManager {
     return { state: "created", wait: cloneWait(wait), ...(note ? { note } : {}) };
   }
 
-  private limitRefusal({ botId, threadId }: Pick<NewWait, "botId" | "threadId">): CreateWaitResult | null {
+  private limitRefusal({ botId, threadId, assignmentId }: Pick<NewWait, "botId" | "threadId" | "assignmentId">): CreateWaitResult | null {
+    const handed = assignmentId ? this.waits.filter((w) => w.assignmentId === assignmentId && !w.ending) : [];
+    if (handed.length >= WAIT_LIMITS.perAssignment) {
+      return { state: "refused", status: 409, error: `Work handed to you keeps one wait at a time, and this work already has one:\n${waitList(handed)}\nFinish this turn; it tells you here when it happens.` };
+    }
     const mine = this.waits.filter((w) => w.botId === botId && !w.ending);
     if (mine.length >= WAIT_LIMITS.perBot) {
       const here = mine.filter((w) => w.threadId === threadId), others = mine.length - here.length;

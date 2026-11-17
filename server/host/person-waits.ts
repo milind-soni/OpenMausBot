@@ -2,7 +2,7 @@
 // The state follows the card rows, so every way a card opens or closes (saved, declined, replaced, stopped, answered in
 // the chat, a restart, another branch) reads the same. A card a person isn't looking at reaches them by notification,
 // and a turn that ends resting on them says so instead of "finished".
-import { openPersonWait, personWait, restingOnPerson, type PersonWait } from "../../shared/person-wait.ts";
+import { openPersonWait, personWait, personWrote, restingOnPerson, type PersonWait } from "../../shared/person-wait.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { NEEDS_YOU_WINDOW_MS } from "../../shared/today.ts";
 import { buildNotification } from "../notify.ts";
@@ -30,7 +30,7 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
 
   /** What this conversation rests on: a card older than the Needs you window has been left, and no longer asks. */
   const restsOn = (threadId: string): PersonWait | undefined => {
-    const wait = restingOnPerson(store.activePath(threadId));
+    const wait = restingOnPerson(store.activePath(threadId), Boolean(store.groupByThread(threadId)));
     return wait && now() - wait.at < NEEDS_YOU_WINDOW_MS ? wait : undefined;
   };
 
@@ -82,7 +82,10 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
 
   store.onChange((change) => {
     if (change.type === "message" || change.type === "message.patch") {
-      if (!CARD_ROWS.has(change.message.kind)) return;
+      if (!CARD_ROWS.has(change.message.kind)) {
+        if (change.type === "message" && withCards.has(change.threadId) && personWrote(change.message)) refresh(change.threadId);
+        return;
+      }
       withCards.add(change.threadId);
       refresh(change.threadId);
       // A proposal applied at once (Full access) settles in the same tick it is added: only one left open asks.

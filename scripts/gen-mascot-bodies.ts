@@ -1,5 +1,5 @@
 /**
- * Bakes the mascot body catalog into `shared/mascot-bodies.ts`. Run with `pnpm gen:bodies`.
+ * Bakes the mascot body catalog into `packages/phone-protocol/src/mascot-bodies.ts`. Run with `pnpm gen:bodies`.
  *
  * Fails with a non-zero exit if any expression would clip at any body's final anchor at
  * any aim: fix the geometry, never the check.
@@ -497,7 +497,7 @@ function main(): void {
     )
   }
 
-  const out = fileURLToPath(new URL("../shared/mascot-bodies.ts", import.meta.url))
+  const out = fileURLToPath(new URL("../packages/phone-protocol/src/mascot-bodies.ts", import.meta.url))
   writeFileSync(out, emit(baked))
   console.log(`wrote ${out}`)
 

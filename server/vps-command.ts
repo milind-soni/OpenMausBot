@@ -43,9 +43,10 @@ function tailCollector() {
 
 export async function defaultRunner(args: string[], options: VpsCommandOptions = {}): Promise<{ stdout: string; stderr: string }> {
   const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
-  const deadline = Date.now() + (options.timeoutMs ?? 120_000);
+  let deadline = Date.now() + (options.timeoutMs ?? 120_000);
   const destination = args[0] === "-H" && args[1]?.startsWith("ssh://") ? args[1].slice(6) : null;
-  if (destination) await ensureVpsSshMaster(ssh, destination, Math.min(30_000, deadline - Date.now()));
+  // Time spent waking a paused host does not count against the command's own timeout.
+  if (destination) deadline += await ensureVpsSshMaster(ssh, destination, Math.min(30_000, deadline - Date.now()));
   if (Date.now() >= deadline) throw new Error("Docker-over-SSH command timed out");
   return new Promise((resolve, reject) => {
     // Docker's SSH transport runs the first `ssh` on PATH: the app's shim, which shares one connection.

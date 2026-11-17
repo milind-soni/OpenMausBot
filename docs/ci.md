@@ -1,8 +1,10 @@
 # CI job selection
 
 Every PR still runs the workflow, its `static` job and the `CI` gate: locale
-validation, lint, the CI-selection tests, the verification-documentation
-checks and the source guards always run. Selection never skips the entire
+validation, lint, the announcements file's check
+(`scripts/check-announcements.mjs`, which installs download from main within
+the hour, so it fails on any invalid edit), the CI-selection tests, the
+verification-documentation checks and the source guards always run. Selection never skips the entire
 workflow. The source guards are the tests that only read the source (the
 vocabulary and locale checks, the size and route ratchets, and the like): they
 take seconds, and they run in `static` as well as in the shards, so a change
@@ -22,7 +24,11 @@ too) into areas, and runs only the jobs some area can affect:
 | Windows computer control | the `electron/` modules that start computer control and lend a PC's screen: `cua`, `cua-failure`, `cua-connection`, `capabilities`, `screen-status`, `shared-cua-connection`, `shared-computer-access`, `lent-screen-tools`, `lent-screen-failures`, `paced-typing` | the same as server, and Windows CUA |
 | desktop | the rest of `electron/`, `build/`, `electron-builder.yml`, `index.html` | the same as server |
 | control plane | `cloudflare/control-plane/` | the control-plane job |
+| announcements | `announcements/`: the cards file, its JSON Schema and pictures | nothing beyond `static`, which validates them |
 | everything | anything else: `.github/` workflows, `package.json`, the lockfile and workspace, tsconfig, vite and vitest config, `third_party/`, `scripts/` code, unknown paths | every job |
+
+`static` also validates `server/model-manifest/model-manifest.json` with `scripts/check-model-manifest.mjs`: installs
+download that file from main within hours of a change, so it is checked on every event and fails on any invalid edit.
 
 The build is the `build` job: typecheck, Electron syntax check and UI build,
 about three minutes, beside the shards rather than ahead of them. Several areas
@@ -102,10 +108,12 @@ builds the matrix.
 `OMB_VITEST_WORKERS` in `vite.config.ts`), one for each of the runner's vCPUs.
 Most of a shard's time is waiting on real servers and fake engines: one file at
 a time it took 16 minutes with the machine 70% idle, and four at a time 5.
-Windows and macOS shards, and every local run, still run one file at a time. So
+A Windows shard runs two files at a time: one at a time it took 9 to 14
+minutes and was the last job of every run that had one. macOS shards, and
+every local run, still run one file at a time. So
 that files side by side never share a port, each worker picks from its own
 (`server/testing/worker-port.ts`); a test that picks a port some other way can
-meet another file's. Four files share the runner's CPU, so test and hook
+meet another file's. Files share the runner's CPU, so test and hook
 timeouts double there, as on Windows (`server/testing/host-timeout.ts`).
 
 **Which files run where.** Linux runs every file. Most e2e files drive
@@ -158,6 +166,7 @@ For example, a full Windows shard 3/8 uses PowerShell syntax:
 ```powershell
 $env:OMB_VITEST_E2E = "host"
 $env:OMB_VITEST_SUBSET = ""
+$env:OMB_VITEST_WORKERS = "2"
 pnpm exec vitest run --shard=3/8
 ```
 

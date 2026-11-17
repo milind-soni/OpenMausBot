@@ -20,6 +20,35 @@ export const ROUTINE_LINE = {
   "routines.server.part.provider": "a temporary error",
   "routines.server.part.failed": "a failure",
   "routines.server.backupSignedOut": "Starting again on the backup AI: this bot's AI is signed out",
+  "routines.server.busyTooLong": "Did not run: the bot was busy for more than {minutes} minutes",
+  "routines.server.overLimit": "Stopped: this run ran longer than the {hours}-hour limit",
+  "routines.server.stopPending": "Its turn has not confirmed that it stopped. The next run waits for that, up to {minutes} minutes.",
+  "routines.server.stopUnconfirmed": "Its turn never confirmed that it stopped, so the next run started without that.",
+  "routines.server.skippedOne": "Skipped because {why}",
+  "routines.server.skippedMany": "Skipped {count} scheduled runs because {why}",
+  "routines.server.startSkippedOne": "Not run at this start because {why}",
+  "routines.server.startSkippedMany": "Not run at {count} starts because {why}",
+  "routines.server.part.stillWaiting": "the previous run of this routine is still waiting",
+  "routines.server.part.stillRunning": "the previous run of this routine is still running",
+  "routines.server.part.notStarted": "the previous run of this routine has not started yet",
+  "routines.server.part.computerNoStart": "its cloud desktop has not started, so its next tries are spaced out",
+  "routines.server.part.runsFailed": "its last runs failed, so its next tries are spaced out",
+  "routines.server.part.restartedSoon": "OpenMausBot started again soon after the start that last ran it",
+  "routines.server.capSkippedOne": "Skipped: {why} ({amount}) is reached. Runs start again after {resets}",
+  "routines.server.capSkippedMany": "Skipped {count} runs: {why} ({amount}) is reached. Runs start again after {resets}",
+  "routines.server.part.capServerDay": "the daily usage cap for all bots",
+  "routines.server.part.capServerMonth": "the monthly usage cap for all bots",
+  "routines.server.part.capBotDay": "this bot’s daily usage cap",
+  "routines.server.part.capBotMonth": "this bot’s monthly usage cap",
+  "routines.server.missedOne": "Missed because {why}",
+  "routines.server.missedMany": "Missed {count} scheduled runs because {why}",
+  "routines.server.missedTooLate": "Missed because {why} until more than {hours} hours after its time",
+  "routines.server.part.computerOff": "this computer was asleep or OpenMausBot was not running",
+  "routines.server.part.cloudDown": "this Cloud was asleep or restarting",
+  "routines.server.part.heldUp": "the scheduler was held up starting another run",
+  "routines.server.restored": "Not run again: this schedule was restored from a backup made before this run had its turn",
+  "routines.server.restoredMany": "Not run again: {count} scheduled runs from before this schedule was restored from a backup",
+  "routines.server.duplicate": "Not started: this scheduled run had already started once",
 } as const;
 
 export type RoutineLineKey = keyof typeof ROUTINE_LINE;
@@ -86,4 +115,28 @@ export function applyCheckResult(routine: RoutineTroubleCode & { checkTrouble?: 
   Object.assign(routine, result.wakeAt === undefined ? {} : { wakeAt: result.wakeAt },
     result.trouble ? { checkTrouble: result.trouble.slice(0, 300), ...(result.troubleCode ? { checkTroubleCode: result.troubleCode } : {}) } : {},
     result.trouble || result.run ? {} : { checkedAt: now });
+}
+
+const CLOSING_QUESTION = /^\s*needs input:/i;
+
+/** A run's reply cut to max characters for its stored output. A reply that ends on a NEEDS INPUT question (with at most
+ * a default: line after it) keeps that question at the end, whole when it fits and else cut on its own line, so a long
+ * reply still reads as waiting on the person. */
+export function clipRunOutput(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const lines = text.split(/\r?\n/);
+  const at = lines.findLastIndex((line) => CLOSING_QUESTION.test(line));
+  const after = at < 0 ? [] : lines.slice(at + 1).filter((line) => line.trim());
+  const closing = at >= 0 && (after.length === 0 || (after.length === 1 && /^default:/i.test(after[0]!.trim())));
+  if (!closing) return text.slice(0, max);
+  const tail = lines.slice(at).join("\n").trim();
+  if (tail.length > max) {
+    const question = lines[at]!.trim();
+    // A bare NEEDS INPUT: line asks through its default: line, so that line is kept (cut) with it.
+    // Blank lines between them and the default: line's own indent say nothing, so they go first; otherwise they could push it out.
+    if (!question.replace(CLOSING_QUESTION, "").trim()) return `${[question, ...after.map((line) => line.trim())].join("\n").slice(0, max - 1)}…`;
+    return question.length <= max ? question : `${question.slice(0, max - 1)}…`;
+  }
+  const room = max - tail.length - 3;
+  return room > 0 ? `${text.slice(0, room).trimEnd()}\n…\n${tail}` : tail;
 }

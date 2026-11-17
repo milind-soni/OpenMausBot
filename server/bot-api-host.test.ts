@@ -8,6 +8,8 @@ import { BotApiManager } from "./bot-api.ts";
 import { BOT_API_DEFAULT_WAIT_MS, createBotApiHost, type BotApiHostDeps, type BotApiTurnOptions } from "./bot-api-host.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message } from "./store.ts";
+import { assertWithinBudget, resetSpendCacheForTests } from "./spend.ts";
+import { appendUsage } from "./usage-ledger.ts";
 import { createWebhookIngressHandler } from "./webhook-ingress.ts";
 import type { WebhookManager } from "./webhooks.ts";
 
@@ -18,7 +20,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-type Task = { threadId: string; title: string; busy: boolean; botApi?: true; approvalMode?: string };
+type Task = { threadId: string; title: string; busy: boolean; botApi?: true; botApiAsOwner?: true; outside?: true; approvalMode?: string };
 
 /** The slice of the store the host reads and writes, in memory. */
 function fakeStore() {
@@ -65,7 +67,7 @@ const replies = (text: string): Script => (fake, _botId, _prompt, opts) => {
   }, 30);
 };
 
-async function harness(script: Script, options: { waitMs?: number; full?: boolean; included?: () => boolean; noConfine?: boolean } = {}) {
+async function harness(script: Script, options: { waitMs?: number; full?: boolean; included?: () => boolean; noConfine?: boolean; owner?: { available(): boolean } } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-bot-api-host-"));
   dirs.push(dir);
   const fake = fakeStore();
@@ -92,6 +94,7 @@ async function harness(script: Script, options: { waitMs?: number; full?: boolea
     hooksBaseUrl: () => "https://bots.example.test",
     manageRefusal: (auth) => (auth.scopes.includes("admin") ? null : "Only people who can edit Scout can change this."),
     record: (_auth, row) => recorded.push(row),
+    ...(options.owner ? { actsAsOwner: { available: () => options.owner!.available(), refusal: (auth: RequestAuth) => !options.owner!.available() ? "Not on this server." : auth.scopes.includes("admin") ? null : "Only the owner." } } : {}),
   });
   const webhooks = { authorize: () => false, recordUnauthorized: () => null } as unknown as WebhookManager;
   const handle = createWebhookIngressHandler(webhooks, undefined, host.door);
@@ -311,6 +314,30 @@ describe("the Bot API door on the webhook receiver", () => {
     expect(await refused.json()).toEqual({ error: "This Cloud moved" });
   });
 
+  it("answers the licensed monthly spend limit with 429 and a Retry-After up to the next UTC month", async () => {
+    const fake = fakeStore();
+    const dir = mkdtempSync(join(tmpdir(), "omb-bot-api-budget-"));
+    dirs.push(dir);
+    resetSpendCacheForTests();
+    await appendUsage(dir, { botId: "b1", botName: "b1", threadId: "t", instanceId: "claude", driverKind: "claudeAgent", model: "m", input: 1, output: 1, costUsd: 2, trigger: { kind: "owner" } });
+    const host = createBotApiHost({
+      store: fake.store, manager: new BotApiManager({ file: join(dir, "bot-api.json") }), waitMs: 5_000,
+      startTurn: async () => assertWithinBudget({ budgets: { monthlyUsd: 1 } }, dir, new Date(), () => true),
+      threadBusy: () => false, canStart: () => true, canConfine: () => true, hooksBaseUrl: () => "https://x", manageRefusal: () => null,
+    });
+    const key = host.manager.enable("b1").key;
+    const server = createServer((req, res) => { void createWebhookIngressHandler({} as WebhookManager, undefined, host.door)(req, res); });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const answer = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/hooks/api/bots/b1/messages`, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": "application/json" }, body: JSON.stringify({ message: "Hi" }) });
+    expect(answer.status).toBe(429);
+    const now = new Date(), next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+    const retryAfter = Number(answer.headers.get("retry-after"));
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(Math.abs(retryAfter - (next - Date.now()) / 1000)).toBeLessThan(60);
+    resetSpendCacheForTests();
+  });
+
   it("shows what callers sent only to those who manage the key", async () => {
     const h = await harness(replies("ok"));
     const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
@@ -421,5 +448,100 @@ describe("the Bot API door on the webhook receiver", () => {
     h.fake.deleted("b1");
     expect(h.manager.enabled("b1")).toBe(false);
     expect(h.manager.listAttempts("b1")).toEqual([]);
+  });
+});
+
+describe("a key that acts as the owner", () => {
+  it("is off by default; the owner turns it on where the server allows it, and the threads it opens run at the bot's level as the owner's work", async () => {
+    let allowed = true;
+    const h = await harness(replies("Done"), { owner: { available: () => allowed } });
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    expect((await h.app("GET", "/api/bots/b1/bot-api")).body).toMatchObject({ actsAsOwner: false, mayActAsOwner: true });
+
+    // Before it is turned on, a call is fenced as always.
+    const fenced = await h.call("b1", key, { message: "Before" });
+    const fencedThread = fenced.body.thread as string;
+    expect(h.fake.bots.get("b1")!.tasks[0]).toMatchObject({ approvalMode: "ask", botApi: true, outside: true });
+    expect(h.fake.bots.get("b1")!.tasks[0]!.botApiAsOwner).toBeUndefined();
+
+    // Only the owner turns it on, and only where the server allows it.
+    expect((await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: true }, false)).status).toBe(403);
+    allowed = false;
+    expect((await h.app("GET", "/api/bots/b1/bot-api")).body).toMatchObject({ actsAsOwner: false, mayActAsOwner: false });
+    expect((await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: true })).status).toBe(403);
+    allowed = true;
+    const on = await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: true });
+    expect([on.status, on.body.actsAsOwner]).toEqual([200, true]);
+    expect(JSON.stringify(on.body)).not.toContain(key);
+
+    // A new thread runs at the bot's own level with its saved allowances, is not outside, and its words are the owner's request.
+    const owned = await h.call("b1", key, { message: "Tidy the build folder" });
+    expect(owned.status).toBe(200);
+    const ownedThread = owned.body.thread as string;
+    const task = h.fake.bots.get("b1")!.tasks.find((one) => one.threadId === ownedThread)!;
+    expect(task).toMatchObject({ botApi: true, botApiAsOwner: true });
+    expect(task.approvalMode).toBeUndefined();
+    expect(task.outside).toBeUndefined();
+    const turn = h.turns.at(-1)!;
+    expect(turn.opts).toMatchObject({ automationSource: "api", unattended: true });
+    expect(turn.opts.userMessage).toMatchObject({ via: "api", apiAsOwner: true });
+    expect(turn.prompt).toContain("on their behalf at your level");
+    expect(turn.prompt).not.toContain("[UNTRUSTED BOT API MESSAGE]");
+    expect(h.manager.listAttempts("b1").at(-1)).toMatchObject({ outcome: "accepted", asOwner: true });
+
+    // A thread keeps what it was opened as: the fenced one stays fenced.
+    expect((await h.call("b1", key, { message: "Again", thread: fencedThread })).status).toBe(200);
+    expect(h.turns.at(-1)!.prompt).toContain("[UNTRUSTED BOT API MESSAGE]");
+    expect(h.turns.at(-1)!.opts.userMessage.apiAsOwner).toBeUndefined();
+
+    // Once the server no longer allows it, the key acts as nobody: it can't go on in the owner's thread, and new threads are fenced.
+    allowed = false;
+    expect((await h.app("GET", "/api/bots/b1/bot-api")).body.actsAsOwner).toBe(false);
+    const refused = await h.call("b1", key, { message: "More", thread: ownedThread });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error).toContain("no longer does");
+    expect((await h.call("b1", key, { message: "New" })).status).toBe(200);
+    expect(h.fake.bots.get("b1")!.tasks.at(-1)).toMatchObject({ approvalMode: "ask", outside: true });
+    allowed = true;
+
+    // A new key starts without it, and switching it off is recorded too: by hand, by a new key, or by switching the API off.
+    expect((await h.app("POST", "/api/bots/b1/bot-api/new-key")).body.actsAsOwner).toBe(false);
+    await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: true });
+    expect((await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: false })).body.actsAsOwner).toBe(false);
+    await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: true });
+    expect((await h.app("POST", "/api/bots/b1/bot-api", { enabled: false })).body.actsAsOwner).toBe(false);
+    // A key that never had the mark: a new key and switching off add no such row.
+    await h.app("POST", "/api/bots/b1/bot-api", { enabled: true });
+    await h.app("POST", "/api/bots/b1/bot-api/new-key");
+    await h.app("POST", "/api/bots/b1/bot-api", { enabled: false });
+    expect(h.recorded.map((row) => (row as { action: string }).action)).toEqual([
+      "bot-api.on", "bot-api.acts-as-owner.on",
+      "bot-api.new-key", "bot-api.acts-as-owner.off",
+      "bot-api.acts-as-owner.on", "bot-api.acts-as-owner.off",
+      "bot-api.acts-as-owner.on", "bot-api.off", "bot-api.acts-as-owner.off",
+      "bot-api.on", "bot-api.new-key", "bot-api.off",
+    ]);
+  });
+
+  it("takes a call on a bot whose AI can't be confined only while the key acts as the owner", async () => {
+    const h = await harness(replies("Done"), { noConfine: true, owner: { available: () => true } });
+    const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+    expect((await h.call("b1", key, { message: "Hi" })).status).toBe(403);
+    await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: true });
+    expect((await h.app("GET", "/api/bots/b1/bot-api")).body.canTakeCalls).toBe(true);
+    expect((await h.call("b1", key, { message: "Hi" })).status).toBe(200);
+  });
+
+  it("is never available where the host does not offer it, and a key on its own does not make it so", async () => {
+    const h = await harness(replies("Done"));
+    await h.app("POST", "/api/bots/b1/bot-api", { enabled: true });
+    expect((await h.app("GET", "/api/bots/b1/bot-api")).body).toMatchObject({ actsAsOwner: false, mayActAsOwner: false });
+    expect((await h.app("POST", "/api/bots/b1/bot-api/acts-as-owner", { enabled: true })).status).toBe(403);
+    // Even a key marked by hand in its file acts as nobody here.
+    h.manager.setActsAsOwner("b1", true);
+    const key = (await h.app("POST", "/api/bots/b1/bot-api/new-key")).body.key as string;
+    h.manager.setActsAsOwner("b1", true);
+    expect((await h.call("b1", key, { message: "Hi" })).status).toBe(200);
+    expect(h.fake.bots.get("b1")!.tasks.at(-1)).toMatchObject({ approvalMode: "ask", outside: true });
   });
 });

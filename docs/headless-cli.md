@@ -90,7 +90,7 @@ one of its conversations.
 
 | Command | What it does |
 |---|---|
-| `doctor [--wait 2m]` | Checks the server answers, is new enough, who you are to it (and when your session expires), that an engine is ready, and whether bots have a browser. |
+| `doctor [--wait 2m]` | Checks the server answers, is new enough, who you are to it (and when your session expires), that an engine is ready, and whether bots have a browser. On a shared server without a session (`docker compose exec omb openmausbot doctor`), it learns only how many engines are ready, not which (`GET /api/health/engines`). |
 | `doctor --host` | Checks this Linux machine can run the server and the bots' sandbox (below). |
 | `bots`, `channels`, `models` | Your bots and what each is doing, your rooms, the engines and the models each offers. |
 | `messages TARGET [--limit 30]` | The latest messages of a conversation. |
@@ -267,7 +267,7 @@ openmausbot engine list
 ```
 
 KIND is `claude`, `openai`, `openrouter`, `openai-compatible` (needs
-`--base-url`), `xai`, `groq`, `greenference`, `mistral` or `cerebras`. The key comes from an
+`--base-url`), `xai`, `groq`, `greenference`, `modelgo`, `mistral` or `cerebras`. The key comes from an
 environment variable (`--key-env`) or a file (`--key-file`), is written once
 through the same setting the Settings screen uses, and is never printed or
 read back. An engine that already has a key is left alone unless `--rotate`,
@@ -326,7 +326,7 @@ is the confirmation.
 version: 1                                  # required
 engines:                                    # optional; needs full access
   claude: { key: SECRET, baseUrl: URL | SECRET, everyClaudeBot: true, install: false }
-  openai | openrouter | xai | groq | greenference | mistral | cerebras: { key: SECRET }
+  openai | openrouter | xai | groq | greenference | modelgo | mistral | cerebras: { key: SECRET }
   openaiCompatible: { key: SECRET, baseUrl: URL | SECRET }
   # SECRET is { env: NAME } or { file: PATH }. A key written in the file is refused.
 defaults: BOT FIELDS                        # every bot gets these unless it sets its own

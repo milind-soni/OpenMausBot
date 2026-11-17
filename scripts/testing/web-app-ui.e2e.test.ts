@@ -80,7 +80,7 @@ async function connect(url: string) {
       return value.result.value;
     };
     await request("Page.enable");
-    await request("Page.addScriptToEvaluateOnNewDocument", { source: "localStorage.setItem('omb-analytics-opt-out','1');localStorage.setItem('omb-email-gate','skipped');localStorage.setItem('grok-move-2026-11','1');" });
+    await request("Page.addScriptToEvaluateOnNewDocument", { source: "localStorage.setItem('omb-analytics-opt-out','1');localStorage.setItem('omb-email-gate','skipped');localStorage.setItem('grok-move-2026-11','1');localStorage.setItem('modelgo-offer-2026-11','1');" });
     await request("Runtime.enable");
     await request("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
     await request("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });

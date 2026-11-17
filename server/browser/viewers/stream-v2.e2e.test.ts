@@ -249,7 +249,13 @@ suite("the v2 stream on real Chrome", () => {
     expect(answered.status).toBe(204);
     await until(() => real.peek<string[]>(target, "[...document.getElementById('f').files].map((file) => file.name)"), same(["notes.txt"]));
     await client.next("fileChooserClosed");
-    const again = await fetch(`http://${origin}/api/bots/pepper/browser/upload?chooser=${chooser.id}`, { method: "POST", body });
+    // The route refuses an answered picker before reading the body and closes the connection. Node's fetch streams a
+    // FormData body after the headers, and on Linux that late write can meet the closed socket (EPIPE) and fail the
+    // fetch before it returns the 409; the same form sent whole goes out in one write, so only the answer is tested.
+    const whole = new Response(body);
+    const again = await fetch(`http://${origin}/api/bots/pepper/browser/upload?chooser=${chooser.id}`, {
+      method: "POST", headers: { "content-type": whole.headers.get("content-type")! }, body: new Uint8Array(await whole.arrayBuffer()),
+    });
     expect(again.status).toBe(409);
     await client.close();
   }, hostTimeout(90_000));

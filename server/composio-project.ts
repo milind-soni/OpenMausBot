@@ -338,3 +338,21 @@ export async function listConnectedAccounts(
   }
   throw new Error("Composio account inventory exceeded the pagination safety limit");
 }
+
+export async function deleteConnectedAccount(apiKey: string, id: string) {
+  const removed = await fetch(
+    `${apiBase()}/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`,
+    { method: "DELETE", headers: projectHeaders(apiKey), signal: AbortSignal.timeout(30_000) },
+  );
+  if (!removed.ok) throw new Error(await responseError(removed, `Composio disconnect: HTTP ${removed.status}`));
+}
+
+/** Revokes and deletes every connected account of one Composio user in the project; how many went. */
+export async function removeUserConnections(apiKey: string, userId: string): Promise<number> {
+  const accounts = await listConnectedAccounts(apiKey, userId, []);
+  // Security: only an account Composio names as this user's is deleted.
+  if (accounts.some((account) => account.user_id !== userId)) throw new Error("Composio listed a connected account without naming this user as its owner");
+  let removed = 0;
+  for (const { id } of accounts) if (id) { await deleteConnectedAccount(apiKey, id); removed += 1; }
+  return removed;
+}

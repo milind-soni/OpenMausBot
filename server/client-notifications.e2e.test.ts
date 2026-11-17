@@ -6,6 +6,10 @@ import { launchCloudSendFixture } from "../scripts/testing/cloud-send-fixture.ts
 import { personKey } from "./person-key.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
+/** On a Team Cloud a notification's read mark is each person's own (`read_by`); its one `read` mark stays untouched. */
+const readBy = (db: DatabaseSync, person: string) => db.prepare("SELECT id FROM notification_log WHERE EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?) ORDER BY id")
+  .all(person).map((row) => row.id);
+
 it("lets a Team Cloud member list and read only their own notification feed", async () => {
   const fixture = await launchCloudSendFixture({ onePasswordToken: "synthetic-notifications-token",
     team: { id: "team-notifications", name: "Notifications" } });
@@ -13,7 +17,7 @@ it("lets a Team Cloud member list and read only their own notification feed", as
     const team = fixture.team!;
     const owner = await team.pair({ email: "ada@notifications.test", role: "owner" });
     const member = await team.pair({ email: "bob@notifications.test", role: "member" });
-    const created = await team.as(owner.token!, "POST", "/api/bots", { name: "Scout" });
+    const created = await team.as(owner.token!, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
     expect(created.status).toBe(201);
     const bot = created.body.bot;
     const opened = await team.as(owner.token!, "POST", `/api/bots/${bot.id}/tasks`, { title: "Ada's private chat" });
@@ -38,8 +42,9 @@ it("lets a Team Cloud member list and read only their own notification feed", as
         expect((await team.as(member.token!, "POST", `/api/notifications/${id}/read`)).status, id).toBe(404);
       }
       expect((await team.as(member.token!, "POST", "/api/notifications/read-all")).status).toBe(200);
-      expect(db.prepare("SELECT id FROM notification_log WHERE read = 1 ORDER BY id").all().map((row) => row.id)).toEqual(["own-a", "own-b"]);
-      expect(db.prepare("SELECT id FROM notification_log WHERE read = 0 ORDER BY id").all().map((row) => row.id)).toEqual(["owners-ask", "private", "spend", "targeted"]);
+      expect(readBy(db, personKey({ id: "", email: "bob@notifications.test" }))).toEqual(["own-a", "own-b"]);
+      expect(readBy(db, ada), "Bob's reads are his alone").toEqual([]);
+      expect(db.prepare("SELECT id FROM notification_log WHERE read = 1").all(), "nobody's read reaches the one mark").toEqual([]);
     } finally {
       db.close();
     }
@@ -55,7 +60,7 @@ it("reads only the opener's notifications in shared conversations and keeps spen
     const team = fixture.team!;
     const owner = await team.pair({ email: "ada@notifications.test", role: "owner" });
     const member = await team.pair({ email: "bob@notifications.test", role: "member" });
-    const created = await team.as(owner.token!, "POST", "/api/bots", { name: "Scout" });
+    const created = await team.as(owner.token!, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
     expect(created.status).toBe(201);
     const bot = created.body.bot;
     const channel = await team.as(owner.token!, "POST", "/api/groups", { name: "Updates", memberIds: [bot.id],
@@ -85,14 +90,15 @@ it("reads only the opener's notifications in shared conversations and keeps spen
         [`/api/groups/${group.id}/tasks/${group.threadId}`, group.threadId],
       ]) {
         db.prepare("UPDATE notification_log SET thread_id = ? WHERE id != 'workspace-spend'").run(threadId);
-        for (const [token, readIds, unreadIds] of [
-          [member.token!, ["bobs-ask", "shared-done"], ["adas-ask", "shared-spend", "workspace-spend"]],
-          [owner.token!, ["adas-ask", "shared-done", "shared-spend"], ["workspace-spend"]],
+        // Bob opening the conversation reads his own, and leaves Ada's list (unread() is hers) as it was.
+        for (const [token, reader, readIds, unreadIds] of [
+          [member.token!, bob, ["bobs-ask", "shared-done"], ["adas-ask", "shared-done", "shared-spend", "workspace-spend"]],
+          [owner.token!, ada, ["adas-ask", "shared-done", "shared-spend"], ["workspace-spend"]],
         ] as const) {
-          db.prepare("UPDATE notification_log SET read = 0").run();
+          db.prepare("UPDATE notification_log SET read = 0, read_by = NULL").run();
           expect(await unread()).toEqual(["adas-ask", "shared-done", "shared-spend", "workspace-spend"]);
           expect((await team.as(token, "POST", path, { threadId })).status, path).toBe(200);
-          expect(db.prepare("SELECT id FROM notification_log WHERE read = 1 ORDER BY id").all().map((row) => row.id), path).toEqual(readIds);
+          expect(readBy(db, reader), path).toEqual(readIds);
           expect(await unread(), path).toEqual(unreadIds);
         }
       }

@@ -78,6 +78,9 @@ describe("localComputerResultLine", () => {
     const frame = { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "launch_app", arguments: { bundle_id: "com.google.Chrome", urls: ["https://calendar.google.com/"] } } };
     expect(localComputerCallQuery(frame)).toEqual({ app: "Chrome", site: "calendar.google.com" });
     expect(localComputerCallQuery({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "screenshot", arguments: {} } })).toEqual({});
+    for (const name of ["list_files", "read_file", "write_file", "make_folder"]) {
+      expect(localComputerCallQuery({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name, arguments: { path: "/x", url: "https://evil.example" } } })).toEqual({ files: "1" });
+    }
   });
 
   it("passes every other frame through byte for byte", () => {

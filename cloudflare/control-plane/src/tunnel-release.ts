@@ -4,6 +4,7 @@
 // it through the same ownership-verified path as an owner's DELETE. The row
 // and its hostname stay, so a computer the relay later cannot serve gets the
 // same address back by provisioning again.
+import { TUNNEL_CONNECTED_CODE } from "./cloudflare-api";
 import type { ControlPlaneConfig } from "./config";
 import { ACTED_ON_ENDPOINT_SQL, actedOnAccounts, appVersionAtLeast } from "./endpoint-accounts";
 import type { JSONValue } from "./http";
@@ -21,6 +22,8 @@ export const SEEN_FRESH_MS = 2 * DAY_MS;
 /** Release marks per cron run, all reasons together: with the cleanup sweep's
  * 20 rows a run, a wave never outgrows what cleanup removes. */
 export const RELEASE_MARK_LIMIT = 20;
+/** A forced removal that met a tunnel still connected: by name, and as Cloudflare's own code from before it was named. */
+const STILL_CONNECTED_CODES = JSON.stringify([TUNNEL_CONNECTED_CODE, "cf_api_1022"]);
 /** Rows read per run before a percentage is applied. */
 const PROVEN_SCAN_LIMIT = 5_000;
 
@@ -88,6 +91,10 @@ const HELD_TUNNEL_SQL = `e.status = 'ready'
 /** The relay gave this computer a token lately. */
 const RELAY_SERVED_SQL = "a.token_at IS NOT NULL AND a.token_at >= ?";
 
+/** Not a self-hosted server by its own report: a server's tunnel is its public address, so the relay never replaces
+ * it. Only the version cutoff applies to one. Needs migration 0016; without it nothing is released. */
+const NOT_SERVER_SQL = "i.kind IS NOT 'server'";
+
 /** Every paired phone has used the encrypted connection (a phone that has
  * never dials the tunnel again), none is an old phone, and that has held for
  * the whole wait. Binds: fresh cutoff twice, then the wait cutoff. */
@@ -113,15 +120,15 @@ interface VersionRow {
 }
 
 /** Held tunnels by desktop version, with how many of each the relay serves
- * and how many are proven on it. Throws without migration 0015. */
+ * and how many are proven on it. Throws without migrations 0015 and 0016. */
 async function heldByVersion(env: Env, config: ControlPlaneConfig, policy: TunnelPolicy, now: number): Promise<VersionRow[]> {
   const fresh = now - RELAY_FRESH_MS;
   const found = await env.DB.prepare(
     `SELECT COALESCE(i.app_version, '') AS version,
             COUNT(*) AS tunnels,
             COALESCE(SUM(CASE WHEN ${SEEN_LATELY_SQL} THEN 1 ELSE 0 END), 0) AS seen,
-            COALESCE(SUM(CASE WHEN ${RELAY_SERVED_SQL} THEN 1 ELSE 0 END), 0) AS relay_served,
-            COALESCE(SUM(CASE WHEN ${RELAY_PROVEN_SQL} THEN 1 ELSE 0 END), 0) AS proven
+            COALESCE(SUM(CASE WHEN ${NOT_SERVER_SQL} AND ${RELAY_SERVED_SQL} THEN 1 ELSE 0 END), 0) AS relay_served,
+            COALESCE(SUM(CASE WHEN ${NOT_SERVER_SQL} AND ${RELAY_PROVEN_SQL} THEN 1 ELSE 0 END), 0) AS proven
        FROM installation_endpoints e
        JOIN installations i ON i.id = e.installation_id
        LEFT JOIN relay_adoption a ON a.installation_id = e.installation_id
@@ -168,7 +175,7 @@ export function forgetTunnelRelease(): void {
 
 /** Counts only, for /healthz: the switches as set, and what each would clear
  * now, so the numbers can be read before a switch is turned. Read at most
- * every five minutes per isolate; left out without migration 0015. */
+ * every five minutes per isolate; left out without migrations 0015 and 0016. */
 export async function tunnelReleaseHealth(env: Env, config: ControlPlaneConfig, now = Date.now()): Promise<JSONValue | null> {
   if (healthMemo && now - healthMemo.at < HEALTH_MEMO_MS) return healthMemo.value;
   const policy = readTunnelPolicy(env);
@@ -240,7 +247,7 @@ export async function releaseTunnels(
   try {
     rows = await heldByVersion(env, config, policy, now);
   } catch {
-    // Migration 0015 is not applied yet: nothing is released.
+    // Migration 0015 or 0016 is not applied yet: nothing is released.
     return null;
   }
   const summary: ReleaseSummary = {
@@ -249,10 +256,14 @@ export async function releaseTunnels(
   };
   // Never more waiting for cleanup than one sweep removes: while the sweep is
   // failing or rate-limited its queue stays full and nothing more is marked,
-  // so no owner is left with a row it cannot take back.
+  // so no owner is left with a row it cannot take back. A forced removal
+  // whose tunnel was still connected after its cleanup rounds is not a failing
+  // sweep: it backs off and retries on its own, and does not hold the queue.
   const queued = await env.DB.prepare(
-    `SELECT COUNT(*) AS count FROM installation_endpoints e WHERE e.status = 'deleting' AND ${ACTED_ON_ENDPOINT_SQL}`,
-  ).bind(actedOnAccounts(config)).first<{ count: number }>();
+    `SELECT COUNT(*) AS count FROM installation_endpoints e
+      WHERE e.status = 'deleting' AND ${ACTED_ON_ENDPOINT_SQL}
+        AND NOT (e.reclaim_requested_at IS NULL AND COALESCE(e.last_error_code, '') IN (SELECT value FROM json_each(?)))`,
+  ).bind(actedOnAccounts(config), STILL_CONNECTED_CODES).first<{ count: number }>();
   let budget = Math.max(0, Math.min(RELEASE_MARK_LIMIT, config.capacity.cleanupSweepLimit) - (queued?.count ?? 0));
   const fresh = now - RELAY_FRESH_MS;
   const versions = rows.map((row) => row.version);
@@ -294,7 +305,7 @@ export async function releaseTunnels(
   if (policy.minAppVersion !== null) {
     await run("min_version", `${VERSION_IN_SQL} AND ${SEEN_LATELY_SQL}`, [below, now - SEEN_FRESH_MS]);
   }
-  const servedGuard = `${VERSION_IN_SQL} AND i.relay_blocked_at IS NULL`;
+  const servedGuard = `${VERSION_IN_SQL} AND i.relay_blocked_at IS NULL AND ${NOT_SERVER_SQL}`;
   if (relay && policy.legacyCutoffPercent > 0) {
     await run("legacy_cutoff", `${servedGuard} AND ${RELAY_SERVED_SQL}`, [capable, fresh], inside(policy.legacyCutoffPercent));
   }

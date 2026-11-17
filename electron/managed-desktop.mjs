@@ -163,7 +163,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   const restored = new Promise(resolve => { markRestored = resolve; });
   let grant = null, connection = null, pending = null, state = { status: "signed-out" };
   let renewalCheckedFor = null, lastRenewAttempt = 0, renewalSupported = false, reportedPolicyVersion = null;
-  let policyLifted = false;
+  let policyLifted = false, policyRead = false;
   let issuedGrant = null, cleanupGrant = null, cleanupNeeded = false, clearing = null, restoreFailures = 0;
   let generation = 0, timer = null, closed = false, controller = new AbortController(), refreshing = null;
   let branding = parseOrganizationBranding(null);
@@ -465,6 +465,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     // Restore the last policy before any network call.
     if (grant?.policy && grant.expiresAt > now()) await sendPolicy(grant);
     if (library && grant && grant.expiresAt > now()) await Promise.resolve().then(() => library.restore(libraryIdentity(grant))).catch(() => {});
+    policyRead = true;
     markRestored();
     await sendIdentity(grant);
     return refresh();
@@ -514,6 +515,8 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     /** Main-process only. Never expose this method through the renderer bridge. */
     connection: () => connection ? structuredClone(connection) : null,
     whenRestored: () => restored,
+    /** The saved policy has been read; until then, and while it can't be read, `policy()` is null without meaning "none". */
+    policyKnown: () => policyRead,
     policy: () => !policyLifted && grant?.policy && grant.expiresAt > now() ? structuredClone(grant.policy) : null,
     backupGeneration: () => generation,
     /** Fixed first-party backup API only; this function stays in Electron main. */

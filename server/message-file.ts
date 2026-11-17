@@ -136,7 +136,7 @@ export function referencedFileName(href: string): string | null {
 }
 
 /** Lexical on purpose: `resolve` and `fileURLToPath` follow the runner OS, and `/C:/notes.md` is not `C:\\notes.md`. */
-function referencedPathIdentity(href: string, allowForwardSlashUNC = true): string {
+export function referencedPathIdentity(href: string, allowForwardSlashUNC = true): string {
   const path = referencedPath(href, true, allowForwardSlashUNC);
   if (/^[a-z]:[\\/]/i.test(path) || path.startsWith("\\\\") || path.startsWith("//")) {
     return `windows:${win32.resolve(path)}`;
@@ -367,6 +367,15 @@ export function mimeFor(path: string): string {
     case ".odt": return "application/vnd.oasis.opendocument.text";
     case ".ods": return "application/vnd.oasis.opendocument.spreadsheet";
     case ".odp": return "application/vnd.oasis.opendocument.presentation";
+    // Archives are typed by name only and stay downloads: never previewed, never unpacked. foo.tar.gz is a .gz.
+    case ".zip": return "application/zip";
+    case ".rar": return "application/vnd.rar";
+    case ".7z": return "application/x-7z-compressed";
+    case ".tar": return "application/x-tar";
+    case ".gz": return "application/gzip";
+    case ".tgz": return "application/x-compressed-tar";
+    case ".bz2": return "application/x-bzip2";
+    case ".xz": return "application/x-xz";
     default: return "application/octet-stream";
   }
 }
@@ -410,7 +419,8 @@ export async function openMessageFile(
     let handle: FileHandle | undefined;
     try {
       const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-      handle = await open(canonicalBefore, constants.O_RDONLY | noFollow);
+      const nonBlock = typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0;
+      handle = await open(canonicalBefore, constants.O_RDONLY | noFollow | nonBlock);
       const opened = await handle.stat();
       if (opened.isDirectory()) throw statusError(400, "the link points to a folder, not a file", "directory");
       if (!opened.isFile()) throw statusError(400, "the link does not point to a regular file");

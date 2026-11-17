@@ -8,9 +8,6 @@ import { setLocale } from "@/lib/i18n";
 import { ADVANCED_MODE_KEY, readAdvancedMode, setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_MODE_PROMPT_KEY, simpleModePromptSeen } from "@/lib/simple-mode-prompt";
 
-// The popup only shows with the switch put back, and its cases flip the mode: they run that way until it goes.
-vi.mock("@/lib/simple-only", () => ({ SIMPLE_ONLY: false }));
-
 const analytics = vi.hoisted(() => ({ track: vi.fn() }));
 vi.mock("@/lib/analytics", () => analytics);
 const { SimpleModePrompt } = await import("./SimpleModePrompt");
@@ -59,7 +56,7 @@ describe("the Simple mode popup", () => {
     expect(dialog()?.getAttribute("aria-modal")).toBe("true");
     expect(host.querySelector("h2")?.textContent).toBe("Try the new Simple mode");
     expect(host.textContent).toContain("A calmer screen, with every feature still there.");
-    expect(host.textContent).toContain("Switch any time in Settings → General.");
+    expect(host.textContent).toContain("Switch any time in Settings → Advanced mode.");
     expect(toggle().getAttribute("role")).toBe("switch");
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     expect(document.activeElement, "focus starts on the title, so no key flips the switch by accident").toBe(host.querySelector("h2"));

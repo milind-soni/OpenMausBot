@@ -112,6 +112,39 @@ describe("augmentedPath", () => {
     }
   });
 
+  posixIt("keeps the login-shell PATH in the same order after a rescan", async () => {
+    const knownBin = join(homedir(), ".local", "bin");
+    mkdirSync(knownBin, { recursive: true });
+    const shell = join(homedir(), "fake-login-shell");
+    const rcOnlyBin = join(homedir(), "rc-only", "bin");
+    writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
+    chmodSync(shell, 0o755);
+
+    const saved = { PATH: process.env.PATH, SHELL: process.env.SHELL, VITEST: process.env.VITEST };
+    const restore = (key: keyof typeof saved) => {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    };
+    try {
+      process.env.PATH = join(homedir(), "bare-path");
+      process.env.SHELL = shell;
+      delete process.env.VITEST;
+      resetPathCacheForTests();
+
+      augmentedPath();
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin));
+      const afterProbe = augmentedPath();
+
+      resetPathCache();
+      expect(augmentedPath()).toBe(afterProbe);
+    } finally {
+      restore("PATH");
+      restore("SHELL");
+      restore("VITEST");
+      resetPathCacheForTests();
+    }
+  });
+
   posixIt("keeps a sealed fixture off machine-wide install dirs and the login shell (#2035)", async () => {
     // Real directories on this machine: Homebrew's codex lives in one of them.
     const machineDirs = ["/opt/homebrew/bin", "/usr/local/bin"].filter((dir) => existsSync(dir));
@@ -439,6 +472,26 @@ winOnly("resolveCli (Windows)", () => {
     });
     onPath();
     expect(resolveCli("ombfake", [], { PATH: "", PATHEXT: ".CMD" })).toEqual({ command: "ombfake", args: [] });
+  });
+
+  it("preserves the DeepSeek desktop shim's Electron CLI entry point", () => {
+    const exe = join(dir, "DeepSeek Harness.exe");
+    const archive = join(dir, "resources", "app.asar");
+    const shim = join(dir, "dsh.cmd");
+    writeFileSync(exe, "MZ");
+    mkdirSync(join(dir, "resources"));
+    writeFileSync(archive, "");
+    writeFileSync(shim, [
+      "@echo off",
+      'set "ELECTRON_RUN_AS_NODE=1"',
+      '"%~dp0DeepSeek Harness.exe" --expose-internals "%~dp0resources\\app.asar\\dsh\\cli.js" %*',
+      "exit /b %errorlevel%",
+    ].join("\r\n"));
+    expect(resolveCli(shim, ["--profile", "acp"])).toEqual({
+      command: exe,
+      args: ["--expose-internals", join(archive, "dsh", "cli.js"), "--profile", "acp"],
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+    });
   });
 
   it("parses an npm .cmd shim down to `node <cli.js>`, never the shim's own node.exe", async () => {

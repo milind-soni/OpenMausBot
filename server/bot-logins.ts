@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
 
-import { browserMatesOf, loginPageCheck, loginPlace, loginSite, type LoginPlace } from "../shared/logins.ts";
+import { browserMatesOf, loginPageCheck, loginPlace, loginSite, type LoginBots, type LoginPlace } from "../shared/logins.ts";
 import type { LinkedSecret } from "../shared/vault.ts";
 import type { FillCandidate } from "./login-fill.ts";
 import { receiveLoginHandoff, type ConnectionHandoffAnswer, type ConnectionHandoffWhat, type LoginHandoffResult } from "./login-handoff.ts";
-import type { VaultStore } from "./vault-store.ts";
+import type { VaultReader, VaultStore } from "./vault-store.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import type { LoginRouteDeps } from "./routes/logins.ts";
 import { findLinkedSecret, linkedCandidates, linkedSecretNames, linkedSecrets, linkedSites, readLinkedSecret, type VaultProvider } from "./vault/providers.ts";
+
+const linkedItemId = (secretId: string, field: string | undefined) => `linked-${createHash("sha256").update(`${secretId}\0${field ?? ""}`).digest("hex").slice(0, 32)}`;
 
 /** What the bot's browser shows while the person answers a sign-in card. */
 export interface ObservedPage {
@@ -82,7 +84,8 @@ export class BotLogins {
     return [...this.store.sitesFor(bots), ...this.providers.flatMap((provider) => linkedSites(provider, bots))];
   }
 
-  private async fresh(): Promise<void> {
+  /** Reads each linked manager's list again if it is older than the manager allows. */
+  async fresh(): Promise<void> {
     await Promise.all(this.providers.map((provider) => provider.fresh()));
   }
 
@@ -108,10 +111,10 @@ export class BotLogins {
     return this.providers.flatMap((provider) => linkedSecrets(provider));
   }
 
-  /** The names of the secrets the bot may use, for its prompt: never a value. */
-  secretNamesFor(botId: string): Array<{ name: string; refOnly?: true }> {
+  /** The names of the secrets the bot may use in a turn `reader` names, for its prompt: never a value. */
+  secretNamesFor(botId: string, reader: VaultReader): Array<{ name: string; refOnly?: true }> {
     const linked = this.providers.flatMap((provider) => linkedSecrets(provider, botId).flatMap((secret) => linkedSecretNames(secret).map(({ name }) => ({ name }))));
-    return [...this.store.secretNamesFor(botId), ...linked];
+    return [...this.store.secretNamesFor(botId, reader), ...linked];
   }
 
   /** A secret a linked manager holds for the bot by this name, read from it now; its id is safe as a file name. */
@@ -121,8 +124,23 @@ export class BotLogins {
     if (!use) return null;
     const value = await readLinkedSecret(use);
     this.hold(value);
-    const id = `linked-${createHash("sha256").update(`${use.secret.id}\0${use.field ?? ""}`).digest("hex").slice(0, 32)}`;
-    return { id, name: use.field ? `${use.secret.name} ${use.field}` : use.secret.name, value };
+    return { id: linkedItemId(use.secret.id, use.field), name: use.field ? `${use.secret.name} ${use.field}` : use.secret.name, value };
+  }
+
+  /** The linked secret `linkedSecret` gave this id: who may use it, and its value read from the manager when asked. */
+  linkedById(id: string): { bots: LoginBots; read(): Promise<string> } | null {
+    for (const provider of this.providers) {
+      for (const secret of linkedSecrets(provider)) {
+        const name = linkedSecretNames(secret).find(({ field }) => linkedItemId(secret.id, field) === id);
+        if (!name) continue;
+        return { bots: secret.bots, read: async () => {
+          const value = await readLinkedSecret({ provider, secret, ...(name.field ? { field: name.field } : {}) });
+          this.hold(value);
+          return value;
+        } };
+      }
+    }
+    return null;
   }
 
   /** The settings, plus whether a 1Password token is held: what a credential card's "configured" check reads. */
@@ -156,6 +174,17 @@ export class BotLogins {
           this.store.setOnePasswordGrant(vaultId, bots);
           return this.onePassword.status();
         },
+        grantItem: async (item, bots) => {
+          // Handing an item back to its vault's choice is kept even while 1Password cannot be read.
+          if (bots !== null) {
+            const read = await this.onePassword.readsItem(item);
+            if (read !== true) return read;
+          }
+          this.store.setOnePasswordItemGrant(item, bots);
+          return true;
+        },
+        // Kept whole, even for an item not loaded here yet: it then opens no wider than the computer that chose it.
+        setItemGrants: (grants, keep) => this.store.setOnePasswordItemGrants(keep ? { ...this.store.onePasswordItemGrants(), ...grants } : grants),
       },
     };
   }

@@ -157,11 +157,27 @@ thread.
 
 The chat shows an avatar and “Sent to Eli · Delivery”; clicking opens the
 receiving conversation. Same-room receipts have no unnecessary navigation.
-Receipts remain visible when tool calls are hidden. Files are not copied between
-computers: briefs must include accessible absolute paths or the required content.
+Receipts remain visible when tool calls are hidden. A bare path in a brief only
+works when the recipient can already read it; to give a teammate a file the
+sender names it in `coordinate_bots` `files` (at most 5 paths and 100 MB a
+message, each within `attach_file`'s rules). Each file is stored once in the
+attachment store, under a name keyed to this install so it cannot be worked out
+from the file, shown as a chip on the hand-off line, and copied into the
+receiving conversation's own folder under `inbox/<sender>/<assignment>/` (and
+into the receiver's own Local VM workspace when it has one) before its turn
+starts; the turn's text lists the copies under a note that says they are data
+from another bot, as `inbox/...` paths where the receiver works in that folder.
+Files the teammate attaches with `attach_file` while it works come back the
+same way with its result, under `inbox/<teammate>/<assignment>-returned/`,
+unless the result itself is withheld. A bot may attach or pass on a file from
+its own inbox; that read follows no link. One assignment carries at most 20
+files and 200 MB in all, one bot passes or returns at most 100 files and 500 MB
+a day, and `files` does not travel with `answers`. Inbox copies are removed
+when their record ages out (30 days) and when the conversation or the bot is
+deleted; the rest of a conversation's folder stays, as before.
 Returned reports stay available to subsequent model turns behind the compact
-receipt, subject to the bounded retention and a fresh reach check (peers list,
-archived bots, audiences).
+receipt, subject to the bounded retention and a fresh reach check (archived
+bots, audiences).
 Direct-chat receipts use the existing avatar/thread pill, opening the exact
 recipient task without changing other tasks.
 
@@ -263,13 +279,11 @@ first member's two turns in one thread, and one resume of the Lead.
 
 A room's members can come from any department, a Chief that manages none of
 them included: they list each other with `list_room_targets` and hand each
-other work with `coordinate_bots` like any room. A bot's own peers list still
-narrows what it can address, and a revoked peer is refused before queued work
-starts. On a Team Cloud, nothing from a member's private chat is handed into a
-room or posted in one.
+other work with `coordinate_bots` like any room. On a Team Cloud, nothing from
+a member's private chat is handed into a room or posted in one.
 
 ```sh
-pnpm exec vitest run server/peer-roster.test.ts server/post-to-room.test.ts server/room-coordination.e2e.test.ts server/direct-coordination.e2e.test.ts server/runtime-coordinator.test.ts server/peer-allowlist.e2e.test.ts server/cloud-team-open-reach.e2e.test.ts
+pnpm exec vitest run server/peer-roster.test.ts server/post-to-room.test.ts server/room-coordination.e2e.test.ts server/direct-coordination.e2e.test.ts server/runtime-coordinator.test.ts server/cloud-team-open-reach.e2e.test.ts
 ```
 
 The coordination suites use `launchVerificationServer`, `control-omb`, and the
@@ -329,7 +343,7 @@ pnpm exec vitest run server/group-goal-run.e2e.test.ts server/group-goal-wait-ca
 pnpm exec vitest run server/room-recovery.e2e.test.ts server/testing/room-handoff-agent.test.ts
 pnpm exec vitest run server/direct-coordination.e2e.test.ts --maxWorkers=1
 pnpm exec vitest run server/turn-dispatch-guard.test.ts
-pnpm exec vitest run server/comms.test.ts server/thread-aware-bots.e2e.test.ts server/routine-delegation.e2e.test.ts server/independent-threads-api.test.ts server/peer-allowlist.e2e.test.ts server/steer-queue.test.ts
+pnpm exec vitest run server/comms.test.ts server/thread-aware-bots.e2e.test.ts server/routine-delegation.e2e.test.ts server/independent-threads-api.test.ts server/steer-queue.test.ts
 pnpm exec vitest run server/runtime-paths.e2e.test.ts server/notification-routing.e2e.test.ts server/post-to-room.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/direct-coordination-ui.e2e.test.ts
 ```
@@ -414,7 +428,7 @@ preview/server processes afterward; retain evidence without credentials.
 
 ## Limits and safety
 
-Peer lists and peer approvals still apply; departments never limit who works with whom.
+Departments never limit who works with whom.
 Every turn — a chat, a room, a routine run, a webhook run, a goal run, a Cloud
 guest's turn, a standing external runtime — hands teammate work on with the
 one `coordinate_bots` tool (work, a question with `consult`, a one-way notice

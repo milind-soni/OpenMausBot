@@ -9,7 +9,7 @@ import { openRuntimeStore } from "./runtime/store.ts";
 import type { Assignment } from "./runtime/types.ts";
 import { createWorkspaceBackupSnapshot, stagedWorkspaceData, stageWorkspaceBackup } from "./workspace-backup.ts";
 import { ensureMemoryIndex } from "./message-db-memory-index.ts";
-import { omittedAsTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
+import { omittedAsTeamPrivate, routinesWithoutTeamPrivate, stripTeamPrivate, TEAM_PRIVATE_NOTE, teamPrivateAttachments, teamPrivateThreads, withoutTeamPrivate } from "./workspace-backup-team-private.ts";
 
 const BOB = "p_bobbobbobbobbobbobbob1";
 const PASSWORD = "correct horse battery staple";
@@ -106,6 +106,22 @@ describe("what a Team Cloud's export leaves out (the private sentence: not the O
     for (const kept of ["events/bob-chat.ndjson", "native/bob-chat.ndjson", `memory-journal/bot--member-${BOB}.ndjson`]) expect(omittedAsTeamPrivate(kept, privacy), kept).toBe(true);
     for (const shared of ["events/main.ndjson", "native/main.ndjson", "memory-journal/bot.ndjson", "memory-journal/bot--room-room.ndjson"]) expect(omittedAsTeamPrivate(shared, privacy), shared).toBe(false);
     expect(withoutTeamPrivate([{ id: "bot", tasks: [{ threadId: "main" }, { threadId: "bob-chat" }] }, { id: "bobs-own", tasks: [] }], privacy)).toEqual([{ id: "bot", tasks: [{ threadId: "main" }] }]);
+  });
+
+  it("leaves out the routines that live in a member's private chat and every run that names one", () => {
+    const privacy = { threads: new Set(["bob-chat", "bob-results", "bob-run"]), bots: new Set(["bobs-own"]), attachments: new Set<string>() };
+    const bots = [{ id: "bot", tasks: [{ threadId: "main", title: "Scout" }, { threadId: "bob-chat", title: "Bob's" }, { threadId: "bob-results", title: "Standup · Results" }] }];
+    const routines = { routines: [
+      { id: "made-there", botId: "bot", name: "Kumquat", sourceThreadId: "bob-chat" },
+      { id: "reports-there", botId: "bot", name: "Quince", resultsThreadId: "bob-chat" },
+      { id: "standup", botId: "bot", name: "Standup", resultsThreadId: "bob-results" },
+      { id: "own-bot", botId: "bobs-own", name: "Mine" },
+    ], runs: [
+      { id: "r1", routineId: "made-there", threadId: "other" },
+      { id: "r2", routineId: "standup", threadId: "bob-run" },
+      { id: "r3", routineId: "standup", threadId: "team-run" },
+    ], ownerNotices: [] };
+    expect(routinesWithoutTeamPrivate(routines, bots, privacy)).toEqual({ routines: [routines.routines[2]], runs: [routines.runs[2]], ownerNotices: [] });
   });
 
   it("strips the private conversations' rows from the snapshot databases and rebuilds them, so no freed page keeps their words", () => {

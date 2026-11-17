@@ -28,5 +28,5 @@ These checks do not exercise physical clicks on the Windows notification-area
 menu, the full packaged app, update downloads, or helper-console suppression.
 For package acceptance, start a packaged Windows build in an isolated profile,
 close during startup and after loading, reopen from the tray and a second
-launch, and use **Quit OpenMaus Bot**. Verify owned helpers exit and the tray
+launch, and use **Quit OpenMausBot**. Verify owned helpers exit and the tray
 icon disappears. Repeat with an update-driven restart.

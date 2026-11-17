@@ -6,15 +6,18 @@ import { plainTimeZone } from "../../shared/plain-time-zone.ts";
 import { plainWhen } from "../plain-time.ts";
 
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
-import { WEEKDAYS } from "./agents-catalog.ts";
+import { WEEKDAYS, fullInputSchema } from "./agents-catalog.ts";
 import type { Json } from "./agents-client.ts";
+import { argumentNames } from "./agents-schema.ts";
 
 export const TRIGGER_TOOL_NAMES: ReadonlySet<string> = new Set(["trigger_info", "trigger", "delete_trigger"]);
 
 const LIST_ROUTE = "/api/internal/triggers";
 const EVENTS_ROUTE = "/api/internal/trigger-events";
 const APP_ONLY = ["app", "event", "account"] as const;
+const SAME_CONVERSATION_ONLY = "same_conversation applies only to when=app_event, when=webhook or when=schedule.";
 const REQUEST_ROUTE = "/api/internal/trigger-requests";
+const TAKES = () => ` trigger takes ${argumentNames(fullInputSchema("trigger"))}.`;
 const SCHEDULE_ONLY = ["schedule", "timeout_minutes", "timeoutMinutes", "clear_timeout", "continuity", "overlap", "run_on_startup", "runOnStartup"] as const;
 
 function jsonRecord(value: unknown): value is Json {
@@ -36,9 +39,10 @@ const SHORT_WEEKDAYS = {
 
 const SUPPORTED_SCHEDULES =
   'Supported schedules: {"type":"once","at":"2026-09-01T09:00:00+05:30"} (future RFC3339 with explicit offset), ' +
-  '{"type":"weekly","time":"09:00","weekdays":["monday","friday"]}, {"type":"daily","time":"09:00"}, ' +
-  '{"type":"interval","every_minutes":15,"weekdays":["monday","friday"],"window_start":"09:00","window_end":"17:00"}, ' +
-  'or {"type":"cron","expression":"0 9 1 * *","timeZone":"Asia/Kolkata"} (monthly at 09:00 on day 1; five fields and an explicit IANA timezone).';
+  '{"type":"weekly","time":"09:00","weekdays":["monday","friday"]}, {"type":"daily","time":"09:00"} (the computer\'s local time), ' +
+  '{"type":"interval","every_minutes":15,"weekdays":["monday","friday"],"window_start":"09:00","window_end":"17:00"} (every_minutes 5 to 1440; optional starts_at and ends_at), ' +
+  'or {"type":"cron","expression":"0 9 1 * *","timeZone":"Asia/Kolkata"} (monthly at 09:00 on day 1; five fields, L for the last day, MON#2 for the second Monday, ' +
+  'no seconds, year or @ macros, and an explicit IANA timezone).';
 
 interface NormalizedSchedule {
   schedule?: Json;
@@ -71,7 +75,10 @@ function normalizeScheduleInput(args: Json): NormalizedSchedule {
   // Providers may send unused optional fields as null; any other unknown field refuses the call.
   const unsupported = fields && Object.keys(raw).find((key) => raw[key] != null && !fields.includes(key));
   if (unsupported) {
-    return { error: `Unsupported ${type} schedule field "${unsupported}". Weekly and daily times use the computer's timezone from trigger_info. ${SUPPORTED_SCHEDULES}` };
+    const hint = type === "once" && unsupported === "timeZone"
+      ? 'A once schedule takes no "timeZone": its zone is the offset inside "at", for example 2026-09-01T09:00:00+05:30.'
+      : "Weekly and daily times use the computer's timezone from trigger_info.";
+    return { error: `Unsupported ${type} schedule field "${unsupported}". ${hint} ${SUPPORTED_SCHEDULES}` };
   }
   if (type === "cron") {
     try {
@@ -304,6 +311,22 @@ function triggerFields(args: Json): { fields: Json; error?: string } {
     }
     fields.eventTypes = eventTypes.map((value) => String(value).trim()).filter(Boolean);
   }
+  const payloadFilter = args.webhook_payload_filter;
+  if (payloadFilter === null) {
+    fields.payloadFilter = null;
+  } else if (payloadFilter !== undefined) {
+    const entries = jsonRecord(payloadFilter) ? Object.entries(payloadFilter) : null;
+    if (!entries || entries.some(([field, value]) => !field.trim() || field.length > 200
+      || !(typeof value === "string" || typeof value === "number" || typeof value === "boolean") || String(value).length > 200)) {
+      return { fields, error: 'webhook_payload_filter must be an object of field paths and the text each must have, e.g. {"action":"opened","pull_request.base.ref":"main"}.' };
+    }
+    if (entries.length > 10) return { fields, error: "webhook_payload_filter takes at most 10 fields." };
+    fields.payloadFilter = Object.fromEntries(entries.map(([field, value]) => [field.trim(), String(value).trim()]));
+  }
+  if (args.same_conversation !== undefined && args.same_conversation !== null) {
+    if (typeof args.same_conversation !== "boolean") return { fields, error: "same_conversation must be true or false." };
+    fields.sameConversation = args.same_conversation;
+  }
   return { fields };
 }
 
@@ -369,7 +392,7 @@ export async function callTriggerTool(name: string, args: Json, context: ToolCal
   // Deleting is its own tool, so an engine's remembered allow for trigger never covers it.
   if (name === "trigger" && args.action === "delete") return { text: "trigger does not delete: call delete_trigger with the trigger_id.", isError: true };
   const action = name === "delete_trigger" ? "delete" : routineAction(args.action);
-  if (!action) return { text: "trigger needs action: create, or update, pause, resume or run_now with a trigger_id from trigger_info.", isError: true };
+  if (!action) return { text: `trigger needs action: create, or update, pause, resume or run_now with a trigger_id from trigger_info.${name === "trigger" ? TAKES() : ""}`, isError: true };
   if (!triggerId) return { text: `${name === "delete_trigger" ? "delete_trigger" : `trigger action=${action}`} needs the trigger_id from trigger_info.`, isError: true };
   const createOnly = CREATE_ONLY.find((key) => args[key] !== undefined && args[key] !== null);
   if (createOnly) return { text: `${createOnly} applies only to action=create.`, isError: true };
@@ -377,7 +400,7 @@ export async function callTriggerTool(name: string, args: Json, context: ToolCal
   if (error) return { text: error, isError: true };
   const body: Json = { action, triggerId, ...(forBotId ? { forBotId } : {}) };
   if (action === "update") {
-    if (!Object.keys(fields).length) return { text: "The update action needs at least one supported field to change.", isError: true };
+    if (!Object.keys(fields).length) return { text: `The update action needs at least one supported field to change.${TAKES()}`, isError: true };
     body.changes = fields;
   } else if (Object.keys(fields).length) {
     return { text: name === "delete_trigger" ? "delete_trigger takes only trigger_id and for_bot_id." : `The ${action} action changes no fields; send them with action=update.`, isError: true };
@@ -425,20 +448,21 @@ async function listEvents(args: Json, context: ToolCallContext): Promise<ToolCal
 
 async function createTrigger(args: Json, forBotId: string | undefined, context: ToolCallContext): Promise<ToolCallResult> {
   const when = args.when;
-  if (when !== "schedule" && when !== "webhook" && when !== "app_event" && when !== "limit_reset") return { text: 'trigger action=create needs when: "schedule", "app_event", "webhook" or "limit_reset".', isError: true };
+  if (when !== "schedule" && when !== "webhook" && when !== "app_event" && when !== "limit_reset") return { text: `trigger action=create needs when: "schedule", "app_event", "webhook" or "limit_reset".${TAKES()}`, isError: true };
   if (when !== "limit_reset") {
     const limitOnly = ["engine", "repeat"].find((key) => args[key] !== undefined && args[key] !== null);
     if (limitOnly) return { text: `${limitOnly} applies only to when=limit_reset.`, isError: true };
   }
   const { fields, error } = triggerFields(args);
   if (error) return { text: error, isError: true };
-  if (!fields.name || !fields.instructions) return { text: "trigger action=create needs name and instructions.", isError: true };
+  if (!fields.name || !fields.instructions) return { text: `trigger action=create needs name and instructions.${TAKES()}`, isError: true };
   if (when !== "app_event") {
     const appOnly = [...APP_ONLY, "filter", "event_config"].find((key) => args[key] !== undefined && args[key] !== null);
     if (appOnly) return { text: `${appOnly} applies only to when=app_event.`, isError: true };
   }
+  if (fields.sameConversation !== undefined && when === "limit_reset") return { text: SAME_CONVERSATION_ONLY, isError: true };
   if (when === "app_event") {
-    const misplaced = [...SCHEDULE_ONLY, "webhook_event_types"].find((key) => args[key] !== undefined && args[key] !== null);
+    const misplaced = [...SCHEDULE_ONLY, "webhook_event_types", "webhook_payload_filter"].find((key) => args[key] !== undefined && args[key] !== null);
     if (misplaced) return { text: `An app-event trigger fires when the app's event happens, so it takes no ${misplaced}.`, isError: true };
     const app = typeof args.app === "string" ? args.app.trim().toLowerCase() : "";
     const event = typeof args.event === "string" ? args.event.trim() : "";
@@ -447,27 +471,31 @@ async function createTrigger(args: Json, forBotId: string | undefined, context: 
       name: fields.name, instructions: fields.instructions, app, event,
       ...(typeof args.account === "string" && args.account.trim() ? { account: args.account.trim() } : {}),
       ...(fields.filter ? { filter: fields.filter } : {}), ...(fields.config ? { config: fields.config } : {}), ...(fields.runOn ? { runOn: fields.runOn } : {}),
+      ...(fields.sameConversation !== undefined ? { sameConversation: fields.sameConversation } : {}),
     };
     return request({ action: "create", kind: "app", trigger, ...(forBotId ? { forBotId } : {}) }, context, `Created the app-event trigger “${String(fields.name)}”`);
   }
   if (when === "limit_reset") {
-    const misplaced = ["schedule", "webhook_event_types", "run_on_startup", "runOnStartup"].find((key) => args[key] !== undefined && args[key] !== null);
+    const misplaced = ["schedule", "webhook_event_types", "webhook_payload_filter", "run_on_startup", "runOnStartup"].find((key) => args[key] !== undefined && args[key] !== null);
     if (misplaced) return { text: `A limit-reset trigger runs when the engine's limit resets, so it takes no ${misplaced}.`, isError: true };
     const timing = limitResetSchedule(args.engine, args.repeat);
     if (timing.error) return { text: timing.error, isError: true };
-    const { eventTypes: _unused, ...routine } = fields;
+    const { eventTypes: _unused, payloadFilter: _unusedFilter, ...routine } = fields;
     return request({ action: "create", kind: "schedule", routine: { ...routine, schedule: timing.schedule }, ...(forBotId ? { forBotId } : {}) }, context,
       `Created the trigger “${String(fields.name)}” for when the limit resets`);
   }
   const label = `the ${when === "webhook" ? "webhook" : "schedule"} trigger “${String(fields.name)}”`;
   if (when === "schedule") {
-    if (!fields.schedule) return { text: "A schedule trigger needs schedule.", isError: true };
+    if (!fields.schedule) return { text: `A schedule trigger needs schedule. ${SUPPORTED_SCHEDULES}`, isError: true };
     if (fields.eventTypes) return { text: "webhook_event_types applies only to when=webhook.", isError: true };
-    const { eventTypes: _unused, ...routine } = fields;
+    if (fields.payloadFilter) return { text: "webhook_payload_filter applies only to when=webhook.", isError: true };
+    const { eventTypes: _unused, payloadFilter: _unusedFilter, ...routine } = fields;
     return request({ action: "create", kind: "schedule", routine, ...(forBotId ? { forBotId } : {}) }, context, `Created ${label}`);
   }
   const misplaced = SCHEDULE_ONLY.find((key) => args[key] !== undefined && args[key] !== null);
   if (misplaced) return { text: `A webhook trigger fires when its link is called, so it takes no ${misplaced}.`, isError: true };
-  const webhook = { name: fields.name, instructions: fields.instructions, ...(fields.runOn ? { runOn: fields.runOn } : {}), ...(fields.eventTypes ? { eventTypes: fields.eventTypes } : {}) };
+  const webhook = { name: fields.name, instructions: fields.instructions, ...(fields.runOn ? { runOn: fields.runOn } : {}), ...(fields.eventTypes ? { eventTypes: fields.eventTypes } : {}),
+    ...(fields.payloadFilter ? { payloadFilter: fields.payloadFilter } : {}),
+    ...(fields.sameConversation !== undefined ? { sameConversation: fields.sameConversation } : {}) };
   return request({ action: "create", kind: "webhook", webhook, ...(forBotId ? { forBotId } : {}) }, context, `Created ${label}`);
 }

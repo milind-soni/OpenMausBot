@@ -35,7 +35,9 @@ export interface CloudSendSources {
   /** The stored picture's bytes, or null when it is gone. */
   picture(avatarUrl: string): Uint8Array | null;
   logins(): ReadonlyArray<{ id: string; site: string; hosts: readonly string[]; exactHost: boolean; username: string; updatedAt: number }>;
-  onePassword(): { connectedAt: number; grants: Record<string, LoginBots> } | null;
+  onePassword(): { connectedAt: number; grants: Record<string, LoginBots>; itemGrants?: Record<string, LoginBots> } | null;
+  /** Saved Vault secrets, never a value. Linked password-manager items are not listed: they stay linked. */
+  secrets?(): ReadonlyArray<{ id: string; name: string; updatedAt: number }>;
   settings(): { profile?: { name?: string; email?: string; aboutMe?: string }; language?: string };
   /** What only a move carries, of the bots it carries (cloud-send-kinds.ts), and a bot's parts only a move compares.
    * `only`: a move of that one bot into a team. */
@@ -94,12 +96,14 @@ export function unused(bot: BotRecord, skills: number, greetingOnly: (threadId: 
 }
 
 /** `move`: a move's comparison, with what only a move carries. `bot`: a move of that one bot into a team: the bot, its
- * skills, its routines and the library skills it uses, never anything of the person's own. */
-export function cloudSendSummary(sources: CloudSendSources, { move = false, bot: only }: { move?: boolean; bot?: string } = {}): CloudSendSummary {
+ * skills, its routines and the library skills it uses, never anything of the person's own. `bots`: a move of only these of
+ * this computer's bots, which a calendar call stays out of: it runs where it was set up. `leaving`: this server is the one
+ * bots move away from, so one that lives elsewhere now is not carried again. */
+export function cloudSendSummary(sources: CloudSendSources, { move = false, bot: only, bots: chosen, leaving = false }: { move?: boolean; bot?: string; bots?: ReadonlySet<string>; leaving?: boolean } = {}): CloudSendSummary {
   const items: CloudSendItem[] = [];
   const carried = new Set<string>();
   for (const bot of sources.bots()) {
-    if (only !== undefined && bot.id !== only) continue;
+    if ((only !== undefined && bot.id !== only) || (chosen && !chosen.has(bot.id)) || (leaving && bot.movedTo?.state === "moved")) continue;
     const skills = sources.skills(bot);
     if (only === undefined && unused(bot, skills.length, sources.greetingOnly, sources.inRoom, move ? sources.automated : undefined)) continue;
     carried.add(bot.id);
@@ -123,12 +127,17 @@ export function cloudSendSummary(sources: CloudSendSources, { move = false, bot:
   const onePassword = sources.onePassword();
   if (onePassword) {
     items.push({ key: itemKey.onePassword(), kind: "1password", label: "1Password",
-      parts: { token: partHash(onePassword.connectedAt), vaults: partHash(onePassword.grants) } });
+      // Items' own bots count with the vaults', so narrowing one item sends again; without any the hash stays as before.
+      parts: { token: partHash(onePassword.connectedAt),
+        vaults: partHash(Object.keys(onePassword.itemGrants ?? {}).length ? { vaults: onePassword.grants, items: onePassword.itemGrants } : onePassword.grants) } });
+  }
+  for (const secret of sources.secrets?.() ?? []) {
+    items.push({ key: itemKey.secret(secret.id), kind: "secret", label: secret.name, id: secret.id, parts: { saved: partHash(secret.updatedAt) } });
   }
   const { profile = {}, language } = sources.settings();
   items.push({ key: itemKey.setting("profile"), kind: "setting", label: "profile",
     parts: { name: partHash(profile.name), email: partHash(profile.email), about: partHash(profile.aboutMe) } });
   items.push({ key: itemKey.setting("language"), kind: "setting", label: "language", parts: { value: partHash(language) } });
-  if (move && sources.move) items.push(...sources.move.items(carried));
+  if (move && sources.move) items.push(...sources.move.items(carried).filter((item) => !chosen || item.kind !== "call"));
   return { v: 1, appVersion: sources.appVersion, items };
 }

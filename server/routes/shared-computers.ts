@@ -21,7 +21,7 @@ export function createSharedComputerRoutes(deps: {
   /** On a Cloud home every lent computer is the owner's, under this one name. */
   cloudHomeLender: string | null;
   principal: (auth: RequestAuth) => string | null;
-  personKey: (session: Pick<SessionRecord, "id" | "email">) => string;
+  personKey: (session: SessionRecord) => string;
   /** A Cloud home that agreed to sleep sends the desktop away until it wakes (server/cloud-power.ts). */
   power: () => Pick<CloudPower, "sleeping" | "sleepSignal"> | null;
   /** A Cloud home's device links (a lent computer's internet connection); null elsewhere, where the path 404s. */
@@ -62,7 +62,7 @@ export function createSharedComputerRoutes(deps: {
       if (!parsed.success) return json(res, 400, { error: "Invalid computer registration" });
       const registration = parsed.data;
       if (registration.environmentId !== deps.environmentId) return json(res, 409, { error: "Workspace identity changed. Pair again before sharing this computer." });
-      if (deps.cloudHomeLender && !auth.scopes.includes("admin")) return json(res, 403, { error: "Only your own computers can be shared with the Cloud. On this computer, choose Open the Cloud in Settings → MausBot Cloud first." });
+      if (deps.cloudHomeLender && !auth.scopes.includes("admin")) return json(res, 403, { error: "Only your own computers can be shared with the Cloud. On this computer, choose Open the Cloud in Settings → Plan & billing first." });
       deps.computers.register(registration, { session: auth.session.id, person: deps.cloudHomeLender ?? deps.personKey(auth.session) }, secret);
       return json(res, 200, { ok: true });
     }
@@ -85,7 +85,8 @@ export function createSharedComputerRoutes(deps: {
     if (action === "poll") {
       const power = deps.power();
       if (power?.sleeping()) return answerAsleep(res, json);
-      const job = await deps.computers.poll(id, auth.session.id, secret, power ? AbortSignal.any([responseGone(res), power.sleepSignal()]) : responseGone(res));
+      const job = await deps.computers.poll(id, auth.session.id, secret, power ? AbortSignal.any([responseGone(res), power.sleepSignal()]) : responseGone(res),
+        deps.cloudHomeLender ?? deps.personKey(auth.session));
       if (!job && power?.sleeping()) return answerAsleep(res, json);
       return json(res, 200, { job });
     }

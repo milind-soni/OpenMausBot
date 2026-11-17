@@ -22,6 +22,8 @@ export interface DirectSendInput {
   followUp?: FollowUp;
   /** Bot ids the person picked from the @ list. */
   mentions?: string[];
+  /** The sender is the team's Owner or an Admin, so a typed stop may end someone else's run. */
+  admin?: boolean;
 }
 
 export type DirectSendReceipt =

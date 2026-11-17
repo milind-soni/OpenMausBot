@@ -16,11 +16,13 @@ describe.skipIf(process.platform !== "linux")("BoxRunner refusal cleanup", () =>
   it.each(["explicit", "argv"] as const)("releases seccomp descriptors and broker grants on %s read-only refusal", async (source) => {
     const root = mkdtempSync(join(tmpdir(), "omb-wrap-cleanup-"));
     const home = join(root, "home"), dataDir = join(root, "data");
-    const file = join(dataDir, "mcp.json"), filter = join(root, "seccomp.bpf");
+    // A path on the command line is shown only outside the data folder; one the caller names may be inside it.
+    const file = source === "argv" ? join(root, "turn", "mcp.json") : join(dataDir, "mcp.json"), filter = join(root, "seccomp.bpf");
     let broker: CredentialBroker | undefined;
     try {
       mkdirSync(home);
       mkdirSync(dataDir);
+      mkdirSync(join(root, "turn"));
       writeFileSync(file, "fixture");
       writeFileSync(filter, "filter");
       broker = await openCredentialBroker({ socketPath: join(root, "b.sock") });

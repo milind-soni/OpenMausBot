@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { handSaved, installOwnHome, openServerSession, OWNER_KNOWN_MS, OWNER_RETRY_MS, parseChoice } from "./own-home-main.mjs";
@@ -156,4 +157,69 @@ test("a server that does not say who owns it is asked once at a time, and again 
   assert.equal(to(garage.origin), 4, "then asked again");
   assert.equal(to(family.origin), 2, "while its first ask still waits");
   own.close();
+});
+
+test("after an own-home move is done, an app update does not send the old workspace files, and the copy is never deleted", async () => {
+  const sha = (text) => createHash("sha256").update(text).digest("hex");
+  const file = (path, text) => ({ path, size: Buffer.byteLength(text), sha256: sha(text) });
+  const oldFiles = [file("workspaces/ember/.git/refs/heads/main", "old-ref"), file("workspaces/ember/notes.md", "mine")];
+  const serverFiles = [file("workspaces/ember/.git/refs/heads/main", "new-ref"), file("workspaces/ember/notes.md", "theirs")];
+  const bytes = { "workspaces/ember/.git/refs/heads/main": "old-ref", "workspaces/ember/notes.md": "mine" };
+  const botItem = { key: "bot:ember", kind: "bot", label: "Ember", id: "ember", parts: { soul: "s" } };
+  const summary = { v: 1, appVersion: "0.1.151", items: [botItem], chats: 1 };
+  const choice = { v: 1, id: "g", origin: garage.origin, environmentId: ID, name: "Garage server", at: 1 };
+  const cloud = { origin: garage.origin, account: `own:${ID}`, machine: garage.origin, name: "Garage server" };
+  const journal = memory({ v: 1, phase: "done", cloud, doneAt: 1_000, version: "0.1.151", lent: true, told: true });
+  const asked = [];
+  const lines = [];
+  const localRequest = async (route) => {
+    const path = route.split("?")[0];
+    const query = route.includes("?") ? route.slice(route.indexOf("?") + 1) : "";
+    asked.push(`local ${route}`);
+    if (path === "/api/cloud-send/files" && query.startsWith("path=")) {
+      const body = bytes[new URLSearchParams(query).get("path")];
+      return body ? new Response(Buffer.from(body)) : Response.json({}, { status: 404 });
+    }
+    if (path === "/api/cloud-send/files") return Response.json({ v: 1, files: oldFiles });
+    if (path === "/api/cloud-send") return Response.json(summary);
+    if (path === "/api/cloud-connections") return Response.json({ computer: { environmentId: "env-mac", label: "MacBook" }, connections: [], engines: [], commands: [] });
+    if (path === "/api/bots") return Response.json({ bots: [{ id: "ember", name: "Ember", threadId: "t-ember" }] });
+    if (path === "/api/cloud-send/memory") return Response.json(query.startsWith("bot=") ? { v: 1, files: [], journal: [] } : { v: 1, about: { learned: [], removed: [] }, teams: [] });
+    if (path.endsWith("/skills")) return Response.json({ skills: [] });
+    if (path.endsWith("/memory")) return Response.json({ topics: [] });
+    if (path === "/api/cloud-send/chats") return Response.json({ v: 1, dataDir: "/desk/.openmausbot", conversations: [], attachments: [] });
+    return Response.json({ v: 1 });
+  };
+  const fetch = async (url, init) => {
+    const { pathname, search } = new URL(url);
+    const method = init?.method ?? "GET";
+    asked.push(`${method} ${pathname}${search}`);
+    if (pathname === "/api/auth/session") return Response.json({ kind: "session", scopes: ["admin"], own: true });
+    if (pathname === "/.well-known/openmausbot/environment") return Response.json({ environmentId: ID, capabilities: { move: 1 } });
+    if (pathname === "/api/cloud-connections") return Response.json({ computer: { environmentId: "env-srv", label: "Garage" }, connections: [], engines: [], commands: [] });
+    if (pathname === "/api/cloud-send/files" && method === "POST") return Response.json({ stored: true }, { status: 201 });
+    if (pathname === "/api/cloud-send/files") return Response.json({ v: 1, files: serverFiles, space: { freeBytes: 1e12, volumeBytes: 1e12 } });
+    if (pathname === "/api/cloud-send") return Response.json(summary);
+    if (pathname === "/api/cloud-send/memory") return Response.json({ v: 1, files: 0, journal: 0, about: 0, teams: 0 });
+    if (pathname === "/api/cloud-send/chats") return Response.json({ v: 1, conversations: [] });
+    return Response.json({ v: 1 });
+  };
+  const open = (version) => installOwnHome({
+    localRequest, fetch, environments: () => [garage], handoff: async () => ({}), journal, choice: memory(choice), sendState: memory(), cloudJournal: () => null,
+    version, log: (line) => lines.push(line), now: () => 5_000_000,
+  });
+  const files = () => asked.filter((line) => line.includes("/api/cloud-send/files"));
+  const first = open("0.1.152");
+  await first.kick();
+  assert.equal(first.journal().version, "0.1.152", lines.join("\n"));
+  assert.equal(first.journal().phase, "done");
+  assert.equal(first.journal().forgot, undefined, "a server of the person's own is never paid, so this copy is not deleted");
+  assert.deepEqual(files(), [], "the version change does not list or send the old workspace, including .git");
+  first.close();
+
+  const second = open("0.1.153");
+  await second.kick();
+  assert.equal(second.journal().version, "0.1.153", lines.join("\n"));
+  assert.deepEqual(files(), []);
+  second.close();
 });

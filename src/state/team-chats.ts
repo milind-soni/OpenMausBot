@@ -11,16 +11,22 @@ import { api } from "./api";
 import type { Action, Bot } from "./store";
 import { readSessionState } from "@/lib/session";
 
-/** The team on screen, whether this person is a Member (no admin scope), and the conversations the server says they
- * opened: null anywhere but a team's Cloud. */
-export type TeamChats = { teamId: string; member: boolean; opened?: readonly string[] };
+/** The team on screen, whether this person is a Member (no admin scope), the conversations the server says they opened
+ * and the address they signed in with: null anywhere but a team's Cloud. */
+export type TeamChats = { teamId: string; member: boolean; opened?: readonly string[]; person?: string };
 
 type TaskLike = { threadId: string; createdAt?: number; updatedAt?: number; private?: unknown; inbox?: unknown; routineRunId?: unknown; openedBy?: unknown; archivedAt?: unknown; closedBy?: unknown };
 type BotLike = { id: string; tasks?: TaskLike[]; yourAccess?: string };
 
 let current: TeamChats | null = null;
+const watchers = new Set<() => void>();
+/** Hears every change of the team on screen, the person signed in and the conversations known to be theirs. */
+export function onTeamChats(watcher: () => void): void {
+  watchers.add(watcher);
+}
 export function setTeamChats(next: TeamChats | null) {
   current = next;
+  for (const watcher of watchers) watcher();
 }
 export function teamChats(): TeamChats | null {
   return current;
@@ -28,8 +34,12 @@ export function teamChats(): TeamChats | null {
 
 /** A conversation this page just made: the person's own, which the session it read before does not list yet. */
 export function rememberOwnChat(teamId: string, threadId: string) {
-  if (current?.teamId === teamId && !current.opened?.includes(threadId)) current = { ...current, opened: [...(current.opened ?? []), threadId] };
+  if (current?.teamId === teamId && !current.opened?.includes(threadId)) setTeamChats({ ...current, opened: [...(current.opened ?? []), threadId] });
 }
+
+/** A conversation this person started on a team (the session's list, and one this page just made before its task arrives):
+ * theirs alone, so it is never shown as the shared chat. */
+export const ownChatStarted = (threadId: string | undefined) => Boolean(threadId && current?.opened?.includes(threadId));
 
 /** A person's own conversation: private, open, and opened by a person (not a routine's report or a bot's thread). */
 const ownKind = (task: TaskLike) => task.private === true && !task.routineRunId && !task.openedBy && !task.archivedAt && !task.closedBy;
@@ -46,12 +56,22 @@ export function ownChatOf(bot: BotLike, team: TeamChats): string | null {
 }
 
 const making = new Set<string>();
-/** On a team: opens the person's own conversation with `bot` through `open`, or makes it and opens it. False anywhere
- * else, and for a bot this person can only view and has no conversation of their own with, so the caller opens the bot
+/** On a team: opens the person's own conversation with `bot` through `open`, or makes it and opens it, once the session
+ * has said which conversations are theirs: before that their own chat is not known from anyone's, and a second one would
+ * be made. False anywhere else, and for a bot this person can only view and has no conversation of their own with, so the caller opens the bot
  * as it always has: its main chat. */
 export function openOwnTeamChat(dispatch: (action: Action) => void, bot: BotLike, open: (threadId: string) => void): boolean {
   const team = current;
   if (!team) return false;
+  if (team.opened === undefined) {
+    const whenRead = () => {
+      if (current && current.opened === undefined) return;
+      watchers.delete(whenRead);
+      if (current) openOwnTeamChat(dispatch, bot, open);
+    };
+    watchers.add(whenRead);
+    return true;
+  }
   const own = ownChatOf(bot, team);
   if (own) { open(own); return true; }
   if (bot.yourAccess === "view") return false;
@@ -75,6 +95,18 @@ export function teamOfConfig(config: unknown): { id: string } | null {
   return typeof team?.id === "string" && team.id ? { id: team.id } : null;
 }
 
+const chatsOf = (teamId: string, session: { scopes: string[]; openedThreads?: string[]; email?: string }): TeamChats =>
+  ({ teamId, member: !session.scopes.includes("admin"), opened: session.openedThreads ?? [], ...(session.email?.trim() ? { person: session.email.trim().toLowerCase() } : {}) });
+
+/** The person's role may have changed: read the session again. */
+export function rereadTeamChats(): void {
+  const teamId = current?.teamId;
+  if (!teamId) return;
+  void readSessionState().then((session) => {
+    if (current?.teamId === teamId && session.kind === "session") setTeamChats(chatsOf(teamId, session));
+  }).catch(() => {});
+}
+
 /** Keeps the sidebar's rule in step with the page's server: on a team, the person's own conversations; a Member until
  * the session says otherwise is never assumed (an Admin's rule is the safe one). */
 export function useTeamChats(config: unknown) {
@@ -84,8 +116,8 @@ export function useTeamChats(config: unknown) {
     setTeamChats({ teamId, member: false });
     let alive = true;
     void readSessionState().then((session) => {
-      if (alive && session.kind === "session") setTeamChats({ teamId, member: !session.scopes.includes("admin"), opened: session.openedThreads ?? [] });
-    }).catch(() => {});
+      if (alive) setTeamChats(session.kind === "session" ? chatsOf(teamId, session) : { teamId, member: false, opened: [] });
+    }).catch(() => { if (alive) setTeamChats({ teamId, member: false, opened: [] }); });
     return () => { alive = false; };
   }, [teamId]);
 }

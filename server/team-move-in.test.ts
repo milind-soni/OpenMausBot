@@ -127,7 +127,7 @@ describe("what a move-in may write", () => {
 
   const ADMINS_SET = {
     approvalMode: "full", autoApprove: true, alwaysAllow: ["Bash(*)"], chiefOfStaff: true, managedSections: ["Ops"], computer: "local", cwd: "/",
-    cloudBackend: "vps", peers: [OTHER], approvePeerComms: false, composio: true, browser: true, browserProfile: "guest", mcpServers: ["github"],
+    cloudBackend: "vps", composio: true, browser: true, browserProfile: "guest", mcpServers: ["github"],
     toolScope: { allow: ["native:*"] }, connectorTools: {}, connectorScopes: {}, outbound: {}, xResearch: true, phoneApps: [], section: "Finance",
     visibility: { audience: "members" }, recordBrowserSteps: true, cacheKeepWarm: true,
   };

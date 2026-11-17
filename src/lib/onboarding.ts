@@ -22,6 +22,8 @@ export interface WelcomeViewer {
   hosted: boolean;
   canSave: boolean;
   cloudHome?: boolean;
+  /** On a Team Cloud: the person's role there (owner, admin, member). */
+  teamRole?: string;
 }
 
 export const LOCAL_VIEWER: WelcomeViewer = { hosted: false, canSave: true };
@@ -35,12 +37,19 @@ export function spotlightsQuiet(viewer: WelcomeViewer | null): boolean {
 }
 
 export function welcomeViewer(session: unknown): WelcomeViewer {
-  const record = session && typeof session === "object" ? (session as { hosted?: unknown; scopes?: unknown; cloudHome?: unknown }) : {};
+  const record = session && typeof session === "object" ? (session as { hosted?: unknown; scopes?: unknown; cloudHome?: unknown; team?: { role?: unknown } | null }) : {};
+  const teamRole = record.team?.role;
   return {
     hosted: record.hosted === true,
     canSave: Array.isArray(record.scopes) ? record.scopes.includes("admin") : true,
     ...(record.cloudHome === true ? { cloudHome: true } : {}),
+    ...(typeof teamRole === "string" ? { teamRole } : {}),
   };
+}
+
+/** Whose setup a Cloud's welcome and setup list are: whoever can change the Cloud, and on a team its Owner alone. */
+export function setsUpCloud(viewer: WelcomeViewer | null): boolean {
+  return Boolean(viewer?.cloudHome && viewer.canSave && (viewer.teamRole === undefined || viewer.teamRole === "owner"));
 }
 
 export function welcomeDue(

@@ -48,7 +48,7 @@ export const LOCAL_VM_UPDATING_PROBLEM =
 
 export function localVmUpdateNote(failure: string | null): string {
   return failure
-    ? ` This bot's Local VM desktop runs an older version and could not be updated automatically (${failure}), so no computer is mounted this turn. Work that needs no screen can go ahead. If the request needs the desktop, do not use another computer: say plainly that its desktop needs updating, and that the person can update it in App Settings → Computers.`
+    ? ` This bot's Local VM desktop runs an older version and could not be updated automatically (${failure}), so no computer is mounted this turn. Work that needs no screen can go ahead. If the request needs the desktop, do not use another computer: say plainly that its desktop needs updating, and that the person can update it in Settings → Desktops & browser.`
     : " This bot's Local VM desktop is being updated to the new version after an app update, which usually takes a few minutes, so no computer is mounted this turn. Work that needs no screen can go ahead. If the request needs the desktop, do not use another computer: say plainly that its desktop is being updated and will be ready in a few minutes.";
 }
 
@@ -215,7 +215,7 @@ export function createLocalVmUpdater(deps: LocalVmUpdaterDeps) {
         await sleep(200);
       }
       const failure = entries.get(target.key)?.failure;
-      if (failure) throw new Error(`this bot's desktop could not be updated automatically (${failure}) — update it in App Settings → Computers`);
+      if (failure) throw new Error(`this bot's desktop could not be updated automatically (${failure}) — update it in Settings → Desktops & browser`);
     },
     /** After boot: the image is built once, then each old desktop is recreated as soon as nothing uses it. */
     async sweep(): Promise<void> {

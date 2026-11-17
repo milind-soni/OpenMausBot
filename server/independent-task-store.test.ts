@@ -7,10 +7,11 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { isProjectEmoji, Store, type BotRecord, type GroupRecord, type TaskPatch } from "./store.ts";
 import { ensureTaskWorkspace } from "./workspace.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "default" });
-const savedBots = (): BotRecord[] => JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
-const savedGroups = (): GroupRecord[] => JSON.parse(readFileSync(join(DATA_DIR, "groups.json"), "utf8"));
+const savedBots = (): BotRecord[] => readRegistry(DATA_DIR).bots;
+const savedGroups = (): GroupRecord[] => readRegistry(DATA_DIR).rooms;
 
 describe("independent bot task state", () => {
   // The shared Vitest setup gives this file its own disposable home.
@@ -40,6 +41,30 @@ describe("independent bot task state", () => {
     expect(approvalModeFor(restarted.bot(other.id)!)).toBe("ask");
     restarted.setAllThreadApprovalMode(bot.id, "ask");
     expect(new Store(selection).tasks(bot.id).every(task => task.approvalMode === "ask")).toBe(true);
+  });
+
+  it("keeps a bot's saved grants through Full access, so going back to Ask does not ask for each again", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const grants = ["provider-tool:claude:linear:list_issues:0123456789abcdef", "provider-tool:claude:notes:get_note:fedcba9876543210"];
+    store.patchBot(bot.id, { approvalMode: "ask", autoApprove: false, alwaysAllow: grants });
+    const first = bot.threadId;
+    store.patchTask(bot.id, first, { alwaysAllow: grants });
+    const sibling = store.createTask(bot.id, "Sibling")!;
+    store.patchTask(bot.id, sibling.threadId, { alwaysAllow: [grants[0]!] });
+
+    store.setAllThreadApprovalMode(bot.id, "full");
+    expect(approvalModeFor(store.bot(bot.id)!)).toBe("full");
+    expect(store.bot(bot.id)?.alwaysAllow, "unused at Full access, but still saved").toEqual(grants);
+    expect(savedBots().find((saved) => saved.id === bot.id)?.alwaysAllow).toEqual(grants);
+
+    const restarted = new Store(selection);
+    restarted.setAllThreadApprovalMode(bot.id, "ask");
+    expect(approvalModeFor(restarted.bot(bot.id)!)).toBe("ask");
+    expect(restarted.bot(bot.id)?.alwaysAllow).toEqual(grants);
+    expect(restarted.projectBotForTask(bot.id, first)?.alwaysAllow).toEqual(grants);
+    expect(restarted.projectBotForTask(bot.id, sibling.threadId)?.alwaysAllow, "each thread keeps its own list, no wider than before").toEqual([grants[0]]);
+    expect(new Store(selection).bot(bot.id)?.alwaysAllow).toEqual(grants);
   });
 
   it("refreshes one thread's permissions from the bot default and leaves the rest", () => {
@@ -122,7 +147,7 @@ describe("independent bot task state", () => {
     const hidden = saved.tasks!.find((task) => task.threadId === execution.threadId)!;
     hidden.unread = true;
     saved.unread = true;
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(raw));
+    writeRegistry(DATA_DIR, { bots: raw });
     const reloaded = new Store(selection);
     expect(reloaded.taskByThread(bot.id, execution.threadId)).toMatchObject({ routineRunId: "run-1", unread: false });
     expect(reloaded.bot(bot.id)?.unread).toBe(false);
@@ -400,7 +425,7 @@ describe("independent bot task state", () => {
     raw.rewound = true;
     raw.pinnedMessageId = "legacy-pin";
     raw.unread = true;
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(legacy));
+    writeRegistry(DATA_DIR, { bots: legacy });
     const migrated = new Store(selection);
     expect(migrated.tasks(bot.id)).toHaveLength(2);
     expect(migrated.projectBotForTask(bot.id, first)).toMatchObject({
@@ -542,7 +567,7 @@ describe("independent bot task state", () => {
     expect(store.patchProject(sibling.id, project.id, { name: "Wrong owner" })).toBeNull();
     const saved = savedBots();
     Object.assign(saved.find((entry) => entry.id === bot.id)!.projects![0], { modelSelection: { instanceId: "codex", model: "removed-folder-default" } });
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(saved));
+    writeRegistry(DATA_DIR, { bots: saved });
     const reloaded = new Store(selection);
     expect(reloaded.project(bot.id, project.id)).toEqual({ id: project.id, name: "General", emoji: "⭐" });
     expect(reloaded.taskByThread(bot.id, bot.threadId)?.modelSelection).toEqual({ instanceId: "codex", model: "existing-thread" });

@@ -33,7 +33,7 @@ const boltGo = () => join(team.home, "bolt-go");
 const turns = (): Turn[] => existsSync(`${planPath()}.evidence.jsonl`)
   ? readFileSync(`${planPath()}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Turn) : [];
 const create = async (body: Record<string, unknown>) => {
-  const created = await team.as(olive, "POST", "/api/bots", body);
+  const created = await team.as(olive, "POST", "/api/bots", { visibility: "everyone", ...body });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   return created.body.bot as Bot;
 };

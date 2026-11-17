@@ -27,8 +27,9 @@ export async function changeSecret(id: string, change: { name?: string; value?: 
   })).secret;
 }
 
-export async function deleteSecret(id: string): Promise<void> {
-  await api(`/api/vault/secrets/${encodeURIComponent(id)}`, { method: "DELETE" });
+/** The MCP servers that lost their key with it. */
+export async function deleteSecret(id: string): Promise<string[]> {
+  return (await api<{ keysOff?: string[] }>(`/api/vault/secrets/${encodeURIComponent(id)}`, { method: "DELETE" })).keysOff ?? [];
 }
 
 /** The NAME=value lines of a pasted .env file. `export`, quotes and trailing comments are dropped; a later line with the

@@ -23,6 +23,21 @@ ipcRenderer.on("chat:open", (_event, link) => {
   for (const listener of chatLinkListeners) listener(link);
 });
 
+// A new bot asked for from the person's other place is made only by a page that is listening soon after: held for a
+// page still starting, then forgotten, so a sign-in document or an older page never makes one later.
+const NEW_BOT_HELD_MS = 10_000;
+let pendingNewBotAt = null;
+const newBotListeners = new Set();
+const hearNewBot = () => {
+  pendingNewBotAt = null;
+  void ipcRenderer.invoke("places-together:new-bot-heard").catch(() => {});
+  for (const listener of newBotListeners) listener();
+};
+ipcRenderer.on("places-together:new-bot", () => {
+  if (!newBotListeners.size) { pendingNewBotAt = Date.now(); return; }
+  hearNewBot();
+});
+ipcRenderer.on("places-together:new-bot-cancel", () => { pendingNewBotAt = null; });
 let pendingNotificationOpen = null;
 const notificationOpenListeners = new Set();
 ipcRenderer.on("desktop-notifications:open", (_event, target) => {
@@ -34,7 +49,8 @@ ipcRenderer.on("desktop-notifications:open", (_event, target) => {
 });
 
 // Only fixed actions are retained, never a destination supplied by a renderer.
-const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto"]);
+const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto",
+  "overview", "phone", "ai", "bots", "desktops", "vault", "usage", "transfer", "data", "people", "installations", "account", "plan", "app", "general", "appearance"]);
 let pendingSettingsAction = null;
 const appSettingsListeners = new Set();
 ipcRenderer.on("app:open-settings", (_event, section) => {
@@ -74,7 +90,7 @@ function railKeepsItsSize() {
 if (typeof window !== "undefined") {
   for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
-const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering"]);
+const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
@@ -209,6 +225,10 @@ const bridge = {
       ipcRenderer.on("rail:state", handler);
       return () => ipcRenderer.removeListener("rail:state", handler);
     },
+    // "Switch to This computer" on a Cloud's settings: only from the person's click, and only a settings page's name.
+    openComputer: (page) => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("rail:open-computer", typeof page === "string" && /^[a-z-]{1,32}$/.test(page) ? page : "")
+      : Promise.reject(new Error("Choose Switch to This computer.")),
     ...(isLocalPage ? {
       expand: (on) => ipcRenderer.invoke("rail:expand", on === true),
       onSkin: (cb) => {
@@ -268,6 +288,7 @@ const bridge = {
     keepAwake: (enabled) => ipcRenderer.invoke("companion:keep-awake", enabled),
     refreshTailscale: () => ipcRenderer.invoke("companion:refresh-tailscale"),
     setTailscale: (on) => ipcRenderer.invoke("companion:tailscale", on === true),
+    setTailscaleComputers: (on) => ipcRenderer.invoke("companion:tailscale-computers", on === true),
     setRoute: (route, on) => ipcRenderer.invoke("companion:route", String(route), on === true),
     dismissNotice: (route) => ipcRenderer.invoke("companion:notice-dismiss", String(route)),
     pairing: (open, expectedToken) => ipcRenderer.invoke("companion:pairing", open, expectedToken),
@@ -420,11 +441,18 @@ const bridge = {
     set: on => on !== true || isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("open-at-login:set", on === true) : Promise.reject(new Error("Turn on the switch to open OpenMausBot at login.")),
   },
-  setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
+  setCredential: (name, value, options) => ipcRenderer.invoke("credential:set", name, value, options),
   // Saved keys this launch could not read, and "Reset saved keys" (main asks the person first, then restarts).
   credentialStore: {
     unreadable: () => ipcRenderer.invoke("credential-store:unreadable"),
     reset: () => ipcRenderer.invoke("credential-store:reset"),
+  },
+
+  // A server's page from the Server menu, once that server is newer than this app, asks for this app's own update from
+  // the person's click. It learns only what was done; main asks in a dialog of its own before anything restarts.
+  appUpdate: {
+    request: () => navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("update:for-server-page") : Promise.reject(new Error("Choose Update app.")),
   },
 
   updater: {
@@ -535,6 +563,15 @@ const bridge = {
     teamBringMove: botId => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-bring-move", String(botId)) : Promise.reject(new Error("Choose Move to move the bot.")),
     teamBringStatus: () => ipcRenderer.invoke("cloud-send:team-bring-status"),
+    // Which of this computer's bots move to My Cloud: asked on either page, and only from the person's click on My Cloud's.
+    botMoveState: () => ipcRenderer.invoke("cloud-send:bot-move-state"),
+    botChoices: () => ipcRenderer.invoke("cloud-send:bot-choices"),
+    moveBots: ids => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-bots", Array.isArray(ids) ? ids.map(String) : []) : Promise.reject(new Error("Choose which bots move.")),
+    moveEverything: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-send:move-everything") : Promise.reject(new Error("Choose which bots move.")),
+    botMoveRetry: () => ipcRenderer.invoke("cloud-send:bot-move-retry"),
+    openMyCloud: () => ipcRenderer.invoke("cloud-send:open-my-cloud"),
     // Settings → MausBot Cloud, Advanced: "Keep this computer's bots on this computer".
     keepHere: () => ipcRenderer.invoke("one-home:keep"),
     setKeepHere: on => isLocalPage || navigator.userActivation?.isActive === true
@@ -543,6 +580,28 @@ const bridge = {
       const handler = (_event, notice) => cb(notice);
       ipcRenderer.on("cloud-send:notice-changed", handler);
       return () => ipcRenderer.removeListener("cloud-send:notice-changed", handler);
+    },
+  } : undefined,
+  // This computer's page and My Cloud's own page (main refuses any other): the other one's bots, listed beside this one's.
+  placesTogether: process.argv.includes("--omb-company-desktop=1") ? {
+    state: () => ipcRenderer.invoke("places-together:state"),
+    set: on => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:set", on === true) : Promise.reject(new Error("Turn the switch to list both places' bots.")),
+    open: botId => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:open", String(botId)) : Promise.reject(new Error("Choose a bot to open it.")),
+    onChanged: cb => {
+      const handler = () => cb();
+      ipcRenderer.on("places-together:changed", handler);
+      return () => ipcRenderer.removeListener("places-together:changed", handler);
+    },
+    newBotChoice: () => ipcRenderer.invoke("places-together:new-bot-choice"),
+    newBot: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("places-together:new-bot") : Promise.reject(new Error("Choose where the new bot lives.")),
+    onNewBot: cb => {
+      newBotListeners.add(cb);
+      if (pendingNewBotAt !== null && Date.now() - pendingNewBotAt <= NEW_BOT_HELD_MS) hearNewBot();
+      pendingNewBotAt = null;
+      return () => newBotListeners.delete(cb);
     },
   } : undefined,
   // This computer's page only (never in REMOTE_SAFE, and main refuses any other): bots in two places, brought together on one.

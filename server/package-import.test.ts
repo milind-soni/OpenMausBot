@@ -227,51 +227,41 @@ describe("importing a whole team", () => {
   });
 });
 
-describe("importing onto a Starter Cloud", () => {
-  const onStarter = async (bots: number, starter = true) => {
+describe("importing past five bots, and the workspace's ceiling", () => {
+  const withBots = async (bots: number, maxBots?: number) => {
     const app = await installation();
     for (let i = 0; i < bots; i++) app.store.createBot({ name: `Bot ${i}` });
-    const { createBotLimit } = await import("./host/starter-bot-limit.ts");
-    return { ...app, deps: { ...app.deps, botLimit: createBotLimit({ starter: () => starter, bots: () => app.store.bots }) } };
+    return { ...app, deps: { ...app.deps, ...(maxBots === undefined ? {} : { maxBots }) } };
   };
   const team = (app: { parsePackageDocument: (input: unknown) => PackageDocument }) => app.parsePackageDocument(fixture("full-team.v2.json"));
 
-  it("refuses a team that doesn't fit before writing anything", async () => {
-    const app = await onStarter(3);
+  it("adds a whole team to a Cloud that already has five or more bots", async () => {
+    const app = await withBots(5, 100);
+    const result = app.importer.importPackageDocument(team(app), { trust: "file", mode: "add" }, app.deps);
+    if (result.alreadyAdded) throw new Error("unexpected");
+    expect(result.bots).toHaveLength(3);
+    expect(app.store.bots).toHaveLength(8);
+  });
+
+  it("adds a template's manifest past five bots", async () => {
+    const app = await withBots(19, 100);
+    const { parseTeamManifest } = await import("./team-manifest.ts");
+    const manifest = parseTeamManifest({ format: "openmaus.team", version: 2, team: { name: "Desk", members: [{ key: "helper", name: "Helper", appearance: { color: "blue" } }] } });
+    app.importer.importTeamManifest(manifest, { mode: "add", cwd: null }, app.deps);
+    expect(app.store.bots).toHaveLength(20);
+  });
+
+  it("refuses a team past the workspace's ceiling before writing anything, in words that name no plan", async () => {
+    const app = await withBots(98, 100);
     const before = app.snapshot();
     expect(() => app.importer.importPackageDocument(team(app), { trust: "file", mode: "add" }, app.deps))
-      .toThrow(expect.objectContaining({ code: "bot_limit", status: 409 }));
+      .toThrow(expect.objectContaining({ code: "too_many_bots", status: 409, message: "This adds 3 bots, and this workspace is limited to 100 bots." }));
     expect(app.snapshot()).toBe(before);
     expect(app.events).toEqual([]);
   });
 
-  it("refuses a template's manifest the same way", async () => {
-    const app = await onStarter(5);
-    const before = app.snapshot();
-    const { parseTeamManifest } = await import("./team-manifest.ts");
-    const manifest = parseTeamManifest({ format: "openmaus.team", version: 2, team: { name: "Desk", members: [{ key: "helper", name: "Helper", appearance: { color: "blue" } }] } });
-    expect(() => app.importer.importTeamManifest(manifest, { mode: "add", cwd: null }, app.deps))
-      .toThrow(expect.objectContaining({ code: "bot_limit", status: 409 }));
-    expect(app.snapshot()).toBe(before);
-  });
-
-  it("adds a team that fits, exactly up to the limit", async () => {
-    const app = await onStarter(2);
-    const result = app.importer.importPackageDocument(team(app), { trust: "file", mode: "add" }, app.deps);
-    if (result.alreadyAdded) throw new Error("unexpected");
-    expect(result.bots).toHaveLength(3);
-    expect(app.store.bots).toHaveLength(5);
-  });
-
-  it("adds it on another plan however many are here", async () => {
-    const app = await onStarter(9, false);
-    const result = app.importer.importPackageDocument(team(app), { trust: "file", mode: "add" }, app.deps);
-    if (result.alreadyAdded) throw new Error("unexpected");
-    expect(result.bots).toHaveLength(3);
-  });
-
-  it("registers a preset library at the limit: it makes no bot", async () => {
-    const app = await onStarter(5);
+  it("registers a preset library at the ceiling: it makes no bot", async () => {
+    const app = await withBots(5, 5);
     const library = app.parsePackageDocument(fixture("library-only.v2.json"));
     const presets = { register: vi.fn(() => ({ added: [], existing: [], skipped: [] })) };
     expect(() => app.importer.importPackageDocument(library, { trust: "file", mode: "add" }, { ...app.deps, presets: presets as never })).not.toThrow();

@@ -52,6 +52,16 @@ describe("DigestChip", () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
   });
+  it("draws a Start fresh row as a divider, not a summary", () => {
+    const html = renderToStaticMarkup(createElement(CompactionChip, { message: {
+      id: "context", role: "bot", kind: "compaction", at: 1,
+      compaction: { summary: "", firstKeptId: "", foldedThroughId: "old", tokensBefore: 0, by: "person", fresh: true },
+    } }));
+    expect(html).toContain('role="separator"');
+    expect(html).toContain("Fresh start");
+    expect(html).toContain("Messages above this line");
+    expect(html).not.toContain("<details");
+  });
   it("says one tool call and one file in the singular", () => {
     const one = { ...message.digest!, tools: [], toolsDropped: 0, toolCalls: 1, files: { changed: ["a.ts"], added: [], deleted: [] } };
     expect(renderToStaticMarkup(createElement(DigestChip, { message: { ...message, digest: one } }))).toContain("Did 1 tool call · 1 file changed");

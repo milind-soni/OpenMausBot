@@ -115,6 +115,9 @@ describe("classifyRoutineFailure", () => {
     ["Provider settings changed while this thread was running", { stopReason: "interrupted" }, { kind: "final" }],
     ["The engine stopped without saying why (stop reason: refusal).", { stopReason: "refusal" }, { kind: "final" }],
     ["The model refused the request (HTTP 400): unsupported model", {}, { kind: "final" }],
+    // A model its engine has no route to fails the same way every time, raw or in the plain words the person sees.
+    ["Internal error: Unsupported package for chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017: unknown (session/prompt, service: session, provider.no-route)", { stopReason: "rpc_error" }, { kind: "final" }],
+    ["OpenCode can't use the model chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017 here, so choose another model for this bot.", { stopReason: "rpc_error" }, { kind: "final" }],
     [CAPPED, {}, { kind: "final" }],
     ["Model-call limit reached before a final answer", {}, { kind: "final" }],
     ["The bot repeated the same call 6 times, so it was stopped", { cause: "cap" }, { kind: "final" }],

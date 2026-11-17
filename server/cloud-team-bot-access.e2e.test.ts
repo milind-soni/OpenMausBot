@@ -81,7 +81,7 @@ beforeAll(async () => {
   await until(idle);
   const lines = (await as("ada", "GET", `/api/threads/${payroll.threadId}/messages`)).body.messages as Array<{ id: string }>;
   lastLine = lines.at(-1)!.id;
-  const routine = (botId: string) => ({ name: "Weekly pay check", prompt: "Check this week's pay runs.", botId, schedule: { type: "interval", everyMinutes: 1440, anchorAt: Date.now() + 86_400_000 } });
+  const routine = (botId: string) => ({ name: "Weekly pay check", prompt: "Check this week's pay runs.", botId, resultsThreadId: null, schedule: { type: "interval", everyMinutes: 1440, anchorAt: Date.now() + 86_400_000 } });
   const adas = await as("ada", "POST", "/api/routines", routine(payroll.id));
   expect(adas.status, JSON.stringify(adas.body)).toBe(201);
   adaRoutine = adas.body.routine.id;
@@ -117,6 +117,7 @@ describe("a team bot shared with a level per person", () => {
     ["POST", `/api/bots/${payroll.id}/tasks`, { title: "Mine" }],
     ["POST", `/api/bots/${payroll.id}/interrupt`, { threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/compact`, { threadId: payroll.threadId }],
+    ["POST", `/api/bots/${payroll.id}/start-fresh`, { threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/respond`, { requestId: "x", behavior: "deny", threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/messages/${lastLine}/edit`, { text: "Edited", threadId: payroll.threadId }],
     ["POST", `/api/bots/${payroll.id}/always-allow`, { threadId: payroll.threadId, requestId: "x" }],
@@ -198,7 +199,7 @@ describe("a team bot shared with a level per person", () => {
     expect(changed.body.bot).toMatchObject({ soul: "Answer pay questions briefly.", yourAccess: "edit" });
     const profile = await as("dan", "PATCH", `/api/bots/${payroll.id}/profile`, { description: "Pay questions" });
     expect(profile.status, JSON.stringify(profile.body)).toBe(200);
-    for (const field of [{ approvalMode: "full" }, { cwd: "/tmp" }, { computer: "off" }, { section: "Finance" }, { chiefOfStaff: true }, { peers: [] }, { visibility: "everyone" }, { access: { everyone: "edit", people: {} } }]) {
+    for (const field of [{ approvalMode: "full" }, { cwd: "/tmp" }, { computer: "off" }, { section: "Finance" }, { chiefOfStaff: true }, { visibility: "everyone" }, { access: { everyone: "edit", people: {} } }]) {
       const res = await as("dan", "PATCH", `/api/bots/${payroll.id}`, field);
       expect(res.status, `${JSON.stringify(field)}: ${JSON.stringify(res.body)}`).toBe(403);
     }

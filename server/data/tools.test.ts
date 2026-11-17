@@ -231,8 +231,8 @@ describe("sources", () => {
     expect(folder.map((plan) => plan.stem).sort()).toEqual(["stuff_csv", "stuff_json", "stuff_parquet", "stuff_tsv"]);
     const csvFamily = folder.find((plan) => plan.stem === "stuff_csv")!.reader;
     const forward = dir.replace(/\\/g, "/");
-    expect(csvFamily).toBe(`read_csv(['${forward}/**/*.csv', '${forward}/**/*.txt'], union_by_name=true, filename=true)`);
-    expect(folder.find((plan) => plan.stem === "stuff_parquet")!.reader).toBe(`read_parquet('${forward}/**/*.parquet', union_by_name=true, filename=true)`);
+    expect(csvFamily).toBe(`read_csv(['${forward}/**/*.[cC][sS][vV]', '${forward}/**/*.[tT][xX][tT]'], union_by_name=true, filename=true)`);
+    expect(folder.find((plan) => plan.stem === "stuff_parquet")!.reader).toBe(`read_parquet('${forward}/**/*.[pP][aA][rR][qQ][uU][eE][tT]', union_by_name=true, filename=true)`);
     expect(folder.find((plan) => plan.stem === "stuff_tsv")!.reader).toContain("delim='\t'");
   });
 
@@ -330,6 +330,19 @@ describe("data_load", () => {
 });
 
 describe("data_describe saved results", () => {
+  it.each(['"Revenue ""USD"""', ' main . "分析" ', "café"])("routes identifier %j to catalog resolution", async (target) => {
+    const { ctx, database } = context();
+    database.resolveTable = async (name) => {
+      database.calls.push({ method: "resolveTable", target: name });
+      return "main.resolved";
+    };
+    const result = await runDataTool(ctx, "data_describe", { target });
+    expect(result.isError).toBeUndefined();
+    expect(database.calls.map((call) => call.method)).toEqual(["resolveTable", "describe"]);
+    expect(result.structuredContent).toHaveProperty("name");
+    expect(result.structuredContent).not.toHaveProperty("sql");
+  });
+
   it("reads the latest saved SQL after a person edits it, without rerunning queries", async () => {
     const { ctx, database, sheet } = context();
     await showCard(ctx, { kind: "table", sql: "SELECT 1", title: "First" });
@@ -470,7 +483,7 @@ describe("data_show", () => {
     const card = sheet.card("c_1")!;
     expect(card).toMatchObject({ status: "ready", result: "c_1", rowCount: 12, truncated: false, by: "bot", sql: "SELECT * FROM orders" });
     expect(card.columns).toHaveLength(2);
-    expect(database.calls.find((call) => call.method === "materialise")).toMatchObject({ sql: `SELECT * FROM (SELECT * FROM orders) LIMIT ${DATA_LIMITS.showTableRowsMax}`, name: "c_1" });
+    expect(database.calls.find((call) => call.method === "materialise")).toMatchObject({ sql: `SELECT * FROM (SELECT * FROM orders\n) LIMIT ${DATA_LIMITS.showTableRowsMax}`, name: "c_1" });
   });
 
   it("points a card at a loaded table through resolveTable", async () => {
@@ -592,8 +605,8 @@ describe("data_show", () => {
     const card = sheet.card("c_1")!;
     expect(card).toMatchObject({ kind: "chart", title: "bar of count by region", status: "ready", result: "c_1", chart: { type: "bar", x: "region" }, vegaLite: { mark: "bar", columns: ["region", "n"] } });
     const materialised = database.calls.find((call) => call.method === "materialise")!;
-    expect(materialised.sql).toBe("SELECT region, count(*) AS n FROM (SELECT * FROM orders) GROUP BY ALL");
-    expect(database.calls.some((call) => call.sql === "SELECT * FROM (SELECT * FROM orders) LIMIT 0")).toBe(true);
+    expect(materialised.sql).toBe("SELECT region, count(*) AS n FROM (SELECT * FROM orders\n) GROUP BY ALL");
+    expect(database.calls.some((call) => call.sql === "SELECT * FROM (SELECT * FROM orders\n) LIMIT 0")).toBe(true);
     database.onRun = (sql) => (sql.startsWith("SELECT count(*)") ? { columns: [{ name: "n", type: "BIGINT" }], rows: [[3]], rowCount: 1, truncated: false, elapsedMs: 1 } : undefined);
     const whole = await showCard(ctx, { kind: "chart", sql: "SELECT * FROM small", chart: { type: "scatter", x: "a", y: "b" } });
     expect(whole.reduction).toEqual({ method: "none", inputRows: 3, outputRows: 3 });
@@ -642,7 +655,7 @@ describe("data_show", () => {
     const out = await showCard(ctx, { kind: "chart", sql: "SELECT a, b FROM t", vegaLite: { mark: "line" }, limit: 100 });
     expect(out.reduction).toEqual({ method: "none", inputRows: 1234, outputRows: 3 });
     expect(sheet.card("c_1")!.vegaLite).toEqual({ mark: "line", validated: true });
-    expect(database.calls.find((call) => call.method === "materialise")!.sql).toBe("SELECT * FROM (SELECT a, b FROM t) LIMIT 101");
+    expect(database.calls.find((call) => call.method === "materialise")!.sql).toBe("SELECT * FROM (SELECT a, b FROM t\n) LIMIT 101");
     expect(await failure(showCard(ctx, { kind: "chart", sql: "SELECT 1", vegaLite: { nope: true } }))).toMatchObject({ code: "spec_invalid" });
   });
 
@@ -659,6 +672,86 @@ describe("data_show", () => {
 });
 
 describe("data_export", () => {
+  it.each(["png", "svg"] as const)("keeps both concurrent %s exports instead of overwriting one", async (format) => {
+    const { ctx } = context();
+    await showCard(ctx, { kind: "chart", sql: "SELECT a FROM t", chart: { type: "pie", x: "a" }, title: "Share" });
+    const entered = deferred();
+    const finish = deferred();
+    let count = 0;
+    const render = async () => {
+      const n = ++count;
+      if (n === 2) entered.resolve();
+      await finish.promise;
+      return `image ${n}`;
+    };
+    ctx.renderer = { svg: render, png: async () => Buffer.from(await render()) };
+    const first = exportData(ctx, { id: "c_1", format });
+    const second = exportData(ctx, { id: "c_1", format });
+    await entered.promise;
+    finish.resolve();
+    const [a, b] = await Promise.all([first, second]);
+    expect(readFileSync(a.path, "utf8")).toBe("image 1");
+    expect(readFileSync(b.path, "utf8")).toBe("image 2");
+    expect(a.path).not.toBe(b.path);
+  });
+
+  it("reserves distinct CSV destinations before either database copy finishes", async () => {
+    const { ctx, database } = context();
+    const original = database.run.bind(database);
+    const entered = deferred();
+    const finish = deferred();
+    let count = 0;
+    database.run = async (sql, options) => {
+      if (sql.startsWith("COPY ")) {
+        if (++count === 2) entered.resolve();
+        await finish.promise;
+      }
+      return original(sql, options);
+    };
+    const first = exportData(ctx, { sql: "SELECT 1", format: "csv" });
+    const second = exportData(ctx, { sql: "SELECT 2", format: "csv" });
+    await entered.promise;
+    finish.resolve();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.path).not.toBe(b.path);
+    expect(existsSync(a.path)).toBe(true);
+    expect(existsSync(b.path)).toBe(true);
+  });
+
+  it("recognizes a pending export through another allowed directory alias", async () => {
+    const { ctx, dir } = context();
+    await showCard(ctx, { kind: "chart", sql: "SELECT a FROM t", chart: { type: "pie", x: "a" } });
+    symlinkSync(join(dir, "work"), join(dir, "work-alias"), "junction");
+    ctx.exportRoots = () => [join(dir, "work"), join(dir, "work-alias")];
+    const entered = deferred();
+    const finish = deferred();
+    let count = 0;
+    ctx.renderer.svg = async () => {
+      const n = ++count;
+      if (n === 2) entered.resolve();
+      await finish.promise;
+      return `image ${n}`;
+    };
+    const first = exportData(ctx, { id: "c_1", format: "svg", path: join(dir, "work", "same.svg") });
+    const second = exportData(ctx, { id: "c_1", format: "svg", path: join(dir, "work-alias", "same.svg") });
+    await entered.promise;
+    finish.resolve();
+    const [a, b] = await Promise.all([first, second]);
+    expect(readFileSync(a.path, "utf8")).toBe("image 1");
+    expect(readFileSync(b.path, "utf8")).toBe("image 2");
+  });
+
+  it("releases a destination when rendering fails before creating its file", async () => {
+    const { ctx, dir } = context();
+    await showCard(ctx, { kind: "chart", sql: "SELECT a FROM t", chart: { type: "pie", x: "a" }, title: "Share" });
+    const render = ctx.renderer.png;
+    ctx.renderer.png = async () => { throw new Error("renderer failed"); };
+    await expect(exportData(ctx, { id: "c_1", format: "png" })).rejects.toThrow("renderer failed");
+    ctx.renderer.png = render;
+    const next = await exportData(ctx, { id: "c_1", format: "png" });
+    expect(next.path).toBe(join(dir, "work", "share.png"));
+  });
+
   it("writes csv with COPY TO under the first allowed folder and numbers a repeat", async () => {
     const { ctx, database, dir } = context();
     await showCard(ctx, { kind: "table", sql: "SELECT * FROM orders", title: "Paid orders" });
@@ -670,7 +763,7 @@ describe("data_export", () => {
     expect(again.path).toBe(join(dir, "work", "paid_orders-2.csv"));
     const parquet = await exportData(ctx, { sql: "SELECT 1 AS one", format: "parquet", path: "out/one" });
     expect(parquet.path).toBe(join(dir, "work", "out", "one.parquet"));
-    expect(database.calls.at(-1)!.sql).toBe(`COPY (SELECT * FROM (SELECT 1 AS one)) TO '${parquet.path}' (FORMAT parquet)`);
+    expect(database.calls.at(-1)!.sql).toBe(`COPY (SELECT * FROM (SELECT 1 AS one\n)) TO '${parquet.path}' (FORMAT parquet)`);
     const xlsx = await exportData(ctx, { sql: "SELECT 1", format: "xlsx", path: join(dir, "Downloads") });
     expect(xlsx.path).toBe(join(dir, "Downloads", "query.xlsx"));
     expect(database.calls.at(-1)!.sql).toContain("(FORMAT xlsx, HEADER true)");

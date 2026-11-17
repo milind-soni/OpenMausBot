@@ -53,4 +53,16 @@ describe("workThreadFor", () => {
     expect(() => fromLiaison("archived-run", true, () => true, { botId: "bugfixer", threadId: "archived-run" })).toThrow(/is not a thread you opened/);
     expect(() => fromLiaison("run-1", true, () => false)).toThrow(/is not a thread you opened/);
   });
+
+  it("lets post_to_thread reach any open thread of the bot, not only one the sender opened, but never a closed or archived one", () => {
+    const post = (thread: string, more: Partial<TaskRecord> = {}) => workThreadFor({ ...store, taskByThread: () => task(thread, undefined, more) },
+      { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat", thread, notice: true, answering: undefined, also: () => true, reach: () => true, any: true });
+    expect(post("run-0")?.threadId).toBe("run-0");
+    expect(() => post("closed", { closedBy: {} as TaskRecord["closedBy"] })).toThrow(/is not an open thread of Bugfixer/);
+    expect(() => post("archived", { archivedAt: 1 })).toThrow(/is not an open thread of Bugfixer/);
+    expect(() => workThreadFor({ ...store, taskByThread: () => undefined }, { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat",
+      thread: "nope", notice: true, answering: undefined, also: () => true, reach: () => true, any: true })).toThrow(/is not an open thread of Bugfixer/);
+    expect(() => workThreadFor({ ...store, taskByThread: () => task("x") }, { botId: "bugfixer", botName: "Bugfixer", fromBotId: "liaison", fromThreadId: "liaison-chat",
+      thread: "x", notice: true, answering: undefined, also: () => true, reach: () => false, any: true })).toThrow(OUTSIDE_STAYS_HERE);
+  });
 });

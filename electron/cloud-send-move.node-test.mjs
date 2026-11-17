@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { EMPTY, itemKey } from "./cloud-send-parts.mjs";
@@ -88,6 +89,7 @@ function sides({ here = [], bots = {}, there = [], connections = [], secrets = {
     },
     store: stored(),
     engineWaitMs: 0,
+    patience: { stallMs: 0, waits: [0], blips: [] },
   };
   return { calls, cloud, deps, opened, asked };
 }
@@ -156,9 +158,9 @@ test("a bot a move made on My Cloud has all its fields sent again when the move 
 test("each item is recorded from My Cloud's own answer as soon as it went, so a send cut short later never takes it for My Cloud's own change", async () => {
   const store = stored({ v: 1, clouds: { [CLOUD]: { sent: { [itemKey.bot("juno")]: { team: ["p1", "p1"] } } } } });
   let cutAtEnd = true;
-  const move = sides({ here: [bot("juno", { team: "p2" })], bots: { juno: { peers: ["ember"] } }, there: [bot("juno", { team: "p1" })],
+  const move = sides({ here: [bot("juno", { team: "p2" })], bots: { juno: { section: "Ops" } }, there: [bot("juno", { team: "p1" })],
     onCall: (method, route, _body, cloud) => {
-      // My Cloud keeps the team without the bot it lacks: its own hash for what it took.
+      // My Cloud files the bot its own way: its own hash for what it took.
       if (method === "PATCH" && route === "/api/bots/juno") { cloud.get(itemKey.bot("juno")).parts.team = "p3"; return reply(200, {}); }
       if (cutAtEnd && method === "GET" && route === "/api/cloud-send?move=1" && cloud.get(itemKey.bot("juno")).parts.team === "p3") throw new TypeError("fetch failed");
     } });
@@ -445,10 +447,10 @@ test("a check that finds things missing names, for what may stay behind, each sh
     conversations: [{ threadId: "t-b1", bot: "b1", rows: 1, newest: "t-b1-1", settings: {} }, { threadId: "t-b2", bot: "b2", rows: 1, newest: "t-b2-1", settings: {} }],
     attachments: side === "here" ? ["0b6c9f2e-1d4a.mp3"] : [], files: [], automations: [], runs: [] });
   const s = sides({ here: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], there: [bot("b1", { soul: "s" }), bot("b2", { soul: "s" })], onCall: (method, route, body) => {
-    if (route === "/api/cloud-send/manifest") return reply(200, { ...manifest("there"), rooms: [{ id: "r1", name: "Launch room", members: ["b1"], threads: ["t-r1"] }] });
+    if (route.startsWith("/api/cloud-send/manifest")) return reply(200, { ...manifest("there"), rooms: [{ id: "r1", name: "Launch room", members: ["b1"], threads: ["t-r1"] }] });
     if (route === "/api/cloud-send/chats/verify") {
-      const threadId = body.conversations[0].threadId;
-      return reply(200, { v: 1, conversations: [{ threadId, missing: threadId === "t-b1" ? body.conversations[0].ids : [], unstamped: 0, path: { holds: true, at: null, leaf: `${threadId}-1`, length: 1 } }] });
+      return reply(200, { v: 1, conversations: body.conversations.map(({ threadId, ids }) => ({ threadId, missing: threadId === "t-b1" ? ids : [], unstamped: 0,
+        path: { holds: true, at: null, leaf: `${threadId}-1`, length: 1 } })) });
     }
     if (route === "/api/cloud-send/chats/attachments") return reply(200, { missing: body.names });
     if (route === "/api/cloud-send/verify-secrets") return reply(200, { v: 1, secrets: {} });
@@ -462,4 +464,48 @@ test("a check that finds things missing names, for what may stay behind, each sh
   assert.deepEqual(report.attachments, ["0b6c9f2e-1d4a.mp3"], "one this computer no longer has is missing pass after pass");
   assert.deepEqual(report.names, { b1: "b1", b2: "b2", "room:r1": "Launch room" });
   assert.deepEqual(report.owners, { "t-b1": "b1" }, "only the chats found short");
+});
+
+/** A move whose workspace differs from My Cloud's, including a git ref: My Cloud keeps its own and the arrival goes beside it. */
+function differingWorkspace() {
+  const sha = (text) => createHash("sha256").update(text).digest("hex");
+  const file = (path, text) => ({ path, size: Buffer.byteLength(text), sha256: sha(text) });
+  const here = [file("workspaces/ember/.git/refs/heads/main", "old-ref"), file("workspaces/ember/notes.md", "mine")];
+  const there = [file("workspaces/ember/.git/refs/heads/main", "new-ref"), file("workspaces/ember/notes.md", "theirs")];
+  const text = { "workspaces/ember/.git/refs/heads/main": "old-ref", "workspaces/ember/notes.md": "mine" };
+  const move = sides({ here: [bot("ember", { soul: "s" })], there: [bot("ember", { soul: "s" })], bots: { ember: { soul: "s" } },
+    onCall: (method, route) => (method === "GET" && /^\/api\/cloud-send\/files(?:\?bot=ember)?$/u.test(route)
+      ? reply(200, { v: 1, files: there, space: { freeBytes: 1e12, volumeBytes: 1e12 } }) : null) });
+  const local = move.deps.local;
+  move.deps.local = async (route, init) => {
+    if (route === "/api/cloud-send/files" || route.startsWith("/api/cloud-send/files?")) {
+      move.calls.push(`HERE GET ${route}`);
+      if (route.startsWith("/api/cloud-send/files?path=")) {
+        const body = text[new URL(`http://local${route}`).searchParams.get("path")];
+        return body ? new Response(Buffer.from(body)) : json({}, 404);
+      }
+      return json({ v: 1, files: here });
+    }
+    return local(route, init);
+  };
+  return move;
+}
+
+const arrivedBeside = (calls) => calls.filter((call) => call.startsWith("UPLOAD /api/cloud-send/files"))
+  .map((call) => new URL(`http://x${call.slice("UPLOAD ".length)}`).searchParams.get("path"));
+
+test("a move sends a workspace file that differs, including under .git; a pass that leaves files does not list or send them", async () => {
+  const topped = differingWorkspace();
+  const outcome = await createCloudSend(topped.deps).send({ reason: "move", final: true, files: false });
+  assert.deepEqual(outcome.result.files, { sent: 0, kept: 0 });
+  assert.equal(topped.calls.some((call) => call.includes("/api/cloud-send/files")), false, "no listing and no copy beside My Cloud's file");
+  assert.ok(topped.calls.includes("POST /api/cloud-send/memory"), "what a newer app learned to move still goes");
+
+  const moving = differingWorkspace();
+  const sent = await createCloudSend(moving.deps).send({ reason: "move", final: true });
+  assert.deepEqual(sent.result.files, { sent: 2, kept: 2 });
+  assert.deepEqual(arrivedBeside(moving.calls).sort(), [
+    "workspaces/ember/.git/refs/heads/main (Amit's Mac)",
+    "workspaces/ember/notes (Amit's Mac).md",
+  ]);
 });

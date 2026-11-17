@@ -56,10 +56,10 @@ Use only mapped, tested commands:
 - [MausBot, everyone's helper](mausbot.md)
 - [Profile proposal and credential-card lifecycle](proposal-cards.md)
 - [Full Access without duplicate approvals](full-access.md)
+- [Bots changing app settings, and the guards Full access cannot skip](app-settings.md)
 - [Gmail draft creation, send approval and revision](gmail-drafts.md)
 - [Exact command allowlist UI and saved rules](command-allowlist.md)
 - [The safety floor: a never-list no grant can allow](safety-floor.md)
-- [Peer approval denial, expiry, and cancellation](peer-approvals.md)
 - [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Computer panel focus hand-off](computer-panel-focus.md)
@@ -71,6 +71,8 @@ Use only mapped, tested commands:
 - [A new Cloud's first hour](first-hour.md)
 - [Chat widgets](widgets.md)
 - [Pages and apps in a room](room-pages.md)
+- [Published apps](published-apps.md)
+- [Included app hosting](included-hosting.md)
 - [The Inbox on every plan](inbox.md)
 - [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)
@@ -222,6 +224,11 @@ instructions, history restore, skill/memory refresh, and stale-response isolatio
 The [hosted Slack management fixture](hosted-slack-management.md) checks the
 agent settings link to Admin: hosted-only availability, the member-readable
 route module, and stale-response isolation.
+
+The [Slack for Team Clouds fixture](team-slack.md) checks a Slack message handed over with a member's own session:
+a channel's shared conversation, a direct message's private chat, who may ask and stop, and the signed reports a
+stand-in Admin takes; and the same on a My Cloud, where both are the owner's ordinary conversations. It reaches no
+Slack workspace and no real Admin.
 
 The [chat and settings polish fixture](chat-polish.md) exercises attachment
 galleries, opt-in video playback, persisted tool details, and responsive settings

@@ -6,7 +6,7 @@
 // The export's shape, the repairs for what a chat window does to it and its credential refusal adapt an MIT-licensed
 // importer; see NOTICE.
 import {
-  AGENT_MAX_SKILLS, PACKAGE_FORMAT, PACKAGE_MAX_CONNECTIONS, PACKAGE_VERSION, SEED_FILE_MAX_BYTES,
+  AGENT_MAX_SKILLS, PACKAGE_FORMAT, PACKAGE_MAX_CONNECTIONS, PACKAGE_V2_VERSION, SEED_FILE_MAX_BYTES,
   parsePackageDocument, utf8Bytes, type PackageDocument, type PackageRoutineSchedule,
 } from "./package-format.ts";
 import { BOT_PROFILE_LIMITS } from "./bot-profile.ts";
@@ -288,6 +288,28 @@ export function parseGrokExport(text: string): GrokBot[] {
   return bots;
 }
 
+/** Bots as one export document holding only what parseGrokExport reads from it: what a service that carries an
+ * export keeps, in place of the text it was sent. An app's header values are never read, so only the names go. */
+export function grokExportDocument(bots: readonly GrokBot[]): Record<string, unknown> {
+  return {
+    format: GROK_EXPORT_FORMAT,
+    version: 1,
+    bots: bots.map((bot) => ({
+      name: bot.name, title: bot.title, description: bot.description, instructions: bot.instructions,
+      memories: bot.memories, user_facts: bot.userFacts, skills: bot.skills,
+      routines: bot.routines.map((routine) => ({
+        name: routine.name, instruction: routine.instruction, trigger: routine.trigger, schedule_cron: routine.cron,
+        schedule_text: routine.when, timezone: routine.timeZone, paused: routine.paused, skills: routine.skills,
+        trigger_details: routine.details,
+      })),
+      apps: bot.apps.map((app) => ({
+        name: app.name, mcp_url: app.mcpUrl, transport: app.transport,
+        ...(app.headerNames.length ? { headers: Object.fromEntries(app.headerNames.map((header) => [header, ""])) } : {}),
+      })),
+    })),
+  };
+}
+
 const slug = (value: string, max: number) =>
   value.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, max).replace(/-+$/, "");
 
@@ -498,7 +520,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
   const packageId = `${agentKey}-${hash.toString(16).padStart(8, "0").slice(0, 6)}`;
   const draft: PackageDocument = {
     format: PACKAGE_FORMAT,
-    version: PACKAGE_VERSION,
+    version: PACKAGE_V2_VERSION,
     package: {
       id: packageId,
       release: "1.0.0",
