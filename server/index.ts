@@ -5547,8 +5547,9 @@ async function scheduleTurnDigest(input: {
     } finally {
       clearTimeout(timer!);
     }
-    if (!files || !input.isCurrent() || !store.activePath(input.threadId).some(row => row.id === message.id)) return;
-    const withFiles = buildTurnDigest({ ...digest, activities, memory, files });
+    const stored = store.activePath(input.threadId).find(row => row.id === message.id);
+    if (!files || !input.isCurrent() || !stored) return;
+    const withFiles = buildTurnDigest({ ...digest, hookCoverage: stored.digest?.hookCoverage ?? digest.hookCoverage, activities, memory, files });
     store.patchMessage(input.threadId, message.id, { digest: withFiles, text: renderDigest(withFiles) }, { kind: "digest.files", key: `${input.threadId}:${input.turnId}` });
   } catch (error) {
     console.error(`digest: could not record turn ${input.turnId} on ${input.threadId}:`, error instanceof Error ? error.message : error);

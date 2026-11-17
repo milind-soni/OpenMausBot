@@ -649,6 +649,7 @@ const startLateTurn = (): boolean => {
 
 const finishIfDone = () => {
   if (turnRunning) return;
+  runHooksAfterTurn();
   if (startLateTurn()) return;
   if (hookBatchesWaiting > 0) return;
   if (stdinEnded) process.exit(0);
@@ -666,7 +667,6 @@ const finishIfDone = () => {
 const finishTurn = () => {
   runHooks("Stop", { stop_hook_active: false });
   out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
-  runHooksAfterTurn();
   turnRunning = false;
   finishIfDone();
 };
@@ -1147,7 +1147,6 @@ const playTurn = (prompt: JsonValue, late = false) => {
       modelUsage: runningCost.modelUsage,
       ...(queued === "zero" ? { queued_turn_count: 0 } : queued === "count" ? { queued_turn_count: lateSteers.length } : {}),
     });
-    runHooksAfterTurn();
     turnRunning = false;
     finishIfDone();
   };
@@ -1317,7 +1316,6 @@ const playTurn = (prompt: JsonValue, late = false) => {
       out({ type: "assistant", message: { content: [{ type: "text", text: `reply to: ${promptText(prompt)}${tail}` }] } });
       if (!lateContinuation && finishGate && readFileSync(finishGate, "utf8").trim() === "fail") {
         out({ type: "result", is_error: true, stop_reason: "error", result: "fixture turn failed" });
-        runHooksAfterTurn();
         turnRunning = false;
         finishIfDone();
         return;
