@@ -237,6 +237,7 @@ describe("CI outputs", () => {
       "server/cloud-team-mausbot-reach.e2e.test.ts",
       "server/cloud-team-member-secrets.e2e.test.ts",
       "server/cloud-team-new-chat-private.e2e.test.ts",
+      "server/cloud-team-onepassword.e2e.test.ts",
       "server/cloud-team-open-reach.e2e.test.ts",
       "server/cloud-team-own-key-apps.e2e.test.ts",
       "server/cloud-team-owners.e2e.test.ts",

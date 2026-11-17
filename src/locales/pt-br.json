@@ -3685,6 +3685,7 @@
   "settings.logins.signsInOn": "Também faz login em {hosts}",
   "settings.logins.removeTotp": "Remover a chave de 2FA salva",
   "settings.logins.limits": "Os bots recebem a senha digitada na página, nunca como texto, e ela fica oculta em tudo o que eles conseguem ler. Uma captura de tela da página ainda pode mostrar o que o site exibe. Por isso, só salve o login de um site se confiar nos bots para usá-lo.",
+  "settings.logins.onePassword.team": "Para toda a equipe: os bots usam em chats compartilhados e privados. Use um cofre dedicado e uma conta de serviço só de leitura.",
   "settings.logins.onePassword.title": "1Password",
   "settings.logins.onePassword.guide": "Deixe os bots usarem logins, chaves e segredos do 1Password. No 1Password, crie uma conta de serviço que só possa ler um cofre, como “Compartilhado com o app {app}”, e cole o token aqui.",
   "settings.logins.onePassword.token": "Token da conta de serviço",

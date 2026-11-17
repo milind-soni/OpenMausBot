@@ -149,16 +149,23 @@ export interface CloudTeamFixture {
 
 const TEAM_MACHINE_ID = "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a";
 
-function fakeOnePassword(at: string, token: string): string {
+/** One item in the fake 1Password's one vault, in the SDK's shapes (no website: a secret, not a login). */
+export interface FakeOnePasswordItem { id: string; title: string; category: string; fields: Array<{ id: string; title: string; fieldType: string; value: string }> }
+
+function fakeOnePassword(at: string, token: string, items: readonly FakeOnePasswordItem[] = []): string {
   const sdk = join(at, "node_modules", "@1password", "sdk");
   mkdirSync(sdk, { recursive: true });
   writeFileSync(join(sdk, "package.json"), JSON.stringify({ name: "@1password/sdk", version: "0.5.0", main: "index.js" }));
   writeFileSync(join(sdk, "index.js"), `"use strict";
+const ITEMS = ${JSON.stringify(items)};
 exports.createClient = async ({ auth }) => {
   if (auth !== ${JSON.stringify(token)}) throw new Error("error authenticating: invalid service account token");
   return {
     vaults: { list: async () => [{ id: "v1", title: "Shared with OpenMausBot" }] },
-    items: { list: async () => [], getAll: async () => ({ individualResponses: [] }) },
+    items: {
+      list: async () => ITEMS.map(({ id, title, category }) => ({ id, title, category, websites: [] })),
+      getAll: async (vaultId, ids) => ({ individualResponses: ITEMS.filter((item) => ids.includes(item.id)).map(({ id, fields }) => ({ content: { id, fields } })) }),
+    },
   };
 };
 `);
@@ -171,8 +178,10 @@ exports.createClient = async ({ auth }) => {
  * with an installation of its own as the desktop app registers one, My Cloud registering itself as a Cloud home does.
  * `env`: more of both servers' environment. `cloudEngine`: lines run at the start of My Cloud's synthetic Claude CLI, to
  * script its turns (fake-claude-cli.ts). */
-export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true, team }: {
+export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, onePasswordItems = [], toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true, team }: {
   onePasswordToken: string; cloudOnePasswordToken?: string; toolCalls?: number;
+  /** What every server's fake 1Password vault ("Shared with OpenMausBot") holds; empty by default. */
+  onePasswordItems?: readonly FakeOnePasswordItem[];
   /** A Team Cloud too (OMB_CLOUD_ROLE=team), with its own environment and synthetic Claude CLI lines. */
   team?: { id: string; name: string; env?: NodeJS.ProcessEnv; engine?: string; noAi?: boolean;
     /** Scopes of this checkout's node_modules (`@duckdb`) linked into the Team Cloud's native tree before it starts: the
@@ -221,7 +230,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const child = spawn(process.execPath, ["--import", offline, ...extra, join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir,
-        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_DUCKDB_DIR: fakeOnePassword(join(home, "native"), acceptedToken), ...env, ...own },
+        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_DUCKDB_DIR: fakeOnePassword(join(home, "native"), acceptedToken, onePasswordItems), ...env, ...own },
       stdio: ["ignore", "pipe", "pipe", ...(ipc ? ["ipc" as const] : [])],
     });
     children.add(child);

@@ -625,7 +625,7 @@ import { createConfigRoutes } from "./routes/config.ts";
 import { createInstanceRoutes } from "./routes/instances.ts";
 import { createMcpConfig } from "./host/mcp-config.ts";
 import { createMcpServerRoutes } from "./routes/mcp-servers.ts";
-import { teamAdminSummary } from "./cloud-team-admin.ts"; import { createConnectionHealthHost } from "./host/connection-health-host.ts";
+import { teamAdminSummary } from "./cloud-team-admin.ts"; import { createConnectionHealthHost } from "./host/connection-health-host.ts"; import { teamVaultReport } from "./host/team-vault-report.ts";
 import { createSetupImportRoutes } from "./routes/setup-import.ts";
 import { createComputerRoutes } from "./routes/computers.ts";
 import { createStatusRoutes } from "./routes/status.ts";
@@ -11779,7 +11779,7 @@ function teamAdminHost() {
       status: configStatus(),
       voice: { key: Boolean(cfg.tts?.key?.trim()), included: tts.describeVoice(cfg).included === true },
       engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, name: instance.displayName ?? instance.driverKind, snapshot: registry.lastSnapshot(instance.instanceId) })),
-    }), ...await teamConnections.adminExtras() }),
+    }), ...await teamConnections.adminExtras(), vault: teamVaultReport({ secrets: logins.listSecrets(TEAM_READER), bots: store.bots, onePassword: onePassword.status() }) }),
   };
 }
 
