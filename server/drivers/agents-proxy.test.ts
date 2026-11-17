@@ -1335,6 +1335,20 @@ describe("agents-proxy MCP surface", () => {
     assignmentStatusResponse = DONE_ASSIGNMENT;
   });
 
+  it("assignment_status on a hand-off sent from another own chat says its result does not resume this one", async () => {
+    const running = { assignment: { id: "asg-7", botId: "bot-helper", botName: "Helper", status: "running" }, children: [], inbox: [] };
+    try {
+      assignmentStatusResponse = running;
+      expect((await callTool("assignment_status", { id: "asg-7" })).result.content[0].text).toContain("Its result resumes you on its own");
+      assignmentStatusResponse = { ...running, sentElsewhere: true };
+      const text = (await callTool("assignment_status", { id: "asg-7" })).result.content[0].text;
+      expect(text).toContain("It was sent from another of your chats, so its result returns there and does not resume you here");
+      expect(text).not.toContain("resumes you on its own");
+    } finally {
+      assignmentStatusResponse = DONE_ASSIGNMENT;
+    }
+  });
+
   it("assignment_status long-polls with wait_ms, capped at 240000, and refuses a bad wait", async () => {
     lastAssignmentStatusUrl = null;
     const res = await callTool("assignment_status", { id: "task-earlier123", wait_ms: 900_000 });
@@ -1359,9 +1373,10 @@ describe("agents-proxy MCP surface", () => {
       expect(missing.result.isError).toBe(true);
       expect(missing.result.content[0].text).toContain("No assignment asg-gone is known here");
       assignmentStatusCode = 403;
+      assignmentStatusResponse = { error: "it was handed off by another bot" };
       const foreign = await callTool("assignment_status", { id: "asg-theirs" });
       expect(foreign.result.isError).toBe(true);
-      expect(foreign.result.content[0].text).toContain("Assignment asg-theirs is not this conversation's");
+      expect(foreign.result.content[0].text).toBe("Assignment asg-theirs can't be read here: it was handed off by another bot.");
     } finally {
       assignmentStatusCode = 200;
       assignmentStatusResponse = DONE_ASSIGNMENT;
