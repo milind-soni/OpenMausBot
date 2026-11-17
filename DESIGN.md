@@ -80,7 +80,15 @@ Rules:
 
 - **No raw colours.** No hex, `rgb()`, or Tailwind palette classes
   (`text-gray-500`, `bg-white`, `text-black`). A skin can't restyle them.
-  The only exception is a third-party logo that needs its own plate.
+  The only exceptions are a third-party logo that needs its own plate and
+  the material of a drawn mascot body (next rule).
+- **A mascot body is a picture of the bot, not a surface.** Inside the
+  body's own outline, the finish in `src/components/mascot-finish.tsx` may
+  use literal colours: white highlights at low opacity, and gradient stops
+  worked out from the bot's colour, which can lean into a neighbouring hue.
+  It is the same in every skin, so a bot is recognised by the same mark
+  whichever skin is on. Nothing outside the outline is covered, and nothing
+  else in the app may take its colours from that file.
 - **Hover and pressed fills are ink at low opacity:** `hover:bg-ink/[0.06]`,
   `active:bg-ink/[0.08]`. They work on every skin.
 - **Hierarchy comes from ink, not colour.** Use the three ink levels and
