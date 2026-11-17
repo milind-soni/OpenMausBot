@@ -1,5 +1,5 @@
 import { readBotActivity } from "../activity.ts";
-import { activityCsv, activityEntries, parseActivityWhat, readAdminActivityRange } from "../admin-activity.ts";
+import { activityCsv, activityEntries, flushAdminActivity, parseActivityWhat, readAdminActivityRange } from "../admin-activity.ts";
 import { loadBrand } from "../brand.ts";
 import { browserEngineStatus, ensureChrome, installAgentBrowserBinary, resolveAgentBrowserBinary } from "../browser-engine.ts";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, instanceConfigs, type AppConfig } from "../config.ts";
@@ -188,6 +188,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       if (!range) return json(res, 400, { error: "from and to must be dates (YYYY-MM-DD), from no later than to, at most a year apart" });
       const what = parseActivityWhat(url.searchParams.get("what"));
       if (!what) return json(res, 400, { error: "what must be all, approvals, decisions, config, people, session, webhook, mcp, engine, bot, budget or visibility" });
+      await flushAdminActivity(DATA_DIR); // rows are appended in the background; a change already answered is listed
       const entries = activityEntries(readDecisionRange(DATA_DIR, range).map(decision), readAdminActivityRange(DATA_DIR, range).filter(deps.records?.adminActionShown(auth) ?? (() => true)), {
         what,
         who: (url.searchParams.get("who") ?? "").slice(0, 200),
