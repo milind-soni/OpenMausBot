@@ -41,9 +41,14 @@ function usable(accounts: ConnectedAccounts, toolkit: string): readonly Connecte
   return (accounts[toolkit] ?? []).filter((account) => /^active$/i.test(account.status));
 }
 
+/** The tool the call names: the first that is not one of Composio's own management tools. */
+function calledTool(slugs: readonly string[]): string {
+  return slugs.find((candidate) => candidate && !candidate.startsWith("COMPOSIO_")) ?? slugs[0] ?? "";
+}
+
 /** The note for a call refused on the account it used: the other accounts of that app, by alias or id. */
 export function accountHint(slugs: readonly string[], accounts: ConnectedAccounts): string {
-  const slug = slugs.find((candidate) => candidate && !candidate.startsWith("COMPOSIO_")) ?? "";
+  const slug = calledTool(slugs);
   const toolkit = toolkitOf(slug);
   const known = usable(accounts, toolkit);
   if (known.length < 2) return "";
@@ -69,5 +74,8 @@ export async function withAccountHint(
 ): Promise<Uint8Array> {
   if (!ACCOUNT_ERROR.test(new TextDecoder().decode(bytes))) return bytes;
   const accounts = await loadAccounts().catch(() => ({}) as ConnectedAccounts);
-  return withFailedCallHint(bytes, contentType, ACCOUNT_ERROR, (failed) => accountHint(failed, accounts), slugs);
+  // Nothing to say when that app has no other account to try: the answer stays as it was.
+  const note = accountHint(slugs, accounts);
+  if (!note) return bytes;
+  return withFailedCallHint(bytes, contentType, ACCOUNT_ERROR, (failed) => accountHint(failed, accounts) || note, slugs);
 }
