@@ -249,7 +249,7 @@ describe("topic files the bot keeps", () => {
 
   it("creates a topic with a header, and merges new aliases into an existing one", () => {
     const created = mergeTopicText(null, { title: "food", aliases: ["restaurants", "dinner"], lines: ["- 2026-09-25 · Loves pasta"] });
-    expect(created).toBe("---\ntitle: food\naliases: [restaurants, dinner]\n---\n\n- 2026-09-25 · Loves pasta\n");
+    expect(created).toBe('---\ntitle: food\naliases: ["restaurants", "dinner"]\n---\n\n- 2026-09-25 · Loves pasta\n');
     const merged = mergeTopicText(created, { title: "food", aliases: ["Dinner", "lunch"], lines: ["- 2026-09-26 · Hates olives"] });
     expect(parseTopicHeader(merged).aliases).toEqual(["restaurants", "dinner", "lunch"]);
     expect(merged.endsWith("- 2026-09-25 · Loves pasta\n- 2026-09-26 · Hates olives\n")).toBe(true);

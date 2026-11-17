@@ -1,5 +1,6 @@
 // A memory/<topic>.md may begin with YAML frontmatter: `title`, `description`, `aliases`.
 import { closeSync, openSync, readSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
 
 import { hasCjk } from "./cjk-search.ts";
 
@@ -15,7 +16,13 @@ export interface TopicHeader {
 
 function unquote(value: string): string {
   const v = value.trim();
-  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) return v.slice(1, -1).trim();
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    try {
+      const parsed: unknown = parseYaml(v, { schema: "failsafe" });
+      if (typeof parsed === "string") return parsed.trim();
+    } catch {}
+    return v.slice(1, -1).trim();
+  }
   return v;
 }
 
@@ -39,13 +46,20 @@ export function parseTopicHeader(text: string): TopicHeader {
     }
     const items: string[] = [];
     if (value.trim().startsWith("[")) {
-      items.push(...value.trim().replace(/^\[|\]$/g, "").split(","));
+      try {
+        const parsed: unknown = parseYaml(value.trim(), { schema: "failsafe" });
+        if (Array.isArray(parsed)) items.push(...parsed.filter((item): item is string => typeof item === "string"));
+      } catch {
+        items.push(...value.trim().replace(/^\[|\]$/g, "").split(",").map(unquote));
+      }
+    } else if (/^["']/.test(value.trim())) {
+      items.push(unquote(value));
     } else if (value.trim()) {
-      items.push(...value.split(","));
+      items.push(...value.split(",").map(unquote));
     } else {
-      while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) items.push(lines[(i += 1)].replace(/^\s*-\s+/, ""));
+      while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) items.push(unquote(lines[(i += 1)].replace(/^\s*-\s+/, "")));
     }
-    for (const item of items.map(unquote).filter(Boolean)) {
+    for (const item of items.map((item) => item.trim()).filter(Boolean)) {
       if (!header.aliases.includes(item)) header.aliases.push(item.slice(0, 40));
     }
   }
@@ -110,7 +124,7 @@ const LEAD = /^(?:\s*\r?\n|#{1,6}[ \t]+[^\r\n]*\r?\n)*/;
 const HEADER_BLOCK = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
 function aliasList(aliases: readonly string[]): string {
-  return `[${aliases.join(", ")}]`;
+  return `[${aliases.map((alias) => JSON.stringify(alias)).join(", ")}]`;
 }
 
 export function mergeTopicText(existing: string | null, input: { title: string; aliases: readonly string[]; lines: readonly string[] }): string {
