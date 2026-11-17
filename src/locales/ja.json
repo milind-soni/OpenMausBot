@@ -7938,5 +7938,8 @@
   "remote.tailscale.needsApproval": "このコンピューターは Tailscale ネットワークでの承認を待っています。Tailscale の管理コンソールで承認してから、もう一度お試しください。",
   "together.switch.title": "このコンピューターと My Cloud をまとめる",
   "together.switch.line": "既定ではオフです。Cloud のボットとこのコンピューターのボットを 1 つの一覧に表示し、それぞれがある場所で開きます。",
-  "together.switch.failed": "保存できませんでした。もう一度お試しください。"
+  "together.switch.failed": "保存できませんでした。もう一度お試しください。",
+  "alwaysOn.section": "常時オンの拠点",
+  "alwaysOn.title": "このコンピュータを常時オンの拠点として使う",
+  "alwaysOn.add.title": "Mac mini などの常時オンのコンピュータを追加"
 }

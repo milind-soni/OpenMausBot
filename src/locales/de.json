@@ -4010,5 +4010,8 @@
   "server.rooms.linkedEnded": "{place} hat sich 30 Tage lang nicht verbunden, deshalb wurde die Verbindung dorthin beendet. Nicht mehr in diesem Raum: {bots}.",
   "room.members.far.place": "auf {place}",
   "room.members.far.off": "Verbindung ist aus",
-  "room.members.far.missing": "Nicht mehr verfügbar"
+  "room.members.far.missing": "Nicht mehr verfügbar",
+  "alwaysOn.section": "Immer eingeschaltetes Zuhause",
+  "alwaysOn.title": "Diesen Computer als immer eingeschaltetes Zuhause nutzen",
+  "alwaysOn.add.title": "Einen Mac mini oder anderen immer eingeschalteten Computer hinzufügen"
 }

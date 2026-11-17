@@ -77,6 +77,30 @@ test("crash clears readiness immediately, backs off, and exhausts a bounded budg
   assert.equal(f.children.length, 4);
 });
 
+test("an always-on home never gives up: a spent budget waits the long delay and starts over, with no dialog", async (t) => {
+  let home = true;
+  const f = fixture(t, { keepTrying: () => home, longRetryMs: 500 });
+  const crash = () => f.children.at(-1).emit("exit", 1);
+  f.supervisor.ready(f.spawn());
+  for (const delay of [10, 20, 40]) { crash(); await f.tick(delay); }
+  assert.equal(f.children.length, 4);
+  crash();
+  await f.tick(499);
+  assert.equal(f.children.length, 4, "the long wait, not a fourth quick try");
+  assert.equal(f.events.some(([kind]) => kind === "exhausted"), false);
+  await f.tick(1);
+  assert.equal(f.children.length, 5);
+  crash();
+  await f.tick(10);
+  assert.equal(f.children.length, 6, "after the long wait the quick tries start over");
+  home = false;
+  for (const delay of [20, 40]) { crash(); await f.tick(delay); }
+  crash();
+  assert.deepEqual(f.events.at(-1), ["exhausted"], "turned off: the budget ends as before");
+  await f.tick(1000);
+  assert.equal(f.children.length, 8);
+});
+
 test("only a stable ready uptime resets the recovery budget", async (t) => {
   const f = fixture(t);
   f.supervisor.ready(f.spawn());

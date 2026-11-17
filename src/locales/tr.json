@@ -5892,5 +5892,8 @@
   "remote.tailscale.needsApproval": "Bu bilgisayar Tailscale ağınızda onay bekliyor. Tailscale yönetici konsolunda onaylayın, ardından tekrar deneyin.",
   "together.switch.title": "Bu bilgisayar ve Cloud'um birlikte",
   "together.switch.line": "Varsayılan olarak kapalı. Cloud'daki botlar ile bu bilgisayardaki botlar tek listede görünür ve her biri bulunduğu yerde açılır.",
-  "together.switch.failed": "Kaydedilemedi. Yeniden deneyin."
+  "together.switch.failed": "Kaydedilemedi. Yeniden deneyin.",
+  "alwaysOn.section": "Her zaman açık ev",
+  "alwaysOn.title": "Bu bilgisayarı her zaman açık ev olarak kullan",
+  "alwaysOn.add.title": "Mac mini veya her zaman açık başka bir bilgisayar ekle"
 }

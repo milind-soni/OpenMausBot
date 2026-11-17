@@ -5892,5 +5892,8 @@
   "remote.tailscale.needsApproval": "Máy tính này đang chờ được phê duyệt trên mạng Tailscale của bạn. Hãy phê duyệt trong bảng điều khiển quản trị Tailscale, rồi thử lại.",
   "together.switch.title": "Máy tính này và My Cloud cùng nhau",
   "together.switch.line": "Mặc định là tắt. Bot trên Cloud và bot trên máy tính này hiện trong một danh sách, và mỗi bot mở ở nơi nó đang ở.",
-  "together.switch.failed": "Không lưu được. Hãy thử lại."
+  "together.switch.failed": "Không lưu được. Hãy thử lại.",
+  "alwaysOn.section": "Nhà luôn bật",
+  "alwaysOn.title": "Dùng máy tính này làm nhà luôn bật",
+  "alwaysOn.add.title": "Thêm Mac mini hoặc máy tính luôn bật khác"
 }

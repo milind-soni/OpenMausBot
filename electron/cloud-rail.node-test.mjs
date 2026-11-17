@@ -326,7 +326,7 @@ test("Remove from list from a circle's menu: only the rail's own page, only a ci
   assert.deepEqual(making.opened, ["cloud:c-b"], "its own screen, never a saved place or an address");
 });
 
-test("Make … my home: only on a server connected by hand that main offers it for, from the rail's own page, by main's own word for it", async () => {
+test("Make … my home: only on a server connected by hand that main offers it for, from the rail's or this computer's own page, by main's own word for it", async () => {
   const offered = new Set(["vps"]), made = [];
   const r = rail({ places: () => railPlaces({ saved: saved("home", [{ id: "box", kind: "remote", name: "Box", origin: "https://box.example.test" }]), home: HOME, mine: HOME, state: session(),
     offers: entry => offered.has(entry.id) || entry.id === "home" || entry.id === "a" || entry.id === "acme" }), makeHome: id => { made.push(id); return { started: true }; } });
@@ -339,7 +339,10 @@ test("Make … my home: only on a server connected by hand that main offers it f
   assert.deepEqual(made, ["vps"]);
   offered.clear();
   assert.throws(() => r.call("workspaces:make-home", "vps"), /can't be your bots' home/, "no longer offered: refused");
+  offered.add("vps");
   r.w.lists = false;
+  assert.deepEqual(await r.call("workspaces:make-home", "vps"), { started: true }, "this computer's own page (Settings → Phone & devices)");
+  r.w.trusted = false;
   assert.throws(() => r.call("workspaces:make-home", "vps"), /only available/, "any other page: refused");
   assert.throws(() => rail().call("workspaces:make-home", "vps"), /can't be your bots' home/, "a main that offers it nowhere");
 });

@@ -436,6 +436,10 @@ const bridge = {
   openHtmlInBrowser: (source, name) => invokeWithPlainError("desktop:open-html", source, name),
   // This app's own logs folder (server.log, desktop-crashes.log, updater.log); the page names no path.
   openLogsFolder: () => ipcRenderer.invoke("desktop:open-logs"),
+  alwaysOnHome: {
+    state: () => ipcRenderer.invoke("always-on-home:state"),
+    set: on => ipcRenderer.invoke("always-on-home:set", on === true),
+  },
   openAtLogin: {
     state: () => ipcRenderer.invoke("open-at-login:state"),
     set: on => on !== true || isLocalPage || navigator.userActivation?.isActive === true

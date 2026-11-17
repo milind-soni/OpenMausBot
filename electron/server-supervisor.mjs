@@ -1,4 +1,5 @@
-// Owns one child, including while its health probe is pending; recovery retries the established port.
+// Owns one child, including while its health probe is pending; recovery retries the established port. `keepTrying()`:
+// the computer is an always-on home, so a spent budget waits `longRetryMs` and starts over instead of giving up.
 export function createServerSupervisor({
   restart,
   stop,
@@ -8,6 +9,8 @@ export function createServerSupervisor({
   log = () => {},
   retryDelaysMs = [1_000, 2_000, 4_000],
   stableUptimeMs = 60_000,
+  keepTrying = () => false,
+  longRetryMs = 5 * 60_000,
   now = () => performance.now(),
 }) {
   let current = null;
@@ -29,12 +32,18 @@ export function createServerSupervisor({
 
   function schedule() {
     if (stopped || paused) return;
-    if (attempts === retryDelaysMs.length) {
+    let delay;
+    if (attempts < retryDelaysMs.length) {
+      delay = retryDelaysMs[attempts++];
+      log(`server recovery attempt ${attempts}/${retryDelaysMs.length} in ${delay}ms`);
+    } else if (keepTrying()) {
+      attempts = 0;
+      delay = longRetryMs;
+      log(`server recovery: always-on home, trying again in ${delay}ms`);
+    } else {
       onExhausted();
       return;
     }
-    const delay = retryDelaysMs[attempts++];
-    log(`server recovery attempt ${attempts}/${retryDelaysMs.length} in ${delay}ms`);
     timer = setTimeout(async () => {
       timer = null;
       if (paused) return;

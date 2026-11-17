@@ -4,6 +4,9 @@
   "0.1.136"
  ],
  "paths": [
+  "alwaysOnHome",
+  "alwaysOnHome.set",
+  "alwaysOnHome.state",
   "androidDevice",
   "androidDevice.frame",
   "androidDevice.input",

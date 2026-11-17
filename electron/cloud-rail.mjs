@@ -206,8 +206,9 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
     const client = account();
     return { outcome: client?.hideCloud ? (await client.hideCloud(place.cloudId)).outcome : "unsupported" };
   });
-  // Make … my home, from a circle's menu: only a server main listed with it, by main's own word for it.
-  listed("workspaces:make-home", (_event, id) => {
+  // Make … my home, from a circle's menu or Settings → Phone & devices on this computer's own page (`trusted`): only a server
+  // main listed with it, by main's own word for it.
+  handle("workspaces:make-home", (_event, id) => {
     const place = places().find(entry => entry.id === plain(id) && entry.makeHome);
     if (!place || !makeHome) throw new Error(t("native.home.notAvailable"));
     return makeHome(place.id);

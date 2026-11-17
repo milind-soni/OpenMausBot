@@ -13,12 +13,15 @@ import { PlaceBadge } from "./settings/SettingsNav";
 
 type Saved = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 type Entry = Saved["environments"][number];
+/** One place saved on this computer, as Settings reads it. */
+export type SavedServer = Entry;
 type Sheet = { address: string; locked: boolean; title: string } | null;
 /** A saved server of the person's own (this desktop is its admin), and how lending this computer to it is. */
 export type OwnServerSharing = { id: string; enabled: boolean; connected: boolean; paused: boolean };
 
 const TRANSPORT = { https: "servers.transport.https", tailscale: "servers.transport.tailscale", "private-http": "servers.transport.privateHttp", loopback: "servers.transport.loopback" } as const;
-const byHand = (entry: Entry) => entry.kind !== "local" && Boolean(entry.origin) && !entry.home && !entry.cloud && !("team" in entry && entry.team);
+/** A server the person connected by hand: not This computer, My Cloud, another Cloud of theirs or a team's. */
+export const byHand = (entry: Entry) => entry.kind !== "local" && Boolean(entry.origin) && !entry.home && !entry.cloud && !("team" in entry && entry.team);
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /** The update command that fits how the server was installed, pinned to this app's version. */

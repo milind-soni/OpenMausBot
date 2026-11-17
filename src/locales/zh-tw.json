@@ -10166,5 +10166,8 @@
   "remote.tailscale.needsApproval": "這台電腦正在等待你的 Tailscale 網路核准。請在 Tailscale 管理主控台中核准它，然後再試一次。",
   "together.switch.title": "這台電腦和 My Cloud 合在一起",
   "together.switch.line": "預設為關閉。Cloud 上的機器人和這台電腦上的機器人顯示在同一個清單中，各自在所在的位置開啟。",
-  "together.switch.failed": "無法儲存。請再試一次。"
+  "together.switch.failed": "無法儲存。請再試一次。",
+  "alwaysOn.section": "常開的家",
+  "alwaysOn.title": "將這台電腦當作常開的家",
+  "alwaysOn.add.title": "加入 Mac mini 或其他常開的電腦"
 }

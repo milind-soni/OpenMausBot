@@ -10062,5 +10062,8 @@
   "server.rooms.linkedEnded": "{place} 已有 30 天没有连接，与它的连接已结束。已不在这个群组聊天中：{bots}。",
   "room.members.far.place": "位于 {place}",
   "room.members.far.off": "连接已关闭",
-  "room.members.far.missing": "已不可用"
+  "room.members.far.missing": "已不可用",
+  "alwaysOn.section": "常开的家",
+  "alwaysOn.title": "将这台电脑用作常开的家",
+  "alwaysOn.add.title": "添加 Mac mini 或其他常开的电脑"
 }
