@@ -7638,10 +7638,7 @@
   "activity.tool.team.editImage": "이미지 편집",
   "voice.deepseek.sharedKey": "DeepSeek은 이 설치에 이미 있는 DeepSeek 키를 써요.",
   "voice.deepseek.description": "답장과 음성 메시지를 DeepSeek의 Stella 또는 Tide 목소리로 읽어 줘요. DeepSeek을 고르면 받아쓰기와 번갈아 말하기도 DeepSeek 음성 인식으로 들어요. 녹음 한 번에 약 2분까지예요. DeepSeek API 키를 쓰고 요금은 DeepSeek에서 청구돼요.",
-  "voice.deepseek.missingKey": "DeepSeek 목소리를 쓰려면 호스트의 설정 → API 키에서 DeepSeek API 키를 추가하세요.",
   "voice.deepseek.stella": "Stella (여성)",
   "voice.deepseek.tide": "Tide (남성)",
-  "call.capability.turnsNeedDeepSeekKey": "통화에서 번갈아 말하려면 DeepSeek 키를 추가하세요",
-  "call.capability.turnsNeedDeepSeekKeyReason": "목소리로 DeepSeek을 쓰고 있어서 번갈아 말하기도 DeepSeek 음성 인식으로 들어요. 설정 → API 키에서 DeepSeek 키를 추가하세요.",
-  "serverError.voice.deepseekKeyRequired": "DeepSeek 목소리로 봇과 대화하려면 설정 → API 키에서 DeepSeek API 키를 추가하세요."
+  "call.capability.turnsNeedDeepSeekKey": "통화에서 번갈아 말하려면 DeepSeek 키를 추가하세요"
 }
