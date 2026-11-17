@@ -18,32 +18,33 @@ import { descendantsOf, stillRunning } from "./proc-descendants.ts";
 beforeEach(() => { fixture.rows = []; fixture.unreadable.clear(); fixture.scans = 0; });
 
 describe("process descendants", () => {
+  const pid = (offset: number) => process.pid + 10_000 + offset;
   for (const platform of ["linux", "darwin"] as const) {
     it(`keeps breadth-first parent order and sibling enumeration order on ${platform}`, () => {
       fixture.rows = [
-        { pid: 33, parent: 31 }, { pid: 22, parent: 20 }, { pid: 32, parent: 20 },
-        { pid: 31, parent: 22 }, { pid: 99, parent: 98 }, { pid: 20, parent: 10 },
+        { pid: pid(33), parent: pid(31) }, { pid: pid(22), parent: pid(20) }, { pid: pid(32), parent: pid(20) },
+        { pid: pid(31), parent: pid(22) }, { pid: pid(99), parent: pid(98) }, { pid: pid(20), parent: pid(10) },
       ];
-      expect(descendantsOf(20, platform).map(row => row.pid)).toEqual([22, 32, 31, 33]);
+      expect(descendantsOf(pid(20), platform).map(row => row.pid)).toEqual([22, 32, 31, 33].map(pid));
     });
     it(`walks through dead parents without returning them on ${platform}`, () => {
-      fixture.rows = [{ pid: 21, parent: 20, state: "Z" }, { pid: 22, parent: 21 }];
-      expect(descendantsOf(20, platform)).toEqual([{ pid: 22, start: "start-22" }]);
+      fixture.rows = [{ pid: pid(21), parent: pid(20), state: "Z" }, { pid: pid(22), parent: pid(21) }];
+      expect(descendantsOf(pid(20), platform)).toEqual([{ pid: pid(22), start: `start-${pid(22)}` }]);
     });
     it(`does not revisit cycles or include the current process or its children on ${platform}`, () => {
       fixture.rows = [
-        { pid: 21, parent: 20 }, { pid: 20, parent: 21 },
-        { pid: process.pid, parent: 20 }, { pid: 23, parent: process.pid },
-        { pid: 1, parent: 20 }, { pid: 0, parent: 20 },
+        { pid: pid(21), parent: pid(20) }, { pid: pid(20), parent: pid(21) },
+        { pid: process.pid, parent: pid(20) }, { pid: pid(23), parent: process.pid },
+        { pid: 1, parent: pid(20) }, { pid: 0, parent: pid(20) },
       ];
-      expect(descendantsOf(20, platform).map(row => row.pid)).toEqual([21]);
+      expect(descendantsOf(pid(20), platform).map(row => row.pid)).toEqual([pid(21)]);
     });
   }
   it("skips disappearing Linux processes and keeps the observed start identity", () => {
-    fixture.rows = [{ pid: 21, parent: 20, start: "12345" }, { pid: 22, parent: 20 }];
-    fixture.unreadable.add(22);
-    const tree = descendantsOf(20, "linux");
-    expect(tree).toEqual([{ pid: 21, start: "12345" }]);
+    fixture.rows = [{ pid: pid(21), parent: pid(20), start: "12345" }, { pid: pid(22), parent: pid(20) }];
+    fixture.unreadable.add(pid(22));
+    const tree = descendantsOf(pid(20), "linux");
+    expect(tree).toEqual([{ pid: pid(21), start: "12345" }]);
     fixture.rows[0]!.start = "new-process";
     expect(stillRunning(tree, "linux")).toEqual([]);
   });
@@ -56,8 +57,8 @@ describe("process descendants", () => {
     expect(fixture.scans).toBe(1);
   });
   it("leaves Windows tree discovery to taskkill", () => {
-    fixture.rows = [{ pid: 21, parent: 20 }];
-    expect(descendantsOf(20, "win32")).toEqual([]);
+    fixture.rows = [{ pid: pid(21), parent: pid(20) }];
+    expect(descendantsOf(pid(20), "win32")).toEqual([]);
     expect(fixture.scans).toBe(0);
   });
 });
