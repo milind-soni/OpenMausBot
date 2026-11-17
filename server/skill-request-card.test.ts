@@ -40,4 +40,13 @@ describe("importedSkillRequest", () => {
     expect(await importing("acme/skills")).toEqual({ importError: expect.stringContaining("acme/skills has 2 skills (") });
     expect(await importing("acme/notes")).toEqual({ importError: expect.stringMatching(/^Could not import a skill from acme\/notes: /) });
   });
+
+  it("stops fetching once the turn's signal aborts", async () => {
+    const turnEnded = new AbortController();
+    turnEnded.abort();
+    const before = github.requests.length;
+    const body = await importedSkillRequest({ action: "import", source: "https://github.com/acme/skills/tree/main/skills/pdf" }, github.fetch, turnEnded.signal);
+    expect(body).toEqual({ importError: expect.stringMatching(/^Could not import a skill from /) });
+    expect(github.requests.length).toBe(before);
+  });
 });
