@@ -306,6 +306,8 @@ export function fetchDeepSeekCatalog(
 export const deepseekSupport: AcpSupport = {
   driverKind: "deepseekAgent",
   displayName: "DeepSeek Harness",
+  // @deepseek-ai/dsh declares engines.node ">=24.9.0"; on older Node it quits before answering.
+  minNodeVersion: "24.9.0",
   models: DEEPSEEK_MODELS,
   defaultCli: "dsh",
   nativeSource: "deepseek.acp",

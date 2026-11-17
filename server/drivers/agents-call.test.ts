@@ -222,11 +222,26 @@ describe("skill_manage", () => {
     const sent: unknown[] = [];
     const ctx = context({ client: { api: async (path) => { sent.push(path); return {}; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
     expect(await callTool("skill_manage", { action: "save" }, ctx)).toEqual({
-      text: 'skill_manage action must be "create", "update", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source.',
+      text: 'skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes action, skill_name, skill_md, references, gist, base_revision, source.',
       isError: true,
     });
     expect((await callTool("skill_manage", { action: "create", source: "conversation" }, ctx)).text).toContain("---\\nname: file-expense\\ndescription:");
     expect(sent).toEqual([]);
+  });
+
+  it("sends import with only its source, so the app fetches the skill and it gets the same card as create", async () => {
+    const sent: Array<{ path: string; body: any }> = [];
+    const ctx = context({ client: { api: async (path, init) => { sent.push({ path, body: JSON.parse(String(init?.body)) }); return { name: "pdf" }; }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } });
+    expect((await callTool("skill_manage", { action: "import" }, ctx)).text).toContain("skill_manage needs source");
+    const result = await callTool("skill_manage", { action: "import", source: "https://skills.sh/acme/skills/pdf" }, ctx);
+    expect(result.text).toContain("A confirmation card is now visible to the user for new skill “pdf”.");
+    expect(sent).toEqual([{ path: "/api/internal/skills/stage", body: expect.objectContaining({ action: "import", skill_md: "", source: "https://skills.sh/acme/skills/pdf" }) }]);
+  });
+
+  it("tells bots they can import a skill from GitHub or skills.sh", () => {
+    const tool = availableTools({ ...catalogProfileFromEnv({}), skillAuthoring: true }).find((entry) => entry.name === "skill_manage");
+    expect(tool?.description).toContain("import one from GitHub or skills.sh");
+    expect(tool?.inputSchema.properties).toMatchObject({ action: { enum: expect.arrayContaining(["import"]) } });
   });
 });
 

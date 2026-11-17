@@ -9,6 +9,7 @@ import {
   cloudBackendChangeError,
   vpsAliasResourceChangeError,
   vpsBotAliasChangeError,
+  vpsNotChosenReason,
 } from "./cloud-backend.ts";
 
 describe("cloud backend switching", () => {
@@ -45,5 +46,18 @@ describe("cloud backend switching", () => {
 
   it("allows a bot's own SSH alias change while idle", () => {
     expect(vpsBotAliasChangeError(false, false)).toBeNull();
+  });
+});
+
+describe("vpsNotChosenReason", () => {
+  it("points a Boat bot at the saved VPS it could use instead", () => {
+    const reason = vpsNotChosenReason("Scout", "production-vps");
+    expect(reason).toContain("production-vps");
+    expect(reason).toContain("Self-hosted VPS");
+    expect(reason).toContain("Scout's Bot settings, Access section");
+  });
+
+  it("says nothing when no VPS is set up", () => {
+    expect(vpsNotChosenReason("Scout", null)).toBeNull();
   });
 });

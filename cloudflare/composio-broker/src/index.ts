@@ -28,6 +28,8 @@ interface ComposioSession {
   headers: Record<string, string>;
   userId?: string;
   multiAccountConfigured: boolean;
+  /** The account cap Composio echoed, when it did. */
+  maxAccounts?: number;
   /** Project auth configs the Session was created with, by canonical toolkit slug. */
   authConfigs: AuthConfigMap;
 }
@@ -100,9 +102,11 @@ const toolkitPageSchema = z.object({
 const linkResponseSchema = z.object({ redirect_url: z.string().optional() });
 const aliasRequestSchema = z.object({ alias: z.string().nullable().optional() });
 const MAX_MCP_BODY = 2 * 1024 * 1024;
+/** Ten accounts per app is the most Composio allows (its range is 2-10). A Session keeps the cap it was made with,
+ * so one made under a lower cap is raised in place before its next sign-in link. */
 const MULTI_ACCOUNT_CONFIG = {
   enable: true,
-  max_accounts_per_toolkit: 5,
+  max_accounts_per_toolkit: 10,
   require_explicit_selection: true,
 } as const;
 const MAX_AUTH_CONFIG_PAGES = 20;
@@ -162,6 +166,7 @@ function parseSession(value: SessionWire): ComposioSession {
     // creation, and recreating a Session would post the same config and get
     // the same echo back — strict equality here can only churn, never fix.
     multiAccountConfigured: multi?.enable === true,
+    maxAccounts: multi?.max_accounts_per_toolkit,
     authConfigs: Object.fromEntries(
       Object.entries(config?.auth_configs ?? {}).map(([slug, id]) => [canonicalToolkitSlug(slug), id]),
     ),
@@ -251,6 +256,30 @@ function authConfigsKey(sessionId: string, wanted: AuthConfigMap) {
 /** Session ids this isolate already tried to upgrade once. If the fresh Session
  *  still doesn't echo multi-account, Composio isn't granting it. */
 const multiAccountUpgradeAttempted = new Set<string>();
+/** Session ids this isolate already raised to the current account cap. */
+const accountCapRaised = new Set<string>();
+
+/** A Session made under a lower account cap gets the current one, in place, so
+ *  its MCP endpoint stays. If Composio refuses or can't be reached, the old cap
+ *  stays, the next link tries again, and this link goes ahead. */
+async function raiseAccountCap(session: ComposioSession, env: Env) {
+  if (session.maxAccounts === undefined || session.maxAccounts >= MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit
+    || accountCapRaised.has(session.sessionId)) return;
+  const response = await composioRequest(env, `/tool_router/session/${encodeURIComponent(session.sessionId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ multi_account: MULTI_ACCOUNT_CONFIG }),
+  }).catch((error: unknown) => {
+    console.warn(JSON.stringify({ message: "account cap not raised", error: error instanceof Error ? error.message : String(error) }));
+    return null;
+  });
+  if (!response) return;
+  if (!response.ok) {
+    console.warn(JSON.stringify({ message: "account cap not raised", status: response.status }));
+    return;
+  }
+  accountCapRaised.add(session.sessionId);
+}
+
 /** Likewise for an `auth_configs` echo Composio leaves out, keyed by the map
  *  asked for so a new auth config still triggers one more upgrade. */
 const authConfigUpgradeAttempted = new Set<string>();
@@ -607,6 +636,7 @@ async function authorize(
     const removed = await composioRequest(env, `/connected_accounts/${encodeURIComponent(id)}?revoke_on_delete=true`, { method: "DELETE" });
     if (!removed.ok) return json({ error: await upstreamError(removed, "Removing the earlier sign-in failed") }, 502);
   }
+  await raiseAccountCap(session, env);
   const linkRequest: AccountLinkRequest = { toolkit: slug };
   if (plan.alias) linkRequest.alias = plan.alias;
   const response = await composioRequest(env, `/tool_router/session/${encodeURIComponent(session.sessionId)}/link`, {

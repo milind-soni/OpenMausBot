@@ -2,6 +2,7 @@
 // compared in constant time, single-valued parameters, and a listener that lives only until its last sign-in settles.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { isDeepStrictEqual } from "node:util";
 
 import type { McpServerSpec } from "./contracts.ts";
 import { discoverMcpAuth, type McpAuthMetadata } from "./mcp-oauth-discovery.ts";
@@ -364,11 +365,11 @@ export class McpOAuthManager {
   async signOut(name: string, url: string): Promise<void> {
     this.cancel(name);
     const record = this.store.get(name, url);
+    this.store.delete(name);
     const token = record?.tokens?.refresh ?? record?.tokens?.access;
     if (record?.revocationEndpoint && token) {
       await postForm(record.revocationEndpoint, { token }, this.recordClient(name, record) ?? undefined).catch(() => undefined);
     }
-    this.store.delete(name);
   }
 
   forget(name: string): void {
@@ -425,15 +426,16 @@ export class McpOAuthManager {
   /** One refresh at a time per server. `forced`: a server refused the token, so it is renewed whatever its expiry says, and
    * a token nothing can renew has ended. */
   private renew(name: string, record: McpOAuthRecord, forced: boolean): Promise<{ token: string | null; outcome: McpRefreshOutcome | null }> {
-    const pending = this.refreshing.get(name);
+    const key = JSON.stringify([name, record]);
+    const pending = this.refreshing.get(key);
     if (pending) return pending;
     const renewed = this.refresh(name, record, forced).then((result) => {
       if (result.outcome) {
         try { this.onRefresh(name, result.outcome); } catch (error) { console.error("mcp sign-in: onRefresh failed", error); }
       }
       return result;
-    }).finally(() => this.refreshing.delete(name));
-    this.refreshing.set(name, renewed);
+    }).finally(() => this.refreshing.delete(key));
+    this.refreshing.set(key, renewed);
     return renewed;
   }
 
@@ -454,8 +456,10 @@ export class McpOAuthManager {
         resource: record.url,
       }, client);
     } catch {
+      if (!isDeepStrictEqual(this.store.get(name, record.url), record)) return { token: null, outcome: null };
       return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
     }
+    if (!isDeepStrictEqual(this.store.get(name, record.url), record)) return { token: null, outcome: null };
     const next = answer.status >= 200 && answer.status < 300 ? tokensFrom(answer.body, tokens) : null;
     if (!next) {
       const dead = (answer.status === 400 || answer.status === 401)
@@ -464,8 +468,6 @@ export class McpOAuthManager {
       this.markNeedsSignIn(name, record.url);
       return { token: null, outcome: "rejected" };
     }
-    // the entry may have been removed or re-pointed while this was in flight
-    if (!this.store.get(name, record.url)) return { token: null, outcome: null };
     this.store.put(name, { ...record, state: "signed-in", tokens: next });
     return { token: next.access, outcome: "refreshed" };
   }

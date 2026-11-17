@@ -80,7 +80,8 @@ const GLYPH_HEIGHT = 14;
 const BASELINE_INSET = 2;
 const TALLEST = GLYPH_HEIGHT - BASELINE_INSET;
 const GLYPH_WIDTH = BAR_STEP * USAGE_BARS - (BAR_STEP - BAR_WIDTH);
-const TONE_INK: Record<UsageTone, string> = { fine: "text-ink-tertiary", near: "text-warning", out: "text-warning" };
+const TONE_INK: Record<UsageTone, string> = { fine: "text-success", near: "text-warning", out: "text-danger" };
+const TONE_TRACK: Record<UsageTone, string> = { fine: "bg-success", near: "bg-warning", out: "bg-danger" };
 
 /** Four rising bars on whole pixels, filled for the usage left; at the limit every bar is empty and struck through. */
 export function UsageGlyph({ limit, className }: { limit: EngineLimit; className?: string }) {
@@ -116,13 +117,13 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
         <div key={row.window} data-usage-row={row.window} className="flex flex-col gap-1.5">
           <div className="flex items-baseline gap-3 text-[12px] leading-4">
             <span className="shrink-0 text-ink-secondary">{windowLabel(row.window)}</span>
-            <span className={cn("ms-auto min-w-0 truncate text-end tabular-nums", row.tone === "fine" ? "text-ink" : "text-warning")}>
+            <span className={cn("ms-auto min-w-0 truncate text-end tabular-nums", row.tone === "fine" ? "text-ink" : TONE_INK[row.tone])}>
               <span className="font-medium">{row.tone === "out" ? t("limits.windowAtLimit") : t("planUsage.left", { remaining: row.left })}</span>
               {row.resetsAt !== null && row.resetsAt > now && ` · ${t("limits.resets", { time: resetTime(row.resetsAt, now) })}`}
             </span>
           </div>
           <div aria-hidden="true" className="h-1 overflow-hidden rounded-full bg-ink/[0.08]">
-            <div data-usage-track className={cn("h-full rounded-full", row.tone === "fine" ? "bg-ink-tertiary" : "bg-warning")} style={{ width: `${100 - row.left}%` }} />
+            <div data-usage-track className={cn("h-full rounded-full", TONE_TRACK[row.tone])} style={{ width: `${100 - row.left}%` }} />
           </div>
         </div>
       ))}

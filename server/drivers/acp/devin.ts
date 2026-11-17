@@ -43,8 +43,9 @@ export function devinSignedIn(env: Record<string, string | undefined>, platform:
 }
 
 /** No exit grace: devin 3000.12.57 exits on EOF but orphans the MCP servers it started from its own config, which then
- * hold the discovery folder for seconds where the tree kill would have stopped them. */
-const DISCOVERY: AcpDiscoveryOptions = { passthrough: AGENT_DEFAULT };
+ * hold the discovery folder for seconds where the tree kill would have stopped them. A Devin Pro account advertises
+ * 145 models, past discovery's default cap of 128; above 128 the per-model variant switches are skipped, as for OMP. */
+const DISCOVERY: AcpDiscoveryOptions = { passthrough: AGENT_DEFAULT, variantLimit: 128, maxModels: 4096 };
 
 export function resolveDevinModels(env: Record<string, string | undefined>, config: Pick<AcpConfig, "cli">): Promise<ModelCatalog> {
   return discoverAcpModels(env, config.cli, SPAWN_ARGS, DISCOVERY);
