@@ -77,6 +77,7 @@ function windowsKnownDirs(): string[] {
 
 let cached: string | null = null;
 let probed = false;
+let probeGeneration = 0;
 let loginShellPath: string | null = null;
 
 // App-managed dirs (its own npm prefix) go first, so an engine installed there wins over an older copy.
@@ -99,6 +100,7 @@ export function registerFallbackPathDir(dir: string): void {
 
 /** `probed` resets too, or a rescan would drop rc-file PATH entries and never probe the login shell again. */
 export function resetPathCache(): void {
+  probeGeneration++;
   cached = null;
   probed = false;
 }
@@ -135,6 +137,7 @@ function mergePaths(parts: string[]): string {
 }
 
 function probeLoginShellPath(): void {
+  const generation = probeGeneration;
   const shell = process.env.SHELL || "/bin/zsh";
   // -l -i: nvm and friends live in .zshrc/.bashrc, which only interactive shells read; a marker isolates $PATH from rc noise.
   execFile(
@@ -142,7 +145,7 @@ function probeLoginShellPath(): void {
     ["-l", "-i", "-c", 'printf "__OMB_PATH__%s" "$PATH"'],
     { timeout: 5000 },
     (err, stdout) => {
-      if (err || !stdout) return;
+      if (generation !== probeGeneration || err || !stdout) return;
       const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
       if (!m || !m[1]) return;
       loginShellPath = m[1];
@@ -152,8 +155,7 @@ function probeLoginShellPath(): void {
 }
 
 export function resetPathCacheForTests(): void {
-  cached = null;
-  probed = false;
+  resetPathCache();
   loginShellPath = null;
   registeredDirs.length = 0;
   fallbackDirs.length = 0;
