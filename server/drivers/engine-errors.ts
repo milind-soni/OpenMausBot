@@ -7,7 +7,19 @@ import { redactSecretsInText } from "../redact.ts";
 import { hostTimeZone } from "../turn-clock.ts";
 import { toolCountLimitFromError } from "../tool-count-limit.ts";
 import { MODEL_NO_ROUTE, USAGE_LIMIT } from "./retry.ts";
-import { usageLimitWait } from "./acp/quiet-status.ts";
+
+/** How long an engine may stay quiet after a model request failed on a limit before the turn is ended as a usage limit,
+ * so a backup the person chose carries on (or the bot waits for the reset): longer than any retry an engine makes without a provider's retry-after
+ * (OMB_ACP_LIMIT_QUIET_MS overrides). */
+export const DEFAULT_LIMIT_QUIET_MS = 2 * 60_000;
+export const limitQuietMs = (): number => {
+  const ms = Number(process.env.OMB_ACP_LIMIT_QUIET_MS);
+  return Number.isFinite(ms) && ms > 0 ? ms : DEFAULT_LIMIT_QUIET_MS;
+};
+
+/** A 429 whose wait is longer than any engine retries on its own is a usage limit, not a short rate limit. */
+export const usageLimitWait = (status: number | null | undefined, waitMs: number | null | undefined): boolean =>
+  status === 429 && (waitMs ?? 0) > limitQuietMs();
 
 export type EngineFailureKind = "credits" | "usage_limit" | "rate_limit" | "overloaded" | "server" | "tool_schema" | "tool_count" | "model_no_route" | "refused";
 

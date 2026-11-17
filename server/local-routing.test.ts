@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shouldMountLocalComputer } from "./local-routing.ts";
+import { newBotWorksOn, shouldMountLocalComputer } from "./local-routing.ts";
 
 describe("local computer routing", () => {
   it("never lets Linux Auto fall back to the user's desktop", () => {
@@ -80,5 +80,18 @@ describe("local computer routing", () => {
         providerSupportsLocal: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("where a new bot works when nothing names a place", () => {
+  it("is This computer on the desktop app on a Mac or a Windows PC, with a model that can use it", () => {
+    expect(newBotWorksOn({ desktopApp: true, platform: "win32", providerSupportsLocal: true })).toBe("local");
+    expect(newBotWorksOn({ desktopApp: true, platform: "darwin", providerSupportsLocal: true })).toBe("local");
+  });
+
+  it("stays Auto on a server or Cloud, on Linux, and for a model that can't use this computer", () => {
+    expect(newBotWorksOn({ desktopApp: false, platform: "win32", providerSupportsLocal: true })).toBeUndefined();
+    expect(newBotWorksOn({ desktopApp: true, platform: "linux", providerSupportsLocal: true })).toBeUndefined();
+    expect(newBotWorksOn({ desktopApp: true, platform: "darwin", providerSupportsLocal: false })).toBeUndefined();
   });
 });

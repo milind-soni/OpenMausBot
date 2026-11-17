@@ -1,8 +1,7 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
+import { readRegistry } from "./testing/registry.ts";
 
 describe("thread archive through an isolated HTTP fixture", () => {
   let fixture: VerificationServer;
@@ -15,7 +14,7 @@ describe("thread archive through an isolated HTTP fixture", () => {
     return { status: response.status, body: await response.json() as any };
   };
   const getBot = async (botId: string) => (await api("GET", "/api/bots?messages=1")).body.bots.find((bot: any) => bot.id === botId);
-  const persistedTask = (botId: string, threadId: string) => JSON.parse(readFileSync(join(fixture.info.dataDir, "bots.json"), "utf8"))
+  const persistedTask = (botId: string, threadId: string) => readRegistry(fixture.info.dataDir).bots
     .find((bot: any) => bot.id === botId).tasks.find((task: any) => task.threadId === threadId);
 
   beforeAll(async () => {

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { linkedAddress } from "../electron/bot-link-address.mjs";
 
 type Fixture = Awaited<ReturnType<typeof launchVerificationServer>>;
 
@@ -62,6 +63,54 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     expect(backedUp).not.toMatch(/Wait for bot turns/);
     await expect.poll(async () => (await computer.api("GET", "/api/bot-link")).online, { timeout: 15_000 }).toBe(true);
 
+    // The server's bot is a record on the computer, found by its address there and nowhere else: not listed, not saved,
+    // and it takes no turn on the computer.
+    const rows = (await computer.api("GET", "/api/bot-link/bots")).bots as any[];
+    const standIn = rows.find((row) => row.name === "Atlas");
+    expect(standIn).toMatchObject({ botId: atlas.id, home: { name: "My server", kind: "cloud", key: expect.stringMatching(/^[0-9a-f]{8}$/u), online: true }, threadId: expect.any(String) });
+    // The address is the one the app's main process works out for the sidebar's row of the same bot.
+    expect(standIn.id).toBe(linkedAddress(paired.place.id, atlas.id));
+    expect(standIn.id).toMatch(/^link-[0-9a-f]{8}-/);
+    expect(JSON.stringify(await computer.api("GET", `/api/bots/${standIn.id}`))).toContain("\"Atlas\"");
+    expect((await computer.api("GET", "/api/bots?messages=0")).bots.some((bot: any) => bot.id === standIn.id)).toBe(false);
+    expect(readFileSync(join(computer.dataDir, "bots.json"), "utf8")).not.toContain(standIn.id);
+    const direct = await fetch(`${computer.url}/api/bots/${standIn.id}/messages`, { method: "POST", headers: { "content-type": "application/json", origin: computer.url }, body: JSON.stringify({ text: "Are you here?" }) });
+    const refused = JSON.stringify(await direct.json());
+    expect(direct.status, refused).toBeGreaterThanOrEqual(400);
+    expect(refused).toContain("lives on My server");
+    await home.api("GET", "/api/bot-link/bots", undefined, { token: owner, status: 403 });
+
+    // A stand-in is read-only on the computer. Every route that changes a bot is found in the server's own source and
+    // asked for the stand-in, with each changing method: each answers where the bot lives, and nothing on the computer changes.
+    expect(JSON.stringify(await computer.api("GET", `/api/bots/${standIn.id}`))).not.toContain("\"home\"");
+    const source = [join(import.meta.dirname, "index.ts"), ...readdirSync(join(import.meta.dirname, "routes")).filter((name) => name.endsWith(".ts") && !name.includes(".test.")).map((name) => join(import.meta.dirname, "routes", name))]
+      .map((file) => readFileSync(file, "utf8")).join("\n");
+    const botRoutes = new Set([""]);
+    for (const found of source.matchAll(/\\\/api\\\/bots\\\/\([^)]*\)((?:\\\/[a-z][\w-]*)*)/gu)) botRoutes.add(found[1]!.replaceAll("\\/", "/"));
+    for (const found of source.matchAll(/["`]\/api\/bots\/\$\{[^}]*\}((?:\/[a-z][\w-]*)*)/gu)) botRoutes.add(found[1]!);
+    expect(botRoutes.size, [...botRoutes].join(" ")).toBeGreaterThan(15);
+    const before = { bots: readFileSync(join(computer.dataDir, "bots.json"), "utf8"), groups: existsSync(join(computer.dataDir, "groups.json")) ? readFileSync(join(computer.dataDir, "groups.json"), "utf8") : "", list: JSON.stringify((await computer.api("GET", "/api/bots?messages=0")).bots.map((bot: any) => [bot.id, bot.chiefOfStaff ?? false, bot.tasks?.length ?? 0])) };
+    const asked = async (method: string, path: string, body: unknown) => {
+      const response = await fetch(`${computer.url}${path}`, { method, headers: { "content-type": "application/json", origin: computer.url }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
+      return { status: response.status, text: await response.text() };
+    };
+    for (const route of botRoutes) for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      const answer = await asked(method, `/api/bots/${standIn.id}${route}`, { chiefOfStaff: true, name: "Renamed", title: "New thread", text: "hello" });
+      expect([answer.status, answer.text], `${method} /api/bots/<stand-in>${route}`).toEqual([409, expect.stringContaining("lives on My server")]);
+    }
+    // Named in a body: no automation of its own, with the same plain reason. (A room member it may be: see below.)
+    for (const [path, body] of [["/api/routines", { name: "Daily", prompt: "Count the orders.", botId: standIn.id, schedule: { kind: "daily", time: "09:00" } }]] as const) {
+      const answer = await asked("POST", path, body);
+      expect(answer.status, `${path}: ${answer.text}`).toBeGreaterThanOrEqual(400);
+      expect(answer.text, path).toContain("lives on My server");
+    }
+    expect((await asked("POST", "/api/webhooks", { name: "Orders", botId: standIn.id, prompt: "Read the order." })).status).toBeGreaterThanOrEqual(400);
+    expect((await computer.api("GET", "/api/routines")).routines.some((routine: any) => routine.botId === standIn.id)).toBe(false);
+    expect(readFileSync(join(computer.dataDir, "bots.json"), "utf8")).toBe(before.bots);
+    expect(existsSync(join(computer.dataDir, "groups.json")) ? readFileSync(join(computer.dataDir, "groups.json"), "utf8") : "").toBe(before.groups);
+    expect(JSON.stringify((await computer.api("GET", "/api/bots?messages=0")).bots.map((bot: any) => [bot.id, bot.chiefOfStaff ?? false, bot.tasks?.length ?? 0]))).toBe(before.list);
+    expect(JSON.stringify(await computer.api("GET", `/api/bots/${standIn.id}`))).toContain("\"Atlas\"");
+
     // The computer's bot hands work to the server's bot by name, and is resumed with its result.
     home.plan(atlas.id, { reply: "Atlas counted 42 orders." });
     computer.plan(writer.id,
@@ -112,9 +161,63 @@ it("a bot on the computer and a bot on the person's own server hand each other w
     expect((await home.cli("wait", "--bot", atlas.id, "--task", atlas.activeTaskId, "--timeout", "30")).status).toBe("settled");
     expect((await home.messages(atlas.activeTaskId)).filter((message) => message.kind === "text").at(-1)).toMatchObject({ role: "bot", text: "Writer drafted it." });
 
+    // From a room: the other place's bot is in no room here, so it gets the work directly and its result comes back to the room.
+    const editor = (await computer.cli("new-bot", "--name", "Editor")).bot;
+    const room = (await computer.cli("new-channel", "--name", "Newsroom", "--members", `${writer.id},${editor.id}`)).channel;
+    home.plan(atlas.id, { reply: "Atlas checked: 3 returns." });
+    computer.plan(writer.id,
+      { steps: [{ tool: "coordinate_bots", arguments: { bot_ids: ["Atlas"], request_key: "returns", message: "Count this week's returns." } }], reply: "Asked Atlas about returns." },
+      { reply: "Atlas counts 3 returns." });
+    await computer.cli("send-channel", "--channel", room.id, "--text", "@Writer ask Atlas how many returns we had.");
+    await expect.poll(async () => (await computer.messages(room.activeTaskId)).some((message) => message.roomRequest?.phase === "result" && /3 returns/.test(message.tool?.output ?? "")), { timeout: 40_000 }).toBe(true);
+    expect(await computer.cli("wait", "--channel", room.id, "--timeout", "30")).toMatchObject({ status: "settled" });
+    const said = await computer.messages(room.activeTaskId);
+    expect(said.some((message) => message.kind === "text" && message.text === "Atlas counts 3 returns.")).toBe(true);
+    expect(said.find((message) => message.roomRequest?.phase === "result").tool.name).toContain("Atlas (My server)");
+
+    // A room on the computer with a member from each place. The server's bot is mentioned: its turn runs on the server,
+    // its answer is its own line in the room, once, and the member it names in that answer takes its turn after it.
+    const made = (await computer.api("POST", "/api/groups", { name: "Launch", memberIds: [writer.id, standIn.id], setup: { bulletin: "", defaultResponder: { kind: "member", botId: writer.id } } }, { status: 201 })).group;
+    const launch = { ...made, activeTaskId: made.activeTaskId ?? made.threadId };
+    expect(launch.memberIds).toEqual([writer.id, standIn.id]);
+    const atlasTurns = () => home.providerTurns().filter((turn) => turn.botId === atlas.id).length;
+    const turnsBefore = atlasTurns();
+    home.plan(atlas.id, { reply: "Atlas here: 42 orders this week. @Writer please confirm." });
+    computer.plan(writer.id, { reply: "Writer confirms: 42." });
+    await computer.cli("send-channel", "--channel", launch.id, "--text", "@Atlas how many orders this week?");
+    const fromAtlas = async () => (await computer.messages(launch.activeTaskId)).filter((message) => message.kind === "text" && message.from?.botId === standIn.id);
+    await expect.poll(async () => (await fromAtlas()).map((message) => message.text), { timeout: 40_000 }).toEqual(["Atlas here: 42 orders this week. @Writer please confirm."]);
+    await expect.poll(async () => (await computer.messages(launch.activeTaskId)).some((message) => message.kind === "text" && message.from?.botId === writer.id && message.text === "Writer confirms: 42."), { timeout: 40_000 }).toBe(true);
+    expect(atlasTurns()).toBe(turnsBefore + 1);
+    const roomWork = (await home.api("GET", "/api/bots")).bots.find((bot: any) => bot.id === atlas.id).tasks.find((task: any) => task.title === "@Launch · work");
+    expect(roomWork, "the room's turns run in one thread of their own on the server").toBeTruthy();
+    const read = (await home.messages(roomWork.threadId)).map((message) => message.text ?? "").join("\n");
+    expect(read).toContain("room \"Launch\"");
+    expect(read).toContain("how many orders this week?");
+    // The room is kept across a restart's load rule: its far member is still a member in the saved record.
+    expect(JSON.parse(readFileSync(join(computer.dataDir, "groups.json"), "utf8")).find((group: any) => group.id === launch.id).memberIds).toEqual([writer.id, standIn.id]);
+
     // Off on the computer: the server is told, and neither keeps the link.
     expect(await computer.api("PUT", "/api/bot-link", { on: false })).toEqual({ on: false });
     await expect.poll(() => existsSync(join(home.dataDir, "bot-link.json")), { timeout: 10_000 }).toBe(false);
+    expect((await computer.api("GET", "/api/bot-link/bots")).bots).toEqual([]);
+    // Turning the link off removes nobody from a room: the far member stays, named, marked as out of reach, and takes no turn.
+    const savedMembers = () => JSON.parse(readFileSync(join(computer.dataDir, "groups.json"), "utf8")).find((group: any) => group.id === launch.id).memberIds;
+    expect(savedMembers()).toEqual([writer.id, standIn.id]);
+    // Saving the members again, with an address no record answers to among them, is not refused: that address is left out.
+    const resaved = (await computer.api("PATCH", `/api/groups/${launch.id}`, { memberIds: [writer.id, standIn.id, "link-0000abcd-nobody"] })).group;
+    expect(resaved.memberIds).toEqual([writer.id, standIn.id]);
+    expect(resaved.farMembers).toEqual([{ id: standIn.id, name: "Atlas", place: "My server", state: "off" }]);
+    await computer.cli("send-channel", "--channel", launch.id, "--text", "@Atlas are you there?");
+    await expect.poll(async () => (await computer.messages(launch.activeTaskId)).some((message) => message.kind === "activity" && /The link to My server is off now/u.test(message.tool?.name ?? "")), { timeout: 20_000 }).toBe(true);
+    expect(atlasTurns()).toBe(turnsBefore + 1);
+    // The person removes it: then nothing of it is left here.
+    const without = (await computer.api("PATCH", `/api/groups/${launch.id}`, { memberIds: [writer.id] })).group;
+    expect(without.memberIds).toEqual([writer.id]);
+    expect(without.farMembers).toBeUndefined();
+    expect(savedMembers()).toEqual([writer.id]);
+    await computer.api("GET", `/api/bots/${standIn.id}`, undefined, { status: 404 });
+    expect(existsSync(join(computer.dataDir, "bot-link-rooms.json"))).toBe(false);
     await home.api("POST", "/api/bot-link/sync", { ack: 0, frames: [], wait: 0 }, { token: paired.token, status: 401 });
   } finally {
     await Promise.all(fixtures.map((fixture) => fixture.close()));

@@ -25,6 +25,7 @@ import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
 import { TeamComputers } from "./team-computers.ts";
 import { allowsTool } from "../shared/tool-scope.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
 
@@ -126,9 +127,9 @@ describe("Store", () => {
   it("retains corrupt persisted tool selection as denied access instead of inheriting all tools", () => {
     const store = new Store(selection);
     const bot = store.createBot({ name: "Corrupt selection fixture" });
-    const bots = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    const bots = readRegistry(DATA_DIR).bots;
     bots[0].toolScope = { allow: "all" };
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(bots));
+    writeRegistry(DATA_DIR, { bots });
     const restored = new Store(selection).bot(bot.id)!;
     expect(restored).toHaveProperty("toolScope", { allow: "all" });
     expect(allowsTool((restored as unknown as { toolScope: unknown }).toolScope, { kind: "native", name: "read" })).toBe(false);
@@ -162,7 +163,7 @@ describe("Store", () => {
     expect(store.bot(ben.id)).toBeNull();
     expect(store.messagesFor(ben.threadId)).toEqual([]);
     expect(existsSync(soulFile(ben.id))).toBe(false);
-    expect(JSON.parse(readFileSync(join(DATA_DIR, "groups.json"), "utf8"))[0].memberIds).toContain(ben.id);
+    expect(readRegistry(DATA_DIR).rooms[0].memberIds).toContain(ben.id);
     expect(new Store(selection).group(room.id)?.memberIds).toEqual([ada.id]);
   });
 
@@ -196,6 +197,31 @@ describe("Store", () => {
     expect(new Store(selection).group(room.id)?.memberIds).toEqual([ada.id, cleo.id]);
     expect(JSON.parse(readFileSync(groupsFile, "utf8")).find((g: { id: string }) => g.id === room.id).memberIds)
       .toEqual(JSON.parse(before).find((g: { id: string }) => g.id === room.id).memberIds);
+  });
+
+  it("a stand-in is read-only: no write method finds it, so naming one changes nothing of this place's own", () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ section: "Delivery" });
+    store.setChiefOfStaff(chief.id);
+    store.patchBot(chief.id, { managedSections: ["Office"] });
+    const room = store.createGroup("Room", [chief.id], false, "Delivery");
+    const id = "link-0a1b2c3d-atlas";
+    store.standIns.set(id, { id, name: "Atlas", color: "blue", threadId: "", tasks: [], resumeCursors: {}, modelSelection: { instanceId: "", model: "" }, section: "Delivery", home: { place: "0a1b2c3d", placeName: "My Cloud", botId: "atlas" } } as unknown as BotRecord);
+    const bots = readFileSync(join(DATA_DIR, "bots.json"), "utf8"), groups = readFileSync(join(DATA_DIR, "groups.json"), "utf8");
+    const changes: string[] = [];
+    store.onChange((change) => { changes.push(change.type); });
+    expect(store.bot(id)?.name).toBe("Atlas");
+    expect(store.setChiefOfStaff(id)).toBeNull();
+    expect(store.bot(chief.id)).toMatchObject({ chiefOfStaff: true, managedSections: ["Office"] });
+    expect(store.deleteBot(id)).toBe(false);
+    expect(store.patchBot(id, { name: "Renamed" })).toBeNull();
+    expect(store.createTask(id, "A thread")).toBeFalsy();
+    expect(store.tasks(id)).toEqual([]);
+    expect(store.standIns.get(id)).toMatchObject({ name: "Atlas", tasks: [] });
+    expect(store.group(room.id)?.memberIds).toEqual([chief.id]);
+    expect(changes).toEqual([]);
+    expect(readFileSync(join(DATA_DIR, "bots.json"), "utf8")).toBe(bots);
+    expect(readFileSync(join(DATA_DIR, "groups.json"), "utf8")).toBe(groups);
   });
 
   it("renames populated teams without changing members, conversations, grants or computer identity", () => {
@@ -391,7 +417,7 @@ describe("Store", () => {
     const reloaded = new Store(selection);
     expect(reloaded.taskByThread(bot.id, bot.threadId)).toMatchObject({ surface: "local", surfaceSource: "user" });
     expect(toWireTask(reloaded.taskByThread(bot.id, bot.threadId)!, selection())).not.toHaveProperty("surfaceSource");
-    const saved = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as any[];
+    const saved = readRegistry(DATA_DIR).bots as any[];
     expect(saved[0].tasks[0]).toMatchObject({ surface: "local", surfaceSource: "user" });
   });
 
@@ -416,7 +442,7 @@ describe("Store", () => {
     expect(store.taskByThread(bot.id, legacyMismatch.threadId)).toMatchObject({ surface: "local" });
     expect(store.taskByThread(bot.id, autoMatch.threadId)).toMatchObject({ surface: "vm" });
     expect(changes).toHaveBeenCalledTimes(1);
-    const saved = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as any[];
+    const saved = readRegistry(DATA_DIR).bots as any[];
     const savedCleared = saved[0].tasks.find((task: any) => task.threadId === autoMismatch.threadId);
     expect(savedCleared).not.toHaveProperty("surface");
     expect(savedCleared).not.toHaveProperty("surfaceSource");
@@ -640,12 +666,12 @@ describe("Store", () => {
     original.appendMessage(group.threadId, { role: "user", kind: "text", text: "Keep the group conversation" });
     const botMessages = original.messagesFor(bot.threadId);
     const groupMessages = original.messagesFor(group.threadId);
-    const bots = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
-    const groups = JSON.parse(readFileSync(join(DATA_DIR, "groups.json"), "utf8"));
+    const bots = readRegistry(DATA_DIR).bots;
+    const groups = readRegistry(DATA_DIR).rooms;
     delete bots[0].tasks; delete bots[0].soulHash;
     delete groups[0].tasks; delete groups[0].defaultResponder;
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(bots));
-    writeFileSync(join(DATA_DIR, "groups.json"), JSON.stringify(groups));
+    writeRegistry(DATA_DIR, { bots });
+    writeRegistry(DATA_DIR, { rooms: groups });
     const malformed = '{"version":1,"contexts":';
     writeFileSync(SECTION_CONTEXTS_FILE, malformed);
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -656,8 +682,8 @@ describe("Store", () => {
       expect(restored.group(group.id)?.defaultResponder).toEqual({ kind: "member", botId: bot.id });
       expect(restored.messagesFor(bot.threadId)).toEqual(botMessages);
       expect(restored.messagesFor(group.threadId)).toEqual(groupMessages);
-      expect(JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"))[0].tasks).toHaveLength(1);
-      expect(JSON.parse(readFileSync(join(DATA_DIR, "groups.json"), "utf8"))[0].tasks).toHaveLength(1);
+      expect(readRegistry(DATA_DIR).bots[0].tasks).toHaveLength(1);
+      expect(readRegistry(DATA_DIR).rooms[0].tasks).toHaveLength(1);
       expect(warning.mock.calls.some(([message]) => String(message).includes("[teams] Startup could not register"))).toBe(true);
       const beforeBots = structuredClone(restored.bots);
       const beforeGroups = structuredClone(restored.groups);
@@ -1077,7 +1103,7 @@ describe("Store", () => {
     });
     expect(reloaded.bot(bot.id)).not.toHaveProperty("approvalGrant");
 
-    const persisted: BotRecord[] = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    const persisted: BotRecord[] = readRegistry(DATA_DIR).bots;
     expect(persisted.find((candidate) => candidate.id === bot.id)).toMatchObject({
       approvalMode: "ask",
       autoApprove: false,
@@ -1124,12 +1150,12 @@ describe("Store", () => {
     const vps = store.createBot();
     const invalid = store.createBot();
     const absent = store.createBot();
-    const raw: BotRecord[] = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    const raw: BotRecord[] = readRegistry(DATA_DIR).bots;
     raw.find((bot) => bot.id === boat.id)!.cloudBackend = "box";
     raw.find((bot) => bot.id === vps.id)!.cloudBackend = "vps";
     (raw.find((bot) => bot.id === invalid.id) as unknown as { cloudBackend: string }).cloudBackend = "daytona";
     delete raw.find((bot) => bot.id === absent.id)!.cloudBackend;
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(raw));
+    writeRegistry(DATA_DIR, { bots: raw });
 
     const reloaded = new Store(selection);
     expect(reloaded.bot(boat.id)?.cloudBackend).toBe("box");
@@ -1137,7 +1163,7 @@ describe("Store", () => {
     expect(reloaded.bot(invalid.id)?.cloudBackend).toBeUndefined();
     expect(reloaded.bot(absent.id)?.cloudBackend).toBeUndefined();
 
-    const saved: BotRecord[] = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    const saved: BotRecord[] = readRegistry(DATA_DIR).bots;
     expect(saved.find((bot) => bot.id === boat.id)?.cloudBackend).toBe("box");
     expect(saved.find((bot) => bot.id === vps.id)?.cloudBackend).toBe("vps");
     expect(saved.find((bot) => bot.id === invalid.id)).not.toHaveProperty("cloudBackend");
@@ -1239,7 +1265,7 @@ describe("Store", () => {
       "provider-tool:claude:linear:list_issues:config-one",
     ]);
 
-    const persisted: BotRecord[] = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    const persisted: BotRecord[] = readRegistry(DATA_DIR).bots;
     expect(persisted.find((candidate) => candidate.id === bot.id)?.alwaysAllow).toEqual(
       reloaded.bot(bot.id)?.alwaysAllow,
     );
@@ -1795,9 +1821,9 @@ describe("Store", () => {
   it("busy is wiped even when bots.json says otherwise", () => {
     const store = new Store(selection);
     const bot = store.createBot();
-    const raw: BotRecord[] = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+    const raw: BotRecord[] = readRegistry(DATA_DIR).bots;
     raw.find((b) => b.id === bot.id)!.busy = true;
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(raw));
+    writeRegistry(DATA_DIR, { bots: raw });
 
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)?.busy).toBe(false);
@@ -2604,12 +2630,12 @@ describe("soul", () => {
   it("backfills old bots' mirrors before the first non-soul history change", async () => {
     const store = new Store(selection);
     const bot = store.createBot();
-    const raw = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as Record<string, unknown>[];
+    const raw = readRegistry(DATA_DIR).bots as Record<string, unknown>[];
     for (const record of raw) {
       delete record.soul;
       delete record.soulHash;
     }
-    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(raw));
+    writeRegistry(DATA_DIR, { bots: raw });
     rmSync(join(DATA_DIR, "bots", bot.id), { recursive: true, force: true });
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)?.soul).toBe("");
@@ -2640,7 +2666,7 @@ describe("soul", () => {
     expect(() => store.patchBotProfile(bot.id, { name: "Kiwi", soul: "new", lastProfileRequestId: "card" })).toThrow("disk full");
     expect(bot).toEqual(before);
     expect(readFileSync(soulFile(bot.id), "utf8")).toBe("");
-    expect(JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"))[0].name).toBe(before.name);
+    expect(readRegistry(DATA_DIR).bots[0].name).toBe(before.name);
     save.mockRestore();
     const emit = vi.fn();
     store.onChange(emit);

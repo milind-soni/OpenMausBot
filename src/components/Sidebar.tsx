@@ -1,7 +1,7 @@
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
-import { Archive, Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Phone, Pin, Plus, Search, SquarePen, TextQuote, Trash2, Users, X } from "lucide-react";
+import { Archive, Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Phone, Pin, Plus, Search, SquarePen, TextQuote, Trash2, Users, X } from "lucide-react";
 import { sidebarState } from "./sidebar-state"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { api, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
@@ -16,7 +16,7 @@ import { cn } from "@/lib/cn";
 import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
 import { useHeldMenuMotion, useMenuMotion } from "./MenuMotion";
 import { lastNonReceipt } from "@/lib/receipts";
-import { botPreview, groupPreview } from "./sidebar-preview";
+import { botPreview, groupPreview, lastLine } from "./sidebar-preview";
 import { activeLocale, t } from "@/lib/i18n"; import { isBotHeld } from "@/lib/bot-pause";
 import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
@@ -28,7 +28,7 @@ import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
-import { ShareTeamDialog, TeamLibraryPanel } from "./lazy-screens";
+import { ImportDialog, ShareDepartmentDialog, TeamLibraryPanel } from "./lazy-screens";
 import { SidebarNewChatPanel } from "./SidebarNewChatPanel";
 import { openCommandPalette } from "./CommandPalette";
 import { TeamSettingsDialog } from "./TeamSettingsDialog";
@@ -90,7 +90,7 @@ import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, cro
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
-import { AvatarActivityDot, RowDot, RowStatusText, rowSurface } from "./SidebarRowMarkers";
+import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, rowSurface } from "./SidebarRowMarkers";
 
 
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
@@ -728,7 +728,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     selected ? "bg-raised" : "hover:bg-raised/50",
     simpleRow && rowSurface(selected),
   );
-  const { waiting, working, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued);
+  const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
   const { unread, noticing } = useBotUnread(bot);
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const body = (
@@ -744,7 +744,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         />
         {/* Bottom-left, clear of the status dots on the right and of the row's hover actions. */}
         {(iconOnly || !simpleList) && <BotModelBadge bot={bot} instances={instances} avatarSize={avatarSize} />}
-        {simpleRow && <AvatarActivityDot activity={working ? "working" : teammateWait ? "teammate" : queued && !waiting ? "queued" : null} />}
+        {simpleRow && <AvatarActivityDot activity={working ? "working" : failed ? "failed" : teammateWait ? "teammate" : queued && !waiting ? "queued" : null} />}
         {!simpleRow && working && (
           <span
             data-testid="working-dot"
@@ -756,10 +756,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         )}
         {!simpleRow && waiting && <span data-testid="waiting-dot" role="status" aria-label={t("sidebar.preview.waiting")} title={t("sidebar.preview.waiting")}
           className={cn("absolute -right-0.5 -bottom-0.5 flex items-center justify-center overflow-hidden rounded-full border-2 border-panel bg-warning font-black text-panel", iconOnly ? "size-5 text-[14px]" : "size-4 text-[12px]")}><span aria-hidden="true">!</span></span>}
-        {!simpleRow && teammateWait && <span data-testid="teammate-wait-dot" role="status" aria-label={t("sidebar.preview.waitingOnTeammate")} title={t("sidebar.preview.waitingOnTeammate")}
-          className={cn("absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-accent", iconOnly ? "size-3" : "size-2.5")} />}
-        {!simpleRow && !teammateWait && !waiting && !working && queued && <span data-testid="queued-dot" role="status" aria-label={t("task.queued")} title={t("task.queued")}
-          className={cn("absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-ink-secondary", iconOnly ? "size-3" : "size-2.5")} />}
+        {!simpleRow && <AvatarCornerDot activity={failed ? "failed" : teammateWait ? "teammate" : queued && !waiting && !working ? "queued" : null} large={iconOnly} />}
         {bot.chiefOfStaff && (iconOnly || simpleRow) && (
           <span className="absolute -left-1 -top-1 flex rounded-full bg-raised p-[3px]">
             <Crown size={11} strokeWidth={2.25} className="shrink-0 text-accent" role="img" aria-label={t("sidebar.bot.chiefOfStaff")} data-testid="chief-crown">
@@ -832,14 +829,14 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               {working ? (
                 <SidebarWorkingStep bot={bot} last={last} />
               ) : (
-                <FadeLine>{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : botPreview(bot, visible, instances, advanced)}</FadeLine>
+                <FadeLine>{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued && !failed ? t("task.queued") : failed ? lastLine(bot, visible, instances, advanced) : botPreview(bot, visible, instances, advanced)}</FadeLine>
               )}
             </span>
           )}
           {simpleRow && <BotEngineMark bot={bot} instances={instances} className="ms-auto" />}
           {!simpleRow && unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
         </div>}
-        {simpleRow && <RowStatusText working={working} unread={unread} />}
+        {simpleRow && <RowStatusText working={working} failed={failed} unread={unread} />}
       </div>
     </>
   );
@@ -866,7 +863,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           !renaming && iconOnly
             ? deleting
               ? t("sidebar.bot.deletingAria", { name: bot.name })
-              : `${bot.name}${bot.title?.trim() ? ` · ${bot.title.trim()}` : ""}${bot.chiefOfStaff ? ` · ${t("sidebar.bot.chiefOfStaff")}` : ""}${onLiveCall ? ` · ${t("call.live.badge")}` : ""}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : teammateWait ? ` · ${t("sidebar.preview.waitingOnTeammate")}` : queued ? ` · ${t("task.queued")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`
+              : `${bot.name}${bot.title?.trim() ? ` · ${bot.title.trim()}` : ""}${bot.chiefOfStaff ? ` · ${t("sidebar.bot.chiefOfStaff")}` : ""}${onLiveCall ? ` · ${t("call.live.badge")}` : ""}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : failed ? ` · ${t("sidebar.preview.failed")}` : teammateWait ? ` · ${t("sidebar.preview.waitingOnTeammate")}` : queued ? ` · ${t("task.queued")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`
             : undefined
         }
         aria-busy={deleting || undefined} aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
@@ -976,7 +973,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const [newTaskFolderBotId, setNewTaskFolderBotId] = useState<string | null>(null);
   const newTaskFolderBot = state.bots.find((bot) => bot.id === newTaskFolderBotId);
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
-  const [teamInstallUrl, setTeamInstallUrl] = useState<string | null>(null);
+  const [importUrl, setImportUrl] = useState<string | null>(null);
   const [archivedBotsOpen, setArchivedBotsOpen] = useState(false);
   const [teamFeedback, setTeamFeedback] = useState<{
     error: boolean;
@@ -1027,10 +1024,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
 
   useEffect(() => {
     if (remoteClient) return;
-    return window.ogb?.onPackageInstall?.((url) => {
-      setTeamInstallUrl(url);
-      setTeamLibraryOpen(true);
-    });
+    return window.ogb?.onPackageInstall?.((url) => setImportUrl(url));
   }, [remoteClient]);
 
   useEffect(() => {
@@ -1197,12 +1191,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           >
             <Users size={16} className="text-ink-secondary" />{t("sidebar.newChannel.title")}
           </button>
-          {advanced && !remoteClient && teamSettingsAllowed !== false && <button
-            onClick={() => { setPlusOpen(false); setNewTeam(true); }}
-            role="menuitem"
-            className={plusItem}
-          >
-            <FolderPlus size={16} className="text-ink-secondary" /> {t("team.create")}
+          {!remoteClient && teamSettingsAllowed !== false && <button onClick={() => { setPlusOpen(false); setNewTeam(true); }} role="menuitem" className={plusItem}>
+            <FolderPlus size={16} className="text-ink-secondary" />{t("sidebar.addDepartment")}
           </button>}
           {!remoteClient && <>
           {teamSettingsAllowed !== false && <button
@@ -1213,6 +1203,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             <LayoutTemplate size={16} className="text-ink-secondary" />
             {t("sidebar.teamLibrary")}
           </button>}
+          {teamSettingsAllowed !== false && <button onClick={() => { setPlusOpen(false); setImportUrl(""); }} role="menuitem" className={plusItem}><FolderInput size={16} className="text-ink-secondary" />{t("sidebar.import")}</button>}
           {advanced && archivedBots.length > 0 && (
             <button
               onClick={() => {
@@ -1572,7 +1563,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             .finally(() => { teamDeleteRunning.current = false; setTeamDeletePending(false); });
         }} />
       {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
-      {shareTeam !== null && <ShareTeamDialog team={shareTeam} onClose={() => setShareTeam(null)} />}
+      {shareTeam !== null && <ShareDepartmentDialog department={shareTeam} onClose={() => setShareTeam(null)} />}
       {teamSettings !== null && <TeamSettingsDialog team={teamSettings} onClose={() => setTeamSettings(null)} />}
       <SectionPicker
           current={sectionPicker ? state.bots.find((b) => b.id === sectionPicker.botId)?.section : undefined}
@@ -1636,14 +1627,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       {!remoteClient && teamLibraryOpen && (
         <TeamLibraryPanel
           returnFocusRef={importReturnRef}
-          initialUrl={teamInstallUrl ?? undefined}
-          onClose={() => {
-            setTeamLibraryOpen(false);
-            setTeamInstallUrl(null);
-          }}
+          onClose={() => setTeamLibraryOpen(false)}
           onImported={(result) => {
             setTeamLibraryOpen(false);
-            setTeamInstallUrl(null);
             setTeamFeedback({
               error: false,
               text:
@@ -1657,6 +1643,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           }}
         />
       )}
+      {!remoteClient && importUrl !== null && <ImportDialog initialUrl={importUrl || undefined} onClose={() => setImportUrl(null)}
+        onAdded={(line) => { setImportUrl(null); setTeamFeedback({ error: false, text: line }); }} />}
       {teamFeedback &&
         createPortal(
           <div

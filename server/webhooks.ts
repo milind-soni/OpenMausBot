@@ -70,6 +70,8 @@ export interface WebhookManagerOptions {
     deliveryId: string;
     receivedAt: number;
     sameConversation?: boolean;
+    /** The person's own Run now test, not an outside delivery. */
+    byPerson?: boolean;
   }) => { id: string };
   cancelQueued?: (webhookId: string, message: string) => void;
   pendingRuns?: (webhookId: string) => number;
@@ -826,6 +828,7 @@ export class WebhookManager {
       deliveryId,
       receivedAt: now,
       sameConversation: trigger.sameConversation,
+      ...(byPerson ? { byPerson: true } : {}),
     });
     this.deliveries.push({ key: `${trigger.endpointId}:${deliveryId}`, runId: run.id, at: now });
     if (this.deliveries.length > MAX_DELIVERIES) {

@@ -51,7 +51,7 @@ describe("app_settings show_card", () => {
     for (const card of ["phone-pairing", "keep-awake", "vault", "", undefined, 7, { id: "other-computers" }, "__proto__", "constructor"]) {
       const answer = await show(card);
       expect(answer.status, String(card)).toBe(404);
-      expect(String(answer.body.error)).toContain("Cards: other-computers.");
+      expect(String(answer.body.error)).toContain("Cards: other-computers, ai-sign-in.");
     }
     expect(messages).toEqual([]);
   });
@@ -71,6 +71,14 @@ describe("app_settings show_card", () => {
     expect(unknown).toContain("Whether Your other computers is on is not known to you: it may be off, or on but not reachable yet, so do not say it is off");
     expect(unknown).not.toMatch(/is (on|off) now/);
     expect(String((await fixture({ on: true }).show("other-computers")).body.text)).not.toContain("not known");
+  });
+
+  it("AI sign-in shows on any place, says nothing about on or off, and in a room names its real place", async () => {
+    const { show, messages } = fixture({ here: true, on: null });
+    const answer = await show("ai-sign-in");
+    expect(messages).toEqual([{ id: "m1", threadId: "t-kiwi", role: "bot", kind: "text", text: SETTINGS_CARDS["ai-sign-in"].text, settingsCard: { id: "ai-sign-in" } }]);
+    expect(answer.body.text).toBe("Card shown: AI sign-in. Only the user can change it; you cannot, and you never see what the card shows. " + SETTINGS_CARDS["ai-sign-in"].guide);
+    expect(String((await fixture({ group: true }).show("ai-sign-in")).body.text)).toContain("open Settings → AI → Providers in MausBot");
   });
 
   it("in a room, where no control is drawn, posts nothing and tells the bot where the person finds it", async () => {
@@ -126,7 +134,8 @@ describe("app_settings show_card", () => {
     const { properties } = APP_SETTINGS_TOOL_DEFINITION.inputSchema;
     expect(properties.card.enum).toEqual([...SETTINGS_CARD_IDS]);
     expect(Object.keys(SETTINGS_CARDS)).toEqual([...SETTINGS_CARD_IDS]);
-    expect(properties.card.description).toBe("show_card: other-computers when the person asks how to connect or open this computer from another computer.");
+    expect(properties.card.description).toBe("show_card: other-computers when the person asks how to connect or open this computer from another computer; "
+      + "ai-sign-in when the person wants to sign in to an AI account (Claude, ChatGPT or Codex, Antigravity), or one is signed out.");
     expect(properties.action.enum).toContain("show_card");
     expect(APP_SETTINGS_TOOL_DEFINITION.description).toContain("you cannot change it or see what it shows");
   });

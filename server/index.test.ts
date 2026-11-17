@@ -25,6 +25,7 @@ import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
 import { freePortBlock, withFreeSignInPort } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { STARTER_COLORS } from "./bot-look.ts";
+import { createTeamManifest } from "./team-manifest.ts";
 import { DEFAULT_MASCOT_BODY } from "../shared/mascot-bodies.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
@@ -491,8 +492,8 @@ beforeAll(async () => {
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
     JSON.stringify({
-      // generated titles are opt-in; this suite owns the one-shot's reply file (FAKE_CLAUDE_TEXT_FILE below); the setup card's tests turn its answers on
-      features: { llmThreadTitles: true, browser: false, smartSetupChoices: false },
+      // this suite owns the one-shot's reply file (FAKE_CLAUDE_TEXT_FILE below); the setup card's tests turn its answers on
+      features: { browser: false, smartSetupChoices: false },
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
         claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
@@ -5963,8 +5964,7 @@ describe("harness HTTP API", () => {
     const visibleNames = stateBefore.bots
       .filter((bot: { hidden?: boolean }) => !bot.hidden)
       .map((bot: { name: string }) => bot.name);
-    const exported = await api("POST", "/api/teams/export", { name: "Field Team" });
-    expect(exported.status).toBe(200);
+    const exported = { body: createTeamManifest({ name: "Field Team", memberIds: stateBefore.bots.filter((bot: { hidden?: boolean }) => !bot.hidden).map((bot: { id: string }) => bot.id) }, stateBefore.bots) };
     expect(exported.body).toMatchObject({ format: "openmaus.team", version: 2, team: { name: "Field Team" } });
     expect(exported.body.team.members.map((member: { name: string }) => member.name)).toEqual(visibleNames);
     expect(exported.body.team.members).toEqual(expect.arrayContaining([
@@ -5973,14 +5973,7 @@ describe("harness HTTP API", () => {
     ]));
     expect(exported.body.team).not.toHaveProperty("room");
     expect(JSON.stringify(exported.body)).not.toMatch(/Archived|autoApprove|alwaysAllow|modelSelection|threadId/);
-    const markdownExport = await api("POST", "/api/teams/export", { name: "Field Team", format: "package" });
-    expect(markdownExport.status).toBe(200);
-    expect(markdownExport.body).toMatchObject({ name: "Field Team", members: visibleNames.length });
-    expect(markdownExport.body.markdown).toContain("## Activation");
-    expect(markdownExport.body.markdown).toContain("Give this file to your Chief of Staff");
-    expect(markdownExport.body.markdown).not.toMatch(/Archived|autoApprove|alwaysAllow|modelSelection|threadId/);
-    expect((await api("GET", "/api/bots")).body.groups).toHaveLength(roomsBefore);
-    expect((await api("POST", "/api/teams/export", {})).body.team.name).toBe("My OpenMaus Team");
+    for (const body of [{ name: "Field Team", format: "package" }, { name: "Field Team" }, {}]) expect((await api("POST", "/api/teams/export", body)).status).toBe(400);
 
     const stream = await openSse(`${BASE}/api/events`);
     try {
@@ -6037,8 +6030,8 @@ describe("harness HTTP API", () => {
 
   it("imports a team as a project: one room, on a folder", async () => {
     const seed = await api("POST", "/api/bots", { name: "Planner", title: "Lead", description: "Plans", color: "purple" });
-    const exported = await api("POST", "/api/teams/export", { name: "Client XY" });
-    expect(exported.body.team).not.toHaveProperty("room");
+    const listed = (await api("GET", "/api/bots")).body.bots;
+    const exported = { body: createTeamManifest({ name: "Client XY", memberIds: listed.filter((bot: { hidden?: boolean }) => !bot.hidden).map((bot: { id: string }) => bot.id) }, listed) };
 
     const roomsBefore = (await api("GET", "/api/bots")).body.groups.length;
     const folder = mkdtempSync(join(tmpdir(), "omb-project-"));
@@ -6214,16 +6207,6 @@ describe("harness HTTP API", () => {
       status: 200,
       body: { text: expect.stringContaining("name: source-check") },
     });
-    const exportedWithSkill = await api("POST", "/api/teams/export", {
-      format: "package",
-      name: "Signal Skill Package",
-      skillIds: ["source-check"],
-    });
-    expect(exportedWithSkill.status).toBe(200);
-    expect(exportedWithSkill.body.markdown).toContain("name: source-check");
-    const exportedWithoutSkills = await api("POST", "/api/teams/export", { format: "package" });
-    expect(exportedWithoutSkills.status).toBe(200);
-    expect(exportedWithoutSkills.body.markdown).not.toContain("name: source-check");
     expect(editor.playbooks).toBeUndefined();
     expect(scout.section).toBe(editor.section);
     expect(installed.body.groups[0]).toMatchObject({
@@ -6245,44 +6228,12 @@ describe("harness HTTP API", () => {
     for (const bot of installed.body.bots) await api("DELETE", `/api/bots/${bot.id}`);
   });
 
-  it("the scout reads a folder, proposes an importable team, and creates nothing until the human imports", async () => {
-    const folder = mkdtempSync(join(tmpdir(), "omb-scout-"));
-    writeFileSync(join(folder, "README.md"), "# Demo Shop\n\nA storefront demo.\n");
-    writeFileSync(
-      join(folder, "package.json"),
-      JSON.stringify({ dependencies: { react: "^19" }, devDependencies: { vitest: "^3" } }),
-    );
-
-    const before = (await api("GET", "/api/bots")).body;
-
-    expect((await api("GET", "/api/teams/scout")).status).toBe(400);
-    expect((await api("GET", `/api/teams/scout?cwd=${encodeURIComponent(join(folder, "nope"))}`)).status).toBe(400);
-
-    const scouted = await api("GET", `/api/teams/scout?cwd=${encodeURIComponent(folder)}`);
-    expect(scouted.status).toBe(200);
-    expect(scouted.body.profile).toMatchObject({ name: "Demo Shop", summary: "A storefront demo." });
-    expect(scouted.body.profile.stacks).toContain("React");
-    expect(scouted.body.suggestion.roomName).toBe("Demo Shop");
-    const keys = scouted.body.suggestion.manifest.team.members.map((member: { key: string }) => member.key);
-    expect(keys).toEqual(["lead", "frontend", "testing"]);
-    expect(Object.keys(scouted.body.suggestion.reasons).sort()).toEqual(keys.slice().sort());
-
-    const after = (await api("GET", "/api/bots")).body;
-    expect(after.bots).toHaveLength(before.bots.length);
-    expect(after.groups).toHaveLength(before.groups.length);
-
-    const imported = await api(
-      "POST",
-      `/api/teams/import?mode=project&cwd=${encodeURIComponent(folder)}&room=${encodeURIComponent(scouted.body.suggestion.roomName)}`,
-      scouted.body.suggestion.manifest,
-    );
-    expect(imported.status).toBe(201);
-    expect(imported.body.group).toMatchObject({ name: "Demo Shop", cwd: folder });
-    expect(imported.body.bots).toHaveLength(3);
-
-    expect((await api("DELETE", `/api/groups/${imported.body.group.id}`)).status).toBe(200);
-    for (const bot of imported.body.bots) await api("DELETE", `/api/bots/${bot.id}`);
-    rmSync(folder, { recursive: true, force: true });
+  it("the folder scout and the old share formats are gone", async () => {
+    expect((await api("GET", "/api/teams/scout?cwd=%2Ftmp")).status).toBe(404);
+    expect((await api("GET", "/api/teams/scout/directory?cwd=%2Ftmp")).status).toBe(404);
+    for (const body of [{ format: "package", version: 2, team: "" }, { format: "package", version: 2, kind: "library" }, { format: "package" }]) {
+      expect((await api("POST", "/api/teams/export", body)).status).toBe(400);
+    }
   });
 
   it("team import is additive-only: smuggled grants, claimed ids, and re-imports never touch existing records", async () => {
@@ -9983,7 +9934,7 @@ describe("harness HTTP API", () => {
   it("keeps skill authoring on by default and persists an explicit opt-out", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
     const untouched = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(untouched.features?.skillAuthoring).toBeUndefined();
     expect(untouched.features?.skillReview).toBeUndefined();
@@ -9993,7 +9944,7 @@ describe("harness HTTP API", () => {
       features: { skillAuthoring: false },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     // Earlier browser coverage may have persisted its own toggle: opting out must preserve sibling settings.
@@ -10001,7 +9952,7 @@ describe("harness HTTP API", () => {
 
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
 
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -10950,7 +10901,7 @@ describe("harness HTTP API", () => {
 
   it.each([
     { testedMode: "shared", refusal: expect.not.stringMatching(/take control|pool mode|per-bot Local VM/i) },
-    { testedMode: "pool", refusal: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Computers." },
+    { testedMode: "pool", refusal: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Desktops & browser." },
   ])("answers Local VM phone joins in $testedMode mode for direct and companion callers past the mode check only when it is not pool", async ({ testedMode, refusal }) => {
     const { mode, maxInstances } = (await api("GET", "/api/config")).body.localVm;
     const previous = { mode, maxInstances };
@@ -14169,7 +14120,8 @@ describe("bot memory API", () => {
         bytes: 78,
       });
       expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("soul");
-      expect(before.body.sections.map((s: { id: string }) => s.id)).toContain("memory");
+      // A new bot has no memory yet: the preview shows how memory works, and the notes section once there is something in it.
+      expect(before.body.sections.map((s: { id: string }) => s.id)).toContain("memory-rules");
       expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("cloud-home");
       expect((await api("GET", "/api/config")).body).not.toHaveProperty("cloudHome");
       expect(before.body.totalBytes).toBe(

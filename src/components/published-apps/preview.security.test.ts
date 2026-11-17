@@ -94,7 +94,7 @@ describe("the sandbox a published site runs in", () => {
     expect(host.querySelector("iframe")).not.toBeNull();
     expect(listen.mock.calls.filter(([type]) => type === "message")).toEqual([]);
     listen.mockRestore();
-    for (const file of ["SiteFrame.tsx", "SiteThumb.tsx", "AppPreviewPanel.tsx", "use-framing.ts"]) {
+    for (const file of ["SiteFrame.tsx", "SiteThumb.tsx", "AppPreviewPanel.tsx", "use-framing.ts", "PublishedSiteCards.tsx"]) {
       const text = source(`src/components/published-apps/${file}`);
       for (const bridge of ["postMessage", "contentWindow", "contentDocument", "window.ogb", "srcDoc", "mausbot.", "<webview"]) expect(text, `${file}: ${bridge}`).not.toContain(bridge);
     }
@@ -133,6 +133,13 @@ describe("a site that can't be shown in the preview", () => {
     expect(host.querySelector("iframe")).toBeNull();
     expect(host.textContent).toContain("This site asks for a Netlify login. Open it in your browser instead.");
     expect(fixture.api).not.toHaveBeenCalled();
+  });
+
+  it("is not framed when the check says it answers with a login", async () => {
+    fixture.api.mockResolvedValue({ framing: "login" });
+    await frame({ url: SITE });
+    expect(host.querySelector("iframe")).toBeNull();
+    expect(host.textContent).toContain("This site asks for a Netlify login. Open it in your browser instead.");
   });
 
   it("falls back when it never loads, and stays when it did", async () => {

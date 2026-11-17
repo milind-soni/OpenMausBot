@@ -49,7 +49,7 @@ export const CREDENTIAL_TARGETS = {
   },
   onePasswordToken: {
     label: "1Password service account token",
-    description: "Lets bots sign in with the website logins in the 1Password vault this token can read, the way Settings → Logins does.",
+    description: "Lets bots sign in with the website logins in the 1Password vault this token can read, the way Settings → Vault does.",
     placeholder: "ops_…",
     helpUrl: "https://developer.1password.com/docs/service-accounts/get-started/",
   },

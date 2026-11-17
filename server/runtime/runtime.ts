@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { redactSecretsInText } from "../../shared/redact.ts";
 
+import { hostFaultOf, retryCannotFix } from "../host-fault.ts";
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
@@ -17,7 +18,19 @@ export interface RuntimeOptions {
   limits?: Partial<Limits>;
   level?: typeof assignmentLevel;
   log?: (line: string) => void;
+  /** Turns a restart cut start again at most one per this many ms (default RERUN_GAP_MS). */
+  rerunGapMs?: number;
 }
+
+/** After a restart, the first RERUN_BURST turns it cut start again at once and the rest one at a time this far apart: a
+ * server that fell under the load of many turns does not meet it again in its first second, and a fall during the
+ * reruns cuts only those already started (a turn cut twice fails; one still waiting here was not cut again). Of 34 cut
+ * turns, the last starts 15 s after the first. */
+export const RERUN_GAP_MS = 500;
+export const RERUN_BURST = 4;
+export const RERUN_HELD = "waiting its turn to start again after the restart";
+/** A cut turn is not run again once newer work in its conversation started first: it would answer out of order. */
+export const RERUN_SUPERSEDED = "cut by a restart; newer work in this conversation started before it could run again, so it was not run again";
 
 export interface BeginRequest {
   /** The host's own id for the requesting turn (its generation); default a fresh uuid. */
@@ -50,6 +63,10 @@ interface LiveTurn { controller: AbortController; rootId: string; activeAt: numb
 
 type TerminalStatus = "completed" | "failed" | "cancelled";
 
+/** Work nobody is waiting on (a routine's, a webhook's): the caps that only failures in a row or a total can end apply to
+ * it alone. A person's request always gets its requester's turn to react. */
+const unattendedRoot = (root: Assignment | undefined): boolean => root !== undefined && root.origin.kind !== "person";
+
 export class Runtime {
   readonly limits: Limits;
   private readonly store: RuntimeStore;
@@ -67,6 +84,10 @@ export class Runtime {
   private readonly reportDue = new Set<string>();
   private batch: Map<string, Assignment> | null = null;
   private lastThrew = false;
+  private readonly rerunGapMs: number;
+  /** Monotonic: no turn a restart cut starts before this. */
+  private nextRerunAt = Number.NEGATIVE_INFINITY;
+  private rerunsStarted = 0;
 
   constructor(store: RuntimeStore, runner: TurnRunner, options: RuntimeOptions = {}) {
     this.store = store;
@@ -76,6 +97,7 @@ export class Runtime {
     this.level = options.level ?? assignmentLevel;
     this.log = options.log ?? (line => console.error("runtime:", line));
     this.bootAt = this.clock.now();
+    this.rerunGapMs = options.rerunGapMs ?? RERUN_GAP_MS;
   }
 
   /** Restart reconciliation and re-park of needs_input, from stored data only. Idempotent; runs before the first tick. */
@@ -135,7 +157,7 @@ export class Runtime {
       id, rootId: id, depth: 0, origin: req.origin, requester: req.requester, assignee: req.assignee,
       mode: "work", reply: req.reply ?? "resume", brief: clip(req.brief, BRIEF_MAX), status: "running",
       level: req.level, levelSource: "own", executions: 1, restarts: 0, createdAt: now, startedAt: now, lastActivityAt: now,
-      result: "", rework: false, budgets: { since: now, requests: 0, executions: 1, wakes: 0 }, version: 1,
+      result: "", rework: false, budgets: { since: now, requests: 0, executions: 1, wakes: 0, total: 1 }, version: 1,
       ...(req.goalRunId ? { goalRunId: req.goalRunId } : {}),
     };
     this.store.transaction(() => {
@@ -208,6 +230,10 @@ export class Runtime {
       if (existing && !(req.rework && isTerminal(existing))) return { ok: true, assignment: existing, duplicate: true };
       if (parent.depth + 1 > this.limits.depth) return refuse(`Assignment depth limit reached (${this.limits.depth})`);
       sameCall = req.fanOut !== undefined && siblings.some(c => c.fanOut === req.fanOut);
+      if (!sameCall && unattendedRoot(root) && root?.budgets && (root.budgets.total ?? 0) >= this.limits.totalExecutions) {
+        this.store.update(root, { kind: "budget", at: now, detail: `turns: ${root.budgets.total} in all` });
+        return refuse(`Request budget exhausted: ${this.limits.totalExecutions} turns in all`, "budget");
+      }
       if (!sameCall && root?.budgets && root.budgets.requests + 1 > this.limits.requests) {
         this.store.update(root, { kind: "budget", at: now, detail: `requests: ${root.budgets.requests} since last progress` });
         return refuse(`Request budget exhausted: ${this.limits.requests} requests without progress`, "budget");
@@ -355,14 +381,22 @@ export class Runtime {
         continue;
       }
       const thread = n.assignee.destination.threadId;
+      if (n.restart === "rerun" && this.newerWorkIn(thread, n)) { this.cancelTree(n, RERUN_SUPERSEDED, "failed", "interrupted"); continue; }
       // Same-conversation turns never overlap; same-room speakers take turns.
       if (busyThreads.has(thread)) { this.heldBehindTurn(n, "an earlier turn in its conversation is running"); continue; }
       const parent = n.parentId ? this.store.get(n.parentId) : undefined;
       const group = n.assignee.destination.groupId;
       if (parent?.status === "running" && group !== undefined && parent.assignee.destination.groupId === group) { this.heldBehindTurn(n, "its requester's turn in the room is running"); continue; }
+      const rerun = n.restart === "rerun";
+      if (rerun && this.clock.monotonic() < this.nextRerunAt) { this.held(n.id, RERUN_HELD); busyThreads.add(thread); continue; }
       const resumed = n.status === "resume";
+      const root = n.parentId ? this.store.get(n.rootId) : n;
+      // The root's own resume is let through: it wraps up what came back, and can start nothing more.
+      if (unattendedRoot(root) && !(resumed && root?.id === n.id) && root?.budgets && (root.budgets.total ?? 0) + 1 > this.limits.totalExecutions) {
+        this.cancelTree(root, `${this.limits.totalExecutions} turns in all, the most one request may take`, "failed", "budget");
+        continue;
+      }
       if (!resumed) {
-        const root = n.parentId ? this.store.get(n.rootId) : n;
         if (root?.budgets && root.budgets.executions + 1 > this.limits.executions) {
           this.cancelTree(n, `${this.limits.executions} turns without progress`, "failed", "budget");
           continue;
@@ -376,8 +410,15 @@ export class Runtime {
         if (typeof can === "string") this.held(n.id, can);
         continue;
       }
-      if (this.dispatch(n, parent, resumed)) busyThreads.add(thread);
+      if (!this.dispatch(n, parent, resumed)) continue;
+      busyThreads.add(thread);
+      if (rerun && ++this.rerunsStarted >= RERUN_BURST) this.nextRerunAt = this.clock.monotonic() + this.rerunGapMs;
     }
+  }
+
+  /** Work in this conversation from another request, begun since this start. */
+  private newerWorkIn(threadId: string, n: Assignment): boolean {
+    return this.store.all({ assigneeThreadId: threadId }).some(other => other.rootId !== n.rootId && other.createdAt >= this.bootAt);
   }
 
   private dispatch(n: Assignment, parent: Assignment | undefined, resumed: boolean): boolean {
@@ -424,7 +465,7 @@ export class Runtime {
     delete n.continuation; delete n.cards;
     if (carrying.length) n.carrying = carrying; else delete n.carrying;
     if (root.id !== n.id) root.lastActivityAt = now;
-    if (root.budgets) root.budgets.executions += 1;
+    if (root.budgets) { root.budgets.executions += 1; root.budgets.total = (root.budgets.total ?? 0) + 1; }
     try {
       this.store.transaction(() => {
         this.store.update(n, { kind: "admitted", at: now, detail: "admitted" });
@@ -452,7 +493,7 @@ export class Runtime {
       result => this.turnEnded(n.id, live, result),
       error => {
         this.log(`run(${n.id}) threw: ${String(error)}`);
-        this.turnEnded(n.id, live, { kind: "failed", outcome: "provider_error", text: clip(String(error), 1000) });
+        this.turnEnded(n.id, live, { kind: "failed", outcome: "provider_error", text: clip(String(error), 1000), failure: { text: clip(String(error), 1000) } });
       },
     ).finally(() => { if (this.turns.get(n.id) === live) this.turns.delete(n.id); });
     return true;
@@ -531,7 +572,8 @@ export class Runtime {
     const outstanding = unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
     if (outstanding) {
       n.status = "waiting"; n.lastActivityAt = now;
-      if (root) this.renew(root, now);
+      if (root && unattendedRoot(root)) root.lastActivityAt = now;
+      else if (root) this.renew(root, now);
       this.store.transaction(() => {
         this.store.update(n, { kind: "waiting", at: now, detail: result.kind === "failed" ? `waiting: turn ${result.outcome}` : "waiting" });
         if (root && root.id !== n.id) this.store.update(root);
@@ -540,6 +582,8 @@ export class Runtime {
       return;
     }
     const ownTurn = !n.parentId;
+    const fault = result.kind === "failed" && result.failure ? hostFaultOf(result.failure.text, result.failure.stopReason) : null;
+    if (fault && retryCannotFix(fault)) n.fault = fault;
     if (result.kind === "completed") this.settle(n, "completed", "done", undefined, ownTurn);
     else this.settle(n, "failed", result.outcome, undefined, ownTurn);
   }
@@ -706,12 +750,20 @@ export class Runtime {
     if (detail !== undefined) n.outcomeDetail = clip(detail, DETAIL_MAX); else delete n.outcomeDetail;
     if (status !== "completed" && detail !== undefined && n.result === "") n.result = clip(detail, RESULT_MAX);
     if (outcome === "refused" && detail !== undefined) { n.result = clip(detail, RESULT_MAX); delete n.evidence; }
+    if (outcome === "budget" && detail !== undefined && detail !== STOPPED_WITH_REQUEST) n.result = clip(detail, RESULT_MAX);
     delete n.question; delete n.decide; delete n.answer; delete n.answeredBy; delete n.restart; delete n.carrying;
     const kind: EventKind = status === "cancelled" ? "cancelled" : outcome === "refused" ? "refused" : "settled";
     const root = n.parentId ? this.store.get(n.rootId) : n;
     this.store.transaction(() => {
       this.store.update(n, { kind, at: now, detail: `${status}: ${outcome}${detail ? ` — ${clip(detail, DETAIL_MAX)}` : ""}` });
-      if (root && root.id !== n.id && !isTerminal(root)) { this.renew(root, now); this.store.update(root); }
+      if (root && root.id !== n.id && !isTerminal(root)) {
+        if (status === "completed" || !unattendedRoot(root)) this.renew(root, now);
+        else {
+          root.lastActivityAt = now;
+          if (status === "failed" && outcome !== "budget" && outcome !== "stopped" && detail !== STOPPED_WITH_REQUEST && root.budgets) root.budgets.failed = (root.budgets.failed ?? 0) + 1;
+        }
+        this.store.update(root);
+      }
     });
     this.turns.get(n.id)?.controller.abort();
     this.turns.delete(n.id);
@@ -719,6 +771,11 @@ export class Runtime {
     if (root?.id === n.id) this.rootActivity.delete(n.id);
     this.touch(n, ...root && root.id !== n.id ? [root] : []);
     this.report(n, ownTurn);
+    const failed = root && root.id !== n.id ? this.store.get(root.id)?.budgets?.failed ?? 0 : 0;
+    if (failed >= this.limits.failedInARow) {
+      const last = n.outcomeDetail ?? n.result;
+      this.cancelTree(this.store.get(root!.id)!, `${failed} hand-offs in a row failed, so this request was stopped${last ? `. The last one: ${clip(last, DETAIL_MAX / 2)}` : ""}`, "failed", "budget");
+    }
   }
 
   private report(n: Assignment, ownTurn: boolean): void {
@@ -762,7 +819,7 @@ export class Runtime {
 
   private renew(root: Assignment, now: number): void {
     root.lastActivityAt = now;
-    if (root.budgets) root.budgets = { since: now, requests: 0, executions: 0, wakes: 0 };
+    if (root.budgets) root.budgets = { since: now, requests: 0, executions: 0, wakes: 0, ...(root.budgets.total === undefined ? {} : { total: root.budgets.total }) };
   }
 
   private since(at: number): number {
