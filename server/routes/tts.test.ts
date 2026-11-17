@@ -57,6 +57,12 @@ describe("voice routes", () => {
     ]);
   });
 
+  it("prepares image descriptions without speaking emphasis markers or changing identifiers", async () => {
+    const { answers } = await call("POST", "/api/tts/prepare", { text: "See ![*diagram*](x.png) and ![API_KEY](key.png)." });
+    expect(answers[0]![0]).toBe(200);
+    expect((answers[0]![1] as { utterances: string[] }).utterances.join(" ")).toBe("See. (image: diagram) and. (image: API_KEY).");
+  });
+
   it("list no voices, and say why, when no voice provider is set up", async () => {
     const { answers } = await call("GET", "/api/tts/voices?q=calm");
     expect(answers).toHaveLength(1);

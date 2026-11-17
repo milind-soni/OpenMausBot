@@ -69,7 +69,10 @@ export function speakable(input: string): string {
   text = stripEmphasis(text);
 
   // Images before links: the syntax differs by one character.
-  text = text.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_m, alt: string) => (alt ? `. (image: ${alt}) ` : ". (an image) "));
+  text = text.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_m, alt: string) => {
+    const description = stripEmphasis(alt);
+    return description ? `. (image: ${description}) ` : ". (an image) ";
+  });
   text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
   text = text.replace(/<https?:\/\/[^>\s]+>/g, " a link ");
   text = text.replace(/\bhttps?:\/\/\S+/g, " a link ");

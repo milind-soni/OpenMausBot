@@ -69,6 +69,15 @@ describe("speakable", () => {
     expect(speakable(input)).toBe(expected);
   });
 
+  it.each([
+    ["See ![*diagram*](x.png).", "See. (image: diagram)."],
+    ["See ![**API_KEY**](x.png).", "See. (image: API_KEY)."],
+    ["See ![API_KEY](x.png).", "See. (image: API_KEY)."],
+    ["See ![](x.png).", "See. (an image)."],
+  ])("prepares the image description in %j", (input, expected) => {
+    expect(speakable(input)).toBe(expected);
+  });
+
   it("gives a heading a full stop so the voice breathes", () => {
     expect(speakable("## Results\nAll green")).toBe("Results. All green");
   });
