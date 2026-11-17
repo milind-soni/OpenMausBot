@@ -250,18 +250,20 @@ describe("a cloud computer the provider reports in error", () => {
     expect(deletes()).toHaveLength(2);
   });
 
-  it("is deleted by itself at most three times an hour for the whole installation, whoever's computers they are", async () => {
-    const dead = [await botWith("error"), await botWith("error"), await botWith("error"), await botWith("error")];
-    for (const { botId } of dead) await boat.findBoat(cfg, botId);
-    for (const { botId } of dead) await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_DEAD_WAITING);
+  it("is deleted by itself at most once an hour for the whole installation, whoever's computer it is", async () => {
+    const first = await botWith("error");
+    const second = await botWith("error");
+    await boat.findBoat(cfg, first.botId);
+    await boat.findBoat(cfg, second.botId);
+    await expect(boat.provisionBoat(cfg, first.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_DEAD_WAITING);
+    await expect(boat.provisionBoat(cfg, second.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_DEAD_WAITING);
     at += DEAD_CONFIRM;
-    for (const { botId } of dead.slice(0, 3)) await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
-    const last = dead[3]!;
-    await expect(boat.provisionBoat(cfg, last.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_NEEDS_PERSON);
-    expect(deletes().map((request) => request.headers["x-ascii-confirm-delete"])).toEqual(dead.slice(0, 3).map(({ box }) => box.id));
+    await expect(boat.provisionBoat(cfg, first.botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
+    await expect(boat.provisionBoat(cfg, second.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_NEEDS_PERSON);
+    expect(deletes().map((request) => request.headers["x-ascii-confirm-delete"])).toEqual([first.box.id]);
     at += 61 * 60_000;
-    await expect(boat.provisionBoat(cfg, last.botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
-    expect(deletes()).toHaveLength(4);
+    await expect(boat.provisionBoat(cfg, second.botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
+    expect(deletes()).toHaveLength(2);
   });
 
   it("finishes after a crash between the delete and the new computer, telling each side once", async () => {

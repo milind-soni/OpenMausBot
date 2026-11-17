@@ -152,9 +152,9 @@ const ready = (bot: BotRecord) => power.ready(bot, turn(), {
 });
 const deletes = () => requests.filter((request) => request.method === "DELETE");
 const creates = () => requests.filter((request) => request.method === "POST" && request.path === "/boxes");
-/** One computer call as the bot makes it, through the same route a turn's calls take. */
-const call = (boxId: () => string, extra: Partial<Parameters<typeof tools.cloudComputerRpc>[1]> = {}) =>
-  tools.cloudComputerRpc({ method: "tools/call", params: { name: "exec", arguments: { command: "echo hi" } } }, {
+/** One computer call as the bot makes it, through the same route a turn's calls take: by default an exec of `echo hi`. */
+const call = (boxId: () => string, extra: Partial<Parameters<typeof tools.cloudComputerRpc>[1]> = {}, name = "exec") =>
+  tools.cloudComputerRpc({ method: "tools/call", params: { name, arguments: name === "exec" ? { command: "echo hi" } : {} } }, {
     cfg, signal: new AbortController().signal, boxId, gate: async () => ({ held: false }), assertActive: () => {}, recovery, ...extra,
   });
 const ranEcho = () => requests.filter((request) => request.command?.includes("echo hi")).length;
@@ -183,6 +183,7 @@ describe("a woken cloud computer that never answers", () => {
     expect(deletes().map((request) => request.path)).toEqual([`/boxes/${box.id}`]);
     expect(creates()).toHaveLength(1);
     expect(told).toEqual([[bot.id, "replaced"]]);
+    expect(recovery.replacedRecently(bot.id)).toBe(true);
 
     const first = await call(() => machine!.id as string);
     expect((first as { isError?: boolean }).isError).toBeFalsy();
@@ -268,30 +269,57 @@ describe("a woken cloud computer that never answers", () => {
 });
 
 describe("a computer call made while its computer is being replaced", () => {
-  it("waits for the replacement and runs on the new computer, instead of being refused again and again", async () => {
+  /** A computer the recovery is replacing, slowly, while the turn still names it. */
+  async function replacing() {
     const { bot, box } = await asleep(Infinity);
     box.state = "ready";
     await boat.findBoat(cfg, bot.id);
     deleteDelayMs = 300;
-    const replacing = recovery.wakeTimedOut(bot.id, box.id);
-    await vi.waitFor(() => expect(recovery.refusal(box.id, "before")).not.toBeNull());
+    const done = recovery.wakeTimedOut(bot.id, box.id);
+    await vi.waitFor(() => expect(recovery.refusal(box.id, "before")).not.toBeNull(), { timeout: 10_000 });
     let current = box.id;
     let reclaims = 0;
-    const result = await call(() => current, {
-      reclaim: async (replacedBoxId) => {
-        reclaims++;
-        expect(replacedBoxId).toBe(box.id);
-        const machine = await power.ready(bot, turn(), { budgetMs: 30_000 });
-        current = machine!.id as string;
-        return current;
-      },
-    });
-    await replacing;
-    expect(reclaims).toBe(1);
-    expect(current).not.toBe(box.id);
+    const reclaim = async (replacedBoxId: string) => {
+      reclaims++;
+      expect(replacedBoxId).toBe(box.id);
+      const machine = await power.ready(bot, turn(), { budgetMs: 30_000 });
+      current = machine!.id as string;
+      return current;
+    };
+    return { box, done, reclaim, current: () => current, reclaims: () => reclaims };
+  }
+
+  it("waits for the replacement instead of being refused again and again, and a look at the screen then runs on the new computer", async () => {
+    const r = await replacing();
+    let gates = 0;
+    const result = await call(r.current, { reclaim: r.reclaim, gate: async () => { gates++; return { held: false }; } }, "get_screen_size");
+    await r.done;
+    expect(r.reclaims()).toBe(1);
+    expect(r.current()).not.toBe(r.box.id);
+    expect(gates).toBe(2);
     expect((result as { isError?: boolean }).isError).toBeFalsy();
     expect((result as { content: unknown[] }).content[0]).toEqual({ type: "text", text: words.CLOUD_COMPUTER_REPLACED });
-    expect(ranEcho()).toBe(1);
+    expect(requests.some((request) => request.command?.includes("getdisplaygeometry") && request.path.includes(r.current()))).toBe(true);
+  });
+
+  it("hands back a call that would change something, unperformed, once the new computer answers: the bot looks first", async () => {
+    const r = await replacing();
+    const result = await call(r.current, { reclaim: r.reclaim });
+    await r.done;
+    expect(r.reclaims()).toBe(1);
+    expect(result).toEqual({ isError: true, content: [
+      { type: "text", text: words.CLOUD_COMPUTER_REPLACED }, { type: "text", text: words.CLOUD_COMPUTER_ANSWERS_AGAIN },
+    ] });
+    expect(ranEcho()).toBe(0);
+  });
+
+  it("is refused after the wait when a person took the computer meanwhile", async () => {
+    const r = await replacing();
+    let gates = 0;
+    const result = await call(r.current, { reclaim: r.reclaim, gate: async () => (++gates === 1 ? { held: false } : { held: true, reason: "person" as const }) }, "get_screen_size");
+    await r.done;
+    expect((result as { isError?: boolean }).isError).toBe(true);
+    expect(requests.some((request) => request.command?.includes("getdisplaygeometry"))).toBe(false);
   });
 
   it("says the new computer is still starting, and that the call was not performed, when it is not up in time", async () => {

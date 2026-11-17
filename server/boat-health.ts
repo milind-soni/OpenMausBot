@@ -20,7 +20,7 @@ export const DEAD_COMPUTER = {
   /** And in a day, so a provider that keeps handing out broken computers cannot use up the plan's computers or hours. */
   replacementsPerDay: 3,
   /** And at most this many automatic deletes per installation in an hour, whoever's computers they are. */
-  installationDeletesPerHour: 3,
+  installationDeletesPerHour: 1,
   /** The provider's `error` must be seen on two reads at least this far apart before a computer is deleted for it. */
   deadConfirmMs: process.env.OMB_CLOUD_COMPUTER_DEAD_CONFIRM_MS?.trim() ? Math.max(0, Number(process.env.OMB_CLOUD_COMPUTER_DEAD_CONFIRM_MS) || 0) : 30 * 60_000,
   /** At most one automatic restart per installation in this long. */

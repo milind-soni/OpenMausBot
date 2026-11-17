@@ -13,7 +13,7 @@ import { controlRefusal, type ControlState } from "./control-client.ts";
 import { COMPUTER_COPY_BUDGET_MS, HARNESS_CALL_BUDGET_MS } from "./harness-budget.ts";
 import { compileToolSchema } from "./mcp-schema-validator.ts";
 import {
-  CLOUD_COMPUTER_ANSWER_LOST, CLOUD_COMPUTER_EXEC_ANSWER_LOST, CLOUD_COMPUTER_NO_ANSWER, CLOUD_COMPUTER_REPLACEMENT_STARTING, CLOUD_COMPUTER_STILL_RESTORING,
+  CLOUD_COMPUTER_ANSWER_LOST, CLOUD_COMPUTER_ANSWERS_AGAIN, CLOUD_COMPUTER_EXEC_ANSWER_LOST, CLOUD_COMPUTER_NO_ANSWER, CLOUD_COMPUTER_REPLACEMENT_STARTING, CLOUD_COMPUTER_STILL_RESTORING,
   CLOUD_COMPUTER_STILL_WAKING, CLOUD_COMPUTER_UNREACHABLE,
 } from "../shared/cloud-computer-recovery.ts";
 
@@ -66,6 +66,8 @@ const QUICK_CALL_MS = 25_000;
  * so the call itself, or the line that says to repeat it, still gets through. */
 const RECOVERY_WAIT_RESERVE_MS = 30_000;
 const COPY_TOOLS = new Set(["copy_from_computer", "copy_to_computer"]);
+/** Calls that change nothing on the computer: the only ones made after the call waited out a restart or replacement. */
+const LOOKS = new Set(["screenshot", "get_screen_size"]);
 export const cloudComputerCallBudgetMs = (name: unknown): number =>
   typeof name === "string" && COPY_TOOLS.has(name) ? COMPUTER_COPY_BUDGET_MS : HARNESS_CALL_BUDGET_MS;
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
@@ -226,7 +228,10 @@ export async function cloudComputerRpc(
     return text ? { isError: true, content: [{ type: "text", text }] } : null;
   };
   let before = refused("before");
+  let waited = false;
+  let noticeOwed: string | null = null;
   if (before && deps.recovery?.settle) {
+    waited = true;
     // A restart or replacement under way is waited for here, not refused at once: a bot refused straight away repeats
     // the call, is refused again, and gives up while its computer is still being brought back.
     const until = deadline - RECOVERY_WAIT_RESERVE_MS;
@@ -242,6 +247,19 @@ export async function cloudComputerRpc(
     before = refused("before");
   }
   if (before) { deps.settled?.(false); return before; }
+  if (waited) {
+    // The computer came back, or was replaced, while this call waited: anything but a look at the screen is handed back
+    // unperformed, as a call that waited through a person's hold is, and a look goes through the control gate again.
+    const notice = deps.recovery?.notice(boxId);
+    const again = LOOKS.has(String(params.name)) ? await deps.gate() : null;
+    if (again?.held) return { isError: true, content: [{ type: "text", text: controlRefusal(again) }] };
+    if (!again) {
+      deps.settled?.(false);
+      return { isError: true, content: [...(notice ? [{ type: "text" as const, text: notice }] : []), { type: "text", text: CLOUD_COMPUTER_ANSWERS_AGAIN }] };
+    }
+    deps.assertActive();
+    if (notice) noticeOwed = notice;
+  }
   const late = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
   deps.disk?.began(deps.cfg, boxId);
   let result: CloudComputerResult;
@@ -262,6 +280,6 @@ export async function cloudComputerRpc(
   if (unanswered) result = refused("after") ?? result;
   deps.settled?.(!unanswered);
   if (disk) result = { ...result, content: [...result.content, { type: "text", text: disk }] };
-  const notice = deps.recovery?.notice(boxId);
+  const notice = noticeOwed ?? deps.recovery?.notice(boxId);
   return notice ? { ...result, content: [{ type: "text", text: notice }, ...result.content] } : result;
 }

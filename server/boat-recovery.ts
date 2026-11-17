@@ -88,8 +88,9 @@ type Dead = { boxId: string; name: string };
 type ReplaceOutcome = "confirmed" | "pending" | "kept" | "held" | "waiting" | "capped" | "failed";
 
 /** What became of a computer that was woken for a turn and stayed silent past the wake's patience. `answers`: a last probe
- * got through after all. `gone`: it no longer exists, so the next start makes a new one. `off`: automatic replacement is
- * switched off, so nothing was done. `kept`: it was left as it is, and `why` says so in a few words for the turn. */
+ * got through after all. `gone`: it no longer exists, so the next start makes a new one. `off`: nothing was done, as
+ * automatic replacement is switched off (or the computer answered moments ago), and the turn's wait fails as a passing
+ * failure, as before. `kept`: it was left as it is, and `why` says so in a few words for the turn. */
 export type WakeTimeoutOutcome = { kind: "answers" | "replaced" | "gone" | "off" } | { kind: "kept"; why: string };
 
 const KEPT_WHY: Partial<Record<ReplaceOutcome | "unreachable", string>> = {
@@ -424,7 +425,8 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
     }
     deps.log(`cloud computer ${owner}: ${boxId} did not answer within ${Math.round(READY_WAIT.wakePatienceMs / 60_000)} minutes of waking; replacing it`);
     const outcome = await replace(owner, seen.identity, seen.identity.state === "error" ? { dead: true } : {});
-    return outcome === "confirmed" || outcome === "pending" ? { kind: "replaced" } : outcome === "kept" ? { kind: "answers" } : keptWhy(outcome);
+    // "kept": it answered a command moments ago by the record, though not this probe; left as it is, as when switched off.
+    return outcome === "confirmed" || outcome === "pending" ? { kind: "replaced" } : outcome === "kept" ? { kind: "off" } : keptWhy(outcome);
   }
 
   const unsubscribe = health.onNotResponding((boxId) => {
@@ -512,6 +514,9 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
     },
     /** A start the Admin turned away for computers at once, right after this owner's computer was replaced: the old one's
      * place is still being given back. */
+    /** This owner's computer was replaced by itself in the last fifteen minutes: its turns may make the new one even
+     * where they would never make a first one. */
+    replacedRecently: (owner: string): boolean => entries.some((entry) => entry.owner === owner && !entry.manual && now() - entry.at < 15 * 60_000),
     claimSentence(owner: string, error: unknown): string | undefined {
       const recent = entries.some((entry) => entry.owner === owner && now() - entry.at < 15 * 60_000);
       return recent && cloudFailureOf(error).limit?.reason === "at_once" ? CLOUD_COMPUTER_NOT_RESPONDING : undefined;
