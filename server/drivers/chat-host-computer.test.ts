@@ -159,14 +159,18 @@ describe("this desktop's own computer in a chat turn", () => {
   });
 
   it("in a background start, keeps its stand-in while a slower server joins, then lists its own tools beside both", async () => {
-    const starting = computer(`background-${randomUUID()}`, { DELAY_MS: "2500" });
+    // A driver that failed before gets the short wait, so the turn goes on with the stand-in well inside the other
+    // servers' startup budget, and the gated server can join after the mount.
+    const driver = `background-${randomUUID()}`;
+    await mount(computer(driver, { MODE: "exit" }).server, 5_000, 20_000);
+    const starting = computer(driver, { DELAY_MS: "2500" });
     const gate = join(dirs[0]!, `gate-${randomUUID()}`);
     const plain = (env: Record<string, string> = {}) => ({ command: process.execPath, args: [script], env: { ANSWERED: join(dirs[0]!, `answered-${randomUUID()}`), ...env } });
     const ask: ChatToolDefinition = { type: "function", function: { name: "ask_user", description: "Ask", parameters: { type: "object" } } };
     const settled: string[] = [];
     const session = await mountChatTools({ localComputer: starting.server, agents: plain(), custom: { notes: plain({ GATE: gate }) } } as SendTurnInput["integrations"],
       controller.signal, true, undefined, undefined, undefined, undefined, undefined, undefined,
-      { startupMs: 1_000, hostComputerMs: 20_000, background: true, onSettled: (server) => settled.push(server) });
+      { startupMs: 5_000, hostComputerMs: 20_000, background: true, onSettled: (server) => settled.push(server) });
     sessions.push(session);
     expect(names(session)).toEqual(["agents_write", HOST_COMPUTER_STAND_IN]);
     expect(settled).not.toContain("notes");
