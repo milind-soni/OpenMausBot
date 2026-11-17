@@ -436,10 +436,11 @@ describe("createOpenAIChatRuntime tool approvals", () => {
   });
 
   it.each([
-    ["not JSON", '{"path":"a.md","content":"cut off', "tool arguments are not complete JSON"],
-    ["empty", "", undefined],
-    ["blank", "   ", undefined],
-  ])("replays a call whose arguments are %s as an empty object, so a strict provider takes the next request", async (_kind, badArguments, toolError) => {
+    ["not JSON", '{"path":"a.md","content":"cut off', "{}", "tool arguments are not complete JSON"],
+    ["empty", "", "{}", undefined],
+    ["blank", "   ", "{}", undefined],
+    ["led by a byte-order mark", '\uFEFF{"n":1}', '{"n":1}', undefined],
+  ])("replays a call whose arguments are %s as valid JSON, so a strict provider takes the next request", async (_kind, badArguments, replayedArguments, toolError) => {
     const call = (id: string, argumentsText: string) =>
       `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: "function", function: { name: "fx_write", arguments: argumentsText } }] } }] })}\n\n`
       + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
@@ -469,7 +470,7 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       });
       await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
       expect(bodies).toHaveLength(3);
-      expect(bodies[1].messages.find((message: any) => message.tool_calls)?.tool_calls[0].function.arguments).toBe("{}");
+      expect(bodies[1].messages.find((message: any) => message.tool_calls)?.tool_calls[0].function.arguments).toBe(replayedArguments);
       if (toolError) {
         expect(bodies[1].messages.find((message: any) => message.role === "tool" && message.tool_call_id === "c1")?.content)
           .toContain(toolError);
