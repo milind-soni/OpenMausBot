@@ -798,7 +798,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             let started = false;
             let fatal: Error | undefined, title = call.function.name, skipRepeatCount = false;
             try {
-              const args = toolArguments(call.function.arguments);
+              const args = toolArguments(call.function.arguments, safeText);
               const inputPreview = preview(args);
               if (call.function.name === ASK_USER_TOOL) {
                 if (!questionAllowed || !allowsTool(scope, { kind: "native", name: ASK_USER_TOOL })) throw new Error("Tool selection excludes this tool");

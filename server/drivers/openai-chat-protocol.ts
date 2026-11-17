@@ -24,13 +24,14 @@ export function object(value: unknown): Record<string, unknown> | undefined {
     ? value as Record<string, unknown> : undefined;
 }
 
-/** A call's arguments as its tool gets them. An empty argument string is a tool with no arguments. */
-export function toolArguments(text: string): Record<string, unknown> {
+/** A call's arguments as its tool gets them. An empty argument string is a tool with no arguments. `redact` masks
+ * secrets in rejected arguments before they are cut down to quote, so a secret split by the cut can't slip past it. */
+export function toolArguments(text: string, redact: (text: string) => string = (same) => same): Record<string, unknown> {
   let args: unknown;
   try { args = JSON.parse(text.trim() || "{}"); }
-  catch { throw new ChatProtocolError(`tool arguments are not complete JSON; you sent ${text.length} characters: ${shownArguments(text)}`); }
+  catch { throw new ChatProtocolError(`tool arguments are not complete JSON; you sent ${text.length} characters: ${shownArguments(redact(text))}`); }
   const found = object(args);
-  if (!found) throw new ChatProtocolError(`tool arguments must be a JSON object; you sent ${text.length} characters: ${shownArguments(text)}`);
+  if (!found) throw new ChatProtocolError(`tool arguments must be a JSON object; you sent ${text.length} characters: ${shownArguments(redact(text))}`);
   return found;
 }
 

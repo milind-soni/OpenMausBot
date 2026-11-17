@@ -239,4 +239,14 @@ describe("rejected tool arguments", () => {
     expect(message.endsWith("xxEND")).toBe(true);
     expect(message.length).toBeLessThan(1_200);
   });
+
+  it("masks a secret before cutting, so one that crosses the cut never shows in part", () => {
+    const secret = "SYNTHETIC-SECRET-0123456789";
+    const text = `{"content":"${"x".repeat(480)}${secret}${"y".repeat(1_000)}`;
+    let message = "";
+    try { toolArguments(text, (raw) => raw.split(secret).join("[redacted]")); } catch (error) { message = (error as Error).message; }
+    expect(message.startsWith(`tool arguments are not complete JSON; you sent ${text.length} characters: `)).toBe(true);
+    expect(message).not.toContain("SYNTH");
+    expect(message).toContain("[red");
+  });
 });

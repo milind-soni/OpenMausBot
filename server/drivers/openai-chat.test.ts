@@ -441,6 +441,9 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     ["empty", "", "{}", undefined],
     ["blank", "   ", "{}", undefined],
     ["led by a byte-order mark", '\uFEFF{"n":1}', '{"n":1}', undefined],
+    // The API key ("synthetic") crosses the 500-character cut: it is masked first, so no part of it is quoted back.
+    ["long and holding the API key across the cut", `{"content":"${"x".repeat(484)}synthetic${"y".repeat(1_000)}`, "{}",
+      `tool arguments are not complete JSON; you sent 1505 characters: {"content":"${"x".repeat(484)}[red … ${"y".repeat(500)}`],
   ])("replays a call whose arguments are %s as valid JSON, so a strict provider takes the next request", async (_kind, badArguments, replayedArguments, toolError) => {
     const call = (id: string, argumentsText: string) =>
       `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: "function", function: { name: "fx_write", arguments: argumentsText } }] } }] })}\n\n`
