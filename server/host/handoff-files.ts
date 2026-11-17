@@ -215,8 +215,11 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     return null;
   }
 
-  function releaseDay(botId: string, files: number, bytes: number): void {
+  function releaseDay(botId: string, files: number, bytes: number, reservedDay?: string): void {
     const used = today(botId);
+    // An async stage/send can finish after midnight. Its old reservation must
+    // not refund another operation's allowance in the new day's bucket.
+    if (reservedDay !== undefined && used.day !== reservedDay) return;
     load().days[botId] = { day: used.day, files: Math.max(0, used.files - files), bytes: Math.max(0, used.bytes - bytes) };
   }
 
@@ -404,19 +407,21 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     if (call.answers) return { status: 400, body: { error: "files do not travel with an answer. Send the answer without files, then pass the files in a new coordinate_bots message to that teammate." } };
     // The day's file count is taken before anything is stored, the bytes as soon as they are known; a refusal gives both back.
     const asked = new Set(call.paths.map((path) => path.trim()).filter(Boolean)).size * call.recipients;
+    const filesDay = today(call.senderId).day;
     const full = reserveDay(call.senderId, asked, 0);
     if (full) return { status: 429, body: { error: full } };
     let staged: Awaited<ReturnType<typeof stage>>;
     try {
       staged = await stage(call.paths, call.saveOne);
     } catch (error) {
-      releaseDay(call.senderId, asked, 0);
+      releaseDay(call.senderId, asked, 0, filesDay);
       return { status: typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500, body: { error: error instanceof Error ? error.message : "files could not be read" } };
     }
     const count = staged.files.length, bytes = total(staged.files);
+    const bytesDay = today(call.senderId).day;
     const over = reserveDay(call.senderId, 0, bytes * call.recipients);
     if (over) {
-      releaseDay(call.senderId, asked, 0);
+      releaseDay(call.senderId, asked, 0, filesDay);
       drop(staged.fresh);
       return { status: 429, body: { error: over } };
     }
@@ -424,7 +429,8 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     try {
       result = await call.send(staged.files);
     } catch (error) {
-      releaseDay(call.senderId, count * call.recipients, bytes * call.recipients);
+      releaseDay(call.senderId, count * call.recipients, 0, filesDay);
+      releaseDay(call.senderId, 0, bytes * call.recipients, bytesDay);
       drop(staged.fresh);
       throw error;
     }
@@ -434,7 +440,10 @@ export function createHandoffFiles(deps: HandoffFilesDeps) {
     const got = receipts.filter((receipt) => receipt.outcome !== "failed" && carries(receipt.requestId)), missed = receipts.filter((receipt) => receipt.outcome !== "failed" && !carries(receipt.requestId));
     // Only a teammate that got the files costs the sender's day.
     const unused = Math.max(0, call.recipients - got.length);
-    if (unused) releaseDay(call.senderId, count * unused, bytes * unused);
+    if (unused) {
+      releaseDay(call.senderId, count * unused, 0, filesDay);
+      releaseDay(call.senderId, 0, bytes * unused, bytesDay);
+    }
     save();
     if (!got.length) drop(staged.fresh);
     const names = staged.files.map((passed) => passed.name).join(", ");

@@ -62,6 +62,12 @@ const write = (name: string, content: string | Buffer = `content of ${name}`) =>
 const saver = (roots: string[] = [work]) => (path: string) => saveBotAttachment({ path, roots, byContent: true });
 const stored = () => readdirSync(ATTACHMENTS_DIR, { withFileTypes: true }).filter((entry) => entry.isFile() && !entry.name.startsWith(".")).map((entry) => entry.name);
 
+function barrier() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => { release = resolve; });
+  return { promise, release };
+}
+
 beforeEach(() => {
   serial += 1;
   work = join(ROOT, `work-${serial}`);
@@ -77,6 +83,78 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
+
+describe("daily reservations across midnight", () => {
+  it("does not refund yesterday's failed file stage into today's file allowance", async () => {
+    const files = setup();
+    const entered = barrier(), finish = barrier();
+    const pending = files.coordinate({ paths: ["report.txt"], senderId: "ana", recipients: 1,
+      saveOne: async () => { entered.release(); await finish.promise; throw new Error("fixture read failed"); },
+      send: async () => { throw new Error("must not send"); },
+    });
+    await entered.promise;
+    clock += 24 * 3600_000;
+    expect(files.reserveDay("ana", HANDOFF_FILES_PER_DAY, 0)).toBeNull();
+    finish.release();
+    expect((await pending).status).toBe(500);
+    expect(files.reserveDay("ana", 1, 0)).toContain("daily limit");
+  });
+
+  for (const outcome of ["throw", "refuse", "partial"] as const) {
+    it(`does not refund yesterday's ${outcome} send into today's file or byte allowance`, async () => {
+      const files = setup();
+      write("report.txt");
+      const entered = barrier(), finish = barrier();
+      const pending = files.coordinate({ paths: ["report.txt"], senderId: "ana", recipients: outcome === "partial" ? 2 : 1, saveOne: saver(),
+        send: async (passed) => {
+          entered.release();
+          await finish.promise;
+          if (outcome === "throw") throw new Error("fixture send failed");
+          if (outcome === "partial") {
+            files.sent("sent-one", ANA, passed!);
+            return { status: 200, body: { receipts: [{ botId: "ben", outcome: "sent", requestId: "sent-one" }, { botId: "cy", outcome: "failed" }] } };
+          }
+          return { status: 409, body: { receipts: [{ botId: "ben", outcome: "failed" }] } };
+        },
+      });
+      const settled = pending.then((value) => ({ value }), (error: unknown) => ({ error }));
+      await entered.promise;
+      clock += 24 * 3600_000;
+      expect(files.reserveDay("ana", HANDOFF_FILES_PER_DAY, HANDOFF_BYTES_PER_DAY)).toBeNull();
+      finish.release();
+      const result = await settled;
+      if (outcome === "throw") expect(result).toMatchObject({ error: new Error("fixture send failed") });
+      else expect(result).toMatchObject({ value: { status: outcome === "partial" ? 200 : 409 } });
+      expect(files.reserveDay("ana", 1, 0)).toContain("daily limit");
+      expect(files.reserveDay("ana", 0, 1)).toContain("daily limit");
+    });
+  }
+
+  it("refunds bytes reserved after midnight without refunding the previous day's file count", async () => {
+    const files = setup();
+    write("report.txt");
+    const entered = barrier(), finish = barrier();
+    const save = saver();
+    const pending = files.coordinate({ paths: ["report.txt"], senderId: "ana", recipients: 1,
+      saveOne: async (path) => { entered.release(); await finish.promise; return save(path); },
+      send: async () => ({ status: 409, body: {} }),
+    });
+    await entered.promise;
+    clock += 24 * 3600_000;
+    expect(files.reserveDay("ana", HANDOFF_FILES_PER_DAY, 0)).toBeNull();
+    finish.release();
+    expect((await pending).status).toBe(409);
+    expect(files.reserveDay("ana", 1, 0)).toContain("daily limit");
+    expect(files.reserveDay("ana", 0, HANDOFF_BYTES_PER_DAY)).toBeNull();
+  });
+
+  it("still returns same-day failed reservations", async () => {
+    const files = setup();
+    write("report.txt");
+    expect((await files.coordinate({ paths: ["report.txt"], senderId: "ana", recipients: 1, saveOne: saver(), send: async () => ({ status: 409, body: {} }) })).status).toBe(409);
+    expect(files.reserveDay("ana", HANDOFF_FILES_PER_DAY, HANDOFF_BYTES_PER_DAY)).toBeNull();
+  });
+});
 
 describe("sending", () => {
   it("stores a passed file once however often it is passed, and keeps it on the assignment", async () => {
