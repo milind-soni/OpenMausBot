@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { HELD_SECRET_MASK } from "../shared/redact.ts";
-import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
+import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginPlace, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
 import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { decryptBrowserState, encryptBrowserState } from "./browser-sites.ts";
@@ -127,6 +127,8 @@ export interface NewLogin extends LoginPlace {
 }
 
 export interface LoginPatch {
+  /** A new host for the login: its site becomes that host's, and its sign-in hosts just that host. */
+  site?: string;
   username?: string;
   password?: string;
   totp?: TotpKey | null;
@@ -290,12 +292,15 @@ export class VaultStore {
     return summarizeLogin(login);
   }
 
-  update(id: string, patch: LoginPatch): LoginSummary | null {
+  /** "taken" when the login would move onto a site where the same account is already saved. */
+  update(id: string, patch: LoginPatch): LoginSummary | null | "taken" {
     const data = this.read();
     const current = data.logins.find((login) => login.id === id);
     if (!current) return null;
+    const moved = patch.site !== undefined && !current.hosts.includes(patch.site);
     const next: StoredLogin = {
       ...current,
+      ...(moved ? loginPlace(patch.site!, [], current.exactHost) : {}),
       ...(patch.username === undefined ? {} : { username: patch.username }),
       ...(patch.password === undefined ? {} : { password: patch.password }),
       ...(patch.bots === undefined ? {} : { bots: patch.bots }),
@@ -304,6 +309,7 @@ export class VaultStore {
     };
     if (patch.totp === null) delete next.totp;
     else if (patch.totp) next.totp = patch.totp;
+    if (moved && data.logins.some((login) => login.id !== id && sameAccount(login, next))) return "taken";
     this.write({ ...data, logins: data.logins.map((login) => login.id === id ? next : login) });
     return summarizeLogin(next);
   }

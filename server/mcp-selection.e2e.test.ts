@@ -110,7 +110,7 @@ it("imports atomically and mounts the selected MCP servers in fresh direct and r
   });
 }, 90_000);
 
-it("validates MCP grants, refuses live changes and client sessions, and rechecks delayed imports after revocation", async () => {
+it("validates MCP grants, saves live changes, refuses client sessions and rechecks delayed imports after revocation", async () => {
   await withFixture("hang", async ({ api, control, dump, clearDump, url, evidence }) => {
     const { bot } = await control(["new-bot", "--name", "Working fixture"]) as { bot: Bot };
     const { bot: idle } = await control(["new-bot", "--name", "Idle fixture"]) as { bot: Bot };
@@ -130,7 +130,7 @@ it("validates MCP grants, refuses live changes and client sessions, and rechecks
     expect((await api("POST", "/api/mcp/servers/import", { json: "{}" }, clientHeaders)).status).toBe(403);
     await control(["send", "--bot", bot.id, "--text", "Stay active."]);
     await dump();
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: [] }, { origin: url })).status).toBe(409);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: [] }, { origin: url })).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: ["notes"] }, { origin: url })).status).toBe(200);
     expect((await api("PATCH", `/api/bots/${idle.id}`, { mcpServers: null })).status).toBe(409);
     expect((await api("PATCH", `/api/bots/${idle.id}`, { mcpServers: ["notes"] }, { origin: url })).status).toBe(200);
@@ -142,7 +142,7 @@ it("validates MCP grants, refuses live changes and client sessions, and rechecks
     clearDump();
     await control(["send-channel", "--channel", channel.id, "--text", "Stay active in the room."]);
     await dump();
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: ["notes"] }, { origin: url })).status).toBe(409);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: ["notes"] }, { origin: url })).status).toBe(200);
     await control(["interrupt", "--channel", channel.id]);
     await control(["wait", "--channel", channel.id, "--timeout", "30"]);
     await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots.find((row: Bot) => row.id === bot.id)?.busy).toBe(false);

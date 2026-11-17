@@ -259,3 +259,13 @@ describe("the Activity view", () => {
     expect(csv).toContain(",'=cmd|' /C calc'!A0,");
   });
 });
+
+it("records explicit tool selection and connected-app permission changes", () => {
+  const before = botAuditSnapshot({ id: "b" });
+  const after = botAuditSnapshot({ id: "b", toolScope: { allow: ["native:read"] }, connectorScopes: { apps: { gmail: "read" } }, connectorTools: { gmail: { tools: ["GMAIL_FETCH_EMAILS"] } } });
+  const rows = botChangeRows({ id: "b" }, before, after);
+  expect(rows.flatMap(row => row.changed).sort()).toEqual(["connectorScopes", "connectorTools", "toolScope"]);
+  const reset = botChangeRows({ id: "b" }, after, before);
+  expect(reset.flatMap(row => row.changed).sort()).toEqual(["connectorScopes", "connectorTools", "toolScope"]);
+  expect(botChangeRows({ id: "b" }, after, after)).toEqual([]);
+});

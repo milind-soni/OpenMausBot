@@ -112,7 +112,7 @@ describe("the header's right side", () => {
     }
   });
 
-  it("moves Stop out of the Simple header into the composer's round button while a turn runs", () => {
+  it("moves Stop out of the Simple header into the composer's round button while a turn runs, Call beside it", () => {
     fixture.advanced = false;
     try {
       const busy = { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) };
@@ -120,7 +120,7 @@ describe("the header's right side", () => {
       expect(controls).not.toContain("Stop this turn");
       const stop = markup.match(/<button[^>]*data-composer-stop="slot"[^>]*>/)?.[0] ?? "";
       expect(stop).toContain('aria-label="Stop this turn"');
-      expect(markup).not.toContain('data-call-button="composer"');
+      expect(markup).toContain('data-call-button="composer"');
       expect(header({ ...busy, waitingForTeammates: true, busy: false, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: false, waitingForTeammates: true })) }).markup)
         .toContain('data-composer-stop="slot"');
     } finally {

@@ -139,11 +139,11 @@ interface SavedBot { id: string; name: string; toolScope?: { allow?: string[]; d
     await selectBot(first.name); await click("Open settings"); await click("Access");
     await runControlOmb(["send", "--bot", first.id, "--text", "Stay active for the settings test.", "--url", info.url]);
     await expect.poll(async () => (await bots()).find(bot => bot.id === first.id)?.busy).toBe(true);
-    await expect.poll(() => evaluate("document.querySelector('select[aria-label=\"Tool selection\"]')?.disabled")).toBe(true);
-    expect(await snapshot()).toContain("Wait until this bot finishes all active tasks");
+    await expect.poll(async () => await snapshot()).toContain("Added access applies from its next turn");
+    expect(await evaluate("document.querySelector('select[aria-label=\"Tool selection\"]')?.disabled")).toBe(false);
     await runControlOmb(["interrupt", "--bot", first.id, "--url", info.url]);
     await runControlOmb(["wait", "--bot", first.id, "--timeout", "30", "--url", info.url]);
-    await expect.poll(() => evaluate("document.querySelector('select[aria-label=\"Tool selection\"]')?.disabled")).toBe(false);
+    await expect.poll(async () => await snapshot()).not.toContain("Added access applies from its next turn");
   } finally {
     if (child?.connected) child.send("stop");
     await waitForExit(child, { graceMs: 30_000 });
