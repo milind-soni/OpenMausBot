@@ -253,7 +253,9 @@ describe("a memory cap per bot", () => {
     { pid: 200, botIds: ["bot_a"], kind: "engine" }, { pid: 300, botIds: ["bot_b"], kind: "engine" },
     { pid: 500, botIds: ["bot_b"], kind: "browser" }, { pid: 400, botIds: ["bot_a", "bot_b"], kind: "engine" },
   ];
-  function dog(rows: () => ProcessRow[], pss: (pid: number) => number | null = () => null, startOf: (pid: number) => string | null = (pid) => `s${pid}`) {
+  /** By default every process's proportional size reads as its resident size. */
+  function dog(rows: () => ProcessRow[], pss: (pid: number) => number | null = (pid) => rows().find((row) => row.pid === pid)?.rssBytes ?? null,
+    startOf: (pid: number) => string | null = (pid) => `s${pid}`) {
     const signals: string[] = [], closed: string[] = [], logs: string[] = [];
     let clock = 1_800_000_000_000;
     const watchdog = new BotMemoryWatchdog({ cap: () => 1000 * MB, list: rows, owners: () => owners, pss, startOf, graceMs: 0, now: () => clock,
@@ -297,8 +299,19 @@ describe("a memory cap per bot", () => {
     expect(shared.signals).toEqual([]);
   });
 
+  it("stops a bot whose shares can't be read only when it stays far over, its resident pages erring high", async () => {
+    let sizes = { a: 1300 };
+    const h = dog(() => processes(sizes), () => null);
+    expect(await h.watchdog.check()).toEqual([]);
+    expect(await h.watchdog.check()).toEqual([]);
+    expect(await h.watchdog.check()).toEqual([]);
+    sizes = { a: 1600 };
+    expect(await h.watchdog.check()).toEqual([]);
+    expect((await h.watchdog.check()).map((stop) => stop.botId)).toEqual(["bot_a"]);
+  });
+
   it("leaves alone a pid the system gave to another process since it was read", async () => {
-    const h = dog(() => processes({ a: 1600 }), () => null, (pid) => (pid === 201 ? "later" : `s${pid}`));
+    const h = dog(() => processes({ a: 1600 }), undefined, (pid) => (pid === 201 ? "later" : `s${pid}`));
     await h.watchdog.check();
     expect(h.signals).toEqual(["SIGTERM 200", "SIGKILL 200"]);
   });

@@ -109,6 +109,7 @@ export class BotMemoryWatchdog {
   readonly #stoppedPids = new Map<number, number>();
   #stopping = new Set<string>();
   #timer: ReturnType<typeof setInterval> | null = null;
+  #closing: Promise<unknown> = Promise.resolve();
   #running = false;
   #count = 0;
 
@@ -136,11 +137,18 @@ export class BotMemoryWatchdog {
       for (const [id, tally] of bots) {
         if (tally.rssBytes <= cap || this.#stopping.has(id)) { this.#strikes.delete(id); continue; }
         // Resident pages count what several processes share once each; their proportional share counts it once.
-        const used = tally.pids.reduce((sum, pid) => sum + (this.#options.pss?.(pid) ?? rowRss(rows, pid)), 0);
-        if (used <= cap) { this.#strikes.delete(id); continue; }
+        // Where a process's share can't be read (another user's, a sandboxed one), its resident pages stand in; they err
+        // high, so a bot counted that way is stopped only when it stays far over.
+        let used = 0, estimated = false;
+        for (const pid of tally.pids) {
+          const share = this.#options.pss?.(pid) ?? null;
+          if (share === null) estimated = true;
+          used += share ?? rowRss(rows, pid);
+        }
+        if (used <= cap || (estimated && used < cap * FAR_OVER)) { this.#strikes.delete(id); continue; }
         const strikes = (this.#strikes.get(id) ?? 0) + 1;
         this.#strikes.set(id, strikes);
-        if (strikes >= STRIKES || used >= cap * FAR_OVER) over.push({ id, tally, used });
+        if (strikes >= STRIKES || (!estimated && used >= cap * FAR_OVER)) over.push({ id, tally, used });
       }
       return await Promise.all(over.map(({ id, tally, used }) => this.#stopBot(id, tally, used, cap, starts)));
     } finally { this.#running = false; }
@@ -164,13 +172,15 @@ export class BotMemoryWatchdog {
     const send = (pids: readonly number[], value: NodeJS.Signals) => { for (const pid of pids) if (same(pid)) try { signal(pid, value); } catch {} };
     try {
       send(engine, "SIGTERM");
-      const closing = browser.size ? this.#options.closeBrowsers?.(botId).catch(() => undefined) : undefined;
+      // The browser closes on its own time (it waits for the stopped turn to let it go): the next look at every other bot
+      // does not wait for it.
+      const closing = browser.size && this.#options.closeBrowsers ? this.#options.closeBrowsers(botId).catch(() => undefined) : Promise.resolve();
+      if (browser.size && !this.#options.closeBrowsers) send([...browser], "SIGTERM");
       await new Promise((resolve) => { const timer = setTimeout(resolve, this.#options.graceMs ?? STOP_GRACE_MS); timer.unref?.(); });
       send(engine, "SIGKILL");
-      await closing;
-      // A browser that would not close (a turn still held it after its engine was gone) goes as the engine did.
       if (browser.size && !this.#options.closeBrowsers) send([...browser], "SIGKILL");
-    } finally { this.#stopping.delete(botId); }
+      this.#closing = closing.finally(() => this.#stopping.delete(botId));
+    } catch { this.#stopping.delete(botId); }
     return stop;
   }
 
@@ -187,6 +197,9 @@ export class BotMemoryWatchdog {
     const when = pid === undefined ? undefined : this.#stoppedPids.get(pid);
     return when !== undefined && at - when <= EXPLAIN_FOR_MS;
   }
+
+  /** Resolves once the last stop's browser close has finished: for tests. */
+  closed(): Promise<unknown> { return this.#closing; }
 
   /** Bots stopped since the server started. */
   stops(): number { return this.#count; }
