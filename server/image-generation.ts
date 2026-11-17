@@ -29,11 +29,13 @@ export interface ImageRequest {
   prompt: string;
   aspect?: ImageAspect;
   draft?: boolean;
+  /** An animated GIF, from a GPT-Image-2.6 model only. */
+  gif?: { frames?: number; frameDurationMs?: number };
 }
 
 export interface GeneratedImage {
   bytes: Buffer;
-  mime: "image/png" | "image/jpeg" | "image/webp";
+  mime: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
 }
 
 export interface GeneratedSlotImage extends GeneratedImage, ImageSlot {
@@ -208,8 +210,14 @@ export async function generateImageWith(
   const apiKey = provider.key(cfg)?.trim();
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
-  const complexity = supportsImageComplexity(slot) ? cfg.imageGen?.complexity : undefined;
-  const body = { model: slot.model, prompt: request.prompt, ...provider.body(request), ...(complexity && { complexity }) };
+  const gpt26 = supportsImageComplexity(slot);
+  if (request.gif && !gpt26) fail("Animated GIFs need a GPT-Image-2.6 model (Sunburst or Flare) on OpenAI", 409, true);
+  const complexity = gpt26 ? cfg.imageGen?.complexity : undefined;
+  const { frames, frameDurationMs } = request.gif ?? {};
+  const gif = request.gif && {
+    output_format: "gif", ...(frames && { frame_count: frames }), ...(frameDurationMs && { frame_duration_ms: frameDurationMs }),
+  };
+  const body = { model: slot.model, prompt: request.prompt, ...provider.body(request), ...(complexity && { complexity }), ...gif };
 
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const cancelled = () => cancel?.aborted === true && !timeoutSignal.aborted;
@@ -280,7 +288,7 @@ export async function generateImageWith(
   }
   try {
     const image = decodeGeneratedImage(encoded);
-    if (image.mime === "image/gif") throw new Error("unsupported image format");
+    if (image.mime === "image/gif" && !request.gif) throw new Error("unsupported image format");
     return { bytes: image.bytes, mime: image.mime };
   } catch {
     fail(`${provider.name} returned invalid or oversized image data; expected PNG, JPEG, or WebP`, 502);

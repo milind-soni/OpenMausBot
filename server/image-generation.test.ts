@@ -56,6 +56,29 @@ describe("complexity", () => {
   });
 });
 
+describe("animated GIF", () => {
+  const GIF = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+  const gifResponse = () => new Response(JSON.stringify({ data: [{ b64_json: GIF.toString("base64") }] }), { status: 200 });
+  const cfg = (model: string) => ({ imageGen: { key: "openai-secret", primary: { provider: "openai" as const, model } } });
+
+  it("asks a GPT-Image-2.6 model for a gif with its frame settings and returns it", async () => {
+    const fetchMock = vi.fn(async () => gifResponse());
+    const image = await generateImage(cfg("gpt-image-2.6-flare"), { prompt: "owl", gif: { frames: 6, frameDurationMs: 100 } }, { fetchImpl: fetchMock });
+    expect(image.mime).toBe("image/gif");
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body))).toMatchObject({ output_format: "gif", frame_count: 6, frame_duration_ms: 100 });
+  });
+
+  it("refuses other models before any request", async () => {
+    const fetchMock = vi.fn(async () => gifResponse());
+    await expect(generateImage(cfg("gpt-image-2"), { prompt: "owl", gif: {} }, { fetchImpl: fetchMock })).rejects.toThrow(/GPT-Image-2.6/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still rejects a gif nobody asked for", async () => {
+    await expect(generateImage(cfg("gpt-image-2.6-flare"), { prompt: "owl" }, { fetchImpl: vi.fn(async () => gifResponse()) })).rejects.toThrow(/invalid or oversized/);
+  });
+});
+
 describe("provider requests", () => {
   it("sends a Gemini key only to Google's OpenAI-compatible image route", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => imageResponse());

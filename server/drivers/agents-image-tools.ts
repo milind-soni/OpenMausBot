@@ -23,6 +23,9 @@ export const IMAGE_TOOL_DEFINITIONS = [
       properties: {
         prompt: { type: "string", minLength: 1, maxLength: IMAGE_PROMPT_MAX_CHARS, description: "What the image shows: subject, setting, style, lighting." },
         aspect: { type: "string", enum: ["1:1", "16:9", "9:16"], description: "Shape; square when omitted." },
+        format: { type: "string", enum: ["gif"], description: "gif makes an animated GIF; only GPT-Image-2.6 models on OpenAI can." },
+        frames: { type: "integer", minimum: 2, maximum: 16, description: "GIF frame count; 9 when omitted." },
+        frameDurationMs: { type: "integer", minimum: 20, maximum: 2000, description: "GIF milliseconds per frame; 200 when omitted." },
         provider: { type: "string", enum: ["openai", "xai", "gemini", "openrouter", "custom"], description: "Only when the person named one; it must be their base or backup." },
       },
       required: ["prompt"],

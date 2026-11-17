@@ -1230,6 +1230,25 @@
             ],
             "description": "Shape; square when omitted."
           },
+          "format": {
+            "type": "string",
+            "enum": [
+              "gif"
+            ],
+            "description": "gif makes an animated GIF; only GPT-Image-2.6 models on OpenAI can."
+          },
+          "frames": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 16,
+            "description": "GIF frame count; 9 when omitted."
+          },
+          "frameDurationMs": {
+            "type": "integer",
+            "minimum": 20,
+            "maximum": 2000,
+            "description": "GIF milliseconds per frame; 200 when omitted."
+          },
           "provider": {
             "type": "string",
             "enum": [
