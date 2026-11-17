@@ -1,5 +1,5 @@
-// Kimi Code: Moonshot's `kimi acp` on the Kimi Code subscription login
-// (~/.kimi-code/credentials), not a Moonshot API key. Verified on kimi-code 0.29.1.
+// Kimi Code 2.5.3 ignores the global -m option when opening an ACP session;
+// its model config option selects both subscription and configured API providers.
 import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -560,6 +560,7 @@ const support: AcpSupport = {
 
   // -m is a global commander option and must precede `acp` (0.29.1).
   resolveTurnModel: (model, env) => (model ? ensureKimiInjectAlias(model, env) : model),
+  selectModel: { configId: "model" },
   spawnArgs: (_config, turn) => {
     const model = turn.model;
     return [...(model ? ["-m", model] : []), "acp"];

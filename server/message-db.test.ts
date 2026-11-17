@@ -18,6 +18,7 @@ import { closeMessageDb,
   optionCardsForTools,
   logNotification,
   openRescueMessages,
+  LATEST_SAID_BY_BOT_SQL,
   latestSaidByBot,
   markNotificationLogRead,
   readMessageText,
@@ -279,6 +280,8 @@ describe("message-db", () => {
       { threadId: "room", messageId: "r1", at: now - 2 * hour, head: "I can take the deploy" },
     ]);
     expect(latestSaidByBot(["dm", "room"], "me", now - 48 * hour, 1).map((row) => row.threadId)).toEqual(["dm"]);
+    expect(latestSaidByBot(["dm", "dm", "room", "dm"], "me", now - 48 * hour).map((row) => row.threadId)).toEqual(["dm", "room"]);
+    expect(latestSaidByBot(["dm", "dm", "room"], "me", now - 48 * hour, 2).map((row) => row.threadId)).toEqual(["dm", "room"]);
     expect(latestSaidByBot([], "me", 0)).toEqual([]);
   });
 
@@ -487,18 +490,11 @@ describe("messages_thread_at", () => {
       .map((row) => String((row as { detail: string }).detail))
       .join("\n");
     try {
-      // Same statements as latestSaidByBot and latestMessageAts.
-      const said = planOf(
-        "SELECT thread_id, id, at, head FROM (" +
-          "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head, " +
-          "ROW_NUMBER() OVER (PARTITION BY m.thread_id ORDER BY m.at DESC) AS rn " +
-          "FROM messages m " +
-          "WHERE m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (?, ?) " +
-          "AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)" +
-          ") WHERE rn = 1 ORDER BY at DESC LIMIT ?",
-      );
+      const said = planOf(LATEST_SAID_BY_BOT_SQL.replace("json_each(?)", "json_each('[\"thread-0\"]')"));
       const ats = planOf("SELECT value AS thread_id, (SELECT MAX(at) FROM messages  WHERE thread_id = value ) AS at FROM json_each(?)");
-      expect(said).toContain("messages_thread_at");
+      expect(said).toContain("SEARCH m2 USING INDEX messages_thread_at");
+      expect(said).toContain("SEARCH m USING INDEX sqlite_autoindex_messages_1");
+      expect(said.split("\n")).not.toContain("SCAN m");
       expect(ats).toContain("messages_thread_at");
     } finally {
       raw.close();

@@ -3799,5 +3799,19 @@
   "remote.tailscale.needsApproval": "Cet ordinateur attend d'être approuvé sur votre réseau Tailscale. Approuvez-le dans la console d'administration Tailscale, puis réessayez.",
   "together.switch.title": "Cet ordinateur et Mon Cloud ensemble",
   "together.switch.line": "Désactivé par défaut. Les bots du Cloud et ceux de cet ordinateur s'affichent dans une seule liste, et chacun s'ouvre là où il se trouve.",
-  "together.switch.failed": "Impossible d'enregistrer. Réessayez."
+  "together.switch.failed": "Impossible d'enregistrer. Réessayez.",
+  "imageGen.complexity.label": "Niveau de détail",
+  "imageGen.complexity.help": "Le niveau de détail des images GPT-Image-2.6. Plus bas, c'est plus simple et plus rapide.",
+  "imageGen.complexity.low": "Faible",
+  "imageGen.complexity.medium": "Moyen",
+  "imageGen.complexity.high": "Élevé",
+  "activity.tool.team.editImage": "Modifier l'image",
+  "voice.deepseek.sharedKey": "DeepSeek utilise la clé DeepSeek déjà présente dans cette installation.",
+  "voice.deepseek.description": "Lit les réponses et les messages vocaux avec la voix Stella ou Tide de DeepSeek. En choisissant DeepSeek, la dictée et les appels à tour de rôle vous entendent aussi via la reconnaissance vocale de DeepSeek, jusqu’à environ deux minutes par enregistrement. Utilise votre clé API DeepSeek et est facturé par DeepSeek.",
+  "voice.deepseek.missingKey": "Ajoutez une clé API DeepSeek dans Paramètres → Clés API sur l’hôte pour utiliser la voix DeepSeek.",
+  "voice.deepseek.stella": "Stella (féminine)",
+  "voice.deepseek.tide": "Tide (masculine)",
+  "call.capability.turnsNeedDeepSeekKey": "Ajoutez une clé DeepSeek pour parler à tour de rôle pendant les appels",
+  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek est votre voix : les appels à tour de rôle vous entendent donc via la reconnaissance vocale de DeepSeek. Ajoutez une clé DeepSeek dans Paramètres → Clés API.",
+  "serverError.voice.deepseekKeyRequired": "Ajoutez une clé API DeepSeek dans Paramètres → Clés API pour parler à vos bots avec la voix DeepSeek."
 }

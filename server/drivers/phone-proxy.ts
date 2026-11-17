@@ -168,6 +168,15 @@ const NO_FIELD_TEXT = "No text field is taking input, so nothing was cleared or 
 // `dumpsys input_method` prints the current keyboard's own state under a header that names it (seen on Android 9).
 const adbKeyboardShown = (inputState: string) =>
   /\bmIsInputViewShown=(\w+)/.exec(inputState.split("Input method service state for com.android.adbkeyboard.AdbIME@")[1]?.split("Input method service state for ")[0] ?? "")?.[1] === "true";
+// The same output says `mInputShown=false` until a field's keyboard is up, 0.5 to 0.8 s after the tap on Android 9.
+const noKeyboardUp = (inputState: string) => /\bmInputShown=false\b/.test(inputState);
+
+async function waitForInputState(shell: Shell, ready: (inputState: string) => boolean): Promise<void> {
+  for (let read = 1; !ready(await shell("dumpsys", "input_method")); read += 1) {
+    if (read === 10) throw new Error(NO_FIELD_TEXT);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
 
 export async function typePhoneText(shell: Shell, text: string, clear = false, unclaimed: Shell = shell): Promise<string> {
   if (!text || [...text].length > 256) throw new Error("Android text must be 1 to 256 characters");
@@ -183,14 +192,13 @@ export async function typePhoneText(shell: Shell, text: string, clear = false, u
       ? "A field can be cleared only when ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and switched on in the phone's keyboard list. Ask the person to set it up, or call type_text without clear and remove the old text with press delete."
       : "Only letters, digits, spaces and _.,@- can be typed until ADBKeyBoard (https://github.com/senzhk/ADBKeyBoard) is installed and switched on in the phone's keyboard list. Ask the person to set it up, or type only those characters.");
   }
+  // A keyboard switch sent while a tapped field's keyboard is still coming up can leave the field with no keyboard at all (seen on Android 9).
+  await waitForInputState(shell, (inputState) => !noKeyboardUp(inputState));
   // Known open risk: a proxy killed between the switch and the restore leaves the phone on ADBKeyBoard.
   try {
     await shell("ime", "set", ADB_KEYBOARD);
     // `ime set` returns before the keyboard is up (ADBKeyBoard took 0.2 to 0.4 s on Android 9), and it stays down while no field takes input.
-    for (let read = 1; !adbKeyboardShown(await shell("dumpsys", "input_method")); read += 1) {
-      if (read === 10) throw new Error(NO_FIELD_TEXT);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
+    await waitForInputState(shell, adbKeyboardShown);
     return await sendThroughAdbKeyboard(shell, text, clear);
   } finally {
     await unclaimed("ime", "set", keyboard).catch(() => {

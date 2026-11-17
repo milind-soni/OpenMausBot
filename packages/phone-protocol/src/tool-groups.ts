@@ -10,7 +10,7 @@ export const TOOL_GROUP_LABELS: Readonly<Record<ToolGroup, string>> = {
 
 /** About how many tokens each group's tool definitions add to every request where the workspace has the group. */
 export const TOOL_GROUP_TOKENS: Readonly<Record<ToolGroup, number>> = {
-  meetings: 900, data: 1600, pages: 1500, images: 200, email: 1300,
+  meetings: 900, data: 1600, pages: 1500, images: 480, email: 1300,
 };
 
 /** The agents server's environment variable that carries `toolsOff`: group ids joined with commas. */

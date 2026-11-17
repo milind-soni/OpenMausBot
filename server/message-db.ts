@@ -899,20 +899,22 @@ export interface ThreadLatest {
   head: string;
 }
 
+/** CROSS JOIN pins the order: the list, then messages_thread_at per thread, then the primary key (thread_id, id). `id` alone has no index. */
+export const LATEST_SAID_BY_BOT_SQL =
+  "WITH latest(thread_id, id) AS MATERIALIZED (" +
+  "SELECT j.value, (SELECT m2.id FROM messages m2 " +
+  "WHERE m2.thread_id = j.value AND m2.kind = 'text' AND m2.role = 'bot' AND m2.text IS NOT NULL AND m2.at >= ? " +
+  "AND (json_extract(m2.json, '$.from.botId') IS NULL OR json_extract(m2.json, '$.from.botId') = ?) " +
+  "ORDER BY m2.at DESC LIMIT 1) FROM json_each(?) j) " +
+  "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head " +
+  "FROM latest CROSS JOIN messages m ON m.thread_id = latest.thread_id AND m.id = latest.id " +
+  "WHERE latest.id IS NOT NULL ORDER BY m.at DESC LIMIT ?";
+
 export function latestSaidByBot(threadIds: readonly string[], botId: string, since: number, limit = 20): ThreadLatest[] {
   if (!threadIds.length) return [];
-  const placeholders = threadIds.map(() => "?").join(", ");
   const rows = db()
-    .prepare(
-      "SELECT thread_id, id, at, head FROM (" +
-        "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head, " +
-        "ROW_NUMBER() OVER (PARTITION BY m.thread_id ORDER BY m.at DESC) AS rn " +
-        "FROM messages m " +
-        `WHERE m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (${placeholders}) ` +
-        "AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)" +
-        ") WHERE rn = 1 ORDER BY at DESC LIMIT ?",
-    )
-    .all(since, ...threadIds, botId, limit) as Array<{ thread_id: string; id: string; at: number; head: string }>;
+    .prepare(LATEST_SAID_BY_BOT_SQL)
+    .all(since, botId, JSON.stringify([...new Set(threadIds)]), limit) as Array<{ thread_id: string; id: string; at: number; head: string }>;
   return rows.map((row) => ({
     threadId: row.thread_id,
     messageId: row.id,
