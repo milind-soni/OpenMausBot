@@ -73,7 +73,7 @@ describe("the Teams popup", () => {
     expect(faces.map(face => face.style.getPropertyValue("--face"))).toEqual(["0", "1", "2", "3"]);
     for (const face of faces) expect(face.className).toContain("teams-face-in");
     expect(avatars.at(-1)?.animated).toBe(true);
-    const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
+    const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8").replace(/\r\n/g, "\n");
     const ms = (pattern: RegExp) => Number(pattern.exec(css)![1]);
     const card = ms(/\.teams-card-in \{ animation: teams-card-in (\d+)ms/), face = ms(/\.teams-face-in \{ animation: teams-face-in (\d+)ms/);
     const [, start, step] = /animation-delay: calc\((\d+)ms \+ var\(--face, 0\) \* (\d+)ms\)/.exec(css)!.map(Number);
@@ -82,7 +82,7 @@ describe("the Teams popup", () => {
   });
 
   it("with reduced motion nothing moves: no entrance, no faces flying in, a still bot", async () => {
-    const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8");
+    const css = readFileSync(join(process.cwd(), "src", "styles.css"), "utf8").replace(/\r\n/g, "\n");
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\n  \.teams-card-in, \.teams-face-in \{ animation: none; \}/);
     expect(css).toMatch(/:root\[data-reduced-motion="true"\] \.teams-card-in,\n:root\[data-reduced-motion="true"\] \.teams-face-in \{\n  animation: none !important;/);
     document.documentElement.dataset.reducedMotion = "true";

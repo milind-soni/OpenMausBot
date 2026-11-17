@@ -36,7 +36,7 @@ export interface HistoryFacts {
 }
 
 export type HistoryMark = "teams" | "cloud" | "boat" | "modelgo" | "grok" | "product-hunt";
-/** A popup the page opens again (AnnouncementReplay). */
+/** A popup the Announcements page opens again. */
 export type HistoryModal = "teams" | "whats-new" | "grok-move";
 export type HistoryAction = { open_url: string } | { email: string } | { cloud_add: CloudSource } | { cloud_how_to: true };
 export interface HistoryButton { label: LocaleKey; action: HistoryAction }
