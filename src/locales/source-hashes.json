@@ -36787,7 +36787,12 @@
       "templateImport.notATemplate": "750c5a704ea91da9cbdd9206f63c187546979bd60ddde1d98beb188b1753cbcd",
       "sidebar.addDepartment": "8854f21e30a4d47fd0c717c63e7361f5fc6dda6f483f33d24f4ee4bae7996844",
       "sidebar.import": "ea94509e38cf6d6427db3a1b5a3b5816cba1e8f89b08f9739f6077ade188163c",
-      "team.shareDepartment": "29887a5ff9846ccc23327565a07e17fa6dcaea6211f1898ae825f84ae38f4223"
+      "team.shareDepartment": "29887a5ff9846ccc23327565a07e17fa6dcaea6211f1898ae825f84ae38f4223",
+      "room.queue.busyIn": "57c8a5a630dcea31ceae7b194162bcaaa5dcef4f7bb24eeaf532f5143cc791c7",
+      "room.queue.busyElsewhere": "ecdbe34c1cca24d6d0365a04bf672203b437647795ac4e358fbcf671ef345b97",
+      "room.queue.busyInAfter": "a944c189ff63871adf83e91509d65f6ec8044478de1969f5a8874a11d2f15847",
+      "room.queue.busyElsewhereAfter": "3432832abb792772c22e30806a674a4edcd22f660ee53d47ba4e2075121a79e8",
+      "room.queue.aTeammate": "1ca7804e31164a622443afee44c7ab79a97c1fb2e169b4df211bff0c10bd4a30"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

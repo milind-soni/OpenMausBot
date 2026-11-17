@@ -239,6 +239,15 @@ The e2e test launches the isolated scripted fixture with the flag set to
 a gate, and checks the Lead's receipts and the room's `group` frames (2 of 3 and 3 of 3, both waiting on
 the first), then that the line clears once all three settle.
 
+A member already running elsewhere is named: while it speaks in another
+room (or works in a busy thread of its own), its queued job here carries
+`busyIn` and the room shows "Busy in <room> · queued …" ("another
+conversation" when the viewer can't see that room).
+
+```sh
+pnpm exec vitest run server/room-queue.e2e.test.ts -t "names the other room"
+```
+
 ### Parallel room jobs (on by default)
 
 Unless `features.parallelRoomJobs` is `false` (`PATCH /api/config` with
