@@ -1,4 +1,4 @@
-import type { TemplateCard, TemplateDetails } from "../../shared/share-card";
+import type { TeamTemplate, TemplateCard, TemplateDetails, TemplateRepoPublish } from "../../shared/share-card";
 import { SKILL_FILE_LIMITS, skillFilePathProblem } from "../../shared/skill-files";
 import { t } from "./i18n";
 import { api, type Action, type Bot, type Group } from "@/state/store";
@@ -32,7 +32,18 @@ export const templateDetails = (id: string) => api<{ card: TemplateCard; details
 export const publishTemplate = (id: string) => api<TemplateCard>(`/api/share/${encodeURIComponent(id)}/publish`, post({}));
 export const deleteTemplate = (id: string) => api<{ ok: true }>(`/api/share/${encodeURIComponent(id)}`, { method: "DELETE" });
 
-export type ImportSource = { url: string } | { path: string } | { files: Record<string, string> };
+export type ImportSource = { url: string } | { path: string } | { files: Record<string, string> } | { library: string };
+
+/** A Team Cloud's own templates, for its owner and admins. */
+export const teamTemplates = () => api<{ team: string; templates: TeamTemplate[] }>("/api/share/library");
+export const addToTeamTemplates = (id: string) =>
+  api<{ template: TeamTemplate; replaced: boolean }>(`/api/share/${encodeURIComponent(id)}/library`, post({}));
+export const removeTeamTemplate = (slug: string) => api<{ ok: true }>(`/api/share/library/${encodeURIComponent(slug)}`, { method: "DELETE" });
+
+/** Whether a GitHub connection is there to publish to the person's own repository through. */
+export const githubConnection = () => api<{ connected: boolean; error?: string }>("/api/share/github");
+export const publishToRepo = (id: string, target: { repo: string; folder?: string; direct?: boolean }) =>
+  api<TemplateRepoPublish>(`/api/share/${encodeURIComponent(id)}/publish-repo`, post(target));
 
 export const previewImport = (source: ImportSource) =>
   api<{ details: TemplateDetails }>("/api/share/import?preview=1", post(source)).then((answer) => answer.details);
