@@ -144,8 +144,8 @@ podman_compose() {
       shift 2
       podman exec "$SERVER_UNIT" "$@" </dev/null
       ;;
-    # The container's own lines, not systemd's about it.
-    logs) journalctl --user -u "$SERVER_UNIT.service" -t "$SERVER_UNIT" -n 40 -o cat --no-pager ;;
+    # The container's own lines: not systemd's about it, nor the container id Podman prints as it starts one.
+    logs) journalctl --user -u "$SERVER_UNIT.service" -t "$SERVER_UNIT" -n 40 -o cat --no-pager | grep -Ev '^[0-9a-f]{64}$' ;;
     *) return 1 ;;
   esac
 }
