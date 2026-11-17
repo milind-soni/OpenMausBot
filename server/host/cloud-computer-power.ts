@@ -4,7 +4,9 @@
 import * as boat from "../boat.ts";
 import { boatCreateRecoverySnapshot } from "../boat-create-idempotency.ts";
 import { BOAT_DELETING, BOAT_DELETION_FINISHED, hasPendingBoatDeletionForBot } from "../boat-delete-journal.ts";
-import { boatReadiness, type BoatReadiness } from "../boat-ready.ts";
+import { boatReadiness, type BoatAnswer, type BoatReadiness } from "../boat-ready.ts";
+import type { WakeTimeoutOutcome } from "../boat-recovery.ts";
+import { withinBudget } from "../auto-vm-claims.ts";
 import { backgroundCommandRunning } from "../cloud-computer-background.ts";
 import { ComputerIdleTimer } from "../computer-idle.ts";
 import type { AppConfig } from "../config.ts";
@@ -44,6 +46,18 @@ export interface CloudComputerPowerDeps {
   broadcast(payload: Record<string, unknown>): void;
   log(line: string): void;
   readiness?: Pick<BoatReadiness, "awaitAnswer">;
+  /** A computer woken or created for a turn stayed silent past the wake's patience: replace it, within every guard
+   * (server/boat-recovery.ts). Absent, such a computer is only reported, as with automatic replacement switched off. */
+  wakeTimedOut?(owner: string, boxId: string): Promise<WakeTimeoutOutcome>;
+}
+
+/** How a turn's start went, for the line the bot hears meanwhile. */
+export interface CloudComputerReadyHooks {
+  onRestoring?(): void;
+  /** Woken and silent: the wait goes on. */
+  onWaking?(): void;
+  /** Silent past the wake's patience, and being replaced with a new computer. */
+  onReplacing?(): void;
 }
 
 export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
@@ -187,22 +201,58 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     }
   }
 
-  /** After a start, before the turn's first call is sent: the computer has to answer a command, not only be reported
-   * ready. One that answered moments ago is not asked again. The failure is passing, so the turn's next call tries again. */
-  async function answering(boxId: string, opts: { woke?: boolean; onRestoring?: () => void } = {}): Promise<void> {
+  const notAnswering = (answer: Extract<BoatAnswer, { ok: false }>) =>
+    Object.assign(new Error(answer.phase === "restoring" ? CLOUD_COMPUTER_DISK_NOT_BACK_YET : CLOUD_COMPUTER_NOT_ANSWERING_YET), { status: 503, transient: true });
+
+  /** Waits for the computer to answer a command, not only be reported ready; one that answered moments ago is not asked
+   * again. After a wake the wait is patient (READY_WAIT.wakePatienceMs, longer while the provider says its disk is restored). */
+  async function awaitAnswer(boxId: string, opts: { woke?: boolean } & CloudComputerReadyHooks): Promise<BoatAnswer & { woke: boolean }> {
+    const woke = opts.woke === true || unheard.has(boxId);
     const answer = await readiness.awaitAnswer(cfg, boxId, {
-      woke: opts.woke === true || unheard.has(boxId),
-      onPhase: (phase) => { if (phase === "restoring") opts.onRestoring?.(); },
+      woke,
+      onPhase: (phase) => { if (phase === "restoring") opts.onRestoring?.(); else opts.onWaking?.(); },
     });
-    if (!answer.ok) {
-      throw Object.assign(new Error(answer.phase === "restoring" ? CLOUD_COMPUTER_DISK_NOT_BACK_YET : CLOUD_COMPUTER_NOT_ANSWERING_YET), { status: 503, transient: true });
+    if (answer.ok) unheard.delete(boxId);
+    return { ...answer, woke };
+  }
+
+  /** After a start, before the turn's first call is sent. The failure is passing, so the turn's next call tries again. */
+  async function answering(boxId: string, opts: { woke?: boolean; onRestoring?: () => void } = {}): Promise<void> {
+    const answer = await awaitAnswer(boxId, opts);
+    if (!answer.ok) throw notAnswering(answer);
+  }
+
+  /** A bot's own computer for a turn: started (woken, or created) within `budgetMs`, then waited on until it answers. One
+   * woken or created here that stays silent past the wake's patience is replaced, once, and the turn goes on on the new
+   * one; the old one's files are gone, which the recovery tells the bot and the person. Null when `existingOnly` and the
+   * bot has none. */
+  async function ready(bot: BotRecord, turn: TurnOwner, opts: { existingOnly?: boolean; budgetMs: number } & CloudComputerReadyHooks) {
+    for (let replaced = false; ; replaced = true) {
+      // The replacement stands in for the computer the bot already had, so it is made even where a first one would not be.
+      const machine = await withinBudget(start(bot, turn, { existingOnly: !replaced && opts.existingOnly, budgetMs: opts.budgetMs }), opts.budgetMs, CLOUD_COMPUTER_DID_NOT_START);
+      if (!machine) {
+        if (replaced) throw new Error("the cloud computer did not answer after waking, so it was replaced, but its replacement could not be found. Trying again later is fine");
+        return null;
+      }
+      const boxId = machine.id as string;
+      const answer = await awaitAnswer(boxId, opts);
+      if (answer.ok) return machine;
+      // A computer this process did not wake keeps today's short wait: the recovery restarts it, then replaces it.
+      if (!answer.woke || !deps.wakeTimedOut) throw notAnswering(answer);
+      if (replaced) throw new Error("the cloud computer did not answer after waking, so it was replaced with a new one, but the new one did not answer in time either. Trying again later is fine");
+      opts.onReplacing?.();
+      const outcome = await deps.wakeTimedOut(bot.id, boxId);
+      if (outcome.kind === "answers") return machine;
+      if (outcome.kind === "off") throw notAnswering(answer);
+      if (outcome.kind === "kept") throw new Error(outcome.why);
+      deps.log(`cloud computer ${bot.id}: ${boxId} ${outcome.kind === "gone" ? "is gone" : "was replaced"} after it did not answer its wake; starting a new one for the turn`);
     }
-    unheard.delete(boxId);
   }
 
   return {
     start,
     answering,
+    ready,
     attached,
     released,
     used,

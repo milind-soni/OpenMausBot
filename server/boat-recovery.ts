@@ -1,6 +1,8 @@
-// A cloud computer that stopped answering: waited for while the provider is still restoring its disk, restarted once, then
-// replaced (its deletion frees the plan's place, and the next use creates a new one) or, with automatic replacement off,
-// left for the person. The bot and the person are told once. Nothing here asks the person anything.
+// A cloud computer that stopped answering: waited for while the provider is still restoring its disk, restarted once,
+// then replaced (its deletion frees the plan's place, and the next use creates a new one) or, with automatic replacement
+// switched off, left for the person. A computer woken for a turn that stays silent past the wake's patience is replaced
+// at once (wakeTimedOut), so the turn goes on on a new one. The bot and the person are told once. Nothing here asks the
+// person anything.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -46,14 +48,14 @@ interface Replacement {
   toldPerson?: true;
 }
 
-/** Whether a dead computer is deleted and replaced without the person. Off unless OMB_CLOUD_COMPUTER_AUTO_REPLACE is "1" or
- * config.json has `"features": {"cloudComputerAutoReplace": true}`; the environment, "1" or "0", wins. Off by default until
- * the provider confirms that deleting a computer whose host is unreachable is safe for the rest of the account. */
+/** Whether a dead or silent computer is deleted and replaced without the person. On unless OMB_CLOUD_COMPUTER_AUTO_REPLACE
+ * is "0" or config.json has `"features": {"cloudComputerAutoReplace": false}`; the environment, "1" or "0", wins. Off, a
+ * silent computer waits for the person's Replace computer, as before. */
 export function cloudComputerAutoReplace(cfg: Pick<AppConfig, "features">, env: NodeJS.ProcessEnv = process.env): boolean {
   const override = env.OMB_CLOUD_COMPUTER_AUTO_REPLACE?.trim();
   if (override === "1") return true;
   if (override === "0") return false;
-  return cfg.features?.cloudComputerAutoReplace === true;
+  return cfg.features?.cloudComputerAutoReplace !== false;
 }
 
 export interface BoatRecoveryDeps {
@@ -66,6 +68,8 @@ export interface BoatRecoveryDeps {
   eligible?(owner: string): boolean;
   /** A person is driving or viewing this owner's desktop now. */
   personActive?(owner: string): boolean;
+  /** A running turn of another bot holds this computer: it is never replaced by itself then. */
+  usedByOther?(owner: string, boxId: string): boolean;
   file?: string;
   now?: () => number;
   health?: BoatHealth;
@@ -82,6 +86,21 @@ export type RecoveryVerdict = "restart-failed" | "person-busy" | "restart-limite
 
 type Dead = { boxId: string; name: string };
 type ReplaceOutcome = "confirmed" | "pending" | "kept" | "held" | "waiting" | "capped" | "failed";
+
+/** What became of a computer that was woken for a turn and stayed silent past the wake's patience. `answers`: a last probe
+ * got through after all. `gone`: it no longer exists, so the next start makes a new one. `off`: automatic replacement is
+ * switched off, so nothing was done. `kept`: it was left as it is, and `why` says so in a few words for the turn. */
+export type WakeTimeoutOutcome = { kind: "answers" | "replaced" | "gone" | "off" } | { kind: "kept"; why: string };
+
+const KEPT_WHY: Partial<Record<ReplaceOutcome | "unreachable", string>> = {
+  capped: "it was already replaced recently, and MausBot replaces a bot's computer at most once an hour and three times a day",
+  held: "it could not be replaced by itself right now (a person or another bot is using it, or this installation already replaced computers in the last hour)",
+  failed: "replacing it failed: the old computer's deletion was not confirmed",
+  unreachable: "the cloud computer service itself can't be reached right now",
+  waiting: "the provider reports it broken, and it is replaced if it stays that way",
+};
+const keptWhy = (outcome: keyof typeof KEPT_WHY): WakeTimeoutOutcome =>
+  ({ kind: "kept", why: `the cloud computer did not answer after waking, and ${KEPT_WHY[outcome] ?? "it was left as it is"}. Nothing else was changed; trying again later is fine` });
 
 export function createBoatRecovery(deps: BoatRecoveryDeps) {
   const health = deps.health ?? boatHealth;
@@ -229,13 +248,14 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
         return "held";
       }
       if (!fenced) {
-        if (personBusy(owner, target.boxId)) { needsPerson(owner, target.boxId); return "held"; }
+        if (personBusy(owner, target.boxId) || deps.usedByOther?.(owner, target.boxId) === true) { needsPerson(owner, target.boxId); return "held"; }
         if (opts.dead && !deadConfirmed(target.boxId)) { needsPerson(owner, target.boxId); return "waiting"; }
         if (!(await listWorks(cfg))) { unreachable(owner, target.boxId); return "held"; }
         const automatic = entries.filter((entry) => !entry.manual && entry.boxId !== target.boxId && now() - entry.at < HOUR_MS);
-        if (automatic.filter((entry) => entry.owner === owner).length >= DEAD_COMPUTER.replacementsPerHour) {
+        const today = entries.filter((entry) => !entry.manual && entry.boxId !== target.boxId && entry.owner === owner && now() - entry.at < DAY_MS);
+        if (automatic.filter((entry) => entry.owner === owner).length >= DEAD_COMPUTER.replacementsPerHour || today.length >= DEAD_COMPUTER.replacementsPerDay) {
           tellOnce(owner, target.boxId, "capped", "capped");
-          deps.log(`cloud computer ${owner}: ${target.boxId} was already replaced in the last hour; left as it is`);
+          deps.log(`cloud computer ${owner}: ${target.boxId} was already replaced in the last hour, or three times today; left as it is`);
           return "capped";
         }
         if (automatic.length >= DEAD_COMPUTER.installationDeletesPerHour) {
@@ -272,9 +292,10 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
   }
 
   /** A fresh probe that got no answer, with the provider's list working; false when that is not so (the outcome is
-   * reported). `witness`: before a delete, another computer of this installation must have answered as well. A restart
-   * keeps the files, so the provider's own list answering is enough for it: an installation with one computer in use has
-   * no witness, and would otherwise never be restarted. */
+   * reported). `witness`: before a delete, the installation's other computers must not all be silent as well: that is
+   * the provider's own outage, which a new computer would not fix. An installation with no other computer in use has no
+   * one to compare against; its list answering, a restart that did not help and the hourly and daily limits stand for
+   * that, or a lone computer would never be replaced. */
   async function stillDown(owner: string, boxId: string, cfg: AppConfig, witness = true): Promise<boolean> {
     const probe = await boat.probeBoat(cfg, boxId);
     if (probe !== false) {
@@ -283,14 +304,16 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
       return false;
     }
     if (!(await listWorks(cfg))) { unreachable(owner, boxId); return false; }
-    // An installation whose other computers do not answer either cannot tell a dead machine from its own outage.
-    if (witness && !health.otherAnsweredWithin(boxId, DEAD_COMPUTER.witnessMs)) { needsPerson(owner, boxId); return false; }
+    if (witness && !health.otherAnsweredWithin(boxId, DEAD_COMPUTER.witnessMs) && health.othersSilentWithin(boxId, DEAD_COMPUTER.witnessMs)) {
+      unreachable(owner, boxId);
+      return false;
+    }
     return true;
   }
 
-  /** After the restart: replaced once the provider says the machine is gone, or after DEAD_COMPUTER.replaceAfterMs of no
-   * answers while another computer of this installation answers (else the provider itself may be down). */
-  async function decide(owner: string, boxId: string): Promise<void> {
+  /** After the restart: replaced once the provider says the machine is gone, at once when the restart's own wake got no
+   * answer in its patience (`restartFailed`), or else after DEAD_COMPUTER.replaceAfterMs of no answers. */
+  async function decide(owner: string, boxId: string, restartFailed = false): Promise<void> {
     timers.delete(owner);
     const cfg = deps.cfg();
     const since = health.notRespondingSince(boxId);
@@ -299,7 +322,7 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
     if (!seen.identity || !(await boat.boatNameMatchesBot(owner, seen.identity.name))) return clear(owner, boxId);
     if (seen.identity.state === "error") return void await replace(owner, seen.identity, { dead: true });
     if (since === null || !READY.has(seen.identity.state)) return clear(owner, boxId);
-    const left = since + DEAD_COMPUTER.replaceAfterMs - now();
+    const left = restartFailed ? 0 : since + DEAD_COMPUTER.replaceAfterMs - now();
     if (left > 0) {
       set(owner, boxId, "not-responding");
       const timer = setTimeout(() => void lane(owner, () => decide(owner, boxId)).catch((error) => deps.log(`cloud computer ${owner}: ${String(error)}`)), left);
@@ -372,8 +395,36 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
       }
       judge(owner, boxId, "restart-failed");
       deps.log(`cloud computer ${owner}: ${boxId} still does not answer after a restart`);
+      return decide(owner, boxId, restarted === "no-answer");
     }
     return decide(owner, boxId);
+  }
+
+  /** A computer woken, created or restarted for a turn that did not answer in the wake's patience. Every guard of a
+   * replacement holds; one that is merely slow but answers a last probe is kept. */
+  async function wakeTimedOut(owner: string, boxId: string): Promise<WakeTimeoutOutcome> {
+    if (!autoReplace()) return { kind: "off" };
+    if (!eligible(owner)) { needsPerson(owner, boxId); return keptWhy("held"); }
+    const cfg = deps.cfg();
+    const seen = await boat.inspectBoatIdentity(cfg, boxId);
+    if (!seen.available) { unreachable(owner, boxId); return keptWhy("unreachable"); }
+    if (!seen.identity || !(await boat.boatNameMatchesBot(owner, seen.identity.name))) return { kind: "gone" };
+    if (seen.identity.state !== "error") {
+      const probe = await boat.probeBoat(cfg, boxId);
+      if (probe !== false) {
+        if (probe) health.answered(boxId);
+        clear(owner, boxId);
+        return { kind: "answers" };
+      }
+      if (!(await listWorks(cfg))) { unreachable(owner, boxId); return keptWhy("unreachable"); }
+      if (!health.otherAnsweredWithin(boxId, DEAD_COMPUTER.witnessMs) && health.othersSilentWithin(boxId, DEAD_COMPUTER.witnessMs)) {
+        unreachable(owner, boxId);
+        return keptWhy("unreachable");
+      }
+    }
+    deps.log(`cloud computer ${owner}: ${boxId} did not answer within ${Math.round(READY_WAIT.wakePatienceMs / 60_000)} minutes of waking; replacing it`);
+    const outcome = await replace(owner, seen.identity, seen.identity.state === "error" ? { dead: true } : {});
+    return outcome === "confirmed" || outcome === "pending" ? { kind: "replaced" } : outcome === "kept" ? { kind: "answers" } : keptWhy(outcome);
   }
 
   const unsubscribe = health.onNotResponding((boxId) => {
@@ -431,6 +482,23 @@ export function createBoatRecovery(deps: BoatRecoveryDeps) {
       if (found?.boxId === boxId && found.state === "needs-person") return eligible(owner!) ? CLOUD_COMPUTER_NEEDS_PERSON : CLOUD_COMPUTER_TEAM_NOT_RESPONDING;
       return health.notRespondingSince(boxId) === null ? null : CLOUD_COMPUTER_NOT_RESPONDING;
     },
+    wakeTimedOut: (owner: string, boxId: string): Promise<WakeTimeoutOutcome> => lane(owner, () => wakeTimedOut(owner, boxId)),
+    /** Resolves once no restart or replacement of this computer is under way, or at `until`: a call waits that out instead
+     * of being refused at once, so a recovery in progress is not taken for one failure after another. */
+    async settle(boxId: string, until: number, signal?: AbortSignal): Promise<void> {
+      const owner = boat.boatOwnerOf(boxId);
+      if (!owner) return;
+      const underWay = () => {
+        const found = states.get(owner);
+        return retired.has(boxId) ? lanes.has(owner) : found?.boxId === boxId && recoveryUnderWay(found.state) && (lanes.has(owner) || timers.has(owner));
+      };
+      // `until` is the caller's own clock, the wall clock.
+      while (underWay() && Date.now() < until && !signal?.aborted && !closed) {
+        await Promise.race([lanes.get(owner)?.catch(() => undefined), wait(Math.max(1, Math.min(pollMs, until - Date.now())))]);
+      }
+    },
+    /** This computer was deleted by a replacement: the turn that used it goes on on the owner's new one. */
+    replaced: (boxId: string): boolean => retired.has(boxId),
     /** Told once, with the first call on the owner's computer after a replacement or a restart. */
     notice(boxId: string): string | null {
       const owner = boat.boatOwnerOf(boxId);

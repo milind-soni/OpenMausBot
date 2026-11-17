@@ -348,7 +348,8 @@ describe("a cloud computer starts only when the bot uses it", () => {
     .filter((frame: any) => frame.kind === "notify" && frame.notification?.botId === botId && frame.notification.kind === "notice")
     .map((frame: any) => frame.notification.body);
 
-  it("by default a computer whose machine is gone is never deleted by itself: the bot and the person are told once, and Replace computer replaces it", async () => {
+  it("with automatic replacement switched off, a computer whose machine is gone is never deleted by itself: the bot and the person are told once, and Replace computer replaces it", async () => {
+    await apiOk("PATCH", "/api/config", { features: { cloudComputerAutoReplace: false } });
     const bot = await cloudBot("Waiting");
     await apiOk("POST", `/api/bots/${bot.id}/computer/provision`);
     const dead = rows.at(-1)!;
@@ -376,11 +377,11 @@ describe("a cloud computer starts only when the bot uses it", () => {
     expect(creates()).toBe(made + 1);
     await finish(bot.id);
     expect(await recoveryLines(bot.id)).toHaveLength(1);
+    await apiOk("PATCH", "/api/config", { features: { cloudComputerAutoReplace: true } });
     await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 60_000);
 
-  it("with automatic replacement on, a computer whose machine is gone is replaced on its next use, and the bot and the person are told once", async () => {
-    await apiOk("PATCH", "/api/config", { features: { cloudComputerAutoReplace: true } });
+  it("by default, a computer whose machine is gone is replaced on its next use, and the bot and the person are told once", async () => {
     const bot = await cloudBot("Stranded");
     // Made from the panel, so no command has answered on it lately: one that has is kept for a few minutes.
     await apiOk("POST", `/api/bots/${bot.id}/computer/provision`);
@@ -413,7 +414,6 @@ describe("a cloud computer starts only when the bot uses it", () => {
     const line = "Stranded's cloud computer stopped responding, so MausBot replaced it with a new one. Files that were only on the old computer are gone.";
     expect(await recoveryLines(bot.id)).toEqual([`recovery: ${waiting}`, `recovery: ${line}`]);
     expect(inboxNotices(bot.id)).toEqual([waiting, line]);
-    await apiOk("PATCH", "/api/config", { features: { cloudComputerAutoReplace: false } });
     await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 60_000);
 

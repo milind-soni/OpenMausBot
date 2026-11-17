@@ -80,6 +80,21 @@ export function startAutoVmClaim(table: AutoVmClaimTable, threadId: string, gene
   slot.begin = begin;
 }
 
+/** The turn's cloud computer `replacedBoxId` was replaced: the slot claims again, which starts the owner's new computer,
+ * and this waits for that until `until`. The new computer's id once it answers; null while it is still starting (the
+ * claim goes on, and the turn's next call waits for it), or when the claim failed or this slot never claimed one. */
+export async function reclaimAutoVm(table: AutoVmClaimTable, owner: AutoVmClaimOwner, replacedBoxId: string, until: number, signal?: AbortSignal): Promise<string | null> {
+  const slot = table.get(owner.threadId);
+  if (!slot || slot.owner.generation !== owner.generation || !slot.lazy || !slot.startsComputer) return null;
+  // Only the first call to see the replacement starts the claim again; later ones wait on that same claim.
+  if (slot.claimed && slot.boxId === replacedBoxId) {
+    Object.assign(slot, { claimed: false, begin: undefined, attempts: 0, boxId: undefined, retryReason: undefined });
+  }
+  startAutoVmClaim(table, owner.threadId, owner.generation);
+  if (!slot.claimed) await settledWithin(slot.begin ?? null, until - Date.now(), signal);
+  return slot.claimed && slot.boxId && slot.boxId !== replacedBoxId ? slot.boxId : null;
+}
+
 /** What every screen call hears for the rest of a turn whose computer could not be claimed. */
 export function lazyClaimFailedText(slot: Pick<AutoVmClaimSlot, "label" | "failure" | "cause" | "limit" | "startsComputer" | "backOnAuto">): string {
   const label = slot.label ?? "this computer";

@@ -250,20 +250,18 @@ describe("a cloud computer the provider reports in error", () => {
     expect(deletes()).toHaveLength(2);
   });
 
-  it("is deleted by itself at most once an hour for the whole installation, whoever's computer it is", async () => {
-    const first = await botWith("error");
-    const second = await botWith("error");
-    await boat.findBoat(cfg, first.botId);
-    await boat.findBoat(cfg, second.botId);
-    await expect(boat.provisionBoat(cfg, first.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_DEAD_WAITING);
-    await expect(boat.provisionBoat(cfg, second.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_DEAD_WAITING);
+  it("is deleted by itself at most three times an hour for the whole installation, whoever's computers they are", async () => {
+    const dead = [await botWith("error"), await botWith("error"), await botWith("error"), await botWith("error")];
+    for (const { botId } of dead) await boat.findBoat(cfg, botId);
+    for (const { botId } of dead) await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_DEAD_WAITING);
     at += DEAD_CONFIRM;
-    await expect(boat.provisionBoat(cfg, first.botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
-    await expect(boat.provisionBoat(cfg, second.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_NEEDS_PERSON);
-    expect(deletes().map((request) => request.headers["x-ascii-confirm-delete"])).toEqual([first.box.id]);
+    for (const { botId } of dead.slice(0, 3)) await expect(boat.provisionBoat(cfg, botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
+    const last = dead[3]!;
+    await expect(boat.provisionBoat(cfg, last.botId, "Bot")).rejects.toThrow(words.CLOUD_COMPUTER_NEEDS_PERSON);
+    expect(deletes().map((request) => request.headers["x-ascii-confirm-delete"])).toEqual(dead.slice(0, 3).map(({ box }) => box.id));
     at += 61 * 60_000;
-    await expect(boat.provisionBoat(cfg, second.botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
-    expect(deletes()).toHaveLength(2);
+    await expect(boat.provisionBoat(cfg, last.botId, "Bot")).rejects.toMatchObject({ code: journal.BOAT_DELETION_FINISHED });
+    expect(deletes()).toHaveLength(4);
   });
 
   it("finishes after a crash between the delete and the new computer, telling each side once", async () => {
@@ -348,19 +346,17 @@ describe("a cloud computer that says it is ready but does not answer", () => {
     expect(deletes()).toHaveLength(0);
   });
 
-  it("is restarted, which keeps its files, but never deleted when no other computer answers: it then waits for the person", async () => {
+  it("with no other computer to compare against, is restarted, then replaced as soon as the restart's wake gets no answer", async () => {
     const { botId, box } = await botWith("ready");
     commandStatus.set(box.id, 502);
     await boat.findBoat(cfg, botId);
     stopsAnswering(box.id);
-    await until(() => recovery.status(botId)?.state === "needs-person");
+    await until(() => recovery.status(botId)?.state === "replaced");
     expect(stops().map((request) => request.path)).toEqual([`/boxes/${box.id}/stop`]);
     expect(recovery.verdict(botId)).toBe("restart-failed");
-    expect(deletes()).toHaveLength(0);
-    expect(told).toEqual([[botId, "needsPerson"]]);
-    expect(recovery.refusal(box.id, "after")).toBe(words.CLOUD_COMPUTER_NEEDS_PERSON);
-    expect(recovery.refusal(box.id, "before")).toBeNull();
-    expect(recovery.stuck(botId)).toBe(true);
+    expect(deletes().map((request) => request.headers["x-ascii-confirm-delete"])).toEqual([box.id]);
+    expect(told).toEqual([[botId, "replaced"]]);
+    expect(recovery.replaced(box.id)).toBe(true);
   });
 
   it("is neither restarted nor deleted while the provider's list fails", async () => {
@@ -585,6 +581,7 @@ describe("why a silent computer was left as it is", () => {
   });
 
   it("says a restart did not help, and keeps saying that while the computer stays silent", async () => {
+    autoOn = false;
     const { botId, box } = await botWith("ready");
     commandStatus.set(box.id, 502);
     await boat.findBoat(cfg, botId);
@@ -599,6 +596,7 @@ describe("why a silent computer was left as it is", () => {
   });
 
   it("says it was restarted too recently when it goes silent again within the hour, and nothing once it answers", async () => {
+    autoOn = false;
     const { botId, box } = await botWith("ready");
     commandStatus.set(box.id, 502);
     resumeAnswers.add(box.id);
@@ -752,17 +750,20 @@ describe("a start the Admin refuses right after a replacement", () => {
   });
 });
 
-describe("with automatic replacement off, the default", () => {
-  beforeEach(() => { autoOn = false; });
-
-  it("is off unless the environment or config.json turns it on, and the environment wins", () => {
+describe("automatic replacement", () => {
+  it("is on unless the environment or config.json turns it off, and the environment wins", () => {
     const on = recoveryModule.cloudComputerAutoReplace;
-    expect(on({}, {})).toBe(false);
-    expect(on({ features: { cloudComputerAutoReplace: true } }, {})).toBe(true);
-    expect(on({}, { OMB_CLOUD_COMPUTER_AUTO_REPLACE: "1" })).toBe(true);
+    expect(on({}, {})).toBe(true);
+    expect(on({ features: { cloudComputerAutoReplace: false } }, {})).toBe(false);
+    expect(on({ features: { cloudComputerAutoReplace: false } }, { OMB_CLOUD_COMPUTER_AUTO_REPLACE: "1" })).toBe(true);
     expect(on({ features: { cloudComputerAutoReplace: true } }, { OMB_CLOUD_COMPUTER_AUTO_REPLACE: "0" })).toBe(false);
-    expect(on({}, { OMB_CLOUD_COMPUTER_AUTO_REPLACE: "yes" })).toBe(false);
+    expect(on({}, { OMB_CLOUD_COMPUTER_AUTO_REPLACE: "0" })).toBe(false);
+    expect(on({}, { OMB_CLOUD_COMPUTER_AUTO_REPLACE: "yes" })).toBe(true);
   });
+});
+
+describe("with automatic replacement switched off", () => {
+  beforeEach(() => { autoOn = false; });
 
   it("never deletes a computer the provider reports in error: the bot and the person hear it once", async () => {
     const { botId } = await botWith("error");

@@ -25,6 +25,11 @@ export const READY_WAIT = {
   freshMs: 60_000,
   /** With the provider saying ready and giving no reason for the silence: a resume takes about 8 s, so this is ten of them. */
   answerPatienceMs: 90_000,
+  /** Right after a wake, a create or a restart, the same silence is given longer: resumed computers were seen to time
+   * out every command for several minutes and then answer. Past this the computer may be replaced (boat-recovery.ts). */
+  wakePatienceMs: 3 * 60_000,
+  /** Between probes after a wake, longer as the silence goes on; the last one repeats. */
+  wakeGapsMs: [3_000, 5_000, 8_000, 13_000, 20_000],
   /** With the provider saying the disk is still being restored. Restores of 5 to 30 minutes were seen; past ten the
    * computer is restarted instead, once. */
   restorePatienceMs: 10 * 60_000,
@@ -137,11 +142,12 @@ export function createBoatReadiness(overrides: Partial<BoatReadinessDeps> = {}) 
       failures += 1;
       deps.health.unanswered(boxId);
       enter(boatSignals(await deps.read(cfg, boxId)).restoring === true ? "restoring" : phase);
-      const patience = phase === "restoring" ? READY_WAIT.restorePatienceMs : READY_WAIT.answerPatienceMs;
+      const patience = phase === "restoring" ? READY_WAIT.restorePatienceMs : opts.woke ? READY_WAIT.wakePatienceMs : READY_WAIT.answerPatienceMs;
+      const gap = opts.woke ? READY_WAIT.wakeGapsMs[Math.min(failures, READY_WAIT.wakeGapsMs.length) - 1]! : READY_WAIT.probeGapMs;
       // The patience may be overrun by one probe; the caller's deadline never is.
-      const next = deps.now() + READY_WAIT.probeGapMs;
+      const next = deps.now() + gap;
       if (next >= started + patience || next + READY_WAIT.probeTimeoutMs > hardStop) return done({ ok: false, phase, waitedMs: deps.now() - started });
-      await deps.sleep(READY_WAIT.probeGapMs, opts.signal);
+      await deps.sleep(gap, opts.signal);
     }
   }
 
