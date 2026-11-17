@@ -12,10 +12,28 @@ describe("whether this server can give a bot a Local VM", () => {
     expect(availability.available()).toBe(false);
   });
 
-  it("says no when the runtime is installed but its daemon is down", async () => {
-    const availability = createLocalVmAvailability(async () => ({ available: ["docker"], daemonUp: false }));
+  it("says yes when the runtime is installed but its daemon is down, since a turn starts it", async () => {
+    const availability = createLocalVmAvailability(async () => ({ available: ["podman"], daemonUp: false }));
+    await flush();
+    expect(availability.available()).toBe(true);
+  });
+
+  it("reads it again at most once a minute while the answer is no, so a runtime installed later shows up", async () => {
+    let clock = 0;
+    let runtimes: string[] = [];
+    let probes = 0;
+    const availability = createLocalVmAvailability(async () => { probes += 1; return { available: runtimes }; }, () => clock);
     await flush();
     expect(availability.available()).toBe(false);
+    runtimes = ["docker"];
+    clock = 59_999;
+    expect(availability.available()).toBe(false);
+    expect(probes).toBe(1);
+    clock = 60_000;
+    availability.available();
+    await flush();
+    expect(probes).toBe(2);
+    expect(availability.available()).toBe(true);
   });
 
   it("says yes when a runtime is installed and its daemon answers", async () => {
