@@ -4,6 +4,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
 import { engineMemory } from "../../engine-memory.ts";
+import { engineOwners } from "../../engine-owners.ts";
 import { appendNative } from "../native.ts";
 import { StderrTail } from "./exit-report.ts";
 import { acpRpcError } from "./rpc-error.ts";
@@ -182,13 +183,14 @@ export class AcpHost {
     this.links.add(link);
     this.opened += 1;
     engineMemory.attach(this.child, threadId);
+    engineOwners.attach(this.child, threadId);
     return link;
   }
 
   unlink(link: AcpLink): void {
     if (!this.links.delete(link)) return;
     if (!this.links.size) this.#lastOut = link;
-    if (![...this.links].some((other) => other.threadId === link.threadId)) engineMemory.detach(this.child, link.threadId);
+    if (![...this.links].some((other) => other.threadId === link.threadId)) { engineMemory.detach(this.child, link.threadId); engineOwners.detach(this.child, link.threadId); }
   }
 
   #listening(): AcpLink[] {
