@@ -11070,5 +11070,13 @@
   "sidebar.addDepartment": "Adicionar equipe",
   "sidebar.import": "Importar…",
   "team.shareDepartment": "Compartilhar",
-  "activity.tool.team.editImage": "Editar imagem"
+  "activity.tool.team.editImage": "Editar imagem",
+  "voice.deepseek.sharedKey": "o DeepSeek usa a chave do DeepSeek que já existe nesta instalação.",
+  "voice.deepseek.description": "Lê respostas e mensagens de voz em voz alta com a voz Stella ou Tide do DeepSeek. Ao escolher o DeepSeek, o ditado e o modo Um de cada vez também ouvem você pela transcrição de fala do DeepSeek, até cerca de dois minutos por gravação. Usa sua chave de API do DeepSeek e é cobrado pelo DeepSeek.",
+  "voice.deepseek.missingKey": "Adicione uma chave de API do DeepSeek em Configurações → Chaves de API no computador anfitrião para usar a voz do DeepSeek.",
+  "voice.deepseek.stella": "Stella (feminina)",
+  "voice.deepseek.tide": "Tide (masculina)",
+  "call.capability.turnsNeedDeepSeekKey": "Adicione uma chave do DeepSeek para falar um de cada vez nas chamadas",
+  "call.capability.turnsNeedDeepSeekKeyReason": "O DeepSeek é a sua voz, então o modo Um de cada vez ouve você pela transcrição de fala do DeepSeek. Adicione uma chave do DeepSeek em Configurações → Chaves de API.",
+  "serverError.voice.deepseekKeyRequired": "Adicione uma chave de API do DeepSeek em Configurações → Chaves de API para falar com seus bots com a voz do DeepSeek."
 }

@@ -7106,5 +7106,13 @@
   "imageGen.complexity.low": "Niski",
   "imageGen.complexity.medium": "Średni",
   "imageGen.complexity.high": "Wysoki",
-  "activity.tool.team.editImage": "Edytuj obraz"
+  "activity.tool.team.editImage": "Edytuj obraz",
+  "voice.deepseek.sharedKey": "DeepSeek korzysta z istniejącego klucza DeepSeek tej instalacji.",
+  "voice.deepseek.description": "Czyta na głos odpowiedzi i wiadomości głosowe głosem Stella lub Tide od DeepSeek. Po wybraniu DeepSeek dyktowanie i tryb Po kolei też słyszą cię przez rozpoznawanie mowy DeepSeek, do około dwóch minut na nagranie. Używa twojego klucza API DeepSeek, a opłaty nalicza DeepSeek.",
+  "voice.deepseek.missingKey": "Dodaj klucz API DeepSeek w Ustawienia → Klucze API na hoście, aby używać głosu DeepSeek.",
+  "voice.deepseek.stella": "Stella (kobiecy)",
+  "voice.deepseek.tide": "Tide (męski)",
+  "call.capability.turnsNeedDeepSeekKey": "Dodaj klucz DeepSeek, aby rozmawiać po kolei w połączeniach",
+  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek jest twoim głosem, więc tryb Po kolei słyszy cię przez rozpoznawanie mowy DeepSeek. Dodaj klucz DeepSeek w Ustawienia → Klucze API.",
+  "serverError.voice.deepseekKeyRequired": "Dodaj klucz API DeepSeek w Ustawienia → Klucze API, aby rozmawiać z botami głosem DeepSeek."
 }

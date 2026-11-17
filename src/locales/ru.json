@@ -7160,5 +7160,13 @@
   "imageGen.complexity.low": "Низкий",
   "imageGen.complexity.medium": "Средний",
   "imageGen.complexity.high": "Высокий",
-  "activity.tool.team.editImage": "Редактировать изображение"
+  "activity.tool.team.editImage": "Редактировать изображение",
+  "voice.deepseek.sharedKey": "DeepSeek использует существующий ключ DeepSeek этой установки.",
+  "voice.deepseek.description": "Читает ответы и голосовые сообщения голосом Stella или Tide от DeepSeek. Если выбрать DeepSeek, диктовка и режим «По очереди» тоже слушают вас через распознавание речи DeepSeek — до двух минут на одну запись. Использует ваш API-ключ DeepSeek, оплата — через DeepSeek.",
+  "voice.deepseek.missingKey": "Добавьте API-ключ DeepSeek в разделе Настройки → API-ключи на хосте, чтобы использовать голос DeepSeek.",
+  "voice.deepseek.stella": "Stella (женский)",
+  "voice.deepseek.tide": "Tide (мужской)",
+  "call.capability.turnsNeedDeepSeekKey": "Добавьте ключ DeepSeek, чтобы говорить по очереди в звонках",
+  "call.capability.turnsNeedDeepSeekKeyReason": "Ваш голос — DeepSeek, поэтому режим «По очереди» слушает вас через распознавание речи DeepSeek. Добавьте ключ DeepSeek в разделе Настройки → API-ключи.",
+  "serverError.voice.deepseekKeyRequired": "Добавьте API-ключ DeepSeek в разделе Настройки → API-ключи, чтобы разговаривать с ботами голосом DeepSeek."
 }

@@ -7944,5 +7944,13 @@
   "imageGen.complexity.low": "低",
   "imageGen.complexity.medium": "中",
   "imageGen.complexity.high": "高",
-  "activity.tool.team.editImage": "画像を編集"
+  "activity.tool.team.editImage": "画像を編集",
+  "voice.deepseek.sharedKey": "DeepSeek は、このインストール環境に保存済みの DeepSeek キーを使います。",
+  "voice.deepseek.description": "返信と音声メッセージを DeepSeek の Stella または Tide の声で読み上げます。DeepSeek を選ぶと、音声入力と「交互に話す」も DeepSeek の音声認識であなたの声を聞き取ります（1 回の録音につき約 2 分まで）。DeepSeek API キーを使い、料金は DeepSeek から請求されます。",
+  "voice.deepseek.missingKey": "DeepSeek の音声を使うには、ホストの 設定 → API キー で DeepSeek API キーを追加してください。",
+  "voice.deepseek.stella": "Stella（女性）",
+  "voice.deepseek.tide": "Tide（男性）",
+  "call.capability.turnsNeedDeepSeekKey": "通話で交互に話すには DeepSeek キーを追加してください",
+  "call.capability.turnsNeedDeepSeekKeyReason": "音声に DeepSeek を選んでいるため、「交互に話す」は DeepSeek の音声認識であなたの声を聞き取ります。設定 → API キー で DeepSeek キーを追加してください。",
+  "serverError.voice.deepseekKeyRequired": "DeepSeek の音声でボットと話すには、設定 → API キー で DeepSeek API キーを追加してください。"
 }

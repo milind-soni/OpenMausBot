@@ -6398,5 +6398,13 @@
   "imageGen.complexity.low": "Bajo",
   "imageGen.complexity.medium": "Medio",
   "imageGen.complexity.high": "Alto",
-  "activity.tool.team.editImage": "Editar imagen"
+  "activity.tool.team.editImage": "Editar imagen",
+  "voice.deepseek.sharedKey": "DeepSeek usa la clave de DeepSeek que ya tiene esta instalación.",
+  "voice.deepseek.description": "Lee en voz alta las respuestas y los mensajes de voz con la voz Stella o Tide de DeepSeek. Al elegir DeepSeek, el dictado y el modo Por turnos también te escuchan con la transcripción de voz de DeepSeek, hasta unos dos minutos por grabación. Usa tu clave de API de DeepSeek y DeepSeek lo factura.",
+  "voice.deepseek.missingKey": "Añade una clave de API de DeepSeek en Ajustes → Claves de API en el equipo anfitrión para usar la voz de DeepSeek.",
+  "voice.deepseek.stella": "Stella (femenina)",
+  "voice.deepseek.tide": "Tide (masculina)",
+  "call.capability.turnsNeedDeepSeekKey": "Añade una clave de DeepSeek para hablar por turnos en las llamadas",
+  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek es tu voz, así que el modo Por turnos te escucha con la transcripción de voz de DeepSeek. Añade una clave de DeepSeek en Ajustes → Claves de API.",
+  "serverError.voice.deepseekKeyRequired": "Añade una clave de API de DeepSeek en Ajustes → Claves de API para hablar con tus bots con la voz de DeepSeek."
 }

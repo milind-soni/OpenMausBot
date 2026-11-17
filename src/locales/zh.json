@@ -10068,5 +10068,13 @@
   "imageGen.complexity.low": "低",
   "imageGen.complexity.medium": "中",
   "imageGen.complexity.high": "高",
-  "activity.tool.team.editImage": "编辑图片"
+  "activity.tool.team.editImage": "编辑图片",
+  "voice.deepseek.sharedKey": "DeepSeek 使用此安装现有的 DeepSeek 密钥。",
+  "voice.deepseek.description": "用 DeepSeek 的 Stella 或 Tide 声音朗读回复和语音消息。选择 DeepSeek 后，听写和“轮流说话”也会通过 DeepSeek 语音转文字来听你说话，每段录音最长约两分钟。使用你的 DeepSeek API 密钥，费用由 DeepSeek 收取。",
+  "voice.deepseek.missingKey": "要使用 DeepSeek 声音，请在主机的设置 → API 密钥中添加 DeepSeek API 密钥。",
+  "voice.deepseek.stella": "Stella（女声）",
+  "voice.deepseek.tide": "Tide（男声）",
+  "call.capability.turnsNeedDeepSeekKey": "添加 DeepSeek 密钥即可在通话中轮流说话",
+  "call.capability.turnsNeedDeepSeekKeyReason": "你的声音是 DeepSeek，所以“轮流说话”会通过 DeepSeek 语音转文字来听你说话。请在设置 → API 密钥中添加 DeepSeek 密钥。",
+  "serverError.voice.deepseekKeyRequired": "要用 DeepSeek 声音和机器人说话，请在设置 → API 密钥中添加 DeepSeek API 密钥。"
 }

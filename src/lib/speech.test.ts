@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEEPSEEK_RECORDING_MAX_MS } from "../../shared/deepseek-voice";
 import type { ConfigStatus } from "@/state/store";
 import { cacheDesktopCapabilities, initialDesktopCapabilities } from "./desktop";
 import { createEndpointer, fishSpeech } from "./fish-speech";
-import { CALL_ENDPOINT_MS, fishListeningReady, listensHere, speechBridge } from "./speech";
+import { CALL_ENDPOINT_MS, fishListeningReady, listensHere, missingListenKey, recordsClips, speechBridge } from "./speech";
 
 const withDictation = (dictation: DesktopCapabilities["dictation"]): DesktopCapabilities =>
   ({ ...initialDesktopCapabilities(), dictation });
@@ -19,19 +20,61 @@ describe("speechBridge", () => {
   it("is the page's own Fish Audio listener where the engine is fish-audio", () => {
     vi.stubGlobal("window", { ogb: { speechStart: vi.fn() } });
     cacheDesktopCapabilities(withDictation(FISH));
-    expect(speechBridge()).toBe(fishSpeech);
+    expect(speechBridge(null)).toBe(fishSpeech);
   });
 
   it("is the desktop app's helper everywhere else", () => {
     const ogb = { speechStart: vi.fn() };
     vi.stubGlobal("window", { ogb });
     cacheDesktopCapabilities(withDictation(APPLE));
-    expect(speechBridge()).toBe(ogb);
+    expect(speechBridge(null)).toBe(ogb);
   });
 
   it("is nothing in a browser", () => {
     vi.stubGlobal("window", {});
-    expect(speechBridge()).toBeUndefined();
+    expect(speechBridge(null)).toBeUndefined();
+  });
+});
+
+describe("DeepSeek listening", () => {
+  const deepseek = { tts: { provider: "deepseek" }, savedKeys: { fishAudioKey: { configured: true } } } as unknown as ConfigStatus;
+  const deepseekSaved = { ...deepseek, deepseek: { configured: true } } as unknown as ConfigStatus;
+
+  it("records in the page on the Mac too, instead of the native recognizer, while DeepSeek is the voice", () => {
+    const ogb = { speechStart: vi.fn() };
+    vi.stubGlobal("window", { ogb });
+    cacheDesktopCapabilities(withDictation(APPLE));
+    const bridge = speechBridge(deepseekSaved);
+    expect(bridge).not.toBe(ogb);
+    expect(recordsClips(bridge)).toBe(true);
+    expect(speechBridge(savedFish)).toBe(ogb);
+    expect(recordsClips(ogb as never)).toBe(false);
+  });
+
+  it("needs the DeepSeek key, not a Fish key, and still nothing where dictation is unavailable", () => {
+    expect(listensHere(withDictation(APPLE), deepseek)).toBe(false);
+    expect(missingListenKey(withDictation(APPLE), deepseek)).toBe("deepseek");
+    expect(missingListenKey(withDictation(FISH), deepseek)).toBe("deepseek");
+    expect(listensHere(withDictation(FISH), deepseekSaved)).toBe(true);
+    expect(missingListenKey(withDictation(FISH), null)).toBe("fish");
+    expect(listensHere(withDictation({ available: false, engine: "none", onDevice: false }), deepseekSaved)).toBe(false);
+    vi.stubGlobal("window", {});
+    expect(speechBridge(deepseekSaved)).toBeUndefined();
+  });
+});
+
+describe("manual recording cap", () => {
+  it("ends a DeepSeek clip under 120 seconds even with frame rounding, and leaves the default cap alone", () => {
+    const FRAME = 64;
+    const framesUntilDone = (maxMs?: number) => {
+      const heard = createEndpointer(undefined, FRAME, maxMs);
+      let frames = 1;
+      while (heard(0.1) !== "done") frames += 1;
+      return frames;
+    };
+    expect(framesUntilDone(DEEPSEEK_RECORDING_MAX_MS) * FRAME).toBeLessThan(120_000);
+    expect(framesUntilDone(DEEPSEEK_RECORDING_MAX_MS) * FRAME).toBeGreaterThanOrEqual(DEEPSEEK_RECORDING_MAX_MS);
+    expect(framesUntilDone() * FRAME).toBeGreaterThanOrEqual(5 * 60_000);
   });
 });
 
