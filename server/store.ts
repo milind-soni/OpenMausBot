@@ -73,14 +73,25 @@ export interface Message {
 /** A room: a shared thread where several bots + the user talk. Bots reply
  * only when @mentioned (the Buzz rule). The bulletin is the room's shared
  * instructions — every member's turn gets it as part of its system prompt. */
+export type RoomHandoffs = "inherit" | "on" | "off";
+export const ROOM_MAX_HOPS = 3;
+export const ROOM_IDLE_MINUTES_MAX = 180;
+
 export interface GroupRecord {
   id: string;
   threadId: ThreadId;
   name: string;
   memberIds: string[];
   bulletin: string;
-  /** User-controlled: agent-authored @mentions may queue one teammate hop. */
-  autoHandoffs: boolean;
+  /** Agent-authored @mentions may queue teammates: "inherit" follows the
+   * app-wide setting, "on"/"off" override it for this room. */
+  handoffs: RoomHandoffs;
+  /** Member who answers a user message with no @mention (null = nobody). */
+  defaultResponderId?: string | null;
+  /** How many chained bot→bot handoffs one user message may trigger (1–3). */
+  maxHops?: number;
+  /** Per-room inactivity window for a turn, in minutes (null = app default). */
+  turnIdleMinutes?: number | null;
   unread: boolean;
   createdAt: number;
   /** true for auto-created bot⇄bot channels (ask_bot exchanges live here;
@@ -212,11 +223,21 @@ export class Store {
       }
     }
     if (migrated) this.saveBots();
+    let groupsMigrated = false;
     for (const g of this.groups) {
-      g.autoHandoffs = g.autoHandoffs === true;
+      // legacy boolean: no UI ever set it, so `false` was only the creation
+      // default and was never honoured — treat it as "follow the app setting"
+      const legacy = g as GroupRecord & { autoHandoffs?: boolean };
+      if (!["inherit", "on", "off"].includes(g.handoffs)) {
+        g.handoffs = legacy.autoHandoffs === true ? "on" : "inherit";
+        groupsMigrated = true;
+      }
+      if ("autoHandoffs" in legacy) { delete legacy.autoHandoffs; groupsMigrated = true; }
+      if (g.defaultResponderId && !g.memberIds.includes(g.defaultResponderId)) g.defaultResponderId = null;
       g.busyBotId = null;
       g.queuedBotIds = [];
     }
+    if (groupsMigrated) this.saveGroups();
   }
 
   private saveBots() {
@@ -246,7 +267,7 @@ export class Store {
       name,
       memberIds,
       bulletin: "",
-      autoHandoffs: false,
+      handoffs: "inherit",
       unread: false,
       createdAt: Date.now(),
       dm: dm || undefined,
@@ -265,7 +286,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "bulletin" | "autoHandoffs" | "unread" | "busyBotId" | "queuedBotIds" | "projectId">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "bulletin" | "handoffs" | "defaultResponderId" | "maxHops" | "turnIdleMinutes" | "unread" | "busyBotId" | "queuedBotIds" | "projectId">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     Object.assign(group, patch);

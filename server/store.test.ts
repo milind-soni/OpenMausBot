@@ -281,8 +281,8 @@ describe("Store", () => {
     const first = store.createBot();
     const second = store.createBot();
     const group = store.createGroup("Work room", [first.id, second.id]);
-    expect(group.autoHandoffs).toBe(false);
-    store.patchGroup(group.id, { autoHandoffs: true, busyBotId: first.id, queuedBotIds: [second.id] });
+    expect(group.handoffs).toBe("inherit");
+    store.patchGroup(group.id, { handoffs: "on", busyBotId: first.id, queuedBotIds: [second.id] });
 
     expect(store.group(group.id)).toMatchObject({ busyBotId: first.id, queuedBotIds: [second.id] });
     const saved = JSON.parse(readFileSync(join(DATA_DIR, "groups.json"), "utf8"));
@@ -290,18 +290,42 @@ describe("Store", () => {
     expect(saved[0]).not.toHaveProperty("queuedBotIds");
 
     const reloaded = new Store(selection);
-    expect(reloaded.group(group.id)).toMatchObject({ autoHandoffs: true, busyBotId: null, queuedBotIds: [] });
+    expect(reloaded.group(group.id)).toMatchObject({ handoffs: "on", busyBotId: null, queuedBotIds: [] });
   });
 
-  it("defaults legacy rooms to manual handoffs", () => {
+  it("migrates the legacy room handoff boolean once", () => {
     const store = new Store(selection);
     const bot = store.createBot();
-    const group = store.createGroup("Legacy room", [bot.id]);
+    const off = store.createGroup("Legacy default", [bot.id]);
+    const on = store.createGroup("Legacy on", [bot.id]);
+    const missing = store.createGroup("Legacy missing", [bot.id]);
     const saved = JSON.parse(readFileSync(join(DATA_DIR, "groups.json"), "utf8"));
-    delete saved[0].autoHandoffs;
+    for (const g of saved) {
+      delete g.handoffs;
+      if (g.id === off.id) g.autoHandoffs = false;
+      if (g.id === on.id) g.autoHandoffs = true;
+    }
     writeFileSync(join(DATA_DIR, "groups.json"), JSON.stringify(saved));
 
-    expect(new Store(selection).group(group.id)?.autoHandoffs).toBe(false);
+    const migrated = new Store(selection);
+    expect(migrated.group(off.id)?.handoffs).toBe("inherit");
+    expect(migrated.group(on.id)?.handoffs).toBe("on");
+    expect(migrated.group(missing.id)?.handoffs).toBe("inherit");
+    const rewritten = JSON.parse(readFileSync(join(DATA_DIR, "groups.json"), "utf8"));
+    expect(rewritten.every((g: Record<string, unknown>) => !("autoHandoffs" in g))).toBe(true);
+
+    // an explicit "off" chosen after migration survives the next restart
+    migrated.patchGroup(off.id, { handoffs: "off" });
+    expect(new Store(selection).group(off.id)?.handoffs).toBe("off");
+  });
+
+  it("drops a default responder that is no longer a member on load", () => {
+    const store = new Store(selection);
+    const a = store.createBot();
+    const b = store.createBot();
+    const group = store.createGroup("Room", [a.id]);
+    store.patchGroup(group.id, { defaultResponderId: b.id });
+    expect(new Store(selection).group(group.id)?.defaultResponderId).toBeNull();
   });
 
   it("persists messages with attachments and preserves them across branching and restart", () => {

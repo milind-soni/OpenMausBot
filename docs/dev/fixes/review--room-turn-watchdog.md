@@ -4,12 +4,12 @@ created: 2026-11-17
 updated: 2026-11-17
 scope: room turn timeout
 owner: claude
-related: [done--stalled-room-activities.md, todo--room-settings.md]
+related: [done--stalled-room-activities.md, review--room-settings.md]
 ---
 
 # Let room turns finish instead of a 5-minute wall clock
 
-Room turns were interrupted after a fixed 5 minutes even while the bot was working, which killed long builds mid-step (`claude exited 143 before result` + `activity timed out and was stopped`). Covers the timeout only; room settings are tracked in `todo--room-settings.md`.
+Room turns were interrupted after a fixed 5 minutes even while the bot was working, which killed long builds mid-step (`claude exited 143 before result` + `activity timed out and was stopped`). Covers the timeout only; room settings are tracked in `review--room-settings.md`.
 
 ---
 

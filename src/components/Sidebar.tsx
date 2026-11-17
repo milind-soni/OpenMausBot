@@ -24,7 +24,9 @@ import {
   MonitorSmartphone,
   Trash2,
   Users,
+  Settings2,
 } from "lucide-react";
+import { RoomSettings } from "./RoomSettings";
 import { useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
@@ -178,10 +180,12 @@ function RoomContextMenu({
   menu,
   onClose,
   onClear,
+  onSettings,
 }: {
   menu: { groupId: string; x: number; y: number };
   onClose: () => void;
   onClear: (target: ClearTarget) => void;
+  onSettings: (groupId: string) => void;
 }) {
   const { state, dispatch } = useStore();
   const group = state.groups.find((g) => g.id === menu.groupId);
@@ -202,7 +206,7 @@ function RoomContextMenu({
   }, [onClose]);
 
   if (!group) return null;
-  const top = Math.min(menu.y, window.innerHeight - 160);
+  const top = Math.min(menu.y, window.innerHeight - 200);
   const left = Math.min(menu.x, window.innerWidth - 240);
   const clearDisabled = Boolean(group.busyBotId) || (group.queuedBotIds?.length ?? 0) > 0 || group.messages.length === 0;
   const clearHint = group.messages.length === 0
@@ -216,6 +220,18 @@ function RoomContextMenu({
       style={{ top, left }}
       className="fixed z-40 w-[228px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/60"
     >
+      {!group.dm && (
+        <button
+          onClick={() => {
+            onSettings(group.id);
+            onClose();
+          }}
+          className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+        >
+          <Settings2 size={16} className="text-ink-secondary" />
+          Room settings…
+        </button>
+      )}
       <button
         onClick={() => {
           void navigator.clipboard?.writeText(group.threadId);
@@ -641,6 +657,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
   const { state, dispatch } = useStore();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
+  const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
   const [newRoom, setNewRoom] = useState(false);
   const [clearTarget, setClearTarget] = useState<ClearTarget | null>(null);
@@ -910,7 +927,8 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
       </div>
 
       {menu && <BotContextMenu menu={menu} onClose={() => setMenu(null)} onClear={setClearTarget} />}
-      {roomMenu && <RoomContextMenu menu={roomMenu} onClose={() => setRoomMenu(null)} onClear={setClearTarget} />}
+      {roomMenu && <RoomContextMenu menu={roomMenu} onClose={() => setRoomMenu(null)} onClear={setClearTarget} onSettings={setSettingsRoomId} />}
+      {settingsRoomId && <RoomSettings groupId={settingsRoomId} onClose={() => setSettingsRoomId(null)} />}
       {newRoom && <NewRoomPanel onClose={() => setNewRoom(false)} />}
       {clearTarget && (
         <ClearChatDialog

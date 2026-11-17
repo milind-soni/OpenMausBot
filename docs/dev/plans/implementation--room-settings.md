@@ -44,4 +44,4 @@ Give the user one place to manage a room: rename it, add and remove bots, and se
 
 ## Approval
 
-Status: awaiting user approval
+Status: approved by user, 2026-11-17

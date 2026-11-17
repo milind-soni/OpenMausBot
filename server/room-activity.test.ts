@@ -68,6 +68,11 @@ posixOnly("room activity runtime", () => {
           environment: { FAKE_ACP_MODE: "happy" },
           config: { cli: fakeCli, fullAuto: false },
         },
+        "mentions-gamma": {
+          driver: "grokAgent",
+          environment: { FAKE_ACP_MODE: "mention-beta", FAKE_ACP_MENTION: "Gamma" },
+          config: { cli: fakeCli, fullAuto: false },
+        },
         slow: {
           driver: "grokAgent",
           environment: { FAKE_ACP_MODE: "slow", FAKE_ACP_TICKS: "6", FAKE_ACP_TICK_MS: "400" },
@@ -301,4 +306,101 @@ posixOnly("room activity runtime", () => {
     expect(stopped.message.tool.name).toBe("error: activity went quiet for 1 min and was stopped");
     expect(stopped.message.from.botId).toBe(sleeper.id);
   }, 30_000);
+
+  const makeBot = async (name: string, instanceId: string) => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { name, modelSelection: { instanceId, model: "fake-model" } });
+    return bot;
+  };
+  const turnFrame = (botId: string, type: string) => (frame: any) =>
+    frame.kind === "runtime" && frame.botId === botId && frame.event.type === type;
+
+  it("lets a room override the app-wide handoff setting in both directions", async () => {
+    const alpha = await makeBot("Alpha", "mentions");
+    const beta = await makeBot("Beta", "happy");
+    const group = (await api("POST", "/api/groups", { name: "Override room", memberIds: [alpha.id, beta.id] })).body.group;
+
+    // app on, room off: Alpha's @Beta must not chain. A second Alpha turn
+    // runs on the same serial queue, so a chained Beta would land before it.
+    await api("PUT", "/api/config", { autoHandoffs: true });
+    expect((await api("PATCH", `/api/groups/${group.id}`, { handoffs: "off" })).body.group.handoffs).toBe("off");
+    const offStart = frames.length;
+    await api("POST", `/api/groups/${group.id}/messages`, { text: "@Alpha begin" });
+    await api("POST", `/api/groups/${group.id}/messages`, { text: "@Alpha again" });
+    let alphaTurns = 0;
+    await waitForFrame((frame) => turnFrame(alpha.id, "turn.completed")(frame) && ++alphaTurns === 2, "two Alpha turns", 12_000, offStart);
+    expect(frames.slice(offStart).some(turnFrame(beta.id, "turn.started"))).toBe(false);
+
+    // app off, room on: the handoff runs
+    await api("PUT", "/api/config", { autoHandoffs: false });
+    await api("PATCH", `/api/groups/${group.id}`, { handoffs: "on" });
+    const onStart = frames.length;
+    await api("POST", `/api/groups/${group.id}/messages`, { text: "@Alpha begin" });
+    await waitForFrame(turnFrame(beta.id, "turn.completed"), "room-enabled Beta handoff", 12_000, onStart);
+    await api("PUT", "/api/config", { autoHandoffs: true });
+  }, 30_000);
+
+  it("chains handoffs up to the room's depth", async () => {
+    const alpha = await makeBot("Alpha", "mentions");
+    const beta = await makeBot("Beta", "mentions-gamma");
+    const gamma = await makeBot("Gamma", "happy");
+    const group = (await api("POST", "/api/groups", { name: "Chain room", memberIds: [alpha.id, beta.id, gamma.id] })).body.group;
+    await api("PATCH", `/api/groups/${group.id}`, { handoffs: "on", maxHops: 2 });
+
+    const start = frames.length;
+    await api("POST", `/api/groups/${group.id}/messages`, { text: "@Alpha begin" });
+    await waitForFrame(turnFrame(gamma.id, "turn.completed"), "second-hop Gamma turn", 15_000, start);
+  }, 30_000);
+
+  it("routes unmentioned messages to the room's default responder", async () => {
+    const alpha = await makeBot("Alpha", "happy");
+    const beta = await makeBot("Beta", "happy");
+    const group = (await api("POST", "/api/groups", { name: "Default room", memberIds: [alpha.id, beta.id] })).body.group;
+    await api("PATCH", `/api/groups/${group.id}`, { defaultResponderId: beta.id });
+
+    const start = frames.length;
+    await api("POST", `/api/groups/${group.id}/messages`, { text: "anyone there?" });
+    await waitForFrame(turnFrame(beta.id, "turn.completed"), "default responder turn", 12_000, start);
+    expect(frames.slice(start).some(turnFrame(alpha.id, "turn.started"))).toBe(false);
+  }, 20_000);
+
+  it("stops a removed member's turn, clears its default role and announces roster changes", async () => {
+    const lead = await makeBot("Lead", "happy");
+    const sleeper = await makeBot("Sleeper", "hang");
+    const extra = await makeBot("Extra", "happy");
+    const group = (await api("POST", "/api/groups", { name: "Roster room", memberIds: [lead.id, sleeper.id] })).body.group;
+    await api("PATCH", `/api/groups/${group.id}`, { defaultResponderId: sleeper.id });
+
+    const start = frames.length;
+    await api("POST", `/api/groups/${group.id}/messages`, { text: "@Sleeper go" });
+    await waitForFrame(turnFrame(sleeper.id, "turn.started"), "Sleeper running", 12_000, start);
+
+    const patched = await api("PATCH", `/api/groups/${group.id}`, { memberIds: [lead.id, extra.id] });
+    expect(patched.status).toBe(200);
+    expect(patched.body.group).toMatchObject({ memberIds: [lead.id, extra.id], defaultResponderId: null });
+    const stopped = await waitForFrame(turnFrame(sleeper.id, "turn.completed"), "removed member stopped", 12_000, start);
+    // the hang fake reports an interrupt as an early exit; either way it ended
+    expect(stopped.event.ok).toBe(false);
+    const lines = () => frames.slice(start).filter((f) => f.kind === "message" && f.threadId === group.threadId).map((f) => f.message.tool?.name);
+    expect(lines()).toEqual(expect.arrayContaining(["Extra joined the room", "Sleeper left the room"]));
+  }, 20_000);
+
+  it("validates room settings", async () => {
+    const solo = await makeBot("Solo", "happy");
+    const other = await makeBot("Other", "happy");
+    const group = (await api("POST", "/api/groups", { name: "Valid room", memberIds: [solo.id] })).body.group;
+    const patch = (body: unknown) => api("PATCH", `/api/groups/${group.id}`, body);
+
+    expect((await patch({ maxHops: 4 })).status).toBe(400);
+    expect((await patch({ maxHops: 1.5 })).status).toBe(400);
+    expect((await patch({ handoffs: "sometimes" })).status).toBe(400);
+    expect((await patch({ turnIdleMinutes: 0 })).status).toBe(400);
+    expect((await patch({ defaultResponderId: other.id })).status).toBe(400);
+    expect((await patch({ memberIds: [] })).status).toBe(400);
+    expect((await patch({ name: "  " })).status).toBe(400);
+    expect((await patch({ autoHandoffs: false })).body.group.handoffs).toBe("off");
+    expect((await patch({ turnIdleMinutes: 45, maxHops: 3, name: " Renamed " })).body.group)
+      .toMatchObject({ turnIdleMinutes: 45, maxHops: 3, name: "Renamed" });
+    expect((await patch({ turnIdleMinutes: null })).body.group.turnIdleMinutes).toBeNull();
+  });
 });

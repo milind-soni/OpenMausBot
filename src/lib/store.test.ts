@@ -32,7 +32,7 @@ const group = (id: string, threadId: string): Group => ({
   name: id,
   memberIds: [],
   bulletin: "",
-  autoHandoffs: false,
+  handoffs: "inherit",
   unread: true,
   createdAt: 1,
   messages: [message(`${id}-message`)],
@@ -98,9 +98,9 @@ describe("automatic room handoffs", () => {
     const room = group("room", "room-thread");
     const state = { ...initialState, groups: [room] };
 
-    const next = reducer(state, { type: "groupPatched", group: { id: room.id, autoHandoffs: true } });
+    const next = reducer(state, { type: "groupPatched", group: { id: room.id, handoffs: "off", maxHops: 2, defaultResponderId: "bot-a" } });
 
-    expect(next.groups[0].autoHandoffs).toBe(true);
+    expect(next.groups[0]).toMatchObject({ handoffs: "off", maxHops: 2, defaultResponderId: "bot-a" });
     expect(next.groups[0].messages).toBe(room.messages);
   });
 });

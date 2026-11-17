@@ -6,7 +6,7 @@ import { UsageRings } from "./UsageRings";
 // bot messages carry a small maus + name cluster label. Bots reply only
 // when @mentioned (the composer's @ picker knows the members).
 import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, ArrowDown, ClipboardList, Pin, Smartphone, AlarmClock } from "lucide-react";
+import { Activity, ArrowDown, ClipboardList, Pin, Smartphone, AlarmClock, Settings2 } from "lucide-react";
 import { useStore, useStreaming, formatTime, type Attachment, type Bot, type Group } from "@/state/store";
 import { MausAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
@@ -25,6 +25,7 @@ import { OptionCard } from "./OptionCard";
 import { AttachmentList } from "./AttachmentViewer";
 import { useHeaderCollapse } from "@/lib/useHeaderCollapse";
 import { HeaderMoreMenu } from "./HeaderMoreMenu";
+import { RoomSettings } from "./RoomSettings";
 import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 import { getStoredPanelWidth } from "@/lib/usePanelResize";
 
@@ -146,6 +147,7 @@ export function GroupView({ group }: { group: Group }) {
   const [follow, setFollow] = useState(true);
   const touchY = useRef(0);
   const [bulletinOpen, setBulletinOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [bulletinDraft, setBulletinDraft] = useState(group.bulletin);
   const [activityOpen, setActivityOpen] = useState(() => {
     const saved = localStorage.getItem("room-activity-open");
@@ -293,7 +295,7 @@ export function GroupView({ group }: { group: Group }) {
     [state.tasks, group.projectId],
   );
 
-  useEffect(() => setFollow(true), [group.id]);
+  useEffect(() => { setFollow(true); setSettingsOpen(false); }, [group.id]);
   useEffect(() => setBulletinDraft(group.bulletin), [group.id, group.bulletin]);
   useEffect(() => localStorage.setItem("room-activity-open", String(activityOpen)), [activityOpen]);
   useEffect(() => localStorage.setItem("room-mobile-preview-open", String(mobilePreviewOpen)), [mobilePreviewOpen]);
@@ -391,6 +393,17 @@ export function GroupView({ group }: { group: Group }) {
           )}
         </div>
         <div ref={actionsRef} className="flex shrink-0 items-center gap-1.5" style={noDrag}>
+          {!group.dm && !collapse.collapseSecondaryToMenu && (
+            <button
+              type="button"
+              title="Room settings"
+              aria-label="Room settings"
+              onClick={() => setSettingsOpen(true)}
+              className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"
+            >
+              <Settings2 size={16} />
+            </button>
+          )}
           {!collapse.collapseSecondaryToMenu && (
             <button
               type="button"
@@ -429,6 +442,12 @@ export function GroupView({ group }: { group: Group }) {
           {collapse.collapseSecondaryToMenu && (
             <HeaderMoreMenu
               items={[
+                ...(group.dm ? [] : [{
+                  id: "settings",
+                  label: "Room settings…",
+                  icon: <Settings2 size={14} />,
+                  onClick: () => setSettingsOpen(true),
+                }]),
                 {
                   id: "schedule",
                   label: "Schedule run…",
@@ -698,6 +717,7 @@ export function GroupView({ group }: { group: Group }) {
           className="flex"
         />
       )}
+      {settingsOpen && <RoomSettings groupId={group.id} onClose={() => setSettingsOpen(false)} />}
     </main>
   );
 }

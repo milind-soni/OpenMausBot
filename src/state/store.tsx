@@ -69,13 +69,22 @@ export interface Message {
 }
 
 /** A room: several bots + you in one shared thread. */
+export type RoomHandoffs = "inherit" | "on" | "off";
+
 export interface Group {
   id: string;
   threadId: string;
   name: string;
   memberIds: string[];
   bulletin: string;
-  autoHandoffs: boolean;
+  /** bot→bot @mention handoffs: follow the app setting, or override it */
+  handoffs: RoomHandoffs;
+  /** member who answers a message with no @mention */
+  defaultResponderId?: string | null;
+  /** chained handoffs one user message may trigger (1–3, default 1) */
+  maxHops?: number;
+  /** per-room inactivity window in minutes (null = app default, 20) */
+  turnIdleMinutes?: number | null;
   unread: boolean;
   createdAt: number;
   /** auto-created bot⇄bot channel (ask_bot exchanges mirror here) */
@@ -225,7 +234,7 @@ export type Action =
   | { type: "groupDeleted"; groupId: string }
   | { type: "createGroup"; memberIds: string[]; name?: string }
   | { type: "sendGroup"; groupId: string; text: string; attachments?: Attachment[] }
-  | { type: "patchGroup"; groupId: string; patch: Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "autoHandoffs" | "projectId">> }
+  | { type: "patchGroup"; groupId: string; patch: Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "handoffs" | "defaultResponderId" | "maxHops" | "turnIdleMinutes" | "projectId">> }
   | { type: "deleteGroup"; groupId: string }
   | { type: "clearChat"; threadId: string }
   | { type: "threadCleared"; threadId: string }

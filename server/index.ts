@@ -31,7 +31,7 @@ import type { ModelSelection, RuntimeEvent, SendTurnInput } from "./contracts.ts
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
-import { automaticHandoffBots, mentionedBots, Store, type Attachment, type Message } from "./store.ts";
+import { automaticHandoffBots, mentionedBots, ROOM_IDLE_MINUTES_MAX, ROOM_MAX_HOPS, Store, type Attachment, type GroupRecord, type Message } from "./store.ts";
 import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContext } from "./projects.ts";
 import { CHAT_FORMATTING_HINT } from "./chat-formatting.ts";
 import { createTurnWatchdog, formatDuration, type TurnExpiry } from "./turn-watchdog.ts";
@@ -780,7 +780,7 @@ async function startTurn(
 // members run SEQUENTIALLY (one speaker at a time — the transcript and the
 // streaming bubble stay coherent), each on a fresh session with the recent
 // room conversation serialized into its prompt. A member's reply may
-// @mention teammates; those get one chained turn (hop 1), never deeper.
+// @mention teammates; those get chained turns up to the room's maxHops.
 const groupQueues = new Map<string, Promise<void>>();
 const groupQueueEpoch = new Map<string, number>();
 // A room turn is stopped only when the bot goes quiet for GROUP_TURN_IDLE_MS
@@ -789,7 +789,11 @@ const groupQueueEpoch = new Map<string, number>();
 const GROUP_TURN_IDLE_MS = Math.max(1_000, Number(process.env.GBS_GROUP_TURN_IDLE_MS ?? process.env.GBS_GROUP_TURN_TIMEOUT_MS) || 20 * 60_000);
 const GROUP_TURN_MAX_MS = Math.max(GROUP_TURN_IDLE_MS, Number(process.env.GBS_GROUP_TURN_MAX_MS) || 3 * 60 * 60_000);
 const GROUP_CONTEXT_MESSAGES = 30;
-const MAX_GROUP_HOPS = 1;
+
+/** The room's handoff setting, falling back to the app-wide one. */
+function roomHandoffsEnabled(group: GroupRecord): boolean {
+  return group.handoffs === "inherit" ? (cfg.autoHandoffs ?? true) : group.handoffs === "on";
+}
 
 function queueGroupResponders(groupId: string, botIds: string[]) {
   if (botIds.length === 0) return;
@@ -818,6 +822,21 @@ function dropQueuedResponder(groupId: string, botId: string) {
   queuedBotIds.splice(index, 1);
   store.patchGroup(groupId, { queuedBotIds });
   broadcastGroup(groupId);
+}
+
+/** Cancel one member's queued or active room activity. */
+async function stopRoomActivity(group: GroupRecord, botId: string): Promise<"ok" | "busy-other" | "no-provider"> {
+  if (group.queuedBotIds?.includes(botId)) {
+    dropQueuedResponder(group.id, botId);
+    return "ok";
+  }
+  if (group.busyBotId && group.busyBotId !== botId) return "busy-other";
+  const bot = store.bot(botId);
+  const instance = registry.get((activeSelections.get(group.threadId) ?? bot?.modelSelection)?.instanceId ?? "");
+  if (!instance) return "no-provider";
+  stoppedConversations.add(group.threadId); schedules.cancelResume(group.threadId);
+  await instance.adapter.interruptTurn(group.threadId).catch(() => {});
+  return "ok";
 }
 
 function serializeRoomContext(threadId: string, userName: string): string {
@@ -853,7 +872,7 @@ async function runGroupMemberTurn(
   const group = store.group(groupId);
   const bot = store.bot(botId);
   if (!group) return;
-  if (!bot) {
+  if (!bot || !group.memberIds.includes(botId)) {
     dropQueuedResponder(groupId, botId);
     return;
   }
@@ -928,6 +947,8 @@ async function runGroupMemberTurn(
   let usageFailure: UsageLimitFailure | undefined;
   activeSelections.set(group.threadId, selection);
   let timedOut: TurnExpiry | null = null;
+  const idleMs = group.turnIdleMinutes ? group.turnIdleMinutes * 60_000 : GROUP_TURN_IDLE_MS;
+  const maxMs = Math.max(idleMs, GROUP_TURN_MAX_MS);
   await new Promise<void>((resolve) => {
     let done = false;
     let interruptFallback: ReturnType<typeof setTimeout> | undefined;
@@ -940,8 +961,8 @@ async function runGroupMemberTurn(
       resolve();
     };
     const watchdog = createTurnWatchdog({
-      idleMs: GROUP_TURN_IDLE_MS,
-      maxMs: GROUP_TURN_MAX_MS,
+      idleMs,
+      maxMs,
       onExpire: (reason) => {
         timedOut = reason;
         void instance.adapter.interruptTurn(group.threadId)
@@ -986,8 +1007,8 @@ async function runGroupMemberTurn(
       from: { botId: bot.id, name: bot.name, color: bot.color },
       tool: {
         name: timedOut === "max"
-          ? `error: activity hit the ${formatDuration(GROUP_TURN_MAX_MS)} limit and was stopped`
-          : `error: activity went quiet for ${formatDuration(GROUP_TURN_IDLE_MS)} and was stopped`,
+          ? `error: activity hit the ${formatDuration(maxMs)} limit and was stopped`
+          : `error: activity went quiet for ${formatDuration(idleMs)} and was stopped`,
         ok: false,
       },
     });
@@ -997,14 +1018,14 @@ async function runGroupMemberTurn(
   store.patchGroup(group.id, { busyBotId: null, unread: true });
   broadcastGroup(group.id);
 
-  // chained mentions: a member's reply can summon teammates — one hop only
+  // chained mentions: a member's reply can summon teammates, up to the
+  // room's hop depth
   const latestGroup = store.group(groupId);
-  if (hop < MAX_GROUP_HOPS && replyText.trim() && latestGroup && (groupQueueEpoch.get(groupId) ?? 0) === epoch) {
-    const members = group.memberIds
+  if (latestGroup && hop < (latestGroup.maxHops ?? 1) && replyText.trim() && (groupQueueEpoch.get(groupId) ?? 0) === epoch) {
+    const members = latestGroup.memberIds
       .map((id) => store.bot(id))
       .filter((b): b is NonNullable<typeof b> => Boolean(b) && b!.id !== bot.id);
-    const autoHandoffsEnabled = cfg.autoHandoffs ?? true;
-    for (const next of automaticHandoffBots(autoHandoffsEnabled, replyText, members)) {
+    for (const next of automaticHandoffBots(roomHandoffsEnabled(latestGroup), replyText, members)) {
       if (spoken.has(next.id)) continue;
       queueGroupResponders(groupId, [next.id]);
       await runGroupMemberTurn(groupId, next.id, hop + 1, spoken, epoch);
@@ -1028,8 +1049,10 @@ function startGroupTurn(groupId: string, text: string, attachments?: Attachment[
     .filter((b): b is NonNullable<typeof b> => Boolean(b));
   const mentioned = mentionedBots(text, members);
   // Buzz rule: nobody replies unless mentioned — except a one-member room,
-  // where the single bot obviously IS the addressee
-  let responders = options?.resume ? members.filter(b => b.id === options.resume!.botId) : mentioned.length ? mentioned : members.length === 1 ? members : [];
+  // where the single bot obviously IS the addressee, or a room with a
+  // default responder
+  const fallback = members.length === 1 ? members : members.filter((b) => b.id === group.defaultResponderId);
+  let responders = options?.resume ? members.filter(b => b.id === options.resume!.botId) : mentioned.length ? mentioned : fallback;
   // bot⇄bot channels: chipping in without a tag addresses the last speaker
   if (!responders.length && group.dm) {
     const lastSpeakerId = [...store.messagesFor(group.threadId)]
@@ -1627,17 +1650,53 @@ const server = createServer(async (req, res) => {
     m = path.match(/^\/api\/groups\/([\w-]+)$/);
     if (m && method === "PATCH") {
       const body = await readBody(req);
-      const patch: Record<string, unknown> = {};
-      for (const key of ["name", "bulletin", "unread"] as const) {
-        if (body[key] !== undefined) patch[key] = body[key];
+      const current = store.group(m[1]);
+      if (!current) return json(res, 404, { error: "no such room" });
+      const patch: Parameters<typeof store.patchGroup>[1] = {};
+      if (body.name !== undefined) {
+        if (typeof body.name !== "string" || !body.name.trim()) return json(res, 400, { error: "name must be a non-empty string" });
+        patch.name = body.name.trim().slice(0, 80);
       }
+      if (body.bulletin !== undefined) {
+        if (typeof body.bulletin !== "string") return json(res, 400, { error: "bulletin must be a string" });
+        patch.bulletin = body.bulletin;
+      }
+      if (body.unread !== undefined) patch.unread = Boolean(body.unread);
+      // legacy boolean from older clients
       if (body.autoHandoffs !== undefined) {
         if (typeof body.autoHandoffs !== "boolean") return json(res, 400, { error: "autoHandoffs must be a boolean" });
-        patch.autoHandoffs = body.autoHandoffs;
+        patch.handoffs = body.autoHandoffs ? "on" : "off";
       }
-      if (Array.isArray(body.memberIds)) {
-        const ids = body.memberIds.filter((id: unknown): id is string => typeof id === "string" && Boolean(store.bot(id)));
-        if (ids.length) patch.memberIds = ids;
+      if (body.handoffs !== undefined) {
+        if (!["inherit", "on", "off"].includes(body.handoffs)) return json(res, 400, { error: "handoffs must be inherit, on or off" });
+        patch.handoffs = body.handoffs;
+      }
+      if (body.maxHops !== undefined) {
+        if (!Number.isInteger(body.maxHops) || body.maxHops < 1 || body.maxHops > ROOM_MAX_HOPS) {
+          return json(res, 400, { error: `maxHops must be a whole number from 1 to ${ROOM_MAX_HOPS}` });
+        }
+        patch.maxHops = body.maxHops;
+      }
+      if (body.turnIdleMinutes !== undefined) {
+        if (body.turnIdleMinutes !== null && (!Number.isInteger(body.turnIdleMinutes) || body.turnIdleMinutes < 1 || body.turnIdleMinutes > ROOM_IDLE_MINUTES_MAX)) {
+          return json(res, 400, { error: `turnIdleMinutes must be null or a whole number from 1 to ${ROOM_IDLE_MINUTES_MAX}` });
+        }
+        patch.turnIdleMinutes = body.turnIdleMinutes;
+      }
+      if (body.memberIds !== undefined) {
+        if (!Array.isArray(body.memberIds)) return json(res, 400, { error: "memberIds must be an array" });
+        const ids = [...new Set(body.memberIds.filter((id: unknown): id is string => typeof id === "string" && Boolean(store.bot(id))))] as string[];
+        if (!ids.length) return json(res, 400, { error: "a room needs at least one bot" });
+        patch.memberIds = ids;
+      }
+      const memberIds = patch.memberIds ?? current.memberIds;
+      if (body.defaultResponderId !== undefined) {
+        if (body.defaultResponderId !== null && (typeof body.defaultResponderId !== "string" || !memberIds.includes(body.defaultResponderId))) {
+          return json(res, 400, { error: "defaultResponderId must be null or a room member" });
+        }
+        patch.defaultResponderId = body.defaultResponderId;
+      } else if (current.defaultResponderId && !memberIds.includes(current.defaultResponderId)) {
+        patch.defaultResponderId = null;
       }
       if (body.projectId !== undefined) {
         if (body.projectId !== null && typeof body.projectId !== "string") {
@@ -1645,9 +1704,26 @@ const server = createServer(async (req, res) => {
         }
         patch.projectId = body.projectId;
       }
+      const removed = current.memberIds.filter((id) => !memberIds.includes(id));
+      const added = memberIds.filter((id) => !current.memberIds.includes(id));
+      // stop what a removed member is doing before it leaves the roster
+      for (const id of removed) await stopRoomActivity(current, id);
       const group = store.patchGroup(m[1], patch);
       if (!group) return json(res, 404, { error: "no such room" });
       broadcast({ kind: "group", group });
+      for (const [ids, verb] of [[added, "joined"], [removed, "left"]] as const) {
+        for (const id of ids) {
+          const member = store.bot(id);
+          if (!member) continue;
+          const line = store.appendMessage(group.threadId, {
+            role: "bot",
+            kind: "activity",
+            from: { botId: member.id, name: member.name, color: member.color },
+            tool: { name: `${member.name} ${verb} the room`, ok: true },
+          });
+          broadcast({ kind: "message", threadId: group.threadId, message: line });
+        }
+      }
       return json(res, 200, { group });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)$/);
@@ -1689,17 +1765,9 @@ const server = createServer(async (req, res) => {
       const group = store.group(m[1]);
       const bot = store.bot(m[2]);
       if (!group || !bot || !group.memberIds.includes(bot.id)) return json(res, 404, { error: "no such room activity" });
-      if (group.queuedBotIds?.includes(bot.id)) {
-        dropQueuedResponder(group.id, bot.id);
-        return json(res, 200, { ok: true });
-      }
-      if (group.busyBotId && group.busyBotId !== bot.id) {
-        return json(res, 409, { error: "another agent owns the active room turn" });
-      }
-      const instance = registry.get((activeSelections.get(group.threadId) ?? bot.modelSelection).instanceId);
-      if (!instance) return json(res, 409, { error: "provider unavailable" });
-      stoppedConversations.add(group.threadId); schedules.cancelResume(group.threadId);
-      await instance.adapter.interruptTurn(group.threadId).catch(() => {});
+      const stopped = await stopRoomActivity(group, bot.id);
+      if (stopped === "busy-other") return json(res, 409, { error: "another agent owns the active room turn" });
+      if (stopped === "no-provider") return json(res, 409, { error: "provider unavailable" });
       return json(res, 200, { ok: true });
     }
 
