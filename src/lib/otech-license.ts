@@ -102,7 +102,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 /**
- * Verifies a key against https://license.otech.jo/api/verify
+ * Verifies a key against https://russell-garbage-elimination-productions.trycloudflare.com/api/verify
  * Falls back to offline keys or 3-day grace period if network unavailable
  */
 export async function verifyLicenseKey(keyToVerify: string): Promise<{ success: boolean; state: OtechLicenseState; message?: string }> {

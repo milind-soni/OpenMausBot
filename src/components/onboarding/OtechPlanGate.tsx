@@ -16,7 +16,7 @@ import {
 import { setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 import { useOtechLicense } from "@/lib/otech-license";
 
-const WHATSAPP_PHONE = "962791234567";
+const WHATSAPP_PHONE = "962776801240";
 
 export function OtechPlanGate() {
   const { license, isLocked, activateKey, startTrial } = useOtechLicense();
@@ -117,7 +117,7 @@ export function OtechPlanGate() {
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              OTECH <span className="text-xs px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 font-medium">v0.1.161</span>
+              OTECH <span className="text-xs px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 font-medium">v0.1.162</span>
             </h1>
             <p className="text-xs text-slate-400">
               {isArabic ? "حلول الذكاء الاصطناعي وإدارة الأعمال — الأردن" : "Enterprise AI Solutions — Jordan"}
@@ -404,7 +404,7 @@ export function OtechPlanGate() {
       <div className="w-full max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-slate-800 text-xs text-slate-400 text-center sm:text-start">
         <div className="flex items-center gap-2">
           <span>{isArabic ? "مكتب عمان، الأردن • خدمة العملاء:" : "Amman Office, Jordan • Customer Service:"}</span>
-          <span dir="ltr" className="font-mono text-slate-300">+962 7 9123 4567</span>
+          <span dir="ltr" className="font-mono text-slate-300">+962 7 7680 1240</span>
         </div>
         <button
           type="button"
