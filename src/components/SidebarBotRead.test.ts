@@ -122,6 +122,31 @@ describe("bot menu bulk reads", () => {
   });
 });
 
+describe("Advanced mode's bot menu", () => {
+  const paused = (all: boolean) => { state = { ...state, config: { ...state.config!, pausedByPerson: { bots: [], departments: [], ...(all ? { all: true as const } : {}) }, heldBots: all ? [bot.id] : [] } }; };
+
+  it("offers Pause bot and Pause every bot while nothing is paused", () => {
+    paused(false); draw();
+    expect(button("Pause bot").disabled).toBe(false);
+    expect(button("Pause every bot")).toBeDefined();
+  });
+
+  it("offers Resume every bot while every bot is paused, as the paused line tells the person", async () => {
+    const fetch = vi.fn(async (_url: unknown, _init?: RequestInit) => new Response(JSON.stringify({ stopped: 0 }), { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch); paused(true); draw();
+    expect(button("Pause bot").disabled).toBe(true);
+    flushSync(() => button("Resume every bot").click());
+    await expect.poll(() => fetch.mock.calls.length).toBe(1);
+    expect(JSON.parse(String(fetch.mock.calls[0]![1]?.body))).toEqual({ kind: "all", paused: false });
+  });
+
+  it("keeps the pause items off a paired desktop's menu", () => {
+    window.ogb = { remoteClient: { active: true } } as typeof window.ogb;
+    paused(true); draw();
+    expect(button("Resume every bot")).toBeUndefined();
+  });
+});
+
 describe("Simple mode's bot menu", () => {
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   const sheet = () => document.querySelector<HTMLElement>('[data-bot-menu][aria-label="Actions for Reviewer"]')!;

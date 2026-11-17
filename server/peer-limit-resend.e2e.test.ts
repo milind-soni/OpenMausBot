@@ -73,6 +73,8 @@ async function withHandoffFixture(helperPlan: Record<string, unknown>, check: (f
     await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true });
     const own = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === specialist.id).modelSelection;
     await api("PATCH", `/api/bots/${specialist.id}/tasks/${specialist.activeTaskId}`, { modelSelection: { ...own, instanceId: "helper" }, updateBotDefault: true });
+    const { instances } = await api("GET", "/api/instances") as { instances: any[] };
+    await api("PATCH", `/api/bots/${specialist.id}`, { fallback: [{ instanceId: "codex", model: instances.find((instance) => instance.instanceId === "codex").models.default }] });
     const brief = "CHECK_THE_FIXTURE_REPORT_5Q";
     writeFileSync(planPath, JSON.stringify({
       [chief.id]: { turns: [

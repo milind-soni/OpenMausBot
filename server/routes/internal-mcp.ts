@@ -275,6 +275,11 @@ async function update(deps: Ctx, name: string, existing: StoredMcpServer, fields
   const planned = planUpdate(deps, name, existing, fields);
   if ("error" in planned) return planned;
   const { dropped } = planned;
+  // A card can explicitly approve clearing values; a direct partial update cannot.
+  // Literal environment values can redirect a command, so keeping credentials is unsafe.
+  if (!isRemoteMcpServer(existing) && fields.env !== undefined && dropped.length && !deps.approved) {
+    return { status: 409, error: `Changing the environment of ${name} would clear saved values: ${dropped.join(", ")}. Send all listed values in the same update (use fresh secretRefs for secrets), or change it in Settings.` };
+  }
   let server = planned.server;
   let moved: Array<{ from: string; to: string }> = [];
   if (!isRemoteMcpServer(server) && !isRemoteMcpServer(existing) && !sameRun(server, existing)) {

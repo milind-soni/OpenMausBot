@@ -19,6 +19,7 @@ import { MEETING_TOOL_DEFINITIONS, MEETING_TOOL_NAMES } from "./agents-meeting-t
 import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
 import { PERSON_TOOL_DEFINITIONS } from "./agents-person-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES, X_TOOL_NAMES } from "./agents-research-tools.ts";
+import { SHARE_TOOL_DEFINITIONS } from "./agents-share-tool.ts";
 import type { CatalogProfile } from "./agents-catalog-profile.ts";
 import { advertisedSchema } from "./agents-schema.ts"; import { withoutToolsOff } from "./agents-tool-groups.ts";
 export { catalogProfileFromEnv, type CatalogProfile } from "./agents-catalog-profile.ts";
@@ -508,7 +509,7 @@ const TOOL_DEFINITIONS = [
       required: ["text"],
     },
   },
-  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS, ...IMAGE_TOOL_DEFINITIONS, ...MEETING_TOOL_DEFINITIONS, ...PERSON_TOOL_DEFINITIONS, ...DEVS_TOOL_DEFINITIONS, ...HOSTING_TOOL_DEFINITIONS,
+  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS, ...IMAGE_TOOL_DEFINITIONS, ...MEETING_TOOL_DEFINITIONS, ...PERSON_TOOL_DEFINITIONS, ...DEVS_TOOL_DEFINITIONS, ...HOSTING_TOOL_DEFINITIONS, ...SHARE_TOOL_DEFINITIONS,
   {
     name: "memory_update",
     description:
@@ -718,13 +719,13 @@ const TOOL_DEFINITIONS = [
   {
     name: "skill_manage",
     description:
-      "Create or update a reusable skill (SKILL.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill." + APPLIES_OUTCOME,
+      "Create or update a reusable skill (SKILL.md), import one from GitHub or skills.sh (action import with source; same review as create, brings SKILL.md and references/*.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        action: { type: "string", enum: ["create", "update", "enable", "disable", "delete"] },
-        skill_name: { type: "string", description: "Every action but create: the exact name from skills_list." },
+        action: { type: "string", enum: ["create", "update", "import", "enable", "disable", "delete"] },
+        skill_name: { type: "string", description: "Every action but create and import: the exact name from skills_list." },
         skill_md: { type: "string", description: "create or update: the full SKILL.md with its YAML frontmatter." },
         references: {
           type: "array",
@@ -742,7 +743,7 @@ const TOOL_DEFINITIONS = [
         },
         gist: { type: "string", description: "Optional one-line summary of the change." },
         base_revision: { type: "string", description: "To update a skill shared with your team: its revision from skills_list." },
-        source: { type: "string", description: "create or update: the URL, folder or 'conversation' it came from." },
+        source: { type: "string", description: "create or update: the URL, folder or 'conversation' it came from. import: owner/repo, a GitHub link to the skill's folder or SKILL.md, or a skills.sh link." },
       },
       required: ["action"],
     },
@@ -809,6 +810,11 @@ const CLOUD_HOME_SURFACE = {
   type: "string", enum: ["auto", "cloud", "browser"],
   description: "auto = suitable configured computer, cloud = the bot's cloud computer, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",
 };
+/** A server with no container runtime cannot give a bot a Local VM, so that surface is left out of the list. */
+const NO_LOCAL_VM_SURFACE = {
+  type: "string", enum: ["auto", "cloud", "local", "browser"],
+  description: "auto = suitable configured computer, cloud = the bot's cloud computer or self-hosted VPS, local = user's own desktop, browser = built-in browser. Omit to list. This server cannot give a bot a Local VM, so vm is not a place here.",
+};
 
 export function availableTools(profile: CatalogProfile) {
   const tools = withoutToolsOff(catalogTools(profile), profile.toolsOff ?? []);
@@ -816,7 +822,13 @@ export function availableTools(profile: CatalogProfile) {
     ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
       ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: CLOUD_HOME_SURFACE } } }
       : tool)
-    : tools;
+    // A model shown a tool it cannot use spends turns finding out: with no container runtime there is
+    // no Local VM to run a command in, and no Local VM to pick as a place either.
+    : profile.localVm === false
+      ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
+        ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: NO_LOCAL_VM_SURFACE } } }
+        : tool)
+      : tools;
   return placed.map((tool) => ({ ...tool, inputSchema: advertisedSchema(tool.inputSchema, tool.description) }));
 }
 

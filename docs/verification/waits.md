@@ -12,9 +12,14 @@ pnpm exec vitest run server/wait-probes.test.ts server/waits.test.ts server/wait
 
 ## In a fixture
 
-The fake engine calls `wait_until` on every turn it runs, the follow-up turn too. That
-turn was started by the wait, not by the person, so its `wait_until` is refused: a wait
-never renews itself.
+The fake engine calls `wait_until` on every turn it runs, including the follow-up.
+A follow-up proved by its live turn generation, originating wait run and fired notice
+can create its next wait in the same bot's direct chat. Continuation authorization is
+checked again after the initial probe, before returning immediate follow-up instructions
+or persisting a wait. The multi-stage e2e test exercises two completions and
+registration of the next stage. Scheduled routines and unrelated outside events
+retain their existing refusal. A condition already true returns immediately and
+directs the bot to carry out its follow-up in that turn.
 
 ```sh
 W=$(mktemp -d)
@@ -45,9 +50,9 @@ Expected:
 - After the `touch`: exactly one bot line `the report: done. <W>/report.txt is there now.`
   carrying `"wait": { "id": "...", "status": "fired" }`, then a user line
   `[Wait finished: the report] Say the report is ready.`, then that turn's `wait_until`
-  row with `"ok": false` (refused: "Only the person can set up or stop a wait, in their
-  own chat with you; …"), and the fake engine's reply.
-- Still one `options` card: the refused call made no second wait.
+  row with `"ok": true` (the condition already holds, so the result asks it to
+  carry out `follow_up` now), and the fake engine's reply.
+- Still one `options` card because the condition already holds.
 - `waits.json` holds `"waits": []`.
 - One notification with `"kind": "wait"` and `"title": "Pepper's wait is over"`.
 - The last `messages` still shows one fired line.
@@ -61,10 +66,20 @@ internet, and what a real model does with the follow-up (the fake engine replies
 
 ## Last exercised
 
+2026-11-16, macOS arm64, Node 26.5.0. Twelve targeted Vitest files passed with
+505 tests, including successive build, test and package waits in one direct chat,
+originating-run and live-generation authorization, and rejection when continuation
+authorization changes during a URL probe with either a matching or pending condition.
+The packaged server passed its smoke checks and all four wait and handed-wait
+e2e tests against disposable fixture data. The route tests also cover immediate
+follow-up when the requested condition already holds.
+
+## Earlier fixture transcript
+
 2026-10-28, Node 24, branch `feat/bot-waits` at `4fc4ef0bb`, fixture log
 `/var/folders/7b/15jj691d4tj_7vq99cqvwgbr0000gn/T/openmausbot-verification-evidence/server-1793162265419-23568.log`.
-Every expectation above held. The lines below are abridged: only these fields of each
-message are kept, and `<W>` stands for the temp dir.
+The lines below record the original continuation refusal. They are abridged to
+selected message fields, and `<W>` stands for the temp dir.
 
 `wait_until` answer in the person's turn:
 

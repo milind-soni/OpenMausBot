@@ -326,6 +326,22 @@ describe("internal mcp_server route, Full access", () => {
     expect(body.dropped).toBeUndefined();
   });
 
+  it("refuses a partial literal environment update without clearing saved credentials", async () => {
+    const probe = probeWith({ ok: true, tools: [] });
+    const { post, stored, ref } = fixture({ servers: { notes } });
+    const rejected = await post({ action: "update", name: "notes", env: { npm_config_cache: "/tmp/npm-cache" } });
+    expect(rejected.status).toBe(409);
+    expect(rejected.body.error).toContain("env NOTES_TOKEN");
+    expect(rejected.body.error).not.toContain("saved-token");
+    expect(stored("notes")).toMatchObject({ env: { NOTES_TOKEN: "saved-token" } });
+    expect(probe).not.toHaveBeenCalled();
+
+    const accepted = await post({ action: "update", name: "notes", env: { npm_config_cache: "/tmp/npm-cache", NOTES_TOKEN: ref("replacement") } });
+    expect(accepted.status).toBe(200);
+    expect(stored("notes")).toMatchObject({ env: { npm_config_cache: "/tmp/npm-cache" } });
+    expect(accepted.body.dropped).toBeUndefined();
+  });
+
   it("a new address drops the sign-in only when there was one to drop", async () => {
     probeWith({ ok: true, tools: [] });
     const signedIn = fixture({ servers: { linear } });
@@ -881,6 +897,15 @@ describe("internal mcp_server route, below Full access", () => {
     await remote.post({ action: "update", name: "linear", headers: { "X-Api-Key": "opaque-value-123", Authorization: "Bearer abc123" } });
     expect(remote.card()?.subtitle).toBe("new key for X-Api-Key\nnew key for Authorization");
     expect(JSON.stringify(remote.chat)).not.toMatch(/opaque-value-123|abc123/);
+  });
+
+  it("allows clearing saved credentials when the person approves the card", async () => {
+    probeWith({ ok: true, tools: [] });
+    const { post, card, respond, stored } = fixture({ full: false, servers: { notes } });
+    expect((await post({ action: "update", name: "notes", env: { npm_config_cache: "/tmp/npm-cache" } })).status).toBe(202);
+    expect(card()?.subtitle).toContain("env NOTES_TOKEN");
+    expect(await respond("allow")).toMatchObject({ status: 200, body: { result: { state: "applied" } } });
+    expect(stored("notes")).toMatchObject({ env: { npm_config_cache: "/tmp/npm-cache" } });
   });
 
   it("the card's targetHash is the hash of the display target, so a secret in the args or url cannot be guessed from it", async () => {

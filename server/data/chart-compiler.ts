@@ -125,7 +125,7 @@ function binned(x: Resolved, channel: string, bins: number, bars: boolean): Dime
   FROM src
 `,
   };
-  const bin = `least(floor((${v} - ${cte.name}.lo) / ${cte.name}.width), ${bins - 1})`;
+  const bin = `CASE WHEN ${x.id} IS NULL THEN NULL ELSE least(floor((${v} - ${cte.name}.lo) / ${cte.name}.width), ${bins - 1}) END`;
   const start = `${cte.name}.lo + ${bin} * ${cte.name}.width`;
   const end = `${channel}2`;
   return bars
@@ -428,7 +428,9 @@ function planScatter(x: Resolved, y: Resolved | undefined, color: Resolved | und
   const selects = [`${x.id} AS x`, `${y.id} AS y`];
   if (color) selects.push(`${color.id} AS color`);
   if (size) selects.push(`${size.id} AS size`);
-  const body = `SELECT ${selects.join(",\n       ")}\nFROM src USING SAMPLE reservoir(${DATA_LIMITS.chartMaxMarks} ROWS) REPEATABLE (${SAMPLE_SEED})`;
+  const required = [x, y].filter((axis) => axis.cls === "numeric" || axis.cls === "temporal");
+  const source = required.length ? `(SELECT * FROM src WHERE ${required.map((axis) => `${axis.id} IS NOT NULL`).join(" AND ")}) AS src` : "src";
+  const body = `SELECT ${selects.join(",\n       ")}\nFROM ${source} USING SAMPLE reservoir(${DATA_LIMITS.chartMaxMarks} ROWS) REPEATABLE (${SAMPLE_SEED})`;
   const encoding: Encoding = {
     x: { field: "x", type: vegaType(x), title: x.column.name },
     y: { field: "y", type: vegaType(y), title: y.column.name },

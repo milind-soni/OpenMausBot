@@ -1218,9 +1218,16 @@
   src: local("Noto Sans Hebrew"), local("Arial Hebrew"), local("SF Hebrew");
   unicode-range: U+0590-05FF, U+FB1D-FB4F;
 }
-/* A reply with a table is as wide as the message; its prose keeps the reading width. */
+/* A reply with a table is as wide as its widest table, never narrower than the reading width, and its prose fills it.
+   A percentage min-width counts as zero while the reply is measured and outranks max-width afterwards. */
+.chat-wide .chat-md {
+  width: fit-content;
+  min-width: min(100%, var(--chat-prose-max));
+  max-width: 100%;
+}
 .chat-wide .chat-md > :not(.chat-table) {
   max-width: var(--chat-prose-max);
+  min-width: 100%;
 }
 
 /* A reply's long unbroken text (a URL, a run of letters) wraps inside its bubble instead of running past the window.
@@ -1927,14 +1934,15 @@ body {
   top: calc(-1 * var(--glass-reach, 0px));
   mask-image: linear-gradient(to top, black calc(100% - var(--glass-reach, 0px)), transparent);
 }
-/* A fading bar has no tint and no blur. What scrolls under it fades straight into the canvas: hidden
-   at the window edge, back to full strength over the last --glass-fade of the bar, which is the whole
-   of Simple mode's 60px header. A taller bar (find, a notice) stays plain canvas above that stretch. */
+/* A fading bar has no tint and no blur. What scrolls under it stays hidden at the window edge and is
+   at most a tenth visible at the bar's inner edge, across the last --glass-fade of the bar, which is
+   the whole of Simple mode's 60px header: its controls stay readable over any content. A taller bar
+   (find, a notice) stays plain canvas above that stretch. */
 .glass-bar[data-glass-fade] {
   --glass-fade: 60px;
 }
 .glass-bar[data-glass-fade]::before {
-  background: linear-gradient(to bottom, var(--color-app), var(--color-app) calc(100% - var(--glass-fade)), transparent);
+  background: linear-gradient(to bottom, var(--color-app), var(--color-app) calc(100% - var(--glass-fade)), color-mix(in srgb, var(--color-app) 90%, transparent));
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   mask-image: none;
@@ -3621,4 +3629,24 @@ button:disabled.bg-danger {
 .fade-end:dir(rtl) {
   -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+
+/* The Teams What's new: the card fades in growing slightly, then the four teammates join the bot one after another,
+   about 600 ms in all. Each rests visible, so without motion everything is simply there. */
+.teams-card-in { animation: teams-card-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.teams-face-in { animation: teams-face-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: calc(180ms + var(--face, 0) * 70ms); }
+@keyframes teams-card-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes teams-face-in {
+  from { opacity: 0; transform: translateX(var(--from-x, 0)) scale(0.6); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .teams-card-in, .teams-face-in { animation: none; }
+}
+:root[data-reduced-motion="true"] .teams-card-in,
+:root[data-reduced-motion="true"] .teams-face-in {
+  animation: none !important;
 }

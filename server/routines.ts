@@ -256,7 +256,7 @@ export interface RoutineManagerOptions {
     prompt: string,
     runOn: RoutineRunOn,
     triggerSource: RoutineRunTrigger,
-    onDispatchError: (message: string) => void,
+    onDispatchError: (message: string) => void, runId: string,
   ) => Promise<void>;
   startGoal?: (
     groupId: string | undefined,
@@ -1189,7 +1189,7 @@ export class RoutineManager {
               startPrompt(run, prompt, composeExecutionPrompt({ id: run.routineId, name: run.routineName, trigger: triggerSource, runOn: run.runOn ?? "maus" }, prompt, run.attachments, continuityCarry(run, this.routines, this.runs)), (first) => this.options.promptSaid?.(task.threadId, first) === true),
               run.runOn ?? "maus",
               triggerSource,
-              (message) => this.failThread(task.threadId, message, { cause: "refused" }),
+              (message) => this.failThread(task.threadId, message, { cause: "refused" }), run.id,
             );
           }
         } catch (error) {

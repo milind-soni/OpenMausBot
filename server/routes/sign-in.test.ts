@@ -105,8 +105,7 @@ it.each(["createInternalSignInRoutes", "createInternalThreadRoutes", "createInte
     "authorizedInternalCapability(req.headers.authorization)", "!internalCapability", "!internalSender",
     "externalRuntimeMayCall(method, path)", "internalCapability.kind !== requiredCapabilityKind",
     "claimed !== internalSender.id", "claimedThread !== internalCapability.threadId",
-    "internalCapabilityIsActive(internalCapability)", "String(body[key]) !== internalSender.id",
-    "String(body[key]) !== internalCapability.threadId",
+    "internalCapabilityIsActive(internalCapability)", "internalBodyRefusal(body, internalSender.id, internalCapability.threadId)",
   ]) expect(before).toContain(guard);
 });
 

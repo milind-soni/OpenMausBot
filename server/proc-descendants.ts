@@ -46,11 +46,19 @@ function rows(platform: NodeJS.Platform): Row[] {
 /** The live processes below `root`, parents before their children. Empty on Windows, where taskkill /T walks the tree. */
 export function descendantsOf(root: number, platform: NodeJS.Platform = process.platform): TreeProcess[] {
   const all = rows(platform);
+  const children = new Map<number, Row[]>();
+  for (const row of all) {
+    const siblings = children.get(row.parent);
+    if (siblings) siblings.push(row);
+    else children.set(row.parent, [row]);
+  }
   const found: TreeProcess[] = [];
   const parents = [root];
+  const seen = new Set(parents);
   for (let next = 0; next < parents.length; next += 1) {
-    for (const row of all) {
-      if (row.parent !== parents[next] || row.pid === process.pid || row.pid <= 1 || parents.includes(row.pid)) continue;
+    for (const row of children.get(parents[next]!) ?? []) {
+      if (row.pid === process.pid || row.pid <= 1 || seen.has(row.pid)) continue;
+      seen.add(row.pid);
       parents.push(row.pid);
       if (!row.gone) found.push({ pid: row.pid, start: row.start });
     }

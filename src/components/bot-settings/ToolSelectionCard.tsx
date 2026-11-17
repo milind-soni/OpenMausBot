@@ -35,7 +35,7 @@ export function ToolSelectionCard({ bot, engineKind }: { bot: Bot; engineKind?: 
     && (support !== "mcp" || narrowsNativeTools(proposed));
   const change = (patch: Partial<Draft>) => { setDraft({ ...fields, ...patch }); setError(null); };
   const save = async () => {
-    if (!draft || bot.busy || pending.current || !parsed.ok) return;
+    if (!draft || pending.current || !parsed.ok) return;
     pending.current = true; setSaving(true); setError(null);
     try {
       await request(`/api/bots/${bot.id}`, { method: "PATCH", body: JSON.stringify({ toolScope: parsed.scope ?? null }) });
@@ -60,13 +60,13 @@ export function ToolSelectionCard({ bot, engineKind }: { bot: Bot; engineKind?: 
     </p>
     <label className="mt-3 block text-[13px] text-ink-secondary">
       {t("botAccess.tools.mode")}
-      <Select aria-label={t("botAccess.tools.title")} disabled={saving || !!bot.busy} value={fields.custom ? "custom" : "all"}
+      <Select aria-label={t("botAccess.tools.title")} disabled={saving} value={fields.custom ? "custom" : "all"}
         className="mt-1 w-full" onChange={event => change({ custom: event.target.value === "custom", onlyListed: fields.custom ? fields.onlyListed : true })}>
         <option value="all">{t("botAccess.tools.all")}</option>
         <option value="custom">{t("botAccess.tools.custom")}</option>
       </Select>
     </label>
-    {fields.custom && <fieldset disabled={saving || !!bot.busy} className="mt-3 flex flex-col gap-3">
+    {fields.custom && <fieldset disabled={saving} className="mt-3 flex flex-col gap-3">
       <label className="flex items-center gap-2 text-[13px] text-ink">
         <input type="checkbox" checked={fields.onlyListed} onChange={event => change({ onlyListed: event.target.checked })} />
         {t("botAccess.tools.onlyListed")}
@@ -88,9 +88,9 @@ export function ToolSelectionCard({ bot, engineKind }: { bot: Bot; engineKind?: 
     </p>}
     {!parsed.ok && <p role="alert" className="mt-2 text-[12px] text-danger">{parsed.error}</p>}
     {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
-    {bot.busy && <p className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.tools.busy")}</p>}
+    {bot.busy && <p className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.nextTurn")}</p>}
     <div className="mt-3 flex flex-wrap items-center gap-3">
-      <button type="button" disabled={saving || !!bot.busy || !draft || !parsed.ok} onClick={() => void save()}
+      <button type="button" disabled={saving || !draft || !parsed.ok} onClick={() => void save()}
         className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
         {t(saving ? "botAccess.tools.saving" : "botAccess.tools.save")}
       </button>

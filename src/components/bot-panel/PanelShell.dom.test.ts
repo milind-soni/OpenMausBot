@@ -189,14 +189,14 @@ describe("the panel's tabs", () => {
 });
 
 describe("the panel's top", () => {
-  it("has a round Share button that copies or downloads the conversation, a gear for Bot settings, and Close", async () => {
+  it("has a round Share button that shares the bot as a template or copies or downloads the conversation, a gear for Bot settings, and Close", async () => {
     render(null);
     await settle();
     const top = [...host.querySelectorAll("button")].slice(0, 3);
     expect(top.map((button) => button.getAttribute("aria-label") ?? button.getAttribute("title"))).toEqual(["Share", "Bot settings", "Close settings"]);
     for (const button of [moreButton()!, top[1]!, top[2]!]) expect(button.querySelector("span, svg")).not.toBeNull();
     click(moreButton());
-    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["copy", "download"]);
+    expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["as-template", "copy", "download"]);
     press(moreButton(), "Escape");
     click(top[2]!);
     expect(onClose).toHaveBeenCalledOnce();

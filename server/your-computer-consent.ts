@@ -1,6 +1,6 @@
 // Asking before a bot uses the person's own computer. When a turn reaches this computer without the person having
 // picked it as the place, its first screen call waits on one plain card, Allow once or Deny, at every approval level
-// except Full access ("Just do it"), which is the person's grant to act without asking. The answer covers that turn
+// except Full access, which is the person's grant to act without asking. The answer covers that turn
 // only. Pending asks live in memory; a card left by a previous run is closed.
 import { newId } from "./contracts.ts";
 import { optionCardsForTools } from "./message-db.ts";

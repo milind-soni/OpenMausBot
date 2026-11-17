@@ -108,6 +108,22 @@ These fixture checks do not prove that a customer's real provider account or
 network is healthy. Ask for their app version, Claude CLI version, and a
 redacted diagnostic export if failures remain; do not request credentials.
 
+`start_thread` refuses unknown arguments before opening work. A misspelled
+recipient such as `bot` must not turn a teammate assignment into a task on the
+sender. A valid legacy `bot_id` remains supported, but an empty or non-string
+one is refused instead of defaulting to the sender.
+
+```sh
+pnpm exec vitest run server/drivers/agents-proxy.test.ts server/start-thread-routing.e2e.test.ts
+```
+
+The isolated fixture sends the malformed call through the real agents proxy,
+checks that neither bot gained a task, then sends the corrected
+`coordinate_bots` call and reads the recipient's completed conversation. It
+retains the commands, waits, transcript and resulting task IDs beside the
+server log as `.log.json`. It uses a scripted provider and does not establish
+why a real model or relay produced the malformed arguments.
+
 ## Rebuilt conversations
 
 Editing a message or rebuilding context must start a new Claude session,

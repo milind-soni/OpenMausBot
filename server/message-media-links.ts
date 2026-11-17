@@ -3,6 +3,7 @@
 // viewer, and the route re-runs every message, folder and MIME check against what the id stands for.
 import { randomBytes } from "node:crypto";
 
+import type { AudioRange } from "./attachments.ts";
 import type { RequestAuth } from "./request-auth.ts";
 
 /** Idle limit: every range request a playing video makes renews it. */
@@ -10,6 +11,17 @@ export const MESSAGE_MEDIA_IDLE_MS = 15 * 60_000;
 /** Hard limit, however busy the link is. */
 export const MESSAGE_MEDIA_MAX_AGE_MS = 4 * 60 * 60_000;
 const MAX_LINKS = 512;
+/** The most one answer to a player's range request carries; the player asks again for the rest. */
+export const MESSAGE_MEDIA_RANGE_MAX_BYTES = 8 * 1024 * 1024;
+/** What the chat's players accept; anything else is never handed a link. */
+export const STREAMABLE_MEDIA_MIMES: ReadonlySet<string> = new Set([
+  "video/mp4", "video/webm", "video/quicktime", "video/x-m4v",
+  "audio/mpeg", "audio/mp4", "audio/aac", "audio/wav", "audio/ogg", "audio/opus", "audio/flac",
+]);
+
+export function cappedMediaRange(range: AudioRange): AudioRange {
+  return range.kind === "range" ? { ...range, end: Math.min(range.end, range.start + MESSAGE_MEDIA_RANGE_MAX_BYTES - 1) } : range;
+}
 
 export interface MessageMediaGrant {
   threadId: string;
