@@ -30,6 +30,10 @@ export function createLateToolResults(now: () => number = Date.now) {
     return got.length === expected.length && timingSafeEqual(got, expected);
   };
   return {
+    /** Ended turns held, closed windows included until the next prune. */
+    get held(): number {
+      return ended.length;
+    },
     /** A turn can complete before its generation is bound to it, after cleanup revoked the generation's hooks bearer. */
     generationRevoked(generation: string, hooks: { threadId: string; botId: string; token: string }): void {
       revoked.set(generation, hooks);
@@ -39,6 +43,7 @@ export function createLateToolResults(now: () => number = Date.now) {
       return revoked.get(generation);
     },
     turnEnded(turn: EndedHookTurn): void {
+      live();
       if (turn.toolUseIds.size) ended.push({ ...turn, toolUseIds: new Set(turn.toolUseIds), until: now() + LATE_TOOL_RESULT_MS });
     },
     /** The bot and conversation an ended turn's bearer belongs to. */

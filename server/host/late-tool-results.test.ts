@@ -63,4 +63,14 @@ describe("late tool results", () => {
     late.turnEnded({ ...turn, toolUseIds: new Set() });
     expect(late.holder(bearer)).toBeNull();
   });
+
+  it("drops closed windows as later turns end, with no late request to sweep them", () => {
+    let now = 0;
+    const late = createLateToolResults(() => now);
+    for (let i = 0; i < 100; i++) {
+      late.turnEnded({ ...turn, turnId: `turn-${i}` });
+      now += LATE_TOOL_RESULT_MS;
+    }
+    expect(late.held).toBe(1);
+  });
 });
