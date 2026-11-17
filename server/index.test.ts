@@ -2505,6 +2505,27 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("saves how many turns each room member takes, from 1 to 5, and refuses it on a direct-message channel", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const room = (await api("POST", "/api/groups", { name: "Rounds", memberIds: [bot.id] })).body.group;
+    try {
+      expect(room.turnsPerMember).toBeUndefined();
+      const saved = await api("PATCH", `/api/groups/${room.id}`, { turnsPerMember: 3 });
+      expect(saved.status).toBe(200);
+      expect(saved.body.group.turnsPerMember).toBe(3);
+      expect((await api("POST", `/api/groups/${room.id}/tasks/${room.threadId}?messages=0`)).body.group.turnsPerMember).toBe(3);
+      for (const turnsPerMember of [0, 6, 2.5, "2", null]) {
+        const refused = await api("PATCH", `/api/groups/${room.id}`, { turnsPerMember });
+        expect(refused.status).toBe(400);
+        expect(refused.body.error).toContain("turnsPerMember must be a whole number from 1 to 5");
+      }
+      expect((await api("PATCH", "/api/groups/test-dm", { turnsPerMember: 2 })).status).toBe(400);
+    } finally {
+      await api("DELETE", `/api/groups/${room.id}`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("saves a longer turn limit on one conversation and leaves the others at the group default", async () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     const room = (await api("POST", "/api/groups", { name: "Long runs", memberIds: [bot.id] })).body.group;
@@ -9913,7 +9934,7 @@ describe("harness HTTP API", () => {
   it("keeps skill authoring on by default and persists an explicit opt-out", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
     const untouched = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(untouched.features?.skillAuthoring).toBeUndefined();
     expect(untouched.features?.skillReview).toBeUndefined();
@@ -9923,7 +9944,7 @@ describe("harness HTTP API", () => {
       features: { skillAuthoring: false },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     // Earlier browser coverage may have persisted its own toggle: opting out must preserve sibling settings.
@@ -9931,7 +9952,7 @@ describe("harness HTTP API", () => {
 
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: true, savedSteps: true, savedStepsHere: process.platform === "darwin", usbPhoneTakeover: false });
 
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {

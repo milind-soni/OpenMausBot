@@ -127,6 +127,25 @@ describe("Settings → Vault: logins", () => {
     expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/l1", { method: "PATCH", body: JSON.stringify({ bots: ["pepper"], exactHost: true }) });
   });
 
+  it("moves a login to another site, and sends the site only when it changed", async () => {
+    fixture.api.mockResolvedValueOnce({ logins: [SHARED_LOGIN], onePassword: OFF }).mockResolvedValueOnce({ login: SHARED_LOGIN }).mockResolvedValueOnce({ logins: [SHARED_LOGIN], onePassword: OFF });
+    await render();
+    await click("Change the login for example.org");
+    expect(host.querySelector<HTMLInputElement>('input[name="site"]')!.value).toBe("crm.example.org");
+    await type("site", "d1abc.cloudfront.net");
+    await submit();
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/l2", { method: "PATCH", body: JSON.stringify({ site: "d1abc.cloudfront.net", bots: "all" }) });
+  });
+
+  it("keeps every sign-in host when the site is only written differently", async () => {
+    fixture.api.mockResolvedValueOnce({ logins: [CARD_LOGIN], onePassword: OFF }).mockResolvedValueOnce({ login: CARD_LOGIN }).mockResolvedValueOnce({ logins: [CARD_LOGIN], onePassword: OFF });
+    await render();
+    await click("Change the login for example.com");
+    await type("site", "https://EXAMPLE.com/login");
+    await submit();
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/l1", { method: "PATCH", body: JSON.stringify({ bots: ["pepper"] }) });
+  });
+
   it("deletes only on a second click", async () => {
     fixture.api.mockResolvedValueOnce({ logins: [CARD_LOGIN], onePassword: OFF }).mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ logins: [], onePassword: OFF });
     await render();

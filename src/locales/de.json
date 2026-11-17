@@ -3754,6 +3754,7 @@
   "settings.threadDisplay.short": "Zeigt Thread-Listen in der Seitenleiste. Ausblenden behält deinen Verlauf.",
   "settings.pinnedCircles.short": "Zeigt angeheftete Bots als große Avatare oben in der Seitenleiste.",
   "settings.toolCalls.short": "Zeigt jedes Tool, das ein Bot im Chat ausführt. Fehler erscheinen immer.",
+  "webPanels.bar.label": "Eigene Seiten",
   "webPanels.settings.short": "Halte ein paar Webseiten, etwa ein lokales Dashboard, einen Klick entfernt in der Seitenleiste.",
   "webPanels.settings.addPage": "Seite hinzufügen",
   "webPanels.settings.empty": "Noch keine angehefteten Seiten.",

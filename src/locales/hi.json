@@ -3402,6 +3402,7 @@
   "settings.threadDisplay.short": "साइडबार में थ्रेड सूचियाँ दिखाता है। छिपाने से आपका इतिहास बना रहता है।",
   "settings.pinnedCircles.short": "पिन किए बॉट को साइडबार में ऊपर बड़े अवतार के रूप में दिखाता है।",
   "settings.toolCalls.short": "चैट में बॉट का चलाया हर टूल दिखाता है। गड़बड़ियाँ हमेशा दिखती हैं।",
+  "webPanels.bar.label": "कस्टम पेज",
   "webPanels.settings.short": "कुछ वेब पेज, जैसे लोकल डैशबोर्ड, साइडबार में एक क्लिक की दूरी पर रखें।",
   "webPanels.settings.addPage": "पेज जोड़ें",
   "webPanels.settings.empty": "अभी कोई पिन किया पेज नहीं।",

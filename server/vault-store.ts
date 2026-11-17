@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { HELD_SECRET_MASK } from "../shared/redact.ts";
-import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
+import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginPlace, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
 import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { decryptBrowserState, encryptBrowserState } from "./browser-sites.ts";
@@ -127,6 +127,8 @@ export interface NewLogin extends LoginPlace {
 }
 
 export interface LoginPatch {
+  /** A new host for the login: its site becomes that host's, and its sign-in hosts just that host. */
+  site?: string;
   username?: string;
   password?: string;
   totp?: TotpKey | null;
@@ -290,12 +292,15 @@ export class VaultStore {
     return summarizeLogin(login);
   }
 
-  update(id: string, patch: LoginPatch): LoginSummary | null {
+  /** "taken" when the login would move onto a site where the same account is already saved. */
+  update(id: string, patch: LoginPatch): LoginSummary | null | "taken" {
     const data = this.read();
     const current = data.logins.find((login) => login.id === id);
     if (!current) return null;
+    const moved = patch.site !== undefined && !current.hosts.includes(patch.site);
     const next: StoredLogin = {
       ...current,
+      ...(moved ? loginPlace(patch.site!, [], current.exactHost) : {}),
       ...(patch.username === undefined ? {} : { username: patch.username }),
       ...(patch.password === undefined ? {} : { password: patch.password }),
       ...(patch.bots === undefined ? {} : { bots: patch.bots }),
@@ -304,6 +309,7 @@ export class VaultStore {
     };
     if (patch.totp === null) delete next.totp;
     else if (patch.totp) next.totp = patch.totp;
+    if (moved && data.logins.some((login) => login.id !== id && sameAccount(login, next))) return "taken";
     this.write({ ...data, logins: data.logins.map((login) => login.id === id ? next : login) });
     return summarizeLogin(next);
   }
@@ -345,13 +351,15 @@ export class VaultStore {
     return (this.read().secrets ?? []).filter((secret) => secretReadable(secret, reader)).map(summarizeSecret).sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** The secret `botId` may use by this name, as a ref or a file, in a turn `reader` names: one kept to some bots before
-   * one for every bot, then the newest. */
+  /** The secret `botId` may use by this name, as a ref or a file, in a turn `reader` names: the person's own before the
+   * team's of the same name, whichever was saved later; then one kept to some bots before one for every bot; then the
+   * newest. */
   usableSecret(name: string, botId: string, delivery: "ref" | "file", reader: VaultReader): StoredSecret | null {
     const key = vaultNameKey(name);
     const matches = (this.read().secrets ?? []).filter((secret) => vaultNameKey(secret.name) === key && loginUsableBy(secret, botId) &&
       secretReadable(secret, reader) && (delivery === "ref" || !secret.refOnly));
-    return matches.sort((a, b) => Number(b.bots !== "all") - Number(a.bots !== "all") || b.updatedAt - a.updatedAt)[0] ?? null;
+    return matches.sort((a, b) => Number(Boolean(b.person)) - Number(Boolean(a.person)) || Number(b.bots !== "all") - Number(a.bots !== "all") ||
+      b.updatedAt - a.updatedAt)[0] ?? null;
   }
 
   secretNamesFor(botId: string, reader: VaultReader): Array<{ name: string; refOnly?: true }> {

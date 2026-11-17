@@ -3549,6 +3549,7 @@
   "settings.threadDisplay.short": "Affiche les listes de fils dans la barre latérale. Les masquer garde ton historique.",
   "settings.pinnedCircles.short": "Affiche les bots épinglés en grands avatars en haut de la barre latérale.",
   "settings.toolCalls.short": "Affiche chaque outil qu'un bot utilise dans le chat. Les erreurs s'affichent toujours.",
+  "webPanels.bar.label": "Pages personnalisées",
   "webPanels.settings.short": "Garde quelques pages web, comme un tableau de bord local, à un clic dans la barre latérale.",
   "webPanels.settings.addPage": "Ajouter une page",
   "webPanels.settings.empty": "Aucune page épinglée pour l'instant.",

@@ -18,6 +18,7 @@ import { threadLinkLabel } from "../../shared/thread-link";
 import { isSnoozed, orderedThreadList } from "../../shared/wire";
 import { Select } from "./Select";
 import { WorkingTimer } from "./WorkingIndicator";
+import { rowSelectedSurface } from "./SidebarRowMarkers";
 import { useHeldText } from "./SidebarWorkingStep";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { ShareRowItems } from "./conversation-share/ShareRowItems";
@@ -90,7 +91,7 @@ const tomorrowNineAm = () => {
   return when.getTime();
 };
 
-const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
+export const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
 
 const isWaitingOnTeammate = (task: Pick<Task, "waitingForTeammates">): boolean =>
   task.waitingForTeammates === true;
@@ -341,7 +342,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
     )}
   </span>;
   return <>
-    <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", selectMode && checked ? "bg-accent/10" : current ? "bg-raised" : "hover:bg-raised/50", panel && cn("items-start rounded-[8px]", current ? "bg-ink/[0.07]" : "hover:bg-ink/[0.04]"))}>
+    <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", selectMode && checked ? "bg-accent/10" : current ? rowSelectedSurface : "hover:bg-raised/50", panel && cn("items-start rounded-[8px]", current ? "bg-ink/[0.07]" : "hover:bg-ink/[0.04]"))}>
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
         onKeyDown={(event) => { if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; } if (event.key === "Enter") { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}

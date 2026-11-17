@@ -1,7 +1,8 @@
-// Same-room jobs take turns. A requester that sends several members work in
-// one room is told they run one at a time and where each one stands, and the
-// room itself shows who waits on whom ("Queued · waiting for X (2 of 3)"),
-// on an isolated fixture with the real coordination proxy.
+// Same-room jobs run side by side by default. With parallel room jobs turned
+// off, a requester that sends several members work in one room is told they
+// run one at a time and where each one stands, and the room itself shows who
+// waits on whom ("Queued · waiting for X (2 of 3)"), on an isolated fixture
+// with the real coordination proxy.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -10,13 +11,15 @@ import { handleToolCall, request } from "../scripts/mcp-server.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { openSse } from "./testing/sse.ts";
 
-it("tells the requester and the room that three same-room jobs run in turn", async () => {
+it("with parallel room jobs off, tells the requester and the room that three same-room jobs run in turn", async () => {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const env = { OPENMAUSBOT_URL: session.info.url };
   const cli = (...args: string[]) => runControlOmb(args, { env }) as Promise<any>;
+  const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, headers: { Origin: session.info.url }, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   const tool = (name: string, args: Record<string, unknown>) => handleToolCall(name, args, (path, options) => request(path, options, session.info.url)) as Promise<any>;
   const events = await openSse(`${session.info.url}/api/events`, { Origin: session.info.url });
   try {
+    expect((await api("/api/config", { features: { parallelRoomJobs: false } }, "PATCH")).features.parallelRoomJobs).toBe(false);
     const lead = (await cli("new-bot", "--name", "Lead", "--section", "A")).bot;
     const workers: any[] = [];
     for (const name of ["First", "Second", "Third"]) workers.push((await cli("new-bot", "--name", name, "--section", "A")).bot);
@@ -90,20 +93,22 @@ it("shows a round of @mentioned members waiting on the one replying", async () =
   }
 }, 90_000);
 
-it("with parallel room jobs on, runs each member's job in its own thread at once and posts the results back into the room", async () => {
+it("by default, runs each member's job in its own thread at once and posts the results back into the room", async () => {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const env = { OPENMAUSBOT_URL: session.info.url };
   const cli = (...args: string[]) => runControlOmb(args, { env }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, headers: { Origin: session.info.url }, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   const tool = (name: string, args: Record<string, unknown>) => handleToolCall(name, args, (path, options) => request(path, options, session.info.url)) as Promise<any>;
   try {
-    expect((await api("/api/config", { features: { parallelRoomJobs: true } }, "PATCH")).features.parallelRoomJobs).toBe(true);
+    expect((await api("/api/config")).features.parallelRoomJobs).toBe(true);
     const lead = (await cli("new-bot", "--name", "Lead", "--section", "A")).bot;
     const first = (await cli("new-bot", "--name", "First", "--section", "A")).bot;
     const second = (await cli("new-bot", "--name", "Second", "--section", "A")).bot;
-    const room = (await tool("create_channel", { name: "Studio", member_ids: [lead.id, first.id, second.id] })).channel;
+    const room = (await tool("create_channel", { name: "Studio", member_ids: [lead.id, first.id, second.id], bulletin: "SYNTHETIC_DATA_ONLY" })).channel;
     const planPath = join(session.info.dataDir, "room-plan.json");
     const file = (name: string) => join(session.info.dataDir, name);
+    // Each job runs beside the room but still gets the room's bulletin.
+    const bulletin = ["SYNTHETIC_DATA_ONLY"];
     writeFileSync(planPath, JSON.stringify({
       [lead.id]: {
         steps: [
@@ -115,10 +120,10 @@ it("with parallel room jobs on, runs each member's job in its own thread at once
         reply: "Assigned", resumeReply: "All parts reviewed",
       },
       [first.id]: { turns: [
-        { reply: "First part cut", gateFile: file("first.gate"), readyFile: file("first.ready") },
-        { reply: "Trailer cut" },
+        { reply: "First part cut", gateFile: file("first.gate"), readyFile: file("first.ready"), expectContextIncludes: bulletin },
+        { reply: "Trailer cut", expectContextIncludes: bulletin },
       ] },
-      [second.id]: { reply: "Second part cut", gateFile: file("second.gate"), readyFile: file("second.ready") },
+      [second.id]: { reply: "Second part cut", gateFile: file("second.gate"), readyFile: file("second.ready"), expectContextIncludes: bulletin },
     }));
     await cli("send-channel", "--channel", room.id, "--text", "@Lead Split the work");
     // Both members are mid-job at the same moment: neither waits on the other.

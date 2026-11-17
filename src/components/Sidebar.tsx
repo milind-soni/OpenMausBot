@@ -22,7 +22,7 @@ import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, retitleThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
- 
+import { SidebarBotThreadsPeek } from "./SidebarBotThreadsPeek";
 import { RoomMark, StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
@@ -90,7 +90,7 @@ import { attentionHasRunningWork, attentionJumpAction, attentionUnpinAction, cro
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
-import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, rowSurface } from "./SidebarRowMarkers";
+import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, rowSelectedSurface, rowSurface } from "./SidebarRowMarkers";
 
 
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
@@ -188,12 +188,12 @@ export const GroupListItem = memo(function GroupListItem({
         "relative flex w-full items-center rounded-md text-left", SIMPLE_ROW_FOCUS,
         density === "icons" ? (railTile ? "h-[54px] justify-center" : "justify-center px-1 py-1.5") : simpleRow
           ? cn("gap-2 rounded-[8px] py-2 pr-2 group-hover:pr-9 group-focus-within:pr-9 max-md:pr-9 touch:pr-9 md:h-[54px] md:py-0", !group.dm && hasThreadList ? "pl-6" : "pl-2") : "gap-2 py-1.5 pl-6 pr-9",
-        selected && !expanded ? "bg-raised" : "hover:bg-raised/50",
+        selected && !expanded ? rowSelectedSurface : "hover:bg-raised/50",
       )}
       title={density === "icons" ? group.name : undefined}
       aria-label={density === "icons" ? group.name : undefined}
     >
-      {group.dm ? <StackedMauses members={members} density={railTile ? "comfortable" : density} large={simpleRow || railTile} /> : <RoomMark density={railTile ? "comfortable" : density} large={simpleRow || railTile} />}
+      <span className={cn("rounded-full", selected && !expanded && "ring-2 ring-accent/70 ring-offset-2 ring-offset-panel")}>{group.dm ? <StackedMauses members={members} density={railTile ? "comfortable" : density} large={simpleRow || railTile} /> : <RoomMark density={railTile ? "comfortable" : density} large={simpleRow || railTile} />}</span>
       <div className={cn("min-w-0 flex-1", density === "icons" && "hidden")}>
         <div className={cn("flex items-baseline justify-between gap-2", simpleRow && "pr-7")}>
           <span className={cn("truncate text-[14px] text-ink", simpleRow ? "font-medium leading-5" : "font-semibold")}>{group.name}</span>
@@ -725,7 +725,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       : simpleRow ? "gap-2 rounded-[8px] py-2 pl-2 pr-2 md:h-[54px] md:py-0"
         : cn(showThreads ? "gap-2 py-2" : "gap-3 py-2", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-9 touch:pr-[5.75rem]" : "pl-2.5 pr-9"),
     !iconOnly && "max-md:rounded-2xl max-md:py-2.5",
-    selected ? "bg-raised" : "hover:bg-raised/50",
+    selected ? rowSelectedSurface : "hover:bg-raised/50",
     simpleRow && rowSurface(selected),
   );
   const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
@@ -733,7 +733,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const body = (
     <>
-      <span className={cn("relative flex shrink-0", simpleRow && "-m-[3px]")} title={iconOnly || simpleList ? undefined : [bot.name, ...details].join(" · ")}>
+      <span className={cn("relative flex shrink-0", simpleRow && "-m-[3px]", selected && "rounded-full ring-2 ring-accent/70 ring-offset-2 ring-offset-panel")} title={iconOnly || simpleList ? undefined : [bot.name, ...details].join(" · ")}>
         <BotAvatar
           bot={bot}
           state={stateForBot({ ...bot, messages: visible })}
@@ -773,7 +773,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         )}
       </span>
       <div className={cn("min-w-0 flex-1", iconOnly && "hidden")}>
-        <div className={cn("flex items-baseline justify-between gap-2", simpleRow && "pr-7")}>
+        <div className={cn("flex items-baseline justify-between gap-2", simpleRow && "pe-7 group-hover:pe-[3.25rem] group-focus-within:pe-[3.25rem] touch:pe-[3.25rem] max-md:touch:pe-7")}>
           <span className={cn("flex min-w-0 grow items-center gap-1.5 truncate text-ink", simpleRow ? "text-[14px] font-medium leading-5" : "text-[15px] font-semibold leading-5")}>
             {!simpleList && bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
             <RenameTitle
@@ -900,9 +900,9 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         {showThreads && <button type="button" aria-label={t("folder.newNamed", { name: bot.name })} title={t("folder.new")} onClick={() => { setThreadsOpen(true); setCreatingProject(true); }}
           className="pointer-events-none absolute right-8 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:hidden touch:pointer-events-auto touch:opacity-70"><FolderPlus size={14} /></button>}
         <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
-          className={cn("absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink", simpleRow && "right-[3px] top-1.5 size-6 translate-y-0 rounded-lg",
+          className={cn("absolute top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink", simpleRow ? "end-[3px] top-1.5 size-6 translate-y-0 rounded-lg" : "right-1",
             selected && !simpleRow ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70")}><MoreHorizontal size={15} /></button>
-      </>}
+      </>}{!renaming && !deleting && simpleRow && <SidebarBotThreadsPeek bot={bot} onScreen={selected} dispatch={dispatch} />}
       {deleting && iconOnly && (
         <span className="pointer-events-none absolute bottom-1 right-1 rounded-full bg-card p-1 text-ink-secondary">
           <Loader2 size={12} className="animate-spin" />
@@ -1426,7 +1426,6 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                   <SidebarSectionHeader
                     name={sectionLabel(id)}
                     line={simple} reserveMenu={simple && !remoteClient}
-                    count={simple ? sectionChiefItems.length + sectionBotItems.length + sectionGroupItems.length : undefined}
                     onMenu={simple && !remoteClient && sectionName ? (button) => {
                       const rect = button.getBoundingClientRect();
                       openTeamMenu(sectionName, rect.right - 256, rect.bottom + 4, button);

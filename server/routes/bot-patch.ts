@@ -657,17 +657,12 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (toolScopeWidens(freshBrowserBot?.toolScope, patch.toolScope) && auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin && store.bots.some((candidate) => candidate.busy)) {
           return json(res, 409, { error: "A bot is working right now, so this change has to come from the desktop app or a paired device. Try again once every bot is idle." });
         }
-        if (freshBrowserBot && JSON.stringify(freshBrowserBot.toolScope) !== JSON.stringify(patch.toolScope)
-          && (freshBrowserBot.busy || activeGroupTurnForBot(freshBrowserBot.id))) {
-          return json(res, 409, { error: "Stop this bot's turns before changing its tool selection." });
-        }
       }
       if (body.connectorScopes !== undefined && widensConnectorScopes(freshBrowserBot?.connectorScopes, trustPatch.connectorScopes) &&
           auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin &&
           store.bots.some((candidate) => candidate.busy || activeGroupTurnForBot(candidate.id))) {
         return json(res, 409, { error: "A bot is working right now, so this change has to come from the desktop app or a paired device. Try again once every bot is idle." });
       }
-      // A running turn cannot unmount custom servers; rechecked after the awaits above.
       if (body.mcpServers !== undefined) {
         if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
           return json(res, 401, { error: "unauthorized: this session has expired or was revoked" });
@@ -676,11 +671,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
             (requestedMcpServers === undefined || requestedMcpServers.some((name) => !freshBrowserBot.mcpServers!.includes(name))) &&
             auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin && store.bots.some((candidate) => candidate.busy)) {
           return json(res, 409, { error: "A bot is working right now, so this change has to come from the desktop app or a paired device. Try again once every bot is idle." });
-        }
-        if (freshBrowserBot &&
-            JSON.stringify(requestedMcpServers?.toSorted()) !== JSON.stringify(freshBrowserBot.mcpServers?.toSorted()) &&
-            (freshBrowserBot.busy || activeGroupTurnForBot(freshBrowserBot.id))) {
-          return json(res, 409, { error: "Stop this bot's turns before changing its MCP servers." });
         }
       }
       if (normalizedSelection && movedTask) {
