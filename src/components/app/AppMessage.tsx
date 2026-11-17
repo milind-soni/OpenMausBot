@@ -178,13 +178,15 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
     heights.set(`${message.id}:${rev}`, next);
     if (mounted.current) setHeight(next);
   }, [message.id, rev]);
+  const arrived = Boolean(wanted) && loaded?.key === wanted;
   const onHeading = useCallback((next: boolean | null) => {
+    if (!arrived) return;
     const key = `${message.id}:${rev}`;
     if (next !== null) rememberHeading(key, next);
     // Once the card has an answer, or stopped waiting for one, "still drawing" cannot take the preview away again.
     else if (headings.has(key)) return;
     if (mounted.current) setHeading((was) => (next === null && was?.key === key && was.opens !== null ? was : { key, opens: next }));
-  }, [message.id, rev]);
+  }, [arrived, message.id, rev]);
 
   const current = slot.live ? loaded?.doc : undefined;
   const point = usePagePoint({
@@ -252,17 +254,18 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
   const said = heading?.key === `${message.id}:${rev}` ? heading.opens : undefined;
   const opens = said ?? headings.get(`${message.id}:${rev}`);
   const undecided = compact && Boolean(current) && opens === undefined;
+  const timing = undecided && arrived;
   const drawing = said === null;
   const frameKey = loaded?.key;
   useEffect(() => {
-    if (!undecided) return;
+    if (!timing) return;
     const key = `${message.id}:${rev}`;
     const timer = setTimeout(() => {
       rememberHeading(key, false);
       setHeading({ key, opens: false });
     }, drawing ? HEADING_DRAWING_MS : HEADING_WAIT_MS);
     return () => clearTimeout(timer);
-  }, [undecided, drawing, frameKey, message.id, rev]);
+  }, [timing, drawing, frameKey, message.id, rev]);
   // The title stays while the frame is away (the pool took its slot), so the card keeps its height.
   const titled = compact && opens === false;
   // The compact card clips the page at its natural size, so it reads as a preview of the real thing.
