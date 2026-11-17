@@ -6974,10 +6974,7 @@
   "activity.tool.team.editImage": "Modifica immagine",
   "voice.deepseek.sharedKey": "DeepSeek usa la chiave DeepSeek già presente in questa installazione.",
   "voice.deepseek.description": "Legge ad alta voce risposte e messaggi vocali con la voce Stella o Tide di DeepSeek. Scegliendo DeepSeek, anche la dettatura e la modalità A turni ti ascoltano con la trascrizione vocale di DeepSeek, fino a circa due minuti per registrazione. Usa la tua chiave API DeepSeek ed è fatturato da DeepSeek.",
-  "voice.deepseek.missingKey": "Aggiungi una chiave API DeepSeek in Impostazioni → Chiavi API sull’host per usare la voce DeepSeek.",
   "voice.deepseek.stella": "Stella (femminile)",
   "voice.deepseek.tide": "Tide (maschile)",
-  "call.capability.turnsNeedDeepSeekKey": "Aggiungi una chiave DeepSeek per parlare a turni nelle chiamate",
-  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek è la tua voce, quindi la modalità A turni ti ascolta con la trascrizione vocale di DeepSeek. Aggiungi una chiave DeepSeek in Impostazioni → Chiavi API.",
-  "serverError.voice.deepseekKeyRequired": "Aggiungi una chiave API DeepSeek in Impostazioni → Chiavi API per parlare con i tuoi bot con la voce DeepSeek."
+  "call.capability.turnsNeedDeepSeekKey": "Aggiungi una chiave DeepSeek per parlare a turni nelle chiamate"
 }
