@@ -240,8 +240,8 @@ describe("a model that refuses tools over Chat Completions, at OpenAI's address"
     expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/responses"]);
     expect(f.calls[0]!.body).not.toHaveProperty("reasoning_effort");
     expect(textOf(first.events, "assistant_text")).toBe("Hello there.");
-    expect(first.events.find((event) => event.type === "thread.token-usage.updated")).toMatchObject({ input: 40, output: 12 });
-    expect(first.end).toMatchObject({ usage: { input: 40, output: 12 } });
+    expect(first.events.find((event) => event.type === "thread.token-usage.updated")).toMatchObject({ input: 40, output: 12, cachedInput: 8 });
+    expect(first.end).toMatchObject({ usage: { input: 40, output: 12, cachedInput: 8 } });
 
     expect(await f.turn()).toMatchObject({ end: { ok: true } });
     expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/responses", "/v1/responses"]);
@@ -328,7 +328,7 @@ describe("tool rounds over Responses", () => {
     ]);
     expect(textOf(seen, "reasoning_text")).toBe("Thinking it over.Thinking it over.");
     expect(seen.filter((event) => event.type === "item.completed" && event.itemType === "tool").map((event) => event.ok)).toEqual([true, true]);
-    expect(seen.find((event) => event.type === "turn.completed")).toMatchObject({ usage: { input: 120, output: 36 } });
+    expect(seen.find((event) => event.type === "turn.completed")).toMatchObject({ usage: { input: 120, output: 36, cachedInput: 24 } });
   });
 
   it("keeps encrypted reasoning out of everything it logs or shows", async () => {

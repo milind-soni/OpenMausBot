@@ -51,6 +51,7 @@ export interface OpenAIChatMessage {
 interface Usage {
   input: number;
   output: number;
+  cachedInput?: number;
 }
 
 export interface Completion {
@@ -131,10 +132,13 @@ interface RuntimeOptions<Config> {
   localModel?: boolean;
 }
 
-const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
-  usage
-    ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0 }
+const usageFrom = (usage: CompletionJson["usage"]): Usage | null => {
+  const cachedInput = usage?.prompt_tokens_details?.cached_tokens;
+  return usage
+    ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0,
+        ...(typeof cachedInput === "number" && Number.isFinite(cachedInput) && cachedInput >= 0 ? { cachedInput } : {}) }
     : null;
+};
 
 const completionUsage = (json: CompletionJson) => json.usage ?? json.x_groq?.usage;
 
@@ -729,6 +733,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           if (completion.usage) {
             usage.input += completion.usage.input;
             usage.output += completion.usage.output;
+            if (completion.usage.cachedInput !== undefined) usage.cachedInput = (usage.cachedInput ?? 0) + completion.usage.cachedInput;
             hasUsage = true;
             const contextWindow = options.models().options.find((entry) => entry.id === model)?.contextWindow;
             // Accounting sums the turn; context occupancy is the latest round only.
