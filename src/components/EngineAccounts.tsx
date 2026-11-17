@@ -76,7 +76,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
   const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { signOut: canSignOut, remove: canRemove, hide: canHide } = accountActions(group, instance);
-  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length;
+  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId || bot.fallback?.some((backup) => backup.instanceId === instance.instanceId)).length;
 
   useEffect(() => {
     if (!open) return;

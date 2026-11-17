@@ -280,4 +280,12 @@ describe("Settings → AI → ChatGPT: the built-in account rows can be hidden",
     expect(hide?.disabled).toBe(true);
     expect(container.textContent).toContain(t("accounts.inUse", { count: "1" }));
   });
+
+  it("won't hide an account a bot only keeps as a backup AI", async () => {
+    fixture.state = { ...fixture.state, bots: [{ modelSelection: { instanceId: "codex" }, fallback: [{ instanceId: "chatgpt", model: "gpt-5" }] } as Bot] };
+    await openCard();
+    const hide = (await menuItems("chatgpt")).find((item) => item.textContent === "Hide");
+    expect(hide?.disabled).toBe(true);
+    expect(container.textContent).toContain(t("accounts.inUse", { count: "1" }));
+  });
 });
