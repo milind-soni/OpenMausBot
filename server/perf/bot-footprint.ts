@@ -126,8 +126,8 @@ const MAX_PEAKS = 1_000;
 
 export interface BotFootprintsOptions {
   owners: () => readonly FootprintOwner[];
-  /** After each sample: the process groups and sessions the list shows, so records of exited engines can go. */
-  prune?: (inUse: ReadonlySet<number>) => void;
+  /** After each sample, with its list: records of exited engines that list no longer needs can go (engine-owners.ts). */
+  prune?: (rows: readonly ProcessRow[]) => void;
   now?: () => number;
 }
 
@@ -151,11 +151,7 @@ export function createBotFootprints(options: BotFootprintsOptions) {
       while (peaks.size > MAX_PEAKS) peaks.delete(peaks.keys().next().value!);
       latest = { at, windowMs: previous ? Math.max(1, at - previous.at) : null, attribution };
       previous = { at, rows: new Map(rows.map((row) => [row.pid, { start: row.start, cpuMs: row.cpuMs }])) };
-      if (options.prune) {
-        const inUse = new Set<number>();
-        for (const row of rows) { inUse.add(row.pid); if (row.pgid !== undefined) inUse.add(row.pgid); if (row.sid !== undefined) inUse.add(row.sid); }
-        options.prune(inUse);
-      }
+      options.prune?.(rows);
       return attribution;
     },
     /** The last sample's tallies. */

@@ -9,6 +9,7 @@ import { createLoopStalls, requestArrivedBefore, type LoopStalls } from "./loop-
 import { createBotFootprints, type BotFootprintReport, type BotFootprints, type FootprintOwner } from "./bot-footprint.ts";
 import { duration, limitHolds, perfHealth, perfLines, turnLine, type PerfHealth } from "./perf-report.ts";
 import { createProcessHealth, type ProcessHealthRecorder } from "./process-health.ts";
+import type { ProcessRow } from "./process-buckets.ts";
 import { createProcessSampler, linuxProcessList, LINUX_SAMPLE_MS, nodeUtilization, OTHER_SAMPLE_MS, psProcessList, type ProcessSampler } from "./process-sampler.ts";
 import type { FailoverWhy } from "./turn-record.ts";
 import { createTurnTimings, type Refusal, type SlowNote, type TurnTimings } from "./turn-timings.ts";
@@ -39,8 +40,8 @@ export interface PerfHostDeps {
   engines?: () => ReadonlyArray<{ pid: number; threads: readonly string[] }>;
   /** The engine and browser processes the server started for bots, with the bots each serves (bot-footprint.ts). */
   owners?: () => readonly FootprintOwner[];
-  /** After each sample: the process groups and sessions still in use, so records of exited engines can go. */
-  pruneOwners?: (inUse: ReadonlySet<number>) => void;
+  /** After each sample, with its process list: records of exited engines it no longer needs can go. */
+  pruneOwners?: (rows: readonly ProcessRow[]) => void;
 }
 
 /** The health report shows this many bots, the ones using the most memory first; the admin's read shows every one. */
