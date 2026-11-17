@@ -30,7 +30,8 @@ import {
 } from "./quiet-status.ts";
 import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
-import { acpTurnSteering, advertisedCommands, type AcpSteerSupport } from "./steer.ts";
+import { promptTokenUsage } from "./prompt-usage.ts";
+import { advertisedCommands, turnSteering, type AcpSteerSupport } from "./steer.ts";
 import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts";
 import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts"; import { apiKeyAccount } from "./api-key-account.ts";
 
@@ -268,6 +269,7 @@ export interface AcpSupport extends AcpDriverHooks {
 const envOr = (key: string, fallback: number): number => Number(process.env[key] ?? fallback);
 const INIT_TIMEOUT = 300_000;
 const SESSION_CONFIG_TIMEOUT = 300_000;
+const STEER_REQUEST_TIMEOUT_MS = 15_000;
 const NEW_SESSION_TIMEOUT = 300_000;
 const LOAD_SESSION_TIMEOUT = 120_000;
 const ACP_STUCK_AFTER_MS = 180_000;
@@ -1123,9 +1125,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           stopQuietWatch: null,
           flushAssistantText,
           receiveModelVariants,
-          steering: support.steer && acpTurnSteering(support.steer,
-            () => state.promptSent && !state.settled && !state.stopped && !session.closing && session.commands?.has(support.steer!.command) === true,
-            (text) => request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, undefined, undefined, promptIdleTimeoutMs())),
+          steering: support.steer && turnSteering(support.steer, {
+            open: () => state.promptSent && !state.settled && !state.stopped && !session.closing,
+            commands: () => session.commands,
+            initializeResult: () => session.initResult,
+            prompt: (text) => request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, undefined, undefined, promptIdleTimeoutMs()),
+            extension: (method, text) => request(method, { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, STEER_REQUEST_TIMEOUT_MS),
+          }),
         };
 
         const interrupt = () => {
@@ -1427,28 +1433,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 );
               }
             }
-            // opencode 1.18.18 reports usage at the result root; grok and gemini under _meta.
-            const usage = result?.usage ?? result?._meta ?? {};
-            if (typeof usage.inputTokens === "number" || typeof usage.outputTokens === "number") {
-              // opencode 1.18.25 keeps only the uncached share in inputTokens and reports cache reads beside it (omitted when 0); other agents count them inside. Absent is not zero.
-              const input = usage.inputTokens ?? 0;
-              const output = usage.outputTokens ?? 0;
-              const cachedRead = typeof usage.cachedReadTokens === "number" && usage.cachedReadTokens > 0
-                ? usage.cachedReadTokens
-                : null;
-              const exclusive = cachedRead !== null
-                && (typeof usage.totalTokens !== "number"
-                  || usage.totalTokens >= input + output + cachedRead);
-              emit({
-                ...base(threadId, turnId),
-                type: "thread.token-usage.updated",
-                input: cachedRead !== null && exclusive ? input + cachedRead : input,
-                output,
-                ...(cachedRead !== null
-                  ? { cachedInput: exclusive ? cachedRead : Math.min(cachedRead, input) }
-                  : {}),
-              });
-            }
+            const tokens = promptTokenUsage(result);
+            if (tokens) emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...tokens });
             const reason = result?.stopReason, reported = await promptOutcome?.(result); if (reported) throw reported;
             if (reason === "end_turn") settle(threadId, session, true, null);
             else if (reason === "cancelled" || state.stopped) settle(threadId, session, true, "cancelled");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { acpTurnSteering, advertisedCommands, type AcpSteerSupport } from "./steer.ts";
+import { acpRequestSteering, acpTurnSteering, advertisedCommands, type AcpCommandSteer as AcpSteerSupport } from "./steer.ts";
 
 const support: AcpSteerSupport = {
   command: "steer",
@@ -113,5 +113,27 @@ describe("advertisedCommands", () => {
     expect(advertisedCommands({ sessionUpdate: "agent_message_chunk" })).toBeNull();
     expect(advertisedCommands({ sessionUpdate: "available_commands_update" })).toBeNull();
     expect(advertisedCommands(null)).toBeNull();
+  });
+});
+
+describe("acpRequestSteering", () => {
+  const rpcError = Object.assign(new Error("unsupported"), { code: -32603 });
+
+  it("steers with the trimmed text when the agent kept it", async () => {
+    const sent: string[] = [];
+    const steering = acpRequestSteering(() => true, async (text) => { sent.push(text); return { outcome: "steered" }; });
+    expect(await steering.steer("  use pytest  ")).toBe("steered");
+    expect(sent).toEqual(["use pytest"]);
+    expect(steering.promptAnswered()).toBeNull();
+  });
+
+  it("refuses promptRequired, a JSON-RPC error, empty text and a turn that is not running, and is unsure after a timeout", async () => {
+    expect(await acpRequestSteering(() => true, async () => ({ outcome: "promptRequired" })).steer("x")).toBe("refused");
+    expect(await acpRequestSteering(() => true, async () => { throw rpcError; }).steer("x")).toBe("refused");
+    expect(await acpRequestSteering(() => true, async () => { throw new Error("session/x timed out"); }).steer("x")).toBe("indeterminate");
+    expect(await acpRequestSteering(() => true, async () => ({})).steer("  ")).toBe("refused");
+    let sent = false;
+    expect(await acpRequestSteering(() => false, async () => { sent = true; return {}; }).steer("x")).toBe("refused");
+    expect(sent).toBe(false);
   });
 });
