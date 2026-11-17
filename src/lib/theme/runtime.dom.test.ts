@@ -19,7 +19,13 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   delete document.documentElement.dataset.skin;
+  document.documentElement.removeAttribute("style");
 });
+
+// The real skins set --code-color-scheme per skin; this stands in for them so paint() reads the worn skin's mode.
+const skinModes = document.createElement("style");
+skinModes.textContent = ':root[data-skin="daylight"] { --code-color-scheme: light; } :root[data-skin="midnight"] { --code-color-scheme: dark; }';
+document.head.append(skinModes);
 
 async function wear(theme: ThemeFile, skinChoice: string) {
   values.set("omb-skin", skinChoice);
@@ -28,12 +34,17 @@ async function wear(theme: ThemeFile, skinChoice: string) {
   return document.documentElement.dataset.skin;
 }
 
+const appColor = () => document.documentElement.style.getPropertyValue("--color-app");
+
 const bothModes = { light: { canvas: "#ffffff", accent: "#d97757" }, dark: { canvas: "#121212", accent: "#d97757" } };
 
 it("follows the person's Light or dark choice when the theme has both a light and a dark block", async () => {
   expect(await wear({ name: "Repro", skin: "system", ...bothModes }, "midnight")).toBe("midnight");
+  expect(appColor()).toBe("#121212");
   expect(await wear({ name: "Repro", skin: "midnight", ...bothModes }, "daylight")).toBe("daylight");
+  expect(appColor()).toBe("#ffffff");
   expect(await wear({ name: "Repro", canvas: "#121212", ...bothModes }, "daylight")).toBe("daylight");
+  expect(appColor()).toBe("#ffffff");
 });
 
 it("still wears the theme's own skin when it has no block for the other mode", async () => {
