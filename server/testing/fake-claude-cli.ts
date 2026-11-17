@@ -258,16 +258,17 @@ const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ ty
   }
 })();
 const hooksAfterTurnMs = Number(process.env.FAKE_CLAUDE_HOOKS_AFTER_TURN_MS);
-const hooksAfterTurn: Array<() => unknown> = [];
+const hooksAfterTurn: Array<() => Promise<unknown>> = [];
 let hookBatchesWaiting = 0;
 const runHooksAfterTurn = () => {
   const due = hooksAfterTurn.splice(0);
   if (!due.length) return;
   hookBatchesWaiting += 1;
   setTimeout(() => {
-    for (const run of due) run();
-    hookBatchesWaiting -= 1;
-    finishIfDone();
+    void Promise.all(due.map((run) => run())).then(() => {
+      hookBatchesWaiting -= 1;
+      finishIfDone();
+    });
   }, hooksAfterTurnMs);
 };
 function runHooks(event: FakeHookEvent, payload: Record<string, unknown>): string {
@@ -277,16 +278,15 @@ function runHooks(event: FakeHookEvent, payload: Record<string, unknown>): strin
     for (const hook of entry.hooks ?? []) {
       if (hook.type !== "command" || !hook.command) continue;
       // Like Claude Code: a hook with `args` starts `command` itself; otherwise `command` is a shell line.
-      const run = () => spawnSync(hook.command!, hook.args ?? [], {
-        shell: !hook.args,
-        input: JSON.stringify({ hook_event_name: event, session_id: "fake-session", cwd: process.cwd(), ...payload }),
-        env: process.env,
-        timeout: ((hook.timeout ?? 5) + 1) * 1000,
-        stdio: ["pipe", "pipe", "pipe"],
-        encoding: "utf8",
-      });
-      if (hook.async && hooksAfterTurnMs >= 0) hooksAfterTurn.push(run);
-      else stdout += run().stdout ?? "";
+      const input = JSON.stringify({ hook_event_name: event, session_id: "fake-session", cwd: process.cwd(), ...payload });
+      const options = { shell: !hook.args, env: process.env, timeout: ((hook.timeout ?? 5) + 1) * 1000 };
+      if (hook.async && hooksAfterTurnMs >= 0) {
+        hooksAfterTurn.push(() => new Promise((settled) => {
+          const child = spawn(hook.command!, hook.args ?? [], { ...options, stdio: ["pipe", "ignore", "ignore"] });
+          child.on("error", settled).on("close", settled);
+          child.stdin!.end(input);
+        }));
+      } else stdout += spawnSync(hook.command, hook.args ?? [], { ...options, input, stdio: ["pipe", "pipe", "pipe"], encoding: "utf8" }).stdout ?? "";
     }
   }
   return stdout;
