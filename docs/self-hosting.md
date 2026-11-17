@@ -589,6 +589,27 @@ once as "shared", never against any one bot. The report shows the ten bots
 using the most memory; `GET /api/diagnostics/bots` (admin only) lists every
 bot. Bot ids and numbers only.
 
+**Idle engines close sooner when room runs short.** A conversation's engine
+stays loaded after its turn (10 minutes by default, `OMB_SESSION_IDLE_MS`;
+30 seconds for work nobody is watching), a bot's browser stays open for its
+idle time, and a process several bots share is recycled a minute after its
+last session. Where turns wait for room, each of these times shrinks as
+memory or the process limit fills, down to a tenth (never below its floor),
+and what is already loaded is looked at again every few seconds. Before a
+new turn or browser waits for room, the engine idle longest is closed.
+
+**One bot's memory.** Where turns wait for room, one bot may use at most
+twice its fair share of the server's memory (the memory over the turns that
+may run at once), at least 1,900 MB and at most 80% of it. A bot over that
+for two checks in a row (every 5 seconds), or 50% over it once, has its
+engine stopped and its own browser closed; its running turn ends with a line
+saying which bot used more memory than this server allows for one bot.
+Engines and browsers several bots share are never stopped this way. Set
+`OMB_BOT_MEMORY_MAX_MB` to a number of MB, or to `off`; the desktop app has
+no cap unless it is set. The server enforces the cap itself by reading its
+process list; it logs at start whether the host also offers a systemd scope
+or a delegated cgroup, which are not used yet.
+
 **Bots' cloud computers do not count.** A bot's cloud computer runs at the
 provider that hosts it, not in this container, so its desktop and browser
 use none of the container's processes or memory. Only the built-in browser

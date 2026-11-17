@@ -46,7 +46,8 @@ import { passkeyAnnotation } from "../browser/passkey-notice.ts";
 import { LentChromeDoors, lentChromeGuidance, type ChromeLender } from "../browser/lent-chrome.ts";
 import type { ChromeRoute } from "../device-links.ts";
 import type { EngineBrowsers } from "../engine-memory.ts";
-import { processBudget } from "../process-room.ts";
+import { BROWSER_TASKS, processBudget } from "../process-room.ts";
+import { idleAfter } from "../drivers/session-idle.ts";
 import { augmentedPath } from "../env-path.ts";
 import { harnessMcpTokenEnv } from "../harness-mcp-token.ts";
 import type { FillLoginDeps } from "../login-fill.ts";
@@ -80,7 +81,7 @@ export interface BrowserHostDeps {
   lentChrome?: { route(): ChromeRoute | null; lender(): ChromeLender | null };
   /** The engine memory guard, told which browsers each thread's turn starts or holds. */
   /** `selfHosted`: turns wait for room on this server, under its pids limit, and so do its bots' browsers. */
-  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void; selfHosted?(): boolean };
+  engineMemory?: { useBrowsers(browsers: EngineBrowsers): void; selfHosted?(): boolean; roomFactor?(): number; reclaimIdle?(): Promise<boolean> };
   /** Whose browser a conversation's turns use on a Team Cloud: the member's, the group chat's or the team's. Every
    * browser is the bot's own without it. */
   audienceOf?(threadId: string): Audience;
@@ -104,6 +105,9 @@ function lentDevice(device: NonNullable<EgressSetup["device"]>, holder: (session
 type Spec = { command: string; args?: readonly string[]; env: Record<string, string> };
 type LendRefusal = CloudLendingRefusal | "memory-changed" | "memory-changed-here";
 const BOT_SESSION = /^bot-[A-Za-z0-9_.-]+$/;
+/** However short of room the server is, a bot's browser stays this long after its last use: a turn's next browser call is
+ * seldom further apart. */
+const BROWSER_IDLE_FLOOR_MS = 60_000;
 
 export function createBrowserHost(deps: BrowserHostDeps) {
   const { cfg, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, PORT } = deps;
@@ -119,7 +123,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     max: deps.browsersAtOnce ?? (() => defaultBrowserRoomSize()),
     spare: (session) => spareForRoom(agentBrowserRuntime.spare(session), { holds: !turnResources.free(`browser:${session}`), idleMs: idleMs() }),
     close: (session) => agentBrowserRuntime.closeIfIdle(session, 1),
-    ...(processRoom ? { admit: (session: string) => processRoom.enter(session) } : {}),
+    // Short of room for its processes, an idle engine goes before this browser waits or is refused (session-idle.ts).
+    ...(processRoom ? { admit: async (session: string) => {
+      if (processBudget.short(BROWSER_TASKS, 0)) await deps.engineMemory?.reclaimIdle?.().catch(() => false);
+      return processRoom.enter(session);
+    } } : {}),
   });
   const agentBrowserRuntime: BrowserRuntime = new BrowserRuntime({
     closeBrowser: (session, spec) => closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })),
@@ -147,7 +155,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     url: (port) => relay(port, { action: "cdp_url" }, { timeoutMs: 5_000, maxBytes: 65_536 }).then((answer) => answer.data?.cdpUrl),
   } });
   const host: HostKind = DESKTOP_MANAGED ? "desktop" : CLOUD_HOME || existsSync("/.dockerenv") ? "container" : "server";
-  const idleMs = () => browserIdleMs(cfg, { cloudHome: Boolean(CLOUD_HOME) });
+  // per-bot: a bot's browser, kept for any of its conversations; shorter as the server runs short of room (session-idle.ts).
+  const idleMs = () => {
+    const configured = browserIdleMs(cfg, { cloudHome: Boolean(CLOUD_HOME) });
+    return idleAfter(configured, Math.min(configured, BROWSER_IDLE_FLOOR_MS), deps.engineMemory?.roomFactor?.() ?? 1);
+  };
   const chromeEngine = new ChromeEngine({
     dataDir: DATA_DIR,
     host,
@@ -481,6 +493,16 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       return [{ pid, botIds, kind: "browser" as const }];
     });
   }
+  /** Closes the browsers that are this bot's alone (never a profile another bot uses), as one stopped for memory is. */
+  async function closeBotBrowsers(botId: string): Promise<void> {
+    const bot = store.bot(botId);
+    if (!bot) return;
+    const shared = (session: string) => store.bots.some((other) => other.id !== botId && browserSessionsOf(other.id, other.browserProfile).includes(session));
+    await Promise.all(browserSessionsOf(bot.id, bot.browserProfile).flatMap((session) => {
+      const spec = usedBrowserSessions.get(session);
+      return spec && !chromeTarget(session, spec) && !shared(session) ? [closeForMemory(session, spec)] : [];
+    }));
+  }
   /** The browser a thread's bot would start; a temporary one has no session until its first call. My Chrome is the person's own. */
   function threadBrowser(threadId: string): { session: string | undefined; spec: Spec | undefined } | null {
     const bot = store.botByThread(threadId);
@@ -617,6 +639,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, lentChromeSummary, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,
-    eraseAudienceBrowsers, browserOwners,
+    eraseAudienceBrowsers, browserOwners, closeBotBrowsers,
   };
 }

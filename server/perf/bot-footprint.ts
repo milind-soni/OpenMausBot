@@ -31,6 +31,8 @@ export interface BotTally {
   engines: number;
   browsers: number;
   pids: number[];
+  /** Those of `pids` that belong to it through a browser (its daemon and Chrome), not an engine. */
+  browserPids: number[];
 }
 
 export interface Attribution {
@@ -39,7 +41,7 @@ export interface Attribution {
   shared: BotTally;
 }
 
-const emptyTally = (): BotTally => ({ procs: 0, threads: 0, rssBytes: 0, cpuMs: 0, cpuDeltaMs: 0, engines: 0, browsers: 0, pids: [] });
+const emptyTally = (): BotTally => ({ procs: 0, threads: 0, rssBytes: 0, cpuMs: 0, cpuDeltaMs: 0, engines: 0, browsers: 0, pids: [], browserPids: [] });
 
 /** Whose each row is: a bot's id, SHARED, or undefined for none (the server, its own helpers, anything else). */
 export const SHARED = "\0shared";
@@ -61,28 +63,31 @@ export function attributeRows(rows: readonly ProcessRow[], owners: readonly Foot
     roots.set(owner.pid, { label: known && known.label !== label ? SHARED : label, kind: owner.kind });
     if (!owner.exited) live.add(owner.pid);
   }
-  const labels = new Map<number, string | null>();
-  const labelOf = (row: ProcessRow, depth: number): string | null => {
+  type Label = { label: string; kind: FootprintOwner["kind"] } | null;
+  const labels = new Map<number, Label>();
+  const labelOf = (row: ProcessRow, depth: number): Label => {
     const known = labels.get(row.pid);
     if (known !== undefined) return known;
     labels.set(row.pid, null);
     // Its own record first, then the nearest recorded ancestor, then (for what outlived its parent and was adopted by an
     // init) the session and group it still runs in.
-    let label: string | null = live.has(row.pid) ? roots.get(row.pid)?.label ?? null : null;
+    let label: Label = live.has(row.pid) ? roots.get(row.pid) ?? null : null;
     if (label === null && row.ppid !== row.pid && depth < 64) {
       const parent = byPid.get(row.ppid);
       if (parent) label = labelOf(parent, depth + 1);
     }
-    if (label === null && row.sid !== undefined && row.sid !== row.pid) label = roots.get(row.sid)?.label ?? null;
-    if (label === null && row.pgid !== undefined && row.pgid !== row.pid) label = roots.get(row.pgid)?.label ?? null;
+    if (label === null && row.sid !== undefined && row.sid !== row.pid) label = roots.get(row.sid) ?? null;
+    if (label === null && row.pgid !== undefined && row.pgid !== row.pid) label = roots.get(row.pgid) ?? null;
     labels.set(row.pid, label);
     return label;
   };
   const out: Attribution = { bots: new Map(), shared: emptyTally() };
   for (const row of rows) {
-    const label = labelOf(row, 0);
-    if (label === null) continue;
+    const found = labelOf(row, 0);
+    if (found === null) continue;
+    const label = found.label;
     const tally = label === SHARED ? out.shared : out.bots.get(label) ?? out.bots.set(label, emptyTally()).get(label)!;
+    if (found.kind === "browser") tally.browserPids.push(row.pid);
     tally.procs += 1;
     tally.threads = tally.threads === null || row.threads === undefined ? null : tally.threads + row.threads;
     tally.rssBytes += row.rssBytes;
@@ -118,6 +123,8 @@ export interface BotFootprintReport {
   /** The bots using the most memory first. */
   shown: BotFootprintRow[];
   shared: Omit<BotFootprintRow, "id" | "peakMB">;
+  /** The memory one bot may use (bot-memory-cap.ts): MB or null for none, how it is enforced, and bots stopped since start. */
+  cap?: { mb: number | null; rung: string; stops: number };
 }
 
 const MB = 1_048_576;
@@ -188,6 +195,7 @@ export function botFootprintLines(report: BotFootprintReport): string[] {
   const shared = report.shared;
   return [
     `Per bot (${report.bots} with processes running; most memory first): ${report.shown.length ? report.shown.map(one).join("; ") : "none"}`,
+    ...(report.cap ? [`  Memory one bot may use: ${report.cap.mb === null ? "no limit" : `${report.cap.mb} MB (${report.cap.rung}); bots stopped for it since start: ${report.cap.stops}`}`] : []),
     `  Shared by several bots: ${shared.procs} processes${threads(shared.threads)}, ${shared.rssMB} MB, ${shared.engines} engines, ${shared.browsers} browsers`,
   ];
 }

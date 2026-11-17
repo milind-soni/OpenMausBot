@@ -41,6 +41,8 @@ export interface PerfHostDeps {
   owners?: () => readonly FootprintOwner[];
   /** After each sample: the process groups and sessions still in use, so records of exited engines can go. */
   pruneOwners?: (inUse: ReadonlySet<number>) => void;
+  /** The memory one bot may use and how it is enforced (bot-memory-cap.ts). */
+  cap?: () => { mb: number | null; rung: string; stops: number };
 }
 
 /** The health report shows this many bots, the ones using the most memory first; the admin's read shows every one. */
@@ -94,6 +96,7 @@ export function createPerfHost(deps: PerfHostDeps) {
   /** Its two warnings are said once each for the life of the server. */
   const processes = deps.processes ?? createProcessHealth({ warn: (kind, line) => say(kind, line) });
   const footprints: BotFootprints = createBotFootprints({ owners: () => deps.owners?.() ?? [], ...(deps.pruneOwners ? { prune: deps.pruneOwners } : {}), now });
+  const botReport = (limit?: number): BotFootprintReport => ({ ...footprints.report(limit), ...(deps.cap ? { cap: deps.cap() } : {}) });
   const sampler = deps.sampler ?? createProcessSampler({
     list: linux ? () => linuxProcessList() : psProcessList, intervalMs: linux ? LINUX_SAMPLE_MS : OTHER_SAMPLE_MS,
     scope: deps.wholeMachine && linux ? "all" : "tree", utilization: nodeUtilization(), now, engines: enginePids,
@@ -106,13 +109,13 @@ export function createPerfHost(deps: PerfHostDeps) {
   if (deps.timer !== false && linux) guarded("limits", () => (deps.log ?? ((line: string) => console.warn(line)))(processes.startLine()), undefined);
 
   const sources = () => ({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: limits(), process: windows ? null : sampler.report(), stalls: guarded("stalls", () => stalls.report(), null), processes: processes.report(),
-    bots: windows ? null : guarded("bots", () => footprints.report(BOTS_IN_HEALTH), null) });
+    bots: windows ? null : guarded("bots", () => botReport(BOTS_IN_HEALTH), null) });
   return {
     timings,
     sampler,
     footprints,
     /** Every bot's footprint at the last sample, for the admin's read (routes/perf-diagnostics.ts). */
-    bots: (): BotFootprintReport | null => (windows ? null : guarded("bots", () => footprints.report(), null)),
+    bots: (): BotFootprintReport | null => (windows ? null : guarded("bots", () => botReport(), null)),
     noteHeld: (threadId: string, why: "plan-limit" | "memory") => guarded("held", () => timings.noteHeld(threadId, why), undefined),
     noteFailover: (threadId: string, why: FailoverWhy) => guarded("failover", () => timings.noteFailover(threadId, why), undefined),
     noteNotStarted: (threadId: string, turnId: string | null, refusal?: Refusal) => guarded("refused", () => timings.noteNotStarted(threadId, turnId, refusal), undefined),
