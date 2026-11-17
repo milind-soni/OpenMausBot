@@ -11,7 +11,7 @@ const BLANK_MEANS_LEFT_OUT: Readonly<Record<string, readonly string[]>> = {
   coordinate_bots: ["group_id", "reason", "thread", "title", "reply", "done_when", "answers", "files"],
   session_search: ["thread_id", "message_id", "query", "since", "until", "scope"],
   show_html: ["html", "jsx", "path"],
-  // A blank text or old_text is a mistake the schema names, not "not given".
+  // A blank text, or a blank old_text where the action needs one, is a mistake the schema names, not "not given".
   memory_update: ["until"],
 };
 
@@ -60,5 +60,7 @@ export function dropBlankArguments(name: string, input: Json): Json {
   const selectionKey = Object.hasOwn(MODEL_CHOICE_ARGUMENT, name) ? MODEL_CHOICE_ARGUMENT[name] : undefined;
   if (selectionKey && input[selectionKey] !== undefined) return { ...input, [selectionKey]: withoutBlankModelChoice(input[selectionKey]) };
   const keys = Object.hasOwn(BLANK_MEANS_LEFT_OUT, name) ? BLANK_MEANS_LEFT_OUT[name] : undefined;
-  return keys ? withoutBlank(input, keys, blankText) : input;
+  const given = keys ? withoutBlank(input, keys, blankText) : input;
+  // append and prefer never use old_text, so a blank or null one there is only "not given".
+  return name === "memory_update" && (input.action === "append" || input.action === "prefer") ? withoutBlank(given, ["old_text"]) : given;
 }

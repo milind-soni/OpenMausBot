@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../../shared/approval-mode.ts";
-import { normalizeConnectorScopes } from "../../shared/connector-scopes.ts";
+import { normalizeConnectorScopes, widensConnectorScopes } from "../../shared/connector-scopes.ts";
 import { isBotLiveVoice } from "../../shared/live-call.ts";
 import { normalizeOutboundPolicy } from "../../shared/outbound.ts";
 import { normalizePhoneApps } from "../../shared/phone-apps.ts";
@@ -266,7 +266,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (body.connectorScopes === null) patch.connectorScopes = undefined;
         else {
           const scopes = normalizeConnectorScopes(body.connectorScopes);
-          if (!scopes) return json(res, 400, { error: "connectorScopes must be { apps: { <toolkit>: read | write } } or null" });
+          if (!scopes) return json(res, 400, { error: "connectorScopes must be { apps: { <toolkit>: read | write }, accounts?: { <toolkit>: [account ids] } } or null" });
           patch.connectorScopes = scopes;
         }
       }
@@ -591,9 +591,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       const loosened: string[] = [];
       const trustPatch = patch as Pick<Partial<BotRecord>, "outbound" | "connectorScopes" | "fallback">;
       if (body.outbound !== undefined && trustPatch.outbound?.policy === "allow" && existingBot?.outbound?.policy !== "allow") loosened.push("outbound");
-      if (body.connectorScopes !== undefined && existingBot?.connectorScopes &&
-          (!trustPatch.connectorScopes || Object.entries(trustPatch.connectorScopes.apps).some(([slug, scope]) =>
-            !existingBot.connectorScopes!.apps[slug] || (scope === "write" && existingBot.connectorScopes!.apps[slug] === "read")))) loosened.push("connectorScopes");
+      if (body.connectorScopes !== undefined && widensConnectorScopes(existingBot?.connectorScopes, trustPatch.connectorScopes)) loosened.push("connectorScopes");
       if (body.phoneApps !== undefined && existingBot) {
         // Compare effective grants: clearing falls back to every app.
         const before = phoneAppsFor(existingBot);
@@ -663,6 +661,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           && (freshBrowserBot.busy || activeGroupTurnForBot(freshBrowserBot.id))) {
           return json(res, 409, { error: "Stop this bot's turns before changing its tool selection." });
         }
+      }
+      if (body.connectorScopes !== undefined && widensConnectorScopes(freshBrowserBot?.connectorScopes, trustPatch.connectorScopes) &&
+          auth.kind === "loopback" && !DESKTOP_MANAGED && !browserOrigin &&
+          store.bots.some((candidate) => candidate.busy || activeGroupTurnForBot(candidate.id))) {
+        return json(res, 409, { error: "A bot is working right now, so this change has to come from the desktop app or a paired device. Try again once every bot is idle." });
       }
       // A running turn cannot unmount custom servers; rechecked after the awaits above.
       if (body.mcpServers !== undefined) {

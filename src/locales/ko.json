@@ -6109,6 +6109,7 @@
   "botAccess.scopes.empty": "아직 연결된 앱이 없어요. 앱을 연결한 뒤 여기서 허용하세요.",
   "botAccess.scopes.notConnected": "연결 안 됨",
   "botAccess.scopes.accessLabel": "{app} 접근 권한",
+  "botAccess.scopes.accountsLabel": "이 봇이 사용할 수 있는 계정",
   "botAccess.phone.title": "휴대폰 앱",
   "botAccess.phone.subtitle": "이 봇이 {phone}에서 할 수 있는 일",
   "botAccess.phone.notOnPhone": "휴대폰에서 허용 안 됨",

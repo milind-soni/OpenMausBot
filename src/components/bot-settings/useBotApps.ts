@@ -6,6 +6,7 @@ import { api, type Bot } from "@/state/store";
 import type { ConnectorScope } from "../../../shared/connector-scopes";
 import { EMAIL_SLUG, type EmailStatus } from "../../../shared/email";
 import { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
+import type { ConnectorAccount } from "@/lib/connector-status";
 import type { ToolkitCard } from "../ServiceIcon";
 
 export interface BotApp {
@@ -14,6 +15,8 @@ export interface BotApp {
   blurb: string;
   card: Pick<ToolkitCard, "logo" | "domain" | "label">;
   scope: ConnectorScope | null;
+  /** the app's connected accounts, when the inventory lists them */
+  accounts?: ConnectorAccount[];
 }
 
 export interface BotApps {
@@ -68,6 +71,7 @@ export function botAppsFrom(
       blurb: card?.blurb ?? "",
       card: { logo: card?.logo ?? null, domain: card?.domain ?? null, label },
       scope: botAppScope(bot, slug),
+      accounts: inventory.services[slug]?.accounts ?? [],
     };
   });
   return { phase: "ready", apps, connectedSlugs };
