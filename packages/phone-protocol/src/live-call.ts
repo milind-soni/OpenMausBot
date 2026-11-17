@@ -85,23 +85,29 @@ const MAX_SPOKEN_LINES = 2_000;
  * line per stretch of speech, for the call record. A delta without timing
  * continues the current line. */
 export class SpokenLines {
-  private lines: Array<{ at: number; fragments: string[]; endMs: number }> = [];
+  private lines: Array<{ at: number; text: string; endMs: number }> = [];
+  private readonly scrub: (text: string) => string;
+
+  /** `scrub` masks each line as it grows, while anything it masks is still known to it. */
+  constructor(scrub: (text: string) => string = (text) => text) {
+    this.scrub = scrub;
+  }
 
   add(text: string, at: number, startMs: number, endMs: number): void {
     if (!text) return;
     const timed = Number.isFinite(startMs) && Number.isFinite(endMs);
     const last = this.lines.at(-1);
     if (last && (!timed || startMs <= last.endMs + SPOKEN_LINE_GAP_MS)) {
-      last.fragments.push(text);
+      last.text = this.scrub(last.text + text);
       if (timed) last.endMs = Math.max(last.endMs, endMs);
       return;
     }
     if (this.lines.length >= MAX_SPOKEN_LINES) return;
-    this.lines.push({ at, fragments: [text], endMs: timed ? endMs : Number.NEGATIVE_INFINITY });
+    this.lines.push({ at, text: this.scrub(text), endMs: timed ? endMs : Number.NEGATIVE_INFINITY });
   }
 
   list(): LiveSpokenLine[] {
-    return this.lines.map((line) => ({ at: line.at, text: joinFragments(line.fragments) })).filter((line) => line.text);
+    return this.lines.map((line) => ({ at: line.at, text: joinFragments([line.text]) })).filter((line) => line.text);
   }
 }
 

@@ -9,6 +9,7 @@ import { LIVE_CUSTOM_REFUSAL } from "./live-access.ts";
 import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, LiveSessionError, type LiveEndpoint } from "./live-call.ts";
 import { FishRelays, FISH_AGENT_VOICE } from "./live-fish.ts";
 import type { LiveElevenLabsSession, LiveFishSessionToken, LiveGeminiSession } from "../shared/wire.ts";
+import { addHeldSecretScrubber, HELD_SECRET_MASK } from "./redact.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -1710,6 +1711,23 @@ describe("LiveCallController record", () => {
     expect(record.spoken).toEqual([{ at: expect.any(Number), text: "You have two meetings." }, { at: expect.any(Number), text: "Bye!" }]);
     expect(JSON.stringify(record)).not.toContain("calendar");
     expect(JSON.stringify(record)).not.toContain("thanks");
+  });
+
+  it("masks a held code the bot read aloud when it is said, so it stays masked after the code is forgotten", async () => {
+    const code = "Q7XK-24LM";
+    const forget = addHeldSecretScrubber((text) => text.replaceAll(code, HELD_SECRET_MASK));
+    const t = setup({ recordCall: vi.fn() });
+    try {
+      await t.start();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Your code is Q7XK", start_ms: 1_000, end_ms: 1_500 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "-24LM.", start_ms: 1_500, end_ms: 2_000 });
+    } finally {
+      forget();
+    }
+    t.socket().drop();
+    const record = recorded(t)[0]!.record;
+    expect(record.spoken).toEqual([{ at: expect.any(Number), text: `Your code is ${HELD_SECRET_MASK}.` }]);
+    expect(JSON.stringify(record)).not.toContain("24LM");
   });
 
   it("counts wall-clock seconds when OpenAI sent none", async () => {
