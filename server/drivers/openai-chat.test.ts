@@ -435,6 +435,56 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     }, 20_000);
   });
 
+  it.each([
+    ["not JSON", '{"path":"a.md","content":"cut off', "{}", 'tool arguments are not complete JSON; you sent 33 characters: {"path":"a.md","content":"cut off'],
+    ["a JSON array", '[{"path":"a.md"}]', "{}", 'tool arguments must be a JSON object; you sent 17 characters: [{"path":"a.md"}]'],
+    ["empty", "", "{}", undefined],
+    ["blank", "   ", "{}", undefined],
+    ["led by a byte-order mark", '\uFEFF{"n":1}', '{"n":1}', undefined],
+    // The API key ("synthetic") crosses the 500-character cut: it is masked first, so no part of it is quoted back.
+    ["long and holding the API key across the cut", `{"content":"${"x".repeat(484)}synthetic${"y".repeat(1_000)}`, "{}",
+      `tool arguments are not complete JSON; you sent 1505 characters: {"content":"${"x".repeat(484)}[red … ${"y".repeat(500)}`],
+  ])("replays a call whose arguments are %s as valid JSON, so a strict provider takes the next request", async (_kind, badArguments, replayedArguments, toolError) => {
+    const call = (id: string, argumentsText: string) =>
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: "function", function: { name: "fx_write", arguments: argumentsText } }] } }] })}\n\n`
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const replies = [call("c1", badArguments), call("c2", "{}"),
+      'data: {"choices":[{"index":0,"delta":{"content":"Written."}}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n'];
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      const replayed = body.messages.flatMap((message: any) => message.tool_calls ?? []);
+      if (replayed.some((toolCall: any) => { try { JSON.parse(toolCall.function.arguments); return false; } catch { return true; } })) {
+        return new Response(JSON.stringify({ error: { message: "Assistant tool call function.arguments must be valid JSON", type: "invalid_request_error" } }), { status: 400 });
+      }
+      return new Response(replies[bodies.length - 1], { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "badargs", displayName: "Synthetic", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+      environment: { K: "synthetic" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    try {
+      await instance.adapter.sendTurn({
+        threadId: "badargs", text: "Write the file.", approvalMode: "full", integrations: { custom: { fx: toolServer() } },
+      });
+      await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
+      expect(bodies).toHaveLength(3);
+      expect(bodies[1].messages.find((message: any) => message.tool_calls)?.tool_calls[0].function.arguments).toBe(replayedArguments);
+      if (toolError) {
+        expect(JSON.parse(bodies[1].messages.find((message: any) => message.role === "tool" && message.tool_call_id === "c1")?.content).result)
+          .toBe(toolError);
+      }
+      expect((events.find((event) => event.type === "turn.completed") as any).ok).toBe(true);
+    } finally {
+      await instance.dispose();
+    }
+  }, 20_000);
+
   it("completes the turn when a question goes unanswered, without tainting the final answer", async () => {
     const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
       + JSON.stringify(JSON.stringify({ questions: [{ question: "Ship the fixture?", options: [{ label: "Yes" }, { label: "No" }] }] }))

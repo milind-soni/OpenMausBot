@@ -198,6 +198,25 @@ describe("the bars", () => {
     expect(out.querySelector(".sr-only")?.textContent).toBe("Claude: at its limit, resets 3:40 PM");
   });
 
+  it("color the bars and each window's track green with room left, orange near the limit and red at it", () => {
+    const glyph = (limit: EngineLimit) => {
+      serve([limit]);
+      const ink = mount(createElement(UsageBars, { engine: "claude" })).querySelector("[data-usage-glyph]")?.getAttribute("class");
+      root!.unmount();
+      return ink;
+    };
+    expect([glyph(windows(38, 10)), glyph(claude(92)), glyph(claude(100, true))]).toEqual([
+      expect.stringContaining("text-success"), expect.stringContaining("text-warning"), expect.stringContaining("text-danger"),
+    ]);
+    const tracks = (limit: EngineLimit) => {
+      const fills = [...mount(createElement(UsageRows, { limit })).querySelectorAll("[data-usage-track]")].map((track) => track.className.match(/bg-\w+/)?.[0]);
+      root!.unmount();
+      return fills;
+    };
+    expect(tracks(windows(92, 20, { blocked: true, usedPercent: 100 }))).toEqual(["bg-danger", "bg-success"]);
+    expect(tracks(windows(95, 20))).toEqual(["bg-warning", "bg-success"]);
+  });
+
   it("open every window in a card on a mouse hover, never on a touch, and keep the card's clicks from the model button", async () => {
     serve([windows(38, 80)]);
     const opened = vi.fn();

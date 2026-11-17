@@ -227,3 +227,65 @@ describe("Settings → AI lists every provider the app knows", () => {
     if (state === "hidden") expect(hidden.size).toBe(all.length);
   });
 });
+
+describe("Settings → AI → ChatGPT: the built-in account rows can be hidden", () => {
+  const codexAccount: InstanceInfo = { ...codex, authentication: { method: "device-code", signOut: true } };
+  const plan: InstanceInfo = {
+    instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT plan", cliDefault: "codex",
+    snapshot: { state: "available", authenticated: false, chatgptPlan: true }, models: { default: "gpt", options: [] },
+    authentication: { method: "browser-pkce", signOut: true },
+  };
+  const added: InstanceInfo = { ...plan, instanceId: "chatgpt-work", displayName: "Work" };
+  const accounts = () => [...container.querySelectorAll("[data-account]")].map((row) => row.getAttribute("data-account"));
+  const menuItems = async (instanceId: string) => {
+    await click(container.querySelector(`[data-account="${instanceId}"] button[aria-haspopup="menu"]`));
+    return [...container.querySelectorAll('[role="menuitem"]')] as HTMLButtonElement[];
+  };
+  const openCard = async () => { await render(); await click(rowButton("codex")); };
+
+  beforeEach(() => {
+    server.all = [codexAccount, plan, added];
+    fixture.state = { ...fixture.state, instances: [...server.all] };
+  });
+
+  it("hides only the signed-out ChatGPT plan row, and Unhide brings it back to the card", async () => {
+    await openCard();
+    expect(accounts()).toEqual(["codex", "chatgpt", "chatgpt-work"]);
+    const hide = (await menuItems("chatgpt")).find((item) => item.textContent === "Hide");
+    await click(hide);
+    expect(server.calls).toContainEqual({ method: "PATCH", path: "/api/instances/chatgpt", body: { hidden: true } });
+    expect(accounts()).toEqual(["codex", "chatgpt-work"]);
+    expect(hiddenRows()).toEqual(["chatgpt"]);
+    await click(container.querySelector('[data-unhide-engine="chatgpt"]'));
+    expect(server.calls).toContainEqual({ method: "PATCH", path: "/api/instances/chatgpt", body: { hidden: false } });
+    expect(accounts()).toEqual(["codex", "chatgpt", "chatgpt-work"]);
+    expect(hiddenRows()).toEqual([]);
+  });
+
+  it("offers Hide on the Codex row too", async () => {
+    await openCard();
+    expect((await menuItems("codex")).map((item) => item.textContent)).toContain("Hide");
+  });
+
+  it("keeps Remove, not Hide, for an added account", async () => {
+    await openCard();
+    expect((await menuItems("chatgpt-work")).map((item) => item.textContent)).not.toContain("Hide");
+    expect(container.querySelector('[data-account="chatgpt-work"]')?.textContent).toContain("Remove");
+  });
+
+  it("won't hide an account a bot still uses", async () => {
+    fixture.state = { ...fixture.state, bots: [{ modelSelection: { instanceId: "chatgpt" } } as Bot] };
+    await openCard();
+    const hide = (await menuItems("chatgpt")).find((item) => item.textContent === "Hide");
+    expect(hide?.disabled).toBe(true);
+    expect(container.textContent).toContain(t("accounts.inUse", { count: "1" }));
+  });
+
+  it("won't hide an account a bot only keeps as a backup AI", async () => {
+    fixture.state = { ...fixture.state, bots: [{ modelSelection: { instanceId: "codex" }, fallback: [{ instanceId: "chatgpt", model: "gpt-5" }] } as Bot] };
+    await openCard();
+    const hide = (await menuItems("chatgpt")).find((item) => item.textContent === "Hide");
+    expect(hide?.disabled).toBe(true);
+    expect(container.textContent).toContain(t("accounts.inUse", { count: "1" }));
+  });
+});

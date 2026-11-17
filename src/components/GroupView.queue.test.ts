@@ -9,7 +9,8 @@ import type { Bot, Group } from "@/state/store";
 
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, bots: [] as Bot[] }, dispatch: vi.fn() }) };
+  const otherRoom = { id: "other-room", name: "Launch", threadId: "launch-thread", memberIds: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1, messages: [] };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, bots: [] as Bot[], groups: [otherRoom] }, dispatch: vi.fn() }) };
 });
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
@@ -52,6 +53,14 @@ describe("the room's queue", () => {
     ] } })));
     const rows = [...host.querySelectorAll('[data-testid="room-queue"] li')].map((li) => li.textContent);
     expect(rows).toEqual(["Second: Queued · waiting for First (2 of 3)", "Third: Queued · waiting for First (3 of 3)"]);
+  });
+
+  it("says a member busy in another room is queued and starts when that finishes", () => {
+    flushSync(() => root.render(createElement(RoomQueueList, { members, group: { ...room, queue: [
+      { botId: "second", threadId: "room-thread", state: "queued", position: 1, of: 1, busyIn: { groupId: "other-room", threadId: "launch-thread" } },
+    ] } })));
+    const rows = [...host.querySelectorAll('[data-testid="room-queue"] li')].map((li) => li.textContent);
+    expect(rows).toEqual(["Second: Busy in Launch · queued (1 of 1), starts when it finishes"]);
   });
 
   it("shows nothing when nobody waits in the open thread", () => {
