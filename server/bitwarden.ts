@@ -223,6 +223,7 @@ export class BitwardenLogins implements VaultProvider {
   private refreshedAt: number | null = null;
   private error: string | undefined;
   private refreshing: Promise<BitwardenStatus> | null = null;
+  private reading: Promise<unknown> = Promise.resolve();
   private readonly lastUsed = new Map<string, number>();
 
   constructor(options: {
@@ -276,7 +277,9 @@ export class BitwardenLogins implements VaultProvider {
   /** Reads the vault again; with `account`, checks that one first and throws the person's words when it fails. */
   refresh(account?: BitwardenAccount): Promise<BitwardenStatus> {
     if (!account && this.refreshing) return this.refreshing;
-    const run = this.load(account).finally(() => { if (this.refreshing === run) this.refreshing = null; });
+    // One read at a time: `bw` keeps one sign-in in one folder, so checking a new account waits for a read of the old one.
+    const run = this.reading.then(() => this.load(account)).finally(() => { if (this.refreshing === run) this.refreshing = null; });
+    this.reading = run.catch(() => undefined);
     if (!account) this.refreshing = run;
     return run;
   }

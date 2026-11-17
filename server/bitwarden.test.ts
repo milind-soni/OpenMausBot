@@ -112,6 +112,26 @@ describe("BitwardenLogins", () => {
     expect(connects).toEqual([]);
   });
 
+  it("checks a new account only after a read of the old one ends, since both use one bw folder", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((done) => { release = done; });
+    const connects: string[] = [];
+    const bitwarden = new BitwardenLogins({
+      account: () => ACCOUNT,
+      connect: async (one) => {
+        connects.push(one.clientId);
+        return { items: async () => { if (one === ACCOUNT) await gate; return ITEMS; }, item: async () => null };
+      },
+    });
+    const old = bitwarden.refresh();
+    const next = bitwarden.refresh({ ...ACCOUNT, clientId: "user.fake-next" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(connects).toEqual([ACCOUNT.clientId]);
+    release();
+    await Promise.all([old, next]);
+    expect(connects).toEqual([ACCOUNT.clientId, "user.fake-next"]);
+  });
+
   it("checks a new account before it is kept and throws plain words when it fails", async () => {
     const { bitwarden, fail } = setup({ account: null });
     fail.error = new Error("Invalid master password.");
