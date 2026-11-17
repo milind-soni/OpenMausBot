@@ -1,5 +1,10 @@
 # Self-host the full stack with rootless Podman
 
+For the server alone as your user's systemd service, with updates and a way
+back, one command is enough: `install.sh` here
+([Podman (rootless, as a service)](../../docs/self-hosting.md#podman-rootless-as-a-service)).
+The recipe below builds from a checkout and adds Caddy and per-bot desktops.
+
 Run the OpenMausBot server, Caddy, and per-bot Linux desktops with one Podman
 engine. Docker Engine, Docker Desktop, and Docker Compose are not required;
 `podman-compose` provides the Compose commands. The existing

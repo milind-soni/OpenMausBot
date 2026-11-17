@@ -161,6 +161,77 @@ its npx cache. The service log never shows a code. Get one with:
 npx openmausbot pair
 ```
 
+### Podman (rootless, as a service)
+
+On Linux with Podman 4.6 or newer (Ubuntu 24.04, Debian 13, Fedora 39 and
+later), one command run as your own user, without `sudo`, installs the
+published server image as your user's systemd service:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/podman/install.sh | sh
+podman exec -it openmausbot openmausbot pair      # a code, and a sign-in link for this machine's browser
+```
+
+It writes a Quadlet unit, `~/.config/containers/systemd/openmausbot.container`,
+that runs the image pinned by its digest. systemd starts it again when it
+fails or stops answering its health check. It starts at boot once your user
+may run services without being logged in. The installer checks this and
+prints the one line to run as an administrator; it never runs `sudo` itself:
+
+```sh
+sudo loginctl enable-linger "$USER"
+```
+
+The server uses the host's network, as `npx openmausbot serve` does. It
+listens on `127.0.0.1:8799` only, and a program on this machine counts as its
+owner ([Loopback trust](#loopback-trust-owner-or-service)). Nothing is
+forwarded into a container. Options, given after `sh -s --`:
+
+| Option | Does |
+|---|---|
+| `--lan` | Also answers other devices on this network, over plain http, and only from private addresses. Each device pairs. |
+| `--local` | Back to this machine only (the default). |
+| `--port N` | Another port, when 8799 is taken (webhooks use the next one). |
+| `--public-url URL` | The HTTPS address a tunnel or proxy in front of it serves, for pairing links. |
+| `--uninstall` | Stops and removes the service. Keeps the data. |
+
+Running the command again repairs the install and keeps the version, the
+data and your settings. It restarts the server only when something changed.
+
+| | Where |
+|---|---|
+| Data (chats, settings, engine logins) | `~/.local/share/openmausbot/data`, owned by your user on the host |
+| The server's settings | `~/.local/share/openmausbot/server.env`. Apply a change with `systemctl --user restart openmausbot` |
+| Log | `journalctl --user -u openmausbot -f` |
+| Status | `systemctl --user status openmausbot` |
+
+**Update.** `~/.local/share/openmausbot/update.sh` updates to the stable
+version (`--version X.Y.Z` for another, `--check` to only look). It is
+`deploy/update.sh`, as for Docker installs: it downloads the image by digest,
+stops the service, copies the data into a Podman volume and checks the copy,
+points the unit at the new image and restarts the service. Then it waits until
+the server answers and can still start bots. If it cannot, the old image and
+the copy of the data go back. `update.sh --rollback` goes back after an update
+that worked. Run it as your user, without `sudo`. The app's **Update server**
+button does not run it on this install yet: run `update.sh` yourself.
+
+**Uninstall.** Run the same command with `--uninstall`. The data stays.
+Some of its files can belong to the container's other user ids, so remove
+it through Podman: `podman unshare rm -rf ~/.local/share/openmausbot`.
+
+**What rootless does not do.**
+
+- The bots' sandbox (bubblewrap) is not part of the published server image,
+  so bots run in the server's container, beside its data. Use this install
+  on a machine only you sign in to, as with the Docker image.
+- Chrome runs without its own sandbox inside the container, as in every
+  container install. The container is the boundary.
+- Ports below 1024 need root or a sysctl change; put Caddy, a tunnel or
+  Tailscale in front for HTTPS (`--public-url`).
+- Per-bot Linux desktops (**Local VM**) need the Podman socket, which this
+  install does not mount. [deploy/podman](../deploy/podman/README.md) runs
+  the full stack with them.
+
 ## Troubleshooting
 
 | You see | It means | Do this |

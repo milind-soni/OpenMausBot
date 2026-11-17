@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+# The rootless Podman install (deploy/podman/install.sh) on a stock Ubuntu 24.04 host, as its own user runs it: install a
+# published release as the user's systemd service, run it again, a bot turn with the repository's fake engine, Chrome in
+# the server's container, a kill of the server and a restart of the user's systemd (what a boot does), the LAN switch and
+# back, an update to the next release, an update that cannot start and is rolled back, and an uninstall that keeps the
+# data. It also records whether the bots' sandbox (bubblewrap) can run in a rootless container, and with what.
+# The files the installer places (update.sh) come from this checkout.
+#   OUT=<evidence folder> bash deploy/e2e/podman.sh
+set -euo pipefail
+ROOT=$(cd "$(dirname "$0")/../.." && pwd)
+OUT=${OUT:-$(mktemp -d)}
+mkdir -p "$OUT"
+REPO=ghcr.io/milind-soni/openmausbot
+OLD_VERSION=${OMB_E2E_OLD_VERSION:-0.1.165}
+NEW_VERSION=${OMB_E2E_NEW_VERSION:-0.1.166}
+DIR="$HOME/.local/share/openmausbot"
+UNIT="$HOME/.config/containers/systemd/openmausbot.container"
+INSTALL=(env "OMB_INSTALL_SOURCE=file://$ROOT" sh "$ROOT/deploy/podman/install.sh")
+FINDINGS="$OUT/findings.txt"
+: >"$FINDINGS"
+
+step() { printf '\n== %s\n' "$*"; }
+finding() { printf '%s\n' "$*" | tee -a "$FINDINGS"; }
+fail() {
+  printf 'FAILED: %s\n' "$*" >&2
+  journalctl --user -u openmausbot -n 120 --no-pager >"$OUT/journal.txt" 2>&1 || true
+  tail -n 60 "$OUT/journal.txt" >&2 || true
+  exit 1
+}
+contains() { # file words what
+  grep -qF -- "$2" "$1" || fail "$3: $(tail -n 20 "$1")"
+}
+healthy() { curl -sf --max-time 5 "http://127.0.0.1:${1:-8799}/api/health" 2>/dev/null | grep -q openmausbot; }
+healthy_again() {
+  local _
+  for _ in $(seq 1 80); do
+    healthy "${1:-8799}" && return 0
+    sleep 3
+  done
+  fail "the server did not answer again"
+}
+container_id() { podman inspect -f '{{.Id}}' openmausbot 2>/dev/null || true; }
+in_server() { podman exec openmausbot "$@"; }
+
+step "this host: rootless Podman, and systemd for this user without a login (linger, as a server has it)"
+podman version | tee "$OUT/podman-version.txt"
+if ! grep -q "^$(id -un):" /etc/subuid; then
+  sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$(id -un)"
+  podman system migrate
+fi
+sudo loginctl enable-linger "$(id -un)"
+XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export XDG_RUNTIME_DIR
+for _ in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+systemctl --user show-environment >/dev/null || fail "no systemd for this user"
+finding "host: $(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"'), kernel $(uname -r), $(uname -m), Podman $(podman version --format '{{.Client.Version}}'), $(podman info --format '{{.Host.NetworkBackend}} network, {{.Host.CgroupsVersion}}, rootless={{.Host.Security.Rootless}}')"
+finding "host: kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo absent)"
+
+step "the repository's fake engine, wired into the data folder before the first start"
+fake="$DIR/data/.openmausbot/fake-engine"
+mkdir -p "$fake"
+for file in fake-claude-cli launch-note room-handoff-agent stream-script cleanup; do cp "$ROOT/server/testing/$file.ts" "$fake/"; done
+chmod 755 "$fake/fake-claude-cli.ts"
+cat >"$DIR/data/.openmausbot/config.json" <<'JSON'
+{
+  "features": { "smartSetupChoices": false },
+  "instances": {
+    "claude": { "driver": "claudeAgent", "displayName": "E2E fake engine", "config": { "cli": "/data/.openmausbot/fake-engine/fake-claude-cli.ts" } }
+  }
+}
+JSON
+chmod 700 "$DIR/data"
+
+step "install $OLD_VERSION as this user's service"
+OMB_INSTALL_IMAGE="$REPO:v$OLD_VERSION" "${INSTALL[@]}" >"$OUT/install.txt" 2>&1 || { cat "$OUT/install.txt"; fail "the install failed"; }
+cat "$OUT/install.txt"
+contains "$OUT/install.txt" "MausBot is running as your user's service (openmausbot), on http://127.0.0.1:8799." "the install did not finish"
+contains "$OUT/install.txt" "It starts at boot, without anyone logged in." "the install did not see linger"
+grep -q "^Image=$REPO@sha256:[0-9a-f]\{64\}$" "$UNIT" || fail "the unit does not pin the image by digest: $(grep '^Image=' "$UNIT")"
+grep -q "^UserNS=keep-id:uid=[0-9]*,gid=[0-9]*$" "$UNIT" || fail "the unit does not map the image's user to this one"
+cp "$UNIT" "$OUT/openmausbot.container"
+/usr/libexec/podman/quadlet -dryrun -user >"$OUT/quadlet-dryrun.txt" 2>&1 || true
+contains "$OUT/quadlet-dryrun.txt" "---openmausbot.service---" "quadlet did not make the service"
+systemctl --user is-active --quiet openmausbot || fail "the service is not active"
+healthy || fail "the server does not answer on 127.0.0.1:8799"
+ss -ltnH >"$OUT/listening.txt"
+grep -q "127.0.0.1:8799 " "$OUT/listening.txt" || fail "nothing listens on 127.0.0.1:8799: $(cat "$OUT/listening.txt")"
+if grep -qE "(0\.0\.0\.0|\*|\[::\]):8799 " "$OUT/listening.txt"; then fail "the server answers beyond this machine without --lan"; fi
+[ "$(stat -c %u "$DIR/data")" = "$(id -u)" ] || fail "the data folder is not this user's"
+[ -z "$(find "$DIR/data" ! -user "$(id -u)" -print -quit)" ] || fail "the server wrote files that are not this user's on the host: $(find "$DIR/data" ! -user "$(id -u)" | head -n 5)"
+[ "$(stat -c %a "$DIR/.env")" = 600 ] && [ "$(stat -c %a "$DIR/server.env")" = 600 ] || fail "the settings are readable by others"
+{ [ -x "$DIR/update.sh" ] && cmp -s "$ROOT/deploy/update.sh" "$DIR/update.sh"; } || fail "update.sh was not placed"
+finding "install: service active, 127.0.0.1:8799 only, image pinned by digest, data owned by the user on the host"
+
+step "running it again changes nothing"
+first=$(container_id)
+"${INSTALL[@]}" >"$OUT/install-again.txt" 2>&1 || { cat "$OUT/install-again.txt"; fail "the second run failed"; }
+contains "$OUT/install-again.txt" "the one already installed" "the second run did not keep the installed version"
+[ "$(container_id)" = "$first" ] || fail "the second run restarted the server"
+finding "idempotent: a second run kept the version and did not restart the server"
+
+step "a bot turn with the fake engine"
+in_server openmausbot new-bot Probe --json >"$OUT/new-bot.json" 2>"$OUT/new-bot.err" || { cat "$OUT/new-bot.json" "$OUT/new-bot.err"; fail "new-bot failed"; }
+in_server openmausbot run Probe "hello from the podman e2e" --json --timeout 2m >"$OUT/run.json" 2>"$OUT/run.err" || { cat "$OUT/run.json" "$OUT/run.err"; fail "the turn failed"; }
+contains "$OUT/run.json" "hello from fake claude" "the turn did not answer with the fake engine's reply"
+finding "turn: new-bot + run answered \"hello from fake claude\" through the server in the rootless container"
+
+step "Chrome in the server's container"
+if in_server sh -c 'agent-browser open "data:text/html,<title>podman-e2e</title>" >/dev/null && agent-browser get title; agent-browser close >/dev/null 2>&1 || true' >"$OUT/chrome.txt" 2>&1 &&
+  grep -q podman-e2e "$OUT/chrome.txt"; then
+  finding "chrome: agent-browser started the image's browser and read a page title, with no extra flags"
+else
+  cat "$OUT/chrome.txt"
+  fail "the image's browser did not start in the rootless container"
+fi
+
+step "the bots' sandbox (bubblewrap) in a rootless container: the first setting that lets it run"
+image=$(sed -n 's/^Image=//p' "$UNIT")
+userns=$(sed -n 's/^UserNS=//p' "$UNIT")
+printf 'FROM %s\nUSER root\nRUN apt-get update && apt-get install -y --no-install-recommends bubblewrap socat && rm -rf /var/lib/apt/lists/*\nUSER maus\n' "$image" >"$OUT/Containerfile.box"
+podman build -q -t localhost/omb-box-probe:e2e -f "$OUT/Containerfile.box" "$OUT" >/dev/null
+probe=(--unshare-user --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent --ro-bind /usr /usr
+  --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp /bin/true)
+box_rung=""
+for rung in "default" "seccomp=repository profile" "unmask=/proc" "apparmor=unconfined"; do
+  extra=()
+  case "$rung" in
+    seccomp*) extra=(--security-opt "seccomp=$ROOT/connector/profiles/seccomp-omb-home.json") ;;
+    unmask*) extra=(--security-opt "seccomp=$ROOT/connector/profiles/seccomp-omb-home.json" --security-opt unmask=/proc/*) ;;
+    apparmor*) extra=(--security-opt "seccomp=$ROOT/connector/profiles/seccomp-omb-home.json" --security-opt unmask=/proc/* --security-opt apparmor=unconfined) ;;
+  esac
+  if podman run --rm --userns "$userns" ${extra[@]+"${extra[@]}"} --entrypoint bwrap localhost/omb-box-probe:e2e "${probe[@]}" >"$OUT/bwrap-$rung.txt" 2>&1; then
+    box_rung=$rung
+    break
+  fi
+  finding "bot box: bubblewrap refused with $rung: $(head -c 300 "$OUT/bwrap-$rung.txt" | tr '\n' ' ')"
+done
+if [ -n "$box_rung" ]; then
+  finding "bot box: bubblewrap ran its probe with: $box_rung"
+  podman run --rm --userns "$userns" --network host -e OMB_BOT_BOX=1 -e OMB_DATA_DIR=/tmp/box-data ${extra[@]+"${extra[@]}"} \
+    --entrypoint node localhost/omb-box-probe:e2e dist-server/bot-box/box-check.js --public=none >"$OUT/box-check.json" 2>&1 || true
+  finding "bot box self-check (published image + bubblewrap): $(head -c 600 "$OUT/box-check.json" | tr '\n' ' ')"
+else
+  finding "bot box: bubblewrap did not run in a rootless container with any of the settings tried"
+fi
+podman rmi -f localhost/omb-box-probe:e2e >/dev/null 2>&1 || true
+
+step "a server that is killed is started again by systemd"
+before=$(container_id)
+launcher=$(podman top openmausbot hpid args | awk '/server-launcher/ { print $1; exit }')
+[ -n "$launcher" ] || fail "no server process to kill"
+kill -9 "$launcher"
+for _ in $(seq 1 40); do [ "$(container_id)" != "$before" ] && [ -n "$(container_id)" ] && break; sleep 2; done
+healthy_again
+[ "$(container_id)" != "$before" ] || fail "the killed server was not started again"
+finding "restart: kill -9 of server-launcher; systemd started a new container ($(systemctl --user show -p NRestarts --value openmausbot) restart(s)) and it answered"
+
+step "a restart of this user's systemd (what a boot does, with linger) starts it again"
+sudo systemctl restart "user@$(id -u).service"
+for _ in $(seq 1 30); do systemctl --user show-environment >/dev/null 2>&1 && break; sleep 1; done
+healthy_again
+systemctl --user is-active --quiet openmausbot || fail "the service did not start with the user's systemd"
+finding "boot: after systemctl restart user@$(id -u).service the service came back by itself (WantedBy=default.target)"
+
+step "--lan: other devices on this network reach it, and must pair; --local takes it back"
+"${INSTALL[@]}" --lan >"$OUT/install-lan.txt" 2>&1 || { cat "$OUT/install-lan.txt"; fail "the --lan run failed"; }
+healthy_again
+address=$(ip -4 -o route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+ss -ltnH | grep -qE "(0\.0\.0\.0|\*):8799 " || fail "the server does not listen beyond loopback with --lan"
+from_lan=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$address:8799/api/bots" || true)
+from_here=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:8799/api/bots" || true)
+[ "$from_lan" = 403 ] || [ "$from_lan" = 401 ] || fail "a request from $address got $from_lan from /api/bots, not a refusal"
+[ "$from_here" = 200 ] || fail "this machine's own request got $from_here from /api/bots"
+"${INSTALL[@]}" --local >"$OUT/install-local.txt" 2>&1 || { cat "$OUT/install-local.txt"; fail "the --local run failed"; }
+healthy_again
+if ss -ltnH | grep -qE "(0\.0\.0\.0|\*):8799 "; then fail "--local left the server listening beyond loopback"; fi
+finding "lan: with --lan, $address got $from_lan and 127.0.0.1 got $from_here on /api/bots; --local went back to loopback"
+
+step "update to $NEW_VERSION, through update.sh"
+"$DIR/update.sh" --version "$NEW_VERSION" >"$OUT/update.txt" 2>&1 || { cat "$OUT/update.txt"; fail "the update failed"; }
+cat "$OUT/update.txt"
+contains "$OUT/update.txt" "Updated from $OLD_VERSION to $NEW_VERSION." "the update did not finish"
+new_image=$(sed -n 's/^Image=//p' "$UNIT")
+{ [ "$new_image" != "$image" ] && grep -qx "OMB_IMAGE=$new_image" "$DIR/.env"; } || fail "the unit and .env do not name the new image"
+[ "$(podman inspect -f '{{.Image}}' openmausbot)" = "$(podman image inspect -f '{{.Id}}' "$new_image")" ] || fail "the server does not run the new image"
+in_server sh -c 'curl -sf http://127.0.0.1:8799/.well-known/openmausbot/environment' | grep -q "\"version\":\"$NEW_VERSION\"" || fail "the server does not say it is $NEW_VERSION"
+in_server openmausbot bots --json | grep -q Probe || fail "the bot made before the update is gone"
+podman volume ls -q | grep -q "^openmausbot_data-before-update-" || fail "no copy of the data was kept"
+finding "update: $OLD_VERSION -> $NEW_VERSION by digest, data copied to a Podman volume first, the bot made before it still there"
+
+step "an update to a version that cannot start is rolled back"
+printf 'FROM %s\nCMD ["sh", "-c", "echo broken on purpose; exit 3"]\n' "$new_image" >"$OUT/Containerfile.broken"
+podman build -q -t localhost/omb-broken:e2e -f "$OUT/Containerfile.broken" "$OUT" >/dev/null
+status=0
+OMB_UPDATE_WAIT_S=90 "$DIR/update.sh" --image localhost/omb-broken:e2e --allow-older >"$OUT/update-broken.txt" 2>&1 || status=$?
+cat "$OUT/update-broken.txt"
+[ "$status" = 1 ] || fail "the broken update exited $status, not 1"
+contains "$OUT/update-broken.txt" "Your server runs $NEW_VERSION again, with its data as it was before the update." "the broken update was not rolled back"
+[ "$(sed -n 's/^Image=//p' "$UNIT")" = "$new_image" ] || fail "the unit does not name $NEW_VERSION again"
+healthy_again
+in_server openmausbot bots --json | grep -q Probe || fail "the bot is gone after the rollback"
+finding "rollback: an image that exits at start was rolled back to $NEW_VERSION with its data; the service answers"
+podman rmi -f localhost/omb-broken:e2e >/dev/null 2>&1 || true
+
+step "uninstall keeps the data"
+"${INSTALL[@]}" --uninstall >"$OUT/uninstall.txt" 2>&1 || { cat "$OUT/uninstall.txt"; fail "the uninstall failed"; }
+cat "$OUT/uninstall.txt"
+[ ! -e "$UNIT" ] || fail "the unit is still there"
+if systemctl --user is-active --quiet openmausbot; then fail "the service still runs"; fi
+if healthy; then fail "the server still answers"; fi
+[ -f "$DIR/data/.openmausbot/config.json" ] || fail "the uninstall removed the data"
+finding "uninstall: the service and its unit are gone, the data stays"
+
+step "clean up"
+podman volume ls -q | grep "^openmausbot_data-before-update-" | xargs -r podman volume rm -f >/dev/null
+podman unshare rm -rf "$DIR"
+podman image ls --format '{{.Repository}}:{{.Tag}} {{.Size}}' | tee "$OUT/images.txt"
+echo
+echo "findings:"
+cat "$FINDINGS"
