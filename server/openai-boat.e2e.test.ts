@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 it("keeps the selected API model for direct, group and scheduled Boat turns and preserves human control", async () => {
   const rows: Array<{ id: string; name: string; state: string }> = [];
@@ -28,6 +29,7 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
     }
     if (path === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "chosen-vision-model" }, { id: "other-default" }] }));
     if (path === "/v1/chat/completions") {
+      if (isTitleCall(body)) { res.statusCode = 500; return res.end("{}"); }
       requests.push(body);
       const completed = body.messages.some((message: any) => message.role === "tool");
       const tool = body.tools?.find((entry: any) => entry.function.name === "computer_screenshot");

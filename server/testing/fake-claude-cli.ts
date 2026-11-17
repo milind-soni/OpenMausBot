@@ -499,8 +499,20 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "")) {
     process.stderr.write("fake setup answers failed\n");
     process.exit(1);
   }
+  // Every new thread asks its engine for a title (server/thread-title-generate.ts), so that call stays out of the captures
+  // below unless a test answers it: by FAKE_CLAUDE_TEXT_FILE or a FAKE_CLAUDE_TEXT_ROUTES marker. Otherwise it fails at
+  // once and the thread keeps its first-message title. Answered, it still never overwrites the turn dump.
+  const titleCall = prompt.includes("Reply with only a short title: 3 to 6 words");
+  const routes = process.env.FAKE_CLAUDE_TEXT_ROUTES;
+  const routed = () => {
+    try { return Object.keys(JSON.parse(readFileSync(routes!, "utf8"))).some((marker) => prompt.includes(marker)); } catch { return false; }
+  };
+  if (titleCall && !process.env.FAKE_CLAUDE_TEXT_FILE && !(routes && routed())) {
+    process.stderr.write("fake title failed\n");
+    replyText("fake title failed", 1, null);
+  }
   // Background one-shots never overwrite the shared turn dump; FAKE_CLAUDE_TEXT_DUMP records them.
-  const upkeepCall = /You are the (?:CAPTURE|TIDY|ORGANIZE) step of a memory system|You are the SKILL REVIEW step/.test(prompt);
+  const upkeepCall = titleCall || /You are the (?:CAPTURE|TIDY|ORGANIZE) step of a memory system|You are the SKILL REVIEW step/.test(prompt);
   const oneShotDump = process.env.FAKE_CLAUDE_TEXT_DUMP ?? (upkeepCall ? undefined : process.env.FAKE_CLAUDE_DUMP);
   if (oneShotDump) {
     writeDumpAtomic(

@@ -15,6 +15,7 @@ import { freePortBlock } from "./testing/ports.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { ownTurnText } from "./testing/room-handoff-agent.ts";
 import { withAnswer } from "./testing/your-computer.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const RERUN_NOTE = "OpenMausBot restarted while your previous turn here was running";
@@ -68,6 +69,7 @@ async function loopbackModel() {
     if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
     for await (const chunk of req) body += chunk;
     const sent = JSON.parse(body) as { messages: Array<{ role: string; content?: unknown }>; tools?: Array<{ function: { name: string } }> };
+    if (isTitleCall(sent)) { res.writeHead(500); res.end(); return; }
     const text = (message: { content?: unknown }) => typeof message.content === "string" ? message.content
       : Array.isArray(message.content) ? message.content.map((part: any) => part?.text ?? "").join("\n") : "";
     const lastUserAt = sent.messages.map((message) => message.role).lastIndexOf("user");
