@@ -78,8 +78,8 @@ export function turnLimitScope(event: SettledTurn, flags: { limit?: TakeoverScop
     : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
 }
 
-/** On unless OMB_QUOTA_SWITCH=0: a limited AI's work carries on with another AI by itself. Off, only the backups
- * Automatic recovery names take over, as before. */
+/** On unless OMB_QUOTA_SWITCH=0: a limited AI's work carries on by itself with a backup the person chose (the bot's own,
+ * then Automatic recovery's); with none usable the bot waits for the reset. Off, only Automatic recovery's backups take over. */
 export function quotaSwitchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.OMB_QUOTA_SWITCH?.trim() !== "0";
 }

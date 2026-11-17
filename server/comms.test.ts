@@ -1011,14 +1011,14 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
           failed = askerBot.messages.find((m: any) => m.kind === "activity" && m.tool?.ok === false && m.from?.botId === helper.id);
           return Boolean(failed) && lastText(askerBot.messages)?.text === WOKE_WITH_FAILURE && !askerBot.busy;
         }, 90_000, "the stall never reached the delegator");
-        expect(failed.tool.name).toMatch(/^CapHelper — failed: Stopped after 64 steps without a final answer\./);
+        expect(failed.tool.name).toMatch(/^CapHelper — failed: Stopped after 200 tool calls without a final answer\./);
         expect(failed.tool.name).not.toContain("\n");
         const tasks = (await bot(helper.id)).tasks;
         expect(tasks.map((task: any) => task.title).filter((title: string) => title?.startsWith("Continue:"))).toEqual([]);
         const handed = assignments(helper.id, asker.id);
         expect(handed).toHaveLength(1);
         expect(handed[0]).toMatchObject({ status: "failed", outcome: "stalled", executions: 2 });
-        expect(handed[0]!.outcomeDetail).toMatch(/^Stopped after 2 continuations without progress: Stopped after 64 steps/);
+        expect(handed[0]!.outcomeDetail).toMatch(/^Stopped after 2 continuations without progress: Stopped after 200 tool calls/);
       } finally {
         compatAnswer = "hang";
       }

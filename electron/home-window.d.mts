@@ -1,7 +1,7 @@
 /** What this computer's screen says while the window can't show the place. `reason`: the Admin's words on why My Cloud
  * doesn't answer, in English; `cause`: the same as a code the page says in its own language; `machine`: a plan
  * problem's state; `other`: another MausBot Cloud account is signed in; `name`: the team whose Cloud is being opened
- * (absent for My Cloud). */
+ * or the server of the person's own a frozen copy goes back to (absent for My Cloud). */
 export type HomeView = { name?: string } & (
   | { screen: "opening" | "waking" | "moving" }
   /** The Admin is setting it up (or a brand-new one's name isn't found yet, at `checking`): the step it reports. */
