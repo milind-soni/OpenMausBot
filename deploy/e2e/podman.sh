@@ -30,7 +30,7 @@ fail() {
 contains() { # file words what
   grep -qF -- "$2" "$1" || fail "$3: $(tail -n 20 "$1")"
 }
-healthy() { curl -sf --max-time 5 "http://127.0.0.1:${1:-8799}/api/health" 2>/dev/null | grep -q openmausbot; }
+healthy() { curl -sf --max-time 5 "http://127.0.0.1:8799/api/health" 2>/dev/null | grep -q openmausbot; }
 healthy_again() {
   local _
   for _ in $(seq 1 80); do
