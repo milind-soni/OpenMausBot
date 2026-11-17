@@ -3,7 +3,7 @@ import App from "../../src/App";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
 import { ADVANCED_MODE_KEY, setAdvancedMode } from "../../src/lib/interface-mode";
 import { languageChoice, setLanguageChoice } from "../../src/lib/language-preference";
-import { BOAT_OFFER_NOTICE, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE } from "../../src/lib/notices";
+import { BOAT_OFFER_NOTICE, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, TEAMS_NOTICE } from "../../src/lib/notices";
 import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
 import { applySkinChoice, readSkinChoice } from "../../src/lib/skins";
 import "../../src/styles.css";
@@ -25,6 +25,8 @@ if (!new URLSearchParams(location.search).has("onboarding")) setEmailGateDone("s
 if (!new URLSearchParams(location.search).has("simpleModePrompt")) markSimpleModePromptSeen();
 // The same for the once-per-person Move from Grok Bot popup, with ?grokMovePopup=1.
 if (!new URLSearchParams(location.search).has("grokMovePopup")) localStorage.setItem(GROK_MOVE_NOTICE, "1");
+// And for the once-per-person Teams What's new, with ?teamsPopup=1.
+if (!new URLSearchParams(location.search).has("teamsPopup")) localStorage.setItem(TEAMS_NOTICE, "1");
 // And for the once-per-person ModelGo sponsor card, with ?modelgoOffer=1: it sits over the sidebar's foot, where tests click.
 if (!new URLSearchParams(location.search).has("modelgoOffer")) localStorage.setItem(MODELGO_OFFER_NOTICE, "1");
 if (!new URLSearchParams(location.search).has("boatOffer")) localStorage.setItem(BOAT_OFFER_NOTICE, "1");

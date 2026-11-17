@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
 import { teamMemberEmail } from "./cloud-team.ts";
+import { newestReadMarkOnly } from "../shared/cloud-hints.ts";
 
 const PERSON = /^p_[\w-]{22}$/;
 /** A welcome step's id, as the app's onboarding hints are written. */
@@ -63,7 +64,7 @@ export function createTeamWelcomeStore(dataDir: string): TeamWelcomeStore {
     },
     save(person, change, now = Date.now()) {
       const kept = load(person);
-      const hints = [...new Set([...(kept.hints ?? []), ...(change.hints ?? []).filter((hint) => WELCOME_HINT.test(hint))])].slice(0, MAX_HINTS);
+      const hints = newestReadMarkOnly([...new Set([...(kept.hints ?? []), ...(change.hints ?? []).filter((hint) => WELCOME_HINT.test(hint))])]).slice(0, MAX_HINTS);
       const next = { ...kept, ...(change.welcomed && !kept.welcomedAt ? { welcomedAt: now } : {}), ...(hints.length ? { hints } : {}) };
       if (JSON.stringify(next) !== JSON.stringify(kept)) write(person, next);
       return view(next);
