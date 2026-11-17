@@ -164,18 +164,27 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
         ...hostedModels?.resetTask(selected.modelSelection, checked.selection) });
       return json(res, 200, { bot: wireBot(bot) });
     }
-    m = path.match(/^\/api\/bots\/([\w-]+)\/read$/);
+    m = path.match(/^\/api\/bots\/([\w-]+)\/read(\/guarded)?$/);
     if (m && method === "POST") {
       const body = await readBody(req);
+      const guarded = m[2] !== undefined;
+      if (guarded && (typeof body?.threadId !== "string" || !/^[\w-]+$/.test(body.threadId) ||
+          typeof body.expectedActiveLeafId !== "string" || !/^[\w-]+$/.test(body.expectedActiveLeafId))) {
+        return json(res, 400, { error: "guarded reads require threadId and expectedActiveLeafId" });
+      }
       requirePinnedClientThread(m[1], body?.threadId);
       const current = requestedTaskBot(m[1], body?.threadId);
-      sawThread(current.threadId);
+      const guardedCursor = guarded ? readCursor(current.threadId) : undefined;
+      if (guardedCursor && guardedCursor.lastReadMessageId !== body.expectedActiveLeafId) {
+        return json(res, 409, { error: "the conversation changed" });
+      }
+      if (!guarded) sawThread(current.threadId);
       deps.threadRead?.(auth, current.threadId);
       if (deps.personMarkThread?.(auth, current.threadId, false)) {
         readThreadNotifications(current.threadId, broadcast, notificationListed(auth));
         return json(res, 200, { bot: wireBot(store.bot(current.id)!) });
       }
-      const task = store.taskByThread(current.id, current.threadId), cursor = readCursor(current.threadId);
+      const task = store.taskByThread(current.id, current.threadId), cursor = guardedCursor ?? readCursor(current.threadId);
       const changed = Boolean(task?.unread) || (cursor.lastReadMessageId !== undefined && task?.lastReadMessageId !== cursor.lastReadMessageId);
       if (changed) store.patchTask(current.id, current.threadId, { unread: false, ...cursor });
       readThreadNotifications(current.threadId, broadcast, notificationListed(auth));

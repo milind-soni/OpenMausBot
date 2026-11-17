@@ -11387,6 +11387,39 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("keeps a newer conversation message unread when a guarded read is stale", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    const botPath = `/api/bots/${bot.id}`;
+    const threadId = bot.threadId;
+    const guardedRead = (expectedActiveLeafId: string) => api("POST", `${botPath}/read/guarded`, {
+      threadId, expectedActiveLeafId,
+    });
+    const leaf = async () => (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.activeLeafId;
+    const task = async () => (await api("GET", "/api/bots")).body.bots
+      .find((candidate: { id: string }) => candidate.id === bot.id)
+      .tasks.find((candidate: { threadId: string }) => candidate.threadId === threadId);
+    try {
+      const initial = await leaf();
+      expect(typeof initial).toBe("string");
+      expect((await api("PATCH", botPath, { unread: true })).status).toBe(200);
+      expect((await api("POST", `${botPath}/read/guarded`, { threadId })).status).toBe(400);
+      expect((await guardedRead(initial)).status).toBe(200);
+      expect(await task()).toMatchObject({ unread: false, lastReadMessageId: initial });
+
+      expect((await api("POST", `${botPath}/messages`, { threadId, text: "A newer message" })).status).toBe(202);
+      await releaseTurn(bot.id);
+      const latest = await leaf();
+      expect(latest).not.toBe(initial);
+      expect(await task()).toMatchObject({ unread: true, lastReadMessageId: initial });
+      expect((await guardedRead(initial)).status).toBe(409);
+      expect(await task()).toMatchObject({ unread: true, lastReadMessageId: initial });
+      expect((await guardedRead(latest)).status).toBe(200);
+      expect(await task()).toMatchObject({ unread: false, lastReadMessageId: latest });
+    } finally {
+      await api("DELETE", botPath);
+    }
+  });
+
   it("applies a bot's own chat-created trigger and a teammate's at once, each with its card", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     let routineId = "";

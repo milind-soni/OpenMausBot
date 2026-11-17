@@ -378,6 +378,14 @@ describe("resolveRequestAuth", () => {
     expect(resolve({ host: "localhost" }).auth?.kind).toBe("loopback");
   });
 
+  it("requires a client session for guarded reads from a remote host", () => {
+    const client = sessions.issue({ label: "Phone", scopes: ["client"] });
+    const path = "/api/bots/b/read/guarded";
+    const host = "bots.example.com";
+    expect(resolve({ host }, path, "POST").auth).toBeNull();
+    expect(resolve({ host, authorization: `Bearer ${client.token}` }, path, "POST").auth?.kind).toBe("session");
+  });
+
   it("renews a session only for a request that passed the origin and scope checks", () => {
     let clock = 1_700_000_000_000;
     sessions = new SessionRegistry({ file: join(dir, "sessions.json"), now: () => clock });
