@@ -72,6 +72,7 @@ import { botUnreadCount, showBrowserUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { useConnectLink } from "@/lib/use-connect-link";
 import { isSettingsPage } from "@/components/settings/settings-index";
 import { useBotListDrawer } from "@/hooks/use-bot-list-drawer";
+import { useRememberedSidePanel } from "@/hooks/use-remembered-side-panel";
 import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
@@ -110,6 +111,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   useEffect(() => {
     if (!sidebarInline && state.forkPanel) dispatch({ type: "closeForkPanel" });
   }, [sidebarInline, state.forkPanel, dispatch]);
+  useRememberedSidePanel(state, dispatch, { enabled: sidebarInline, inspector: !remoteClient });
   useEffect(() => {
     if (!window.ogb?.environments) return;
     const open = (computerId?: string | null) => {
