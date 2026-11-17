@@ -59,7 +59,7 @@ describe("read-only access after transcript cache protections expire", () => {
     expect(cache.approxBytes).toBe(approxBytes(oldest.messages[0]) + approxBytes(newest.messages[0]));
   });
 
-  it("does not shorten recent-use protection or evict a busy/current transcript", () => {
+  it("keeps busy and requested transcripts while over budget", () => {
     const busy = new Set(["busy"]);
     const cache = new ThreadCache(() => busy, 1_000);
     const work = cache.load("busy", rows("busy"));
@@ -71,6 +71,24 @@ describe("read-only access after transcript cache protections expire", () => {
     expect(cache.get("current")).toBe(current);
     expect(cache.get("busy")).toBe(work);
     expect(cache.size).toBe(2);
+  });
+
+  it("protects an unrequested recently used transcript until its residency expires", () => {
+    const cache = new ThreadCache(() => new Set(), 15_000);
+    const a = cache.load("a", rows("a"));
+    const b = cache.load("b", rows("b"));
+    expect(cache.approxBytes).toBeGreaterThan(15_000);
+    vi.setSystemTime(START + 4_999);
+    expect(cache.get("a")).toBe(a);
+    vi.setSystemTime(START + 5_000);
+    expect(cache.get("b")).toBe(b);
+    expect(cache.size).toBe(2);
+
+    vi.setSystemTime(START + 10_000);
+    expect(cache.get("b")).toBe(b);
+    expect(cache.get("a")).toBeUndefined();
+    expect(cache.size).toBe(1);
+    expect(cache.approxBytes).toBeLessThanOrEqual(15_000);
   });
 
   it("bounds deferred-eviction scans while all over-budget transcripts are protected", () => {
