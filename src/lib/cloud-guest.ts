@@ -52,3 +52,18 @@ export function currentReactor(): string {
 export function useReactor(): string {
   return useSyncExternalStore(subscribeReactor, () => reactor, () => "user");
 }
+
+/** True once the server says this device is a guest on someone's My Cloud; false for its owner and everywhere else. */
+export function useCloudGuest(): boolean {
+  const [guest, setGuest] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void read().then((state) => {
+      if (alive) setGuest(state?.kind === "session" && state.cloudGuest === true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return guest;
+}

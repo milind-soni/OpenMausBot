@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../../shared/redact.ts";
 
 import { checkInvariants } from "./invariants.ts";
-import { PROGRESS_WRITE_MS, Runtime, type BeginRequest } from "./runtime.ts";
+import { PROGRESS_WRITE_MS, RERUN_BURST, RERUN_GAP_MS, RERUN_HELD, RERUN_SUPERSEDED, Runtime, type BeginRequest } from "./runtime.ts";
 import { openRuntimeStore, type RuntimeStore } from "./store.ts";
 import { CUT_TWICE, INTERRUPTED_OUTWARD, loopStop, nextGuard, outwardDetail } from "./tree.ts";
 import type { Assignment, Clock, EnqueueRequest, Limits, RunInput, RunResult, TurnRunner } from "./types.ts";
@@ -220,6 +220,31 @@ describe("Runtime: one tree, one lane", () => {
     await flush();
     expect(w.store.get(root.id)?.status).toBe("completed");
     invariants(w);
+  });
+
+  it("work held for a place that was away is not expired by the look that finds the place back: its queue window starts then", () => {
+    const w = world(undefined, { queueMs: 1_000, stallMs: 1e9 });
+    let away = true;
+    w.runner.away = a => a.assignee.botId === "far" && away;
+    w.runner.canStartAnswer = "far is not ready";
+    const root = w.runtime.begin(beginReq());
+    const held = ok(w.runtime.enqueue(toBot("far", root.id)));
+    w.runtime.tick();
+    w.clock.advance(50_000);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    // The place comes back, and the next look comes later than the whole queue window.
+    w.clock.advance(5_000);
+    away = false;
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    w.clock.advance(999);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    // From then on it is ordinary queued work, and the queue window is its bound again.
+    w.clock.advance(2);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "never started" });
   });
 
   it("expires a queue entry that never started and a question nobody answered, never as completed", async () => {
@@ -1568,5 +1593,57 @@ describe("Runtime: at Full access a question is its requester's to answer, and o
     expect(runsOf(w, root.id)[1]!.input.settled?.map(a => a.id)).toEqual([builder.id, tester.id]);
     expect(w.store.get(root.id)?.status).toBe("completed");
     invariants(w);
+  });
+});
+
+describe("Runtime: turns a restart cut start again a few at a time", () => {
+  it("starts the first few at once and the rest one per gap, and a second restart cuts only the ones that had started", async () => {
+    const store = openRuntimeStore(":memory:");
+    const first = world(() => "hold", {}, store);
+    const roots = Array.from({ length: RERUN_BURST + 3 }, (_, i) => first.runtime.begin(beginReq({
+      requester: { kind: "person", threadId: `chat-${i}`, chief: true }, assignee: { botId: `bot-${i}`, destination: { kind: "standing_thread", threadId: `chat-${i}` } } })));
+    first.runtime.close();
+
+    const second = world(() => "hold", {}, store);
+    second.runtime.tick(); await flush();
+    expect(second.runner.runs.map(r => r.input.turn)).toEqual(Array(RERUN_BURST).fill("rerun"));
+    const waiting = roots.filter(root => store.get(root.id)?.status === "queued");
+    expect(waiting).toHaveLength(3);
+    for (const root of waiting) expect(store.events(root.id).at(-1)).toMatchObject({ kind: "held", detail: RERUN_HELD });
+    second.clock.advance(RERUN_GAP_MS - 1);
+    second.runtime.tick(); await flush();
+    expect(second.runner.runs).toHaveLength(RERUN_BURST);
+    second.clock.advance(1);
+    second.runtime.tick(); await flush();
+    expect(second.runner.runs).toHaveLength(RERUN_BURST + 1);
+    second.runtime.close();
+
+    // Down again during the reruns: those that had started fail as cut twice; the two still waiting are not cut again.
+    const third = world(() => "hold", {}, store);
+    const cutTwice = roots.filter(root => store.get(root.id)?.status === "failed");
+    expect(cutTwice).toHaveLength(RERUN_BURST + 1);
+    for (const root of cutTwice) expect(store.get(root.id)).toMatchObject({ outcome: "interrupted", result: CUT_TWICE });
+    third.runtime.tick(); await flush();
+    expect(third.runner.runs.map(r => r.input.turn)).toEqual(["rerun", "rerun"]);
+  });
+
+  it("does not run a cut turn again after newer work in its conversation started first: it fails with a line saying so", async () => {
+    const store = openRuntimeStore(":memory:");
+    const first = world(() => "hold", {}, store);
+    const chat = (i: number) => ({ requester: { kind: "person" as const, threadId: `chat-${i}`, chief: true }, assignee: { botId: `bot-${i}`, destination: { kind: "standing_thread" as const, threadId: `chat-${i}` } } });
+    const roots = Array.from({ length: RERUN_BURST + 1 }, (_, i) => first.runtime.begin(beginReq(chat(i))));
+    first.runtime.close();
+
+    const second = world(() => "hold", {}, store);
+    second.runtime.tick(); await flush();
+    const late = roots[RERUN_BURST]!;
+    expect(store.get(late.id)?.status).toBe("queued");
+    // The person writes in that chat while its cut turn waits its turn: the new request runs, and the old one does not.
+    const newer = second.runtime.begin(beginReq(chat(RERUN_BURST)));
+    second.clock.advance(RERUN_GAP_MS);
+    second.runtime.tick(); await flush();
+    expect(store.get(late.id)).toMatchObject({ status: "failed", outcome: "interrupted", result: RERUN_SUPERSEDED });
+    expect(second.runner.runs.filter(r => r.a.id === late.id)).toHaveLength(0);
+    expect(store.get(newer.id)?.status).toBe("running");
   });
 });

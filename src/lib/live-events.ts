@@ -59,12 +59,14 @@ export interface LiveEventsHandlers {
   retryMaxMs?: number;
 }
 
-/** `screens: false` asks the server to leave out live screen frames; `window=1` tells it an app window is open. */
+/** `screens: false` asks the server to leave out live screen frames; `window=1` tells it an app window is open;
+ * `frames=thread` that this client keeps a bot's other threads when a bot frame says `tasksPartial`. */
 export function liveEventsUrl(options?: { since?: string | null; screens?: boolean }): string {
   const params = new URLSearchParams();
   if (options?.since) params.set("since", options.since);
   if (options?.screens === false) params.set("screens", "off");
   params.set("window", "1");
+  params.set("frames", "thread");
   return `${LIVE_EVENTS_PATH}?${params}`;
 }
 

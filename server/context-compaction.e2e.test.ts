@@ -6,6 +6,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { readRegistry } from "./testing/registry.ts";
 
 async function fixture(test: (f: Awaited<ReturnType<typeof setup>>) => Promise<void>, hang = false, fakeEnv: NodeJS.ProcessEnv = {}) {
   const f = await setup(hang, fakeEnv);
@@ -34,7 +35,7 @@ async function setup(hang: boolean, fakeEnv: NodeJS.ProcessEnv) {
     const plan = join(session.info.dataDir, "room-plan.json");
     writeFileSync(plan, JSON.stringify({ [bot.id]: { reply: "Acknowledged" } }));
     const messages = async () => (await api(`/api/threads/${thread}/messages`)).messages as any[];
-    const task = () => JSON.parse(readFileSync(join(session.info.dataDir, "bots.json"), "utf8"))
+    const task = () => readRegistry(session.info.dataDir).bots
       .find((b: any) => b.id === bot.id).tasks.find((t: any) => t.threadId === thread);
     const idle = () => expect.poll(async () => (await api("/api/bots?messages=0")).bots
       .find((b: any) => b.id === bot.id).tasks.find((t: any) => t.threadId === thread).busy, { timeout: 15_000 }).toBe(false);

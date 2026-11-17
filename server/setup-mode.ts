@@ -53,7 +53,7 @@ export function connectedAppsForSetup(input: {
 }
 
 const NO_APP = "so you cannot connect an app such as Gmail yourself. If the job needs one,";
-const KEY_PLACE = "Composio project key in Settings → API keys, under Self-host connected apps";
+const KEY_PLACE = "Composio project key in Settings → AI → Other services, under Self-host connected apps";
 
 function connectedAppsClause(apps: SetupConnectedApps): string {
   switch (apps.state) {

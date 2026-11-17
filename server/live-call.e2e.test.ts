@@ -827,7 +827,7 @@ posixOnly("Live calls for everyone, with the person's own OpenAI key", () => {
 
     for (const [client, headers] of [["ios", phone], ["android", {}], ["desktop", {}]] as const) {
       expect(await start(client, headers), client).toEqual({
-        status: 409, body: { error: "Live calls use your own OpenAI key. Add it in Settings → API keys.", needsKey: true },
+        status: 409, body: { error: "Live calls use your own OpenAI key. Add it in Settings → AI → Other services.", needsKey: true },
       });
     }
     expect(live.sessions).toHaveLength(0);

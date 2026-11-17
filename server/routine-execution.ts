@@ -1,7 +1,5 @@
-import type { RoutineRetryCause } from "../shared/routines.ts";
 import { stopCause } from "./drivers/engine-errors.ts";
 import { redactSecretsInText } from "./redact.ts";
-import { retryNote } from "./routine-recovery.ts";
 import type { Routine, RoutineContextAttachment, RoutineRun, RoutineRunOn, RoutineRunTrigger } from "./routines.ts";
 
 export interface RoutineContinuityCarry {
@@ -69,9 +67,8 @@ export function composeExecutionPrompt(
   prompt: string,
   attachments: readonly RoutineContextAttachment[] | undefined,
   carry?: RoutineContinuityCarry | null,
-  retried?: RoutineRetryCause,
 ): string {
-  const parts = [`${routineHeader(routine.name, routine.trigger)}${routine.trigger === "webhook" ? "" : `Trigger id: ${routine.id}\n`}${prompt}`, retried ? retryNote(retried) : ""];
+  const parts = [`${routineHeader(routine.name, routine.trigger)}${routine.trigger === "webhook" ? "" : `Trigger id: ${routine.id}\n`}${prompt}`];
   const foreign = foreignPaths([prompt, ...(attachments ?? []).map((attachment) => attachment.path)], runHostPlatform(routine.runOn));
   if (foreign.length) {
     parts.push(`[OpenMausBot: this run is on a ${hostName(runHostPlatform(routine.runOn))} computer, where ${foreign.join(", ")} cannot exist. If the work needs ${foreign.length > 1 ? "them" : "it"}, say plainly what is missing instead of reporting success.]`);

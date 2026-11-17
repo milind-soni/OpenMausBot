@@ -41,7 +41,7 @@ describe("process buckets, from the executable's name and parent only", () => {
   });
 
   it("parses /proc stat lines (a comm with spaces and parentheses), ps lines and CPU counters", () => {
-    expect(parseProcStat(42, statLine(42, "Web Content (x)", 7, 150, 50))).toEqual({ pid: 42, ppid: 7, name: "web content (x)", cpuMs: 2_000, rssBytes: 256 * 4096, start: "5555" });
+    expect(parseProcStat(42, statLine(42, "Web Content (x)", 7, 150, 50))).toEqual({ pid: 42, ppid: 7, name: "web content (x)", cpuMs: 2_000, rssBytes: 256 * 4096, start: "5555", threads: 1, state: "S" });
     expect(parseProcStat(1, "garbage")).toBeNull();
     expect(parseReapedChildrenMs(statLine(1, "node", 0, 0, 0, 1, 300, 200))).toBe(5_000);
     expect(parsePsTime("1:02.50")).toBe(62_500);

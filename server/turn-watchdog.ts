@@ -42,7 +42,7 @@ export function stuckCommand(turn: Partial<Pick<WatchedTurn, "runningTools">>, s
 
 /** Why the watchdog stopped a turn: it went silent, or the process running its engine exited and the turn can never
  * answer. */
-export type StallReason = "silent" | "engine-exited";
+export type StallReason = "silent" | "engine-exited" | "server-error";
 
 /** The silence that stops a turn whose engine process has exited: its engine can never answer it, so it waits only long
  * enough for the driver to report the turn's own end, and not for the tool limit. */
@@ -193,6 +193,15 @@ export class TurnWatchdog {
   eventsDiscarded(threadId: string): void {
     const turn = this.turns.get(threadId);
     if (turn) this.watch(threadId, turn.botId);
+  }
+
+  /** Stops a watched turn now, as a stall would (server/crash-guard.ts: an error in the turn's own work). */
+  fail(threadId: string, reason: StallReason = "server-error"): boolean {
+    const turn = this.turns.get(threadId);
+    if (!turn) return false;
+    this.turns.delete(threadId);
+    this.opts.onStall(turn, this.now() - turn.lastEventAt, reason);
+    return true;
   }
 
   watching(threadId: string): boolean {

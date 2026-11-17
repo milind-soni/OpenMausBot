@@ -19,6 +19,10 @@ export const FRESH_MS = 4_000;
 export const CLOUD_EVERY_MS = 60_000;
 /** A row's click waits this long for its place to open (a Cloud may have to wake), and no longer. */
 export const OPEN_WAIT_MS = 2 * 60_000;
+/** A new bot asked for in the other place waits only as long as a wake takes (a stopped Cloud answers in about 20 s). */
+export const NEW_BOT_WAIT_MS = 45_000;
+/** The page that was told to make a new bot says it heard within this long, or is told to forget it. */
+export const NEW_BOT_ACK_MS = 10_000;
 const TIMEOUT_MS = 10_000;
 const MAX_BOTS = 500;
 const ID = /^[\w-]{1,128}$/;
@@ -55,6 +59,20 @@ export function botRow(bot, home) {
     ...(body ? { mascotBody: body } : {}), ...(face ? { mascotFaceColor: face } : {}), ...(bot.chiefOfStaff === true ? { chief: true } : {}), ...rowState(bot) };
 }
 
+/** The AIs a place's `GET /api/instances` answer says are ready to use: installed and signed in, never one that only
+ * works through free no-login models. Each as its name and its kind; the page words them. */
+export function readyAis(body) {
+  const instances = record(body) && Array.isArray(body.instances) ? body.instances : [];
+  const ready = (instance) => record(instance) && record(instance.snapshot) && instance.snapshot.state === "available" && instance.snapshot.freeFallback !== true
+    && (instance.driverKind === "clineAgent" ? instance.snapshot.authenticated === true : instance.access === "custom" || instance.snapshot.authenticated !== false);
+  const seen = new Set();
+  return instances.filter(ready).map((instance) => ({ name: text(instance.displayName, 60), kind: text(instance.driverKind, 40) }))
+    .filter((ai) => ai.name && !seen.has(ai.name) && seen.add(ai.name)).slice(0, 20);
+}
+
+/** Whether a place's `GET /api/bots` answer says its page makes a new bot when the person's other place asks. */
+export const makesNewBots = (body) => record(body) && record(body.together) && body.together.newBot === true;
+
 /** A place's `GET /api/bots` answer as rows, in that place's own order. */
 export function botRows(body, home) {
   const bots = record(body) && Array.isArray(body.bots) ? body.bots : [];
@@ -73,7 +91,8 @@ const needsSignIn = (response) => response?.status === 401 || response?.status =
  *   local(route: string, init?: RequestInit): Promise<Response>,
  *   cloudFetch(url: string, init?: RequestInit): Promise<Response>,
  *   napped?(): void,
- *   shown(): "computer" | "cloud" | null,
+ *   address?(home: "computer" | "cloud", botId: string): string | null,
+ *   shown(): "computer" | "cloud" | "waking" | "other" | null,
  *   focused(): boolean,
  *   openPlace(home: "computer" | "cloud"): unknown,
  *   send(channel: string, value: unknown): void,
@@ -86,24 +105,29 @@ const needsSignIn = (response) => response?.status === 401 || response?.status =
  * }} deps `cloud()`: My Cloud's address and the signed-in account while the person has one, and whether the Admin last
  * said it sleeps. `powerChecked()`: asks the Admin again whether My Cloud sleeps, true once it answered just now.
  * `computer()`: this computer is a place of its own (its bots did not move away). `napped()`: My Cloud answered that it
- * is going to sleep. `shown()`: the place whose page the window shows, null while one loads or another screen is up.
+ * is going to sleep. `shown()`: the place whose page the window shows; "waking" for this app's own screen while My Cloud
+ * wakes, "other" for any other place or screen, null while a page loads.
  * `focused()`: the window is the one the person is using: in front, and the screen not locked. `openPlace(home)`: main's
  * own switch to that place, waking My Cloud as opening it always does. `send`: to the page on screen. `changed()`: the
- * list or the switch changed, so a page that draws it asks again.
+ * list or the switch changed, so a page that draws it asks again. `address(home, botId)`: the address the link between
+ * the two places gives that bot (electron/bot-link-main.mjs), or null while no link of this Cloud and account is on.
  *
  * Security: My Cloud is never asked while it sleeps, since any request would wake it and run up its hours. It is asked
  * only right after the Admin said it is awake, at most once a minute, and only while the person is using the window. What
  * remains is a Cloud that fell asleep in the seconds since the Admin answered; one that only agreed to sleep answers so
  * itself and is left alone. Rows are kept for the Cloud and account they came from, and dropped the moment either changes.
  */
-export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, shown, focused, openPlace, send, changed, now = Date.now,
+export function createPlacesTogether({ pref, cloud, powerChecked, computer, local, cloudFetch, napped = () => {}, address = () => null, shown, focused, openPlace, send, changed, now = Date.now,
   setTimer = setInterval, clearTimer = clearInterval, later = setTimeout, cancelLater = clearTimeout }) {
   /** What each place gave last: its rows, when, and how the last read went. */
   const kept = new Map();
   const reading = new Map();
+  /** The places whose ready AIs the ＋ asked about: read with that place's next list, and not otherwise. */
+  const aisWanted = new Set();
   /** Moves whenever the lists are dropped; a read that started before it moved is thrown away. */
   let epoch = 0;
-  let on = null, timer = null, pending = null, scope = null, cloudAskedAt = -Infinity, signIn = false;
+  let on = null, timer = null, pending = null, scope = null, cloudAskedAt = -Infinity, signIn = false, unheard = null;
+  const placeShown = () => { const place = shown(); return place === "computer" || place === "cloud" ? place : null; };
 
   const isOn = () => { if (on === null) { try { on = parseTogether(pref.read()); } catch { on = false; } } return on; };
   const available = () => Boolean(cloud().origin) && computer();
@@ -114,11 +138,14 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     epoch += 1;
     kept.clear();
     reading.clear();
+    aisWanted.clear();
     cloudAskedAt = -Infinity;
     signIn = false;
     drop();
   }
   function drop() {
+    cancelLater(unheard);
+    unheard = null;
     if (!pending) return false;
     cancelLater(pending.timer);
     pending = null;
@@ -137,11 +164,11 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     if (had) tell();
   }
 
-  async function ask(home) {
+  async function ask(home, route = "/api/bots?messages=0") {
     const signal = AbortSignal.timeout(TIMEOUT_MS);
-    if (home === "computer") return local("/api/bots?messages=0", { signal, headers: { accept: "application/json" } });
+    if (home === "computer") return local(route, { signal, headers: { accept: "application/json" } });
     const { origin } = cloud();
-    return cloudFetch(`${origin}/api/bots?messages=0`, { credentials: "include", cache: "no-store", redirect: "error", signal, headers: { accept: "application/json", ...BACKGROUND_HEADERS } });
+    return cloudFetch(`${origin}${route}`, { credentials: "include", cache: "no-store", redirect: "error", signal, headers: { accept: "application/json", ...BACKGROUND_HEADERS } });
   }
 
   /** Whether My Cloud may be asked now, and what its list says when it may not. */
@@ -153,9 +180,24 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     return cloud().asleep ? "asleep" : "ask";
   }
 
+  const aisFresh = (entry) => entry?.aisAt !== undefined && now() - entry.aisAt < CLOUD_EVERY_MS;
+
+  /** The AIs ready in `home`, read with its bots once the ＋ asked, at most once a minute; what it said last otherwise. */
+  async function aisOf(home, last) {
+    if (!aisWanted.has(home) || aisFresh(last)) return last?.aisAt === undefined ? {} : { ais: last.ais, aisAt: last.aisAt };
+    aisWanted.delete(home);
+    try {
+      const response = await ask(home, "/api/instances");
+      if (home === "cloud" && needsSignIn(response)) { await response.body?.cancel?.(); return "signin"; }
+      if (!response?.ok) { await response?.body?.cancel?.(); return { ais: last?.ais ?? null, aisAt: now() }; }
+      return { ais: readyAis(await response.json()), aisAt: now() };
+    } catch { return { ais: last?.ais ?? null, aisAt: now() }; }
+  }
+
   async function read(home) {
-    const mine = epoch, last = kept.get(home), before = JSON.stringify([last?.state, last?.bots]);
-    const held = (state) => ({ bots: last?.bots ?? [], state });
+    const mine = epoch, last = kept.get(home), said = (entry) => JSON.stringify([entry?.state, entry?.bots, entry?.newBot, entry?.ais]);
+    const held = (state) => ({ ...last, bots: last?.bots ?? [], state });
+    const signedOut = () => { signIn = true; return { bots: [], state: "signin" }; };
     let next;
     try {
       const may = home === "cloud" ? await cloudMayBeAsked(mine) : "ask";
@@ -164,14 +206,17 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
       else {
         const response = await ask(home);
         if (home === "cloud" && asleepAnswer(response)) { napped(); next = held("asleep"); }
-        else if (home === "cloud" && needsSignIn(response)) { await response.body?.cancel?.(); signIn = true; next = { bots: [], state: "signin" }; }
+        else if (home === "cloud" && needsSignIn(response)) { await response.body?.cancel?.(); next = signedOut(); }
         else if (!response?.ok) { await response?.body?.cancel?.(); next = held("offline"); }
-        else next = { bots: botRows(await response.json(), home), state: "ready" };
+        else {
+          const body = await response.json(), ais = await aisOf(home, last);
+          next = ais === "signin" ? signedOut() : { bots: botRows(body, home), state: "ready", newBot: makesNewBots(body), ...ais };
+        }
       }
     } catch { next = held("offline"); }
     if (mine !== epoch || !active()) return;
     kept.set(home, { ...next, at: now() });
-    if (JSON.stringify([next.state, next.bots]) !== before) tell();
+    if (said(next) !== said(last)) tell();
   }
 
   /** Reads `home`'s bots again when it is due. My Cloud is due at most once a minute, never while the person is not
@@ -183,7 +228,7 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     if (home === "cloud") {
       if (signIn || !focused() || now() - cloudAskedAt < CLOUD_EVERY_MS) return Promise.resolve();
       cloudAskedAt = now();
-    } else if (kept.has(home) && now() - kept.get(home).at < FRESH_MS) return Promise.resolve();
+    } else if (kept.has(home) && now() - kept.get(home).at < FRESH_MS && !(aisWanted.has(home) && !aisFresh(kept.get(home)))) return Promise.resolve();
     const mine = epoch;
     const work = read(home).finally(() => { if (mine === epoch && reading.get(home) === work) reading.delete(home); });
     reading.set(home, work);
@@ -194,7 +239,7 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     if (timer !== null || !active()) return;
     timer = setTimer(() => {
       sameScope();
-      const place = shown();
+      const place = placeShown();
       if (active() && place && focused()) void refresh(otherHome(place));
     }, LOOK_EVERY_MS);
     timer?.unref?.();
@@ -204,26 +249,36 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     timer = null;
   }
 
-  /** `home` opens, and its page is sent `channel` once it has loaded. A wait that ends any other way sends nothing:
-   * it ran out, the switch ended with the window still on another page, or the person went back to the page they left. */
-  function go(home, channel, value) {
+  /** `home` opens, and its page is sent `channel` once it has loaded, as the direct result of the click and nothing
+   * else: the wait is over when it runs out, when main's switch fails or ends with the window on another page, and
+   * when the window goes anywhere but `home` or the screen shown while My Cloud wakes. */
+  function go(home, channel, value, waitMs) {
     drop();
-    const mine = { home, channel, value, at: now(), timer: null };
-    mine.timer = later(() => { if (pending === mine) { pending = null; tell(); } }, OPEN_WAIT_MS);
+    const mine = { home, channel, value, timer: null };
+    const over = () => { if (pending === mine && drop()) tell(); };
+    mine.timer = later(over, waitMs);
     mine.timer?.unref?.();
     pending = mine;
     tell();
-    void Promise.resolve().then(() => openPlace(home)).catch(() => {}).then(() => {
+    void Promise.resolve().then(() => openPlace(home)).then(() => {
       const place = shown();
-      if (pending === mine && place !== null && place !== home && drop()) tell();
-    });
+      if (place !== null && place !== home && place !== "waking") over();
+    }, over);
+  }
+
+  /** The row with the address the link gives its bot, worked out as the row is handed over: the list is the sidebar's
+   * own read and stays whole with the link down; the address is there only while the link is this Cloud's and account's. */
+  function addressed(row) {
+    let linked = null;
+    try { linked = address(row.home, row.id); } catch {}
+    return typeof linked === "string" && linked ? { ...row, address: linked } : row;
   }
 
   function otherOf(asking) {
     const home = otherHome(asking), known = kept.get(home);
     const state = home === "cloud" && pending?.home === home && (cloud().asleep || known?.state !== "ready") ? "waking"
       : home === "cloud" && cloud().asleep ? "asleep" : known?.state ?? "loading";
-    return { home, state, bots: known?.bots ?? [] };
+    return { home, state, bots: (known?.bots ?? []).map((row) => addressed(row)), ...(typeof known?.newBot === "boolean" ? { newBot: known.newBot } : {}) };
   }
 
   return {
@@ -249,31 +304,64 @@ export function createPlacesTogether({ pref, cloud, powerChecked, computer, loca
     refresh,
     /** The signed-in account or My Cloud's address may have changed: lists that belong to another are dropped now. */
     scopeChanged: sameScope,
+    /** The link between the two places came, went or changed hands: rows on screen get their addresses again. */
+    linkChanged() { if (active() && kept.size > 0) tell(); },
     /** A row's click: the other place opens at that bot. Only a bot main listed itself, for this Cloud and account, opens. */
     open(asking, botId) {
       sameScope();
       if (!active()) return false;
       const home = otherHome(asking), row = kept.get(home)?.bots.find((bot) => bot.id === botId);
       if (!row) return false;
-      go(home, "desktop-notifications:open", { botId: row.id, threadId: row.threadId });
+      go(home, "desktop-notifications:open", { botId: row.id, threadId: row.threadId }, OPEN_WAIT_MS);
       return true;
     },
+    /** What the ＋ shows about the other place before a bot is made there: how it is doing, and the AIs ready there
+     * (null while it has not said). The AIs are read with the list's own next read, under the list's rules and its
+     * once-a-minute limit for My Cloud, so opening the ＋ again and again asks nothing more. */
+    async newBotChoice(asking) {
+      sameScope();
+      if (!active()) return null;
+      const home = otherHome(asking);
+      if (!aisFresh(kept.get(home))) { aisWanted.add(home); await refresh(home); }
+      if (!active()) return null;
+      return { home, state: otherOf(asking).state, ais: kept.get(home)?.ais ?? null };
+    },
+    /** The ＋'s choice of the other place: that place opens and makes the bot itself, by its own rules and limits.
+     * Refused for a place whose page said it would not hear the request. */
+    newBot(asking) {
+      sameScope();
+      const home = otherHome(asking);
+      if (!active() || kept.get(home)?.newBot === false) return false;
+      go(home, "places-together:new-bot", null, NEW_BOT_WAIT_MS);
+      return true;
+    },
+    /** The page that was told to make a new bot heard it. */
+    newBotHeard() {
+      cancelLater(unheard);
+      unheard = null;
+    },
     /** The window finished loading a page: a click that was waiting for this place lands now. My Cloud on screen is
-     * signed in, so it may be asked again. */
+     * signed in, so it may be asked again. A page told to make a new bot that does not say it heard is told to forget it. */
     arrived() {
       sameScope();
-      const place = shown();
+      const place = placeShown();
       if (place === "cloud" && signIn) { signIn = false; cloudAskedAt = -Infinity; }
       if (!pending || place !== pending.home) return;
       const { channel, value } = pending;
       drop();
-      if (active()) send(channel, value);
+      if (active()) {
+        send(channel, value);
+        if (channel === "places-together:new-bot") {
+          unheard = later(() => { unheard = null; send("places-together:new-bot-cancel", null); }, NEW_BOT_ACK_MS);
+          unheard?.unref?.();
+        }
+      }
       tell();
     },
-    /** The window's page moved to `place` (null for any other screen). Back on the place the click left, the click is
-     * over, so opening the other place later by another route opens it as it is. */
+    /** The window's page moved to `place`. Anywhere but the place the click asked for, or the screen shown while My
+     * Cloud wakes, and the click is over: that place opened later, by any route, opens as it is. */
     navigated(place) {
-      if (pending && place !== null && place !== pending.home && drop()) tell();
+      if (pending && place !== null && place !== pending.home && place !== "waking" && drop()) tell();
     },
     close() { stopWatch(); forget(); },
   };
@@ -297,5 +385,8 @@ export function installPlacesTogether({ ipcMain, asking, together }) {
     return together.set(page, value === true);
   });
   ipcMain.handle("places-together:open", (event, botId) => together.open(side(event), String(botId)));
+  ipcMain.handle("places-together:new-bot-choice", (event) => together.newBotChoice(side(event)));
+  ipcMain.handle("places-together:new-bot", (event) => together.newBot(side(event)));
+  ipcMain.handle("places-together:new-bot-heard", (event) => { side(event); together.newBotHeard(); });
   return together;
 }

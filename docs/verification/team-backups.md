@@ -85,7 +85,7 @@ The output includes the fixture log path and a sidebar screenshot saved at
 
 This section is the original whole-installation Markdown export. Sharing one
 team with everything but its chat history (all its skills by default) is
-**Share team…**, covered in [team-sharing.md](team-sharing.md).
+sharing a template, covered in [team-sharing.md](team-sharing.md).
 
 The existing package export API accepts an explicit list of imported skill names:
 `POST /api/teams/export` with

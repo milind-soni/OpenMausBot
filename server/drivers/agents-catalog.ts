@@ -19,6 +19,7 @@ import { MEETING_TOOL_DEFINITIONS, MEETING_TOOL_NAMES } from "./agents-meeting-t
 import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
 import { PERSON_TOOL_DEFINITIONS } from "./agents-person-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES, X_TOOL_NAMES } from "./agents-research-tools.ts";
+import { SHARE_TOOL_DEFINITIONS } from "./agents-share-tool.ts";
 import type { CatalogProfile } from "./agents-catalog-profile.ts";
 import { advertisedSchema } from "./agents-schema.ts"; import { withoutToolsOff } from "./agents-tool-groups.ts";
 export { catalogProfileFromEnv, type CatalogProfile } from "./agents-catalog-profile.ts";
@@ -100,7 +101,7 @@ const TRIGGER_FIELDS_SCHEMA = {
   },
   timeout_minutes: { type: "integer", minimum: 5, maximum: 240, description: "Schedules: optional limit on a run, 5 to 240." },
   clear_timeout: { type: "boolean", description: "Update: true removes the limit." },
-  same_conversation: { type: "boolean", description: "app_event or webhook: each run continues the last run's conversation." },
+  same_conversation: { type: "boolean", description: "app_event, webhook or schedule: each run continues the last run's conversation." },
   continuity: { type: "boolean", description: "Schedules: each run gets the last run's report." },
   overlap: { type: "string", enum: ["skip", "queue"], description: "Schedules: while a run works, skip (default) or queue one." },
   run_on_startup: { type: "boolean", description: "Repeating schedules: also run when OpenMausBot starts." },
@@ -508,7 +509,7 @@ const TOOL_DEFINITIONS = [
       required: ["text"],
     },
   },
-  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS, ...IMAGE_TOOL_DEFINITIONS, ...MEETING_TOOL_DEFINITIONS, ...PERSON_TOOL_DEFINITIONS, ...DEVS_TOOL_DEFINITIONS, ...HOSTING_TOOL_DEFINITIONS,
+  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS, ...IMAGE_TOOL_DEFINITIONS, ...MEETING_TOOL_DEFINITIONS, ...PERSON_TOOL_DEFINITIONS, ...DEVS_TOOL_DEFINITIONS, ...HOSTING_TOOL_DEFINITIONS, ...SHARE_TOOL_DEFINITIONS,
   {
     name: "memory_update",
     description:

@@ -72,7 +72,7 @@ import { botUnreadCount, showBrowserUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { useConnectLink } from "@/lib/use-connect-link";
 import { isSettingsPage } from "@/components/settings/settings-index";
 import { useBotListDrawer } from "@/hooks/use-bot-list-drawer";
-import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links";
+import { useDesktopNotificationOpens, useExternalChatLinks } from "@/hooks/use-external-chat-links"; import { useNewBotFromOtherPlace } from "@/lib/places-together";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
 import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
 import { usePresence } from "@/hooks/use-presence";
@@ -84,6 +84,7 @@ import { useSessionEnded } from "@/lib/session-ended";
 import { PairPage } from "./pair/PairPage";
 import { WebPanelPage } from "@/components/WebPanelPage";
 import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
+import { refreshPublishedApps } from "@/lib/own-published-apps";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -91,6 +92,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const needsYou = needsYouVersion(state.bots, state.groups, state.notifications);
   useTeamPeopleLoader(state.config, needsYou);
   useInboxLoader(`${inboxVersion(state.bots) ?? ""}|${needsYou}`);
+  useEffect(() => { refreshPublishedApps(); }, []);
   const inboxReady = useInboxReady();
   const inboxShown = useInboxPanel().open && inboxReady;
   // A Switch AI pick lands once its stopped turn's chat is idle, wherever the person is by then.
@@ -140,7 +142,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     dispatch(phonePairingSettingsAction());
   }, [dispatch]);
   useConnectLink(dispatch, Boolean(state.config?.team));
-  useExternalChatLinks(state, dispatch); useDesktopNotificationOpens(state, dispatch);
+  useExternalChatLinks(state, dispatch); useDesktopNotificationOpens(state, dispatch); useNewBotFromOtherPlace(state.hydrated === true, useCallback(() => dispatch({ type: "newBot" }), [dispatch]));
   usePresence(state, dispatch); useTeamPresence(state);
   usePageLanguage(effectiveLanguage(useLanguageChoice(), state.config?.language), true);
   const [paletteOpen, setPaletteOpen] = useState(false);

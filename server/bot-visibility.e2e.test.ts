@@ -428,8 +428,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       expect(created.status, JSON.stringify(created.body)).toBe(201);
       expect(created.body.bot.visibility).toBe("admins");
       expect((await api("POST", "/api/bots", { name: "Bad", visibility: { people: ["nope"] } }, BOSS)).status).toBe(400);
-      const manifest = await api("POST", "/api/teams/export", { name: "Copy" }, BOSS);
-      expect(manifest.status, JSON.stringify(manifest.body)).toBe(200);
+      const manifest = { body: { format: "openmaus.team", version: 2, team: { name: "Copy", members: [{ key: "helper", name: "Copy helper", appearance: { color: "blue" } }] } } };
       const imported = await fetch(`${BASE}/api/teams/import?visibility=${encodeURIComponent(JSON.stringify({ people: [ADA] }))}`, {
         method: "POST", headers: headers(BOSS), body: JSON.stringify(manifest.body),
       });

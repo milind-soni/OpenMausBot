@@ -30,8 +30,8 @@ async function answer(response) {
 export async function openOwnerSession(target, fetchImpl, { label = SESSION_LABEL, background = true } = {}) {
   const quiet = background ? BACKGROUND_HEADERS : {};
   let grant;
-  try { grant = await target.grant(); } catch (error) { throw new Error(sentence(error?.message) ?? "My Cloud is not ready. Check it in Settings → MausBot Cloud, then try again.", { cause: error }); }
-  if (!record(grant) || grant.origin !== target.origin || typeof grant.code !== "string") throw new Error("My Cloud is not ready. Check it in Settings → MausBot Cloud, then try again.");
+  try { grant = await target.grant(); } catch (error) { throw new Error(sentence(error?.message) ?? "My Cloud is not ready. Check it in Settings → Plan & billing, then try again.", { cause: error }); }
+  if (!record(grant) || grant.origin !== target.origin || typeof grant.code !== "string") throw new Error("My Cloud is not ready. Check it in Settings → Plan & billing, then try again.");
   const paired = await answer(await fetchImpl(`${target.origin}/api/auth/pair`, {
     method: "POST", redirect: "error", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(30_000),
     headers: { accept: "application/json", "content-type": "application/json", ...quiet }, body: JSON.stringify({ code: grant.code, label }),

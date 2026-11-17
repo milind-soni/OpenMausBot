@@ -48,6 +48,7 @@ export const routineToolDefinitionSchema = z.object({
   durationMinutes: z.number().optional(),
   timeoutMinutes: z.number().nullable().optional(),
   continuity: z.boolean().optional(),
+  sameConversation: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
   runOnStartup: z.boolean().optional(),
 }).strict();
@@ -177,6 +178,7 @@ export const storedDefinitionSchema = z.object({
   durationMinutes: z.number().int().min(5).max(240),
   timeoutMinutes: z.number().int().min(5).max(1_440).optional(),
   continuity: z.boolean().optional(),
+  sameConversation: z.boolean().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),
   runOnStartup: z.boolean().optional(),
 }).strict();

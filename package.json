@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.1.161",
+  "version": "0.1.165",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
@@ -44,6 +44,8 @@
     "test:electron": "node --test \"electron/*.node-test.mjs\"",
     "bench:observation": "node --experimental-strip-types scripts/bench-observation.ts",
     "bench:persistence": "node --experimental-strip-types scripts/bench-persistence.ts",
+    "bench:registry": "node --experimental-strip-types scripts/bench-registry.ts",
+    "bench:runtime-reads": "node --experimental-strip-types scripts/bench-runtime-reads.ts",
     "bench:today": "node --experimental-strip-types scripts/bench-today.ts",
     "bench:browser-stream": "node --experimental-strip-types scripts/bench-browser-stream.ts",
     "bench:desktop": "node --experimental-strip-types scripts/bench-desktop.ts",

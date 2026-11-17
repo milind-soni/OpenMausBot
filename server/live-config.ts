@@ -2,17 +2,21 @@
 import { z } from "zod";
 
 export const LIVE_KEY_NEEDS_ENDPOINT = "Save the Azure endpoint first: a Live key works only with the endpoint it was saved for.";
+export const LIVE_KEY_NEEDS_CUSTOM_ENDPOINT = "Save the custom endpoint first: a Live key works only with the endpoint it was saved for.";
 const NOWHERE = "nowhere";
 
-/** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required, with "fish", "gemini" or "elevenlabs" it is not used: Fish Audio calls use the Fish Audio key (`tts.fishKey`), Gemini calls the Gemini key (`tts.geminiKey`) and ElevenLabs calls the ElevenLabs key (`tts.key`). `keyFor` says where `key` may go (`liveKeyTarget`): the server sets it when the key is saved and never takes it from a request; absent, the key is from before Azure was offered, so OpenAI's. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name. `fishAgentId` is the Fish Audio agent a "fish" call starts, which the harness sets up on the account of the key whose `fishKeyPrint` is `fishAgentFor`; without `fishAgentFor` (an operator's OMB_FISH_LIVE_AGENT_ID) it is used with any key. `elevenlabsAgentId` and `elevenlabsAgentFor` are the same for an "elevenlabs" call's ElevenLabs agent. `voice` is a GPT-Live voice, `geminiVoice` a Gemini Live voice. */
+/** Live calls: `key` is a key for Live calls only; with `provider` "openai" (the default) a call without one uses `openai.key`, with "azure" it is the Azure resource's key and is required, with "fish", "gemini" or "elevenlabs" it is not used: Fish Audio calls use the Fish Audio key (`tts.fishKey`), Gemini calls the Gemini key (`tts.geminiKey`) and ElevenLabs calls the ElevenLabs key (`tts.key`). `keyFor` says where `key` may go (`liveKeyTarget`): the server sets it when the key is saved and never takes it from a request; absent, the key is from before Azure was offered, so OpenAI's. `azureEndpoint` is the resource URL and `azureDeployment` the gpt-live-1 deployment name; with "custom", `key` is the key of the OpenAI-compatible server at `customEndpoint` and is required, and `customModel` its model. `fishAgentId` is the Fish Audio agent a "fish" call starts, which the harness sets up on the account of the key whose `fishKeyPrint` is `fishAgentFor`; without `fishAgentFor` (an operator's OMB_FISH_LIVE_AGENT_ID) it is used with any key, and `fishAgentLanguage` is the language the harness last set it to speak (absent: English, as agents were first set up). `elevenlabsAgentId` and `elevenlabsAgentFor` are the same for an "elevenlabs" call's ElevenLabs agent. `voice` is a GPT-Live voice, `geminiVoice` a Gemini Live voice. */
 export const liveConfigSchema = z.object({
   key: z.string().optional(),
   keyFor: z.string().max(300).optional(),
-  provider: z.enum(["openai", "azure", "fish", "gemini", "elevenlabs"]).optional(),
+  provider: z.enum(["openai", "azure", "fish", "gemini", "elevenlabs", "custom"]).optional(),
   azureEndpoint: z.string().trim().max(300).optional(),
   azureDeployment: z.string().trim().max(64).optional(),
+  customEndpoint: z.string().trim().max(300).optional(),
+  customModel: z.string().trim().max(64).optional(),
   fishAgentId: z.string().trim().max(128).optional(),
   fishAgentFor: z.string().max(64).optional(),
+  fishAgentLanguage: z.string().max(8).optional(),
   elevenlabsAgentId: z.string().trim().max(128).optional(),
   elevenlabsAgentFor: z.string().max(64).optional(),
   voice: z.string().trim().max(40).regex(/^[a-z]*$/, "a Live voice is a lowercase built-in voice name").optional(),
@@ -24,11 +28,14 @@ export const liveConfigSchema = z.object({
 export interface LiveConfig {
   key?: string;
   keyFor?: string;
-  provider?: "openai" | "azure" | "fish" | "gemini" | "elevenlabs";
+  provider?: "openai" | "azure" | "fish" | "gemini" | "elevenlabs" | "custom";
   azureEndpoint?: string;
   azureDeployment?: string;
+  customEndpoint?: string;
+  customModel?: string;
   fishAgentId?: string;
   fishAgentFor?: string;
+  fishAgentLanguage?: string;
   elevenlabsAgentId?: string;
   elevenlabsAgentFor?: string;
   voice?: string;
@@ -37,13 +44,13 @@ export interface LiveConfig {
   idleMinutes?: number;
 }
 
-/** Where a key saved now may go: "openai", or "azure:<host>"; null while Azure is chosen with no endpoint to tie it to.
- * Fish Audio, Gemini and ElevenLabs calls never use this key, so with any of them chosen it stays OpenAI's. */
+/** Where a key saved now may go: "openai", "azure:<host>" or "custom:<host>"; null while Azure or a custom endpoint is chosen
+ * with no endpoint to tie it to. Fish Audio, Gemini and ElevenLabs calls never use this key, so with any of them chosen it stays OpenAI's. */
 export function liveKeyTarget(live: LiveConfig | undefined): string | null {
-  if (live?.provider !== "azure") return "openai";
+  if (live?.provider !== "azure" && live?.provider !== "custom") return "openai";
   try {
-    const host = new URL(live.azureEndpoint?.trim() ?? "").host.toLowerCase();
-    return host ? `azure:${host}` : null;
+    const host = new URL((live.provider === "azure" ? live.azureEndpoint : live.customEndpoint)?.trim() ?? "").host.toLowerCase();
+    return host ? `${live.provider}:${host}` : null;
   } catch {
     return null;
   }
@@ -63,7 +70,7 @@ export function liveSavePatch(current: LiveConfig | undefined, patch: LiveConfig
   const { keyFor: _fromRequest, ...asked } = patch;
   const target = liveKeyTarget({ ...current, ...asked });
   if (asked.key?.trim()) {
-    if (!target) throw Object.assign(new Error(LIVE_KEY_NEEDS_ENDPOINT), { status: 400 });
+    if (!target) throw Object.assign(new Error({ ...current, ...asked }.provider === "custom" ? LIVE_KEY_NEEDS_CUSTOM_ENDPOINT : LIVE_KEY_NEEDS_ENDPOINT), { status: 400 });
     return { ...asked, keyFor: target };
   }
   return asked.key !== undefined || target !== liveKeyTarget(current) ? { ...asked, key: "", keyFor: NOWHERE } : asked;
@@ -78,16 +85,20 @@ export function liveConfigWithEnv(live: LiveConfig | undefined, env: NodeJS.Proc
     next.key = envKey;
   }
   const provider = env.OMB_LIVE_PROVIDER?.trim().toLowerCase();
-  if (provider === "openai" || provider === "azure" || provider === "fish" || provider === "gemini" || provider === "elevenlabs") next.provider = provider;
+  if (provider === "openai" || provider === "azure" || provider === "fish" || provider === "gemini" || provider === "elevenlabs" || provider === "custom") next.provider = provider;
   if (env.OMB_AZURE_OPENAI_LIVE_ENDPOINT !== undefined) next.azureEndpoint = env.OMB_AZURE_OPENAI_LIVE_ENDPOINT.trim();
   if (env.OMB_AZURE_OPENAI_LIVE_DEPLOYMENT !== undefined) next.azureDeployment = env.OMB_AZURE_OPENAI_LIVE_DEPLOYMENT.trim();
+  if (env.OMB_CUSTOM_LIVE_ENDPOINT !== undefined) next.customEndpoint = env.OMB_CUSTOM_LIVE_ENDPOINT.trim();
+  if (env.OMB_CUSTOM_LIVE_MODEL !== undefined) next.customModel = env.OMB_CUSTOM_LIVE_MODEL.trim();
   if (env.OMB_FISH_LIVE_AGENT_ID?.trim()) {
     next.fishAgentId = env.OMB_FISH_LIVE_AGENT_ID.trim();
     delete next.fishAgentFor;
+    delete next.fishAgentLanguage;
   }
-  // Set together in the environment, the key and the Azure endpoint are the operator's own pairing. A `keyFor` from the
+  // Set together in the environment, the key and the Azure (or custom) endpoint are the operator's own pairing. A `keyFor` from the
   // file stands: saves mirror settings into the environment, so they must not be able to pair a forgotten key.
-  if (envKey?.trim() && provider === "azure" && env.OMB_AZURE_OPENAI_LIVE_ENDPOINT?.trim() && next.keyFor === undefined) next.keyFor = liveKeyTarget(next) ?? NOWHERE;
+  const envEndpoint = provider === "azure" ? env.OMB_AZURE_OPENAI_LIVE_ENDPOINT : provider === "custom" ? env.OMB_CUSTOM_LIVE_ENDPOINT : undefined;
+  if (envKey?.trim() && envEndpoint?.trim() && next.keyFor === undefined) next.keyFor = liveKeyTarget(next) ?? NOWHERE;
   return next;
 }
 
@@ -97,6 +108,8 @@ export function liveSettingEnv(live: LiveConfig | undefined): Array<[value: stri
     [live?.provider, "OMB_LIVE_PROVIDER"],
     [live?.azureEndpoint, "OMB_AZURE_OPENAI_LIVE_ENDPOINT"],
     [live?.azureDeployment, "OMB_AZURE_OPENAI_LIVE_DEPLOYMENT"],
+    [live?.customEndpoint, "OMB_CUSTOM_LIVE_ENDPOINT"],
+    [live?.customModel, "OMB_CUSTOM_LIVE_MODEL"],
   ];
 }
 

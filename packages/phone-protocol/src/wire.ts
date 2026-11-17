@@ -132,7 +132,7 @@ export interface WireTask extends InboxTask {
   projectId?: string;
   /** Detached routine execution, reachable through its visible results card. */ routineRunId?: string;
   /** Work from outside (a webhook, an app's event) reached this conversation: what it starts or runs stays confined, for good. */ outside?: true;
-  /** An outside caller opened this thread through the bot's API, so only it may continue it; such a thread is outside too. */ botApi?: true;
+  /** An outside caller opened this thread through the bot's API, so only it may continue it; such a thread is outside too. */ botApi?: true; /** Opened with a key its owner marked as acting for them: at the bot's own level, not outside, while that key still does (server/bot-api-host.ts). */ botApiAsOwner?: true;
   /** Set when a bot, not a person, opened this thread. */ openedBy?: TaskOpenedBy;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
@@ -325,6 +325,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   replyStyle?: ReplyStyle;
   /** This bot's own voice id, so a room of bots doesn't sound like one person. */
   voice?: string;
+  /** This bot's own Live call voice, a GPT-Live or Gemini Live voice id; absent, or not the call provider's, uses the app's. */ liveVoice?: string;
   /** Whether this bot may send voice notes. Absent/true = allowed; false
    * hides the tool and refuses the route even with a voice configured. */
   voiceNotes?: boolean; /** The harness speaks each reply as a voice note; absent follows the installation's `tts.everyReply`. */ voiceNoteEveryReply?: boolean;
@@ -508,7 +509,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   aside?: boolean;
   /** A user-role message that arrived through the server's HTTP API
    * ("api"), or a request a person spoke on a Live call ("call"). */
-  via?: "api" | "call";
+  via?: "api" | "call"; /** A `via: "api"` line sent with a Bot API key its owner marked as acting for them: their request, at the bot's level. */ apiAsOwner?: true;
   /** The Live call a "call" line was spoken on (LiveCallState.callId). Set
    * only on user messages with `via: "call"`; a turn's own messages point
    * at their request through `requestMessageId` instead. */
@@ -557,7 +558,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** A room reply whose speaker the decision model picked (an Auto room),
    * with how sure it was. Absent on every other message; clients that do
    * not know it ignore it. */
-  routedBy?: { provider: "jev" | "workersai" | "openrouter" | "custom"; probability: number };
+  routedBy?: { provider: "jev" | "workersai" | "openrouter" | "custom" | "gemini"; probability: number };
   /** On a conversational bot's user line: the picker label of the quick model its reply ran on. */
   quickModel?: string;
   /** On a "Sent to" hand-off row: the done_when the sender set, redacted, so the chip can show what counts as finished. */
@@ -588,8 +589,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** A "Sent to" row for work addressed into a room the bot `name` isn't in, so it went to the bot directly. `room`
    * names that room when this row is not in it. Clients say it in their own words; `tool.name` is the English. */
   sentDirectly?: { name: string; room?: string };
-  /** A page the bot published to a public link (publish_page), or why it couldn't. `text` carries the link too. */
-  publishedPage?: PublishedPageCard;
+  /** A page the bot published to a public link (publish_page), or why it couldn't; `template`, a shareable template of the bot or its department (the share tool). `text` says the same in words. */
+  publishedPage?: PublishedPageCard; template?: import("./share-card.ts").TemplateCard;
   /** A published Data result, linked to its bot's main viewer. */
   dataResult?: { botId: string; cardId: string; title: string; kind: "table" | "chart" | "text"; sql?: string };
   /** user messages: the Data result the person was viewing when they sent
@@ -700,7 +701,7 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   fixedOptions?: boolean;
   quotaSwitch?: QuotaSwitchCardData;
   /** Asks before a bot uses the person's own computer; what its first call names, for the question in their language. */
-  yourComputer?: { app?: string; site?: string };
+  yourComputer?: { app?: string; site?: string; files?: boolean };
 }
 
 /** Kept on the card so the offer survives a restart. `engines` follow the card's options; `messageId` is the
@@ -835,7 +836,7 @@ export interface GroupTask {
 /** A room as a client may see it: the record plus the computed working flag. */
 export interface WireGroup {
   /** Computed from the usage ledger, not stored in groups.json. */
-  usage?: GroupThreadUsage | null; /** Transient: the department's Chief of Staff, when this room is without it. Null clears an earlier value. */ chiefAbsent?: { botId: string; name: string } | null;
+  usage?: GroupThreadUsage | null; /** Transient: the department's Chief of Staff, when this room is without it. Null clears an earlier value. */ chiefAbsent?: { botId: string; name: string } | null; /** The room's members that live in another of the person's places: who each is, where it lives, and whether it can be reached now ("off": the link is off or its place is unlinked; "missing": its place no longer has it). Only on a room that has one. */ farMembers?: Array<{ id: string; name: string; place: string; state: "ok" | "off" | "missing" }>;
   /** transient: each member's context in the active thread, from its last
    * turn there, and whether its next turn there was asked to start
    * compacted. */
@@ -960,7 +961,7 @@ export type ServerFrame =
   | { kind: "message"; threadId: string; message: WireMessage }
   | { kind: "message.patch"; threadId: string; message: WireMessage }
   | { kind: "thread"; threadId: string; activeLeafId: string }
-  | { kind: "bot"; bot: WireBot }
+  | { kind: "bot"; bot: WireBot; /** Only on a stream opened with `?frames=thread`: `bot.tasks` holds just the changed threads; keep the rest. */ tasksPartial?: true }
   | { kind: "group"; group: WireGroup }
   | { kind: "notify"; notification: NotificationLogEntry }
   | { kind: "notifications.read"; threadId: string; ids: string[] }

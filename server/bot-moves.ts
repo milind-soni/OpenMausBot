@@ -31,14 +31,15 @@ type Team = BotMovedTo["team"];
 type Held = BotMovedTo & { held?: string[] };
 
 /** Why this bot takes no turn here, or null. */
-export function botMoveRefusal(bot: Pick<BotRecord, "name"> & { movedTo?: BotMovedTo } | null | undefined): string | null {
+export function botMoveRefusal(bot: Pick<BotRecord, "name"> & { movedTo?: BotMovedTo; home?: BotRecord["home"] } | null | undefined): string | null {
+  if (bot?.home) return `${bot.name} lives on ${bot.home.placeName}: its turns run there, not here.`;
   const moved = bot?.movedTo;
   if (!moved) return null;
   return moved.state === "moved" ? `${bot!.name} lives in ${moved.team.name} now.` : `${bot!.name} is moving to ${moved.team.name}. It's ready there in a moment.`;
 }
 
 /** A turn of this bot starts here only while it is not moving or moved. */
-export function assertBotHere(bot: Pick<BotRecord, "name"> & { movedTo?: BotMovedTo } | null | undefined): void {
+export function assertBotHere(bot: Pick<BotRecord, "name"> & { movedTo?: BotMovedTo; home?: BotRecord["home"] } | null | undefined): void {
   const said = botMoveRefusal(bot);
   if (said) throw Object.assign(new Error(said), { status: 409, code: "moved" });
 }

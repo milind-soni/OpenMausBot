@@ -369,7 +369,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
       const action = z.enum(["run", "start", "stop", "remove"]).parse(m[2]);
       const target = localVmTargetForBot(bot.id);
       if (target.key === SHARED_LOCAL_VM_TARGET.key) {
-        return json(res, 409, { error: "Shared mode manages this desktop in App Settings → Computers" });
+        return json(res, 409, { error: "Shared mode manages this desktop in Settings → Desktops & browser" });
       }
       if (localVmImageBusy.get() || localVmModeChangeBusy.get() || localVmLifecycleBusy.has(target.key)) {
         return json(res, 409, { error: "this bot's Local VM setup action is still running" });
@@ -445,7 +445,7 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
         return json(res, 409, { error: "This conversation is not using the Local VM" });
       }
       if (localVmMode(cfg) === "pool") {
-        return json(res, 409, { error: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Computers." });
+        return json(res, 409, { error: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Desktops & browser." });
       }
       const lease = controlLeaseIdSchema.safeParse(url.searchParams.get("controlLeaseId") ?? undefined);
       if (!lease.success) return json(res, 400, { error: "controlLeaseId is required" });

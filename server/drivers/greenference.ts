@@ -60,7 +60,7 @@ export const GreenferenceDriver: ProviderDriver<GreenferenceConfig> = {
   install: {
     docsUrl: "https://greenference.com/docs",
     settings: "connections",
-    signInCommand: "Save a Greenference API key in Settings → API keys, or set GREENFERENCE_API_KEY on the server.",
+    signInCommand: "Save a Greenference API key in Settings → AI → Providers, or set GREENFERENCE_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
@@ -111,8 +111,8 @@ export const GreenferenceDriver: ProviderDriver<GreenferenceConfig> = {
       nudgeAnnouncedAction: true,
       requestBody: (model, messages, stream) => ({ model, messages, stream }),
       httpErrorLabel: "Greenference",
-      missingKeyError: "Save a Greenference API key in Settings → API keys, or set GREENFERENCE_API_KEY.",
-      unavailableReason: "No Greenference API key — open Settings → API keys.",
+      missingKeyError: "Save a Greenference API key in Settings → AI → Providers, or set GREENFERENCE_API_KEY.",
+      unavailableReason: "No Greenference API key — open Settings → AI → Providers.",
       timeoutMs: 180_000, billing: "metered", includeUsageInCompleted: true,
       nativeLog: {
         source: "greenference.chat.completions",

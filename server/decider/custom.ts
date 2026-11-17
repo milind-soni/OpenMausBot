@@ -3,12 +3,31 @@
 import type { BackendRequest, BackendResult, CustomApi, DeciderBackend, DeciderQuestion } from "./types.ts";
 import { keySafeUrl } from "../provider-key-check.ts";
 import { jevRequestBody, parseJevResponse, questionsFit, refusal } from "./jev.ts";
+import { chatRequestBody, parseChatResponse } from "./openrouter.ts";
 
 export const CUSTOM_DEFAULT_API: CustomApi = "systemone";
 
+const CUSTOM_PATH: Record<CustomApi, string> = { systemone: "systemone", decisions: "decisions", chat: "chat/completions" };
+
+/** A saved or requested protocol, or the default for anything else. */
+export const customApiOf = (api: unknown): CustomApi =>
+  api === "decisions" || api === "chat" ? api : CUSTOM_DEFAULT_API;
+
 /** Null without a base URL, or when the key must not be sent there. */
 export function customEndpoint(baseUrl: string | undefined, api: CustomApi): URL | null {
-  return baseUrl?.trim() ? keySafeUrl(baseUrl, api) : null;
+  return baseUrl?.trim() ? keySafeUrl(baseUrl, CUSTOM_PATH[api]) : null;
+}
+
+function requestBody(api: CustomApi, state: unknown, questions: Record<string, DeciderQuestion>, model: string) {
+  if (api === "decisions") return decisionsBody(state, questions, model);
+  return api === "chat" ? customChatBody(state, questions, model) : systemOneBody(state, questions, model);
+}
+
+/** OpenRouter's chat body without its `max_tokens`: a thinking model behind the gateway (Gemini 2.5 and later) counts its thinking
+ * against that cap, which is sized for the answer alone, and could answer empty. The gateway's own limit applies instead. */
+function customChatBody(state: unknown, questions: Record<string, DeciderQuestion>, model: string) {
+  const { max_tokens: _answerOnly, ...body } = chatRequestBody(state, questions, model);
+  return body;
 }
 
 export function systemOneBody(state: unknown, questions: Record<string, DeciderQuestion>, model: string) {
@@ -70,7 +89,7 @@ export function parseDecisionsResponse(body: unknown, questions: Record<string, 
 }
 
 async function decide(request: BackendRequest): Promise<BackendResult> {
-  const api: CustomApi = request.api === "decisions" ? "decisions" : CUSTOM_DEFAULT_API;
+  const api = customApiOf(request.api);
   const endpoint = customEndpoint(request.baseUrl, api);
   const model = request.model?.trim();
   if (!endpoint || !model || !questionsFit(request.questions)) return { ok: false, reason: "misconfigured" };
@@ -79,9 +98,7 @@ async function decide(request: BackendRequest): Promise<BackendResult> {
     response = await request.fetch(endpoint, {
       method: "POST",
       headers: { authorization: `Bearer ${request.key}`, "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify(api === "decisions"
-        ? decisionsBody(request.state, request.questions, model)
-        : systemOneBody(request.state, request.questions, model)),
+      body: JSON.stringify(requestBody(api, request.state, request.questions, model)),
       signal: request.signal,
       // Never replay the key to wherever a redirect points.
       redirect: "error",
@@ -99,6 +116,7 @@ async function decide(request: BackendRequest): Promise<BackendResult> {
   } catch {
     return { ok: false, reason: "malformed" };
   }
+  if (api === "chat") return parseChatResponse(body, request.questions);
   const parsed = api === "decisions" ? parseDecisionsResponse(body, request.questions) : parseJevResponse(body, request.questions);
   return parsed.ok ? parsed : { ok: false, reason: "malformed" };
 }

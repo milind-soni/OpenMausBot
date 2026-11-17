@@ -193,7 +193,8 @@ with it. Questions and missing credentials still reach you.
 ## Answering a request
 
 Approve or deny requests in the conversation to let the bot continue. **Allow
-once** answers this request only. **Always allow this session** hands the
+once** answers this request only. **Allow for this session** (the button says
+so, because nothing is saved) hands the
 provider its own remembered approval: Claude receives its suggested permission
 rules, and ACP agents such as Grok receive their `allow_always` option, or the
 driver repeats your answer for that exact operation until the native session
@@ -207,13 +208,18 @@ the same room asks again.
 For a read-shaped tool from a configured custom MCP server, the card also
 offers **Always allow**. This is an explicit standing grant for that exact bot,
 provider instance, MCP server, tool name, and current server configuration. A
-different tool still asks; editing the server command, URL, headers, or
-credentials invalidates the grant. It is not offered for create/update/delete
+different tool still asks; editing the server command, arguments, variables,
+URL or headers invalidates the grant. A key kept in the Vault is part of that
+configuration by its reference, not its value, so giving the Vault item a new
+value keeps the grant, and so does restarting the server. Switching the bot to
+Full access leaves its grants saved, unused, for when it goes back to Ask. It
+is not offered for create/update/delete
 tools, computer control, a sandbox change, an unconfigured server, or a guest's
 turn. A custom MCP server controls its own tool names, so only remember tools
 from a server you trust. The grant applies to the bot's current and future
 conversations, including newly delegated work. Saved entries are visible and
-revocable in the bot's Access settings.
+revocable in the bot's Access settings; removing one there takes it from every
+conversation of the bot at once, a running turn included.
 
 The harness's own agents tools (coordinating teammates, threads, memory) never
 ask on Claude, Codex or API models: OpenMausBot authorizes each of those

@@ -25,6 +25,7 @@ import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
 import { freePortBlock, withFreeSignInPort } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { STARTER_COLORS } from "./bot-look.ts";
+import { createTeamManifest } from "./team-manifest.ts";
 import { DEFAULT_MASCOT_BODY } from "../shared/mascot-bodies.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
@@ -5942,8 +5943,7 @@ describe("harness HTTP API", () => {
     const visibleNames = stateBefore.bots
       .filter((bot: { hidden?: boolean }) => !bot.hidden)
       .map((bot: { name: string }) => bot.name);
-    const exported = await api("POST", "/api/teams/export", { name: "Field Team" });
-    expect(exported.status).toBe(200);
+    const exported = { body: createTeamManifest({ name: "Field Team", memberIds: stateBefore.bots.filter((bot: { hidden?: boolean }) => !bot.hidden).map((bot: { id: string }) => bot.id) }, stateBefore.bots) };
     expect(exported.body).toMatchObject({ format: "openmaus.team", version: 2, team: { name: "Field Team" } });
     expect(exported.body.team.members.map((member: { name: string }) => member.name)).toEqual(visibleNames);
     expect(exported.body.team.members).toEqual(expect.arrayContaining([
@@ -5952,14 +5952,7 @@ describe("harness HTTP API", () => {
     ]));
     expect(exported.body.team).not.toHaveProperty("room");
     expect(JSON.stringify(exported.body)).not.toMatch(/Archived|autoApprove|alwaysAllow|modelSelection|threadId/);
-    const markdownExport = await api("POST", "/api/teams/export", { name: "Field Team", format: "package" });
-    expect(markdownExport.status).toBe(200);
-    expect(markdownExport.body).toMatchObject({ name: "Field Team", members: visibleNames.length });
-    expect(markdownExport.body.markdown).toContain("## Activation");
-    expect(markdownExport.body.markdown).toContain("Give this file to your Chief of Staff");
-    expect(markdownExport.body.markdown).not.toMatch(/Archived|autoApprove|alwaysAllow|modelSelection|threadId/);
-    expect((await api("GET", "/api/bots")).body.groups).toHaveLength(roomsBefore);
-    expect((await api("POST", "/api/teams/export", {})).body.team.name).toBe("My OpenMaus Team");
+    for (const body of [{ name: "Field Team", format: "package" }, { name: "Field Team" }, {}]) expect((await api("POST", "/api/teams/export", body)).status).toBe(400);
 
     const stream = await openSse(`${BASE}/api/events`);
     try {
@@ -6016,8 +6009,8 @@ describe("harness HTTP API", () => {
 
   it("imports a team as a project: one room, on a folder", async () => {
     const seed = await api("POST", "/api/bots", { name: "Planner", title: "Lead", description: "Plans", color: "purple" });
-    const exported = await api("POST", "/api/teams/export", { name: "Client XY" });
-    expect(exported.body.team).not.toHaveProperty("room");
+    const listed = (await api("GET", "/api/bots")).body.bots;
+    const exported = { body: createTeamManifest({ name: "Client XY", memberIds: listed.filter((bot: { hidden?: boolean }) => !bot.hidden).map((bot: { id: string }) => bot.id) }, listed) };
 
     const roomsBefore = (await api("GET", "/api/bots")).body.groups.length;
     const folder = mkdtempSync(join(tmpdir(), "omb-project-"));
@@ -6193,16 +6186,6 @@ describe("harness HTTP API", () => {
       status: 200,
       body: { text: expect.stringContaining("name: source-check") },
     });
-    const exportedWithSkill = await api("POST", "/api/teams/export", {
-      format: "package",
-      name: "Signal Skill Package",
-      skillIds: ["source-check"],
-    });
-    expect(exportedWithSkill.status).toBe(200);
-    expect(exportedWithSkill.body.markdown).toContain("name: source-check");
-    const exportedWithoutSkills = await api("POST", "/api/teams/export", { format: "package" });
-    expect(exportedWithoutSkills.status).toBe(200);
-    expect(exportedWithoutSkills.body.markdown).not.toContain("name: source-check");
     expect(editor.playbooks).toBeUndefined();
     expect(scout.section).toBe(editor.section);
     expect(installed.body.groups[0]).toMatchObject({
@@ -6224,44 +6207,12 @@ describe("harness HTTP API", () => {
     for (const bot of installed.body.bots) await api("DELETE", `/api/bots/${bot.id}`);
   });
 
-  it("the scout reads a folder, proposes an importable team, and creates nothing until the human imports", async () => {
-    const folder = mkdtempSync(join(tmpdir(), "omb-scout-"));
-    writeFileSync(join(folder, "README.md"), "# Demo Shop\n\nA storefront demo.\n");
-    writeFileSync(
-      join(folder, "package.json"),
-      JSON.stringify({ dependencies: { react: "^19" }, devDependencies: { vitest: "^3" } }),
-    );
-
-    const before = (await api("GET", "/api/bots")).body;
-
-    expect((await api("GET", "/api/teams/scout")).status).toBe(400);
-    expect((await api("GET", `/api/teams/scout?cwd=${encodeURIComponent(join(folder, "nope"))}`)).status).toBe(400);
-
-    const scouted = await api("GET", `/api/teams/scout?cwd=${encodeURIComponent(folder)}`);
-    expect(scouted.status).toBe(200);
-    expect(scouted.body.profile).toMatchObject({ name: "Demo Shop", summary: "A storefront demo." });
-    expect(scouted.body.profile.stacks).toContain("React");
-    expect(scouted.body.suggestion.roomName).toBe("Demo Shop");
-    const keys = scouted.body.suggestion.manifest.team.members.map((member: { key: string }) => member.key);
-    expect(keys).toEqual(["lead", "frontend", "testing"]);
-    expect(Object.keys(scouted.body.suggestion.reasons).sort()).toEqual(keys.slice().sort());
-
-    const after = (await api("GET", "/api/bots")).body;
-    expect(after.bots).toHaveLength(before.bots.length);
-    expect(after.groups).toHaveLength(before.groups.length);
-
-    const imported = await api(
-      "POST",
-      `/api/teams/import?mode=project&cwd=${encodeURIComponent(folder)}&room=${encodeURIComponent(scouted.body.suggestion.roomName)}`,
-      scouted.body.suggestion.manifest,
-    );
-    expect(imported.status).toBe(201);
-    expect(imported.body.group).toMatchObject({ name: "Demo Shop", cwd: folder });
-    expect(imported.body.bots).toHaveLength(3);
-
-    expect((await api("DELETE", `/api/groups/${imported.body.group.id}`)).status).toBe(200);
-    for (const bot of imported.body.bots) await api("DELETE", `/api/bots/${bot.id}`);
-    rmSync(folder, { recursive: true, force: true });
+  it("the folder scout and the old share formats are gone", async () => {
+    expect((await api("GET", "/api/teams/scout?cwd=%2Ftmp")).status).toBe(404);
+    expect((await api("GET", "/api/teams/scout/directory?cwd=%2Ftmp")).status).toBe(404);
+    for (const body of [{ format: "package", version: 2, team: "" }, { format: "package", version: 2, kind: "library" }, { format: "package" }]) {
+      expect((await api("POST", "/api/teams/export", body)).status).toBe(400);
+    }
   });
 
   it("team import is additive-only: smuggled grants, claimed ids, and re-imports never touch existing records", async () => {
@@ -7882,7 +7833,7 @@ describe("harness HTTP API", () => {
         expect(team.status, mode).toBe(200);
         expect(team.body.bot, mode).toMatchObject({ approvalMode: mode, autoApprove: mode === "auto" });
         expect(levels(team.body.bot), mode).toEqual([mode, mode, mode]);
-        expect(team.body.bot.alwaysAllow, mode).toEqual(mode === "full" ? [] : ["Read"]);
+        expect(team.body.bot.alwaysAllow, `${mode}: saved grants stay at every level, unused at Full access`).toEqual(["Read"]);
         const saved = (await api("GET", "/api/bots?messages=0")).body.bots.find((entry: { id: string }) => entry.id === bot.id);
         expect(levels(saved), mode).toEqual([mode, mode, mode]);
         if (mode === "auto") expect(await permissionModeOf(bot.id, opened[0]!)).toBe("auto");
@@ -9389,6 +9340,82 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("keeps an always-allowed MCP read after its server is restarted, for that tool on that server only, until it is removed in Settings", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Wren" })).body.bot;
+    const conns: Socket[] = [];
+    try {
+      expect((await api("POST", "/api/mcp/servers", { name: "ledger", command: process.execPath, args: ["--experimental-strip-types", FAKE_MCP_SERVER] })).status).toBe(201);
+      expect((await api("PATCH", "/api/mcp/servers/ledger", { enabled: true })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-haiku-4-5" }, approvalMode: "auto" })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "read my ledger" })).status).toBe(202);
+      const dump = z.object({ mcpConfig: z.object({ mcpServers: z.object({ ogb: z.object({ args: z.array(z.string()) }) }) }) }).parse(await readJsonFileWhenReady(fakeClaudeDump));
+      const raise = async (id: string, summary: string, tool: string) => {
+        const conn = connect(dump.mcpConfig.mcpServers.ogb.args[1]);
+        conns.push(conn);
+        const answered = new Promise<{ behavior: string }>((resolve) => {
+          let buf = "";
+          conn.on("data", (chunk) => {
+            buf += chunk;
+            const nl = buf.indexOf("\n");
+            if (nl !== -1) resolve(JSON.parse(buf.slice(0, nl)));
+          });
+        });
+        await new Promise<void>((resolve, reject) => { conn.on("connect", resolve); conn.on("error", reject); });
+        conn.write(JSON.stringify({ t: "ask", id, tool, input: { command: summary } }) + "\n");
+        return answered;
+      };
+      type Card = { subtitle: string; requestId?: string; allowKey?: string };
+      const cards = async (): Promise<Card[]> => (await api("GET", "/api/bots?messages=40")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id).messages.flatMap((m: { card?: Card }) => (m.card ? [m.card] : []));
+      const card = async (summary: string): Promise<Card> => {
+        await expect.poll(async () => (await cards()).find((shown) => shown.subtitle === summary)).toBeTruthy();
+        return (await cards()).find((shown) => shown.subtitle === summary)!;
+      };
+
+      const first = raise("ask-entries-1", "list entries", "mcp__ledger__list_entries");
+      const asked = await card("list entries");
+      expect(asked.allowKey).toMatch(/^provider-tool:claude:ledger:list_entries:[a-f0-9]{16}$/);
+      expect((await api("POST", `/api/bots/${bot.id}/always-allow`, { threadId: bot.threadId, allowKey: asked.allowKey })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: asked.requestId, behavior: "allow" })).status).toBe(200);
+      await expect(first).resolves.toMatchObject({ behavior: "allow" });
+
+      // Saving it as on again starts it anew, as a bot's restart of it, an edit or a changed Vault key do.
+      expect((await api("PATCH", "/api/mcp/servers/ledger", { enabled: true })).status).toBe(200);
+      await expect(raise("ask-entries-2", "list entries after a restart", "mcp__ledger__list_entries")).resolves.toMatchObject({ behavior: "allow" });
+      expect((await cards()).some((shown) => shown.subtitle === "list entries after a restart")).toBe(false);
+
+      // The grant is for that tool alone: another read on the same server still asks, under that server's same fingerprint.
+      const other = raise("ask-accounts", "list accounts", "mcp__ledger__list_accounts");
+      const otherCard = await card("list accounts");
+      expect(otherCard.allowKey).toBe(asked.allowKey!.replace(":list_entries:", ":list_accounts:"));
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: otherCard.requestId, behavior: "deny" })).status).toBe(200);
+      await expect(other).resolves.toMatchObject({ behavior: "deny" });
+      // A tool that sends has no saved grant to offer at all, restart or not.
+      const send = raise("ask-send", "send the ledger", "mcp__ledger__send_email");
+      const sendCard = await card("send the ledger");
+      expect(sendCard.allowKey).toBeUndefined();
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: sendCard.requestId, behavior: "deny" })).status).toBe(200);
+      await expect(send).resolves.toMatchObject({ behavior: "deny" });
+      expect((await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id).alwaysAllow).toEqual([asked.allowKey]);
+
+      // Removed in Settings → Access: the thread it was given in and the turn now running stop allowing it too.
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { alwaysAllow: [] })).status).toBe(200);
+      const saved = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect([saved.alwaysAllow, ...saved.tasks.map((task: { alwaysAllow?: string[] }) => task.alwaysAllow ?? [])].flat()).toEqual([]);
+      const afterRemoval = raise("ask-entries-3", "list entries once removed", "mcp__ledger__list_entries");
+      const askedAgain = await card("list entries once removed");
+      expect(askedAgain.allowKey).toBe(asked.allowKey);
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: askedAgain.requestId, behavior: "deny" })).status).toBe(200);
+      await expect(afterRemoval).resolves.toMatchObject({ behavior: "deny" });
+    } finally {
+      for (const conn of conns) conn.destroy();
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("DELETE", "/api/mcp/servers/ledger").catch(() => undefined);
+    }
+  });
+
   it("mounts the data-dashboards skill, with the folder that holds its template, when the person asks for a dashboard", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -10853,7 +10880,7 @@ describe("harness HTTP API", () => {
 
   it.each([
     { testedMode: "shared", refusal: expect.not.stringMatching(/take control|pool mode|per-bot Local VM/i) },
-    { testedMode: "pool", refusal: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Computers." },
+    { testedMode: "pool", refusal: "Phone control is not available in pool mode. Select shared or per-bot mode in Settings → Desktops & browser." },
   ])("answers Local VM phone joins in $testedMode mode for direct and companion callers past the mode check only when it is not pool", async ({ testedMode, refusal }) => {
     const { mode, maxInstances } = (await api("GET", "/api/config")).body.localVm;
     const previous = { mode, maxInstances };
@@ -14072,7 +14099,8 @@ describe("bot memory API", () => {
         bytes: 78,
       });
       expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("soul");
-      expect(before.body.sections.map((s: { id: string }) => s.id)).toContain("memory");
+      // A new bot has no memory yet: the preview shows how memory works, and the notes section once there is something in it.
+      expect(before.body.sections.map((s: { id: string }) => s.id)).toContain("memory-rules");
       expect(before.body.sections.map((s: { id: string }) => s.id)).not.toContain("cloud-home");
       expect((await api("GET", "/api/config")).body).not.toHaveProperty("cloudHome");
       expect(before.body.totalBytes).toBe(

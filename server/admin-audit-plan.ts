@@ -22,7 +22,7 @@ export function adminAuditPlan(method: string, path: string, sharedComputers: bo
   if (path.startsWith("/api/internal/") || path.startsWith("/api/testing/")) return null;
   const plan: AuditPlan = {
     config: requiredScope(method, path, { sharedComputers }) === "admin",
-    createsBots: method === "POST" && (path === "/api/bots" || path === "/api/teams/import" || path === "/api/org-library/add"),
+    createsBots: method === "POST" && (path === "/api/bots" || path === "/api/teams/import" || path === "/api/share/import" || path === "/api/org-library/add"),
     createsWebhook: method === "POST" && path === "/api/webhooks",
     pairing: method === "POST" && path === "/api/auth/pairing",
   };

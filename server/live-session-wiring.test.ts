@@ -5,21 +5,25 @@ import { liveSessionWiring } from "./live-session-wiring.ts";
 
 const TOKEN = { transport: "livekit", session_id: "sess_1", expires_at: "x", max_duration_seconds: 900, livekit_url: "wss://lk.fish.audio", token: "jwt" };
 
-function fakeFish({ goneAgents = [] as string[] } = {}) {
+function fakeFish({ goneAgents = [] as string[], refuseConfig = false } = {}) {
   return vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const route = `${init!.method} ${String(url).replace("https://api.fish.audio/v1/agent", "")}`;
     if (route === "POST /sessions") {
       const agent = JSON.parse(String(init!.body)).agent_id as string;
       return goneAgents.includes(agent) ? new Response("{}", { status: 404 }) : new Response(JSON.stringify(TOKEN), { status: 201 });
     }
+    if (refuseConfig && route.endsWith("/config")) return new Response("{}", { status: 500 });
     const answers: Record<string, unknown> = { "POST /tools": { tool_id: "tool_1" }, "POST /agents": { agent_id: "agent_new" } };
     return new Response(JSON.stringify(answers[route] ?? {}), { status: 200 });
   });
 }
 
-function wiring(fetchImpl: typeof fetch, env: NodeJS.ProcessEnv = {}) {
+function wiring(fetchImpl: typeof fetch, env: NodeJS.ProcessEnv = {}, speech: { language?: string; fishAgentLanguage?: string } = {}) {
   const saveAgent = vi.fn();
-  const wired = liveSessionWiring({ bot: () => ({ name: "Rigel" }), history: () => [], cloudHome: false, othersOnLoopback: () => false, saveAgent, productName: () => "Acme", env, fetchImpl });
+  const wired = liveSessionWiring({
+    bot: () => ({ name: "Rigel" }), history: () => [], cloudHome: false, othersOnLoopback: () => false, saveAgent, productName: () => "Acme", env, fetchImpl,
+    language: () => speech.language, fishAgentLanguage: () => speech.fishAgentLanguage,
+  });
   return { ...wired, saveAgent };
 }
 
@@ -32,7 +36,7 @@ describe("a Fish Audio call's session", () => {
     const w = wiring(fetchImpl);
     const answer = await w.calls.createSession({ ...start, endpoint: fishLiveEndpoint("", {}) });
     expect(routes(fetchImpl)).toEqual(["POST /tools", "POST /agents", "PATCH /agents/agent_new", "POST /agents/agent_new/publish", "POST /sessions"]);
-    expect(w.saveAgent).toHaveBeenCalledWith({ fishAgentId: "agent_new", fishAgentFor: fishKeyPrint("fish-key") });
+    expect(w.saveAgent).toHaveBeenCalledWith({ fishAgentId: "agent_new", fishAgentFor: fishKeyPrint("fish-key"), fishAgentLanguage: "en" });
     const created = fetchImpl.mock.calls.find(([url, init]) => init!.method === "POST" && String(url).endsWith("/agents"))!;
     expect(JSON.parse(String(created[1]!.body)).name).toBe("Acme Live calls");
     expect(answer).toMatchObject({ sessionId: "sess_1", fish: { type: "fish", session: TOKEN } });
@@ -55,6 +59,68 @@ describe("a Fish Audio call's session", () => {
     await expect(w.calls.createSession({ ...start, endpoint: fishLiveEndpoint("agent_saved", {}) })).resolves.toMatchObject({ sessionId: "sess_1" });
     expect(routes(fetchImpl)).toEqual(["POST /sessions", "POST /tools", "POST /agents", "PATCH /agents/agent_new", "POST /agents/agent_new/publish", "POST /sessions"]);
     expect(w.saveAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it("sets up a new agent in the app's language", async () => {
+    const fetchImpl = fakeFish();
+    const w = wiring(fetchImpl, {}, { language: "vi" });
+    await w.calls.createSession({ ...start, endpoint: fishLiveEndpoint("", {}) });
+    const created = fetchImpl.mock.calls.find(([url, init]) => init!.method === "POST" && String(url).endsWith("/agents"))!;
+    expect(JSON.parse(String(created[1]!.body)).config.voice.speaking_language).toBe("vi");
+    expect(w.saveAgent).toHaveBeenCalledWith({ fishAgentId: "agent_new", fishAgentFor: fishKeyPrint("fish-key"), fishAgentLanguage: "vi" });
+  });
+
+  it("moves the saved agent to the app's language before the call, once", async () => {
+    const fetchImpl = fakeFish();
+    const w = wiring(fetchImpl, {}, { language: "vi" });
+    await w.calls.createSession({ ...start, endpoint: fishLiveEndpoint("agent_saved", {}) });
+    expect(routes(fetchImpl)).toEqual(["PATCH /agents/agent_saved/config", "POST /agents/agent_saved/publish", "POST /sessions"]);
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]![1]!.body))).toEqual({ voice: { speaking_language: "vi" } });
+    expect(w.saveAgent).toHaveBeenCalledWith({ fishAgentId: "agent_saved", fishAgentFor: fishKeyPrint("fish-key"), fishAgentLanguage: "vi" });
+
+    const again = fakeFish();
+    const moved = wiring(again, {}, { language: "vi", fishAgentLanguage: "vi" });
+    await moved.calls.createSession({ ...start, endpoint: fishLiveEndpoint("agent_saved", {}) });
+    expect(routes(again)).toEqual(["POST /sessions"]);
+    expect(moved.saveAgent).not.toHaveBeenCalled();
+  });
+
+  it("changes the agent's language one call start at a time, so the app's latest language is the one left saved", async () => {
+    let releaseFirst!: () => void;
+    const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const fish = fakeFish();
+    let patches = 0;
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (init!.method === "PATCH" && patches++ === 0) await firstHeld;
+      return fish(url, init);
+    });
+    const speech: { language?: string; fishAgentLanguage?: string } = { language: "de", fishAgentLanguage: "en" };
+    const w = wiring(fetchImpl as unknown as typeof fetch, {}, speech);
+    w.saveAgent.mockImplementation((agent: { fishAgentLanguage: string }) => { speech.fishAgentLanguage = agent.fishAgentLanguage; });
+    const endpoint = fishLiveEndpoint("agent_saved", {});
+    const first = w.calls.createSession({ ...start, endpoint });
+    speech.language = "fr";
+    const second = w.calls.createSession({ ...start, endpoint });
+    releaseFirst();
+    await Promise.all([first, second]);
+    const languages = fish.mock.calls.filter(([, init]) => init!.method === "PATCH").map(([, init]) => JSON.parse(String(init!.body)).voice.speaking_language);
+    expect(languages).toEqual(["de", "fr"]);
+    expect(speech.fishAgentLanguage).toBe("fr");
+  });
+
+  it("still starts the call when Fish won't change the agent's language", async () => {
+    const fetchImpl = fakeFish({ refuseConfig: true });
+    const w = wiring(fetchImpl, {}, { language: "vi" });
+    await expect(w.calls.createSession({ ...start, endpoint: fishLiveEndpoint("agent_saved", {}) })).resolves.toMatchObject({ sessionId: "sess_1" });
+    expect(routes(fetchImpl)).toEqual(["PATCH /agents/agent_saved/config", "POST /sessions"]);
+    expect(w.saveAgent).not.toHaveBeenCalled();
+  });
+
+  it("never changes the language of an agent the operator chose", async () => {
+    const fetchImpl = fakeFish();
+    const w = wiring(fetchImpl, { OMB_FISH_LIVE_AGENT_ID: "agent_op" }, { language: "vi" });
+    await w.calls.createSession({ ...start, endpoint: fishLiveEndpoint("agent_op", {}) });
+    expect(routes(fetchImpl)).toEqual(["POST /sessions"]);
   });
 
   it("never replaces an agent the operator chose", async () => {

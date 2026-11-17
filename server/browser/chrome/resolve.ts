@@ -16,7 +16,8 @@ export type ChromePlan =
   /** `fallback` is the download to use when the installed Chrome cannot be started headless. */
   | { kind: "chrome"; chrome: FoundChrome; fallback: ChromeForTestingPin | null }
   | { kind: "download"; pin: ChromeForTestingPin }
-  | { kind: "legacy"; reason: string };
+  /** `noChrome`: the engine keeps its own browser, Chromium's headless shell, only because no Google Chrome is installed. */
+  | { kind: "legacy"; reason: string; noChrome?: true };
 
 export interface ChromeHost {
   platform: NodeJS.Platform;
@@ -134,7 +135,7 @@ export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null,
   const pin = platform === "linux" && env.OMB_RESOURCES_PATH ? null : chromeForTestingPin(platform, host.arch);
   const installed = installedGoogleChrome(host);
   if (installed && !chromePolicyManaged(host)) return { kind: "chrome", chrome: { path: installed, source: "installed" }, fallback: pin };
-  if (platform === "linux" && env.OMB_RESOURCES_PATH) return { kind: "legacy", reason: installed ? "Google Chrome here is managed by an organization" : "Google Chrome is not installed" };
+  if (platform === "linux" && env.OMB_RESOURCES_PATH) return installed ? { kind: "legacy", reason: "Google Chrome here is managed by an organization" } : { kind: "legacy", reason: "Google Chrome is not installed", noChrome: true };
   const own = agentBrowserChrome(host);
   if (own) return { kind: "chrome", chrome: { path: own, source: "agent-browser" }, fallback: null };
   if (pin) {
@@ -143,7 +144,7 @@ export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null,
     if (platform === "linux" && !options.downloading && engineFindsLinuxBrowser(host)) return { kind: "legacy", reason: "agent-browser found a browser on this server" };
     return { kind: "download", pin };
   }
-  return { kind: "legacy", reason: installed ? "Google Chrome here is managed by an organization" : "no Chrome is installed and none is pinned for this platform" };
+  return installed ? { kind: "legacy", reason: "Google Chrome here is managed by an organization" } : { kind: "legacy", reason: "no Chrome is installed and none is pinned for this platform", noChrome: true };
 }
 
 function registryQuery(args: string[]): string | null {

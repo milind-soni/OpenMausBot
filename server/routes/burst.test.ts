@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RequestAuth } from "../request-auth.ts";
+import { USER_ERROR, userError } from "../user-errors.ts";
 import { createBurstProposalRoutes, createBurstRoutes, type BurstProposalDeps, type BurstRoutesDeps } from "./burst.ts";
 import { PASS, type RouteContext } from "./table.ts";
 
@@ -33,8 +34,8 @@ describe("burst card routes", () => {
 
   it("refuses a press from someone who may not answer this chat's cards", async () => {
     const { context, sent } = ctx("/api/bursts/b1/run", "POST");
-    await createBurstRoutes(deps({ refusal: () => "Only the owner of this Cloud can answer this card.", run: () => { throw new Error("must not run"); } }))(context);
-    expect(sent).toEqual({ status: 403, body: { error: "Only the owner of this Cloud can answer this card." } });
+    await createBurstRoutes(deps({ refusal: () => USER_ERROR["serverError.card.cloudOwnerOnly"], run: () => { throw new Error("must not run"); } }))(context);
+    expect(sent).toEqual({ status: 403, body: userError("serverError.card.cloudOwnerOnly") });
   });
 
   it("runs, cancels and retries on a press", async () => {
