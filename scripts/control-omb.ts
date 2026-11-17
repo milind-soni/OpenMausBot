@@ -184,6 +184,8 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   for (const key of ["OMB_WARM_SUMMARY_TIME_SCALE", "OMB_WARM_SUMMARY"]) if (parentEnv[key]) childEnv[key] = parentEnv[key];
   // A headless server's usage caps (server/usage-caps.ts).
   for (const key of ["OMB_USAGE_CAP_DAILY_USD", "OMB_USAGE_CAP_MONTHLY_USD", "OMB_USAGE_CAP_DAILY_TOKENS", "OMB_USAGE_CAP_MONTHLY_TOKENS", "OMB_USAGE_CAP_STOPS"]) if (parentEnv[key]) childEnv[key] = parentEnv[key];
+  // Claude Code's tool search (server/drivers/claude-tool-search.ts): a test turns it off to see a bridged Claude turn.
+  if (parentEnv.ENABLE_TOOL_SEARCH) childEnv.ENABLE_TOOL_SEARCH = parentEnv.ENABLE_TOOL_SEARCH;
   // A loopback fake only: the key never reaches a real provider.
   const liveUrl = parentEnv.OMB_OPENAI_LIVE_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(liveUrl)) {

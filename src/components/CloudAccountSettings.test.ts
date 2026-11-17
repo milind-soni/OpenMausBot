@@ -454,16 +454,23 @@ it("on the Cloud itself, the plan card has no phone button: pairing a phone is o
   expect(view().nodes.some(node => node.type === "button")).toBe(false);
 });
 
-it("on a Team Cloud, sends people to the Plan page for its people and plan, never to 'the app on your computer'", () => {
+it("on a Team Cloud, sends its admins to the invite box on the team's People page, its Owner to seats too, and tells anyone else to ask an admin", () => {
   const plan = { state: vi.fn().mockRejectedValue(new Error("cloud-plan:state is only available in this app's window")), manage: vi.fn() };
   vi.stubGlobal("window", { ogb: { cloudPlan: plan } });
-  const team = { name: "Acme", cloudPage: "https://cloud.example.com/cloud" };
+  const team = { id: "team-acme", name: "Acme", cloudPage: "https://cloud.example.com/cloud" };
   const onTeam = render({ cloudHome: true, teamHome: team }).nodes;
   expect(onTeam.some(node => node.type === CloudPlanOnCloud), "a team's people and plan are on its Overview, not Plan & billing").toBe(false);
-  const html = renderToStaticMarkup(createElement(TeamPeopleCard, { team }));
-  all(html, ["People and plan", "Invite people to Acme, change their roles and manage its plan on your Plan page.", 'href="https://cloud.example.com/cloud"', "Open your Plan page"]);
-  none(html, ["managed in the MausBot app on your computer"]);
-  expect(renderToStaticMarkup(createElement(TeamPeopleCard, { team: { name: "Acme" } }))).not.toContain("href=");
+  const html = renderToStaticMarkup(createElement(TeamPeopleCard, { team, admin: true }));
+  all(html, ["People and plan", "Invite or remove people in Acme and change their roles on its People page on MausBot Cloud.",
+    'href="https://cloud.example.com/cloud/team/team-acme/people?do=invite"', "Invite people"]);
+  none(html, ["managed in the MausBot app on your computer", "Plan page", "seats"]);
+  const owner = renderToStaticMarkup(createElement(TeamPeopleCard, { team, admin: true, owner: true }));
+  all(owner, ["Invite or remove people in Acme, add seats and change roles", 'href="https://cloud.example.com/cloud/team/team-acme/people?do=invite"',
+    'href="https://cloud.example.com/cloud/team/team-acme/people?do=seats"', "Add seats"]);
+  expect(renderToStaticMarkup(createElement(TeamPeopleCard, { team: { id: "team-acme", name: "Acme" }, admin: true }))).not.toContain("href=");
+  const member = renderToStaticMarkup(createElement(TeamPeopleCard, { team, admin: false }));
+  all(member, ["Ask a team admin to invite people to Acme."]);
+  none(member, ["href=", "Invite people", "seats"]);
   // My Cloud's own page is unchanged.
   expect(render({ cloudHome: true }).nodes.some(node => node.type === CloudPlanOnCloud)).toBe(true);
 });

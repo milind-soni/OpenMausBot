@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { CloudAccountState, CloudPlanBridge, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudMachine, CloudTrial } from "../../electron/cloud-home.mjs";
 import { planTeam, teamPlan } from "../../electron/cloud-team-plan.mjs";
+import { teamPeoplePage } from "@/lib/app-links";
 import { cloudFilesBridge } from "@/lib/cloud-files";
 import { moveLine } from "@/lib/cloud-send";
 import { activeLocale, t } from "@/lib/i18n";
@@ -155,12 +156,18 @@ export function CloudPlanOnCloud({ bridge, usage = null, upgrade, extra }: { bri
 
 /** Security: the public native snapshot carries no credential and cannot activate a plan. */
 /** `onSignIn`: the sheet's email-code sign-in (the browser approval stays for openmausbot://cloud and Sign in again). */
-/** On a Team Cloud: its people and plan live on the Cloud page, where the person signs in with their own email. */
-export function TeamPeopleCard({ team }: { team: { name: string; cloudPage?: string } }) {
+/** On a Team Cloud: its people, seats and roles live on the team's People page on MausBot Cloud, where the person signs in
+ * with their own email. Its admins invite; only its Owner, who pays, adds seats; anyone else is told to ask an admin. */
+export function TeamPeopleCard({ team, admin, owner = false }: { team: { id: string; name: string; cloudPage?: string }; admin: boolean; owner?: boolean }) {
+  const invite = admin || owner ? teamPeoplePage(team, "invite") : null, seats = owner ? teamPeoplePage(team, "seats") : null;
+  const body = owner ? "cloudAccount.teamPeopleOwner" : admin ? "cloudAccount.teamPeopleAdmin" : "cloudAccount.teamPeopleAsk";
   return <Card title={t("cloudAccount.teamPeopleTitle")}>
     <div data-cloud-plan="team" className="flex flex-col items-start gap-3">
-      <p className="text-[13px] text-ink-secondary">{t("cloudAccount.teamPeopleBody", { team: team.name })}</p>
-      {team.cloudPage && <a className="ui-button" href={team.cloudPage} target="_blank" rel="noreferrer">{t("cloudAccount.teamPeopleOpen")}</a>}
+      <p className="text-[13px] text-ink-secondary">{t(body, { team: team.name })}</p>
+      {invite && <div className="flex flex-wrap gap-2">
+        <a className="ui-button" href={invite} target="_blank" rel="noreferrer" data-team-invite="">{t("cloudAccount.teamPeopleInvite")}</a>
+        {seats && <a className="ui-button" href={seats} target="_blank" rel="noreferrer" data-team-seats="">{t("cloudAccount.teamPeopleSeats")}</a>}
+      </div>}
     </div>
   </Card>;
 }

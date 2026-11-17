@@ -14,6 +14,8 @@ import {
   isMemoryTopicName,
   listMemoryTopics,
   loadMemory,
+  memoryNotesPrompt,
+  memoryRulesPrompt,
   memorySystemPrompt,
   REMEMBER_AND_FORGET,
   supportsWorkspaceFiles,
@@ -441,7 +443,7 @@ describe("workspace", () => {
     expect(memory).toMatchObject({ truncated: true, lines: MEMORY_MAX_LINES + 50 });
     const managed = memorySystemPrompt(BOT, { managedWrites: true });
     expect(managed).toContain(`[MEMORY.md is ${MEMORY_MAX_LINES + 50} lines and ${memory!.bytes} bytes; only the first ${MEMORY_MAX_LINES} lines / ${MEMORY_MAX_BYTES} bytes are shown above.]`);
-    expect(managed).toContain(`It is shown to you at the start of every session, up to ${MEMORY_MAX_LINES} lines / 24 KB.`);
+    expect(managed).toContain(`shown to you at the start of every session (up to ${MEMORY_MAX_LINES} lines / 24 KB).`);
     expect(managed).not.toContain("archive");
     expect(managed).not.toContain("Consolidate");
     expect(managed).not.toContain("short and curated");
@@ -644,9 +646,9 @@ describe("workspace", () => {
   it("routes facts, procedures and short-lived notes to the right place, in both write modes", () => {
     for (const prompt of [memorySystemPrompt(BOT), memorySystemPrompt(BOT, { managedWrites: true })]) {
       expect(prompt).toContain("MEMORY.md is for facts that hold in every session");
-      expect(prompt).toContain("Write each one as a plain statement of fact, never as an instruction to yourself — an imperative is read back as a directive next session.");
-      expect(prompt).toContain("A procedure for one kind of task belongs in a memory/<topic>.md file or a skill, not here.");
-      expect(prompt).toContain("Anything that will be stale within a week belongs in the conversation, not in memory.");
+      expect(prompt).toContain("Write each one as a plain statement of fact, never as an instruction to yourself (an imperative is read back as a directive next session).");
+      expect(prompt).toContain("A procedure for one kind of task belongs in a memory/<topic>.md file or a skill");
+      expect(prompt).toContain("anything stale within a week stays in the conversation.");
       expect(prompt).toContain("When a fact applies only from a date, or stops applying on one, say so in the entry");
       expect(prompt).toContain("gets that day as its until date");
       expect(prompt).toContain(`pointers to files in ${JSON.stringify(join(workspaceDir(BOT), "memory"))}`);
@@ -673,6 +675,29 @@ describe("workspace", () => {
     expect(prompt).toContain("The user prefers CSV exports.");
     expect(prompt).toContain("Change MEMORY.md only with memory_update; on a conflict, find the current passage with session_search.");
     expect(prompt).not.toContain("update it with your file tools");
+  });
+
+  // The rules sit in the cached half of a turn's system prompt and the notes in its volatile half: the rules must hold
+  // nothing that changes from turn to turn, and the two together are what memorySystemPrompt says (which, in one piece,
+  // leaves a refused turn's rules out).
+  it("splits into standing rules and what memory holds now, which together are the whole memory prompt", () => {
+    writeMemoryTopic(BOT, "trip.md", "---\ntitle: Trip\n---\n- Flies Friday\n");
+    writeMemoryFile(BOT, "- The owner likes figs.");
+    for (const opts of [{}, { managedWrites: true }, { managedWrites: true, fileTools: false }, { fileTools: false }, { managedWrites: true, writesRefused: true }, { enabled: false }] as Array<{ writesRefused?: boolean }>) {
+      const rules = memoryRulesPrompt(BOT, opts), notes = memoryNotesPrompt(BOT, opts);
+      expect((opts.writesRefused ? "" : rules) + notes, JSON.stringify(opts)).toBe(memorySystemPrompt(BOT, opts));
+      expect(rules, JSON.stringify(opts)).not.toMatch(/figs|Flies Friday|trip\.md|Your memory \(MEMORY\.md\)/);
+    }
+    expect(memoryRulesPrompt(BOT, { managedWrites: true })).toContain("Change MEMORY.md only with memory_update.");
+    expect(memoryNotesPrompt(BOT, { managedWrites: true })).toContain("The owner likes figs.");
+    expect(memoryNotesPrompt(BOT, { managedWrites: true })).toContain("- memory/trip.md");
+    // A refusal can change from turn to turn, so it never changes the cached rules: the turn's notes override them.
+    expect(memoryRulesPrompt(BOT, { managedWrites: true, writesRefused: true })).toBe(memoryRulesPrompt(BOT, { managedWrites: true }));
+    expect(memoryNotesPrompt(BOT, { managedWrites: true, writesRefused: true })).toContain("Notes cannot be saved from this conversation");
+    expect(memoryNotesPrompt(BOT, { managedWrites: true, writesRefused: true })).toContain("Whatever your memory instructions say, do not call memory_update");
+    // With no way to write, the saved memory is context only, all of it in the notes.
+    expect(memoryRulesPrompt(BOT, { fileTools: false })).toBe("");
+    expect(memoryNotesPrompt(BOT, { fileTools: false })).toContain("this turn has no memory editing tools");
   });
 
   it("opts concurrent agents into targeted memory updates while retaining legacy guidance", () => {

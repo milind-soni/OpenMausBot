@@ -7,12 +7,12 @@ export const LIVE_MODEL = "gpt-live-1";
 const OPENAI_BASE = "https://api.openai.com";
 export const DEFAULT_LIVE_VOICE = "marin";
 export const MAX_SDP_BYTES = 64 * 1024;
-export const LIVE_NEEDS_KEY = "Live calls use your own OpenAI key. Add it in Settings → AI.";
+export const LIVE_NEEDS_KEY = "Live calls use your own OpenAI key. Add it in Settings → AI → Other services.";
 export const LIVE_NEEDS_AZURE = "Live calls through Azure OpenAI need the resource endpoint, the GPT-Live deployment name and its key. Add them in Call settings.";
-export const LIVE_NEEDS_FISH = "Live calls through Fish Audio use your Fish Audio API key. Add it in Settings → AI.";
-export const LIVE_NEEDS_GEMINI = "Live calls through Gemini use your Gemini API key. Add it in Settings → AI.";
+export const LIVE_NEEDS_FISH = "Live calls through Fish Audio use your Fish Audio API key. Add it in Settings → AI → Other services.";
+export const LIVE_NEEDS_GEMINI = "Live calls through Gemini use your Gemini API key. Add it in Settings → AI → Other services.";
 export const LIVE_NEEDS_CUSTOM = "Live calls through a custom endpoint need its address and its own key. Add them in Call settings.";
-export const LIVE_NEEDS_ELEVENLABS = "Live calls through ElevenLabs use your ElevenLabs API key. Add it in Settings → AI.";
+export const LIVE_NEEDS_ELEVENLABS = "Live calls through ElevenLabs use your ElevenLabs API key. Add it in Settings → AI → Other services.";
 
 /** The client's data channel is untrusted: it may only hang up; every append goes over the sideband.
  * Exception: Azure OpenAI refuses `session.client`, so an Azure call goes without this list and its caller's channel keeps
