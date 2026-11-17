@@ -10122,6 +10122,8 @@
   "server.burst.cancelled": "平行處理已取消。",
   "server.burst.partFailed": "未完成（{reason}）",
   "server.burst.partsHeader": "這次平行處理的各部分結果（依完成順序）：{task}",
+  "announcements.title": "公告",
+  "announcements.new": "新公告",
   "composer.command.burstDesc": "同時執行一項工作的多個部分，再彙整結果",
   "burst.title": "平行處理：{task}",
   "burst.plan": "{count} 個任務 · {model} · 同時 {parallel} 個 · 約 {minutes} 分鐘",

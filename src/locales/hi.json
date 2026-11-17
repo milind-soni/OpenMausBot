@@ -3474,6 +3474,8 @@
   "common.ok": "ठीक है",
   "connectedWorkspaces.localTitle": "इस कंप्यूटर पर एनवायरनमेंट",
   "connectedWorkspaces.newEnvironment": "नया एनवायरनमेंट",
+  "announcements.title": "घोषणाएँ",
+  "announcements.new": "नई घोषणाएँ",
   "newBot.defaults": "नए बॉट्स के डिफ़ॉल्ट",
   "newBot.edit": "संपादित करें",
   "notifications.title": "सूचनाएँ",

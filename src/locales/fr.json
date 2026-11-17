@@ -3620,6 +3620,8 @@
   "common.ok": "OK",
   "connectedWorkspaces.localTitle": "Environnements sur cet ordinateur",
   "connectedWorkspaces.newEnvironment": "Nouvel environnement",
+  "announcements.title": "Annonces",
+  "announcements.new": "Nouvelles annonces",
   "newBot.defaults": "Valeurs par défaut des nouveaux bots",
   "newBot.edit": "Modifier",
   "notifications.title": "Notifications",

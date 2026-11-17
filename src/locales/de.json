@@ -4009,6 +4009,8 @@
   "server.rooms.linkedFailed": "{bot} konnte von {place} aus nicht antworten.",
   "server.rooms.linkedMissing": "{bot} gibt es auf {place} nicht mehr und kann hier deshalb nicht antworten. Entferne diesen Bot aus den Mitgliedern dieses Raums.",
   "server.rooms.linkedEnded": "{place} hat sich 30 Tage lang nicht verbunden, deshalb wurde die Verbindung dorthin beendet. Nicht mehr in diesem Raum: {bots}.",
+  "announcements.title": "Ankündigungen",
+  "announcements.new": "Neue Ankündigungen",
   "room.members.far.place": "auf {place}",
   "room.members.far.off": "Verbindung ist aus",
   "room.members.far.missing": "Nicht mehr verfügbar",

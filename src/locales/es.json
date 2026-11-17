@@ -6270,6 +6270,8 @@
   "common.ok": "Aceptar",
   "connectedWorkspaces.localTitle": "Entornos en este ordenador",
   "connectedWorkspaces.newEnvironment": "Nuevo entorno",
+  "announcements.title": "Anuncios",
+  "announcements.new": "Anuncios nuevos",
   "policy.teamRemoteBlocked": "Gestionado por {organization}: abrir esta nube en un teléfono está desactivado. Pregunta a un admin del equipo.",
   "remote.status.pairedMany": "{count} dispositivos vinculados",
   "remote.status.pairedOne": "1 dispositivo vinculado",

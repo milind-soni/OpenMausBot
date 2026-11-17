@@ -5767,6 +5767,8 @@
   "common.ok": "Tamam",
   "connectedWorkspaces.localTitle": "Bu bilgisayardaki ortamlar",
   "connectedWorkspaces.newEnvironment": "Yeni ortam",
+  "announcements.title": "Duyurular",
+  "announcements.new": "Yeni duyurular",
   "policy.teamRemoteBlocked": "{organization} yönetiyor: bu Cloud'u telefonda açmak kapalı. Bir ekip yöneticisine sor.",
   "remote.status.pairedMany": "{count} cihaz eşlendi",
   "remote.status.pairedOne": "1 cihaz eşlendi",

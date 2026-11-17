@@ -12,17 +12,21 @@ import { accountFullName } from "./system-name.mjs";
 
 export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
-export const DESKTOP_NOTICES = Object.freeze(["whats-new-2026-11", "boat-credit-2026-11", "grok-move-2026-11", "modelgo-offer-2026-11"]);
+export const DESKTOP_NOTICES = Object.freeze(["whats-new-2026-11", "boat-credit-2026-11", "grok-move-2026-11", "modelgo-offer-2026-11", "teams-2026-11"]);
 const WHATS_NEW = DESKTOP_NOTICES[0];
 /** A card from the project's announcements file someone closed (src/lib/announcements.ts), and the last day a sponsor's
  * card was shown: kept beside the fixed notices, the newest few only. */
 const ANNOUNCEMENT_SEEN = /^announcement:[a-z0-9][a-z0-9-]{2,39}$/;
 const ANNOUNCEMENT_SPONSOR_DAY = /^announcement-sponsor:\d{4}-\d{2}-\d{2}$/;
+/** When the person last opened Announcements (shared/cloud-hints.ts ANNOUNCEMENTS_READ_HINT): the newest one only. */
+const ANNOUNCEMENTS_READ = /^announcements-read-(\d{1,16})$/;
 const MAX_ANNOUNCEMENTS_SEEN = 40;
+const readAt = id => Number(ANNOUNCEMENTS_READ.exec(id)[1]);
 const keptAnnouncements = list => {
   const marks = list.filter(id => typeof id === "string" && ANNOUNCEMENT_SEEN.test(id));
   const days = list.filter(id => typeof id === "string" && ANNOUNCEMENT_SPONSOR_DAY.test(id)).sort();
-  return [...new Set(marks)].slice(-MAX_ANNOUNCEMENTS_SEEN).concat(days.slice(-1));
+  const read = list.filter(id => typeof id === "string" && ANNOUNCEMENTS_READ.test(id)).sort((a, b) => readAt(a) - readAt(b));
+  return [...new Set(marks)].slice(-MAX_ANNOUNCEMENTS_SEEN).concat(days.slice(-1), read.slice(-1));
 };
 /** A locale code such as "de" or "pt-br", or "" for following the system. */
 const LANGUAGE = /^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,2})?$/i;
@@ -98,7 +102,7 @@ export function createDesktopPrefs({ read, write }) {
       const saved = current();
       if (saved.seen.includes(id)) return;
       if (DESKTOP_NOTICES.includes(id)) save({ ...saved, seen: [...saved.seen, id] });
-      else if (typeof id === "string" && (ANNOUNCEMENT_SEEN.test(id) || ANNOUNCEMENT_SPONSOR_DAY.test(id))) {
+      else if (typeof id === "string" && (ANNOUNCEMENT_SEEN.test(id) || ANNOUNCEMENT_SPONSOR_DAY.test(id) || ANNOUNCEMENTS_READ.test(id))) {
         const fixed = saved.seen.filter(seen => DESKTOP_NOTICES.includes(seen));
         save({ ...saved, seen: [...fixed, ...keptAnnouncements([...saved.seen, id])] });
       }

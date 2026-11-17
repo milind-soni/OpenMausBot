@@ -6843,6 +6843,8 @@
   "common.ok": "OK",
   "connectedWorkspaces.localTitle": "Ambienti su questo computer",
   "connectedWorkspaces.newEnvironment": "Nuovo ambiente",
+  "announcements.title": "Annunci",
+  "announcements.new": "Nuovi annunci",
   "policy.teamRemoteBlocked": "Gestito da {organization}: aprire questo Cloud sul telefono è disattivato. Chiedi a un admin del team.",
   "remote.status.pairedMany": "{count} dispositivi abbinati",
   "remote.status.pairedOne": "1 dispositivo abbinato",

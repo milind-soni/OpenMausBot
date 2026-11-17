@@ -3908,6 +3908,8 @@
   "common.ok": "OK",
   "connectedWorkspaces.localTitle": "Середовища на цьому комп’ютері",
   "connectedWorkspaces.newEnvironment": "Нове середовище",
+  "announcements.title": "Оголошення",
+  "announcements.new": "Нові оголошення",
   "newBot.defaults": "Типові налаштування нових ботів",
   "newBot.edit": "Редагувати",
   "notifications.title": "Сповіщення",

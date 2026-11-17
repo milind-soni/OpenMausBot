@@ -144,7 +144,8 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   `people/<person>/welcome.json` (`GET /api/me` `welcome: { invitedBy, welcomedAt, hints }`, `PUT /api/me/welcome {
   welcomed: true }`). Only the Owner, who set the team up, gets the Cloud's own welcome and its setup list (the session's
   `team.role`); its record (shown, done, hidden: `TEAM_PERSONAL_HINTS`) is each person's, kept in the same file (the Owner
-  also keeps what the team's record said before). An empty team starts fresh: the Owner's own MausBot and the team's first
+  also keeps what the team's record said before). So are whether they saw the Teams What's new and when they last opened
+  Announcements (`announcements-read-<ms>`, the newest kept), which every member saves with `PUT /api/me/welcome { hints }`. An empty team starts fresh: the Owner's own MausBot and the team's first
   bot don't count as bots already there. The finished list ("Acme is ready") shows once: it is recorded as done as it
   shows, names the first bot ("Say hi to Poppy", never a Chief of Staff) and offers Invite people, the team's People page
   on MausBot Cloud.
