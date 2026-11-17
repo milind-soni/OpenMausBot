@@ -9,6 +9,8 @@ describe("announcesAction", () => {
     "I’m in the VM and will launch XFCE Terminal first.",
     "I'll open the browser.",
     "Opening the page now:",
+    "Got the structure. Now I'll pull the actual content from each — inbox, tasks, unread messages, and today's calendar.",
+    "Yes, I'm here. Let me pull from all four MCP servers now.",
   ])("recognizes a short action announcement: %s", text => {
     expect(announcesAction(text)).toBe(true);
   });
@@ -68,6 +70,8 @@ describe("announcesAction", () => {
     "I'm done and will be available tomorrow.",
     "I'm waiting and will need your approval first.",
     "I'm in the VM. The user will launch XFCE Terminal first.",
+    "The report is done. I'll be available tomorrow.",
+    "That is the full list. Let me know if you want more.",
     "The instructions say I will launch XFCE Terminal first.",
     "I'm in the VM and will launch XFCE Terminal first. Is that okay?",
     "Let me know if you want the full report.",
