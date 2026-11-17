@@ -24,6 +24,7 @@ import {
   DEFAULT_CANVAS_SIZE_IDS,
   PREVIEW_SIZE_PRESETS,
   PREVIEW_ZOOM_OPTIONS,
+  RESPONSIVE_PREVIEW_SIZE_ID,
   resolvePreviewSize,
   type CanvasArtboardBox,
   type CanvasViewTransform,
@@ -50,6 +51,8 @@ import { PreviewCanvas } from "@/components/PreviewCanvas";
 import { PreviewFilePicker, usePreviewAutoRefreshWatcher } from "@/components/PreviewFilePicker";
 import { SharePreviewModal, type SharePreviewRequest } from "@/components/SharePreviewModal";
 import { useStore, type Attachment } from "@/state/store";
+import { PreviewBotBar } from "@/components/PreviewBotBar";
+import { SHOW_TESTING_EVENT, testingStore, useTestingState, viewFromSession, type ShowTestingDetail, type TestingView } from "@/lib/previewTestingStore";
 
 export default function PreviewScreen() {
   const { dispatch } = useStore();
@@ -71,10 +74,37 @@ export default function PreviewScreen() {
     initial.source?.kind === "file" ? "file" : "url",
   );
   const [mode, setMode] = useState<"single" | "canvas">(initial.mode);
-  const [presetId, setPresetId] = useState(initial.presetId);
-  const [rotated, setRotated] = useState(initial.rotated);
-  const [zoom, setZoom] = useState<PreviewZoomMode>(initial.zoom);
-  const [customSize, setCustomSize] = useState(initial.customSize);
+  const [ownPresetId, setOwnPresetId] = useState(initial.presetId);
+  const [ownRotated, setOwnRotated] = useState(initial.rotated);
+  const [ownZoom, setOwnZoom] = useState<PreviewZoomMode>(initial.zoom);
+  const [ownCustomSize, setOwnCustomSize] = useState(initial.customSize);
+
+  // Bot testing: a bot tab takes over the stage, and the toolbar acts on the bot's page and size.
+  const testing = useTestingState();
+  const botTab = testing.tab ? testing.sessions.find((s) => s.id === testing.tab && s.target !== "active") ?? null : null;
+  const attached = testing.sessions.find((s) => s.target === "active" && (s.state === "ready" || s.state === "paused")) ?? null;
+  const controlSession = botTab ?? (testing.tab === null ? attached : null);
+  const botTabs = testing.sessions.filter((s) => s.target !== "active");
+  const botView = botTab ? testing.views[botTab.id] : undefined;
+  const botMeta = botTab ? testing.meta[botTab.id] : undefined;
+  const presetId = botView?.presetId ?? ownPresetId;
+  const rotated = botView ? botView.rotated : ownRotated;
+  const zoom = botView?.zoom ?? ownZoom;
+  const customSize = botView?.customSize ?? ownCustomSize;
+  function routed<K extends "presetId" | "rotated" | "zoom" | "customSize">(key: K, own: React.Dispatch<React.SetStateAction<TestingView[K]>>) {
+    return (value: React.SetStateAction<TestingView[K]>) => {
+      if (!botTab || !botView) return own(value);
+      const next = typeof value === "function" ? (value as (previous: TestingView[K]) => TestingView[K])(botView[key]) : value;
+      testingStore.setView(botTab.id, { [key]: next } as Partial<TestingView>);
+    };
+  }
+  const setPresetId = routed("presetId", setOwnPresetId);
+  const setRotated = routed("rotated", setOwnRotated);
+  const setZoom = routed("zoom", setOwnZoom);
+  const setCustomSize = routed("customSize", setOwnCustomSize);
+  // Bot tabs are always shown as a single page, whatever the user's layout mode.
+  const viewDevice = botTab ? isDeviceSource(botTab.source) : deviceSource;
+  const viewMode = botTab ? "single" : mode;
   const [autoRefresh, setAutoRefresh] = useState(initial.autoRefresh);
   const [selectedSizeIds, setSelectedSizeIds] = useState<string[]>(initial.selectedSizeIds);
   const [rotatedById, setRotatedById] = useState<Record<string, boolean>>(initial.rotatedById);
@@ -85,8 +115,10 @@ export default function PreviewScreen() {
 
   const [urlError, setUrlError] = useState("");
   const [pendingLocalUrl, setPendingLocalUrl] = useState<string | null>(null);
-  const [frameStatus, setFrameStatus] = useState<PreviewFrameStatus>("empty");
-  const [historyNav, setHistoryNav] = useState({ canGoBack: false, canGoForward: false });
+  const [ownFrameStatus, setFrameStatus] = useState<PreviewFrameStatus>("empty");
+  const [ownHistoryNav, setHistoryNav] = useState({ canGoBack: false, canGoForward: false });
+  const frameStatus: PreviewFrameStatus = botTab ? botMeta?.status ?? "loading" : ownFrameStatus;
+  const historyNav = botTab ? { canGoBack: Boolean(botMeta?.canGoBack), canGoForward: Boolean(botMeta?.canGoForward) } : ownHistoryNav;
   const [historyList, setHistoryList] = useState<string[]>(() => getMobilePreviewUrlHistory());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
@@ -117,15 +149,40 @@ export default function PreviewScreen() {
 
   usePreviewAutoRefreshWatcher("preview-studio-screen", activeSource, autoRefresh);
 
+  // The user's own page.
+  const ownPreset = useMemo(() => resolvePreviewSize(ownPresetId, ownCustomSize), [ownCustomSize, ownPresetId]);
+  const ownResponsive = ownPreset.id === RESPONSIVE_PREVIEW_SIZE_ID;
+  const ownDims = useMemo(
+    () =>
+      ownResponsive
+        // The stage has 24px padding on each side.
+        ? { width: Math.max(240, Math.floor(stageBounds.width - 48)), height: Math.max(200, Math.floor(stageBounds.height - 48)) }
+        : applyRotation(ownPreset, ownPreset.rotatable ? ownRotated : false),
+    [ownPreset, ownResponsive, ownRotated, stageBounds],
+  );
+  const ownScale = useMemo(
+    () => (ownResponsive ? 1 : computeFrameScale(ownDims, stageBounds, ownZoom, 28)),
+    [ownDims, ownResponsive, ownZoom, stageBounds],
+  );
+
+  // What the toolbar shows: the bot's tab when one is open, otherwise the user's page.
+  const [botStage, setBotStage] = useState<HTMLDivElement | null>(null);
+  const [botBounds, setBotBounds] = useState({ width: 960, height: 720 });
   const activePreset = useMemo(() => resolvePreviewSize(presetId, customSize), [customSize, presetId]);
-  const singleDims = useMemo(
-    () => applyRotation(activePreset, activePreset.rotatable ? rotated : false),
-    [activePreset, rotated],
+  const viewResponsive = activePreset.id === RESPONSIVE_PREVIEW_SIZE_ID;
+  const botDims = useMemo(
+    () =>
+      viewResponsive
+        ? { width: Math.max(240, Math.floor(botBounds.width)), height: Math.max(200, Math.floor(botBounds.height)) }
+        : applyRotation(activePreset, activePreset.rotatable ? rotated : false),
+    [activePreset, botBounds, rotated, viewResponsive],
   );
-  const singleScale = useMemo(
-    () => computeFrameScale(singleDims, stageBounds, zoom, 28),
-    [singleDims, stageBounds, zoom],
+  const botScale = useMemo(
+    () => (viewResponsive ? 1 : computeFrameScale(botDims, botBounds, zoom, 16)),
+    [botBounds, botDims, viewResponsive, zoom],
   );
+  const singleDims = botTab ? botDims : ownDims;
+  const singleScale = botTab ? botScale : ownScale;
 
   // Measure Single mode stage bounds
   useEffect(() => {
@@ -150,10 +207,10 @@ export default function PreviewScreen() {
     savePreviewStudioState({
       input: inputUrl,
       source: activeSource,
-      presetId,
-      rotated,
-      zoom,
-      customSize,
+      presetId: ownPresetId,
+      rotated: ownRotated,
+      zoom: ownZoom,
+      customSize: ownCustomSize,
       autoRefresh,
       mode,
       selectedSizeIds,
@@ -163,25 +220,25 @@ export default function PreviewScreen() {
     });
     saveMobilePreviewState({
       input: inputUrl,
-      presetId,
-      rotated,
-      zoom,
-      customSize,
+      presetId: ownPresetId,
+      rotated: ownRotated,
+      zoom: ownZoom,
+      customSize: ownCustomSize,
       source: activeSource,
     });
   }, [
     activeSource,
     autoRefresh,
     canvasTransform,
-    customSize,
+    ownCustomSize,
     inputUrl,
     mode,
-    presetId,
-    rotated,
+    ownPresetId,
+    ownRotated,
     rotatedById,
     scrollSync,
     selectedSizeIds,
-    zoom,
+    ownZoom,
   ]);
 
   // Close history dropdown on outside click
@@ -218,7 +275,7 @@ export default function PreviewScreen() {
 
   // Single-mode keyboard shortcuts: [ and ] cycle sizes, R rotates
   useEffect(() => {
-    if (!deviceSource || mode !== "single") return;
+    if (!viewDevice || viewMode !== "single") return;
     const allIds = [...PREVIEW_SIZE_PRESETS.map((p) => p.id), "custom"];
     const isTypingTarget = (target: EventTarget | null) => {
       const tag = (target as HTMLElement | null)?.tagName;
@@ -246,9 +303,100 @@ export default function PreviewScreen() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activePreset.id, activePreset.rotatable, mode, deviceSource]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePreset.id, activePreset.rotatable, viewMode, viewDevice, botTab?.id]);
+
+  // Full-screen Preview hosts bot tests while it is open (no chat's Quick Preview is mounted).
+  useEffect(() => testingStore.addHost(), []);
+  useEffect(() => {
+    const onShow = (event: Event) => { (event as CustomEvent<ShowTestingDetail>).detail.handled = true; };
+    window.addEventListener(SHOW_TESTING_EVENT, onShow);
+    return () => window.removeEventListener(SHOW_TESTING_EVENT, onShow);
+  }, []);
+  // Bot pages render in PreviewTestingLayer over this stage.
+  useEffect(() => {
+    if (!botStage) return;
+    testingStore.setSlot(botStage);
+    const measure = () => {
+      const rect = botStage.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) setBotBounds({ width: rect.width, height: rect.height });
+    };
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    observer?.observe(botStage);
+    return () => {
+      observer?.disconnect();
+      if (testingStore.state().slot === botStage) testingStore.setSlot(null);
+    };
+  }, [botStage]);
+  const overlayOpen = historyOpen || filePickerOpen || shareModalOpen;
+  useEffect(() => {
+    if (!botTab) return;
+    testingStore.setLayout(botTab.id, {
+      width: botDims.width,
+      height: botDims.height,
+      scale: botScale,
+      fill: viewResponsive,
+      padded: !viewResponsive,
+      bezel: activePreset.group === "phone" || activePreset.group === "tablet",
+      interactive: !overlayOpen,
+      dims: botView?.dims ?? "",
+    });
+  }, [activePreset.group, botDims.height, botDims.width, botScale, botTab, botView?.dims, overlayOpen, viewResponsive]);
+
+  // A bot asked to act on the page the user is viewing: hand it this screen's single-page frame.
+  const attachTried = useRef(new Set<string>());
+  const attachDims = useRef<string | null>(null);
+  useEffect(() => {
+    const api = window.gbs?.previewTesting;
+    const pending = testing.sessions.find((s) => s.target === "active" && s.state === "opening" && !attachTried.current.has(s.id));
+    if (!api || !pending) return;
+    if (testing.tab !== null) { testingStore.setTab(null); return; }
+    if (activeSource?.kind !== "url" || mode !== "single") {
+      attachTried.current.add(pending.id);
+      void api.register({ sessionId: pending.id, unavailable: activeSource?.kind !== "url" ? "Preview is not showing a web page. Bots can attach to web pages only; use target \"new\"." : "Preview is in Canvas layout. Ask the user to switch to Single, or use target \"new\"." });
+      return;
+    }
+    if (ownFrameStatus === "loading" || ownFrameStatus === "empty") return;
+    const webContentsId = singleFrameRef.current?.webContentsId();
+    if (webContentsId == null) return;
+    attachTried.current.add(pending.id);
+    attachDims.current = `${ownDims.width}x${ownDims.height}x${ownResponsive}`;
+    void api.register({ sessionId: pending.id, webContentsId, viewport: { width: ownDims.width, height: ownDims.height, responsive: ownResponsive } })
+      .catch((error: Error) => testingStore.setError(error.message));
+  }, [activeSource, mode, ownDims.height, ownDims.width, ownFrameStatus, ownResponsive, testing.sessions, testing.tab]);
+  // The bot resized the user's page: show that size in the user's own controls.
+  useEffect(() => {
+    if (!attached) return;
+    const dims = `${attached.width}x${attached.height}x${attached.responsive}`;
+    if (attachDims.current === dims) return;
+    attachDims.current = dims;
+    const view = viewFromSession(attached, ownZoom);
+    setOwnPresetId(view.presetId);
+    setOwnRotated(view.rotated);
+    if (view.presetId === "custom") setOwnCustomSize(view.customSize);
+  }, [attached, ownZoom]);
+
+  // The page the toolbar acts on: the bot's tab or the user's own frame.
+  const viewFrame = () => (botTab ? testingStore.frame(botTab.id) : singleFrameRef.current);
+  /** Any user navigation on a bot-controlled page is a takeover, so the bot cannot act on a page it did not expect. */
+  const takeControl = () => {
+    if (controlSession && controlSession.state !== "paused") void testingStore.control(controlSession.id, "pause");
+  };
+  const [botInput, setBotInput] = useState<string | null>(null);
+  useEffect(() => setBotInput(null), [botTab?.id, botTab?.url]);
+  // Keep the address bar truthful while a bot moves the user's own page.
+  useEffect(() => {
+    if (attached?.url && attached.url !== "about:blank") setInputUrl(attached.url);
+  }, [attached?.url]);
+  const reloadView = () => {
+    takeControl();
+    if (botTab?.source.kind === "file") testingStore.frame(botTab.id)?.loadURL(botTab.url);
+    else viewFrame()?.reload();
+  };
 
   const commitUrl = useCallback((url: string) => {
+    testingStore.setTab(null);
     setPendingLocalUrl(null);
     setUrlError("");
     setInputUrl(url);
@@ -265,7 +413,7 @@ export default function PreviewScreen() {
 
   const handleNavigate = useCallback(
     (rawInput?: string) => {
-      const target = rawInput !== undefined ? rawInput : inputUrl;
+      const target = rawInput !== undefined ? rawInput : botTab ? botInput ?? botTab.url : inputUrl;
       setHistoryOpen(false);
       const check = validatePreviewUrl(target);
       if (!check.valid) {
@@ -273,16 +421,28 @@ export default function PreviewScreen() {
         return;
       }
       setUrlError("");
+      // Navigate controlled pages in place; remounting would end the bot's session.
+      if (botTab || (attached && !testing.tab)) {
+        takeControl();
+        if (viewFrame()?.loadURL(check.url)) {
+          setBotInput(null);
+          if (!botTab) setInputUrl(check.url);
+          setHistoryList(addMobilePreviewUrlToHistory(check.url));
+          return;
+        }
+      }
       if (check.isLocalOrPrivate && (activeSource?.kind !== "url" || activeSource.url !== check.url)) {
         setPendingLocalUrl(check.url);
         return;
       }
       commitUrl(check.url);
     },
-    [activeSource, commitUrl, inputUrl],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeSource, attached, botInput, botTab, commitUrl, inputUrl, testing.tab],
   );
 
   const handleSelectProjectFile = useCallback((fileSource: PreviewFileSource) => {
+    testingStore.setTab(null);
     setPendingLocalUrl(null);
     setUrlError("");
     setSourceKindTab("file");
@@ -486,9 +646,10 @@ export default function PreviewScreen() {
           <div className="relative flex min-w-0 flex-1 items-center" ref={historyDropdownRef}>
             <input
               type="text"
-              value={inputUrl}
+              value={botTab ? botInput ?? botTab.url : inputUrl}
               onChange={(e) => {
-                setInputUrl(e.target.value);
+                if (botTab) setBotInput(e.target.value);
+                else setInputUrl(e.target.value);
                 if (urlError) setUrlError("");
               }}
               onKeyDown={(e) => {
@@ -598,7 +759,7 @@ export default function PreviewScreen() {
             </span>
           )}
 
-          {deviceSource && <div
+          {deviceSource && !botTab && <div
             role="tablist"
             aria-label="Preview layout mode"
             className="flex items-center rounded-lg border border-hairline/60 bg-inset p-0.5"
@@ -635,7 +796,8 @@ export default function PreviewScreen() {
 
           <button
             type="button"
-            disabled={!activeSource}
+            disabled={!activeSource || Boolean(botTab)}
+            title={botTab ? "Switch to Your page to share it" : undefined}
             onClick={(e) => {
               setShareOverrideArtboard(null);
               setShareDefaultScope(deviceSource && mode === "canvas" && selectedSizeIds.length > 1 ? "all" : "current");
@@ -650,8 +812,8 @@ export default function PreviewScreen() {
       </header>
 
       {/* Top Bar Row 2: Size Bar & Viewport Controls */}
-      {deviceSource && <div className="flex min-h-[40px] flex-wrap items-center justify-between gap-2 border-b border-hairline/60 bg-raised/50 px-4 py-1.5">
-        {mode === "single" ? (
+      {viewDevice && <div className="flex min-h-[40px] flex-wrap items-center justify-between gap-2 border-b border-hairline/60 bg-raised/50 px-4 py-1.5">
+        {viewMode === "single" ? (
           <>
             <div className="flex flex-wrap items-center gap-1">
               <div className="mr-1 flex items-center gap-0.5 border-r border-hairline/50 pr-2">
@@ -659,7 +821,7 @@ export default function PreviewScreen() {
                   <>
                     <button
                       type="button"
-                      onClick={() => singleFrameRef.current?.goBack()}
+                      onClick={() => { takeControl(); viewFrame()?.goBack(); }}
                       disabled={!historyNav.canGoBack}
                       aria-label="Back"
                       title="Back"
@@ -669,7 +831,7 @@ export default function PreviewScreen() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => singleFrameRef.current?.goForward()}
+                      onClick={() => { takeControl(); viewFrame()?.goForward(); }}
                       disabled={!historyNav.canGoForward}
                       aria-label="Forward"
                       title="Forward"
@@ -686,8 +848,8 @@ export default function PreviewScreen() {
 
                 <button
                   type="button"
-                  onClick={() => singleFrameRef.current?.reload()}
-                  disabled={!activeSource}
+                  onClick={reloadView}
+                  disabled={!activeSource && !botTab}
                   aria-label="Reload preview"
                   title="Reload preview"
                   className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35"
@@ -698,6 +860,18 @@ export default function PreviewScreen() {
                 </button>
               </div>
 
+              <button
+                type="button"
+                onClick={() => setPresetId(RESPONSIVE_PREVIEW_SIZE_ID)}
+                title="Fill the preview area"
+                className={`inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[11.5px] transition-colors ${
+                  viewResponsive
+                    ? "border-accent/40 bg-accent/15 font-medium text-ink"
+                    : "border-transparent text-ink-secondary hover:bg-raised-hover hover:text-ink"
+                }`}
+              >
+                Responsive
+              </button>
               {PREVIEW_SIZE_PRESETS.map((item) => {
                 const active = activePreset.id === item.id;
                 return (
@@ -881,6 +1055,8 @@ export default function PreviewScreen() {
 
       }
 
+      <PreviewBotBar botTabs={botTabs} botTab={botTab} attached={attached} controlSession={controlSession} error={testing.error} className="px-4" />
+
       {/* Inline URL validation error banner */}
       {urlError && (
         <div
@@ -891,7 +1067,8 @@ export default function PreviewScreen() {
         </div>
       )}
 
-      {/* Main Stage: Single Mode or Canvas Mode */}
+      {/* Main Stage: Single Mode or Canvas Mode. A bot tab covers it; the user's page stays loaded underneath. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
       {!deviceSource || mode === "single" ? (
         <div
           ref={singleStageRef}
@@ -900,9 +1077,10 @@ export default function PreviewScreen() {
           <PreviewFrame
             ref={singleFrameRef}
             source={activeSource}
-            width={singleDims.width}
-            height={singleDims.height}
-            scale={singleScale}
+            width={ownDims.width}
+            height={ownDims.height}
+            scale={ownScale}
+            fill={ownResponsive}
             pendingConfirmUrl={pendingLocalUrl}
             onConfirmLocalUrl={() => {
               if (pendingLocalUrl) commitUrl(pendingLocalUrl);
@@ -915,8 +1093,8 @@ export default function PreviewScreen() {
             onOpenFilePicker={() => openFilePicker()}
             onStatusChange={setFrameStatus}
             onHistoryStateChange={setHistoryNav}
-            frameTitle={activePreset.label}
-            showDeviceBezel={activePreset.group === "phone" || activePreset.group === "tablet"}
+            frameTitle={ownPreset.label}
+            showDeviceBezel={ownPreset.group === "phone" || ownPreset.group === "tablet"}
           />
         </div>
       ) : (
@@ -954,6 +1132,8 @@ export default function PreviewScreen() {
           frameRefsMap={canvasFrameRefs}
         />
       )}
+      {botTab && <div ref={setBotStage} data-panel="preview-bot-stage" className="absolute inset-0 bg-app" />}
+      </div>
 
       <PreviewFilePicker
         open={filePickerOpen}
