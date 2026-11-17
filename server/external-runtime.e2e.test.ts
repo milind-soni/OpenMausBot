@@ -195,10 +195,13 @@ describe("a bot's external runtime", () => {
       expect(sibling.status, JSON.stringify(sibling.body)).toBe(200);
       expect(sibling.body.inbox.length).toBeGreaterThan(0);
       expect(sibling.body.inbox.filter((item: { deliveredAt?: number }) => item.deliveredAt !== undefined)).toEqual([]);
+      expect(sibling.body.sentElsewhere).toBe(true);
 
       pin(runtime.threadId);
       const owner = await asRuntime("GET", `/api/internal/assignment-status?id=${handed.body.rootId}`);
       expect(owner.status, JSON.stringify(owner.body)).toBe(200);
+      expect(owner.body.sentElsewhere).toBeUndefined();
+      expect(owner.body.inbox.length).toBeGreaterThan(0);
       expect(owner.body.inbox.filter((item: { deliveredAt?: number }) => item.deliveredAt === undefined)).toEqual([]);
     } finally {
       for (const bot of [runtime, peer]) {
