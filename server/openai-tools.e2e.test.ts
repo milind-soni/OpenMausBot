@@ -51,6 +51,8 @@ function expectMemoryInTurn(request: ChatRequest, text: string) {
   expect(turn.slice(-text.length)).toBe(text);
 }
 
+const SECRET_ARGS = `{"content":"${"x".repeat(484)}synthetic-fixture-key${"y".repeat(1_000)}`;
+
 it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls through real harness approval and continuation, preserving text and cancellation", async instanceId => {
   const requests: ChatRequest[] = [];
   let scenario = "allow";
@@ -87,6 +89,9 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
     } else if (scenario === "bad-args") {
       // Arguments that parse but are not an object: strict providers answer 400 if the call is replayed as sent.
       res.end(frame({ tool_calls: [{ ...call, function: { name: call.function.name, arguments: '["verified"]' } }] }, "tool_calls") + "data: [DONE]\n\n");
+    } else if (scenario === "bad-args-secret") {
+      // Broken-off arguments with the API key across the 500-character cut of the quote the tool result shows.
+      res.end(frame({ tool_calls: [{ ...call, function: { name: call.function.name, arguments: SECRET_ARGS } }] }, "tool_calls") + "data: [DONE]\n\n");
     } else if (["text", "ordinary", "scope-empty", "tools-off"].includes(scenario)) {
       res.end(frame({ content: scenario === "text" ? JSON.stringify(call) : "Hello from the fixture." }, "stop") + "data: [DONE]\n\n");
     } else {
@@ -132,7 +137,7 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
     writeFileSync(mcpScript, MCP_FIXTURE);
     // A server is started once to check it starts for the bots that use it; the starter bot uses none of these.
     for (const starter of (await api("GET", "/api/bots")).bots) await api("PATCH", `/api/bots/${starter.id}`, { mcpServers: [] });
-    for (const mode of ["allow", "deny", "cancel", "text", "ordinary", "selected", "scope-empty", ...(instanceId === "openaiCompat" ? ["announced", "bad-args"] : []), "tools-off"]) {
+    for (const mode of ["allow", "deny", "cancel", "text", "ordinary", "selected", "scope-empty", ...(instanceId === "openaiCompat" ? ["announced", "bad-args", "bad-args-secret"] : []), "tools-off"]) {
       scenario = mode;
       const artifact = join(fixture.info.dataDir, `${mode}-artifact.txt`);
       const startupMarker = join(fixture.info.dataDir, `${mode}-mcp-started.txt`);
@@ -204,6 +209,16 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
           expect(result?.content).toMatch(/denied/i);
           expect(existsSync(artifact)).toBe(false);
         }
+      } else if (mode === "bad-args-secret") {
+        expect(settled.status).toBe("failed");
+        expect(requests.length).toBeGreaterThanOrEqual(before + 2);
+        const replayed = requests.slice(before + 1);
+        const result = replayed[0]!.messages.find((message) => message.role === "tool");
+        expect(result?.tool_call_id).toBe("fixture-call");
+        expect(JSON.parse(result?.content ?? "{}")).toEqual({ ok: false, result: `tool arguments are not complete JSON; you sent ${SECRET_ARGS.length} characters: {"content":"${"x".repeat(484)}[red … ${"y".repeat(500)}` });
+        expect(result?.content).not.toContain("synt");
+        expect(replayed.flatMap((request) => request.messages).flatMap((message) => message.tool_calls ?? []).every((call) => call.function?.arguments === "{}")).toBe(true);
+        expect(existsSync(artifact)).toBe(false);
       } else if (mode === "bad-args") {
         // A failed tool call ends the turn as failed, like a denied one; what matters is the replay the provider receives.
         expect(settled.status).toBe("failed");
