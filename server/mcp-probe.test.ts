@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MAX_REMOTE_MCP_BYTES } from "./mcp-http.ts";
-import { probeMcpServer, SIGN_IN_CHECK_TOOL } from "./mcp-probe.ts";
+import { probeEnvironment, probeMcpServer, SIGN_IN_CHECK_TOOL } from "./mcp-probe.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
@@ -49,6 +49,16 @@ function watch<T>(pending: Promise<T>): { done: boolean; value?: T } {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("custom MCP probe", () => {
+  it("uses a writable default npm cache and preserves a per-server override", () => {
+    const inherited = { npm_config_cache: "/data/.npm/_cacache", PATH: "/bin" };
+    const defaultEnv = probeEnvironment({ env: {} }, inherited);
+    expect(defaultEnv.npm_config_cache).toContain("openmausbot-mcp-npm-");
+    expect(defaultEnv.npm_config_cache).not.toBe(inherited.npm_config_cache);
+
+    const custom = probeEnvironment({ env: { npm_config_cache: "/tmp/custom-npm-cache" } }, inherited);
+    expect(custom.npm_config_cache).toBe("/tmp/custom-npm-cache");
+  });
+
   it("performs an MCP handshake and returns the bounded public tool list", async () => {
     await expect(probeMcpServer({
       command: process.execPath,
