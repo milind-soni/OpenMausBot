@@ -11069,5 +11069,6 @@
   "templateImport.remove": "Remover {name}",
   "sidebar.addDepartment": "Adicionar equipe",
   "sidebar.import": "Importar…",
-  "team.shareDepartment": "Compartilhar"
+  "team.shareDepartment": "Compartilhar",
+  "activity.tool.team.editImage": "Editar imagem"
 }

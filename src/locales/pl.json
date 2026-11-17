@@ -7105,5 +7105,6 @@
   "imageGen.complexity.help": "Jak szczegółowe są obrazy GPT-Image-2.6. Niższy poziom jest prostszy i szybszy.",
   "imageGen.complexity.low": "Niski",
   "imageGen.complexity.medium": "Średni",
-  "imageGen.complexity.high": "Wysoki"
+  "imageGen.complexity.high": "Wysoki",
+  "activity.tool.team.editImage": "Edytuj obraz"
 }

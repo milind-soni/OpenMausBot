@@ -3656,5 +3656,6 @@
   "imageGen.complexity.help": "GPT-Image-2.6 की छवियाँ कितनी विस्तृत हों। कम का मतलब सरल और तेज़।",
   "imageGen.complexity.low": "कम",
   "imageGen.complexity.medium": "मध्यम",
-  "imageGen.complexity.high": "उच्च"
+  "imageGen.complexity.high": "उच्च",
+  "activity.tool.team.editImage": "छवि संपादित करें"
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { IMAGE_DEFAULT_MODELS } from "../shared/image-generation.ts";
-import { generateImage, imageGenerationReady, imageSlots } from "./image-generation.ts";
+import { generateImage, imageGenerationReady, imageSlots, markupProblem } from "./image-generation.ts";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 const BOTH = {
@@ -76,6 +76,46 @@ describe("animated GIF", () => {
 
   it("still rejects a gif nobody asked for", async () => {
     await expect(generateImage(cfg("gpt-image-2.6-flare"), { prompt: "owl" }, { fetchImpl: vi.fn(async () => gifResponse()) })).rejects.toThrow(/invalid or oversized/);
+  });
+});
+
+describe("image edits", () => {
+  const png = (width: number, height: number, colorType: number) => {
+    const head = Buffer.alloc(26);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(head);
+    head.writeUInt32BE(width, 16); head.writeUInt32BE(height, 20); head[24] = 8; head[25] = colorType;
+    return { bytes: head, mime: "image/png" };
+  };
+  const cfg = (model: string) => ({ imageGen: { key: "openai-secret", primary: { provider: "openai" as const, model } } });
+
+  it("posts the image and the markup to /images/edits with no generated size", async () => {
+    const fetchMock = vi.fn(async () => imageResponse());
+    const image = png(64, 64, 2), markup = png(64, 64, 6);
+    await generateImage(cfg("gpt-image-2.6-sunburst"), { prompt: "remove the circled cup", edit: { image, markup } }, { fetchImpl: fetchMock });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const form = init.body as FormData;
+    expect(url).toBe("https://api.openai.com/v1/images/edits");
+    expect(init.headers).not.toHaveProperty("content-type");
+    expect(form.get("model")).toBe("gpt-image-2.6-sunburst");
+    expect(form.get("prompt")).toBe("remove the circled cup");
+    expect(Buffer.from(await (form.get("image") as Blob).arrayBuffer())).toEqual(image.bytes);
+    expect((form.get("markup") as Blob).type).toBe("image/png");
+    expect(Buffer.from(await (form.get("markup") as Blob).arrayBuffer())).toEqual(markup.bytes);
+    expect(form.has("size")).toBe(false);
+  });
+
+  it("refuses models that are not GPT-Image-2.6 before any request", async () => {
+    const fetchMock = vi.fn(async () => imageResponse());
+    await expect(generateImage(cfg("gpt-image-2"), { prompt: "x", edit: { image: png(8, 8, 2) } }, { fetchImpl: fetchMock })).rejects.toThrow(/GPT-Image-2.6/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("explains a markup that cannot be used", () => {
+    const image = png(64, 64, 2);
+    expect(markupProblem(image, png(64, 64, 6))).toBeNull();
+    expect(markupProblem(image, png(64, 64, 2))).toMatch(/transparent/);
+    expect(markupProblem(image, png(32, 64, 6))).toMatch(/same size/);
+    expect(markupProblem(image, { bytes: Buffer.from("not a png"), mime: "image/png" })).toMatch(/must be a PNG/);
   });
 });
 

@@ -7636,5 +7636,6 @@
   "imageGen.complexity.help": "GPT-Image-2.6 이미지의 세부 정도입니다. 낮을수록 단순하고 빠릅니다.",
   "imageGen.complexity.low": "낮음",
   "imageGen.complexity.medium": "보통",
-  "imageGen.complexity.high": "높음"
+  "imageGen.complexity.high": "높음",
+  "activity.tool.team.editImage": "이미지 편집"
 }

@@ -188,7 +188,7 @@ describe("the generate_image route", () => {
       await routes.internal({
         method: "POST", path: "/api/internal/images/generate", res,
         json: (_res: ServerResponse, status: number, body: unknown) => { answer = { status, body }; },
-        readBody: async () => ({ prompt: "owl" }),
+        readBody: async () => ({ prompt: "owl" }), folders: async () => ({ roots: [], vmWorkspace: null }),
         threadId: "thread", requireActive: options.requireActive ?? (() => {}), personTurn: options.personTurn ?? true,
       });
       return answer!;
@@ -237,7 +237,7 @@ describe("the generate_image route", () => {
     const routes = createImageToolRoutes({ config: () => CFG, dataDir: scratch(), liveTurn: () => "turn", key: (a, b) => a + b, images: () => 0, park: () => {} });
     const answered = vi.fn<(res: ServerResponse, status: number, body: unknown) => void>();
     const res = new ServerResponse(new IncomingMessage(new Socket()));
-    const out = await routes.internal({ method: "POST", path: "/api/internal/voice-note", res, json: answered, readBody: async () => ({}), threadId: "t", requireActive: () => {}, personTurn: true });
+    const out = await routes.internal({ method: "POST", path: "/api/internal/voice-note", res, json: answered, readBody: async () => ({}), folders: async () => ({ roots: [], vmWorkspace: null }), threadId: "t", requireActive: () => {}, personTurn: true });
     expect(typeof out).toBe("symbol");
     expect(answered).not.toHaveBeenCalled();
   });
