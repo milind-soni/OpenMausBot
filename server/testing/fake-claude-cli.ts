@@ -96,6 +96,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { hookMatches } from "./claude-hook-matcher.ts";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 import { playStreamScript, streamScript } from "./stream-script.ts";
 
@@ -254,10 +255,8 @@ const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ ty
     return {};
   }
 })();
-// Like Claude Code: a matcher tests the tool name, a session's source or a compaction's trigger; "" and "*" match all.
+// Like Claude Code: a matcher tests the tool name, a session's source or a compaction's trigger.
 const HOOK_MATCHED_FIELD: Record<string, string> = { PostToolUse: "tool_name", PostToolUseFailure: "tool_name", SessionStart: "source", PreCompact: "trigger" };
-const hookMatches = (matcher: string | undefined, value: unknown) =>
-  !matcher || matcher === "*" || new RegExp(`^(?:${matcher})$`).test(String(value ?? ""));
 function runHooks(event: string, payload: Record<string, unknown>): string {
   let stdout = "";
   for (const entry of settingsHooks[event] ?? []) {

@@ -8,8 +8,8 @@ export function claudeHookSettings(helperPath: string, platform: NodeJS.Platform
     ? { type: "command", command: process.execPath, args: [helperPath], timeout: 5 }
     : { type: "command", command: [process.execPath, helperPath].map(path => `'${path.replace(/'/g, "'\\''")}'`).join(" "), timeout: 5 };
   // Claude Code holds a tool's result until its synchronous hooks exit, and every hook starts a process (on Windows the
-  // whole Electron binary). An async hook (2.1.325) holds nothing but is still killed at its timeout, so it gets room for
-  // a slow start. The matchers keep a process from starting for events whose reply the harness never sends.
+  // whole Electron binary). An async hook holds nothing; 2.1.308 still kills one at its timeout (2.1.325 does not), so it
+  // gets room for a slow start. The matchers keep a process from starting for events whose reply the harness never sends.
   return {
     PostToolUse: [{ matcher: "", hooks: [{ ...hook, async: true, timeout: 60 }] }],
     PostToolUseFailure: [{ matcher: "Bash", hooks: [hook] }],
