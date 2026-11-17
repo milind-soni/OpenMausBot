@@ -5,12 +5,13 @@
 //             conversation no person has in front of them, and while a person asked a prompt-cache keep-warm, until then.
 //   per-bot   a bot's browser, kept for any of its conversations: the browser idle time (Settings, 10 minutes on the
 //             desktop, 3 on a Cloud home; host/browser.ts).
-//   shared    a process several bots' conversations use (a shared ACP process): recycled 60 s after its last session.
-// Where turns wait for room (a Cloud home, a self-hosted Linux server), every one of these times shrinks as memory or the
-// pids limit fills (EngineMemory.roomFactor: the signals admission reads), down to a tenth and never below its floor, and
-// what is already kept is looked at again every couple of seconds (sweepIdleEngines), not only when it went idle. Short
-// of room, a keep-warm hold yields too. Before admission makes a new engine wait it stops the engine idle longest
-// (engine-memory.ts), and a browser with no room to open asks for the same first (host/browser.ts).
+//   shared    a process several bots' conversations use (a shared ACP process): recycled 60 s after its last session
+//             (OMB_ACP_SHARED_RECYCLE_MS), a fixed time that does not shrink.
+// Where turns wait for room (a Cloud home, a self-hosted Linux server), the per-chat and per-bot times shrink as memory or
+// the pids limit fills (EngineMemory.roomFactor: the signals admission reads), down to a tenth and never below their
+// floor, and per-chat engines already kept are looked at again every couple of seconds (sweepIdleEngines), not only when
+// they went idle. Short of room, a keep-warm hold yields too. Before admission makes a new engine wait it stops the
+// engine idle longest (engine-memory.ts), and a browser with no room to open asks for the same first (host/browser.ts).
 import { availableMemory, boxMemory, type BoxMemory } from "../box-memory.ts";
 import { stoppedForBotMemory } from "../bot-memory-cap.ts";
 import { engineMemory, type EngineMemory } from "../engine-memory.ts";
@@ -100,20 +101,24 @@ export function keepWarm(key: string, engine: WarmEngine, box: Pick<BoxMemory, "
 }
 
 /** Every per-chat engine idle now, with when it went idle: what the sweep looks at again. */
-const armed = new Map<string, { engine: WarmEngine; since: number }>();
+const armed = new Map<string, { engine: WarmEngine; since: number; timer: ReturnType<typeof setTimeout> }>();
 
 /** Closes an idle per-chat engine after `ms`, sooner on a small box once another engine goes idle after it, and sooner
  * still once the room shrinks its idle time (sweepIdleEngines). */
 export function armIdleClose(key: string, ms: number, engine: WarmEngine, now: number = Date.now()): ReturnType<typeof setTimeout> {
   const timer = setTimeout(() => { armed.delete(key); engine.close(); }, ms);
   timer.unref?.();
-  armed.set(key, { engine, since: now });
+  armed.set(key, { engine, since: now, timer });
   keepWarm(key, engine);
   return timer;
 }
 
+/** The engine is busy again or gone: its timer stops and it is no longer kept idle. A session ending with an old timer
+ * (`timer` not the one armed under `key` now) leaves a later session's entry alone. */
 export function stopIdleClose(key: string, timer: ReturnType<typeof setTimeout> | null): void {
   if (timer) clearTimeout(timer);
+  const entry = armed.get(key);
+  if (timer && entry && entry.timer !== timer) return;
   warmEngines.delete(key);
   armed.delete(key);
 }
@@ -126,7 +131,9 @@ export function sweepIdleEngines(memory: Pick<EngineMemory, "enabled" | "headroo
   if (factor >= 1 && !short) return 0;
   let closed = 0;
   for (const [key, { engine, since }] of armed) {
-    if (!engine.threadId || !engine.policy || !engine.idle() || (engine.held?.() && !short)) continue;
+    // No longer idle (a turn took it again, or it ended): its driver arms it again when it next goes idle.
+    if (!engine.idle()) { armed.delete(key); continue; }
+    if (!engine.threadId || !engine.policy || (engine.held?.() && !short)) continue;
     if (now - since < engineIdleMs(engine.threadId, engine.policy, { enabled: true, headroom: () => factor, roomFactor: () => factor }, now)) continue;
     armed.delete(key);
     warmEngines.delete(key);
@@ -136,6 +143,9 @@ export function sweepIdleEngines(memory: Pick<EngineMemory, "enabled" | "headroo
   return closed;
 }
 engineMemory.useIdleSweep(() => void sweepIdleEngines());
+
+/** How many per-chat engines are kept idle now: for tests. */
+export const armedIdleCount = (): number => armed.size;
 
 export function warmEngineKeys(): string[] {
   return [...warmEngines.keys()];
@@ -161,4 +171,4 @@ export function engineIdleMs(threadId: string, policy: SessionIdlePolicy,
 
 /** Whether this thread's engine (`pid`, the process that exited) was just stopped to make room, or for want of it, or for
  * its bot's memory cap (bot-memory-cap.ts): a driver does not start it again at once, into the same shortage. */
-export const stoppedForRoom = (threadId: string, pid?: number): boolean => engineMemory.stoppedForRoom(threadId, pid) || stoppedForBotMemory(pid);
+export const stoppedForRoom = (threadId: string, pid?: number): boolean => engineMemory.stoppedForRoom(threadId, pid) || stoppedForBotMemory(threadId, pid);

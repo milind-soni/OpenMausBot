@@ -138,7 +138,10 @@ describe("which bot an engine runs for", () => {
     const owners = new EngineOwners();
     const child = Object.assign(new EventEmitter(), { pid: 4242 });
     runInTurn({ botId: "bot_a", threadId: "thread_1" }, () => owners.track(child, "777"));
-    expect(owners.list()).toEqual([{ pid: 4242, start: "777", threads: new Map([["thread_1", "bot_a"]]), exited: false }]);
+    expect(owners.list()).toEqual([{ pid: 4242, start: "777", threads: new Map([["thread_1", "bot_a"]]), exited: false, shareable: false }]);
+    // A shared ACP process marks itself one other conversations may join.
+    owners.shareable(child);
+    expect(owners.list()[0]?.shareable).toBe(true);
     runInTurn({ botId: "bot_b", threadId: "thread_2" }, () => owners.attach(child, "thread_2"));
     owners.attach(child, "thread_3");
     expect([...owners.list()[0]!.threads]).toEqual([["thread_1", "bot_a"], ["thread_2", "bot_b"], ["thread_3", ""]]);
@@ -163,7 +166,7 @@ describe("which bot an engine runs for", () => {
     const browsers: FootprintOwner[] = [{ pid: 11, botIds: ["bot_z"], kind: "browser" }];
     const botOf = (threadId: string) => (threadId === "thread_known" || threadId === "thread_k2" ? "bot_k" : null);
     const list = footprintOwners({ botOf, browsers: () => browsers, engines: owners });
-    expect(list()).toEqual([{ pid: 10, start: null, kind: "engine", botIds: ["bot_k"] }, browsers[0]]);
+    expect(list()).toEqual([{ pid: 10, start: null, kind: "engine", botIds: ["bot_k"], threads: ["thread_known"] }, browsers[0]]);
     owners.attach(child, "thread_gone");
     expect(list()[0]?.botIds).toEqual(["bot_k", "?"]);
     const rows: ProcessRow[] = [{ pid: 10, ppid: 1, name: "opencode", cpuMs: 0, rssBytes: MB, start: "s" }];

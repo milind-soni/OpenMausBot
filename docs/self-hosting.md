@@ -593,22 +593,34 @@ bot. Bot ids and numbers only.
 stays loaded after its turn (10 minutes by default, `OMB_SESSION_IDLE_MS`;
 30 seconds for work nobody is watching), a bot's browser stays open for its
 idle time, and a process several bots share is recycled a minute after its
-last session. Where turns wait for room, each of these times shrinks as
-memory or the process limit fills, down to a tenth (never below its floor),
-and what is already loaded is looked at again every few seconds. Before a
-new turn or browser waits for room, the engine idle longest is closed.
+last session (`OMB_ACP_SHARED_RECYCLE_MS`; this one stays fixed). Where turns
+wait for room, a conversation's engine time and a browser's idle time shrink
+as memory or the process limit fills, down to a tenth (never below their
+floor), and engines already kept are looked at again every few seconds.
+Before a new turn or browser waits for room, the engine idle longest is
+closed.
 
-**One bot's memory.** Where turns wait for room, one bot may use at most
-twice its fair share of the server's memory (the memory over the turns that
-may run at once), at least 1,900 MB and at most 80% of it. A bot over that
-for two checks in a row (every 5 seconds), or 50% over it once, has its
-engine stopped and its own browser closed; its running turn ends with a line
-saying which bot used more memory than this computer allows for one bot.
-Engines and browsers several bots share are never stopped this way. Set
-`OMB_BOT_MEMORY_MAX_MB` to a number of MB, or to `off`; the desktop app has
-no cap unless it is set. The server enforces the cap itself by reading its
-process list; it logs at start whether the host also offers a systemd scope
-or a delegated cgroup, which are not used yet.
+**One bot's memory.** Where turns wait for room, the server watches how
+much memory each bot uses against twice its fair share (the memory over
+the turns that may run at once), at least 1,900 MB and at most 80% of it,
+for each engine the bot runs (a bot with several conversations open may use
+that much for each). By default it only writes down a bot that stays over
+(for 30 seconds, or sooner while memory is short): the bot's id, the memory
+it used and how it was measured, the limit, its engines and the room left
+go to the server log and the health report. Nothing is stopped. To have the
+server act, set `OMB_BOT_MEMORY_MAX_MB` to a number of MB (any Linux host,
+the desktop app included); `auto` is the default (watch only) and `off` turns
+the watching off. Even then it acts only while the server is short of
+memory, only on the bot using the most, and in steps: first what the bot
+left running and its idle engines; then, measured again and still over, its
+largest busy engine or browser. A turn whose engine is stopped ends with a
+line saying the bot used more memory than this computer allows for one bot.
+Engines and browsers several bots share, and a process other conversations
+may join, are never stopped this way; on a Team Cloud only the browser that
+was over is closed, never the same bot's browsers for other members. The
+server watches by reading its process list; it logs at start whether the
+host also offers a systemd scope or a delegated cgroup, which are not used
+yet.
 
 **Bots' cloud computers do not count.** A bot's cloud computer runs at the
 provider that hosts it, not in this container, so its desktop and browser

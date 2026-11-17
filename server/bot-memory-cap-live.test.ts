@@ -1,4 +1,5 @@
-// The memory cap on real processes (Linux): stand-in engines started as spawnCli starts them, each leading its own
+// The memory cap on real processes (Linux): watch only by default, and an opt-in cap under (injected) memory pressure.
+// Stand-in engines started as spawnCli starts them, each leading its own
 // session with two tool-server children and a child its shell left behind (adopted by init, still in the engine's
 // session); the watchdog reads /proc as the server does: stat lines, proportional set sizes, start ticks, real signals.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -6,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BotMemoryWatchdog, pssBytes } from "./bot-memory-cap.ts";
+import type { FootprintOwner } from "./perf/bot-footprint.ts";
 import { parseProcStat } from "./perf/process-buckets.ts";
 import { linuxProcessList } from "./perf/process-sampler.ts";
 
@@ -38,25 +40,46 @@ async function until(done: () => boolean, ms = 15_000): Promise<boolean> {
 const session = (sid: number) => linuxProcessList().rows.filter((row) => row.sid === sid && row.state !== "Z").map((row) => row.pid);
 
 describe("the memory cap on real processes", () => {
-  it.runIf(process.platform === "linux")("stops only the bot over its cap, the child its shell left included, and leaves the other bot running", async () => {
+  const owners = (big: ChildProcess, small: ChildProcess): FootprintOwner[] => [
+    { pid: big.pid!, botIds: ["bot_big"], kind: "engine", threads: ["t_big"] }, { pid: small.pid!, botIds: ["bot_small"], kind: "engine", threads: ["t_small"] },
+  ];
+
+  it.runIf(process.platform === "linux")("by default only writes the bot down: nothing is signalled", async () => {
+    const big = engine(300), small = engine(10);
+    await Promise.all([ready(big), ready(small)]);
+    expect(await until(() => session(big.pid!).length === 4 && session(small.pid!).length === 4)).toBe(true);
+    const signals: string[] = [];
+    const dog = new BotMemoryWatchdog({
+      cap: () => ({ mode: "log", bytes: 200 * MB }), list: () => linuxProcessList().rows, pss: (pid) => pssBytes(pid), startOf, graceMs: 2_000, owners: () => owners(big, small),
+      pressure: () => ({ room: 0.1, short: true, freeBytes: 100 * MB }), busy: () => true, signal: (pid, value) => { signals.push(`${value} ${pid}`); process.kill(pid, value); }, log: () => {},
+    });
+    let events = await dog.check();
+    if (!events.length) events = await dog.check();
+    expect(events.map((event) => [event.botId, event.action])).toEqual([["bot_big", "logged"]]);
+    expect(events[0]!.usedMB).toBeGreaterThan(300);
+    expect(signals).toEqual([]);
+    expect(session(big.pid!).every(alive)).toBe(true);
+  }, 60_000);
+
+  it.runIf(process.platform === "linux")("set to a number, with memory short: stops only the bot over its cap, the child its shell left included, and leaves the other bot running", async () => {
     const big = engine(300), small = engine(10);
     await Promise.all([ready(big), ready(small)]);
     // Both sessions are whole: the engine, two tool servers and the left-behind sleep.
     expect(await until(() => session(big.pid!).length === 4 && session(small.pid!).length === 4)).toBe(true);
-    const smallPids = session(small.pid!);
+    const smallPids = session(small.pid!), bigPids = session(big.pid!);
     const signals: string[] = [];
     const dog = new BotMemoryWatchdog({
-      cap: () => 200 * MB, list: () => linuxProcessList().rows, pss: (pid) => pssBytes(pid), startOf, graceMs: 2_000,
-      owners: () => [{ pid: big.pid!, botIds: ["bot_big"], kind: "engine" }, { pid: small.pid!, botIds: ["bot_small"], kind: "engine" }],
+      cap: () => ({ mode: "enforce", bytes: 200 * MB }), list: () => linuxProcessList().rows, pss: (pid) => pssBytes(pid), startOf, graceMs: 2_000, owners: () => owners(big, small),
+      pressure: () => ({ room: 0.1, short: true, freeBytes: 100 * MB }), busy: () => true,
       signal: (pid, value) => { signals.push(`${value} ${pid}`); process.kill(pid, value); }, log: () => {},
     });
-    let stops = await dog.check();
-    // 300 MB of its own pages against 200 MB is past one and a half times the cap: one look is enough. Allow a second
-    // where the share read below that the first time.
-    if (!stops.length) stops = await dog.check();
-    expect(stops.map((stop) => stop.botId)).toEqual(["bot_big"]);
-    expect(stops[0]!.usedBytes).toBeGreaterThan(300 * MB);
-    expect(stops[0]!.pids.length).toBeGreaterThanOrEqual(4);
+    // 300 MB of its own pages against 200 MB is past one and a half times the cap with memory short: one look is enough.
+    // Allow a second where the share read below that the first time.
+    let events = await dog.check();
+    if (!events.length) events = await dog.check();
+    expect(events.map((event) => [event.botId, event.action])).toEqual([["bot_big", "engine"]]);
+    expect(events[0]!.usedMB).toBeGreaterThan(300);
+    expect(bigPids.every((pid) => signals.includes(`SIGTERM ${pid}`))).toBe(true);
     expect(await until(() => session(big.pid!).length === 0)).toBe(true);
     expect(signals.some((line) => smallPids.includes(Number(line.split(" ")[1])))).toBe(false);
     expect(smallPids.every(alive)).toBe(true);

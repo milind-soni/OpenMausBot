@@ -1206,7 +1206,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
       const live = sessions.get(threadId);
       if (!turn.sessionReset && live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
-        if (live.idleTimer) clearTimeout(live.idleTimer);
+        stopIdleClose(`${instanceId}\0${threadId}`, live.idleTimer); // busy again: no longer idle
         live.turn = { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, awaitingInit: true, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null };
         active.set(threadId, { stop: () => {
           if (live.turn) live.turn.stopRequested = true;
@@ -1836,7 +1836,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           });
           settle(false, "exit_before_result");
         }
-        if (session.idleTimer) clearTimeout(session.idleTimer);
+        stopIdleClose(`${instanceId}\0${threadId}`, session.idleTimer);
         session.broker?.close();
         session.elicit.close();
         session.context.close();

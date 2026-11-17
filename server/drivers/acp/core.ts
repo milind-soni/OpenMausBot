@@ -1051,7 +1051,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         let session: AcpSession;
         if (pooled && !pooled.dead && !pooled.closing && pooled.contractKey === contractKey
             && (!support.restartOnMcpChange || pooled.sessionKey === sessionKey)) {
-          if (pooled.idleTimer) clearTimeout(pooled.idleTimer);
+          stopIdleClose(`${instanceId}\0${threadId}`, pooled.idleTimer); // busy again: no longer idle
           pooled.idleTimer = null;
           session = pooled;
         } else {

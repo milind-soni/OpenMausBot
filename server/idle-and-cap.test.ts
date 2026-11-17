@@ -1,19 +1,10 @@
-// The one idle policy (drivers/session-idle.ts) and the per-bot memory cap (bot-memory-cap.ts).
+// The one idle policy (drivers/session-idle.ts); the per-bot memory cap's own tests are in bot-memory-cap.test.ts.
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  BOT_CAP_FLOOR_BYTES, BotMemoryWatchdog, botMemoryCapBytes, capLadder, pssBytes, useBotMemoryWatchdog, withBotMemoryCap,
-} from "./bot-memory-cap.ts";
-import type { ProviderInstance, RuntimeEvent, RuntimeEventListener, SendTurnInput } from "./contracts.ts";
-import { armIdleClose, engineIdleMs, idleAfter, stopIdleClose, stoppedForRoom, sweepIdleEngines, type WarmEngine } from "./drivers/session-idle.ts";
-import { EngineMemory, memoryStopped, type HostMemory } from "./engine-memory.ts";
-import { hostFaultOf, retryCannotFix } from "./host-fault.ts";
-import { namesOwnCause } from "./process-shortage.ts";
-import { retriesTeammateThread } from "./routine-recovery.ts";
-import type { FootprintOwner } from "./perf/bot-footprint.ts";
-import type { ProcessRow } from "./perf/process-buckets.ts";
+import { armedIdleCount, armIdleClose, engineIdleMs, idleAfter, stopIdleClose, sweepIdleEngines, type WarmEngine } from "./drivers/session-idle.ts";
+import { EngineMemory, type HostMemory } from "./engine-memory.ts";
 import { ProcessBudget } from "./process-room.ts";
 import { forgetPresence, sawThread } from "./thread-presence.ts";
 
@@ -149,6 +140,27 @@ describe("one idle policy, shorter as the server runs short of room", () => {
     }
   });
 
+  it("lets an engine go from the sweep's list once it is busy again or gone, and an old session's end leaves a newer one's entry", () => {
+    const start = 1_800_000_000_000;
+    const policy = { idleMs: 10 * 60_000, minimumMs: 10_000 };
+    const before = armedIdleCount();
+    const state = { busy: false };
+    const engine: WarmEngine = { threadId: "g1", policy, idle: () => !state.busy, close: () => {} };
+    const old = armIdleClose("g", 600_000, engine, start);
+    // A new turn took the session (the driver stops the idle close), then it went idle again under a new timer.
+    stopIdleClose("g", old);
+    expect(armedIdleCount()).toBe(before);
+    const fresh = armIdleClose("g", 600_000, engine, start);
+    // The earlier session of this conversation ends now, with its old timer: the newer entry stays.
+    stopIdleClose("g", old);
+    expect(armedIdleCount()).toBe(before + 1);
+    // An entry whose engine is busy again (its end came by a plain clearTimeout) is dropped at the next sweep.
+    state.busy = true;
+    clearTimeout(fresh);
+    sweepIdleEngines({ enabled: true, headroom: () => 0.5, roomFactor: () => 0.5, shortOfRoom: () => false }, start + 60_000);
+    expect(armedIdleCount()).toBe(before);
+  });
+
   it("runs the sweep on every tick of the gate", () => {
     const h = server();
     let swept = 0;
@@ -200,174 +212,5 @@ describe("an idle engine goes before admission makes new work wait", () => {
     await h.idleEngine("b");
     expect(await h.memory.reclaimIdle()).toBe(true);
     expect(h.signals).toEqual(["SIGTERM -1000"]);
-  });
-});
-
-describe("a memory cap per bot", () => {
-  const inputs = (memoryBytes: number, turns?: number) => ({ gate: "server" as const, memoryBytes, ...(turns === undefined ? {} : { turns }) });
-
-  it("is off on the desktop and where set off, a set number of MB where given, else twice a bot's fair share within bounds", () => {
-    const warned: string[] = [];
-    expect(botMemoryCapBytes({}, { gate: null, memoryBytes: 16 * GB })).toBeNull();
-    expect(botMemoryCapBytes({ OMB_BOT_MEMORY_MAX_MB: "3000" }, { gate: null, memoryBytes: 16 * GB })).toBe(3000 * MB);
-    expect(botMemoryCapBytes({ OMB_BOT_MEMORY_MAX_MB: "off" }, inputs(8 * GB, 10))).toBeNull();
-    expect(botMemoryCapBytes({ OMB_BOT_MEMORY_MAX_MB: "0" }, inputs(8 * GB, 10))).toBeNull();
-    expect(botMemoryCapBytes({ OMB_BOT_MEMORY_MAX_MB: "10" }, inputs(8 * GB, 10))).toBe(256 * MB);
-    // 8 GB and 10 turns: a fair share is 819 MB, twice that 1,638 MB, below an engine at its largest with its browser.
-    expect(botMemoryCapBytes({}, inputs(8 * GB, 10))).toBe(BOT_CAP_FLOOR_BYTES);
-    expect(BOT_CAP_FLOOR_BYTES).toBe(1900 * MB);
-    // 32 GB and 8 turns: 8 GB.
-    expect(botMemoryCapBytes({ OMB_BOT_MEMORY_MAX_MB: "auto" }, inputs(32 * GB, 8))).toBe(8 * GB);
-    // 2 GB: never more than 80% of the memory.
-    expect(botMemoryCapBytes({}, inputs(2 * GB, 2))).toBe(Math.round(1.6 * GB));
-    // Without a number of turns: as many as fit at an engine's usual 700 MB.
-    expect(botMemoryCapBytes({}, inputs(64 * GB))).toBe(BOT_CAP_FLOOR_BYTES);
-    expect(botMemoryCapBytes({}, inputs(64 * GB, 16))).toBe(8 * GB);
-    expect(botMemoryCapBytes({ OMB_BOT_MEMORY_MAX_MB: "lots" }, inputs(8 * GB, 10), (line) => warned.push(line))).toBe(BOT_CAP_FLOOR_BYTES);
-    expect(warned).toEqual(['OMB_BOT_MEMORY_MAX_MB="lots" is not a number of MB, "auto" or "off", so the default is used']);
-  });
-
-  it("reports the ladder's rungs this host offers, and enforces with the watchdog", () => {
-    expect(capLadder(GB, { platform: "darwin" })).toEqual({ rung: "none", offered: [] });
-    const files: Record<string, string> = { "/proc/self/cgroup": "0::/system.slice/openmausbot.service\n", "/sys/fs/cgroup/system.slice/openmausbot.service/cgroup.controllers": "cpu io memory pids\n" };
-    const read = (path: string) => files[path] ?? null;
-    expect(capLadder(GB, { platform: "linux", read, writable: () => true, exists: () => true })).toEqual({ rung: "watchdog", offered: ["systemd-scope", "cgroup", "watchdog"] });
-    // A container's read-only cgroup: only the watchdog.
-    expect(capLadder(GB, { platform: "linux", read: (path) => (path === "/proc/self/cgroup" ? "0::/\n" : path === "/sys/fs/cgroup/cgroup.controllers" ? "memory pids\n" : null), writable: () => false, exists: () => false }))
-      .toEqual({ rung: "watchdog", offered: ["watchdog"] });
-    expect(capLadder(null, { platform: "linux", read, writable: () => false, exists: () => false })).toEqual({ rung: "none", offered: ["watchdog"] });
-    expect(pssBytes(7, (path) => (path === "/proc/7/smaps_rollup" ? "Rss:  2048 kB\nPss:   1024 kB\n" : null))).toBe(MB);
-    expect(pssBytes(7, () => null)).toBeNull();
-  });
-
-  /** Bot A: engine 200 and its tool server 201. Bot B: engine 300, tool server 301, and its browser 500 with Chrome 501
-   * (100 MB). Shared: an engine 400 both bots use. The sizes are each bot's engine and tool server together. */
-  function processes(sizes: { a?: number; b?: number; shared?: number } = {}) {
-    const row = (pid: number, ppid: number, mb: number, pgid = pid): ProcessRow => ({ pid, ppid, name: "x", cpuMs: 0, rssBytes: mb * MB, start: `s${pid}`, pgid, sid: pgid });
-    return [
-      row(100, 1, 200),
-      row(200, 100, (sizes.a ?? 1200) - 200), row(201, 200, 200, 200),
-      row(300, 100, (sizes.b ?? 600) - 100), row(301, 300, 100, 300),
-      row(500, 1, 40), row(501, 500, 60, 500),
-      row(400, 100, sizes.shared ?? 5000),
-    ];
-  }
-  const owners: FootprintOwner[] = [
-    { pid: 200, botIds: ["bot_a"], kind: "engine" }, { pid: 300, botIds: ["bot_b"], kind: "engine" },
-    { pid: 500, botIds: ["bot_b"], kind: "browser" }, { pid: 400, botIds: ["bot_a", "bot_b"], kind: "engine" },
-  ];
-  /** By default every process's proportional size reads as its resident size. */
-  function dog(rows: () => ProcessRow[], pss: (pid: number) => number | null = (pid) => rows().find((row) => row.pid === pid)?.rssBytes ?? null,
-    startOf: (pid: number) => string | null = (pid) => `s${pid}`) {
-    const signals: string[] = [], closed: string[] = [], logs: string[] = [];
-    let clock = 1_800_000_000_000;
-    const watchdog = new BotMemoryWatchdog({ cap: () => 1000 * MB, list: rows, owners: () => owners, pss, startOf, graceMs: 0, now: () => clock,
-      signal: (pid, value) => signals.push(`${value} ${pid}`), closeBrowsers: async (botId) => { closed.push(botId); }, log: (line) => logs.push(line) });
-    return { watchdog, signals, closed, logs, advance: (ms: number) => { clock += ms; }, now: () => clock };
-  }
-
-  it("stops a bot that stays over its cap: its engine's processes and its own browser, never another bot's or a shared process", async () => {
-    let sizes = { a: 900, b: 1200 };
-    const h = dog(() => processes(sizes));
-    expect(await h.watchdog.check()).toEqual([]);
-    expect(h.signals).toEqual([]);
-    const [stop] = await h.watchdog.check();
-    expect(stop).toMatchObject({ botId: "bot_b", usedBytes: 1300 * MB, capBytes: 1000 * MB });
-    expect(h.signals).toEqual(["SIGTERM 300", "SIGTERM 301", "SIGKILL 300", "SIGKILL 301"]);
-    expect(h.closed).toEqual(["bot_b"]);
-    expect(h.logs).toEqual(["memory: bot bot_b used 1300 MB, more than the 1000 MB this server allows one bot; stopping its engine (2 processes) and closing its browser"]);
-    expect(h.watchdog.stopOf("bot_b")).toMatchObject({ botId: "bot_b" });
-    expect(h.watchdog.stoppedPid(300)).toBe(true);
-    expect(h.watchdog.stoppedPid(200)).toBe(false);
-    expect(h.watchdog.stops()).toBe(1);
-    // A bot that dips back under its cap starts counting again.
-    sizes = { a: 1100, b: 500 };
-    expect(await h.watchdog.check()).toEqual([]);
-    sizes = { a: 900, b: 500 };
-    expect(await h.watchdog.check()).toEqual([]);
-    sizes = { a: 1100, b: 500 };
-    expect(await h.watchdog.check()).toEqual([]);
-    expect(h.signals).toHaveLength(4);
-  });
-
-  it("stops a bot far over its cap at once, and counts shared pages once (by proportional size) before stopping anything", async () => {
-    const far = dog(() => processes({ a: 1600 }));
-    expect((await far.watchdog.check()).map((stop) => stop.botId)).toEqual(["bot_a"]);
-    expect(far.signals).toEqual(["SIGTERM 200", "SIGTERM 201", "SIGKILL 200", "SIGKILL 201"]);
-    expect(far.closed).toEqual([]);
-    // Resident 1,600 MB, but 700 MB of it pages shared with other processes: 900 MB its own share, under the cap.
-    const shared = dog(() => processes({ a: 1600 }), (pid) => (pid === 200 ? 700 * MB : pid === 201 ? 200 * MB : null));
-    expect(await shared.watchdog.check()).toEqual([]);
-    expect(await shared.watchdog.check()).toEqual([]);
-    expect(shared.signals).toEqual([]);
-  });
-
-  it("stops a bot whose shares can't be read only when it stays far over, its resident pages erring high", async () => {
-    let sizes = { a: 1300 };
-    const h = dog(() => processes(sizes), () => null);
-    expect(await h.watchdog.check()).toEqual([]);
-    expect(await h.watchdog.check()).toEqual([]);
-    expect(await h.watchdog.check()).toEqual([]);
-    sizes = { a: 1600 };
-    expect(await h.watchdog.check()).toEqual([]);
-    expect((await h.watchdog.check()).map((stop) => stop.botId)).toEqual(["bot_a"]);
-  });
-
-  it("leaves alone a pid the system gave to another process since it was read", async () => {
-    const h = dog(() => processes({ a: 1600 }), undefined, (pid) => (pid === 201 ? "later" : `s${pid}`));
-    await h.watchdog.check();
-    expect(h.signals).toEqual(["SIGTERM 200", "SIGKILL 200"]);
-  });
-
-  it("ends the stopped bot's turn with a line that says why, and only that bot's turn that ran then", async () => {
-    const h = dog(() => processes({ b: 1600 }));
-    const listeners = new Set<RuntimeEventListener>();
-    const instance = withBotMemoryCap({
-      instanceId: "i", driverKind: "claudeAgent", displayName: "x", enabled: true,
-      adapter: { sendTurn: async () => ({ turnId: "t" }), onEvent: (listener: RuntimeEventListener) => { listeners.add(listener); return () => listeners.delete(listener); } },
-    } as unknown as ProviderInstance, () => h.watchdog, (botId) => (botId === "bot_b" ? "Researcher" : botId), h.now);
-    const seen: RuntimeEvent[] = [];
-    instance.adapter.onEvent((event) => seen.push(event));
-    const emit = (event: Partial<RuntimeEvent>) => { for (const listener of listeners) listener({ eventId: "e", provider: "claudeAgent", createdAt: "", ...event } as RuntimeEvent); };
-    const shown = () => seen.map((event) => (event.type === "runtime.error" ? event.message : event.type));
-    await instance.adapter.sendTurn({ threadId: "tb", botId: "bot_b", text: "go" } as SendTurnInput);
-    await instance.adapter.sendTurn({ threadId: "tc", botId: "bot_b", text: "go" } as SendTurnInput);
-    await instance.adapter.sendTurn({ threadId: "ta", botId: "bot_a", text: "go" } as SendTurnInput);
-    h.advance(1_000);
-    await h.watchdog.check();
-    emit({ threadId: "tb", turnId: "t", type: "runtime.error", message: "the process running this turn's AI ended" });
-    emit({ threadId: "tb", turnId: "t", type: "turn.completed", ok: false, stopReason: "exit_before_result" });
-    emit({ threadId: "ta", turnId: "t", type: "runtime.error", message: "something else" });
-    const line = "Researcher used more memory than this computer allows for one bot (1700 MB of 1000 MB), so I stopped this task to keep the other bots running. "
-      + "Send the message again to start over; if it keeps happening, give this task less to do at once, or give this computer more memory.";
-    expect(shown()).toEqual([line, "turn.completed", "something else"]);
-    expect(seen[0]).toMatchObject({ text: { key: "chat.notice.botMemoryCap", params: { bot: "Researcher", used: "1700", cap: "1000" } } });
-    // A fault a retry cannot fix: no automatic retry or Chief retry starts the bot into the same cap again.
-    expect(hostFaultOf(line)).toBe("bot_memory");
-    expect(retryCannotFix("bot_memory")).toBe(true);
-    expect(retriesTeammateThread(line)).toBe(false);
-    expect(namesOwnCause(line)).toBe(true);
-    expect(memoryStopped(line)).toBe(false);
-    // A turn that ends without an error of its own still says why, first.
-    seen.length = 0;
-    emit({ threadId: "tc", turnId: "t", type: "turn.completed", ok: false, stopReason: "exit_before_result" });
-    expect(shown()).toEqual([line, "turn.completed"]);
-    await settle();
-    // A turn started after the stop fails for its own reasons.
-    seen.length = 0;
-    h.advance(1_000);
-    await instance.adapter.sendTurn({ threadId: "tb", botId: "bot_b", text: "again" } as SendTurnInput);
-    emit({ threadId: "tb", turnId: "t2", type: "runtime.error", message: "its own failure" });
-    expect(shown()).toEqual(["its own failure"]);
-  });
-
-  it("keeps a driver from starting the stopped engine again at once", async () => {
-    const h = dog(() => processes({ b: 1600 }));
-    await h.watchdog.check();
-    useBotMemoryWatchdog(h.watchdog);
-    try {
-      expect(stoppedForRoom("tb", 300)).toBe(true);
-      expect(stoppedForRoom("ta", 200)).toBe(false);
-    } finally { useBotMemoryWatchdog(null); }
   });
 });

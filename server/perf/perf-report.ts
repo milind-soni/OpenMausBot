@@ -61,7 +61,7 @@ export function perfHealth(sources: PerfSources) {
     bots: sources.bots ?? null,
   };
   const size = () => JSON.stringify(body).length;
-  if (size() > PERF_HEALTH_MAX_BYTES && body.bots) body.bots = { ...body.bots, shown: body.bots.shown.slice(0, 3) };
+  if (size() > PERF_HEALTH_MAX_BYTES && body.bots) body.bots = { ...body.bots, shown: body.bots.shown.slice(0, 3), ...(body.bots.cap ? { cap: { ...body.bots.cap, events: body.bots.cap.events.slice(-1) } } : {}) };
   if (size() > PERF_HEALTH_MAX_BYTES && body.process) body.process = { ...body.process, buckets: body.process.buckets.slice(0, 6) };
   if (size() > PERF_HEALTH_MAX_BYTES) body.h24.tools = body.h24.tools.slice(0, 4);
   if (size() > PERF_HEALTH_MAX_BYTES) body.live = body.live.slice(0, 2);

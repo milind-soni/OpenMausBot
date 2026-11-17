@@ -484,7 +484,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const browserDaemons = createBrowserDaemons();
   /** Each running agent-browser daemon (its session's pid file) with the bots whose browser it is: one bot's own, or a
    * profile's several bots share. For the per-bot footprint (perf/bot-footprint.ts): one small file read a session. */
-  function browserOwners(): Array<{ pid: number; start?: string; botIds: string[]; kind: "browser" }> {
+  function browserOwners(): Array<{ pid: number; start?: string; session: string; botIds: string[]; kind: "browser" }> {
     return [...usedBrowserSessions].flatMap(([session, spec]) => {
       // A browser attached to the person's own Chrome is theirs, not a bot's.
       if (chromeTarget(session, spec) || attachesToChrome(spec.env)) return [];
@@ -494,18 +494,14 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       const daemon = browserDaemons.owner(spec.command, session, pid);
       if (!daemon) return [];
       const botIds = store.bots.filter((bot) => browserSessionsOf(bot.id, bot.browserProfile).includes(session)).map((bot) => bot.id);
-      return [{ ...daemon, botIds, kind: "browser" as const }];
+      return [{ ...daemon, session, botIds, kind: "browser" as const }];
     });
   }
-  /** Closes the browsers that are this bot's alone (never a profile another bot uses), as one stopped for memory is. */
-  async function closeBotBrowsers(botId: string): Promise<void> {
-    const bot = store.bot(botId);
-    if (!bot) return;
-    const shared = (session: string) => store.bots.some((other) => other.id !== botId && browserSessionsOf(other.id, other.browserProfile).includes(session));
-    await Promise.all(browserSessionsOf(bot.id, bot.browserProfile).flatMap((session) => {
-      const spec = usedBrowserSessions.get(session);
-      return spec && !chromeTarget(session, spec) && !attachesToChrome(spec.env) && !shared(session) ? [closeForMemory(session, spec)] : [];
-    }));
+  /** Closes one browser session the memory cap stopped (bot-memory-cap.ts), as one stopped for memory is: only that
+   * session, so on a Team Cloud the same bot's browsers for other members stay open; never one on the person's own Chrome. */
+  async function closeCapBrowser(session: string): Promise<void> {
+    const spec = usedBrowserSessions.get(session);
+    if (spec && !chromeTarget(session, spec) && !attachesToChrome(spec.env)) await closeForMemory(session, spec);
   }
   /** The browser a thread's bot would start; a temporary one has no session until its first call. My Chrome is the person's own. */
   function threadBrowser(threadId: string): { session: string | undefined; spec: Spec | undefined } | null {
@@ -643,6 +639,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, lentChromeSummary, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,
-    eraseAudienceBrowsers, browserOwners, closeBotBrowsers,
+    eraseAudienceBrowsers, browserOwners, closeCapBrowser,
   };
 }

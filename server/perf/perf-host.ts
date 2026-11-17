@@ -6,7 +6,7 @@ import type { EngineLimitsReport } from "../../shared/limit-reset.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import type { StoreChange } from "../store.ts";
 import { createLoopStalls, requestArrivedBefore, type LoopStalls } from "./loop-stalls.ts";
-import { createBotFootprints, type BotFootprintReport, type BotFootprints, type FootprintOwner } from "./bot-footprint.ts";
+import { createBotFootprints, type BotCapReport, type BotFootprintReport, type BotFootprints, type FootprintOwner } from "./bot-footprint.ts";
 import { duration, limitHolds, perfHealth, perfLines, turnLine, type PerfHealth } from "./perf-report.ts";
 import { createProcessHealth, type ProcessHealthRecorder } from "./process-health.ts";
 import type { ProcessRow } from "./process-buckets.ts";
@@ -43,7 +43,7 @@ export interface PerfHostDeps {
   /** After each sample, with its process list: records of exited engines it no longer needs can go. */
   pruneOwners?: (rows: readonly ProcessRow[]) => void;
   /** The memory one bot may use and how it is enforced (bot-memory-cap.ts). */
-  cap?: () => { mb: number | null; rung: string; stops: number };
+  cap?: () => BotCapReport;
 }
 
 /** The health report shows this many bots, the ones using the most memory first; the admin's read shows every one. */
