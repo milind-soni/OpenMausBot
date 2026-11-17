@@ -1,6 +1,7 @@
 import { CreditCard, Mail, PhoneCall, RadioTower, Smartphone, type LucideIcon } from "lucide-react";
 
 import bubblavLogo from "@/assets/bubblav/logo.png";
+import leveaLogo from "@/assets/levea/logo.png";
 import whopLogo from "@/assets/whop/logo.png";
 import type { LocaleKey } from "@/locales";
 import { POSTIZ_SERVER } from "../../shared/postiz";
@@ -93,6 +94,15 @@ export const HOSTED_MCP_APPS = [
     description: "bubblav.description",
     notice: "bubblav.notice",
     keywords: "bubblav chatbot chat widget website customer support service knowledge base conversations leads analytics",
+  },
+  {
+    id: "levea",
+    label: "Levea",
+    url: "https://api.livecore.ai/api/v1/misc/mcp",
+    icon: { image: leveaLogo },
+    description: "levea.description",
+    notice: "levea.notice",
+    keywords: "levea livecore video editor editing clips reels shorts tiktok youtube captions subtitles b-roll voiceover reframe",
   },
 ] as const satisfies readonly HostedMcpApp[];
 
