@@ -117,8 +117,8 @@ Claude Code is not bridged when any of these holds:
   whatever it matches: an empty or wildcard matcher sees every call, and a
   hook's own script can test the tool's name. OpenMausBot's own hooks are none
   of these and are in none of these files: it registers `PostToolUse`,
-  `PreCompact`, `SessionStart` and `Stop` through a private settings file
-  written for each launch.
+  `PostToolUseFailure`, `PreCompact` and `SessionStart` through a private
+  settings file written for each launch.
 - A settings file's `permissions.deny` or `permissions.ask` list (keys in any
   case) holds a rule with a wildcard in a tool's name, even one about another
   server (`mcp__github__*`, `*exec*`). Claude Code matches a deny or ask
