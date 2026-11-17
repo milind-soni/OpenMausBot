@@ -63,11 +63,11 @@ license.otech.jo {
 # List all keys
 node admin.mjs list
 
-# Generate new license (Local Managed, 365 days)
-node admin.mjs gen local "مطعم الأصالة" "+962791234567" "فرع عمان" 365
+# Generate new license (Local Managed, 30 days)
+node admin.mjs gen local "مطعم الأصالة" "+962791234567" "فرع عمان" 30
 
-# Generate new license (Cloud Always On, 365 days)
-node admin.mjs gen cloud "شركة الأفق" "+962790001122" "المقر" 365
+# Generate new license (Cloud Always On, 30 days)
+node admin.mjs gen cloud "شركة الأفق" "+962790001122" "المقر" 30
 
 # Verify key
 node admin.mjs verify OTECH-JO-A7K9-2M4P
@@ -76,7 +76,7 @@ node admin.mjs verify OTECH-JO-A7K9-2M4P
 node admin.mjs revoke OTECH-JO-A7K9-2M4P
 ```
 
-## Pre-seeded Test Keys
-- **Active Test Key**: `OTECH-JO-A7K9-2M4P` (Plan: Local Managed, Expires: 2027-12-31)
-- **Expired Test Key**: `OTECH-JO-EXPD-9941` (Plan: Local Managed, Expired: 2025-01-01)
-- **Active Cloud Key**: `OTECH-JO-CLD8-5W3X` (Plan: Cloud Always On, Expires: 2027-12-31)
+## Key Management Rules
+- **Customer License Duration**: Real customer keys default to **30 days** monthly billing.
+- **Revoked Keys**: `OTECH-JO-CLD8-5W3X` is permanently revoked.
+- **Test Keys**: All temporary demo test keys have been deleted. Real keys are issued via `node admin.mjs gen local ... 30` or the API.

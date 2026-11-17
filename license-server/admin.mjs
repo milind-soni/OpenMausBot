@@ -43,8 +43,8 @@ OTECH License Admin CLI
 =======================
 Usage:
   node admin.mjs list                       List all licenses
-  node admin.mjs gen <local|cloud> <name> <phone> <shop> [days]
-                                            Generate a new license key
+  node admin.mjs gen <local|cloud> <name> <phone> <shop> [days=30]
+                                            Generate a new license key (defaults to 30 days)
   node admin.mjs verify <key>               Verify a key locally
   node admin.mjs revoke <key>               Revoke a license key
 `);
@@ -72,7 +72,7 @@ if (command === 'gen' || command === 'generate') {
   const customer = args[2] || 'عميل';
   const phone = args[3] || '';
   const shop = args[4] || '';
-  const days = parseInt(args[5] || '365', 10);
+  const days = parseInt(args[5] || '30', 10);
 
   const key = generateKeyString();
   const now = new Date();

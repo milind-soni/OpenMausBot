@@ -398,33 +398,6 @@ export function OtechPlanGate() {
             <span>{successMsg}</span>
           </div>
         )}
-
-        {/* Quick Demo Test Keys Helpers */}
-        <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between text-[11px] text-slate-400 gap-2">
-          <span>{isArabic ? "مفاتيح الفحص السريع:" : "Quick test keys:"}</span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setInputKey("OTECH-JO-A7K9-2M4P");
-                void handleActivate("OTECH-JO-A7K9-2M4P");
-              }}
-              className="text-sky-400 hover:underline font-mono bg-slate-800 px-2 py-0.5 rounded"
-            >
-              OTECH-JO-A7K9-2M4P ({isArabic ? "صالح" : "Valid"})
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setInputKey("OTECH-JO-EXPD-9941");
-                void handleActivate("OTECH-JO-EXPD-9941");
-              }}
-              className="text-amber-400 hover:underline font-mono bg-slate-800 px-2 py-0.5 rounded"
-            >
-              OTECH-JO-EXPD-9941 ({isArabic ? "منتهي" : "Expired"})
-            </button>
-          </div>
-        </div>
       </div>
 
       {/* Footer Support */}

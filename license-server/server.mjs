@@ -174,7 +174,7 @@ const server = http.createServer(async (req, res) => {
     const customer = body?.customer || 'عميل';
     const phone = body?.phone || '';
     const shop = body?.shop || '';
-    const days = parseInt(body?.durationDays || '365', 10);
+    const days = parseInt(body?.durationDays || '30', 10);
 
     const key = body?.key ? body.key.trim().toUpperCase() : generateKeyString();
     const now = new Date();

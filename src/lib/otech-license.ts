@@ -27,26 +27,13 @@ const TRIAL_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days trial
 
 // Built-in offline fallback database for known keys & development/offline evaluation
 const OFFLINE_KEYS_DB: Record<string, { plan: OtechPlanType; customer: string; phone: string; shop: string; expiresAt: string; revoked?: boolean }> = {
-  "OTECH-JO-A7K9-2M4P": {
-    plan: "local",
-    customer: "مطعم الأصالة",
-    phone: "+962791234567",
-    shop: "فرع عمان",
-    expiresAt: "2027-12-31T23:59:59.000Z",
-  },
   "OTECH-JO-CLD8-5W3X": {
     plan: "cloud",
     customer: "شركة الأفق للاستشارات",
     phone: "+962790001122",
     shop: "المقر الرئيسي",
     expiresAt: "2027-12-31T23:59:59.000Z",
-  },
-  "OTECH-JO-EXPD-9941": {
-    plan: "local",
-    customer: "مقهى الغروب",
-    phone: "+962788889999",
-    shop: "فرع إربد",
-    expiresAt: "2025-01-01T00:00:00.000Z",
+    revoked: true,
   },
 };
 

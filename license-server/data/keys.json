@@ -1,24 +1,4 @@
 {
-  "OTECH-JO-A7K9-2M4P": {
-    "key": "OTECH-JO-A7K9-2M4P",
-    "plan": "local",
-    "customer": "مطعم الأصالة",
-    "phone": "+962791234567",
-    "shop": "فرع عمان",
-    "createdAt": "2026-11-17T00:00:00.000Z",
-    "expiresAt": "2027-12-31T23:59:59.000Z",
-    "revoked": false
-  },
-  "OTECH-JO-EXPD-9941": {
-    "key": "OTECH-JO-EXPD-9941",
-    "plan": "local",
-    "customer": "مقهى الغروب",
-    "phone": "+962788889999",
-    "shop": "فرع إربد",
-    "createdAt": "2024-01-01T00:00:00.000Z",
-    "expiresAt": "2025-01-01T00:00:00.000Z",
-    "revoked": false
-  },
   "OTECH-JO-CLD8-5W3X": {
     "key": "OTECH-JO-CLD8-5W3X",
     "plan": "cloud",
@@ -27,6 +7,7 @@
     "shop": "المقر الرئيسي",
     "createdAt": "2026-11-17T00:00:00.000Z",
     "expiresAt": "2027-12-31T23:59:59.000Z",
-    "revoked": false
+    "revoked": true,
+    "revokedAt": "2026-11-17T16:45:48.041Z"
   }
 }
