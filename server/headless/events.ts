@@ -48,6 +48,37 @@ export async function* sseFrames(body: AsyncIterable<Uint8Array>): AsyncGenerato
 
 const jobExit = (state: string) => state === "needs-input" ? EXIT.needsInput : state === "failed" || state === "stalled" ? EXIT.failed : EXIT.done;
 
+/** A refusal is finite even though a successful event stream has no deadline. */
+async function refusalMessage(response: Response, signal: AbortSignal): Promise<string | undefined> {
+  const reader = response.body?.getReader();
+  if (!reader) return undefined;
+  const cancel = () => { void reader.cancel().catch(() => undefined); };
+  const timer = setTimeout(cancel, 5_000);
+  signal.addEventListener("abort", cancel, { once: true });
+  if (signal.aborted) cancel();
+  try {
+    const decoder = new TextDecoder();
+    let text = "";
+    let bytes = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > 16 * 1024) return undefined;
+      text += decoder.decode(value, { stream: true });
+    }
+    const parsed: unknown = JSON.parse(text + decoder.decode());
+    if (parsed && typeof parsed === "object" && "error" in parsed && typeof parsed.error === "string") return parsed.error;
+  } catch { /* the HTTP status remains authoritative when the body is unavailable */ }
+  finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", cancel);
+    cancel();
+    reader.releaseLock();
+  }
+  return undefined;
+}
+
 export async function eventsVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const job = flag(ctx.flags, "job")?.trim();
   const untilSettled = ctx.flags["until-settled"] === true;
@@ -93,10 +124,13 @@ export async function eventsVerb(ctx: VerbContext): Promise<VerbOutcome> {
       response = await client.raw(`/api/events?${query.toString()}`, { stream: true, headers: { accept: "text/event-stream" }, signal });
       // A refusal (an expired token, a missing scope) does not go away by asking again.
       if (response.status >= 400 && response.status < 500) {
-        const said = ((await response.json().catch(() => ({}))) as Frame).error;
+        const said = await refusalMessage(response, signal);
         throw Object.assign(new Error(`the event stream was refused${typeof said === "string" ? `: ${said}` : ` (${response.status})`}`), { status: response.status });
       }
-      if (!response.ok || !response.body) throw new Error(`the event stream answered ${response.status}`);
+      if (!response.ok || !response.body) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new Error(`the event stream answered ${response.status}`);
+      }
       attempt = 0;
       for await (const { id, data } of sseFrames(response.body as unknown as AsyncIterable<Uint8Array>)) {
         if (id) cursor = id;
