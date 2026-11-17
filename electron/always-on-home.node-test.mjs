@@ -72,6 +72,19 @@ test("off undoes only what on changed: a login item the person set up stays", (t
   assert.equal(theirs.world.login, true);
 });
 
+test("off leaves the login item while lending still needs the app to start at login", (t) => {
+  const f = fixture(t);
+  let lending = false;
+  const home = createAlwaysOnHome({ file: f.file, loginItem: { available: () => true, chosen: () => f.world.login, choose: (on) => { f.world.chose.push(on); f.world.login = on; } },
+    blocker: { start: () => 1, stop: () => {}, isStarted: () => true }, isOnBattery: () => false, loginNeeded: () => lending });
+  home.set(true);
+  lending = true;
+  home.set(false);
+  assert.deepEqual(f.world.chose, [true], "nothing removed while lending wants it");
+  assert.equal(f.world.login, true);
+  home.stop();
+});
+
 test("the switch survives a restart, and a fresh launch holds the computer awake again", (t) => {
   const f = fixture(t);
   f.home.set(true);

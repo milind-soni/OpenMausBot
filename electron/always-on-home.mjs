@@ -20,9 +20,10 @@ export function parseAlwaysOn(value) {
 /**
  * `loginItem`: open-at-login.mjs's item (`available`, `chosen`, `choose`). `blocker`: Electron's powerSaveBlocker.
  * `isOnBattery()`: powerMonitor's word. `updates()`: how an update arrives with nobody at the computer (updater.mjs
- * `unattendedUpdates`). `platform`: process.platform.
+ * `unattendedUpdates`). `platform`: process.platform. `loginNeeded()`: lending still wants the app to start at login, so
+ * turning the switch off leaves the login item.
  */
-export function createAlwaysOnHome({ file, loginItem, blocker, isOnBattery, updates = () => "none", platform = process.platform, log = () => {}, lookMs = ALWAYS_ON_LOOK_MS }) {
+export function createAlwaysOnHome({ file, loginItem, blocker, isOnBattery, updates = () => "none", loginNeeded = () => false, platform = process.platform, log = () => {}, lookMs = ALWAYS_ON_LOOK_MS }) {
   let saved = read();
   let blockerId = null;
   let timer = null;
@@ -78,7 +79,7 @@ export function createAlwaysOnHome({ file, loginItem, blocker, isOnBattery, upda
       let addedLogin = false;
       try {
         if (want && !loginOn()) { loginItem.choose(true); addedLogin = true; }
-        else if (!want && saved.addedLogin && loginOn()) loginItem.choose(false);
+        else if (!want && saved.addedLogin && loginOn() && !loginNeeded()) loginItem.choose(false);
       } catch (error) {
         log(`always-on home: login item: ${error?.message ?? error}`);
       }

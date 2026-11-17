@@ -9,6 +9,7 @@ import { api } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import type { ServerStatus } from "../../electron/server-status.mjs";
 import type { CompanionState, PhoneSetupController } from "./PhoneSetupFlow";
+import { companionRoutesOn } from "./PhoneDevicesSection";
 import { OwnServerLink, RailSheet } from "./PlaceAddSheet";
 import { byHand, type SavedServer } from "./ServerList";
 import { SettingRow, SettingsFoldRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
@@ -47,21 +48,22 @@ export function homeStatusLine(devices: number): string {
 /** Phones paired with this computer, and other computers and browsers signed in to it with a pairing code. */
 function usePairedCount(state: CompanionState, on: boolean): number {
   const [signedIn, setSignedIn] = useState(0);
+  const phones = state.devices.length;
   useEffect(() => {
     if (!on) return;
     let alive = true;
     void api("/api/auth/sessions").then((body) => { if (alive) setSignedIn(Array.isArray(body?.sessions) ? body.sessions.length : 0); }).catch(() => {});
     return () => { alive = false; };
-  }, [on]);
-  return state.devices.length + signedIn;
+  }, [on, phones]);
+  return phones + signedIn;
 }
 
 const ogb = () => (typeof window === "undefined" ? undefined : window.ogb);
 const isMac = () => ogb()?.platform === "darwin";
 
 /** On the spare computer: one switch, what it did, and the next step (pair a phone, then another computer). */
-function ThisComputerHome({ home, setHome, c, state, onAddPhone }: {
-  home: AlwaysOnHomeState; setHome: (next: AlwaysOnHomeState) => void; c: PhoneSetupController; state: CompanionState; onAddPhone: () => void;
+function ThisComputerHome({ home, setHome, c, state, onAddPhone, blocked }: {
+  home: AlwaysOnHomeState; setHome: (next: AlwaysOnHomeState) => void; c: PhoneSetupController; state: CompanionState; onAddPhone: () => void; blocked: string | null;
 }) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -78,17 +80,17 @@ function ThisComputerHome({ home, setHome, c, state, onAddPhone }: {
     <>
       <SettingRow title={title} subtitle={t("alwaysOn.line")}
         message={failed ? <span role="alert" className="text-danger">{t("alwaysOn.failed")}</span>
-          : home.on ? <span data-always-on-status="" aria-live="polite">{homeStatusLine(paired)}</span> : undefined}>
+          : home.on ? <span data-always-on-status="" aria-live="polite">{companionRoutesOn(state) ? homeStatusLine(paired) : t("alwaysOn.status.noWay")}</span> : undefined}>
         <span data-always-on-switch="" className="contents">
           <Switch checked={home.on} disabled={busy} aria-label={title} onClick={() => set(!home.on)} />
         </span>
       </SettingRow>
-      {home.on && <AlwaysOnDetails home={home} c={c} onAddPhone={onAddPhone} canAddComputer={!computersOn} />}
+      {home.on && <AlwaysOnDetails home={home} c={c} onAddPhone={onAddPhone} canAddComputer={!computersOn} blocked={blocked} />}
     </>
   );
 }
 
-function AlwaysOnDetails({ home, c, onAddPhone, canAddComputer }: { home: AlwaysOnHomeState; c: PhoneSetupController; onAddPhone: () => void; canAddComputer: boolean }) {
+function AlwaysOnDetails({ home, c, onAddPhone, canAddComputer, blocked }: { home: AlwaysOnHomeState; c: PhoneSetupController; onAddPhone: () => void; canAddComputer: boolean; blocked: string | null }) {
   const system = systemSettingLines(home.platform);
   return (
     <div data-always-on-details="" className="flex flex-col gap-3 px-4 py-3">
@@ -102,13 +104,14 @@ function AlwaysOnDetails({ home, c, onAddPhone, canAddComputer }: { home: Always
       </ul>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[13px] leading-[18px] text-ink">{t("alwaysOn.next")}</span>
-        <button type="button" className="ui-button ui-button-primary" data-always-on-add-phone="" disabled={c.busy} onClick={onAddPhone}>{t("alwaysOn.addPhone")}</button>
+        <button type="button" className="ui-button ui-button-primary" data-always-on-add-phone="" disabled={c.busy || Boolean(blocked)} title={blocked ?? undefined} onClick={onAddPhone}>{t("alwaysOn.addPhone")}</button>
         {canAddComputer && (
-          <button type="button" className="ui-button" data-always-on-add-computer="" disabled={c.busy}
+          <button type="button" className="ui-button" data-always-on-add-computer="" disabled={c.busy || Boolean(blocked)} title={blocked ?? undefined}
             onClick={() => void c.act((companion) => companion.setTailscaleComputers?.(true) ?? companion.state())}>{t("alwaysOn.addComputer")}</button>
         )}
       </div>
-      {!canAddComputer && <p className="text-[12px] leading-4 text-ink-secondary">{t("alwaysOn.addComputerOn")}</p>}
+      {blocked ? <p role="status" className="text-[12px] leading-4 text-ink-secondary">{blocked}</p>
+        : !canAddComputer && <p className="text-[12px] leading-4 text-ink-secondary">{t("alwaysOn.addComputerOn")}</p>}
       {system.length > 0 && (
         <ul data-always-on-system="" className="flex list-disc flex-col gap-1 pl-4 text-[12px] leading-4 text-ink-secondary">
           {system.map((key) => <li key={key}>{t(key, { app: productName() })}</li>)}
@@ -137,16 +140,16 @@ function useSavedServers(version: number): { servers: SavedServer[]; status: Ser
   return { servers, status };
 }
 
-/** One computer added here: how it is doing, and one tap each for what it can do. */
+/** One computer added here: how it is doing, and one tap each for what it can do. Make … my home is the rail menu's own
+ * one-tap move, with what it does said under it. */
 function AddedComputer({ server, status }: { server: SavedServer; status: ServerStatus | undefined }) {
-  const [confirming, setConfirming] = useState(false);
   const [moving, setMoving] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
   const move = () => {
     setMoving(true); setSaid(null);
     void makeHome(server.id).then((outcome) => {
       setMoving(false);
-      if (outcome === true) setConfirming(false); else setSaid(outcome);
+      if (outcome !== true) setSaid(outcome);
     });
   };
   const health = !status || status.state === "checking" ? t("alwaysOn.added.checking")
@@ -159,18 +162,9 @@ function AddedComputer({ server, status }: { server: SavedServer; status: Server
           <div data-always-on-health={status?.state ?? "checking"} className="text-[12px] leading-4 text-ink-secondary">{health}</div>
         </div>
         <button type="button" className="ui-button" data-always-on-open="" onClick={() => void ogb()?.environments?.switch(server.id)}>{t("alwaysOn.added.open")}</button>
-        {!confirming && <button type="button" className="ui-button" data-always-on-move="" onClick={() => setConfirming(true)}>{t("alwaysOn.added.move")}</button>}
+        <button type="button" className="ui-button" data-always-on-move="" disabled={moving} aria-busy={moving || undefined} onClick={move}>{t("rail.makeHome", { name: server.name })}</button>
       </div>
-      {confirming && (
-        <div role="group" aria-label={t("rail.makeHome", { name: server.name })} className="flex flex-col gap-2 rounded-lg bg-inset px-3 py-2.5">
-          <p className="text-[13px] leading-[18px] text-ink">{t("rail.makeHomeSub", { name: server.name })}</p>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="ui-button ui-button-primary" data-always-on-move-yes="" disabled={moving} aria-busy={moving || undefined} onClick={move}>{t("rail.makeHome", { name: server.name })}</button>
-            <button type="button" className="ui-button" disabled={moving} onClick={() => { setConfirming(false); setSaid(null); }}>{t("common.cancel")}</button>
-          </div>
-          {said && <p role="alert" className="text-[12px] leading-4 text-danger">{said}</p>}
-        </div>
-      )}
+      {said && <p role="alert" className="text-[12px] leading-4 text-danger">{said}</p>}
       <ul className="flex list-disc flex-col gap-1 pl-4 text-[12px] leading-4 text-ink-secondary">
         <li>{t("alwaysOn.added.sidebar", { name: server.name })}</li>
         <li>{t("alwaysOn.added.keepRunning", { name: server.name })}</li>
@@ -209,7 +203,11 @@ function AddAlwaysOnComputer() {
 }
 
 /** The section: this computer as a home, and adding another computer as one. The second is left out while this one is a home. */
-export function AlwaysOnHomeSection({ c, state, onAddPhone }: { c: PhoneSetupController; state: CompanionState; onAddPhone: () => void }) {
+export function AlwaysOnHomeSection({ c, state, onAddPhone, blocked = null }: {
+  c: PhoneSetupController; state: CompanionState; onAddPhone: () => void;
+  /** the organization's policy keeps remote access off: nothing here turns a way in on */
+  blocked?: string | null;
+}) {
   const bridge = ogb()?.alwaysOnHome;
   const [home, setHome] = useState<AlwaysOnHomeState | null>(null);
   useEffect(() => {
@@ -222,7 +220,7 @@ export function AlwaysOnHomeSection({ c, state, onAddPhone }: { c: PhoneSetupCon
   return (
     <SettingsGroup label={t("alwaysOn.section")} block="always-on" description={t("alwaysOn.sectionLine")}>
       <SettingsRows>
-        {home && <ThisComputerHome home={home} setHome={setHome} c={c} state={state} onAddPhone={onAddPhone} />}
+        {home && <ThisComputerHome home={home} setHome={setHome} c={c} state={state} onAddPhone={onAddPhone} blocked={blocked} />}
         {addHere && !home?.on && <AddAlwaysOnComputer />}
       </SettingsRows>
     </SettingsGroup>

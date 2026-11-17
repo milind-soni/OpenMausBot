@@ -11008,7 +11008,7 @@
   "alwaysOn.updates.restart": "Updates wait for you to choose Restart in {app}",
   "alwaysOn.updates.package": "Updates come through your package manager",
   "alwaysOn.updates.none": "This copy of {app} doesn't update itself",
-  "alwaysOn.restarts": "Starts its server again if it stops, as often as it takes",
+  "alwaysOn.restarts": "Starts its server again if it crashes, and keeps trying every few minutes",
   "alwaysOn.status.none": "Home is on · nothing paired yet",
   "alwaysOn.status.one": "Home is on · reachable from 1 device",
   "alwaysOn.status.many": "Home is on · reachable from {count} devices",
@@ -11022,7 +11022,7 @@
   "alwaysOn.mac.permissions": "For bots to use its screen, allow {app} under Accessibility and Screen Recording in System Settings → Privacy & Security.",
   "alwaysOn.add.title": "Add a Mac mini or other always-on computer",
   "alwaysOn.add.line": "Your bots keep running there while this computer sleeps or travels.",
-  "alwaysOn.add.step1": "On that computer, install {app}, open Settings → Phone & devices and turn on Use this Mac as an always-on home.",
+  "alwaysOn.add.step1": "On that computer, install {app}, open Settings → Phone & devices and turn on Use this Mac as an always-on home (on Windows or Linux: Use this computer as an always-on home).",
   "alwaysOn.add.step2": "There, turn on Your other computers and choose Pair a computer. Both computers need Tailscale, signed in to the same account.",
   "alwaysOn.add.step3": "Here, paste the link it shows.",
   "alwaysOn.add.connect": "Connect to it",
@@ -11030,9 +11030,9 @@
   "alwaysOn.added.online": "Online",
   "alwaysOn.added.offline": "Can't reach it right now",
   "alwaysOn.added.open": "Open its bots",
-  "alwaysOn.added.move": "Move my bots there",
   "alwaysOn.added.sidebar": "{name} has its own circle at the left edge of the window: click it to open its bots.",
-  "alwaysOn.added.keepRunning": "Move my bots there moves this computer's bots, chats, memory and routines to {name}, so they keep running while this computer is off.",
+  "alwaysOn.added.keepRunning": "Make {name} my home moves this computer's bots, chats, memory and routines there, so they keep running while this computer is off.",
   "alwaysOn.added.screen": "Bots there use its screen, browser and files, once {app} is allowed to use that computer.",
-  "alwaysOn.windowClosed": "Keeps running when its window is closed"
+  "alwaysOn.windowClosed": "Keeps running when its window is closed",
+  "alwaysOn.status.noWay": "Home is on · no phone or computer can reach it yet"
 }

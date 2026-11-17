@@ -93,7 +93,8 @@ describe("on the spare computer", () => {
     expect(text()).toContain("Opens at login");
     expect(text()).toContain("Stays awake while plugged in");
     expect(text()).toContain("Installs updates by itself when nobody is using it");
-    expect(text()).toContain("Starts its server again if it stops");
+    expect(text()).toContain("Starts its server again if it crashes");
+    expect(text()).toContain("Keeps running when its window is closed");
     await vi.waitFor(() => expect($("[data-always-on-status]")?.textContent).toBe("Home is on · reachable from 2 devices"));
     expect($("[data-always-on-system]")?.textContent).toContain("System Settings → Energy");
     expect($("[data-always-on-system]")?.textContent).toContain("Automatically log in as");
@@ -114,6 +115,23 @@ describe("on the spare computer", () => {
     render(companionState(0, true));
     await vi.waitFor(() => expect($("[data-always-on-add-computer]")).toBeNull());
     expect(text()).toContain("choose Pair a computer under Your other computers");
+  });
+
+  it("with no way in on, the status says nothing can reach it yet", async () => {
+    (globalThis as { ogb?: unknown }).ogb = { platform: "darwin", alwaysOnHome: { state: async () => home({ on: true, openAtLogin: true, awake: "holding" }), set: vi.fn() } };
+    const closed = { ...companionState(1), enabled: false, routes: { wifi: off, relay: off, tailscale: off, https: off } as CompanionState["routes"] };
+    render(closed);
+    await vi.waitFor(() => expect($("[data-always-on-status]")?.textContent).toBe("Home is on · no phone or computer can reach it yet"));
+  });
+
+  it("an organization that keeps remote access off: neither next step turns a way in on, and it says why", async () => {
+    (globalThis as { ogb?: unknown }).ogb = { platform: "darwin", alwaysOnHome: { state: async () => home({ on: true, openAtLogin: true, awake: "holding" }), set: vi.fn() } };
+    const c = { busy: false, accountBusy: false, act: vi.fn() } as unknown as PhoneSetupController;
+    flushSync(() => root.render(createElement(AlwaysOnHomeSection, { c, state: companionState(0), onAddPhone: vi.fn(), blocked: "Managed by Acme" })));
+    await vi.waitFor(() => expect($("[data-always-on-add-phone]")).not.toBeNull());
+    expect($<HTMLButtonElement>("[data-always-on-add-phone]")!.disabled).toBe(true);
+    expect($<HTMLButtonElement>("[data-always-on-add-computer]")!.disabled).toBe(true);
+    expect(text()).toContain("Managed by Acme");
   });
 
   it("on Windows the Mac's settings are left out, and a Linux package's updates say where they come from", async () => {
@@ -147,7 +165,7 @@ describe("on the main computer", () => {
     expect($("[data-rail-sheet] [data-own-server-link]")).not.toBeNull();
   });
 
-  it("once added: how it is doing, Open its bots, and Move my bots there after a plain confirm", async () => {
+  it("once added: how it is doing, Open its bots, and Make … my home in one tap, as on the rail", async () => {
     const env = environments([
       { id: "local", name: "This computer", kind: "local" },
       { id: "cloud", name: "My Cloud", kind: "remote", origin: "https://cloud.example.test", home: true },
@@ -163,10 +181,9 @@ describe("on the main computer", () => {
     expect(text()).toContain("Bots there use its screen, browser and files");
     flushSync(() => $<HTMLButtonElement>("[data-always-on-open]")!.click());
     expect(env.switch).toHaveBeenCalledWith("mini");
+    expect($("[data-always-on-move]")?.textContent).toBe("Make Mac mini my home");
+    expect(text()).toContain("Make Mac mini my home moves this computer's bots, chats, memory and routines there");
     flushSync(() => $<HTMLButtonElement>("[data-always-on-move]")!.click());
-    expect(makeHome, "nothing moves before the confirm").not.toHaveBeenCalled();
-    expect(text()).toContain("Moves this computer's bots, chats, memory and routines to Mac mini");
-    flushSync(() => $<HTMLButtonElement>("[data-always-on-move-yes]")!.click());
     await vi.waitFor(() => expect(makeHome).toHaveBeenCalledWith("mini"));
   });
 
@@ -177,7 +194,6 @@ describe("on the main computer", () => {
     render(companionState(0));
     await vi.waitFor(() => expect($("[data-always-on-move]")).not.toBeNull());
     flushSync(() => $<HTMLButtonElement>("[data-always-on-move]")!.click());
-    flushSync(() => $<HTMLButtonElement>("[data-always-on-move-yes]")!.click());
     await vi.waitFor(() => expect($("[role=alert]")?.textContent).toBe("This server can't be your bots' home."));
   });
 

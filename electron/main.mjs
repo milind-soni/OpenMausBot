@@ -325,7 +325,7 @@ const serverSupervisor = createServerSupervisor({
     routineWake.stop();
   },
   onExhausted() {
-    slog("server recovery paused after repeated failures; quit and reopen to retry");
+    slog("server recovery paused after repeated failures; quit and reopen to retry"); if (alwaysOnHome.on()) return;
     dialog.showErrorBox(
       nativeT("native.dialog.serverStopped.title"),
       nativeT("native.dialog.serverStopped.body", { log: path.join(LOG_DIR, "server.log") }),
@@ -1456,7 +1456,7 @@ function reconnectCloud(origin) {
   return signInCloudSession({ origin, mine: other ? origin : myCloud(), pair: () => ensureCloudAccount().pairHome(other?.id ?? null), fetch: (...args) => session.defaultSession.fetch(...args) });
 }
 const loginItem = createOpenAtLogin({ app, file: path.join(app.getPath("userData"), "open-at-login.json"), home: os.homedir() });
-installOpenAtLogin({ ipcMain, guard: localOrHome, loginItem, changed: refreshApplicationMenu }); const alwaysOnHome = installAlwaysOnHome({ ipcMain, guard: localOnly, loginItem, changed: refreshApplicationMenu, file: path.join(app.getPath("userData"), "always-on-home.json"), blocker: powerSaveBlocker, isOnBattery: () => powerMonitor.isOnBatteryPower(), updates: unattendedUpdates, log: slog });
+installOpenAtLogin({ ipcMain, guard: localOrHome, loginItem, changed: refreshApplicationMenu }); const alwaysOnHome = installAlwaysOnHome({ ipcMain, guard: localOnly, loginItem, changed: refreshApplicationMenu, file: path.join(app.getPath("userData"), "always-on-home.json"), blocker: powerSaveBlocker, isOnBattery: () => powerMonitor.isOnBatteryPower(), updates: unattendedUpdates, loginNeeded: () => Boolean(computerSharing?.lendingToCloud()), log: slog });
 let hiddenStart = false;
 
 async function openCloudSettings() {

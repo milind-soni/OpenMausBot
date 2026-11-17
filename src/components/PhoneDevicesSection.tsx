@@ -474,7 +474,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
         </SettingsGroup>
       )}
 
-      <AlwaysOnHomeSection c={c} state={state} onAddPhone={() => { if (!remoteBlocked) setPairing("device"); }} />
+      <AlwaysOnHomeSection c={c} state={state} blocked={managedBy} onAddPhone={() => { if (!remoteBlocked) setPairing("device"); }} />
 
       {!reachOpen ? (
         <SettingsGroup block="reach" footnote={t("phone.reach.foot")}>
