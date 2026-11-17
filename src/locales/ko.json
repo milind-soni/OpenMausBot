@@ -7043,6 +7043,8 @@
   "email.needsGoogle": "Gmail은 여기서 앱 비밀번호(2단계 인증 사용 시)가 필요합니다. 또는 Google로 로그인하세요.",
   "email.needsMicrosoft": "Outlook은 여기서 메일 비밀번호를 받지 않습니다. Microsoft로 로그인하세요.",
   "email.needsAppPassword": "{provider}은(는) 여기서 일반 비밀번호가 아닌 앱 비밀번호가 필요합니다.",
+  "announcements.title": "공지사항",
+  "announcements.new": "새 공지사항",
   "serverError.mailbox.outgoingFields": "보내는 서버를 확인하세요: mail.example.com 같은 이름, 1~65535 사이의 포트, SSL/TLS 또는 STARTTLS.",
   "rail.addAny": "봇을 위한 공간 추가",
   "rail.searchAny": "공간 찾기",

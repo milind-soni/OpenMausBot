@@ -7032,6 +7032,8 @@
   "accounts.manage": "Аккаунт и выход",
   "connectedWorkspaces.localTitle": "Окружения на этом компьютере",
   "connectedWorkspaces.newEnvironment": "Новое окружение",
+  "announcements.title": "Объявления",
+  "announcements.new": "Новые объявления",
   "policy.teamRemoteBlocked": "Управляет {organization}: открывать это облако на телефоне запрещено. Обратитесь к администратору команды.",
   "remote.status.pairedMany": "Подключено устройств: {count}",
   "remote.status.pairedOne": "Подключено 1 устройство",

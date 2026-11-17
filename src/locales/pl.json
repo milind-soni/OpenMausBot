@@ -6971,6 +6971,8 @@
   "accounts.manage": "Konto i wylogowanie",
   "connectedWorkspaces.localTitle": "Środowiska na tym komputerze",
   "connectedWorkspaces.newEnvironment": "Nowe środowisko",
+  "announcements.title": "Ogłoszenia",
+  "announcements.new": "Nowe ogłoszenia",
   "defaultBot.hidden": "{name} nie ma już na pasku bocznym. Pokaż go znowu w Ustawienia (Na pasku bocznym).",
   "defaultBot.demote": "Zmień w zwykłego bota",
   "defaultBot.demoteHint": "Usuwa wbudowaną ochronę: potem można go zarchiwizować lub usunąć jak każdego innego bota.",
