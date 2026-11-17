@@ -32,8 +32,6 @@
   "agentphone.notice": "Entre com sua conta AgentPhone. Não é necessária uma chave de API. Um bot que pode usar o AgentPhone pode comprar números, enviar mensagens de texto e fazer chamadas, com cobrança na sua conta; cada uma dessas ações segue a opção Enviar em seu nome. Por isso, escolha quais bots terão acesso em Acesso dos bots. Para que um bot responda a mensagens de texto e chamadas, adicione um webhook para esse bot em Automações e configure-o no AgentPhone.",
   "bubblav.description": "O chatbot de suporte com IA do seu site no BubblaV: relatórios, perguntas sem resposta, conversas, conhecimento e configurações do widget.",
   "bubblav.notice": "Entre com o BubblaV e escolha um chatbot. Não é necessária uma chave de API. Com Acesso total, um bot que pode usar o BubblaV pode ler as conversas e os leads desse chatbot e alterar ou excluir o conhecimento e as configurações dele. Por isso, escolha quais bots terão acesso em Acesso dos bots. Escolha Somente leitura na página de consentimento do BubblaV para bloquear qualquer alteração.",
-  "levea.description": "Editor de vídeo autônomo com IA na sua própria conta Levea: transforma gravações ou prompts em clipes editados, legendas, vídeos verticais 9:16 e exportações em MP4.",
-  "levea.notice": "Entre com sua conta Levea. Não é necessária uma chave de API. Um bot que pode usar o Levea pode criar, editar e excluir projetos, ativos, kits de marca e modelos de legenda, e fazer renderizações de MP4 na nuvem cobradas na sua conta. Por isso, escolha quais bots terão acesso em Acesso dos bots.",
   "email.title": "E-mail",
   "email.description": "Leia e envie e-mails de qualquer provedor com seu endereço e senha.",
   "email.menu": "Opções de e-mail",
