@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { PreviewTestingBroker, testingViewport, validateTestingURL } from "./preview-testing.ts";
-const input = { botId: "a", botName: "A", name: "Test", url: "http://localhost:3000", source: { kind: "url" as const, url: "http://localhost:3000", raw: "http://localhost:3000", isLocalOrPrivate: true }, width: 390, height: 844, responsive: false };
+const input = { botId: "a", botName: "A", name: "Test", url: "http://localhost:3000", source: { kind: "url" as const, url: "http://localhost:3000", raw: "http://localhost:3000", isLocalOrPrivate: true }, width: 390, height: 844, responsive: false, target: "new" as const };
 afterEach(() => vi.useRealTimers());
 async function opened(broker: PreviewTestingBroker) {
   broker.poll(); const result = broker.open(input); const command = broker.poll().commands[0];
@@ -43,10 +43,19 @@ describe("Preview testing ownership and cancellation", () => {
     broker.disconnect(); await rejected; expect(broker.status("a").available).toBe(false);
   });
   it("validates dimensions and refuses app origins, credentials and non-http navigation", () => {
-    expect(testingViewport({ preset: "phone" }).width).toBe(390);
+    expect(testingViewport({ preset: "phone" }).width).toBe(393);
     expect(testingViewport({ preset: "responsive" }).responsive).toBe(true);
     for (const value of [{ width: 0 }, { height: 1e9 }, { width: 400.5 }, { preset: "unknown" }]) expect(() => testingViewport(value)).toThrow();
     for (const url of ["file:///etc/passwd", "javascript:alert(1)", "http://a:b@example.com", "http://localhost:8899/api/config"]) expect(() => validateTestingURL(url, ["http://127.0.0.1:8899"])).toThrow();
     expect(validateTestingURL("http://localhost:3000")).toBe("http://localhost:3000/");
+  });
+  it("adopts the attached view's URL and size when targeting the active page", async () => {
+    const broker = new PreviewTestingBroker();
+    broker.poll(); const result = broker.open({ ...input, url: "about:blank", target: "active" }); const command = broker.poll().commands[0];
+    broker.finish(command.id, { url: "https://example.com/cart", source: { kind: "url" }, viewport: { width: 393, height: 852, responsive: false } });
+    await result;
+    const session = broker.owned(command.sessionId, "a");
+    expect(session).toMatchObject({ url: "https://example.com/cart", width: 393, height: 852, target: "active", state: "ready" });
+    expect(session.source).toMatchObject({ kind: "url", url: "https://example.com/cart" });
   });
 });

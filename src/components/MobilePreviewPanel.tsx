@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ArrowLeftRight,
+  Bot,
   Camera,
   ChevronDown,
   ExternalLink,
@@ -10,14 +11,17 @@ import {
   FileText,
   FolderOpen,
   Globe,
+  Hand,
   History,
   Laptop,
   Maximize2,
   Monitor,
   MonitorSmartphone,
+  Play,
   RotateCw,
   SlidersHorizontal,
   Smartphone,
+  Square,
   Tablet,
   Trash2,
   X,
@@ -61,6 +65,7 @@ import { cn } from "@/lib/cn";
 import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 import { isDeviceSource as isWebPreviewSource } from "@/lib/previewSource";
 import { useStore, type Attachment } from "@/state/store";
+import { testingStore, useTestingState, viewFromSession, type TestingView } from "@/lib/previewTestingStore";
 
 function getDeviceGroupIcon(group: PreviewSizeGroup) {
   switch (group) {
@@ -104,6 +109,8 @@ export interface MobilePreviewPanelProps {
   className?: string;
   style?: React.CSSProperties;
   docked?: boolean;
+  /** Hosts bot testing tabs. The app-level fallback panel sets this to false. */
+  testingHost?: boolean;
 }
 
 export function MobilePreviewPanel({
@@ -114,6 +121,7 @@ export function MobilePreviewPanel({
   className,
   style,
   docked = true,
+  testingHost = true,
 }: MobilePreviewPanelProps) {
   const { state, dispatch } = useStore();
   const initial = useMemo(() => loadMobilePreviewState(), []);
@@ -129,7 +137,7 @@ export function MobilePreviewPanel({
   });
 
   const [inputUrl, setInputUrl] = useState(initial.input);
-  const [activeSource, setActiveSource] = useState<PreviewSource | null>(() => {
+  const [ownSource, setActiveSource] = useState<PreviewSource | null>(() => {
     if (initial.source) return initial.source;
     if (initial.input) {
       const check = validatePreviewUrl(initial.input);
@@ -139,17 +147,44 @@ export function MobilePreviewPanel({
     }
     return null;
   });
-  const [presetId, setPresetId] = useState(initial.presetId);
-  const [rotated, setRotated] = useState(Boolean(initial.rotated));
-  const [zoom, setZoom] = useState<PreviewZoomMode>(initial.zoom ?? "fit");
-  const [customSize, setCustomSize] = useState(
+  const [ownPresetId, setOwnPresetId] = useState(initial.presetId);
+  const [ownRotated, setOwnRotated] = useState(Boolean(initial.rotated));
+  const [ownZoom, setOwnZoom] = useState<PreviewZoomMode>(initial.zoom ?? "fit");
+  const [ownCustomSize, setOwnCustomSize] = useState(
     initial.customSize ?? { width: 1024, height: 768 },
   );
 
+  // Bot testing: a bot tab replaces the page and size controls below with the bot's.
+  const testing = useTestingState();
+  const botTab = testing.tab ? testing.sessions.find((s) => s.id === testing.tab && s.target !== "active") ?? null : null;
+  const attached = testing.sessions.find((s) => s.target === "active" && (s.state === "ready" || s.state === "paused")) ?? null;
+  const controlSession = botTab ?? (testing.tab === null ? attached : null);
+  const botTabs = testing.sessions.filter((s) => s.target !== "active");
+  const botView = botTab ? testing.views[botTab.id] : undefined;
+  const activeSource = botTab ? botTab.source : ownSource;
+  const presetId = botView?.presetId ?? ownPresetId;
+  const rotated = botView ? botView.rotated : ownRotated;
+  const zoom = botView?.zoom ?? ownZoom;
+  const customSize = botView?.customSize ?? ownCustomSize;
+  function routed<K extends "presetId" | "rotated" | "zoom" | "customSize">(key: K, own: React.Dispatch<React.SetStateAction<TestingView[K]>>) {
+    return (value: React.SetStateAction<TestingView[K]>) => {
+      if (!botTab || !botView) return own(value);
+      const next = typeof value === "function" ? (value as (previous: TestingView[K]) => TestingView[K])(botView[key]) : value;
+      testingStore.setView(botTab.id, { [key]: next } as Partial<TestingView>);
+    };
+  }
+  const setPresetId = routed("presetId", setOwnPresetId);
+  const setRotated = routed("rotated", setOwnRotated);
+  const setZoom = routed("zoom", setOwnZoom);
+  const setCustomSize = routed("customSize", setOwnCustomSize);
+
   const [urlError, setUrlError] = useState("");
   const [pendingLocalUrl, setPendingLocalUrl] = useState<string | null>(null);
-  const [frameStatus, setFrameStatus] = useState<PreviewFrameStatus>("empty");
-  const [historyNav, setHistoryNav] = useState({ canGoBack: false, canGoForward: false });
+  const [ownFrameStatus, setFrameStatus] = useState<PreviewFrameStatus>("empty");
+  const [ownHistoryNav, setHistoryNav] = useState({ canGoBack: false, canGoForward: false });
+  const botMeta = botTab ? testing.meta[botTab.id] : undefined;
+  const frameStatus: PreviewFrameStatus = botTab ? botMeta?.status ?? "loading" : ownFrameStatus;
+  const historyNav = botTab ? { canGoBack: Boolean(botMeta?.canGoBack), canGoForward: Boolean(botMeta?.canGoForward) } : ownHistoryNav;
   const [historyList, setHistoryList] = useState<string[]>(() => getMobilePreviewUrlHistory());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sizeMenuOpen, setSizeMenuOpen] = useState(false);
@@ -227,7 +262,7 @@ export function MobilePreviewPanel({
   const sizeDropdownRef = useRef<HTMLDivElement | null>(null);
   const screenshotDropdownRef = useRef<HTMLDivElement | null>(null);
 
-  usePreviewAutoRefreshWatcher("quick-preview-panel", activeSource, open);
+  usePreviewAutoRefreshWatcher("quick-preview-panel", ownSource, open);
 
   const preset = useMemo(() => resolvePreviewSize(presetId, customSize), [customSize, presetId]);
 
@@ -250,6 +285,66 @@ export function MobilePreviewPanel({
     () => (responsive ? 1 : computeFrameScale(effectiveDims, stageBounds, zoom, 16)),
     [effectiveDims, responsive, stageBounds, zoom],
   );
+
+  // While a bot tab is shown, the user's hidden page keeps its own size.
+  const ownLayout = useRef({ width: effectiveDims.width, height: effectiveDims.height, scale, fill: responsive, bezel: preset.group === "phone" || preset.group === "tablet", label: preset.label });
+  if (!botTab) ownLayout.current = { width: effectiveDims.width, height: effectiveDims.height, scale, fill: responsive, bezel: preset.group === "phone" || preset.group === "tablet", label: preset.label };
+
+  // Bot tabs render in PreviewTestingLayer over this panel's stage.
+  useEffect(() => (testingHost ? testingStore.addHost() : undefined), [testingHost]);
+  useEffect(() => {
+    if (!open) return;
+    const stage = stageRef.current;
+    testingStore.setSlot(stage);
+    return () => { if (testingStore.state().slot === stage) testingStore.setSlot(null); };
+  }, [open]);
+  const menuOpen = sizeMenuOpen || moreMenuOpen || historyOpen || screenshotMenuOpen || filePickerOpen;
+  useEffect(() => {
+    if (!botTab) return;
+    testingStore.setLayout(botTab.id, {
+      width: effectiveDims.width,
+      height: effectiveDims.height,
+      scale,
+      fill: responsive,
+      padded: !responsive,
+      bezel: preset.group === "phone" || preset.group === "tablet",
+      interactive: !menuOpen,
+      dims: botView?.dims ?? "",
+    });
+  }, [botTab, botView?.dims, effectiveDims.height, effectiveDims.width, menuOpen, preset.group, responsive, scale]);
+
+  // A bot asked to act on the page the user is viewing: hand it this panel's frame.
+  const attachTried = useRef(new Set<string>());
+  const attachDims = useRef<string | null>(null);
+  useEffect(() => {
+    const api = window.gbs?.previewTesting;
+    const pending = testing.sessions.find((s) => s.target === "active" && s.state === "opening" && !attachTried.current.has(s.id));
+    if (!testingHost || !open || !api || !pending) return;
+    if (testing.tab !== null) { testingStore.setTab(null); return; }
+    if (!ownSource || ownSource.kind !== "url") {
+      attachTried.current.add(pending.id);
+      void api.register({ sessionId: pending.id, unavailable: ownSource ? "Quick Preview is showing a project file. Bots can attach to web pages only; use target \"new\"." : "No page is open in Quick Preview. Ask the user to open one, or use target \"new\"." });
+      return;
+    }
+    if (ownFrameStatus === "loading" || ownFrameStatus === "empty") return;
+    const webContentsId = frameRef.current?.webContentsId();
+    if (webContentsId == null) return;
+    attachTried.current.add(pending.id);
+    attachDims.current = `${effectiveDims.width}x${effectiveDims.height}x${responsive}`;
+    void api.register({ sessionId: pending.id, webContentsId, viewport: { width: effectiveDims.width, height: effectiveDims.height, responsive } })
+      .catch((error: Error) => testingStore.setError(error.message));
+  }, [effectiveDims.height, effectiveDims.width, open, ownFrameStatus, ownSource, responsive, testing.sessions, testing.tab, testingHost]);
+  // The bot resized the user's page: show that size in this panel's own controls.
+  useEffect(() => {
+    if (!attached) return;
+    const dims = `${attached.width}x${attached.height}x${attached.responsive}`;
+    if (attachDims.current === dims) return;
+    attachDims.current = dims;
+    const view = viewFromSession(attached, ownZoom);
+    setOwnPresetId(view.presetId);
+    setOwnRotated(view.rotated);
+    if (view.presetId === "custom") setOwnCustomSize(view.customSize);
+  }, [attached, ownZoom]);
 
   // Measure viewport stage for Fit zoom
   useEffect(() => {
@@ -275,6 +370,7 @@ export function MobilePreviewPanel({
     const onOpen = (event: Event) => {
       const detail = (event as CustomEvent<OpenPreviewDetail>).detail;
       if (!detail) return;
+      testingStore.setTab(null);
       if ("file" in detail) {
         setActiveSource(detail.file);
         setInputUrl("");
@@ -291,13 +387,13 @@ export function MobilePreviewPanel({
   useEffect(() => {
     saveMobilePreviewState({
       input: inputUrl,
-      presetId,
-      rotated,
-      zoom,
-      customSize,
-      source: activeSource,
+      presetId: ownPresetId,
+      rotated: ownRotated,
+      zoom: ownZoom,
+      customSize: ownCustomSize,
+      source: ownSource,
     });
-  }, [activeSource, customSize, inputUrl, presetId, rotated, zoom]);
+  }, [ownSource, ownCustomSize, inputUrl, ownPresetId, ownRotated, ownZoom]);
 
   // An empty panel starts in the web header so the address field is available.
   const isDeviceSource = !activeSource || isWebPreviewSource(activeSource);
@@ -432,6 +528,24 @@ export function MobilePreviewPanel({
     };
   }, [historyOpen, screenshotMenuOpen, sizeMenuOpen, updateHistoryPosition, updateScreenshotPosition, updateSizePosition]);
 
+  // The page the toolbar acts on: the bot's tab or the user's own frame.
+  const viewFrame = () => (botTab ? testingStore.frame(botTab.id) : frameRef.current);
+  /** Any user navigation on a bot-controlled page is a takeover, so the bot cannot act on a page it did not expect. */
+  const takeControl = () => {
+    if (controlSession && controlSession.state !== "paused") void testingStore.control(controlSession.id, "pause");
+  };
+  const [botInput, setBotInput] = useState<string | null>(null);
+  useEffect(() => setBotInput(null), [botTab?.id, botTab?.url]);
+  // Keep the address bar truthful while a bot moves the user's own page.
+  useEffect(() => {
+    if (attached?.url && attached.url !== "about:blank") setInputUrl(attached.url);
+  }, [attached?.url]);
+  const reloadView = () => {
+    takeControl();
+    if (botTab?.source.kind === "file") testingStore.frame(botTab.id)?.loadURL(botTab.url);
+    else viewFrame()?.reload();
+  };
+
   const commitUrl = useCallback((url: string) => {
     setPendingLocalUrl(null);
     setUrlError("");
@@ -448,7 +562,7 @@ export function MobilePreviewPanel({
 
   const handleNavigate = useCallback(
     (rawInput?: string) => {
-      const target = rawInput !== undefined ? rawInput : inputUrl;
+      const target = rawInput !== undefined ? rawInput : botTab ? botInput ?? botTab.url : inputUrl;
       setHistoryOpen(false);
       const check = validatePreviewUrl(target);
       if (!check.valid) {
@@ -456,17 +570,29 @@ export function MobilePreviewPanel({
         return;
       }
       setUrlError("");
+      // Navigate controlled pages in place; remounting would end the bot's session.
+      if (botTab || (attached && !testing.tab)) {
+        takeControl();
+        if (viewFrame()?.loadURL(check.url)) {
+          setBotInput(null);
+          if (!botTab) setInputUrl(check.url);
+          setHistoryList(addMobilePreviewUrlToHistory(check.url));
+          return;
+        }
+      }
       if (check.isLocalOrPrivate && (activeSource?.kind !== "url" || activeSource.url !== check.url)) {
         setPendingLocalUrl(check.url);
         return;
       }
       commitUrl(check.url);
     },
-    [activeSource, commitUrl, inputUrl],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeSource, attached, botInput, botTab, commitUrl, inputUrl, testing.tab],
   );
   navigateRef.current = handleNavigate;
 
   const handleSelectProjectFile = useCallback((fileSource: PreviewFileSource) => {
+    testingStore.setTab(null);
     setPendingLocalUrl(null);
     setUrlError("");
     setActiveSource(fileSource);
@@ -476,7 +602,8 @@ export function MobilePreviewPanel({
   const handleCaptureScreenshot = useCallback(
     async (mode: "visible" | "full") => {
       setScreenshotMenuOpen(false);
-      if (!activeSource || !frameRef.current || capturing) return;
+      const frame = viewFrame();
+      if (!activeSource || !frame || capturing) return;
       setCapturing(true);
       setToast(null);
       try {
@@ -487,7 +614,7 @@ export function MobilePreviewPanel({
           setTimeout(() => setToast(null), 2500);
           return;
         }
-        const attachment = await frameRef.current.captureScreenshot(mode, {
+        const attachment = await frame.captureScreenshot(mode, {
           title: preset.label,
           width: effectiveDims.width,
           height: effectiveDims.height,
@@ -514,12 +641,13 @@ export function MobilePreviewPanel({
       onScreenshot,
       onSendScreenshotToChat,
       preset.label,
+      botTab,
     ],
   );
 
   const handleOpenInPreviewPage = useCallback(() => {
     savePreviewStudioState({
-      input: inputUrl,
+      input: botTab ? botTab.url : inputUrl,
       source: activeSource,
       presetId,
       rotated,
@@ -527,7 +655,7 @@ export function MobilePreviewPanel({
       customSize,
     });
     dispatch({ type: "togglePreview", open: true });
-  }, [activeSource, customSize, dispatch, inputUrl, presetId, rotated, zoom]);
+  }, [activeSource, botTab, customSize, dispatch, inputUrl, presetId, rotated, zoom]);
 
   if (!open) return null;
 
@@ -574,9 +702,10 @@ export function MobilePreviewPanel({
 
               <input
                 type="text"
-                value={inputUrl}
+                value={botTab ? botInput ?? botTab.url : inputUrl}
                 onChange={(e) => {
-                  setInputUrl(e.target.value);
+                  if (botTab) setBotInput(e.target.value);
+                  else setInputUrl(e.target.value);
                   if (urlError) setUrlError("");
                 }}
                 onKeyDown={(e) => {
@@ -612,7 +741,7 @@ export function MobilePreviewPanel({
               {/* Reload */}
               <button
                 type="button"
-                onClick={() => frameRef.current?.reload()}
+                onClick={reloadView}
                 disabled={!activeSource}
                 aria-label="Reload preview"
                 title="Reload preview"
@@ -683,8 +812,8 @@ export function MobilePreviewPanel({
                 onOpenInPreviewPage={handleOpenInPreviewPage}
                 onCaptureScreenshot={handleCaptureScreenshot}
                 historyNav={historyNav}
-                onGoBack={() => frameRef.current?.goBack()}
-                onGoForward={() => frameRef.current?.goForward()}
+                onGoBack={() => { takeControl(); viewFrame()?.goBack(); }}
+                onGoForward={() => { takeControl(); viewFrame()?.goForward(); }}
                 onOpenChange={setMoreMenuOpen}
               />
 
@@ -747,7 +876,7 @@ export function MobilePreviewPanel({
               </button>
               <button
                 type="button"
-                onClick={() => frameRef.current?.reload()}
+                onClick={reloadView}
                 aria-label="Reload file"
                 title="Reload file"
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink"
@@ -808,6 +937,64 @@ export function MobilePreviewPanel({
         )}
       </header>
 
+      {(botTabs.length > 0 || attached) && (
+        <div role="tablist" aria-label="Preview tabs" className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline/40 px-2 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!botTab}
+            onClick={() => testingStore.setTab(null)}
+            className={cn("flex max-w-[180px] shrink-0 items-center gap-1.5 truncate rounded-md px-2.5 py-1 text-[11.5px]", !botTab ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised")}
+          >
+            {attached && <Bot className="h-3 w-3 shrink-0" aria-label={`${attached.botName} is on this page`} />}
+            <span className="truncate">Your page</span>
+          </button>
+          {botTabs.map((s) => (
+            <div key={s.id} className={cn("flex max-w-[220px] shrink-0 items-center rounded-md text-[11.5px]", s.id === botTab?.id ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised")}>
+              <button type="button" role="tab" aria-selected={s.id === botTab?.id} onClick={() => testingStore.setTab(s.id)} className="flex min-w-0 items-center gap-1.5 py-1 pl-2.5 pr-1" title={`${s.botName} · ${s.name}`}>
+                <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", s.state === "paused" ? "bg-ink-secondary" : s.state === "error" ? "bg-danger" : "animate-pulse bg-accent")} />
+                <span className="truncate">{s.botName} · {s.name}</span>
+              </button>
+              <button type="button" aria-label={`End ${s.botName}'s test`} title="End this test" onClick={() => void testingStore.control(s.id, "close")} className="rounded p-1 hover:text-ink">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {controlSession && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-hairline/40 bg-accent/5 px-3 py-1.5 text-[11.5px]">
+          {controlSession.state === "paused" ? <Hand className="h-3.5 w-3.5 shrink-0 text-ink-secondary" /> : <Bot className="h-3.5 w-3.5 shrink-0 text-accent" />}
+          <span role="status" className="min-w-0 flex-1 truncate text-ink-secondary">
+            {controlSession.state === "error"
+              ? controlSession.error ?? "This test needs attention"
+              : controlSession.state === "paused"
+                ? controlSession.canResume
+                  ? "You have control"
+                  : `Page replaced · ask ${controlSession.botName} to start a new test`
+                : <><span className="font-medium text-ink">{controlSession.botName}</span> {botTab ? "is in control" : "is in control of your page"} · {controlSession.activity}</>}
+          </span>
+          {controlSession.state === "paused"
+            ? controlSession.canResume && (
+                <button type="button" onClick={() => void testingStore.control(controlSession.id, "resume")} className="flex shrink-0 items-center gap-1 rounded-md bg-accent px-2 py-1 text-[11px] text-white">
+                  <Play className="h-3 w-3" />Resume bot
+                </button>
+              )
+            : controlSession.state !== "error" && (
+                <button type="button" onClick={() => void testingStore.control(controlSession.id, "pause")} className="flex shrink-0 items-center gap-1 rounded-md border border-hairline/60 bg-raised px-2 py-1 text-[11px] text-ink">
+                  <Square className="h-2.5 w-2.5" />Stop / take control
+                </button>
+              )}
+          {!botTab && (
+            <button type="button" aria-label={`End ${controlSession.botName}'s test`} title="End this test" onClick={() => void testingStore.control(controlSession.id, "close")} className="shrink-0 rounded p-1 text-ink-secondary hover:text-ink">
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      )}
+      {testing.error && (botTab || attached) && (
+        <div role="alert" className="border-b border-danger/30 bg-danger/10 px-3 py-1.5 text-[11.5px] text-danger">{testing.error}</div>
+      )}
       {sharesLinkOnly(activeSource, Boolean(window.gbs)) && (
         <p role="status" className="border-b border-hairline px-3 py-2 text-[11px] text-ink-secondary">{PAGE_SHARE_NOTICE}</p>
       )}
@@ -839,12 +1026,14 @@ export function MobilePreviewPanel({
             }}
           />
         )}
+        {/* The user's own page stays mounted (hidden) while a bot tab is shown. */}
+        <div className="contents" style={{ visibility: botTab ? "hidden" : undefined }} aria-hidden={botTab ? true : undefined}>
         <PreviewFrame
           ref={frameRef}
-          source={activeSource}
-          width={effectiveDims.width}
-          height={effectiveDims.height}
-          scale={scale}
+          source={ownSource}
+          width={ownLayout.current.width}
+          height={ownLayout.current.height}
+          scale={ownLayout.current.scale}
           pendingConfirmUrl={pendingLocalUrl}
           onConfirmLocalUrl={() => {
             if (pendingLocalUrl) commitUrl(pendingLocalUrl);
@@ -857,10 +1046,11 @@ export function MobilePreviewPanel({
           onOpenFilePicker={() => openFilePicker()}
           onStatusChange={setFrameStatus}
           onHistoryStateChange={setHistoryNav}
-          frameTitle={preset.label}
-          showDeviceBezel={preset.group === "phone" || preset.group === "tablet"}
-          fill={responsive}
+          frameTitle={ownLayout.current.label}
+          showDeviceBezel={ownLayout.current.bezel}
+          fill={ownLayout.current.fill}
         />
+        </div>
       </div>
       </DocumentChromeContext.Provider>
 

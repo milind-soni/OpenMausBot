@@ -62,8 +62,8 @@ try {
   console.log("Desktop bridge ready; opening fixture");
   const result = text(await proxy.call("preview_open", { url: fixtureURL, project_id: "fixture-project", name: "Profile form", preset: "phone" }));
   console.log("Fixture opened");
-  const id = result.sessionId; assert.equal(result.viewport.width, 390);
-  await until(() => desktop("/state"), x => x.text?.includes("Controlled by Preview tester"));
+  const id = result.sessionId; assert.equal(result.viewport.width, 393);
+  await until(() => desktop("/state"), x => x.text?.includes("Preview tester is in control") && x.text?.includes("Your page"));
   const act = args => proxy.call("preview_action", { session_id: id, ...args });
   let snapshot = text(await proxy.call("preview_snapshot", { session_id: id }));
   const control = name => snapshot.controls.find(c => c.name === name)?.ref;
@@ -128,7 +128,18 @@ try {
   const file = text(await proxy.call("preview_open", { project_id: "fixture-project", path: "index.html", preset: "desktop" }));
   assert.ok(file.text.includes("Preview testing fixture"));
   await proxy.call("preview_close", { session_id: file.sessionId });
-  console.log("Navigation and project HTML verified; checking host reload");
+  console.log("Navigation and project HTML verified; checking the user's active page");
+  const noPage = await proxy.call("preview_open", { target: "active" }, true);
+  assert.equal(noPage.isError, true); assert.match(noPage.content[0].text, /No page is open in Quick Preview/);
+  await desktop("/open-page", { url: fixtureURL + "?mine=1" });
+  const mine = text(await proxy.call("preview_open", { target: "active", name: "Your page" }));
+  assert.ok(mine.url.includes("mine=1"), mine.url); assert.ok(mine.text.includes("Preview testing fixture"));
+  await until(() => desktop("/state"), x => x.text?.includes("is in control of your page"));
+  const webviewsWithMine = (await desktop("/state")).count;
+  await proxy.call("preview_close", { session_id: mine.sessionId });
+  // Ending the test must leave the user's own page open.
+  assert.equal((await desktop("/state")).count, webviewsWithMine);
+  console.log("Active page attach verified; checking host reload");
   const reloadTarget = text(await proxy.call("preview_open", { url: fixtureURL, name: "Reload cancellation", preset: "phone" }));
   await desktop("/reload", {});
   await until(async () => text(await proxy.call("preview_status")), s => s.sessions.some(x => x.id === reloadTarget.sessionId && x.state === "paused"));
@@ -157,7 +168,7 @@ try {
     live = { provider: "Actual Codex CLI", model: process.env.GBS_QA_LIVE_MODEL ?? "gpt-6.1-sol", submittedName: "Lin", reply };
     writeFileSync(join(artifacts, "live-codex.json"), JSON.stringify(live,null,2));
   }
-  const report = { passed: true, live, form: "Saved Ada pro", viewports: [390,768,1440,"Responsive"], actualImageBytes: Buffer.from(image.content[1].data,"base64").length, responsiveBefore: before, responsiveAfter: after, checks: ["real Electron PreviewFrame", "MCP screenshot image", "project evidence", "diagnostics", "stale refs", "session isolation", "Stop cancels queued/running commands", "user resume", "frame destruction on reload stops session", "blocked app navigation/redirect", "project HTML", "unauthenticated/cross-origin bridge rejection"], provider: process.env.GBS_QA_LIVE_CODEX ? "Fake CLI regression plus actual Codex smoke test" : "Fake Claude CLI transport; no paid model call" };
+  const report = { passed: true, live, form: "Saved Ada pro", viewports: [390,768,1440,"Responsive"], actualImageBytes: Buffer.from(image.content[1].data,"base64").length, responsiveBefore: before, responsiveAfter: after, checks: ["real Electron PreviewFrame", "MCP screenshot image", "project evidence", "diagnostics", "stale refs", "session isolation", "Stop cancels queued/running commands", "user resume", "frame destruction on reload stops session", "blocked app navigation/redirect", "project HTML", "attach to the active page", "unauthenticated/cross-origin bridge rejection"], provider: process.env.GBS_QA_LIVE_CODEX ? "Fake CLI regression plus actual Codex smoke test" : "Fake Claude CLI transport; no paid model call" };
   writeFileSync(join(artifacts, "report.json"), JSON.stringify(report,null,2)); console.log(JSON.stringify(report,null,2));
 } finally {
   for (const p of children.reverse()) { p.kill("SIGTERM"); }

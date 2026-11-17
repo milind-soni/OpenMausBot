@@ -12,6 +12,7 @@ import { MausAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { OPEN_PREVIEW_EVENT } from "@/lib/chatLinks";
+import { SHOW_TESTING_EVENT, type ShowTestingDetail } from "@/lib/previewTestingStore";
 import { Composer } from "./Composer";
 import { ReactionBar, ReactionChips } from "./Reactions";
 import { cn } from "@/lib/cn";
@@ -191,17 +192,22 @@ export function GroupView({ group }: { group: Group }) {
 
   const [lastRequestedDrawer, setLastRequestedDrawer] = useState<"preview" | "tasks">("preview");
 
-  // A link or image clicked in a message opens the Quick preview on it.
+  // A link or image clicked in a message, or a bot starting a Preview test, opens the Quick preview.
   useEffect(() => {
-    const onOpen = () => {
+    const onOpen = (event: Event) => {
       setMobilePreviewOpen(true);
+      if (event.type === SHOW_TESTING_EVENT) (event as CustomEvent<ShowTestingDetail>).detail.handled = true;
       if (!isLargeScreen) {
         setLastRequestedDrawer("preview");
         setTasksOpen(false);
       }
     };
     window.addEventListener(OPEN_PREVIEW_EVENT, onOpen);
-    return () => window.removeEventListener(OPEN_PREVIEW_EVENT, onOpen);
+    window.addEventListener(SHOW_TESTING_EVENT, onOpen);
+    return () => {
+      window.removeEventListener(OPEN_PREVIEW_EVENT, onOpen);
+      window.removeEventListener(SHOW_TESTING_EVENT, onOpen);
+    };
   }, [isLargeScreen]);
 
   const togglePreview = useCallback(() => {

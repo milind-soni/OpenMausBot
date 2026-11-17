@@ -9,7 +9,7 @@ declare global {
       platform: string;
       previewTesting?: {
         start(): Promise<PreviewTestingSession[]>;
-        register(input: { sessionId: string; webContentsId: number }): Promise<{ ok: boolean }>;
+        register(input: { sessionId: string; webContentsId?: number; viewport?: { width: number; height: number; responsive: boolean }; unavailable?: string }): Promise<{ ok: boolean }>;
         control(input: { sessionId: string; action: "pause" | "resume" | "close" }): Promise<void>;
         onActive(cb: (id: string) => void): () => void;
         onSessions(cb: (sessions: PreviewTestingSession[]) => void): () => void;

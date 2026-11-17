@@ -906,7 +906,7 @@ async function runGroupMemberTurn(
     taskContext.system,
     composioPrompt.trim(),
     computerPromptHint(integrations),
-    integrations.agents && "Use preview_status, preview_open, preview_snapshot, preview_action, preview_screenshot, preview_diagnostics and preview_close to test project websites directly in Studio Preview. Prefer these over Chrome when desktop Preview is available. Use only your owned sessions; a user-stopped session needs user resumption.",
+    integrations.agents && "Use preview_status, preview_open, preview_snapshot, preview_action, preview_screenshot, preview_diagnostics and preview_close to test project websites directly in Studio Preview. Prefer these over Chrome when desktop Preview is available. Sessions open in the Quick Preview panel: by default open your own new tab (target \"new\"); only when the user asks you to act on the page they currently have open, use preview_open with target \"active\". Use only your owned sessions; a user-stopped session needs user resumption.",
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     CHAT_FORMATTING_HINT,
   ]
@@ -1310,7 +1310,13 @@ const server = createServer(async (req, res) => {
         if (operation === "status" && method === "GET") return json(res, 200, previewTesting.status(botId));
         if (method !== "POST") return json(res, 405, { error: "method not allowed" });
         const body = await readBody(req);
+        if (operation === "open" && body.target === "active") {
+          // Act on the page the user already has open in Quick Preview; the desktop supplies its URL and size.
+          const pending = previewTesting.open({ botId, botName: bot.name, name: typeof body.name === "string" ? body.name.slice(0, 100) : "Your page", url: "about:blank", source: { kind: "url", url: "about:blank", raw: "about:blank", isLocalOrPrivate: false }, width: 1440, height: 900, responsive: false, target: "active" });
+          return json(res, 200, await pending);
+        }
         if (operation === "open") {
+          if (body.target !== undefined && body.target !== "new") throw testingError("target must be \"new\" or \"active\".");
           const viewport = testingViewport(body);
           let source: import("./preview-testing.ts").TestingSession["source"];
           let targetURL: string;
@@ -1326,7 +1332,7 @@ const server = createServer(async (req, res) => {
             } else { targetURL = validateTestingURL(body.url, testingBlockedOrigins); source = { kind: "url", url: targetURL, raw: targetURL, isLocalOrPrivate: false }; }
             projectPath = project.path;
           } else { targetURL = validateTestingURL(body.url, testingBlockedOrigins); source = { kind: "url", url: targetURL, raw: targetURL, isLocalOrPrivate: false }; }
-          const pending = previewTesting.open({ botId, botName: bot.name, name: typeof body.name === "string" ? body.name.slice(0, 100) : `${bot.name}'s test`, url: targetURL, source, ...viewport }, id => { if (projectPath) testingProjects.set(id, projectPath); });
+          const pending = previewTesting.open({ botId, botName: bot.name, name: typeof body.name === "string" ? body.name.slice(0, 100) : `${bot.name}'s test`, url: targetURL, source, ...viewport, target: "new" }, id => { if (projectPath) testingProjects.set(id, projectPath); });
           return json(res, 200, await pending);
         }
         const session = previewTesting.owned(body.session_id, botId);

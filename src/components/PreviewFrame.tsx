@@ -36,6 +36,10 @@ export interface PreviewFrameHandle {
   reload: () => void;
   goBack: () => void;
   goForward: () => void;
+  /** Desktop guest id of the live page, for attaching a bot session to it. */
+  webContentsId: () => number | null;
+  /** Navigates the live page in place without remounting it; false when unsupported. */
+  loadURL: (url: string) => boolean;
   captureScreenshot: (
     mode: "visible" | "full",
     meta: { title: string; width: number; height: number },
@@ -271,9 +275,19 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
       reload,
       goBack,
       goForward,
+      webContentsId: () => {
+        const el = webviewRef.current as any;
+        try { return isElectron && el && typeof el.getWebContentsId === "function" ? el.getWebContentsId() : null; } catch { return null; }
+      },
+      loadURL: (url: string) => {
+        const el = webviewRef.current as any;
+        if (!isElectron || !el || typeof el.loadURL !== "function") return false;
+        void el.loadURL(url).catch(() => {});
+        return true;
+      },
       captureScreenshot,
     }),
-    [captureScreenshot, goBack, goForward, reload],
+    [captureScreenshot, goBack, goForward, isElectron, reload],
   );
 
   // Listen for auto-refresh SSE reload events matching the active project file
@@ -569,9 +583,9 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
         }}
         className={
           fileViewer || fill ? "relative h-full w-full overflow-hidden bg-panel" : showDeviceBezel
-            ? "relative overflow-hidden rounded-[22px] border-[3px] border-hairline bg-panel shadow-xl"
-            : testingSessionId ? "relative overflow-hidden bg-panel"
-            : "relative overflow-hidden rounded-xl border border-hairline bg-panel shadow-lg"
+            // Rings sit outside the box, so the page keeps the preset's exact viewport.
+            ? "relative overflow-hidden rounded-[22px] ring-[3px] ring-hairline bg-panel shadow-xl"
+            : "relative overflow-hidden rounded-xl ring-1 ring-hairline bg-panel shadow-lg"
         }
       >
         {/* Top 2px loading bar */}

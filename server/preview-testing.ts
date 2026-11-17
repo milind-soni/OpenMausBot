@@ -4,6 +4,8 @@ export type TestingSession = {
   id: string; botId: string; botName: string; name: string; url: string;
   source: { kind: "url"; url: string; raw: string; isLocalOrPrivate: boolean } | { kind: "file"; projectId: string; filePath: string; fileType: "html" };
   width: number; height: number; responsive: boolean;
+  /** "new" opens its own Quick Preview tab; "active" attaches to the page the user is viewing. */
+  target: "new" | "active";
   state: "opening" | "ready" | "paused" | "closed" | "error";
   activity: string; error?: string;
 };
@@ -11,7 +13,7 @@ export type TestingCommand = { id: string; sessionId: string; operation: string;
 type Pending = { command: TestingCommand; sent: boolean; resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 export const testingError = (message: string, status = 400) => Object.assign(new Error(message), { status });
 export function testingViewport(value: Record<string, unknown>) {
-  const presets: Record<string, [number, number]> = { phone: [390, 844], tablet: [768, 1024], desktop: [1440, 900], responsive: [800, 700] };
+  const presets: Record<string, [number, number]> = { phone: [393, 852], tablet: [744, 1133], desktop: [1440, 900], responsive: [800, 700] };
   if (value.preset !== undefined && !presets[String(value.preset)]) throw testingError("Choose phone, tablet, desktop or responsive.");
   const preset = presets[String(value.preset ?? "desktop")];
   const width = value.width ?? preset[0], height = value.height ?? preset[1];
@@ -89,6 +91,12 @@ export class PreviewTestingBroker {
       s.state = "ready";
       if (result?.url && s.source.kind === "url") s.url = String(result.url).slice(0, 8192);
       if (p.command.operation === "resize") Object.assign(s, testingViewport(p.command.args));
+      // An attached view keeps the user's size, so adopt what the desktop reports.
+      if (p.command.operation === "open" && s.target === "active" && result?.viewport) {
+        const { width, height, responsive } = result.viewport;
+        if (Number.isInteger(width) && Number.isInteger(height)) Object.assign(s, { width, height, responsive: Boolean(responsive) });
+        if (result.source?.kind === "url" && typeof result.url === "string") s.source = { kind: "url", url: result.url, raw: result.url, isLocalOrPrivate: false };
+      }
       p.resolve({ sessionId: s.id, ...result });
     }
     s.activity = [...this.pending.values()].some(v => v.command.sessionId === s.id) ? "Queued actions" : "Idle";

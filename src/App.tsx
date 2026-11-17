@@ -1,4 +1,6 @@
-import { PreviewTestingPanel } from "@/components/PreviewTestingPanel";
+import { PreviewTestingLayer } from "@/components/PreviewTestingLayer";
+import { MobilePreviewPanel } from "@/components/MobilePreviewPanel";
+import { testingStore, useTestingState } from "@/lib/previewTestingStore";
 import { ScheduleSheet } from "@/components/ScheduleSheet";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
@@ -28,6 +30,20 @@ function ScreenFallback() {
     <div className="flex flex-1 items-center justify-center text-ink-secondary">
       <Loader2 size={18} className="animate-spin" />
     </div>
+  );
+}
+
+/** Shows Quick Preview app-wide when a bot starts testing while no chat shows it. */
+function TestingFallbackPanel() {
+  const testing = useTestingState();
+  if (!testing.fallbackOpen || testing.hosts > 0) return null;
+  return (
+    <MobilePreviewPanel
+      onClose={() => testingStore.setFallbackOpen(false)}
+      docked={false}
+      testingHost={false}
+      className="fixed inset-y-0 right-0 z-30 flex max-w-full shadow-2xl"
+    />
   );
 }
 
@@ -70,7 +86,8 @@ function Shell() {
     <div className="flex h-full flex-col">
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
-      <PreviewTestingPanel />
+      <PreviewTestingLayer />
+      <TestingFallbackPanel />
       <div className="relative flex min-h-0 flex-1">
       <Sidebar />
       {state.scheduleSheet && <ScheduleSheet {...state.scheduleSheet} onClose={() => dispatch({ type: "closeSchedule" })} />}

@@ -21,7 +21,8 @@ app.whenReady().then(async () => {
     try {
       let raw = ""; for await (const chunk of req) raw += chunk;
       const body = raw ? JSON.parse(raw) : {}; let value = { ok: true };
-      if (req.url === "/state") value = await win.webContents.executeJavaScript(`(() => { const panel = document.querySelector('aside[aria-label="Bot testing Preview"]'); return { text: panel?.innerText, count: document.querySelectorAll('webview').length, panel: panel?.getBoundingClientRect().toJSON() }; })()`);
+      if (req.url === "/state") value = await win.webContents.executeJavaScript(`(() => { const panel = document.querySelector('aside[aria-label="Quick preview panel"]'); return { text: panel?.innerText, count: document.querySelectorAll('webview').length, panel: panel?.getBoundingClientRect().toJSON() }; })()`);
+      if (req.url === "/open-page") await win.webContents.executeJavaScript(`(async () => { document.querySelector('[role="tab"]')?.click(); window.dispatchEvent(new CustomEvent("gbs-open-preview", { detail: { url: ${JSON.stringify(body.url)} } })); for (let i = 0; i < 50; i++) { const load = [...document.querySelectorAll("button")].find(b => b.textContent.trim() === "Load preview"); if (load) { load.click(); return; } await new Promise(r => setTimeout(r, 100)); } })()`);
       if (req.url === "/control") await win.webContents.executeJavaScript(`window.gbs.previewTesting.control(${JSON.stringify(body)})`);
       if (req.url === "/resize") win.setSize(body.width, body.height);
       if (req.url === "/capture") fs.writeFileSync(body.path, (await win.capturePage()).toPNG());

@@ -21,7 +21,9 @@ export function createPreviewTestingBridge({ ipcMain, webContents, guestIds, dat
     if (r.wc && !r.wc.isDestroyed()) r.wc.stop();
     r.info.state = "paused"; r.info.activity = reason;
   };
-  const dispose = r => { stopLocal(r, "Session closed"); r.browser?.dispose(); r.browser = null; };
+  // Attached views belong to the user and outlive the session, so guards must come off.
+  const unguard = r => { if (r.wc && !r.wc.isDestroyed()) for (const [name, fn] of r.guards ?? []) r.wc.removeListener(name, fn); r.guards = null; };
+  const dispose = r => { stopLocal(r, "Session closed"); unguard(r); r.browser?.dispose(); r.browser = null; };
   const pauseSession = async (id, action = "pause", reason = "User took control") => {
     const r = sessions.get(id);
     if (!r) throw new Error("No such Preview testing session.");
@@ -63,11 +65,12 @@ export function createPreviewTestingBridge({ ipcMain, webContents, guestIds, dat
       check();
       if (!r.hostId) r.hostId = [...windows].find(win => !win.isDestroyed())?.webContents.id;
       if (!r.hostId) throw new Error("Open a Studio window before testing.");
-      for (const win of windows) if (!win.isDestroyed() && win.webContents.id === r.hostId) win.webContents.send("preview-testing:active", r.info.id);
       if (command.operation === "open") {
+        // Bring the session forward once; later actions must not pull the user away from another tab.
+        for (const win of windows) if (!win.isDestroyed() && win.webContents.id === r.hostId) win.webContents.send("preview-testing:active", r.info.id);
         if (guestIds.size >= 6) throw new Error("Six Preview frames are already open. Close one first.");
         await new Promise((resolve, reject) => {
-          const timer = setTimeout(() => reject(new Error("Preview frame did not become ready.")), 20_000);
+          const timer = setTimeout(() => reject(new Error(r.info.target === "active" ? "No page is open in Quick Preview to attach to. Ask the user to open one, or use target \"new\"." : "Preview frame did not become ready.")), 20_000);
           r.waiting = { resolve: () => { clearTimeout(timer); resolve(); }, reject: error => { clearTimeout(timer); reject(error); } };
           r.mount = true; publish();
         });
@@ -90,6 +93,7 @@ export function createPreviewTestingBridge({ ipcMain, webContents, guestIds, dat
         } while (Date.now() < deadline);
         if (!result) throw new Error("Preview viewport did not resize in time.");
       } else result = await r.browser.perform(command.operation, command.args, abort.signal);
+      if (command.operation === "open" && r.attached) result = { ...result, url: r.wc.getURL(), source: { kind: "url" }, viewport: r.attached };
       check();
       await request({ id: command.id, sessionId: r.info.id, result });
       if (r.info.state === "opening") r.info.state = "ready";
@@ -138,16 +142,21 @@ export function createPreviewTestingBridge({ ipcMain, webContents, guestIds, dat
     if (!trusted(event) || !["pause", "resume", "close"].includes(action)) throw new Error("Untrusted Preview control.");
     return pauseSession(String(sessionId), action);
   });
-  ipcMain.handle("preview-testing:register", async (event, { sessionId, webContentsId }) => {
+  ipcMain.handle("preview-testing:register", async (event, { sessionId, webContentsId, viewport, unavailable }) => {
     const r = sessions.get(String(sessionId));
+    if (unavailable && trusted(event) && r?.waiting && r.info.target === "active" && r.hostId === event.sender.id) { r.waiting.reject(new Error(String(unavailable).slice(0, 300))); r.waiting = null; return { ok: false }; }
     const wc = webContents.fromId(webContentsId);
+    // A tab that navigated or resumed reports its page again; it is already this session's target.
+    if (trusted(event) && r?.wc && !r.wc.isDestroyed() && r.wc === wc) return { ok: true };
     if (!trusted(event) || !r?.waiting || r.hostId !== event.sender.id || !guestIds.has(webContentsId) || !wc || wc.hostWebContents !== event.sender || !allowedURL(r, wc.getURL())) throw new Error("Invalid Preview target registration.");
     r.wc = wc; r.browser = new PreviewBrowserSession(wc, url => allowedURL(r, url));
+    r.attached = r.info.target === "active" && viewport && Number.isInteger(viewport.width) && Number.isInteger(viewport.height) ? { width: viewport.width, height: viewport.height, responsive: Boolean(viewport.responsive) } : null;
     const guard = (e, urlOrDetails) => {
       const url = typeof urlOrDetails === "string" ? urlOrDetails : urlOrDetails?.url ?? e.url;
       if (!allowedURL(r, url)) { e.preventDefault(); r.browser.log({ kind: "navigation", error: "Studio or non-http(s) navigation blocked" }); }
     };
-    wc.on("will-navigate", guard); wc.on("will-redirect", guard); wc.on("will-frame-navigate", guard);
+    r.guards = ["will-navigate", "will-redirect", "will-frame-navigate"].map(name => [name, guard]);
+    for (const [name, fn] of r.guards) wc.on(name, fn);
     wc.once("destroyed", () => {
       if (["closed", "error"].includes(r.info.state)) { r.browser?.dispose(); r.browser = null; r.wc = null; return; }
       stopLocal(r, "Preview frame was destroyed");

@@ -80,3 +80,17 @@ Deliver in order: (1) contracts and broker, (2) vertical desktop flow open → i
 ## Expected benefits
 
 Visible tests and immediate user takeover; shorter handoffs between building and reviewing; repeatable viewport checks using existing sizes; screenshots and errors linked directly to conversations/tasks; less separate-browser window management; reusable test sessions for Developer/Tester collaboration. Existing Preview sessions may reduce repeated navigation/sign-in, subject to verified partition/session behavior. No benchmark claim is made yet.
+
+## Revision 2026-11-17: sessions live in Quick Preview
+
+The user rejected the separate "Testing in Preview" overlay. Bot sessions now use the existing Quick Preview panel and all its controls: address bar, history, reload, size picker, rotate, zoom, screenshot to chat, open externally and open in the Preview page.
+
+- **Target is chosen from the user's prompt.** `preview_open` takes `target: "new"` (default) or `"active"`.
+  - `"new"` opens the bot's own Quick Preview tab and never replaces the user's page.
+  - `"active"` attaches to the page the user is viewing, and only when they ask for that. This works for web pages only. With no page open, or a project file showing, the bot gets an explicit error.
+  - Ending an attached test leaves the user's page open, and its navigation guards are removed.
+- **Bot tabs survive navigation.** `PreviewTestingLayer` (app level) renders the bot tabs over Quick Preview's stage, so they keep running when the user switches chats or closes the panel. If no chat is showing Quick Preview, the app opens a fallback Quick Preview drawer.
+- **Size controls are two-way.** A bot resize appears in Quick Preview's size picker. A user's size choice applies until the bot's next resize.
+- **User navigation counts as a takeover.** Address bar, reload, back and forward on a controlled page pause the bot. Navigation happens in place so the session survives, and the user can resume the bot.
+- **Bot presets match Quick Preview:** phone 393×852, tablet 744×1133, desktop 1440×900.
+- **Frame borders no longer reduce the viewport.** They are now outer rings, which also fixes 6px/2px narrower pages in manual Quick Preview.
