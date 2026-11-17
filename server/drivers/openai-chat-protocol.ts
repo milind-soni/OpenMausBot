@@ -34,13 +34,17 @@ export function toolArguments(text: string): Record<string, unknown> {
   return found;
 }
 
-/** The calls as the next request replays them. Arguments `toolArguments` refuses never ran (the call's result says
- * so) and go back as `{}`: a strict server refuses the whole request over them ("function.arguments must be valid JSON"). */
+/** The calls as the next request replays them. A strict server refuses the whole request over arguments that don't
+ * parse ("function.arguments must be valid JSON"), so blank ones (a tool with no arguments) and ones `toolArguments`
+ * refuses (they never ran; the call's result says so) go back as `{}`. */
 export function replayableToolCalls(calls: ChatToolCall[]): ChatToolCall[] {
-  return calls.map((call) => {
-    try { toolArguments(call.function.arguments); return call; }
-    catch { return { ...call, function: { ...call.function, arguments: "{}" } }; }
-  });
+  return calls.map((call) => replaysAsSent(call.function.arguments) ? call
+    : { ...call, function: { ...call.function, arguments: "{}" } });
+}
+
+function replaysAsSent(text: string): boolean {
+  if (!text.trim()) return false;
+  try { toolArguments(text); return true; } catch { return false; }
 }
 
 /** Opaque provider reasoning blocks must keep their original order/signatures.
