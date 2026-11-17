@@ -11,6 +11,7 @@ import { HELD_SECRET_MASK } from "../shared/redact.ts";
 import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
 import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import type { BitwardenAccount } from "./bitwarden.ts";
 import { decryptBrowserState, encryptBrowserState } from "./browser-sites.ts";
 import type { TotpKey } from "./totp.ts";
 
@@ -69,6 +70,14 @@ const fileSchema = z.object({
   onePasswordGrants: z.record(z.string(), botsSchema).optional(),
   /** 1Password item (`<vault id>:<item id>`) → the bots that may use it, ahead of its vault's choice. Kept across reconnects. */
   onePasswordItemGrants: z.record(z.string(), botsSchema).optional(),
+  /** A linked Bitwarden or Vaultwarden account: its server, personal API key and master password. */
+  bitwarden: z.object({
+    server: z.string().min(1), clientId: z.string().min(1), clientSecret: z.string().min(1), password: z.string().min(1), connectedAt: z.number(),
+  }).optional(),
+  /** The bots that may use the Bitwarden account's items; absent is every bot. Kept across reconnects. */
+  bitwardenGrants: botsSchema.optional(),
+  /** Bitwarden item id → the bots that may use it, ahead of the account's choice. Kept across reconnects. */
+  bitwardenItemGrants: z.record(z.string(), botsSchema).optional(),
   /** Security: MCP server name → the items whose `vault:<id>` that server may read. Written only when a bot's secretRef
    * is redeemed into the server (or a move carries the server), so a pointer planted in config.json reads nothing. */
   mcpKeys: z.record(z.string(), z.array(z.string().min(1))).optional(),
@@ -513,11 +522,45 @@ export class VaultStore {
     this.write(Object.keys(grants).length ? { ...rest, onePasswordItemGrants: grants } : rest);
   }
 
+  bitwardenAccount(): BitwardenAccount | null {
+    const account = this.read().bitwarden;
+    return account ? { server: account.server, clientId: account.clientId, clientSecret: account.clientSecret, password: account.password } : null;
+  }
+
+  setBitwardenAccount(account: BitwardenAccount | null): void {
+    const { bitwarden: _previous, ...rest } = this.read();
+    this.write(account ? { ...rest, bitwarden: { ...account, connectedAt: this.now() } } : rest);
+  }
+
+  bitwardenGrants(): LoginBots {
+    return this.read().bitwardenGrants ?? "all";
+  }
+
+  /** "all" opens the account to every bot again. */
+  setBitwardenGrants(bots: LoginBots): void {
+    const { bitwardenGrants: _grants, ...rest } = this.read();
+    this.write(bots === "all" ? rest : { ...rest, bitwardenGrants: bots });
+  }
+
+  bitwardenItemGrants(): Record<string, LoginBots> {
+    return this.read().bitwardenItemGrants ?? {};
+  }
+
+  /** null hands the item back to the account's choice. */
+  setBitwardenItemGrant(itemId: string, bots: LoginBots | null): void {
+    const data = this.read();
+    const { [itemId]: _previous, ...others } = data.bitwardenItemGrants ?? {};
+    const grants = bots === null ? others : { ...others, [itemId]: bots };
+    const { bitwardenItemGrants: _grants, ...rest } = data;
+    this.write(Object.keys(grants).length ? { ...rest, bitwardenItemGrants: grants } : rest);
+  }
+
   secretValues(): string[] {
     const data = this.read();
     return [
       ...data.logins.flatMap((login) => [login.password, ...(login.totp ? [login.totp.secret] : [])]),
       ...(data.onePassword ? [data.onePassword.token] : []),
+      ...(data.bitwarden ? [data.bitwarden.clientSecret, data.bitwarden.password] : []),
       ...(data.secrets ?? []).map((secret) => secret.value),
     ];
   }

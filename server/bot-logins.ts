@@ -5,6 +5,7 @@ import type { LinkedSecret } from "../shared/vault.ts";
 import type { FillCandidate } from "./login-fill.ts";
 import { receiveLoginHandoff, type ConnectionHandoffAnswer, type ConnectionHandoffWhat, type LoginHandoffResult } from "./login-handoff.ts";
 import type { VaultReader, VaultStore } from "./vault-store.ts";
+import type { BitwardenAccount, BitwardenLogins } from "./bitwarden.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import type { LoginRouteDeps } from "./routes/logins.ts";
 import { findLinkedSecret, linkedCandidates, linkedSecretNames, linkedSecrets, linkedSites, readLinkedSecret, type VaultProvider } from "./vault/providers.ts";
@@ -53,16 +54,18 @@ export function cardLoginPlace(cardHost: string, observed: ObservedPage | null, 
 export class BotLogins {
   readonly store: VaultStore;
   readonly onePassword: OnePasswordLogins;
+  readonly bitwarden: BitwardenLogins | null;
   readonly providers: readonly VaultProvider[];
   private readonly bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }>;
   private readonly hold: (value: string) => void;
 
   /** `hold` masks a value read from a linked manager wherever text crosses to a bot or a transcript. */
   constructor(store: VaultStore, onePassword: OnePasswordLogins, bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }> = () => [],
-    hold: (value: string) => void = () => {}) {
+    hold: (value: string) => void = () => {}, bitwarden: BitwardenLogins | null = null) {
     this.store = store;
     this.onePassword = onePassword;
-    this.providers = [onePassword];
+    this.bitwarden = bitwarden;
+    this.providers = bitwarden ? [onePassword, bitwarden] : [onePassword];
     this.bots = bots;
     this.hold = hold;
   }
@@ -185,6 +188,38 @@ export class BotLogins {
         },
         // Kept whole, even for an item not loaded here yet: it then opens no wider than the computer that chose it.
         setItemGrants: (grants, keep) => this.store.setOnePasswordItemGrants(keep ? { ...this.store.onePasswordItemGrants(), ...grants } : grants),
+      },
+      ...(this.bitwarden ? { bitwarden: this.bitwardenRoutes(this.bitwarden) } : {}),
+    };
+  }
+
+  private bitwardenRoutes(bitwarden: BitwardenLogins): NonNullable<LoginRouteDeps["bitwarden"]> {
+    return {
+      status: () => bitwarden.status(),
+      list: () => { void bitwarden.fresh(); return bitwarden.list(); },
+      connect: async (account: BitwardenAccount) => {
+        const status = await bitwarden.refresh(account);
+        this.store.setBitwardenAccount(account);
+        return status;
+      },
+      refresh: () => bitwarden.refresh(),
+      disconnect: () => {
+        this.store.setBitwardenAccount(null);
+        bitwarden.forget();
+        return bitwarden.status();
+      },
+      grant: (bots) => {
+        this.store.setBitwardenGrants(bots);
+        return bitwarden.status();
+      },
+      grantItem: async (item, bots) => {
+        // Handing an item back to the account's choice is kept even while Bitwarden cannot be read.
+        if (bots !== null) {
+          const read = await bitwarden.readsItem(item);
+          if (read !== true) return read;
+        }
+        this.store.setBitwardenItemGrant(item, bots);
+        return true;
       },
     };
   }

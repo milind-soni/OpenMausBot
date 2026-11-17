@@ -165,6 +165,29 @@ describe("the saved logins store", () => {
     expect(new VaultStore({ dataDir: dir }).onePasswordItemGrants()).toEqual({});
     expect(new VaultStore({ dataDir: dir }).onePasswordGrants()).toEqual({ v2: [] });
   });
+
+  it("keeps the Bitwarden key and master password sealed, masks them, and keeps its bot choices across reconnects", () => {
+    const store = new VaultStore({ dataDir: dir });
+    const account = { server: "https://vault.example.org", clientId: "user.fake-client", clientSecret: "fake-bw-client-secret", password: "fake-bw-master-pass" };
+    expect(store.bitwardenAccount()).toBeNull();
+    store.setBitwardenAccount(account);
+    expect(new VaultStore({ dataDir: dir }).bitwardenAccount()).toEqual(account);
+    const sealed = readFileSync(join(dir, LOGINS_FILE));
+    expect(sealed.includes(Buffer.from("fake-bw-master-pass")) || sealed.includes(Buffer.from("fake-bw-client-secret"))).toBe(false);
+    expect(store.secretValues()).toEqual(["fake-bw-client-secret", "fake-bw-master-pass"]);
+    expect(store.bitwardenGrants()).toBe("all");
+    store.setBitwardenGrants(["pepper"]);
+    store.setBitwardenItemGrant("item-1", []);
+    store.setBitwardenAccount(null);
+    expect(new VaultStore({ dataDir: dir }).bitwardenAccount()).toBeNull();
+    expect(store.secretValues()).toEqual([]);
+    expect(new VaultStore({ dataDir: dir }).bitwardenGrants()).toEqual(["pepper"]);
+    expect(new VaultStore({ dataDir: dir }).bitwardenItemGrants()).toEqual({ "item-1": [] });
+    store.setBitwardenGrants("all");
+    store.setBitwardenItemGrant("item-1", null);
+    expect(new VaultStore({ dataDir: dir }).bitwardenGrants()).toBe("all");
+    expect(new VaultStore({ dataDir: dir }).bitwardenItemGrants()).toEqual({});
+  });
 });
 
 describe("the Vault's saved secrets", () => {

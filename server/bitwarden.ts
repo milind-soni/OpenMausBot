@@ -215,6 +215,7 @@ export class BitwardenLogins implements VaultProvider {
   private readonly grants: () => LoginBots;
   private readonly itemGrants: () => Record<string, LoginBots>;
   private readonly now: () => number;
+  private readonly dropCopy: () => void;
   private client: { account: BitwardenAccount; client: BitwardenClient } | null = null;
   private entries: Entry[] = [];
   private secrets: SecretEntry[] = [];
@@ -227,12 +228,15 @@ export class BitwardenLogins implements VaultProvider {
   constructor(options: {
     account: () => BitwardenAccount | null; connect: (account: BitwardenAccount) => Promise<BitwardenClient>;
     grants?: () => LoginBots; itemGrants?: () => Record<string, LoginBots>; now?: () => number;
+    /** Deletes the CLI's own encrypted copy of the vault and its sign-in. */
+    dropCopy?: () => void;
   }) {
     this.account = options.account;
     this.connect = options.connect;
     this.grants = options.grants ?? (() => "all");
     this.itemGrants = options.itemGrants ?? (() => ({}));
     this.now = options.now ?? Date.now;
+    this.dropCopy = options.dropCopy ?? (() => {});
   }
 
   /** An item's own bots when it has them, else the account's. */
@@ -241,14 +245,19 @@ export class BitwardenLogins implements VaultProvider {
     return { bots: own ?? this.grants(), bitwarden: { item: itemId, ownBots: own !== undefined } };
   }
 
-  /** Whether this item is in the vault as a login or a secret, looking again before saying no. */
-  async readsItem(itemId: string): Promise<boolean> {
+  /** Whether this item is in the vault as a login or a secret, looking again before saying no; null while the vault
+   * cannot be read. */
+  async readsItem(itemId: string): Promise<boolean | null> {
+    const loaded = () => this.refreshedAt !== null && !this.error;
     const reads = () => [...this.entries, ...this.secrets].some((entry) => entry.itemId === itemId);
     if (!this.account()) return false;
+    const before = this.refreshedAt;
     await this.fresh();
-    if (reads()) return true;
-    await this.refresh();
-    return Boolean(this.account()) && reads();
+    if (loaded() && reads()) return true;
+    // One more look, unless the stale check just took it.
+    if (this.refreshedAt === before) await this.refresh();
+    if (!this.account()) return false;
+    return loaded() ? reads() : null;
   }
 
   status(account = this.account()): BitwardenStatus {
@@ -317,6 +326,12 @@ export class BitwardenLogins implements VaultProvider {
     this.refreshedAt = null;
     this.error = undefined;
     this.lastUsed.clear();
+  }
+
+  /** The account is unlinked: nothing read from it, nor the CLI's copy of it, stays on this computer. */
+  forget(): void {
+    this.clear();
+    this.dropCopy();
   }
 
   async fresh(): Promise<void> {

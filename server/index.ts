@@ -5,7 +5,7 @@ import { reserveGmailDrafts } from "./gmail-draft-policy.ts";
 import { createGmailDrafts } from "./host/gmail-drafts.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -442,6 +442,7 @@ import { BROWSER_UPLOAD_TOOL, browserRuntimeEnv } from "./browser-runtime.ts";
 import { BrowserUploadRefusal, uploadableFiles } from "./browser-upload.ts";
 import { listSignedInSites, signOutOfSites } from "./browser-sites.ts";
 import { HeldSecrets, TEAM_READER, VaultStore } from "./vault-store.ts";
+import { BitwardenLogins, bwRunner, cliBitwardenClient } from "./bitwarden.ts";
 import { OnePasswordLogins, onePasswordUnavailable, sdkOnePasswordClient, type OnePasswordSdk } from "./onepassword.ts";
 import { nativeRequire } from "./data/engine.ts";
 import { createFillLoginTurn } from "./host/fill-login-turn.ts";
@@ -745,7 +746,18 @@ const onePassword = new OnePasswordLogins({
   },
 });
 if (logins.onePasswordToken()) void onePassword.refresh();
-const botLogins = new BotLogins(logins, onePassword, () => store.bots, (value) => heldSecrets.remember(value, "password")); const mcpKeys = createMcpKeys({ store: logins, linked: { fresh: () => botLogins.fresh(), byId: (id) => botLogins.linkedById(id) } });
+const BITWARDEN_CLI_DIR = join(DATA_DIR, "bitwarden-cli");
+const bitwarden = new BitwardenLogins({
+  account: () => logins.bitwardenAccount(),
+  grants: () => logins.bitwardenGrants(), itemGrants: () => logins.bitwardenItemGrants(),
+  connect: (account) => {
+    mkdirSync(BITWARDEN_CLI_DIR, { recursive: true, mode: 0o700 });
+    return cliBitwardenClient(account, { run: bwRunner(), appDir: BITWARDEN_CLI_DIR });
+  },
+  dropCopy: () => rmSync(BITWARDEN_CLI_DIR, { recursive: true, force: true }),
+});
+if (logins.bitwardenAccount()) void bitwarden.refresh();
+const botLogins = new BotLogins(logins, onePassword, () => store.bots, (value) => heldSecrets.remember(value, "password"), bitwarden); const mcpKeys = createMcpKeys({ store: logins, linked: { fresh: () => botLogins.fresh(), byId: (id) => botLogins.linkedById(id) } });
 const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
 const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
 let workspaceAccess: WorkspaceAccess | null = null;

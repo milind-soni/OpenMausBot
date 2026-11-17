@@ -134,6 +134,17 @@ describe("BitwardenLogins", () => {
     expect(bitwarden.list()).toHaveLength(4);
   });
 
+  it("finds an item before its bots change, and says so when the vault cannot be read instead of calling it gone", async () => {
+    const { bitwarden, fail, setAccount } = setup();
+    expect(await bitwarden.readsItem("a1")).toBe(true);
+    expect(await bitwarden.readsItem("a5")).toBe(true);
+    expect(await bitwarden.readsItem("missing")).toBe(false);
+    fail.error = new Error("fetch failed");
+    expect(await bitwarden.readsItem("missing")).toBeNull();
+    setAccount(null);
+    expect(await bitwarden.readsItem("a1")).toBe(false);
+  });
+
   it("connects again when the account changes", async () => {
     const { bitwarden, connects, setAccount } = setup();
     await bitwarden.refresh();

@@ -1,5 +1,6 @@
 // No answer ever carries a password, a 2FA key or the token: a saved secret is only ever replaced.
-import { LOGIN_FIELD_MAX, loginPlace, normalizeLoginHost, type LoginBots, type LoginSummary, type OnePasswordStatus } from "../../shared/logins.ts";
+import { LOGIN_FIELD_MAX, loginPlace, normalizeLoginHost, type BitwardenStatus, type LoginBots, type LoginSummary, type OnePasswordStatus } from "../../shared/logins.ts";
+import { bitwardenServer, type BitwardenAccount } from "../bitwarden.ts";
 import type { LoginPatch, NewLogin } from "../vault-store.ts";
 import { parseTotpKey, type TotpKey } from "../totp.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -25,6 +26,19 @@ export interface LoginRouteDeps {
      * unless `keep` leaves the items not named as they are. */
     setItemGrants(grants: Record<string, LoginBots>, keep?: boolean): void;
   };
+  /** Absent where Bitwarden cannot be linked. */
+  bitwarden?: {
+    status(): BitwardenStatus;
+    list(): LoginSummary[];
+    /** Checks the account first; throws the person's words when it fails. */
+    connect(account: BitwardenAccount): Promise<BitwardenStatus>;
+    refresh(): Promise<BitwardenStatus>;
+    disconnect(): BitwardenStatus;
+    grant(bots: LoginBots): BitwardenStatus;
+    /** Bots for one item ahead of the account's; null hands it back. False for an item not in the vault, null when
+     * Bitwarden could not be read just now. */
+    grantItem(item: string, bots: LoginBots | null): Promise<boolean | null>;
+  };
 }
 
 const ONE_PASSWORD = "/api/logins/1password";
@@ -36,6 +50,11 @@ const UNREAD = "1Password could not be read just now. Try again in a moment.";
 
 const ID = /^[\w-]{1,128}$/u;
 
+const BITWARDEN = "/api/logins/bitwarden";
+const BITWARDEN_ITEM = /^\/api\/logins\/bitwarden\/items\/([\w-]{1,128})$/u;
+const BITWARDEN_UNREAD = "Bitwarden could not be read just now. Try again in a moment.";
+const BITWARDEN_SECRET_MAX = 1024;
+
 export const LOGIN_ERRORS = {
   site: "Enter the address of the login page, such as accounts.example.com.",
   password: "Enter the password.",
@@ -46,6 +65,10 @@ export const LOGIN_ERRORS = {
   notServiceAccount: "That is not a 1Password service account token: those start with ops_. Make one in 1Password under Developer → Service accounts. A Connect token, an account password or a Secret Key does not work here.",
   exactHost: "exactHost must be true or false.",
   readOnly: "This login is in 1Password. Change or remove it there.",
+  bitwardenServer: "Enter the Bitwarden server address, such as https://vault.bitwarden.com or your Vaultwarden address, or leave it empty for bitwarden.com.",
+  bitwardenKey: "Paste the personal API key from Bitwarden under Settings → Security → Keys → View API key: client_id starts with user., and client_secret is the text below it.",
+  bitwardenPassword: "Enter the master password that unlocks this Bitwarden vault.",
+  bitwardenReadOnly: "This login is in Bitwarden. Change or remove it there.",
 } as const;
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -78,6 +101,20 @@ export function parseBots(value: unknown, exists: (id: string) => boolean): Pars
   return { ok: true, value: [...new Set(value as string[])] };
 }
 
+/** What connects a Bitwarden or Vaultwarden account, from the Settings form. */
+export function parseBitwardenAccount(body: Record<string, unknown>): Parsed<BitwardenAccount> {
+  const server = bitwardenServer(body.server);
+  if (!server) return { ok: false, error: LOGIN_ERRORS.bitwardenServer };
+  const clientId = typeof body.clientId === "string" ? body.clientId.trim() : "";
+  const clientSecret = typeof body.clientSecret === "string" ? body.clientSecret.trim() : "";
+  if (!/^user\.[\w-]{1,200}$/u.test(clientId) || !clientSecret || clientSecret.length > BITWARDEN_SECRET_MAX || /\s/u.test(clientSecret)) {
+    return { ok: false, error: LOGIN_ERRORS.bitwardenKey };
+  }
+  const password = body.password;
+  if (typeof password !== "string" || !password || password.length > BITWARDEN_SECRET_MAX) return { ok: false, error: LOGIN_ERRORS.bitwardenPassword };
+  return { ok: true, value: { server, clientId, clientSecret, password } };
+}
+
 export function isJson(req: { headers: Record<string, string | string[] | undefined> }): boolean {
   return String(req.headers["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase() === "application/json";
 }
@@ -87,7 +124,10 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
     if (path !== "/api/logins" && !path.startsWith("/api/logins/")) return PASS;
     res.setHeader("cache-control", "no-store");
     if (path === "/api/logins" && method === "GET") {
-      return json(res, 200, { logins: [...deps.list(), ...deps.onePassword.list()], onePassword: deps.onePassword.status() });
+      return json(res, 200, {
+        logins: [...deps.list(), ...deps.onePassword.list(), ...(deps.bitwarden?.list() ?? [])], onePassword: deps.onePassword.status(),
+        ...(deps.bitwarden ? { bitwarden: deps.bitwarden.status() } : {}),
+      });
     }
     // JSON only, so a form posted from another local page cannot add or change one.
     if (method !== "GET" && method !== "DELETE" && !isJson(req)) return json(res, 415, { error: "content-type must be application/json" });
@@ -135,6 +175,37 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
       return json(res, 200, { items: Object.keys(grants).length });
     }
     if (path === ONE_PASSWORD || path.startsWith(`${ONE_PASSWORD}/`)) return json(res, 405, { error: "method not allowed" });
+    if (path === BITWARDEN || path.startsWith(`${BITWARDEN}/`)) {
+      const bitwarden = deps.bitwarden;
+      if (!bitwarden) return json(res, 404, { error: "Bitwarden cannot be linked here." });
+      if (path === BITWARDEN && method === "POST") {
+        const body = await readBody(req, 16_384);
+        const account = parseBitwardenAccount(body && typeof body === "object" && !Array.isArray(body) ? body : {});
+        if (!account.ok) return json(res, 400, { error: account.error });
+        try { return json(res, 200, { bitwarden: await bitwarden.connect(account.value) }); }
+        catch (error) { return json(res, 400, { error: error instanceof Error && error.message ? error.message : LOGIN_ERRORS.bitwardenKey }); }
+      }
+      if (path === `${BITWARDEN}/refresh` && method === "POST") return json(res, 200, { bitwarden: await bitwarden.refresh() });
+      if (path === BITWARDEN && method === "DELETE") return json(res, 200, { bitwarden: bitwarden.disconnect() });
+      if (path === BITWARDEN && method === "PATCH") {
+        const body = await readBody(req, 16_384);
+        const bots = parseBots(body && typeof body === "object" ? body.bots : undefined, deps.botExists);
+        if (!bots.ok || bots.value === undefined) return json(res, 400, { error: bots.ok ? LOGIN_ERRORS.bots : bots.error });
+        return json(res, 200, { bitwarden: bitwarden.grant(bots.value) });
+      }
+      const bitwardenItem = BITWARDEN_ITEM.exec(path);
+      if (bitwardenItem && method === "PATCH") {
+        const body = await readBody(req, 16_384);
+        const value = body && typeof body === "object" ? body.bots : undefined;
+        const bots = value === null ? { ok: true as const, value: null } : parseBots(value, deps.botExists);
+        if (!bots.ok || bots.value === undefined) return json(res, 400, { error: bots.ok ? LOGIN_ERRORS.bots : bots.error });
+        const granted = await bitwarden.grantItem(bitwardenItem[1]!, bots.value);
+        if (granted === null) return json(res, 503, { error: BITWARDEN_UNREAD });
+        if (!granted) return json(res, 404, { error: "no such item" });
+        return json(res, 200, { logins: bitwarden.list(), bitwarden: bitwarden.status() });
+      }
+      return json(res, 405, { error: "method not allowed" });
+    }
     if (path === "/api/logins" && method === "POST") {
       const body = await readBody(req, 16_384);
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "send the login as a JSON object" });
@@ -155,6 +226,7 @@ export function createLoginRoutes(deps: LoginRouteDeps): RouteHandler {
     }
     const id = path.slice("/api/logins/".length);
     if (/^1password(?::|%3a)/iu.test(id)) return json(res, 409, { error: LOGIN_ERRORS.readOnly });
+    if (/^bitwarden(?::|%3a)/iu.test(id)) return json(res, 409, { error: LOGIN_ERRORS.bitwardenReadOnly });
     if (!ID.test(id)) return json(res, 404, { error: "no such login" });
     if (method === "DELETE") {
       return deps.remove(id) ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such login" });
