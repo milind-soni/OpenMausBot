@@ -75,7 +75,16 @@ finding "host: kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kern
 step "the repository's fake engine, wired into the data folder before the first start"
 fake="$DIR/data/.openmausbot/fake-engine"
 mkdir -p "$fake"
-for file in fake-claude-cli launch-note room-handoff-agent stream-script cleanup; do cp "$ROOT/server/testing/$file.ts" "$fake/"; done
+# The fake and every file of server/testing it imports, however that list grows (CI runs this on the merge with main).
+copy_fake() {
+  local dep
+  if [ -e "$fake/$1" ]; then return 0; fi
+  cp "$ROOT/server/testing/$1" "$fake/"
+  { grep -o 'from "\./[A-Za-z0-9_-]*\.ts"' "$ROOT/server/testing/$1" || true; } | sed 's|^from "\./\(.*\)"$|\1|' >"$fake/.imports-$1"
+  while read -r dep; do copy_fake "$dep"; done <"$fake/.imports-$1"
+  rm -f "$fake/.imports-$1"
+}
+copy_fake fake-claude-cli.ts
 chmod 755 "$fake/fake-claude-cli.ts"
 cat >"$DIR/data/.openmausbot/config.json" <<'JSON'
 {
