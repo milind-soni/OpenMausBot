@@ -10906,7 +10906,7 @@
   "voice.deepseek.tide": "Tide (masculina)",
   "call.capability.turnsNeedDeepSeekKey": "Adicione uma chave do DeepSeek para falar um de cada vez nas chamadas",
   "call.capability.turnsNeedDeepSeekKeyReason": "O DeepSeek é a sua voz, então o modo Um de cada vez ouve você pela transcrição de fala do DeepSeek. Adicione uma chave do DeepSeek em Configurações → Chaves de API.",
-  "serverError.voice.deepseekKeyRequired": "Adicione uma chave de API do DeepSeek em Configurações → Chaves de API para falar com seus bots com a voz do DeepSeek."
+  "serverError.voice.deepseekKeyRequired": "Adicione uma chave de API do DeepSeek em Configurações → Chaves de API para falar com seus bots com a voz do DeepSeek.",
   "template.status.draft": "Rascunho",
   "template.status.publishing": "Publicando…",
   "template.status.published": "Publicado",
