@@ -150,32 +150,29 @@ image=$(sed -n 's/^Image=//p' "$UNIT")
 userns=$(sed -n 's/^UserNS=//p' "$UNIT")
 printf 'FROM %s\nUSER root\nRUN apt-get update && apt-get install -y --no-install-recommends bubblewrap socat && rm -rf /var/lib/apt/lists/*\nUSER maus\n' "$image" >"$OUT/Containerfile.box"
 podman build -q -t localhost/omb-box-probe:e2e -f "$OUT/Containerfile.box" "$OUT" >/dev/null
-probe=(--unshare-user --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent --ro-bind /usr /usr
-  --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp /bin/true)
+# The criterion is the server's own self-check of the box (as deploy/install.sh judges it): bubblewrap runs, and a bot
+# cannot read the server's settings. Each rung adds one setting to the one before.
 box_rung=""
 seccomp=(--security-opt "seccomp=$ROOT/connector/profiles/seccomp-omb-home.json")
-for rung in default unmask-proc seccomp-unmask-proc unmask-all apparmor-unconfined; do
+for rung in default unmask-proc seccomp-unmask-proc seccomp-unmask-all apparmor-unconfined; do
   extra=()
   case "$rung" in
     unmask-proc) extra=(--security-opt "unmask=/proc/*") ;;
     seccomp-unmask-proc) extra=("${seccomp[@]}" --security-opt "unmask=/proc/*") ;;
-    unmask-all) extra=("${seccomp[@]}" --security-opt unmask=ALL) ;;
+    seccomp-unmask-all) extra=("${seccomp[@]}" --security-opt unmask=ALL) ;;
     apparmor-unconfined) extra=("${seccomp[@]}" --security-opt unmask=ALL --security-opt apparmor=unconfined) ;;
   esac
-  if podman run --rm --userns "$userns" ${extra[@]+"${extra[@]}"} --entrypoint bwrap localhost/omb-box-probe:e2e "${probe[@]}" >"$OUT/bwrap-$rung.txt" 2>&1; then
+  podman run --rm --userns "$userns" --network host -e OMB_BOT_BOX=1 -e OMB_DATA_DIR=/tmp/box-data ${extra[@]+"${extra[@]}"} \
+    --entrypoint node localhost/omb-box-probe:e2e dist-server/bot-box/box-check.js --public=none >"$OUT/box-check-$rung.json" 2>&1 || true
+  summary=$(jq -c '{box, passed, total, failed, error: (.error // null | if . then .[0:160] else . end)}' "$OUT/box-check-$rung.json" 2>/dev/null || head -c 300 "$OUT/box-check-$rung.json")
+  if jq -e '.box == "bwrap" and .total > 0 and ([.results[] | select(.ok) | .id] | index("config-hidden") != null)' "$OUT/box-check-$rung.json" >/dev/null 2>&1; then
     box_rung=$rung
+    finding "bot box: the self-check runs at rung $rung (${extra[*]:-no options}): $summary"
     break
   fi
-  finding "bot box: bubblewrap refused at rung $rung (${extra[*]:-no options}): $(head -c 300 "$OUT/bwrap-$rung.txt" | tr '\n' ' ')"
+  finding "bot box: not at rung $rung (${extra[*]:-no options}): $summary"
 done
-if [ -n "$box_rung" ]; then
-  finding "bot box: bubblewrap ran its probe at rung $box_rung (${extra[*]:-no options})"
-  podman run --rm --userns "$userns" --network host -e OMB_BOT_BOX=1 -e OMB_DATA_DIR=/tmp/box-data ${extra[@]+"${extra[@]}"} \
-    --entrypoint node localhost/omb-box-probe:e2e dist-server/bot-box/box-check.js --public=none >"$OUT/box-check.json" 2>&1 || true
-  finding "bot box self-check (published image + bubblewrap): $(head -c 600 "$OUT/box-check.json" | tr '\n' ' ')"
-else
-  finding "bot box: bubblewrap did not run in a rootless container with any of the settings tried"
-fi
+[ -n "$box_rung" ] || finding "bot box: the self-check did not run in a rootless container with any of the settings tried"
 podman rmi -f localhost/omb-box-probe:e2e >/dev/null 2>&1 || true
 
 step "a server that is killed is started again by systemd"
@@ -193,9 +190,17 @@ before=$(container_id)
 # The process that answers on 8799 (the launcher's child): it runs as this user, so ss names it.
 server=$(ss -ltnpH "( sport = :8799 )" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -n 1)
 [ -n "$server" ] || fail "no server process to pause"
+# Past the health check's start period first: failures inside it do not count.
+for _ in $(seq 1 60); do [ "$(podman inspect -f '{{.State.Health.Status}}' openmausbot)" = healthy ] && break; sleep 5; done
+podman inspect -f '{{.State.Health.Status}} {{json .Config.Healthcheck}} {{.Config.HealthcheckOnFailureAction}}' openmausbot >"$OUT/health-before.txt" 2>&1 || true
+systemctl --user list-timers --all --no-pager >"$OUT/timers.txt" 2>&1 || true
 kill -STOP "$server"
-for _ in $(seq 1 120); do [ -n "$(container_id)" ] && [ "$(container_id)" != "$before" ] && break; sleep 3; done
-[ "$(container_id)" != "$before" ] || { kill -CONT "$server" 2>/dev/null || true; fail "the health check did not restart a server that stopped answering"; }
+for _ in $(seq 1 100); do [ -n "$(container_id)" ] && [ "$(container_id)" != "$before" ] && break; sleep 3; done
+if [ "$(container_id)" = "$before" ]; then
+  podman inspect -f '{{json .State.Health}}' openmausbot >"$OUT/health-after.json" 2>&1 || true
+  kill -CONT "$server" 2>/dev/null || true
+  fail "the health check did not restart a server that stopped answering: $(cat "$OUT/health-before.txt"); $(head -c 600 "$OUT/health-after.json"); timers: $(grep -c "$before" "$OUT/timers.txt" || true)"
+fi
 healthy_again
 finding "health: a paused server (SIGSTOP) was killed by HealthOnFailure=kill and systemd started a new container"
 
