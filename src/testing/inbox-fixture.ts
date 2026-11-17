@@ -18,7 +18,7 @@ export const messageRow: InboxRow = {
   from: { name: "Cleo", email: "cleo@acme.test" }, via: { botId: "scout", name: "Scout" }, text: "The launch moved to Friday. Can you check the numbers before then?",
 };
 export const reportRow: InboxRow = {
-  id: "line-report", kind: "result", tab: "info", unread: false, at: INBOX_NOW - 3 * 60 * 60_000,
+  id: "line-report", kind: "result", tab: "info", unread: true, at: INBOX_NOW - 3 * 60 * 60_000,
   from: { name: "Reporter", botId: "reporter" }, origin: { botId: "reporter", threadId: "rep-daily", title: "Daily digest" }, text: "Daily digest: 3 new leads, 1 reply waiting.",
 };
 export const settledRow: InboxRow = {
