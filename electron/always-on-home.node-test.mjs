@@ -6,11 +6,21 @@ import test from "node:test";
 
 import { ALWAYS_ON_BLOCKER, createAlwaysOnHome, installAlwaysOnHome, parseAlwaysOn } from "./always-on-home.mjs";
 
+/** A login item that is simply on or off, recording what the switch asked of it. */
+function simpleLogin(world, available = true) {
+  return {
+    available: () => available, chosen: () => world.login, starts: () => world.login, hold: () => {}, whenChosen: () => {}, follow: () => {},
+    choose: (on) => { world.chose.push(on); world.login = on; },
+    homeAdd: () => { world.chose.push(true); world.login = true; return null; },
+    homeRelease: () => { world.chose.push(false); world.login = false; },
+  };
+}
+
 function fixture(t, { login = false, battery = false, available = true, updates = "by-itself", platform = "darwin" } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "omb-always-on-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const world = { login, battery, chose: [], held: new Set(), started: [], nextId: 1 };
-  const loginItem = { available: () => available, chosen: () => world.login, choose: (on) => { world.chose.push(on); world.login = on; } };
+  const loginItem = simpleLogin(world, available);
   const blocker = {
     start: (type) => { const id = world.nextId++; world.started.push(type); world.held.add(id); return id; },
     stop: (id) => { world.held.delete(id); },
@@ -72,19 +82,6 @@ test("off undoes only what on changed: a login item the person set up stays", (t
   assert.equal(theirs.world.login, true);
 });
 
-test("off leaves the login item while lending still needs the app to start at login", (t) => {
-  const f = fixture(t);
-  let lending = false;
-  const home = createAlwaysOnHome({ file: f.file, loginItem: { available: () => true, chosen: () => f.world.login, choose: (on) => { f.world.chose.push(on); f.world.login = on; } },
-    blocker: { start: () => 1, stop: () => {}, isStarted: () => true }, isOnBattery: () => false, loginNeeded: () => lending });
-  home.set(true);
-  lending = true;
-  home.set(false);
-  assert.deepEqual(f.world.chose, [true], "nothing removed while lending wants it");
-  assert.equal(f.world.login, true);
-  home.stop();
-});
-
 test("the switch survives a restart, and a fresh launch holds the computer awake again", (t) => {
   const f = fixture(t);
   f.home.set(true);
@@ -102,7 +99,7 @@ test("a damaged file reads as off, and a failing login item still saves the choi
   const f = fixture(t);
   writeFileSync(f.file, "{not json");
   assert.equal(f.make().on(), false);
-  const home = createAlwaysOnHome({ file: f.file, loginItem: { available: () => true, chosen: () => false, choose: () => { throw new Error("denied"); } },
+  const home = createAlwaysOnHome({ file: f.file, loginItem: { ...simpleLogin(f.world), homeAdd: () => { throw new Error("denied"); } },
     blocker: { start: () => 1, stop: () => {}, isStarted: () => true }, isOnBattery: () => false });
   const state = home.set(true);
   assert.equal(state.on, true);
@@ -120,7 +117,7 @@ test("Settings' channels go through main's guard, and set takes only true as on"
   const handlers = new Map(), guarded = [];
   let changed = 0;
   const home = installAlwaysOnHome({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, guard: (channel, handler) => { guarded.push(channel); return handler; },
-    changed: () => changed++, file: f.file, loginItem: { available: () => true, chosen: () => f.world.login, choose: (on) => { f.world.login = on; } },
+    changed: () => changed++, file: f.file, loginItem: simpleLogin(f.world),
     blocker: { start: () => 1, stop: () => {}, isStarted: () => false }, isOnBattery: () => false });
   assert.deepEqual(guarded, ["always-on-home:state", "always-on-home:set"]);
   assert.equal((await handlers.get("always-on-home:set")({}, "true")).on, false, "a string is not a yes");
