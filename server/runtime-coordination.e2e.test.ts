@@ -173,7 +173,7 @@ it("S1 assigns a teammate under the envelope and resumes the Chief once with the
   expect(f.eventsOf(child.id).map((event: any) => event.kind)).toEqual(expect.arrayContaining(["enqueued", "started", "settled", "reported"]));
 }), hostTimeout(60_000));
 
-/** A question reaches the person on "Ask me first"; at Full access, the default, the Chief answers it instead. */
+/** A question reaches the person on "Ask for approval"; at Full access, the default, the Chief answers it instead. */
 const askMeFirst = async (f: any) => {
   for (const id of [f.clive.id, f.mira.id]) expect((await f.api("PATCH", `/api/bots/${id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
 };
