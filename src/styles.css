@@ -3673,3 +3673,21 @@ html[dir="rtl"],
 [dir="rtl"] :is(.lucide-arrow-right, .lucide-arrow-left) {
   transform: scaleX(-1);
 }
+
+/* In RTL mode, reverse horizontal flex flow so PlacesRail & Sidebar dock naturally on the right */
+[dir="rtl"] div[data-look="app"] > .relative.flex.min-h-0.flex-1 {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] div[data-window-card] > .relative.flex.min-h-0.flex-1 {
+  flex-direction: row-reverse;
+}
+
+[dir="rtl"] aside[data-look="sidebar"] {
+  border-right-width: 0 !important;
+  border-left-width: 0.5px !important;
+}
+
+[dir="rtl"] div[data-window-card] {
+  border-radius: 12px 12px 12px 0px !important;
+}
