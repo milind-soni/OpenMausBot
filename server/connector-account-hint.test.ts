@@ -85,4 +85,26 @@ describe("connector account hint", () => {
     const read = accountsByApp({ github: { accounts: [{ id: "github_one", alias: "personal", status: "ACTIVE" }] } });
     expect(read.github?.[0]?.alias).toBe("personal");
   });
+
+  it("names the app the refusal names, not the first app of the batch", async () => {
+    const mixed = { github: accounts.github, gmail: [{ id: "gmail_one", alias: "work", status: "ACTIVE" }, { id: "gmail_two", alias: "other", status: "ACTIVE" }] };
+    const named = { jsonrpc: "2.0", id: 8, result: { content: [{ type: "text", text: JSON.stringify({ successful: false, tool_slug: "GITHUB_CREATE_AN_ISSUE", error: JSON.stringify({ message: "Resource not accessible by integration" }) }) }], isError: true } };
+    const out = JSON.parse(decode(await withAccountHint(encode(named), "application/json", ["GMAIL_GET_PROFILE", "GITHUB_CREATE_AN_ISSUE"], async () => mixed)));
+    expect(out.result.content[1].text).toContain("GitHub");
+    expect(out.result.content[1].text).toContain("2 connected accounts (vyrgs, personal)");
+  });
+
+  it("leaves a refusal alone when it does not name its app and the batch mixes apps", async () => {
+    const mixed = { github: accounts.github, gmail: [{ id: "gmail_one", alias: "work", status: "ACTIVE" }, { id: "gmail_two", alias: "other", status: "ACTIVE" }] };
+    const bytes = encode(refused);
+    expect(await withAccountHint(bytes, "application/json", ["GMAIL_GET_PROFILE", "GITHUB_CREATE_AN_ISSUE"], async () => mixed)).toBe(bytes);
+  });
+
+  it("gives the note to the app the refusal names even when another app of the batch has one account", async () => {
+    const mixed = { github: accounts.github, gmail: [{ id: "gmail_one", alias: "work", status: "ACTIVE" }] };
+    const named = { jsonrpc: "2.0", id: 9, result: { content: [{ type: "text", text: JSON.stringify({ successful: false, tool_slug: "GITHUB_CREATE_AN_ISSUE", error: JSON.stringify({ message: "Resource not accessible by integration" }) }) }], isError: true } };
+    const out = JSON.parse(decode(await withAccountHint(encode(named), "application/json", ["GMAIL_GET_PROFILE", "GITHUB_CREATE_AN_ISSUE"], async () => mixed)));
+    expect(out.result.content[1].text).toContain("GitHub");
+    expect(out.result.content[1].text).toContain("personal");
+  });
 });

@@ -11,6 +11,9 @@ import { withFailedCallHint } from "./connector-scope-hint.ts";
 /** GitHub's wording when the connected account's app installation cannot reach what the call asks for. */
 const ACCOUNT_ERROR = /not accessible by integration/i;
 
+/** What a first pass leaves in a copy of the answer, so the second pass knows which tool the refusal is about. */
+const PROBE = "omb-account-hint-probe:";
+
 /** A connected account of one app, as the services inventory gives it. */
 export interface ConnectedAccount {
   id: string;
@@ -41,15 +44,17 @@ function usable(accounts: ConnectedAccounts, toolkit: string): readonly Connecte
   return (accounts[toolkit] ?? []).filter((account) => /^active$/i.test(account.status));
 }
 
-/** The tool the call names: the first that is not one of Composio's own management tools. */
-function calledTool(slugs: readonly string[]): string {
-  return slugs.find((candidate) => candidate && !candidate.startsWith("COMPOSIO_")) ?? slugs[0] ?? "";
+/** The app the slugs name, when they all name the same one. A batch that mixes apps names none: a refusal that does
+ * not say which app it is about must not be answered with another app's accounts. */
+function oneToolkit(slugs: readonly string[]): string | undefined {
+  const toolkits = new Set(slugs.filter((slug) => slug && !slug.startsWith("COMPOSIO_")).map(toolkitOf));
+  return toolkits.size === 1 ? [...toolkits][0] : undefined;
 }
 
 /** The note for a call refused on the account it used: the other accounts of that app, by alias or id. */
 export function accountHint(slugs: readonly string[], accounts: ConnectedAccounts): string {
-  const slug = calledTool(slugs);
-  const toolkit = toolkitOf(slug);
+  const toolkit = oneToolkit(slugs);
+  if (!toolkit) return "";
   const known = usable(accounts, toolkit);
   if (known.length < 2) return "";
   const app = appName(toolkit);
@@ -65,6 +70,17 @@ export function accountsByApp(services: Record<string, { accounts: readonly Conn
   return Object.fromEntries(Object.entries(services).map(([slug, state]) => [slug, state.accounts]));
 }
 
+/** The tools the refusal is about, read out of a copy of the answer the shared helper annotated: the tools it names,
+ * or the whole call when it names none. */
+function failedTools(bytes: Uint8Array, contentType: string, slugs: readonly string[]): readonly string[] {
+  const probe = withFailedCallHint(bytes, contentType, ACCOUNT_ERROR, (failed) => `${PROBE}${failed.join(",")}|`, slugs);
+  const text = new TextDecoder().decode(probe);
+  const at = text.indexOf(PROBE);
+  if (at < 0) return [];
+  const end = text.indexOf("|", at);
+  return text.slice(at + PROBE.length, end < 0 ? undefined : end).split(",").filter(Boolean);
+}
+
 /** Adds the account note to a call refused for the account it used, when that app has another account to try. */
 export async function withAccountHint(
   bytes: Uint8Array,
@@ -74,8 +90,9 @@ export async function withAccountHint(
 ): Promise<Uint8Array> {
   if (!ACCOUNT_ERROR.test(new TextDecoder().decode(bytes))) return bytes;
   const accounts = await loadAccounts().catch(() => ({}) as ConnectedAccounts);
-  // Nothing to say when that app has no other account to try: the answer stays as it was.
-  const note = accountHint(slugs, accounts);
+  // The note names the app the refusal is about: the tool the answer names, or the whole call when it names one app.
+  const note = accountHint(failedTools(bytes, contentType, slugs), accounts);
+  // Nothing to say when that app has no other account to try, or when the answer does not say which app it is about.
   if (!note) return bytes;
-  return withFailedCallHint(bytes, contentType, ACCOUNT_ERROR, (failed) => accountHint(failed, accounts) || note, slugs);
+  return withFailedCallHint(bytes, contentType, ACCOUNT_ERROR, () => note, slugs);
 }
