@@ -6976,5 +6976,8 @@
   "voice.deepseek.description": "Legge ad alta voce risposte e messaggi vocali con la voce Stella o Tide di DeepSeek. Scegliendo DeepSeek, anche la dettatura e la modalità A turni ti ascoltano con la trascrizione vocale di DeepSeek, fino a circa due minuti per registrazione. Usa la tua chiave API DeepSeek ed è fatturato da DeepSeek.",
   "voice.deepseek.stella": "Stella (femminile)",
   "voice.deepseek.tide": "Tide (maschile)",
-  "call.capability.turnsNeedDeepSeekKey": "Aggiungi una chiave DeepSeek per parlare a turni nelle chiamate"
+  "call.capability.turnsNeedDeepSeekKey": "Aggiungi una chiave DeepSeek per parlare a turni nelle chiamate",
+  "alwaysOn.section": "Casa sempre accesa",
+  "alwaysOn.title": "Usa questo computer come casa sempre accesa",
+  "alwaysOn.add.title": "Aggiungi un Mac mini o un altro computer sempre acceso"
 }

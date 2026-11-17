@@ -107,6 +107,16 @@ const __APP_VERSION__: string;
     at: number | null;
     onBattery: boolean;
   }
+  /** Use this computer as an always-on home, as main reads it now. `available`: a packaged app, where Open at login works.
+   * `awake`: held awake on power, let sleep on battery, or off. `updates`: how an update arrives with nobody at the computer. */
+  interface AlwaysOnHomeState {
+    available: boolean;
+    on: boolean;
+    platform: string;
+    openAtLogin: boolean;
+    awake: "holding" | "battery" | "off";
+    updates: "by-itself" | "restart" | "package" | "none";
+  }
   interface DesktopRemoteClientState {
     active: boolean;
     endpoint?: string;
@@ -198,6 +208,8 @@ const __APP_VERSION__: string;
         remove?: (id: string) => Promise<{ outcome: import("../../electron/cloud-account.mjs").CloudRemoveOutcome }>;
         /** Make a server of the person's own, which the rail lists with `makeHome`, their bots' home: the move starts. */
         makeHome?: (id: string) => Promise<{ started: true }>;
+        /** The ids of the servers main offers Make … my home for now (none once a move is done). Absent on an older app. */
+        homeOffers?: () => Promise<string[]>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
         /** A workspace of this computer's own (main refuses any page but the rail's and this computer's own): a new one,
@@ -450,6 +462,8 @@ const __APP_VERSION__: string;
       openLogsFolder?(): Promise<{ folder: string; opened: boolean; error?: string }>;
       /** This app's own login item, which opens the window. `available`: false in a build that cannot add one. */
       openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
+      /** Use this computer as an always-on home (this computer's own page only). Absent on an older app. */
+      alwaysOnHome?: { state(): Promise<AlwaysOnHomeState>; set(on: boolean): Promise<AlwaysOnHomeState> };
       /** Saved keys this launch could not read (this app's own page only). `reset` asks the person, moves the unreadable
        * file aside and restarts; it resolves "cancelled" when they say no, "quitting" (doing nothing) when the app began
        * to quit while they decided, "failed" (after telling them) when the file could not be moved, and "readable"

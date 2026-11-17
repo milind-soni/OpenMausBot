@@ -3810,5 +3810,8 @@
   "voice.deepseek.description": "Lit les réponses et les messages vocaux avec la voix Stella ou Tide de DeepSeek. En choisissant DeepSeek, la dictée et les appels à tour de rôle vous entendent aussi via la reconnaissance vocale de DeepSeek, jusqu’à environ deux minutes par enregistrement. Utilise votre clé API DeepSeek et est facturé par DeepSeek.",
   "voice.deepseek.stella": "Stella (féminine)",
   "voice.deepseek.tide": "Tide (masculine)",
-  "call.capability.turnsNeedDeepSeekKey": "Ajoutez une clé DeepSeek pour parler à tour de rôle pendant les appels"
+  "call.capability.turnsNeedDeepSeekKey": "Ajoutez une clé DeepSeek pour parler à tour de rôle pendant les appels",
+  "alwaysOn.section": "Maison toujours allumée",
+  "alwaysOn.title": "Utiliser cet ordinateur comme maison toujours allumée",
+  "alwaysOn.add.title": "Ajouter un Mac mini ou un autre ordinateur toujours allumé"
 }

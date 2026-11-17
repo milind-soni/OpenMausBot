@@ -7110,5 +7110,8 @@
   "voice.deepseek.description": "Czyta na głos odpowiedzi i wiadomości głosowe głosem Stella lub Tide od DeepSeek. Po wybraniu DeepSeek dyktowanie i tryb Po kolei też słyszą cię przez rozpoznawanie mowy DeepSeek, do około dwóch minut na nagranie. Używa twojego klucza API DeepSeek, a opłaty nalicza DeepSeek.",
   "voice.deepseek.stella": "Stella (kobiecy)",
   "voice.deepseek.tide": "Tide (męski)",
-  "call.capability.turnsNeedDeepSeekKey": "Dodaj klucz DeepSeek, aby rozmawiać po kolei w połączeniach"
+  "call.capability.turnsNeedDeepSeekKey": "Dodaj klucz DeepSeek, aby rozmawiać po kolei w połączeniach",
+  "alwaysOn.section": "Zawsze włączony dom",
+  "alwaysOn.title": "Używaj tego komputera jako zawsze włączonego domu",
+  "alwaysOn.add.title": "Dodaj Maca mini lub inny zawsze włączony komputer"
 }

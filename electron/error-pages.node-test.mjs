@@ -27,3 +27,12 @@ test("the page speaks the app's language, with the log's link where the sentence
     '<p style="color:#fcfcfc99;line-height:1.5">Outro processo respondeu às verificações de integridade em todas as portas do OpenMausBot — provavelmente uma segunda cópia do app ou outro programa nas portas 8799–28799. Feche esse programa. Depois, saia do OpenMausBot e abra novamente. '
     + `Se isso continuar acontecendo, confira ${logLink}.</p>`);
 });
+
+test("on an always-on home the page says, in one more line, that it keeps trying; without it the page is as before", () => {
+  const plainPage = page(buildErrorPage({ allPortsOccupied: true, logDir }));
+  const home = page(buildErrorPage({ allPortsOccupied: true, logDir, keepTrying: true }));
+  assert.equal(page(buildErrorPage({ allPortsOccupied: true, logDir, keepTrying: false })), plainPage);
+  assert.equal(home, plainPage.replace("</p></div>", "</p><p style=\"color:#fcfcfc99;line-height:1.5\">This computer is an always-on home, so it keeps trying to start the server every 5 minutes.</p></div>"));
+  const text = nativeText.createNativeText({ saved: "pt-br" });
+  assert.ok(page(buildErrorPage({ allPortsOccupied: false, logDir, keepTrying: true }, text)).includes("continua tentando iniciar o servidor a cada 5 minutos"));
+});

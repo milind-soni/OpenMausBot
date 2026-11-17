@@ -19,7 +19,8 @@ function around(template, name) {
 }
 
 /** The page the main window shows when the background server never came up, in `text`'s language. */
-export function buildErrorPage({ allPortsOccupied, logDir }, text = nativeText.englishText) {
+/** `keepTrying`: this computer is an always-on home, so the app tries again by itself; the page says so in one line. */
+export function buildErrorPage({ allPortsOccupied, logDir, keepTrying = false }, text = nativeText.englishText) {
   const serverLogPath = path.join(logDir, "server.log");
   const serverLogHref = pathToFileURL(serverLogPath).href;
   const reason = text.t(allPortsOccupied ? "native.dialog.serverFailed.portsTaken" : "native.dialog.serverFailed.slow");
@@ -27,7 +28,7 @@ export function buildErrorPage({ allPortsOccupied, logDir }, text = nativeText.e
   return (
     "data:text/html;charset=utf-8," +
     encodeURIComponent(
-      `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#121212;color:#fcfcfc;font:15px -apple-system,system-ui"><div style="text-align:center;max-width:360px"><div style="font-size:40px">🐭</div><h2 style="font-weight:600;margin:12px 0 6px">${escapeText(text.t("native.dialog.serverFailed.title"))}</h2><p style="color:#fcfcfc99;line-height:1.5">${escapeHtml(reason)} ${escapeText(before)}<a target="_blank" rel="noopener" href="${serverLogHref}" style="color:#fcfcfc">${escapeHtml(serverLogPath)}</a>${escapeText(after)}</p></div></body>`,
+      `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#121212;color:#fcfcfc;font:15px -apple-system,system-ui"><div style="text-align:center;max-width:360px"><div style="font-size:40px">🐭</div><h2 style="font-weight:600;margin:12px 0 6px">${escapeText(text.t("native.dialog.serverFailed.title"))}</h2><p style="color:#fcfcfc99;line-height:1.5">${escapeHtml(reason)} ${escapeText(before)}<a target="_blank" rel="noopener" href="${serverLogHref}" style="color:#fcfcfc">${escapeHtml(serverLogPath)}</a>${escapeText(after)}</p>${keepTrying ? `<p style="color:#fcfcfc99;line-height:1.5">${escapeText(text.t("native.dialog.serverFailed.keepTrying"))}</p>` : ""}</div></body>`,
     )
   );
 }
