@@ -66,7 +66,7 @@ export const LOGIN_ERRORS = {
   exactHost: "exactHost must be true or false.",
   readOnly: "This login is in 1Password. Change or remove it there.",
   bitwardenServer: "Enter the Bitwarden address, such as https://vault.bitwarden.com or your Vaultwarden address, or leave it empty for bitwarden.com.",
-  bitwardenKey: "Paste the personal API key from Bitwarden under Settings → Security → Keys → View API key: client_id starts with user., and client_secret is the text below it.",
+  bitwardenKey: "Paste the personal API key from the Bitwarden web vault (Settings, then Security, then Keys, then View API key): client_id starts with user., and client_secret is the text below it.",
   bitwardenPassword: "Enter the master password that unlocks this Bitwarden vault.",
   bitwardenReadOnly: "This login is in Bitwarden. Change or remove it there.",
 } as const;

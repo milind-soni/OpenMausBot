@@ -26,7 +26,7 @@ export interface BitwardenItem {
   type: number;
   name: string;
   notes?: string | null;
-  login?: { username?: string | null; password?: string | null; totp?: string | null; uris?: Array<{ uri?: string | null }> | null } | null;
+  login?: { username?: string | null; password?: string | null; totp?: string | null; uris?: Array<{ uri?: string | null; match?: number | null }> | null } | null;
   /** Custom fields. Types: 0 text, 1 hidden, 2 boolean, 3 linked. */
   fields?: Array<{ name?: string | null; value?: string | null; type: number }> | null;
 }
@@ -133,8 +133,11 @@ export async function cliBitwardenClient(account: BitwardenAccount, options: { r
       await withSession(["sync"]);
       return JSON.parse(await withSession(["list", "items"])) as BitwardenItem[];
     },
+    // A value is read for use, so it is fetched from the server first: `get` alone reads the local copy, which can
+    // still hold a password changed or an item deleted elsewhere.
     item: async (id) => {
       try {
+        await withSession(["sync"]);
         return JSON.parse(await withSession(["get", "item", id])) as BitwardenItem;
       } catch (error) {
         if (error instanceof BwError && /not found/iu.test(error.output)) return null;
@@ -144,7 +147,8 @@ export async function cliBitwardenClient(account: BitwardenAccount, options: { r
   };
 }
 
-export const BITWARDEN_KEY_REFUSED = "Bitwarden did not accept the API key. Copy client_id and client_secret again from Bitwarden under Settings → Security → Keys → View API key, and connect again.";
+export const BITWARDEN_KEY_REFUSED = "Bitwarden did not accept the API key. In the Bitwarden web vault, open Settings, then Security, then Keys, choose View API key, copy client_id and client_secret again, and connect again.";
+export const BITWARDEN_DISCONNECTED = "Bitwarden was disconnected before the check finished. Connect it again to use it.";
 export const BITWARDEN_PASSWORD_REFUSED = "That master password did not unlock the Bitwarden vault. Check it and connect again.";
 
 /** Words for the person, never a key, a password or what `bw` printed. */
@@ -192,6 +196,32 @@ function bySite(hosts: Iterable<string>): Map<string, string[]> {
   return sites;
 }
 
+/** A saved address's match rule (`match`): none for the account's default (base domain unless changed), then 0 base
+ * domain, 1 host, 2 starts with, 3 exact, 4 regular expression, 5 never. */
+const MATCH_DOMAIN = 0;
+const MATCH_HOST = 1;
+
+/** Where a login item may be filled, keeping each saved address's match rule: a base-domain address opens its whole
+ * site, a host address only that host. Starts-with, exact, regular-expression and never addresses are left out: a
+ * place here is a site or hosts, and could not keep their limits. */
+export function bitwardenLoginPlaces(item: BitwardenItem): LoginPlace[] {
+  const open = new Set<string>();
+  const exact = new Set<string>();
+  for (const uri of item.login?.uris ?? []) {
+    const match = uri.match ?? MATCH_DOMAIN;
+    const host = match === MATCH_DOMAIN || match === MATCH_HOST ? normalizeLoginHost(uri.uri) : null;
+    if (host) (match === MATCH_DOMAIN ? open : exact).add(host);
+  }
+  const places = [...bySite(open)].map(([site, hosts]): LoginPlace => ({ site, hosts, exactHost: false }));
+  for (const [site, hosts] of bySite(exact)) if (!places.some((place) => place.site === site)) places.push({ site, hosts, exactHost: true });
+  return places;
+}
+
+/** Whether an item as it is now still fills where it was listed: the same site, and no narrower than then. */
+function stillFills(listed: LoginPlace, now: LoginPlace[]): boolean {
+  return now.some((place) => place.site === listed.site && (!place.exactHost || (listed.exactHost && listed.hosts.every((host) => place.hosts.includes(host)))));
+}
+
 /** One item's hosts on one site. */
 interface Entry extends LoginPlace {
   id: string;
@@ -224,6 +254,8 @@ export class BitwardenLogins implements VaultProvider {
   private error: string | undefined;
   private refreshing: Promise<BitwardenStatus> | null = null;
   private reading: Promise<unknown> = Promise.resolve();
+  /** Raised by forget(), so a read that started before a disconnect keeps nothing it finds. */
+  private generation = 0;
   private readonly lastUsed = new Map<string, number>();
 
   constructor(options: {
@@ -274,12 +306,25 @@ export class BitwardenLogins implements VaultProvider {
     return client;
   }
 
+  /** One use of `bw` at a time: it keeps one sign-in in one folder, so checking a new account, reading an item and
+   * removing the folder each wait for the use before them. */
+  private queued<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.reading.then(work);
+    this.reading = run.catch(() => undefined);
+    return run;
+  }
+
+  /** What a read that outlived a disconnect gives back: nothing kept, and for a new account's check, the reason. */
+  private dropped(candidate?: BitwardenAccount): BitwardenStatus {
+    this.client = null;
+    if (candidate) throw new Error(BITWARDEN_DISCONNECTED);
+    return this.status();
+  }
+
   /** Reads the vault again; with `account`, checks that one first and throws the person's words when it fails. */
   refresh(account?: BitwardenAccount): Promise<BitwardenStatus> {
     if (!account && this.refreshing) return this.refreshing;
-    // One read at a time: `bw` keeps one sign-in in one folder, so checking a new account waits for a read of the old one.
-    const run = this.reading.then(() => this.load(account)).finally(() => { if (this.refreshing === run) this.refreshing = null; });
-    this.reading = run.catch(() => undefined);
+    const run = this.queued(() => this.load(account)).finally(() => { if (this.refreshing === run) this.refreshing = null; });
     if (!account) this.refreshing = run;
     return run;
   }
@@ -287,8 +332,10 @@ export class BitwardenLogins implements VaultProvider {
   private async load(candidate?: BitwardenAccount): Promise<BitwardenStatus> {
     const account = candidate ?? this.account();
     if (!account) { this.clear(); return this.status(); }
+    const generation = this.generation;
     try {
       const listed = await (await this.clientFor(account)).items();
+      if (generation !== this.generation) return this.dropped(candidate);
       const entries: Entry[] = [];
       const secrets: SecretEntry[] = [];
       // Every value in this answer is dropped here and read again when a bot uses it. An item counts once, as a login,
@@ -298,10 +345,8 @@ export class BitwardenLogins implements VaultProvider {
         if (fields.has("")) secrets.push({ id: `${ID_PREFIX}${item.id}`, itemId: item.id, name: item.name.trim() || "Bitwarden item", fields: [...fields.keys()].filter(Boolean) });
         const login = item.type === LOGIN ? item.login : undefined;
         if (!login?.password) continue;
-        const hosts = new Set((login.uris ?? []).flatMap((uri) => normalizeLoginHost(uri.uri) ?? []));
-        if (!hosts.size) continue;
-        for (const [site, siteHosts] of bySite(hosts)) {
-          entries.push({ id: `${ID_PREFIX}${item.id}:${site}`, itemId: item.id, site, hosts: siteHosts, exactHost: false,
+        for (const place of bitwardenLoginPlaces(item)) {
+          entries.push({ id: `${ID_PREFIX}${item.id}:${place.site}`, itemId: item.id, ...place,
             username: login.username ?? "", hasTotp: Boolean(login.totp && parseTotpKey(login.totp)) });
         }
       }
@@ -313,6 +358,7 @@ export class BitwardenLogins implements VaultProvider {
       this.error = undefined;
       return this.status(account);
     } catch (error) {
+      if (generation !== this.generation) return this.dropped(candidate);
       this.client = null;
       if (candidate) throw new Error(bitwardenProblem(error));
       this.error = bitwardenProblem(error);
@@ -330,10 +376,15 @@ export class BitwardenLogins implements VaultProvider {
     this.lastUsed.clear();
   }
 
-  /** The account is unlinked: nothing read from it, nor the CLI's copy of it, stays on this computer. */
-  forget(): void {
+  /** The account is unlinked: nothing read from it, nor the CLI's copy of it, stays on this computer. A read under way
+   * keeps nothing it finds, and the copy is removed once that read's `bw` is done with it. */
+  forget(): Promise<void> {
+    this.generation += 1;
     this.clear();
-    this.dropCopy();
+    return this.queued(async () => {
+      this.client = null;
+      this.dropCopy();
+    });
   }
 
   async fresh(): Promise<void> {
@@ -350,7 +401,7 @@ export class BitwardenLogins implements VaultProvider {
     if (!this.account()) return [];
     return [
       ...this.entries.map((entry): LinkedItem => ({
-        kind: "login", id: entry.id, site: entry.site, hosts: [...entry.hosts], exactHost: false, username: entry.username, hasTotp: entry.hasTotp,
+        kind: "login", id: entry.id, site: entry.site, hosts: [...entry.hosts], exactHost: entry.exactHost, username: entry.username, hasTotp: entry.hasTotp,
         source: "bitwarden", ...this.itemAccess(entry.itemId), createdAt: 0, ...this.lastUsedOf(entry.itemId),
       })),
       ...this.secrets.map((entry): LinkedItem => ({
@@ -364,22 +415,28 @@ export class BitwardenLogins implements VaultProvider {
     return this.items().flatMap(({ kind, ...item }) => (kind === "login" ? [item as LoginSummary] : []));
   }
 
-  private async itemOf(itemId: string): Promise<BitwardenItem | null> {
-    const account = this.account();
-    if (!account) return null;
-    try {
-      return await (await this.clientFor(account)).item(itemId);
-    } catch (error) {
-      this.client = null;
-      throw new Error(bitwardenProblem(error));
-    }
+  private itemOf(itemId: string): Promise<BitwardenItem | null> {
+    return this.queued(async () => {
+      const account = this.account();
+      if (!account) return null;
+      const generation = this.generation;
+      try {
+        const item = await (await this.clientFor(account)).item(itemId);
+        if (generation !== this.generation) { this.client = null; return null; }
+        return item;
+      } catch (error) {
+        this.client = null;
+        throw new Error(bitwardenProblem(error));
+      }
+    });
   }
 
   async read(id: string, field?: string): Promise<LinkedValue> {
     const login = this.entries.find((entry) => entry.id === id);
     if (login) {
       const item = await this.itemOf(login.itemId);
-      if (!item?.login?.password) return {};
+      // The item may have moved to another website since it was listed; its password goes only where it fills now.
+      if (!item?.login?.password || !stillFills(login, bitwardenLoginPlaces(item))) return {};
       return { password: item.login.password, totp: item.login.totp ? parseTotpKey(item.login.totp) : null };
     }
     const secret = this.secrets.find((entry) => entry.id === id);

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BITWARDEN_PASSWORD_REFUSED, BitwardenLogins, type BitwardenAccount, type BitwardenItem } from "../bitwarden.ts";
+import { BITWARDEN_DISCONNECTED, BITWARDEN_PASSWORD_REFUSED, BitwardenLogins, type BitwardenAccount, type BitwardenItem } from "../bitwarden.ts";
 import { BotLogins } from "../bot-logins.ts";
 import { json, readBody } from "../harness/http.ts";
 import { OnePasswordLogins } from "../onepassword.ts";
@@ -30,7 +30,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-async function serve(options: { bitwarden?: boolean } = {}) {
+async function serve(options: { bitwarden?: boolean; gate?: Promise<void> } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-bitwarden-routes-"));
   dirs.push(dir);
   const store = new VaultStore({ dataDir: dir });
@@ -40,6 +40,7 @@ async function serve(options: { bitwarden?: boolean } = {}) {
     account: () => store.bitwardenAccount(), grants: () => store.bitwardenGrants(), itemGrants: () => store.bitwardenItemGrants(),
     connect: async (account) => {
       connects.push(account);
+      await options.gate;
       if (account.password !== MASTER) throw new Error("Invalid master password.");
       return {
         items: async () => { if (down) throw down; return ITEMS; },
@@ -122,6 +123,18 @@ describe("Settings → Logins: Bitwarden", () => {
     // Handing an item back is kept even while Bitwarden cannot be read.
     expect((await call("PATCH", "/api/logins/bitwarden/items/b1", { bots: null })).status).toBe(200);
     expect(store.bitwardenItemGrants()).toEqual({});
+  });
+
+  it("does not let a connect still being checked undo a Disconnect", async () => {
+    let release = () => {};
+    const { store, call } = await serve({ gate: new Promise<void>((done) => { release = done; }) });
+    const connecting = call("POST", "/api/logins/bitwarden", CONNECT);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect((await call("DELETE", "/api/logins/bitwarden")).body.bitwarden).toEqual({ connected: false });
+    release();
+    expect(await connecting).toEqual({ status: 400, body: { error: BITWARDEN_DISCONNECTED } });
+    expect(store.bitwardenAccount()).toBeNull();
+    expect((await call("GET", "/api/logins")).body.bitwarden).toEqual({ connected: false });
   });
 
   it("is not there where Bitwarden cannot be linked", async () => {

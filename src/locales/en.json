@@ -3889,7 +3889,7 @@
   "settings.logins.bitwarden.line": "Let bots use logins and secrets from Bitwarden or your own Vaultwarden.",
   "settings.logins.bitwarden.connect": "Connect Bitwarden",
   "settings.logins.bitwarden.connected": "Connected to {server}",
-  "settings.logins.bitwarden.guide": "In Bitwarden, open Settings → Security → Keys and choose View API key. Paste client_id and client_secret here with the master password. An account made just for {app}, holding only what bots need, is safest.",
+  "settings.logins.bitwarden.guide": "In the Bitwarden web vault, open Settings, then Security, then Keys, and choose View API key. Paste client_id and client_secret here with the master password. An account made just for {app}, holding only what bots need, is safest.",
   "settings.logins.bitwarden.server": "Bitwarden address",
   "settings.logins.bitwarden.serverHint": "https://vault.bitwarden.com, https://vault.bitwarden.eu or your Vaultwarden address",
   "settings.logins.bitwarden.clientId": "client_id",

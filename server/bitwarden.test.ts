@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LoginBots } from "../shared/logins.ts";
 import {
-  BITWARDEN_DEFAULT_SERVER, BITWARDEN_KEY_REFUSED, BITWARDEN_PASSWORD_REFUSED, BitwardenCliMissingError, BitwardenLogins, bitwardenProblem, bitwardenServer,
+  BITWARDEN_DEFAULT_SERVER, BITWARDEN_DISCONNECTED, BITWARDEN_KEY_REFUSED, bitwardenLoginPlaces, BITWARDEN_PASSWORD_REFUSED, BitwardenCliMissingError, BitwardenLogins, bitwardenProblem, bitwardenServer,
   bitwardenSecretFields, bwRunner, cliBitwardenClient, type BitwardenAccount, type BitwardenItem, type BwResult,
 } from "./bitwarden.ts";
 import { parseTotpKey } from "./totp.ts";
@@ -241,7 +241,7 @@ describe("cliBitwardenClient", () => {
     expect((await client.item("a1"))?.login?.password).toBe(SITE_PASSWORD);
     expect(await client.item("gone")).toBeNull();
     expect(bw.calls.map((call) => call.args.join(" "))).toEqual([
-      "status", "config server https://vault.example.test", "login --apikey", "unlock --passwordenv BW_PASSWORD --raw", "sync", "list items", "get item a1", "get item gone",
+      "status", "config server https://vault.example.test", "login --apikey", "unlock --passwordenv BW_PASSWORD --raw", "sync", "list items", "sync", "get item a1", "sync", "get item gone",
     ]);
     for (const call of bw.calls) {
       expect(call.env.BITWARDENCLI_APPDATA_DIR).toBe("/data/bw");
@@ -263,7 +263,7 @@ describe("cliBitwardenClient", () => {
     const bw = fakeBw({ locked: 1 });
     const client = await cliBitwardenClient(ACCOUNT, { run: bw.run, appDir: "/data/bw" });
     expect((await client.item("a1"))?.id).toBe("a1");
-    expect(bw.calls.slice(-3).map((call) => call.args[0])).toEqual(["get", "unlock", "get"]);
+    expect(bw.calls.slice(-4).map((call) => call.args[0])).toEqual(["sync", "unlock", "sync", "get"]);
   });
 
   it("fails with the person's words for a wrong key or master password", async () => {
@@ -275,5 +275,95 @@ describe("cliBitwardenClient", () => {
 
   it("says bw is missing when it is not installed", async () => {
     await expect(bwRunner("/nonexistent/omb-test-bw")(["status"], {})).rejects.toBeInstanceOf(BitwardenCliMissingError);
+  });
+});
+
+describe("Bitwarden review fixes", () => {
+  const login = (uris: Array<{ uri: string; match?: number | null }>): BitwardenItem => ({ id: "m1", type: 1, name: "Matched", login: { username: "u", password: "fake-matched-pass", uris } });
+
+  it("keeps each saved address's match rule: a host address fills only on that host", async () => {
+    expect(bitwardenLoginPlaces(login([{ uri: "https://accounts.example.com", match: 1 }]))).toEqual([{ site: "example.com", hosts: ["accounts.example.com"], exactHost: true }]);
+    expect(bitwardenLoginPlaces(login([{ uri: "https://accounts.example.com", match: null }, { uri: "https://www.example.com", match: 0 }])))
+      .toEqual([{ site: "example.com", hosts: ["accounts.example.com", "www.example.com"], exactHost: false }]);
+    // Starts with, exact, regular expression and never can't be kept by a site-or-hosts place, so they fill nowhere.
+    expect(bitwardenLoginPlaces(login([2, 3, 4, 5].map((match) => ({ uri: `https://m${match}.example.org/login`, match }))))).toEqual([]);
+    // A base-domain address on the same site already opens it all.
+    expect(bitwardenLoginPlaces(login([{ uri: "https://a.example.com", match: 1 }, { uri: "https://example.com", match: 0 }]))).toEqual([{ site: "example.com", hosts: ["example.com"], exactHost: false }]);
+
+    const { bitwarden } = setup({ items: [login([{ uri: "https://accounts.example.com", match: 1 }])] });
+    await bitwarden.refresh();
+    expect(bitwarden.items()).toMatchObject([{ kind: "login", site: "example.com", hosts: ["accounts.example.com"], exactHost: true }]);
+    expect(linkedCandidates(bitwarden, "shop.example.com", "bot-1")).toEqual([]);
+    expect(linkedCandidates(bitwarden, "accounts.example.com", "bot-1")).toHaveLength(1);
+  });
+
+  it("gives a password only where its item still fills now, not where it was listed", async () => {
+    const items = [login([{ uri: "https://accounts.example.com" }])];
+    const { bitwarden } = setup({ items });
+    await bitwarden.refresh();
+    const [candidate] = linkedCandidates(bitwarden, "accounts.example.com", "bot-1");
+    items[0] = login([{ uri: "https://other.example.org" }]);
+    await expect(candidate!.secrets()).rejects.toThrow("This login is no longer in Bitwarden, or has no password there.");
+    items[0] = login([{ uri: "https://accounts.example.com", match: 1 }]);
+    await expect(candidate!.secrets(), "narrowed to one host after it was listed for the whole site").rejects.toThrow("no longer in Bitwarden");
+    items[0] = login([{ uri: "https://accounts.example.com" }, { uri: "https://new.example.com" }]);
+    expect(await candidate!.secrets()).toMatchObject({ password: "fake-matched-pass" });
+  });
+
+  it("reads an item only after a check of another account ends, since both use one bw folder", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((done) => { release = done; });
+    const order: string[] = [];
+    const bitwarden = new BitwardenLogins({
+      account: () => ACCOUNT,
+      connect: async (one) => ({
+        items: async () => { if (one !== ACCOUNT) { await gate; order.push("checked next"); } return ITEMS; },
+        item: async (id) => { order.push(`read ${id}`); return ITEMS.find((item) => item.id === id) ?? null; },
+      }),
+    });
+    await bitwarden.refresh();
+    const checking = bitwarden.refresh({ ...ACCOUNT, clientId: "user.fake-next" });
+    const reading = bitwarden.read("bitwarden:a1:example.com");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(order).toEqual([]);
+    release();
+    await Promise.all([checking, reading]);
+    expect(order).toEqual(["checked next", "read a1"]);
+  });
+
+  it("keeps nothing a read finds after Disconnect, fails a check under way, and removes the CLI copy only once bw is done", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((done) => { release = done; });
+    const order: string[] = [];
+    let account: BitwardenAccount | null = ACCOUNT;
+    const bitwarden = new BitwardenLogins({
+      account: () => account,
+      connect: async () => ({ items: async () => { await gate; order.push("listed"); return ITEMS; }, item: async () => null }),
+      dropCopy: () => { order.push("copy removed"); },
+    });
+    const checking = bitwarden.refresh({ ...ACCOUNT, clientId: "user.fake-new" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    account = null;
+    const forgotten = bitwarden.forget();
+    release();
+    await expect(checking).rejects.toThrow(BITWARDEN_DISCONNECTED);
+    await forgotten;
+    expect(order).toEqual(["listed", "copy removed"]);
+    expect(bitwarden.items()).toEqual([]);
+    expect(bitwarden.status()).toEqual({ connected: false });
+
+    // Nor does a plain refresh under way bring the old account's list back.
+    account = ACCOUNT;
+    let again = () => {};
+    const held = new Promise<void>((done) => { again = done; });
+    const slow = new BitwardenLogins({ account: () => account, connect: async () => ({ items: async () => { await held; return ITEMS; }, item: async () => null }) });
+    const read = slow.refresh();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    account = null;
+    void slow.forget();
+    again();
+    expect(await read).toEqual({ connected: false });
+    account = ACCOUNT;
+    expect(slow.items(), "the list read before Disconnect was dropped").toEqual([]);
   });
 });

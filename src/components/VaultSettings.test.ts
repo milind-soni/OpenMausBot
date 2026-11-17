@@ -435,6 +435,43 @@ describe("Settings → Vault: Bitwarden", () => {
     expect(document.body.querySelector("[data-settings-dialog] [role=alert]")?.textContent).toBe("That master password did not unlock the Bitwarden vault.");
   });
 
+  it("keeps the form open while Bitwarden still checks it, so a cancelled form never connects later", async () => {
+    let answer: (value: unknown) => void = () => {};
+    fixture.api
+      .mockResolvedValueOnce({ logins: [], onePassword: OFF, bitwarden: BW_OFF })
+      .mockReturnValueOnce(new Promise((done) => { answer = done; }))
+      .mockResolvedValueOnce({ logins: [], onePassword: OFF, bitwarden: BW_ON });
+    await render();
+    await click("Connect Bitwarden");
+    await type("bitwardenClientId", "user.fake");
+    await type("bitwardenClientSecret", "fake-secret");
+    await type("bitwardenPassword", "fake-master");
+    await act(async () => inDialog("Connect Bitwarden").click());
+    expect(inDialog("Cancel").disabled).toBe(true);
+    await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    await act(async () => document.body.querySelector<HTMLButtonElement>("[data-settings-dialog] button[aria-label]")?.click());
+    expect(document.body.querySelector("[data-settings-dialog]"), "still open while connecting").not.toBeNull();
+    await act(async () => answer({ bitwarden: BW_ON }));
+    await flush();
+    expect(document.body.querySelector("[data-settings-dialog]")).toBeNull();
+    expect(host.querySelector("[data-bitwarden]")!.textContent).toContain("Connected to vault.example.org");
+  });
+
+  it("keeps Disconnect off while the account's bots are being saved", async () => {
+    let answer: (value: unknown) => void = () => {};
+    fixture.api
+      .mockResolvedValueOnce({ logins: [], onePassword: OFF, bitwarden: BW_ON })
+      .mockReturnValueOnce(new Promise((done) => { answer = done; }))
+      .mockResolvedValueOnce({ logins: [], onePassword: OFF, bitwarden: BW_ON });
+    await render();
+    await click("Change who can use Bitwarden");
+    await click("Save changes");
+    expect(button("Disconnect Bitwarden").disabled).toBe(true);
+    await act(async () => answer({ bitwarden: BW_ON }));
+    await flush();
+    expect(button("Disconnect Bitwarden").disabled).toBe(false);
+  });
+
   it("keeps the account to chosen bots, and one item to its own bots ahead of the account's", async () => {
     const narrowed = { ...BW_ON, bots: ["quill"] };
     const own = { ...BW_LOGIN, bots: ["pepper"], bitwarden: { item: "b1", ownBots: true } };

@@ -392,7 +392,7 @@ function AccessRow({ title, line, changeLabel, value: current, bots, disabled, e
           {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
           <div className="flex flex-wrap justify-end gap-2">
             <button type="button" className="ui-button ui-button-md" disabled={busy} onClick={() => setEditing(false)}>{t("logins.cancel")}</button>
-            <button type="button" className="ui-button ui-button-md ui-button-primary" disabled={busy} onClick={() => void save()}>{t("settings.logins.saveChange")}</button>
+            <button type="button" className="ui-button ui-button-md ui-button-primary" disabled={disabled || busy} onClick={() => void save()}>{t("settings.logins.saveChange")}</button>
           </div>
         </div>
       )}
@@ -490,15 +490,23 @@ function BitwardenConnection({ status, disabled, bots, botNames, onChange }: {
 }) {
   const [form, setForm] = useState<BitwardenAccountInput>(BITWARDEN_FORM);
   const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<"connect" | "refresh" | "disconnect" | null>(null);
+  // One action at a time across the card, so a slow save of the bots can't bring back a status Disconnect just cleared.
+  const [busy, setBusy] = useState<"connect" | "refresh" | "disconnect" | "grant" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const close = () => { setOpen(false); setForm(BITWARDEN_FORM); setError(null); };
+  const reset = () => { setOpen(false); setForm(BITWARDEN_FORM); setError(null); };
+  // A check under way can't be called back, so the dialog stays until it ends.
+  const close = () => { if (busy !== "connect") reset(); };
   const run = async (kind: NonNullable<typeof busy>, work: () => Promise<BitwardenStatus>) => {
     if (busy) return;
     setBusy(kind);
     setError(null);
-    try { await onChange(await work()); if (kind === "connect") close(); }
+    try { await onChange(await work()); if (kind === "connect") reset(); }
     catch (cause) { setError(cause instanceof Error && cause.message ? cause.message : t("settings.logins.bitwarden.error")); }
+    finally { setBusy(null); }
+  };
+  const grant = async (next: LoginBots) => {
+    setBusy("grant");
+    try { await onChange(await grantBitwarden(next)); }
     finally { setBusy(null); }
   };
   const ready = form.clientId.trim() && form.clientSecret.trim() && form.password;
@@ -526,17 +534,17 @@ function BitwardenConnection({ status, disabled, bots, botNames, onChange }: {
       {status.connected && status.error && <p role="alert" className="text-[12px] leading-4 text-danger">{status.error}</p>}
       {status.connected && (
         <ul className="divide-y-[0.5px] divide-(--settings-edge)">
-          <AccessRow title={t("settings.logins.bitwarden.account")} value={status.bots ?? "all"} bots={bots} disabled={disabled} attrs={{ "data-bitwarden-account": server }}
+          <AccessRow title={t("settings.logins.bitwarden.account")} value={status.bots ?? "all"} bots={bots} disabled={disabled || busy !== null} attrs={{ "data-bitwarden-account": server }}
             line={t("settings.logins.bitwarden.accountUse", { count: String(status.items ?? 0), who: botNames(status.bots ?? "all") })}
             changeLabel={t("settings.logins.bitwarden.changeAccount")} errorText={t("settings.logins.bitwarden.error")}
-            save={async (next) => { await onChange(await grantBitwarden(next)); }} />
+            save={grant} />
         </ul>
       )}
       {error && !open && <p role="alert" className="text-[12px] leading-4 text-danger">{error}</p>}
       {open && !status.connected && (
         <SettingsDialog title={t("settings.logins.bitwarden.connect")} onClose={close}
           footer={<>
-            <button type="button" className="ui-button" onClick={close}>{t("common.cancel")}</button>
+            <button type="button" className="ui-button" disabled={busy === "connect"} onClick={close}>{t("common.cancel")}</button>
             <button type="submit" form="bitwarden-connect" className="ui-button ui-button-primary gap-1.5" disabled={disabled || busy !== null || !ready}>
               {busy === "connect" && <Loader2 size={13} className="animate-spin" />}{t("settings.logins.bitwarden.connect")}
             </button>

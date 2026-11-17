@@ -205,7 +205,8 @@ export class BotLogins {
       refresh: () => bitwarden.refresh(),
       disconnect: () => {
         this.store.setBitwardenAccount(null);
-        bitwarden.forget();
+        // A connect still checking its account now fails instead of saving it; the CLI's copy goes once bw is idle.
+        void bitwarden.forget().catch((error: unknown) => console.warn("[bitwarden] could not remove the CLI copy:", error instanceof Error ? error.message : error));
         return bitwarden.status();
       },
       grant: (bots) => {
