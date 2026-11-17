@@ -230,6 +230,9 @@ export interface RoutineRun {
   partial?: boolean;
   /** Set when the run used its one automatic second start, and why. */
   retried?: RoutineRetryCause;
+  /** A failed run that only the owner's AI account could have let through (signed out, out of credit, a usage limit, an
+   * engine to set up): it spent nothing, so it does not count towards spacing its routine out. */
+  ownerCause?: "signed_out" | "credits" | "usage_limit" | "setup";
   /** Concise, redacted question or approval reason while status is waiting,
    * or why a queued run starts later. */
   attention?: string;

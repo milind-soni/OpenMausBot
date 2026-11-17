@@ -10,7 +10,7 @@ const { WhatsNewPopup } = await import("./WhatsNewPopup");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const BOTH: WhatsNewView = { slides: ["pro", "team"], audience: "none", signedIn: true, staging: false,
-  plans: { pro: { name: "Pro", terms: "Pro · $49/month + tax · 14-day money-back" }, team: { name: "Team", terms: "Free for 3 days, then $169/month + tax" } } };
+  plans: { pro: { name: "Pro", terms: "Pro · $49/month + tax · 14-day money-back" }, team: { name: "Team", terms: "Free for 3 days, then $40/month + tax" } } };
 const TEAM_ONLY: WhatsNewView = { ...BOTH, slides: ["team"], audience: "own", plans: { team: BOTH.plans.team } };
 const PRO = "Meet the new MausBot Cloud", TEAM = "Shared bots for your whole team";
 
@@ -104,7 +104,7 @@ describe("the What's new popup", () => {
     expect(slide.textContent).toContain("Everyone chats with the same bots, like one Support bot and one Sales bot, and hands them work. Each person's own MausBot is their inbox: anything for them lands there.");
     for (const point of ["Connected apps, set up once for everyone", "Group chats with teammates and bots together", "Team memory the bots share",
       "Bots hand work to each other across the team", "Choose who can use each bot"]) expect(slide.textContent).toContain(point);
-    expect(slide.textContent).toContain("Free for 3 days, then $169/month + tax");
+    expect(slide.textContent).toContain("Free for 3 days, then $40/month + tax");
     expect(slide.querySelector('svg[role="img"]')!.getAttribute("aria-label")).toBe("Ada, Ben, Cleo and Dara, each with their own MausBot, share the team's Support and Sales bots on one Team Cloud.");
     expect([...slide.querySelectorAll("button")].map(item => item.textContent)).toEqual(["Start a Team"]);
     expect(button("Next")).toBeUndefined(); expect(button("Back")).toBeUndefined(); expect(button("Slide 1 of 1"), "one slide has no dots").toBeUndefined();

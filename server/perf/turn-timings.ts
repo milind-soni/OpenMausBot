@@ -13,7 +13,8 @@ import {
   type FailoverWhy, type LimitScope, type QueueWhy, type ToolKind, type ToolStat, type TurnTiming,
 } from "./turn-record.ts";
 
-export const RING_CAP = 200;
+/** Enough for an hour of 34 bots' turns, so the hour's percentiles are not cut short. */
+export const RING_CAP = 1_000;
 const LIVE_CAP = 200, PENDING_CAP = 500, OPEN_TOOLS_CAP = 64;
 /** A turn whose end never came is taken as over after this long: dropped, or, while it waits on a person, finished as such. */
 export const LIVE_TTL_MS = 6 * 3_600_000;
@@ -247,14 +248,15 @@ export function createTurnTimings(options: TurnTimingsOptions = {}) {
     },
     /** Every message the store appends: a person's message starts their wait for a turn; a reply or a failure row while
      * no turn runs ends that wait unanswered. Other bot rows do not: wait notices are posted while the turn waits. */
-    noteMessage(threadId: string, message: Pick<Message, "at" | "role" | "kind" | "steered" | "aside" | "from" | "peerAsk" | "automation" | "tool">) {
+    noteMessage(threadId: string, message: Pick<Message, "at" | "role" | "kind" | "steered" | "aside" | "from" | "peerAsk" | "automation" | "tool">, arrivedAt?: number) {
       if (message.role !== "user") {
         if (!live.has(threadId) && (message.kind === "text" || message.tool?.ok === false)) clearWaiting(threadId);
         return;
       }
       const waiting = pending.get(threadId);
       if (!PERSON_MESSAGE(message) || (waiting && message.at - waiting.at <= PENDING_TTL_MS)) return;
-      remember(pending, threadId, { at: message.at, behind: live.has(threadId) }, PENDING_CAP);
+      // The wait starts when the request carrying the message arrived: work the server did before storing it is part of it.
+      remember(pending, threadId, { at: Math.min(message.at, arrivedAt ?? message.at), behind: live.has(threadId) }, PENDING_CAP);
     },
     /**
      * A turn this thread was dispatching never ran (`turnId`, the id the driver refused it under). Its wait ends; a turn

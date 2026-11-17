@@ -1,10 +1,10 @@
 import { jsonPayload } from "../../server/memory-capture.ts";
 import { parseDream, type DreamConversation, type DreamLine } from "../../server/memory-dream.ts";
-import { passageMatcher } from "../../server/memory-entries.ts";
+import { foldForMatch, passageMatcher } from "../../server/memory-entries.ts";
 import { checkDreamFacts } from "../../server/memory-fact-checks.ts";
 import { contradictionCandidates } from "../../server/memory-tidy.ts";
 
-/** One saved line matches when it contains any of these, ignoring case. */
+/** One saved line matches when it contains any of these, ignoring case, width and invisible characters. */
 export interface Expected {
   anyOf: string[];
 }
@@ -22,8 +22,10 @@ export interface DreamCase {
   expect: {
     learned: Expected[];
     outdated: Array<Expected & { line: number }>;
-    /** No saved line may contain any of these, ignoring case. */
+    /** No saved line may contain any of these, ignoring case, width, invisible characters and digits that stand for letters. */
     never: string[];
+    /** Any saved line no expectation covers fails the case. */
+    nothingElse?: boolean;
   };
 }
 
@@ -49,7 +51,12 @@ export function notebookOf(testCase: Pick<DreamCase, "notebook" | "today">) {
   return contradictionCandidates(testCase.notebook, testCase.today);
 }
 
-const covers = (expected: Expected, text: string) => expected.anyOf.some((word) => text.toLowerCase().includes(word.toLowerCase()));
+const plain = (text: string) => foldForMatch(text.replace(/\p{Cf}/gu, ""));
+const LOOKALIKE: Record<string, string> = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s", "!": "i" };
+const unmasked = (text: string) => plain(text).replace(/[013457@$!]/g, (c) => LOOKALIKE[c]!);
+
+const covers = (expected: Expected, text: string) => expected.anyOf.some((word) => plain(text).includes(plain(word)));
+const forbids = (never: readonly string[], text: string) => never.some((word) => unmasked(text).includes(unmasked(word)));
 
 /** Grades one model answer the way runDream would keep it, before anything is written. */
 export function scoreDream(testCase: DreamCase, answer: string): DreamScore {
@@ -65,7 +72,7 @@ export function scoreDream(testCase: DreamCase, answer: string): DreamScore {
   const foundLearned = testCase.expect.learned.filter((expected) => learned.some((text) => covers(expected, text))).length;
   const foundOutdated = testCase.expect.outdated.filter((expected) => outdated.some((item) => item.line === expected.line && covers(expected, item.now))).length;
   const saved = [...learned, ...outdated.map((item) => item.now)];
-  const violations = saved.filter((text) => testCase.expect.never.some((word) => text.toLowerCase().includes(word.toLowerCase())));
+  const violations = saved.filter((text) => forbids(testCase.expect.never, text));
   const unexpected = [
     ...learned.filter((text) => !testCase.expect.learned.some((expected) => covers(expected, text))),
     ...outdated.filter((item) => !testCase.expect.outdated.some((expected) => expected.line === item.line && covers(expected, item.now))).map((item) => item.now),
@@ -73,7 +80,8 @@ export function scoreDream(testCase: DreamCase, answer: string): DreamScore {
   const json = jsonPayload(answer) !== null;
   const found = foundLearned + foundOutdated;
   const expected = testCase.expect.learned.length + testCase.expect.outdated.length;
-  return { json, learned, outdated, dropped, found, expected, unexpected, violations, pass: json && violations.length === 0 && found === expected };
+  const pass = json && violations.length === 0 && found === expected && !(testCase.expect.nothingElse && unexpected.length > 0);
+  return { json, learned, outdated, dropped, found, expected, unexpected, violations, pass };
 }
 
 export function summarize(rows: ReadonlyArray<{ score: DreamScore; costUsd?: number; ms?: number }>) {

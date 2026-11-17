@@ -8,6 +8,7 @@ import { join, relative } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
+import { CONFIG_BACKUP_PREFIX } from "./config-backup.ts";
 import { FAKE_POSTIZ_KEY, startFakePostiz, type FakePostiz } from "./testing/fake-postiz.ts";
 
 type Dump = { prompt?: string; systemPrompt: string | null; mcpConfig: { mcpServers: Record<string, { url?: string; alwaysLoad?: boolean }> } };
@@ -46,7 +47,9 @@ async function turn(botId: string, calls: unknown[]): Promise<Dump> {
   return dump;
 }
 
-/** Files under the data folder that hold this text, the fake engine's own capture of its launch files aside. */
+/** Files under the data folder that hold this text, the fake engine's own capture of its launch files aside.
+ * The dated copies of the settings file count as the settings file itself: config.json holds every credential
+ * of the install, so a copy of it beside it holds nothing that config.json does not hold. */
 function filesHolding(secret: string): string[] {
   const found: string[] = [];
   const walk = (dir: string) => {
@@ -54,7 +57,7 @@ function filesHolding(secret: string): string[] {
       const path = join(dir, name);
       const stat = statSync(path);
       if (stat.isDirectory()) walk(path);
-      else if (stat.isFile() && stat.size < 20_000_000 && path !== fixture.fixtureDumpPath && readFileSync(path).includes(secret)) found.push(relative(fixture.info.dataDir, path));
+      else if (stat.isFile() && stat.size < 20_000_000 && path !== fixture.fixtureDumpPath && !name.startsWith(CONFIG_BACKUP_PREFIX) && readFileSync(path).includes(secret)) found.push(relative(fixture.info.dataDir, path));
     }
   };
   walk(fixture.info.dataDir);

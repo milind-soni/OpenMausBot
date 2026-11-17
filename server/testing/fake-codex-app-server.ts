@@ -179,6 +179,10 @@ if (process.argv[2] === "exec") {
   process.exit(0);
 }
 const calls: Array<{ method: string; params: unknown }> = [];
+/** A `-c` value as codex-cli reads it: JSON-compatible TOML, or an inline table of strings (`env`, `http_headers`). */
+const tomlValue = (raw: string): unknown => raw.startsWith("{")
+  ? Object.fromEntries([...raw.matchAll(/("(?:[^"\\]|\\.)*")\s*=\s*("(?:[^"\\]|\\.)*")/g)].map((pair) => [JSON.parse(pair[1]!), JSON.parse(pair[2]!)]))
+  : JSON.parse(raw);
 const mcpOverrides: Record<string, Record<string, unknown>> = {};
 for (let index = 0; process.env.FAKE_CODEX_MCP_OVERRIDES === "1" && index < process.argv.length; index++) {
   if (process.argv[index - 1] === "-c" && process.argv[index]!.startsWith("mcp_servers=")) {
@@ -188,7 +192,7 @@ for (let index = 0; process.env.FAKE_CODEX_MCP_OVERRIDES === "1" && index < proc
     continue;
   }
   const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.]+)=(.*)$/.exec(process.argv[index]!) : null;
-  if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = JSON.parse(match[3]!);
+  if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = tomlValue(match[3]!);
 }
 // codex-cli 0.160 config/read reports every shell_environment_policy field, null when unset. A `-c
 // shell_environment_policy.exclude=[…]` override replaces the list and drops the lower `filters` (0.160.1).
@@ -245,11 +249,7 @@ const mcpMounts = (): Record<string, Record<string, unknown>> => {
   process.argv.forEach((arg, index) => {
     const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.=]+)=(.*)$/.exec(arg) : null;
     if (!match) return;
-    const raw = match[3]!;
-    const value = raw.startsWith("{")
-      ? Object.fromEntries([...raw.matchAll(/("(?:[^"\\]|\\.)*")\s*=\s*("(?:[^"\\]|\\.)*")/g)].map((pair) => [JSON.parse(pair[1]!), JSON.parse(pair[2]!)]))
-      : JSON.parse(raw);
-    (mounts[match[1]!] ??= {})[match[2]!] = value;
+    (mounts[match[1]!] ??= {})[match[2]!] = tomlValue(match[3]!);
   });
   return mounts;
 };
@@ -283,6 +283,7 @@ const startUrlMcp = async (mount: Record<string, unknown>, handshake: unknown): 
   const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream" };
   if (typeof mount.bearer_token_env_var === "string") headers.authorization = `Bearer ${process.env[mount.bearer_token_env_var] ?? ""}`;
   for (const [header, variable] of Object.entries((mount.env_http_headers ?? {}) as Record<string, string>)) headers[header] = process.env[variable] ?? "";
+  Object.assign(headers, mount.http_headers ?? {});
   const post = async (frame: object) => {
     const response = await fetch(mount.url as string, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...frame }), signal: AbortSignal.timeout(20_000) });
     const session = response.headers.get("mcp-session-id");
@@ -314,7 +315,8 @@ const announceMcpStartup = () => {
   const report = (name: string, status: string, error: string | null = null) =>
     out({ jsonrpc: "2.0", method: "mcpServer/startupStatus/updated", params: { threadId: null, name, status, error, failureReason: null } });
   mcpPending = Object.entries(mcpMounts())
-    .filter(([name, fields]) => "command" in fields && fields.enabled !== false && name !== process.env.FAKE_CODEX_MCP_FAILED)
+    // Every server it starts, by command or by URL (OpenMausBot's own, with OMB_OWN_MCP_HTTP=1).
+    .filter(([name, fields]) => ("command" in fields || "url" in fields) && fields.enabled !== false && name !== process.env.FAKE_CODEX_MCP_FAILED)
     .map(([name]) => name);
   for (const name of mcpPending) report(name, "starting");
   const settle = (name: string) => {

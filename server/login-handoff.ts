@@ -89,7 +89,7 @@ type HandoffStore = Pick<VaultStore, "changes" | "get" | "secret" | "listSecrets
 /** This computer's own 1Password problem, from its last read of the vaults (OnePasswordLogins.status().error). */
 type OnePasswordProblem = () => string | undefined;
 
-export const ONE_PASSWORD_DEAD_HERE = "1Password did not accept this computer's token, so it was not sent to My Cloud. Connect 1Password again in Settings → Logins with a new service account token, and it goes to My Cloud by itself.";
+export const ONE_PASSWORD_DEAD_HERE = "1Password did not accept this computer's token, so it was not sent to My Cloud. Connect 1Password again in Settings → Vault with a new service account token, and it goes to My Cloud by itself.";
 
 export function answerLoginHandoff(store: HandoffStore, what: Exclude<LoginHandoffWhat, { kind: "verify-secrets" }>, onePasswordProblem: OnePasswordProblem = () => undefined): LoginHandoffAnswer {
   if (what.kind === "1password") {

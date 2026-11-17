@@ -213,18 +213,15 @@ conversations, permissions, memory, or computer access. Browse the
 [open-source playbook repository](https://github.com/milind-soni/openmausbot-teams) or read its
 [portable format](https://github.com/milind-soni/openmausbot-teams/blob/main/FORMAT.md).
 
-### 🤝 Share a whole department
+### 🤝 Share a bot or a department
 
-Right-click a department and choose **Share department…** (or use **Templates → Share**) to save the whole department as one
-file: its bots with their instructions, pictures and skills, group chats, routines, shared instructions,
-Chief of Staff, connection slots and each bot's starter notes (untick them to leave them out). The dialog
-shows exactly what the file holds before you save it. Chat history, keys and passwords, model choices and
-computers never go in, and anything that looks like a secret is removed from the text. Whoever imports it
-gets new bots on Ask, skills switched off and routines paused. See [docs/team-sharing.md](docs/team-sharing.md).
-Desktops connected to an organization also get **Templates → From {Organization}**: the packages its Admin shares,
-added with one click, skills switched on. See [docs/org-library.md](docs/org-library.md).
-Your New bot defaults can travel too, as a **preset bot** that appears in New bot (in a team file, or on
-their own with **Share as preset…**). See [docs/presets.md](docs/presets.md).
+Ask a bot to share itself ("publish yourself to GitHub"), or open a department's **…** menu and choose **Share**. You
+get one card: the bots, their instructions, skills and pictures, group chats, routines (paused), the Chief of Staff and
+the apps they use, by name. Chats, memory, keys and connection addresses never go in. **Publish** sends it to the
+community repository on GitHub and gives you a link; **Save folder…** keeps it on your computer. Anyone adds it with
+**+ → Import…** and a link or a folder. See [docs/team-sharing.md](docs/team-sharing.md).
+Desktops connected to an organization also get the packages its Admin shares in **Templates**, added with one click,
+skills switched on. See [docs/org-library.md](docs/org-library.md).
 
 ### 🎧 Bots that talk back
 

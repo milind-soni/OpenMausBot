@@ -99,6 +99,10 @@ one line is logged naming the kind of error and nothing of what was read.
 
 Claude Code is not bridged when any of these holds:
 
+- Its tool search is on (the default): the agents server then sends a few tools
+  whole and the rest as names, which costs less than the bridge. For a proxy or
+  model without tool search, set `ENABLE_TOOL_SEARCH=false` in the instance's
+  environment to get the bridge back.
 - The bot inherits this machine's own Claude Code setup
   (`OMB_CLAUDE_INHERIT_USER_CONFIG=1`, or **Also use my Claude Code MCP
   servers**).
