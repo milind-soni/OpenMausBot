@@ -11024,7 +11024,7 @@
   "settings.vault.bitwarden.connect": "Connect Bitwarden",
   "settings.vault.bitwarden.disconnect": "Disconnect Bitwarden",
   "settings.vault.bitwarden.team": "For the whole team: its bots use it in shared and private chats. Use a dedicated Bitwarden account that can only see one collection.",
-  "settings.vault.bitwarden.guide": "Use a dedicated Bitwarden account that can only see one collection. In that account, open Settings → Security → Keys → View API key, then paste its client_id and client_secret here with its master password. Bitwarden's own command line tool is downloaded from Bitwarden the first time.",
+  "settings.vault.bitwarden.guide": "Use a dedicated Bitwarden account that can only see one collection. In that account, open Account settings → Security → Keys → View API key, then paste its client_id and client_secret here with its master password. Bitwarden's own command line tool is downloaded from Bitwarden the first time.",
   "settings.vault.bitwarden.server": "Server",
   "settings.vault.bitwarden.selfHosted": "Self-hosted or Vaultwarden",
   "settings.vault.bitwarden.address": "Server address",

@@ -8,7 +8,7 @@ one. On a desktop, a personal Cloud and a Team Cloud alike (`server/host/bitward
 
 An admin picks the server (bitwarden.com, bitwarden.eu, or a self-hosted Bitwarden or Vaultwarden at any `https://`
 address) and pastes the account's personal API key (`client_id`, which starts with `user.`, and `client_secret`, from the
-account's Settings → Security → Keys → View API key) and its master password. The row says the setup to use: *Use a
+account's Account settings → Security → Keys → View API key) and its master password. The row says the setup to use: *Use a
 dedicated Bitwarden account that can only see one collection.* The account's collections are the boundary: every bot may
 use what the account sees, so the account should see only what bots should.
 

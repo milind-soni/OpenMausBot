@@ -74,7 +74,7 @@ export const LOGIN_ERRORS = {
   taken: "A login with this username is already saved for that site. Change or delete that one instead.",
   bitwardenReadOnly: "This login is in Bitwarden. Change or remove it there.",
   bitwardenServer: "Enter the Bitwarden server's address, starting with https://, such as https://vault.bitwarden.com.",
-  bitwardenClientId: "Paste the account's client_id from Bitwarden: Settings → Security → Keys → View API key. It starts with user.",
+  bitwardenClientId: "Paste the account's client_id from Bitwarden's Account settings → Security → Keys → View API key. It starts with user.",
   bitwardenClientSecret: "Paste the account's client_secret from the same place, on its own.",
   bitwardenPassword: "Enter the account's master password.",
 } as const;

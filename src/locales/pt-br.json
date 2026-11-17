@@ -11024,7 +11024,7 @@
   "settings.vault.bitwarden.connect": "Conectar o Bitwarden",
   "settings.vault.bitwarden.disconnect": "Desconectar o Bitwarden",
   "settings.vault.bitwarden.team": "Para toda a equipe: os bots usam em chats compartilhados e privados. Use uma conta do Bitwarden dedicada que só veja uma coleção.",
-  "settings.vault.bitwarden.guide": "Use uma conta do Bitwarden dedicada que só veja uma coleção. Nessa conta, abra Configurações → Segurança → Chaves → Ver chave de API e cole aqui o client_id e o client_secret, com a senha mestra. A ferramenta de linha de comando do próprio Bitwarden é baixada do Bitwarden na primeira vez.",
+  "settings.vault.bitwarden.guide": "Use uma conta do Bitwarden dedicada que só veja uma coleção. Nessa conta, abra Configurações da conta → Segurança → Chaves → Ver chave de API e cole aqui o client_id e o client_secret, com a senha mestra. A ferramenta de linha de comando do próprio Bitwarden é baixada do Bitwarden na primeira vez.",
   "settings.vault.bitwarden.server": "Servidor",
   "settings.vault.bitwarden.selfHosted": "Auto-hospedado ou Vaultwarden",
   "settings.vault.bitwarden.address": "Endereço do servidor",

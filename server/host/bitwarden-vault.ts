@@ -46,7 +46,7 @@ interface ItemEntry {
 interface LoginEntry extends LoginPlace { id: string; itemId: string; username: string; hasTotp: boolean }
 
 export const BITWARDEN_WRONG_PASSWORD = "Bitwarden did not accept the master password. Check it and connect again.";
-export const BITWARDEN_BAD_KEY = "Bitwarden did not accept the API key. Copy client_id and client_secret again from the account's Settings → Security → Keys → API key, then connect again.";
+export const BITWARDEN_BAD_KEY = "Bitwarden did not accept the API key. Copy client_id and client_secret again in Bitwarden's Account settings → Security → Keys → View API key, then connect again.";
 const TIMEOUT = "Bitwarden did not answer in time. Try again in a moment.";
 const LIMITED = "Bitwarden is limiting requests right now. Try again in a few minutes.";
 const LOCKED = "Bitwarden stayed locked. Connect it again with the master password.";
