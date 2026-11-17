@@ -59,6 +59,8 @@ export interface AdmissionMessage {
   /** Room queues drain one item per turn, so only the head may jump into the live speaker's turn. */
   isQueueHead?: boolean;
   speakerPresent?: boolean;
+  /** A room line meant for another bot never folds into the speaker's turn. */
+  speakerAddressed?: boolean;
 }
 
 export interface AdmissionState {
@@ -73,7 +75,7 @@ export interface AdmissionState {
   threadWorking?: boolean;
 }
 
-export type AdmissionSteerBlock = "images";
+export type AdmissionSteerBlock = "images" | "addressee";
 
 export type AdmissionDecision =
   | { action: "steer" }
@@ -121,6 +123,7 @@ export function admit(
       if (!message.speakerPresent || message.engineCanSteer !== true) {
         return { action: "queue" };
       }
+      if (message.speakerAddressed === false) return { action: "queue", blockedBy: "addressee" };
       if (imagesBlockSteer(message)) return { action: "queue", blockedBy: "images" };
       if (!message.isQueueHead) {
         return { action: "refuse", code: "queue-head-only" };

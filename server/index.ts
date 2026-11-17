@@ -62,7 +62,7 @@ import {
 } from "./browser-lifecycle-cleanup.ts";
 import * as checkpoints from "./checkpoints.ts";
 import { commandReceipt } from "./commands.ts"; import { moveSavedGrants } from "./mcp-grant-spec.ts";
-import { buildTurnDigest, coverageForDriver, digestPromptLine, renderDigest, toolEvidence } from "./digest.ts";
+import { buildTurnDigest, coverageForDriver, digestCompletedLate, digestPromptLine, renderDigest, toolEvidence } from "./digest.ts";
 import { appendDecision, bindDecisionRetention, decisionRetentionDays, flushDecisionLog, pruneDecisions, withDecisionActor, type DecisionActor, type DecisionVia } from "./decision-log.ts";
 import { folderToFollow, inMyFolderCwd, validateBotCwd } from "./bot-cwd.ts";
 import { ATTACHMENTS_DIR, attachmentExists, deleteAttachment, keptAttachmentNames, offerAttachmentClear, saveAudio, saveImage } from "./attachments.ts";
@@ -281,7 +281,7 @@ import { lentCopies, noteSyncBotTurn } from "./routes/cloud-sync.ts"; import { m
 import { type CloudOwnership } from "./cloud-owner.ts"; import { memberLoginRefusal, personalMoveRefusal } from "./cloud-team.ts"; import { createCloudTeamHost, type MemberProfile } from "./host/cloud-team-host.ts"; import { createTeamFilesHost } from "./host/team-files-host.ts"; import { createTeamFilesRoutes } from "./routes/team-files.ts"; import { engineHomes } from "./engine-homes/engine-homes.ts"; import { audienceMember, layerId, memberAudience } from "./audience.ts"; import { createPersonRooms, createRoomReads, type OwnGroupFrames } from "./host/room-reads.ts"; import { createPersonBotOrder } from "./host/person-bot-order.ts"; import { createMeRoutes } from "./routes/me.ts"; import { createPersonNames } from "./host/person-names.ts"; import { createTeamPhoneRoutes } from "./routes/team-phone.ts"; import { settleCloudHome } from "./cloud-home-settle.ts"; import { CLOUD_NOBODY_KEY, CLOUD_OUTSIDE_KEY } from "./cloud-sharing.ts"; import { createTeamSlackHost } from "./host/team-slack-host.ts"; import { createTeamSlackMessages } from "./team-slack.ts"; import { createTeamSlackRoutes } from "./routes/team-slack.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
 import { RESTART_EXIT_CODE } from "./restart.ts"; import { installCrashGuard, SERVER_ERROR_CAUSE } from "./crash-guard.ts"; import { markRequestArrival } from "./perf/loop-stalls.ts"; import { createThreadMaps, keepThreadEntry } from "./host/thread-maps.ts"; import { botLimitRefusal } from "./bot-limit.ts";
-import { applyIncludedXMessage, holdIncludedServices, hostingCredential, researchCredential, trialCreditCredential, xCredential, xResearchStatus } from "./included-services.ts"; import { applyPhoneLinkMessage, phoneLinkPart } from "./phone-link.ts"; import { createResearchAvailability } from "./research.ts";
+import { applyIncludedXMessage, holdIncludedServices, hostingCredential, researchCredential, trialCreditCredential, xCredential, xResearchStatus } from "./included-services.ts"; import { applyPhoneLinkMessage, phoneLinkPart } from "./phone-link.ts"; import { createLocalVmAvailability } from "./local-vm-availability.ts"; import { createResearchAvailability } from "./research.ts";
 import { CloudCreditProvider } from "./cloud-credit-provider.ts";
 import { createCreditMoves } from "./cloud-credit-moves.ts"; import { createRoutineHoldsHost } from "./host/routine-holds-host.ts"; import { tellTurnedBackOn } from "./host/routines-turned-back-on.ts";
 import { TRIAL_CREDIT_OWN_AI, TRIAL_KEY_HELD } from "./trial-credit.ts"; import { createHeldKeys } from "./cloud-held-keys.ts";
@@ -649,7 +649,7 @@ import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
 import { connectorFileDeps, connectorFileScope, prepareConnectorFiles, withMissingFileHint } from "./connector-files.ts";
 import { createConnectorCards } from "./host/connector-cards.ts";
-import { createLoginMailCodes } from "./host/login-mail-codes.ts";
+import { createLoginMailCodes } from "./host/login-mail-codes.ts"; import { createLateToolResults } from "./host/late-tool-results.ts"; import { internalBodyRefusal } from "./host/internal-body-ids.ts";
 import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
@@ -1618,7 +1618,7 @@ const MAX_CREATED_BOTS_PER_TURN = 4;
 const MAX_CREATED_BOT_INSTRUCTIONS = 4_000;
 // Only an orphan backstop: normal terminal paths revoke a capability synchronously.
 const INTERNAL_CAPABILITY_ORPHAN_MS = 30 * 24 * 60 * 60_000;
-const internalCapabilities = new Map<string, InternalCapability>();
+const internalCapabilities = new Map<string, InternalCapability>(); const lateToolResults = createLateToolResults();
 const activeInternalGenerationByThread = new Map<string, string>();
 const turnCallSignals = createTurnCallSignals(internalCapabilityIsActive);
 const internalGenerationByProviderTurn = new ProviderTurnGenerationRegistry();
@@ -1722,9 +1722,7 @@ function revokeInternalCapabilityGeneration(threadId: string, generation: string
   if (standInRoots.delete(generation)) coordinator.endTurn(generation, { ok: true, text: "" });
   endForeignTurns(threadId, generation);
   if (guestDrivenTurns.get(threadId) === generation) guestDrivenTurns.delete(threadId);
-  for (const [token, capability] of internalCapabilities) {
-    if (capability.threadId === threadId && capability.generation === generation) internalCapabilities.delete(token);
-  }
+  for (const [token, capability] of internalCapabilities) if (capability.threadId === threadId && capability.generation === generation) { if (capability.kind === "hooks") lateToolResults.generationRevoked(generation, { threadId, botId: capability.botId, token }); internalCapabilities.delete(token); }
   if (activeInternalGenerationByThread.get(threadId) === generation) activeInternalGenerationByThread.delete(threadId);
   internalGenerationByProviderTurn.deleteGeneration(threadId, generation);
   turnCallSignals.sweep();
@@ -1742,13 +1740,13 @@ function revokeEarlierTurnCapabilities(threadId: string): void {
 
 /** Also retires the thread's bearers, so nothing that still holds one is honoured again. */
 function revokeInternalCapabilitiesForThread(threadId: string): void {
-  revokeEarlierTurnCapabilities(threadId);
+  revokeEarlierTurnCapabilities(threadId); lateToolResults.forgetThread(threadId);
   sessionCredentials.delete(threadId);
 }
 
 function revokeAllInternalCapabilities(): void {
   computerSelectionTurns.clear();
-  internalCapabilities.clear();
+  internalCapabilities.clear(); lateToolResults.clear();
   sessionCredentials.clear();
   // foreignTurns stays: a foreign turn can still write while its engine is torn down, and only its own end judges it.
   activeInternalGenerationByThread.clear();
@@ -1758,7 +1756,7 @@ function revokeAllInternalCapabilities(): void {
 
 function bindInternalCapabilityToProviderTurn(threadId: string, generation: string, turnId?: string): void {
   if (turnId && !internalGenerationByProviderTurn.bind(threadId, generation, turnId)) {
-    revokeInternalCapabilityGeneration(threadId, generation);
+    rememberLateToolResults(threadId, generation, turnId); revokeInternalCapabilityGeneration(threadId, generation);
   }
 }
 
@@ -1766,8 +1764,10 @@ function revokeInternalCapabilityForProviderEvent(event: RuntimeEvent): void {
   if (!event.turnId) return;
   const owner = internalGenerationByProviderTurn.complete(event.threadId, event.turnId);
   if (!owner) return;
-  revokeInternalCapabilityGeneration(owner.threadId, owner.generation);
+  rememberLateToolResults(owner.threadId, owner.generation, event.turnId); revokeInternalCapabilityGeneration(owner.threadId, owner.generation);
 }
+
+function rememberLateToolResults(threadId: string, generation: string, turnId: string): void { const live = [...internalCapabilities].find(([, capability]) => capability.kind === "hooks" && capability.threadId === threadId && capability.generation === generation); lateToolResults.remember(threadId, generation, turnId, live && { botId: live[1].botId, token: live[0] }, store.activePath(threadId)); }
 
 /** Constant-time comparisons, so the check does not leak a matching prefix length. */
 function authorizedInternalCapability(header: string | string[] | undefined): InternalCapability | null {
@@ -1811,7 +1811,7 @@ const MAX_COMMS_DEPTH = 1;
 const MAX_WORKSPACE_BOTS = 100;
 const phoneProxyPath = SPAWNED_PROXIES.phone;
 
-const researchAvailability = createResearchAvailability({ credential: () => researchCredential(cfg.treg?.key) }); researchAvailability.available();
+const researchAvailability = createResearchAvailability({ credential: () => researchCredential(cfg.treg?.key) }); researchAvailability.available(); const localVmAvailability = createLocalVmAvailability(() => containerRuntimeStatus());
 function agentsIntegration(
   botId: string,
   threadId: string,
@@ -1824,7 +1824,7 @@ function agentsIntegration(
   const bot = store.bot(botId), speaking = botForThread(botId, threadId) ?? bot;
   // Only advertises the tools; the routes behind them refuse regardless.
   const host = { skillAuthoring: skillAuthoringEnabled(cfg), sharedComputers: botLending(), cloudHome: Boolean(CLOUD_HOME), team: Boolean(CLOUD_TEAM),
-    voiceNotes: tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false, x: Boolean(researchCredential(cfg.treg?.key)), research: researchAvailability.available(), imageGeneration: imageGenerationReady(cfg), meetings: boat.boatConfigured(cfg), appHosting: hostingCredential() !== null };
+    voiceNotes: tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false, x: Boolean(researchCredential(cfg.treg?.key)), research: researchAvailability.available(), imageGeneration: imageGenerationReady(cfg), meetings: boat.boatConfigured(cfg), appHosting: hostingCredential() !== null, localVm: localVmAvailability.available() };
   return { ...agentsProxyLaunch(), env: agentsServerEnv({ threadId, bot: bot ?? { id: botId }, room: Boolean(store.groupByThread(threadId)), teamComputer: Boolean(bot && inheritedTeamComputer(bot)), botDriven: automated || botDrivenConversation(store.taskByThread(botId, threadId)), host },
     { generation, depth, skillAuthoring, roomHandoffId, ...(hostFiles && !CLOUD_HOME && !HOSTED_WORKSPACE ? { deliversSavedFiles: true } : {}) },
     (turn) => mintInternalCapability({ botId, threadId, kind: "agents", createdBots: 0, openedThreads: 0, ...turn }), `http://127.0.0.1:${PORT}`) };
@@ -5415,11 +5415,11 @@ const TOOL_RESULTS_DIR = join(DATA_DIR, "tool-results");
 const TOOL_RESULT_SPILL_MAX = 512 * 1024;
 
 const DIGESTS_AFTER_COMPACTION = 2;
-function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: boolean; ignored?: string; context?: string; hookSpecificOutput?: unknown } {
+function ingestEngineHook(capability: Pick<InternalCapability, "botId" | "threadId">, body: unknown, bearer: string | string[] | undefined, turnEnded = false): { ok: boolean; ignored?: string; context?: string; hookSpecificOutput?: unknown } {
   const event = body && typeof body === "object" ? (body as { event?: unknown; payload?: unknown }) : {};
   const name = typeof event.event === "string" ? event.event : "";
   const payload = event.payload && typeof event.payload === "object" ? (event.payload as Record<string, unknown>) : {};
-  const threadId = capability.threadId;
+  const threadId = capability.threadId; if (turnEnded && name !== "PostToolUse") return { ok: true, ignored: `${name || "unknown"} after its turn ended` };
   const chip = (text: string) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: text, ok: true } });
   if (name === "PreCompact" || (name === "SessionStart" && payload.source === "compact")) roomSessions.distrust(threadId, capability.botId);
   if (name === "PreCompact") {
@@ -5436,7 +5436,6 @@ function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: 
     const context = digests.map((m) => digestPromptLine(m.digest!, m.from?.name ?? store.bot(m.digest!.botId)?.name ?? bot?.name ?? "the bot")).join("\n");
     return { ok: true, context };
   }
-  if (name === "Stop") return { ok: true };
   if (name === "PostToolUseFailure") return shellTimeoutHookResult(payload);
   if (name !== "PostToolUse") return { ok: true, ignored: name || "unknown" };
   const toolUseId = typeof payload.tool_use_id === "string" ? payload.tool_use_id : "";
@@ -5444,8 +5443,8 @@ function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: 
   if (!Object.hasOwn(payload, "tool_response")) return { ok: true, ignored: "hook did not include a tool response" };
   const response = payload.tool_response;
   const text = typeof response === "string" ? response : JSON.stringify(response ?? null, null, 2);
-  const turnId = liveTurnByThread.get(threadId);
-  const row = store.activePath(threadId).findLast((m) => m.kind === "activity" && m.turnId === turnId && m.tool?.itemId === toolUseId);
+  const rows = store.activePath(threadId), toolRow = (turn: string | null | undefined) => turn ? rows.findLast((m) => m.kind === "activity" && m.turnId === turn && m.tool?.itemId === toolUseId) : undefined; let turnId: string | null | undefined = turnEnded ? undefined : liveTurnByThread.get(threadId), row = toolRow(turnId);
+  const late = row ? null : lateToolResults.turnFor(bearer, threadId, capability.botId, toolUseId); if (late) row = toolRow(turnId = late);
   if (!turnId || !row?.tool) return { ok: true, ignored: "tool not observed in this turn" };
   const key = `${threadId}:${turnId}:${toolUseId}`;
   if (!commandReceipt("hook.ingest", key)) {
@@ -5454,6 +5453,7 @@ function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: 
     const fullResult = spillToolResult(dir, key, redacted, TOOL_RESULT_SPILL_MAX);
     store.patchMessage(threadId, row.id, { tool: { ...row.tool, fullResult } }, { kind: "hook.ingest", key });
   }
+  if (late) { lateToolResults.saved(threadId, late, toolUseId); const completed = digestCompletedLate(store.activePath(threadId), late); if (completed) store.patchMessage(threadId, completed.id, { digest: completed.digest, text: completed.text }); }
   return { ok: true };
 }
 
@@ -5522,8 +5522,8 @@ async function scheduleTurnDigest(input: {
     } finally {
       clearTimeout(timer!);
     }
-    if (!files || !input.isCurrent() || !store.activePath(input.threadId).some(row => row.id === message.id)) return;
-    const withFiles = buildTurnDigest({ ...digest, activities, memory, files });
+    const stored = store.activePath(input.threadId).find(row => row.id === message.id); if (!files || !input.isCurrent() || !stored) return;
+    const withFiles = buildTurnDigest({ ...digest, hookCoverage: stored.digest?.hookCoverage ?? digest.hookCoverage, activities, memory, files });
     store.patchMessage(input.threadId, message.id, { digest: withFiles, text: renderDigest(withFiles) }, { kind: "digest.files", key: `${input.threadId}:${input.turnId}` });
   } catch (error) {
     console.error(`digest: could not record turn ${input.turnId} on ${input.threadId}:`, error instanceof Error ? error.message : error);
@@ -12183,7 +12183,7 @@ ROUTES.push(createChannelRoutes({
   roomMemberContexts,
   skillReview,
   groupSpeakers,
-  groupTurnOperations,
+  groupTurnOperations, speakerOnHandedWork: (threadId, botId) => coordinator.runningIn(threadId).some((node) => node.botId === botId && node.parentId !== undefined),
   lastReply,
   cloudThreadRefusal,
   messageSender,
@@ -12829,7 +12829,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 201, { token });
     }
     if (path.startsWith("/api/internal/")) {
-      const internalCapability = authorizedInternalCapability(req.headers.authorization);
+      const internalCapability: InternalCapability | null = authorizedInternalCapability(req.headers.authorization) ?? lateToolResults.endedTurnCapability(req.headers.authorization);
       if (!internalCapability) {
         return json(res, 401, { error: "unauthorized" });
       }
@@ -12879,18 +12879,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!internalCapabilityIsActive(internalCapability)) {
           throw Object.assign(new Error(TURN_ENDED_REFUSAL), { status: 401 });
         }
-        if (body && typeof body === "object" && !Array.isArray(body)) {
-          for (const key of ["fromBotId", "botId"] as const) {
-            if (body[key] !== undefined && String(body[key]) !== internalSender.id) {
-              throw Object.assign(new Error("the internal capability belongs to a different bot"), { status: 403 });
-            }
-          }
-          for (const key of ["fromThreadId", "threadId"] as const) {
-            if (body[key] !== undefined && String(body[key]) !== internalCapability.threadId) {
-              throw Object.assign(new Error("the internal capability belongs to a different conversation"), { status: 403 });
-            }
-          }
-        }
+        const refused = internalBodyRefusal(body, internalSender.id, internalCapability.threadId);
+        if (refused) throw Object.assign(new Error(refused.error), { status: refused.status });
         return body;
       };
       const requireActiveInternalCapability = () => {
@@ -12942,8 +12932,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           message: `End this turn now without using the previous computer tools. OpenMausBot will continue the original request on ${option.label} with a fresh tool connection.` });
       }
       if (method === "POST" && path === "/api/internal/hook") {
-        const body = await readInternalBody();
-        return json(res, 200, ingestEngineHook(internalCapability, body));
+        const body = await readBody(req), turnEnded = !internalCapabilityIsActive(internalCapability); if (turnEnded && !lateToolResults.holder(req.headers.authorization)) return json(res, 401, { error: TURN_ENDED_REFUSAL });
+        const refused = internalBodyRefusal(body, internalSender.id, internalCapability.threadId); if (refused) return json(res, refused.status, { error: refused.error });
+        return json(res, 200, ingestEngineHook(internalCapability, body, req.headers.authorization, turnEnded));
       }
       if (method === "POST" && path === "/api/internal/tool-result") {
         const body = await readInternalBody();

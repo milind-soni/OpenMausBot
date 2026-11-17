@@ -100,6 +100,27 @@ export function UsageGlyph({ limit, className }: { limit: EngineLimit; className
   );
 }
 
+const RING = 14;
+const RING_STROKE = 2;
+const RING_RADIUS = (RING - RING_STROKE) / 2;
+const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
+const RING_INK: Record<UsageTone, string> = { fine: "text-success", near: "text-warning", out: "text-danger" };
+
+/** A ring drawn clockwise from the top for the usage left; at the limit it is empty and struck through. */
+export function UsageRing({ limit, className }: { limit: EngineLimit; className?: string }) {
+  const tone = usageTone(limit);
+  const left = tone === "out" ? 0 : Math.max(0, 100 - (limit.usedPercent ?? 0));
+  const middle = RING / 2;
+  return (
+    <svg aria-hidden="true" data-usage-ring={tone} width={RING} height={RING} viewBox={`0 0 ${RING} ${RING}`} className={cn("shrink-0", RING_INK[tone], className)}>
+      <circle cx={middle} cy={middle} r={RING_RADIUS} fill="none" stroke="currentColor" strokeWidth={RING_STROKE} opacity={0.3} />
+      {left > 0 && <circle cx={middle} cy={middle} r={RING_RADIUS} fill="none" stroke="currentColor" strokeWidth={RING_STROKE} strokeLinecap="round"
+        strokeDasharray={`${(RING_LENGTH * left) / 100} ${RING_LENGTH}`} transform={`rotate(-90 ${middle} ${middle})`} />}
+      {tone === "out" && <path d={`M3 ${RING - 3}L${RING - 3} 3`} stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />}
+    </svg>
+  );
+}
+
 /** When the usage was last read, each window's share left with its reset and a track filled by use; at the limit, how it
  * clears and a fresh check. */
 export function UsageRows({ limit }: { limit: EngineLimit }) {
@@ -153,6 +174,33 @@ export function UsageRows({ limit }: { limit: EngineLimit }) {
   );
 }
 
+/** One AI's rows, the bot's own to begin with. When another connected AI reports usage too, a ring for each sits above
+ * the rows, and pressing a ring shows that AI's rows. */
+function UsageOverview({ engine }: { engine: string | undefined }) {
+  const limits = useEngineLimits().filter(reportsUsage);
+  const [picked, setPicked] = useState<string>();
+  const shown = limits.find((limit) => limit.engine === picked) ?? limits.find((limit) => limit.engine === engine);
+  const now = Date.now();
+  return (
+    <div className="flex flex-col gap-2.5">
+      {limits.some((limit) => limit.engine !== engine) && (
+        <div data-usage-rings role="group" aria-label={t("limits.title")} className="-mx-1.5 flex flex-wrap gap-1">
+          {limits.map((limit) => (
+            <button key={limit.engine} type="button" data-usage-engine={limit.engine} aria-pressed={limit === shown} aria-label={limitLine(limit, now, ", ")}
+              title={limitLine(limit, now)} onClick={() => setPicked(limit.engine)}
+              className={cn("flex h-6 min-w-0 items-center gap-1.5 rounded-full px-1.5 text-[12px] leading-4",
+                limit === shown ? "bg-ink/[0.08] font-medium text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink")}>
+              <UsageRing limit={limit} />
+              <span className="max-w-28 truncate">{limit.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {shown && <UsageRows limit={shown} />}
+    </div>
+  );
+}
+
 const HOVER_OPEN_MS = 250;
 const HOVER_CLOSE_MS = 150;
 const CARD_WIDTH = 272;
@@ -170,7 +218,7 @@ function UsageCard({ limit, anchor, onEnter, onLeave }: { limit: EngineLimit; an
   return (
     <div data-usage-card role="group" aria-label={limit.name} style={style} className="menu-surface z-[90] px-3 py-2.5"
       onPointerEnter={onEnter} onPointerLeave={onLeave} onPointerDown={keep} onMouseDown={keep} onClick={keep} onKeyDown={keep}>
-      <UsageRows limit={limit} />
+      <UsageOverview engine={limit.engine} />
     </div>
   );
 }
@@ -209,11 +257,10 @@ export function UsageBars({ engine, compact = false, hover = true, className }: 
 /** Widens the narrow header's square model button to fit the bars while they warn. */
 export const USAGE_WARN_WIDENS = "@max-4xl/chathead:has-[[data-usage-warn]]:w-auto @max-4xl/chathead:has-[[data-usage-warn]]:gap-1.5 @max-4xl/chathead:has-[[data-usage-warn]]:px-2";
 
-/** The rows at the top of the open model menu. */
+/** The rows at the top of the open model menu, with a ring for every connected AI that reports usage. */
 export function UsageMenuRows({ engine }: { engine: string | undefined }) {
-  const limit = useEngineUsage(engine);
-  if (!limit) return null;
-  return <div data-usage-menu className="shrink-0 border-b-[0.5px] border-ink/10 px-3.5 py-2.5"><UsageRows limit={limit} /></div>;
+  if (!useEngineLimits().some(reportsUsage)) return null;
+  return <div data-usage-menu className="shrink-0 border-b-[0.5px] border-ink/10 px-3.5 py-2.5"><UsageOverview engine={engine} /></div>;
 }
 
 /** A phone's header has no model button: near or at the limit, the bars stand alone and open the bot's model. */

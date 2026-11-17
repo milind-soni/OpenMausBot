@@ -77,6 +77,13 @@ describe("admission golden tables", () => {
     expect(admit("room-steer", { speakerPresent: false, engineCanSteer: false, isQueueHead: false })).toEqual({ action: "queue" });
   });
 
+  it("room-steer: a line meant for another bot stays queued instead of folding into the speaker", () => {
+    const head = { speakerPresent: true, engineCanSteer: true, isQueueHead: true };
+    expect(admit("room-steer", { ...head, speakerAddressed: true })).toEqual({ action: "steer" });
+    expect(admit("room-steer", { ...head, speakerAddressed: false })).toEqual({ action: "queue", blockedBy: "addressee" });
+    expect(admit("room-steer", { ...head, speakerAddressed: false, isQueueHead: false })).toEqual({ action: "queue", blockedBy: "addressee" });
+  });
+
   it("room-steer: an attachment head steers only into a speaker that takes images mid-turn", () => {
     const head = { speakerPresent: true, engineCanSteer: true, isQueueHead: true, carriesImages: true };
     expect(admit("room-steer", { ...head, engineCanSteerImages: true })).toEqual({ action: "steer" });

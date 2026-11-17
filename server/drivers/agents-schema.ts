@@ -84,10 +84,25 @@ function check(node: unknown, value: unknown, where: string, problems: string[])
   }
 }
 
+function startThreadArgumentProblem(schema: unknown, args: Json): string | undefined {
+  const properties = record(schema) && record(schema.properties) ? schema.properties : {};
+  const unknown = Object.keys(args).filter((key) => key !== "bot_id" && !Object.hasOwn(properties, key));
+  if (unknown.length) {
+    return `start_thread was not run: unknown arguments ${unknown.map((key) => JSON.stringify(key)).join(", ")}. It opens a task on yourself. To hand work to a teammate, use coordinate_bots with bot_ids from list_bots and thread "new".`;
+  }
+  if (Object.hasOwn(args, "bot_id") && (typeof args.bot_id !== "string" || !args.bot_id.trim())) {
+    return 'start_thread was not run: bot_id must be a non-empty bot ID. For a teammate, use coordinate_bots with bot_ids from list_bots and thread "new"; for a task on yourself, omit bot_id.';
+  }
+  return undefined;
+}
+
 /** Why `args` falls outside the full schema's bounds, in words a model can act on; undefined when it fits. A null
  * stands for a field left out, as providers send unused optional fields. Types, enums and required fields are each
- * tool's own to check: several accept a stringified object, a camelCase alias or a case variant on purpose. */
+ * tool's own to check: several accept a stringified object, a camelCase alias or a case variant on purpose.
+ * start_thread also rejects unknown fields and malformed legacy recipients so neither can silently select self. */
 export function outOfBounds(tool: string, schema: unknown, args: Json): string | undefined {
+  const targetProblem = tool === "start_thread" ? startThreadArgumentProblem(schema, args) : undefined;
+  if (targetProblem) return targetProblem;
   const problems: string[] = [];
   check(schema, args, "", problems);
   if (!problems.length) return undefined;
