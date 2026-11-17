@@ -6,6 +6,8 @@
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
+import { createLibraryPackageExport } from "./package-export.ts";
+import { presetFromDefaults } from "./presets.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
 const OLIVE = { email: "olive@acme.test", role: "owner" as const };
@@ -114,11 +116,9 @@ describe("a team bot is its maker's until they share it", () => {
   });
 
   it("a preset's bot starts private too", async () => {
-    const defaults = await as("ada", "PATCH", "/api/config", { newBotDefaults: { profile: { name: "Sky", soul: "Be kind.\n" }, memory: {}, skills: [], routines: [] } });
-    expect(defaults.status, JSON.stringify(defaults.body)).toBe(200);
-    const saved = await as("ada", "POST", "/api/teams/export", { format: "package", version: 2, kind: "library", presetName: "Support agent" });
-    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
-    const library = await as("ada", "POST", "/api/teams/import", saved.body.document);
+    const built = presetFromDefaults({ profile: { name: "Sky", soul: "Be kind.\n" }, memory: {}, skills: [], routines: [] } as never, { name: "Support agent", includeNotes: false });
+    const saved = createLibraryPackageExport({ name: "Support agent", published: null, preset: built.value, skipped: built.skipped });
+    const library = await as("ada", "POST", "/api/teams/import", saved.document);
     expect(library.status, JSON.stringify(library.body)).toBe(201);
     const preset = library.body.presets[0].id as string;
     const agent = await made("ada", { name: "Agent", preset, useDefaults: false });

@@ -65,19 +65,21 @@ describe("additive template imports in the real renderer", () => {
       };
       return true;
     })()`);
-    for (const source of ["library", "file"]) {
+    for (const source of ["library", "folder"]) {
       await click("New or share");
-      await click("Templates");
       if (source === "library") {
+        await click("Templates");
         await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Load"');
         await click("Load");
+        await expect.poll(snapshot, { timeout: 10_000 }).toContain("Outreach writer");
+        await click("Add team");
       } else {
-        await click("Import");
-        // Exercise the file input's actual change handler, not the OS picker.
-        await evaluate(`(() => { const input = document.querySelector('[role=dialog] input[type=file]'); const transfer = new DataTransfer(); transfer.items.add(new File([JSON.stringify(window.templateFixture)], 'sales.mausteam.json', { type: 'application/json' })); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+        await click("Import…");
+        // A browser chooses a folder through the input's change handler, not the OS picker; a folder holding the legacy team file.
+        await evaluate(`(() => { const input = document.querySelector('[role=dialog] input[type=file]'); const transfer = new DataTransfer(); transfer.items.add(new File([JSON.stringify(window.templateFixture)], 'team.mausteam.json', { type: 'application/json' })); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+        await expect.poll(snapshot, { timeout: 10_000 }).toContain("Outreach writer");
+        await click("Add");
       }
-      await expect.poll(snapshot, { timeout: 10_000 }).toContain("Adds a new department for Sales crew");
-      await click("Add team");
       const section = source === "library" ? "Sales crew" : "Sales crew 2";
       await expect.poll(snapshot, { timeout: 10_000 }).toContain(`button "${section}"`);
       const current = await api("/api/bots");
@@ -89,6 +91,6 @@ describe("additive template imports in the real renderer", () => {
     }
     const evidence = join(ROOT, ".omb-scratch", "verify-evidence", "template-import-sections.png");
     await ui("screenshot", "--out", evidence);
-    process.stdout.write(`${JSON.stringify({ fixture: info!, screenshot: evidence, libraryAndFileImports: true, originalConversationUnchanged: true })}\n`);
+    process.stdout.write(`${JSON.stringify({ fixture: info!, screenshot: evidence, libraryAndFolderImports: true, originalConversationUnchanged: true })}\n`);
   }, launchTimeout + 120_000);
 });

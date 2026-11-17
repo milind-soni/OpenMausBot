@@ -49,7 +49,9 @@ dotfile: it is never uploaded with the site, and it never holds the token.
 | `deployId` | no | Netlify's id of the latest production deploy that was started. Absent until the first one starts. |
 | `deployState` | no | That deploy's state when last seen: Netlify's own word (`uploading`, `uploaded`, `processing`, `ready`, `error`, …). Only `ready` means it is live. |
 | `publishedAt` | no | When the latest production deploy was first seen ready, ISO 8601 in UTC. While a newer deploy is still being processed it is the time of the one before. Absent until a deploy has been ready. |
-| `access` | no | `public`: the link answered without a login. `private`: it asked for a Netlify login (a new account's default). As last checked. |
+| `access` | no | `public`: the link answered without a login. `private`: it asked for a login. As last checked. |
+| `privateReason` | no | Only while `access` is `private`: `person` (they asked for a private site), `team` (their Netlify team refused to open it), `protected` (opened, but it still asks for a login, such as a password), `unknown`. |
+| `keepPrivate` | no | `true` once the person asked for a private site (`--keep-private`): later runs leave it private until `--make-public`. |
 
 `deploy.mjs --delete` deletes the site from Netlify and then removes the record; the record stays when Netlify
 refuses. Draft deploys (`--draft`) change nothing in the record. A record written before version 1 has only `siteId`, `name`,
