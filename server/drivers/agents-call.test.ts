@@ -597,6 +597,17 @@ describe("coordinate_bots", () => {
     expect(result.text).toBe(detail);
   });
 
+  it("does not fail the call when every refusal in the batch only says there is nothing left to do", async () => {
+    const one = "nothing of Scout's waits on an answer as a1: it was answered or its work ended. Send it without answers if it still needs doing";
+    const two = "nothing of Atlas's waits on an answer as a2: it was answered or its work ended. Send it without answers if it still needs doing";
+    const receipts = [{ botId: "bot-scout", outcome: "failed", detail: one, instructionOnly: true }, { botId: "bot-atlas", outcome: "failed", detail: two, instructionOnly: true }];
+    const result = await callTool("coordinate_bots", { ...BASE, bot_ids: ["bot-scout", "bot-atlas"], answers: "a1" }, context({
+      client: { apiResponse: async () => ({ ok: false, status: 409, body: { receipts, error: `${one}; ${two}`, instructionOnly: true } }), api: async () => ({}) },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(result.text).toBe(`${one}; ${two}`);
+  });
+
   it("still fails the call on a refusal that says something went wrong", async () => {
     const detail = 'No bot with id "bot-ghost" — call list_bots and copy the exact id from the result';
     const result = await callTool("coordinate_bots", BASE, context({

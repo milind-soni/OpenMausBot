@@ -9,6 +9,7 @@ import { extname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createCoordinator, type CoordinateBotsCall, type Coordinator, type CoordinatorHost, type HandoffView, type HostTurnResult } from "../coordinator.ts";
+import { callTool } from "../drivers/agents-call.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SessionRecord } from "../sessions.ts";
 import type { PassedFile } from "../host/handoff-files.ts";
@@ -307,6 +308,26 @@ describe("the link between a computer and its Cloud", () => {
     await computer.handOff("local-writer", call(["Analyst"], "Now the refunds"));
     await until(() => computer.results.length === 2, "the second result is back");
     expect(cloud.runs.filter((run) => run.botId === "cloud-analyst").map((run) => run.threadId)).toEqual(["cloud-analyst-work-1", "cloud-analyst-work-1"]);
+  });
+
+  it("a call that got one instruction-only local refusal and one real refusal from the other place fails, and says why", async () => {
+    const { computer } = await two();
+    const nothingLeft = "nothing of Writer's waits on an answer as a1: it was answered or its work ended. Send it without answers if it still needs doing";
+    const localBody = { receipts: [{ botId: "local-writer", botName: "Writer", outcome: "failed", detail: nothingLeft, instructionOnly: true }], error: nothingLeft, instructionOnly: true };
+    // "Analyst" lives in the Cloud, where an answer to a question cannot go; "Writer" is here, where the answer named is out of date.
+    const { answer } = await computer.handOff("local-writer", call(["Analyst", "Writer"], "Send the numbers.", { answers: "a1" }),
+      async () => ({ status: 409, body: localBody }));
+    expect(answer.status).toBe(409);
+    expect(answer.body.instructionOnly, "one part's instruction to finish is not the whole call's verdict").toBeUndefined();
+    expect(String(answer.body.error)).toContain("That does not reach My Cloud yet");
+    expect(String(answer.body.error)).toContain(nothingLeft);
+
+    const tool = await callTool("coordinate_bots", { bot_ids: ["Analyst", "Writer"], message: "Send the numbers.", answers: "a1" },
+      { botId: "local-writer", threadId: "local-writer-chat", externalRuntime: false, sharedComputers: false,
+        client: { apiResponse: async () => ({ ok: false, status: answer.status, body: answer.body }), api: async () => ({}) } });
+    expect(tool.isError).toBe(true);
+    expect(tool.text).toContain("That does not reach My Cloud yet");
+    expect(tool.text).toContain(nothingLeft);
   });
 
   it("work goes from the Cloud to the computer over the same link, and a one-way notice returns nothing", async () => {

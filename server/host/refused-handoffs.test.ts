@@ -11,10 +11,10 @@ const books: RosterMember = { id: "books", name: "Bookkeeping", visibility: "adm
 const mausbot: RosterMember = { id: "maus", name: "MausBot", visibility: { people: ["olive@acme.test"] }, defaultBot: { person: "olive@acme.test" } };
 const bots = [rooms, hours, books, mausbot];
 
-function fixture(over: { writer?: string; asked?: string | null; run?: boolean; own?: boolean } = {}) {
+function fixture(over: { writer?: string; asked?: string | null; run?: boolean; own?: boolean; roster?: RosterMember[] } = {}) {
   const lines: Array<{ to: string; delivery: Delivery }> = [];
   const refused = createRefusedHandoffs({
-    bots: () => bots, runOf: () => (over.run === false ? undefined : { routineId: "r1", botId: "rooms" }), writerOf: () => over.writer,
+    bots: () => over.roster ?? bots, runOf: () => (over.run === false ? undefined : { routineId: "r1", botId: "rooms" }), writerOf: () => over.writer,
     askedPerson: () => over.asked ?? null, theirOwn: () => over.own === true, inbox: () => ({ deliver: (to, delivery) => { lines.push({ to, delivery }); } }), language: () => undefined,
   });
   return { refused, lines };
@@ -43,6 +43,24 @@ describe("a routine's refused hand-off", () => {
     refused.settled("t", rooms, ["Bookkeeping"], 403);
     refused.settled("t", rooms, ["books"], 202);
     expect(refused.take("t")).toBeNull();
+  });
+
+  it("forgets a refusal once the retry named the bot by the start of its id, or its id in another case", () => {
+    const long: RosterMember = { id: "2cb14697-4805-4a1e-9a54-0f1f5f6d3c11", name: "Bookkeeping", visibility: "admins" };
+    const roster = [rooms, hours, long, mausbot];
+    // The retry resolved (resolveTeammate takes an id prefix of 8 or more, and an id in any case), so the run was not
+    // left believing nothing was sent.
+    for (const retry of ["2cb14697", "2CB14697-4805-4A1E-9A54-0F1F5F6D3C11"]) {
+      const { refused } = fixture({ roster });
+      refused.settled("t", rooms, ["Bookkeeping"], 403);
+      refused.settled("t", rooms, [retry], 202);
+      expect(refused.take("t"), retry).toBeNull();
+    }
+    // A success that names someone else leaves the refusal standing: only that bot's own retry clears it.
+    const { refused } = fixture({ roster });
+    refused.settled("t", rooms, ["Bookkeeping"], 403);
+    refused.settled("t", rooms, ["Staff Hours"], 202);
+    expect(refused.take("t")).toContain("Bookkeeping");
   });
 
   it("keeps nothing for a conversation that isn't a routine's run", () => {

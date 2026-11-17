@@ -1,7 +1,7 @@
 // A routine's run that tried to hand work to a bot it may not reach. coordinate_bots refuses while the turn runs, and the
 // model may say anything after, so the run keeps who it was refused and ends saying so plainly, instead of "completed":
 // nothing arrived. The person who wrote the routine reads it in their inbox, whoever else the bot's failures reach.
-import { namesTeammate, unreachableTeammate, type RosterMember } from "../peer-roster.ts";
+import { namesTeammateId, unreachableTeammate, type RosterMember } from "../peer-roster.ts";
 import { serverLine } from "../server-lines.ts";
 import type { Delivery } from "./person-inbox.ts";
 
@@ -43,7 +43,7 @@ export function createRefusedHandoffs(deps: RefusedHandoffDeps) {
       for (const raw of named) {
         const target = status >= 400 ? unreachableTeammate(deps.bots(), from, raw, (bot) => deps.hides?.(from, bot) === true) : null;
         if (target) seen.set(target.id, { target, from });
-        if (status < 400) for (const [id, was] of seen) if (namesTeammate(was.target, raw)) seen.delete(id);
+        if (status < 400) for (const [id, was] of seen) if (namesTeammateId(was.target, raw)) seen.delete(id);
       }
       if (seen.size) refused.set(threadId, seen);
       else refused.delete(threadId);

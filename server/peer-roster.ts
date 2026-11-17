@@ -184,6 +184,17 @@ export interface WiderReach<T extends RosterMember> {
 /** The fewest characters of an id that name it: a model retyping a 36-character id drops one, and the first 8 have to agree. */
 const ID_PREFIX_MIN = 8;
 
+/** Whether `raw`, as a bot wrote it, names this teammate in the id forms resolveTeammate accepts too: its id however it was
+ * cased, or the start of one id. Bookkeeping that learns a retry went through uses it, so the retry clears the refusal
+ * recorded under the bot's id instead of leaving the routine saying nothing was sent. */
+export function namesTeammateId(target: Pick<RosterMember, "id" | "name">, raw: string): boolean {
+  const wanted = raw.trim();
+  if (!wanted) return false;
+  if (namesTeammate(target, wanted)) return true;
+  const asked = wanted.toLowerCase();
+  return target.id.toLowerCase() === asked || (asked.length >= ID_PREFIX_MIN && !/\s/u.test(asked) && target.id.toLowerCase().startsWith(asked));
+}
+
 /** In this order: the id, in any case; a name that only one reachable bot answers to; the start of one id that only one
  * reachable bot has. Names and id starts resolve only inside reachablePeers, so they can never reach a bot its id could not.
  * `elsewhere(name)`: why no bot here has that name past "no such bot", when one of the person's other places has it, or when

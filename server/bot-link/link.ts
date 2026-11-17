@@ -674,8 +674,14 @@ export function createBotLink(deps: BotLinkDeps) {
     const theirs = Array.isArray(rest.body.receipts) ? rest.body.receipts as PeerDeliveryReceipt[] : [];
     const ok = sent || rest.status === 200;
     const errors = [...refused, ...(typeof rest.body.error === "string" ? [rest.body.error] : [])];
-    return { status: ok ? 200 : rest.status, body: { ...rest.body, receipts: [...receipts, ...theirs],
-      ...(ok ? { message: [mine, rest.body.message].filter(Boolean).join(" "), ...(errors.length ? { notSent: errors.join("; ") } : {}) } : { error: errors.join("; ") }) } };
+    // Instruction-only is the whole call's verdict, never one part's: nothing was delivered anywhere (`!ok`) and no
+    // refusal here is a real failure. One genuine refusal of another place, or a delivery, makes this a failed call
+    // however instructing the local part's own answer was.
+    const { instructionOnly: localInstructionOnly, ...restBody } = rest.body;
+    const instructionOnly = !ok && refused.length === 0 && localInstructionOnly === true;
+    return { status: ok ? 200 : rest.status, body: { ...restBody, receipts: [...receipts, ...theirs],
+      ...(ok ? { message: [mine, rest.body.message].filter(Boolean).join(" "), ...(errors.length ? { notSent: errors.join("; ") } : {}) } : { error: errors.join("; ") }),
+      ...(instructionOnly ? { instructionOnly: true } : {}) } };
   }
   /** Why this call cannot go to another place at all, or null. */
   function unsupportedHere(call: CoordinateBotsCall, context: CoordinateContext, place: string): string | null {
