@@ -127,7 +127,7 @@ describe("a bot's footprint, from a process list", () => {
 
   it("lets records of exited engines go once nothing runs in their group or session", () => {
     const pruned: number[][] = [];
-    const footprints = createBotFootprints({ owners: () => OWNERS, prune: (inUse) => pruned.push([...inUse].filter((pid) => pid === 200 || pid === 777)) });
+    const footprints = createBotFootprints({ owners: () => OWNERS, prune: (rows) => pruned.push(rows.map((row) => row.pid).filter((pid) => pid === 200 || pid === 777)) });
     footprints.sample(server());
     expect(pruned).toEqual([[200]]);
   });
@@ -145,9 +145,10 @@ describe("which bot an engine runs for", () => {
     owners.detach(child, "thread_2");
     child.emit("exit", 0, null);
     expect(owners.list()[0]).toMatchObject({ exited: true });
-    owners.prune(new Set([4242]));
+    // Something it left still runs in its session.
+    owners.prune([{ pid: 4300, start: "900", pgid: 4242, sid: 4242 }]);
     expect(owners.list()).toHaveLength(1);
-    owners.prune(new Set([1]));
+    owners.prune([{ pid: 1, start: "1" }]);
     expect(owners.list()).toHaveLength(0);
     // Outside a turn (a keep-warm ping): no conversation, so shared until one attaches.
     owners.track(Object.assign(new EventEmitter(), { pid: 4243 }), null);
@@ -177,6 +178,36 @@ describe("which bot an engine runs for", () => {
     const visited = footprintOwners({ botOf, browsers: () => [], engines: visit })();
     expect(visited[0]?.botIds).toEqual(["bot_k", "bot_v"]);
     expect(attributeRows([{ pid: 30, ppid: 1, name: "claude", cpuMs: 0, rssBytes: MB, start: "s" }], visited).shared.procs).toBe(1);
+  });
+
+  it("retires an exited engine the first time its pid shows as another process, and keeps it retired once that one exits", () => {
+    const owners = new EngineOwners();
+    const child = Object.assign(new EventEmitter(), { pid: 200 });
+    runInTurn({ botId: "bot_a", threadId: "thread_a" }, () => owners.track(child, "1200"));
+    const list = footprintOwners({ botOf: () => "bot_a", browsers: () => [], engines: owners });
+    child.emit("exit", 0, null);
+    // What the engine left still runs in its session: kept.
+    const left = fakeProc({ [SERVER]: stat(SERVER, "node", 1, { pgid: 1, sid: 1 }), 203: stat(203, "sleep", 1, { pgid: 200, sid: 200 }) });
+    owners.prune(left);
+    expect(attributeRows(left, list()).bots.get("bot_a")?.pids).toEqual([203]);
+    // Later the system gives 200 to another program, which leads its own session and starts a child there.
+    const reused = fakeProc({ 200: stat(200, "postgres", 1, { start: 99_000 }), 210: stat(210, "postgres", 200, { pgid: 200, sid: 200 }) });
+    owners.prune(reused);
+    expect(owners.list()).toHaveLength(0);
+    // That program exits, its child (adopted by init) still in session 200: nothing of it is bot A's.
+    const after = fakeProc({ 210: stat(210, "postgres", 1, { pgid: 200, sid: 200 }) });
+    owners.prune(after);
+    expect(attributeRows(after, list()).bots.size).toBe(0);
+    // Off Linux no start was read: the pid seen in two lists after the engine was reaped is another process's.
+    const mac = new EngineOwners();
+    const engine = Object.assign(new EventEmitter(), { pid: 300 });
+    runInTurn({ botId: "bot_b", threadId: "thread_b" }, () => mac.track(engine, null));
+    engine.emit("exit", 0, null);
+    const row = { pid: 300, start: "ps:300", pgid: 300 };
+    mac.prune([row]);
+    expect(mac.list()).toHaveLength(1);
+    mac.prune([row]);
+    expect(mac.list()).toHaveLength(0);
   });
 
   it("never names a process by an exited engine's pid, which may be another process's now", () => {

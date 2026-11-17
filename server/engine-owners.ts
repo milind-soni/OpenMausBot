@@ -17,7 +17,7 @@ export interface EngineOwner {
 
 const MAX_ENTRIES = 4_096;
 
-interface Entry { pid: number; start: string | null; threads: Map<string, string>; exited: boolean }
+interface Entry { pid: number; start: string | null; threads: Map<string, string>; exited: boolean; seenSinceExit: number }
 
 export class EngineOwners {
   readonly #entries = new Map<number, Entry>();
@@ -28,7 +28,7 @@ export class EngineOwners {
     const pid = child.pid;
     if (!pid) return;
     const turn = currentTurn();
-    const entry: Entry = { pid, start, threads: new Map(turn?.threadId ? [[turn.threadId, turn.botId ?? ""]] : []), exited: false };
+    const entry: Entry = { pid, start, threads: new Map(turn?.threadId ? [[turn.threadId, turn.botId ?? ""]] : []), exited: false, seenSinceExit: 0 };
     this.#entries.set(pid, entry);
     // Where no process list ever prunes it (no sampler runs), the oldest exited engines go first.
     if (this.#entries.size > MAX_ENTRIES) for (const [other, old] of this.#entries) { if (this.#entries.size <= MAX_ENTRIES) break; if (old.exited) this.#entries.delete(other); }
@@ -51,9 +51,22 @@ export class EngineOwners {
     return [...this.#entries.values()].map((entry) => ({ pid: entry.pid, start: entry.start, threads: entry.threads, exited: entry.exited }));
   }
 
-  /** Forgets exited engines that nothing in `inUse` (the process groups and sessions a process list shows) still names. */
-  prune(inUse: ReadonlySet<number>): void {
-    for (const [pid, entry] of this.#entries) if (entry.exited && !inUse.has(pid)) this.#entries.delete(pid);
+  /** After each process list: forgets an exited engine that no process, group or session in it still names, and one whose
+   * pid the list shows as another process (the system gave the number on, which it does only once no group or session
+   * still has it: nothing the engine left runs any more). Retired at the first sight, it stays retired: once that other
+   * process exits, its pid is not the engine's again. Where the engine's start was not read (off Linux) the list shows
+   * no start to tell them apart; an exited engine was reaped before it was marked so, and the pid seen in two lists after
+   * that is another process's. */
+  prune(rows: readonly { pid: number; start: string; pgid?: number; sid?: number }[]): void {
+    const inUse = new Set<number>(), starts = new Map<number, string>();
+    for (const row of rows) { inUse.add(row.pid); starts.set(row.pid, row.start); if (row.pgid !== undefined) inUse.add(row.pgid); if (row.sid !== undefined) inUse.add(row.sid); }
+    for (const [pid, entry] of this.#entries) {
+      if (!entry.exited) continue;
+      const start = starts.get(pid);
+      if (!inUse.has(pid)) this.#entries.delete(pid);
+      else if (start === undefined) continue;
+      else if (entry.start !== null ? start !== entry.start : (entry.seenSinceExit += 1) >= 2) this.#entries.delete(pid);
+    }
   }
 }
 

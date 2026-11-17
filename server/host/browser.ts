@@ -34,6 +34,7 @@ import { BrowserSweep, browserIdleMs, type BrowserCleanupWireRequest } from "../
 import { AudienceBrowsers, audienceBrowserSuffix } from "../browser/audience.ts";
 import type { BrowserSitesTarget } from "../browser-sites.ts";
 import { namedUploadPaths } from "../browser-upload.ts";
+import { createBrowserDaemons } from "./browser-daemons.ts";
 import type { BrowserSitesRef } from "../routes/browser-sites.ts";
 import { chromeLauncher } from "../browser/chrome/launcher.ts";
 import { LAUNCHER_SECCOMP_FD, browserLanguage, type LauncherBox } from "../browser/chrome/wrapper.ts";
@@ -480,17 +481,20 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     if (chromeTarget(session, spec)) return chromeEngine.service.runs(session);
     return existsSync(browserDaemonFile(browserRuntimeEnv({ ...spec?.env, AGENT_BROWSER_SESSION: session }), ".pid"));
   }
+  const browserDaemons = createBrowserDaemons();
   /** Each running agent-browser daemon (its session's pid file) with the bots whose browser it is: one bot's own, or a
    * profile's several bots share. For the per-bot footprint (perf/bot-footprint.ts): one small file read a session. */
-  function browserOwners(): Array<{ pid: number; botIds: string[]; kind: "browser" }> {
+  function browserOwners(): Array<{ pid: number; start?: string; botIds: string[]; kind: "browser" }> {
     return [...usedBrowserSessions].flatMap(([session, spec]) => {
       // A browser attached to the person's own Chrome is theirs, not a bot's.
       if (chromeTarget(session, spec) || attachesToChrome(spec.env)) return [];
       let pid: number;
       try { pid = Number(readFileSync(browserDaemonFile(browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }), ".pid"), "utf8").trim()); } catch { return []; }
-      if (!Number.isInteger(pid) || pid <= 1) return [];
+      // Only a pid checked to run this session's daemon (the file may outlive it on a Cloud's volume): browser-daemons.ts.
+      const daemon = browserDaemons.owner(spec.command, session, pid);
+      if (!daemon) return [];
       const botIds = store.bots.filter((bot) => browserSessionsOf(bot.id, bot.browserProfile).includes(session)).map((bot) => bot.id);
-      return [{ pid, botIds, kind: "browser" as const }];
+      return [{ ...daemon, botIds, kind: "browser" as const }];
     });
   }
   /** Closes the browsers that are this bot's alone (never a profile another bot uses), as one stopped for memory is. */
