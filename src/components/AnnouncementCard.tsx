@@ -12,8 +12,8 @@ import { ClaudeMark, CodexMark, CopilotMark, DeepSeekMark, GreenferenceMark, Gro
 
 export type AnnouncementButton = "primary" | "secondary";
 
-const KIND_ICON: Record<AnnouncementKind, ComponentType<IconProps>> = { sponsor: Sparkles, product: Megaphone, tip: Lightbulb };
-const MARK: Record<AnnouncementMark, ComponentType<IconProps>> = {
+export const KIND_ICON: Record<AnnouncementKind, ComponentType<IconProps>> = { sponsor: Sparkles, product: Megaphone, tip: Lightbulb };
+export const MARK: Record<AnnouncementMark, ComponentType<IconProps>> = {
   claude: ClaudeMark, codex: CodexMark, grok: GrokMark, kimi: KimiMark, modelgo: ModelgoMark, greenference: GreenferenceMark,
   deepseek: DeepSeekMark, copilot: CopilotMark, kiro: KiroMark,
 };
