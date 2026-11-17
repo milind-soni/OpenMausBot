@@ -10930,6 +10930,8 @@
   "settings.backTo": "Voltar às Configurações",
   "devices.route.httpsAccount": "Usa sua conta do {app}.",
   "server.cloudComputer.replaced": "O computador na nuvem de {name} parou de responder, então o MausBot o substituiu por um novo. Os arquivos que estavam só no computador antigo foram perdidos.",
+  "server.cloudComputer.setAside": "O computador na nuvem de {name} parou de responder, então o MausBot deu a ele um novo. O antigo fica guardado com seus arquivos até {date} em Configurações → Desktops e navegador → Desktops e depois é excluído.",
+  "server.cloudComputer.noRoom": "O computador na nuvem de {name} parou de responder, e o plano não tem espaço para um computador novo ao lado dele, então o MausBot o manteve, com seus arquivos, e continua tentando trazê-lo de volta. Reiniciar computador, no painel do computador, tenta de novo agora.",
   "server.cloudComputer.restarted": "O computador na nuvem de {name} parou de responder, então o MausBot o reiniciou. Ele voltou a responder; os programas que estavam abertos nele foram fechados.",
   "server.cloudComputer.capped": "O computador na nuvem de {name} parou de responder de novo menos de uma hora depois de ser substituído, então o MausBot o deixou como está. Substituir computador, no painel do computador, tenta mais uma vez.",
   "server.cloudComputer.unreachable": "Os computadores na nuvem não podem ser acessados agora. O MausBot manteve o computador na nuvem de {name} e vai verificá-lo de novo.",

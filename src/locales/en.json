@@ -8426,6 +8426,8 @@
   "chat.notice.followupInterrupted": "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.",
   "chat.notice.usageLimit": "This {provider} account has reached its usage limit{detail}. Wait for it to reset, or switch this bot to another AI.",
   "server.cloudComputer.replaced": "{name}'s cloud computer stopped responding, so MausBot replaced it with a new one. Files that were only on the old computer are gone.",
+  "server.cloudComputer.setAside": "{name}'s cloud computer stopped responding, so MausBot gave it a new one. The old one is kept with its files until {date} in Settings → Desktops & browser → Desktops, then deleted.",
+  "server.cloudComputer.noRoom": "{name}'s cloud computer stopped responding, and the plan has no room for a new computer beside it, so MausBot kept it, with its files, and keeps trying to bring it back. Restart computer in the computer panel tries again now.",
   "server.cloudComputer.restarted": "{name}'s cloud computer stopped responding, so MausBot restarted it. It answers again; programs that were open on it were closed.",
   "server.cloudComputer.capped": "{name}'s cloud computer stopped responding again within an hour of being replaced, so MausBot left it as it is. Replace computer in the computer panel tries once more.",
   "server.cloudComputer.unreachable": "Cloud computers can't be reached right now. MausBot kept {name}'s cloud computer and will check it again.",

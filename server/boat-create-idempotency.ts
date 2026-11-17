@@ -457,6 +457,12 @@ export function retireDeletedBoatCreate(boxId: string): void {
   });
 }
 
+/** A Boat set aside under another name (server/boat-set-aside.ts): it is no longer the bot's, so a create for the bot
+ * must make a new one instead of finding this one again. */
+export function forgetSetAsideBoatCreate(boxId: string): void {
+  retireDeletedBoatCreate(boxId);
+}
+
 export function discardBoatCreate(request: BoatCreateRequest): void {
   withJournalLock((requests) => {
     const next = requests.filter((candidate) => candidate.idempotencyKey !== request.idempotencyKey);
