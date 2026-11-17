@@ -4019,7 +4019,12 @@
       "announcements.title": "fe02680f247961a1369a66f681f990ec1e4a8708a2e84871019a93a7287ae7dd",
       "announcements.new": "2357f9321f80214d896bd73a63ce7d1d8614254cf28bb42d7b7d76b7438ff97a",
       "sidebar.nav.teamFiles": "6a967c1647acba4b8a652f36f750619f5fa968b3c12e3e8a4e5bc061ea4fae63",
-      "chat.notice.acpNodeTooOld": "1ed4170eee496793135910a81e9dd427c24f9d0522194cdcf2a08d65674c03c6"
+      "chat.notice.acpNodeTooOld": "1ed4170eee496793135910a81e9dd427c24f9d0522194cdcf2a08d65674c03c6",
+      "geminiServer.title": "ad3cef61d37f5f52dd462d9e75e01ddf4842423e3a86ce2c361c9883b69f0df7",
+      "geminiServer.desc": "72009483b2a7e9d14ab7cce15d09c24f2ec59780db0a31de3978c5af9b0ba0e1",
+      "geminiServer.getKey": "7048ccda6c01174ac602ffbf3d4138802e7be597b64ba0ae687a63c8ccbb22da",
+      "geminiServer.key": "88774da5d424f1506de2317bc38d40fcefa789e724144d2211dbb9fb458161f9",
+      "geminiServer.add": "070389bd52afbe45232b87d9f18f07bad2904c0b2c227c037e3078c71522167f"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -36914,7 +36919,12 @@
       "settings.vault.bitwarden.address": "8be89710b2f1d0c515eaff86dd4f049ec2447de5bfdb07d02d9720ff7fe017e1",
       "settings.vault.bitwarden.password": "f4c2ee7d031e215c194db822a9f9fdf6cde500330d58ec3bda09ab7330cca4c9",
       "settings.vault.bitwarden.note": "de354e48f4544eba3d26a90c9993c3db06bab7097af7ffe2d617171235235408",
-      "settings.vault.bitwarden.error": "dfb662fef386e7c8486cb9bb20268bd342c3423f53f6832cff0ae38564032f80"
+      "settings.vault.bitwarden.error": "dfb662fef386e7c8486cb9bb20268bd342c3423f53f6832cff0ae38564032f80",
+      "geminiServer.title": "ad3cef61d37f5f52dd462d9e75e01ddf4842423e3a86ce2c361c9883b69f0df7",
+      "geminiServer.desc": "72009483b2a7e9d14ab7cce15d09c24f2ec59780db0a31de3978c5af9b0ba0e1",
+      "geminiServer.getKey": "7048ccda6c01174ac602ffbf3d4138802e7be597b64ba0ae687a63c8ccbb22da",
+      "geminiServer.key": "88774da5d424f1506de2317bc38d40fcefa789e724144d2211dbb9fb458161f9",
+      "geminiServer.add": "070389bd52afbe45232b87d9f18f07bad2904c0b2c227c037e3078c71522167f"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

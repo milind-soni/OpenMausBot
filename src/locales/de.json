@@ -4016,5 +4016,10 @@
   "room.members.far.off": "Verbindung ist aus",
   "room.members.far.missing": "Nicht mehr verfügbar",
   "chat.newChatHint": "Starte einen neuen Chat, um Tokens zu sparen.",
-  "chat.newChatHintButton": "Neuer Chat"
+  "chat.newChatHintButton": "Neuer Chat",
+  "geminiServer.title": "Google AI Studio",
+  "geminiServer.desc": "Nutze Gemini-Modelle mit einem API-Schlüssel aus Google AI Studio. Die Modelle werden erkannt, nachdem du ihn hinzugefügt hast.",
+  "geminiServer.getKey": "Schlüssel in Google AI Studio holen",
+  "geminiServer.key": "Gemini-API-Schlüssel",
+  "geminiServer.add": "Google AI Studio hinzufügen"
 }
