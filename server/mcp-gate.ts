@@ -402,8 +402,10 @@ createInterface({ input: child.stdout }).on("line", (line) => {
   if (SCHEMA_PROFILE && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools)) {
     result.tools = fitToolList(result.tools, SCHEMA_PROFILE, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
   }
-  if (BUDGET > 0 && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools) && result.nextCursor === undefined) {
-    result.tools = [...result.tools.filter((tool: unknown) => !isRecord(tool) || tool.name !== QUERY_TOOL_NAME), QUERY_TOOL];
+  if (BUDGET > 0 && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools)) {
+    const tools = result.tools.filter((tool: unknown) => !isRecord(tool) || tool.name !== QUERY_TOOL_NAME);
+    if (result.nextCursor === undefined) tools.push(QUERY_TOOL);
+    result.tools = tools;
   }
   if (TOOL_LIMIT !== undefined && request?.kind === "list" && message.error === undefined && isRecord(result)) {
     message.result = capToolListResult(result, TOOL_LIMIT, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
