@@ -13,7 +13,7 @@
     "email": "46266943+alnatourm@users.noreply.github.com"
   },
   "license": "Apache-2.0",
-  "desktopName": "com.obot.app.desktop",
+  "desktopName": "com.otech.app.desktop",
   "type": "module",
   "main": "electron/main.mjs",
   "engines": {

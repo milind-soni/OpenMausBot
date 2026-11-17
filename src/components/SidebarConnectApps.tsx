@@ -54,7 +54,7 @@ function AppFaceIcon({ face, className }: { face: AppFace; className?: string })
   const [failed, setFailed] = useState(0);
   const src = sources[failed];
   return (
-    <span data-app-face={face.slug} className={cn("flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md p-px motion-safe:transition-colors group-hover/apps:bg-white group-focus-visible/apps:bg-white", className)}>
+    <span data-app-face={face.slug} className={cn("flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-full p-px motion-safe:transition-colors group-hover/apps:bg-white group-focus-visible/apps:bg-white", className)}>
       {src
         ? <img src={src} alt="" draggable={false} className="size-4 object-contain" onError={() => setFailed((count) => count + 1)} />
         : <span className="text-[10px] font-semibold leading-none text-neutral-700">{face.label.slice(0, 1).toUpperCase()}</span>}

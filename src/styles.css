@@ -1406,6 +1406,8 @@ body {
   .ui-icon-button {
     width: 2rem;
     padding: 0.375rem;
+    border-radius: 9999px;
+    aspect-ratio: 1 / 1;
     color: var(--color-ink-secondary);
   }
   /* Control scale. `.ui-button` is the 32px default; the size classes step

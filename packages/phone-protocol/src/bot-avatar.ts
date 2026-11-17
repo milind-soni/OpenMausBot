@@ -20,8 +20,7 @@ export type BotAvatarCrop = z.infer<typeof botAvatarCropSchema>;
 
 /** CSS radius for a profile crop. Mascot is drawn, not photo-cropped, so it is not clipped. */
 export function avatarCropRadius(crop: BotAvatarCrop): string {
-  if (crop === "circle") return "50%";
-  if (crop === "rounded") return "22%";
+  if (crop === "circle" || crop === "rounded") return "50%";
   return "0";
 }
 

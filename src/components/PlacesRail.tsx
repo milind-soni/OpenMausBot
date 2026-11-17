@@ -31,7 +31,7 @@ export const RAIL_SHOWN = 8;
 /** A place's tile on the rail: a small rounded square, so the rail stays as thin as it can (36px). */
 const TILE = 24;
 /** A place's mark at any size: a rounded square, its corners in step with its size. */
-const tileRadius = (size: number) => Math.round(size * 0.3);
+const tileRadius = (size: number) => Math.round(size * 0.5);
 
 /** A tile's words for its tooltip and a screen reader: the place, and what it is doing now. A server of the person's
  * own that signed in with their account says so, whether it is online, and why there is nothing to open when it is only
@@ -153,7 +153,7 @@ function PlaceTile({ place, canPair, pending, onOpen, onMenu }: { place: RailPla
   const label = placeLabel(place), acts = placeActs(place, canPair);
   return <button type="button" aria-label={tileLabel(place)} title={label} aria-current={place.active ? "page" : undefined} aria-disabled={acts ? undefined : true} aria-busy={pending || undefined}
     data-rail-place={place.id} data-rail-kind={place.kind} data-rail-pending={pending ? "" : undefined} onClick={() => { if (acts) onOpen(place); }} onContextMenu={menuOpener(place, onMenu)}
-    className={cn("group/tile relative shrink-0 rounded-[8px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+    className={cn("group/tile relative shrink-0 rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
       !acts && cn("cursor-default", !place.offline && "opacity-75"))}>
     <span aria-hidden="true" data-rail-pill={place.active ? "page" : acts ? "hover" : undefined}
       className={cn("pointer-events-none absolute -left-1.5 top-1/2 w-[3px] -translate-y-1/2 rounded-r-full bg-ink transition-[height,opacity] duration-150 motion-reduce:transition-none",
@@ -473,12 +473,12 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     <div className="relative mt-2 flex flex-col items-center gap-2 pb-3" style={noDrag} ref={moreRef}>
       {state.places.length > RAIL_SHOWN && <button type="button" aria-label={t("rail.more", { count: state.places.length })} title={t("rail.more", { count: state.places.length })}
         aria-haspopup="dialog" aria-expanded={more} data-rail-more-button onClick={() => setMore(!more)}
-        className="grid size-6 place-items-center rounded-[8px] text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-expanded:bg-ink/[0.06]">
+        className="grid size-6 place-items-center rounded-full text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-expanded:bg-ink/[0.06]">
         <MoreHorizontal size={13} aria-hidden="true" />
       </button>}
       {more && <MorePlaces places={places} canPair={canPair} onOpen={open} onMenu={openMenu} onClose={() => setMore(false)} />}
       {canAdd && <button type="button" aria-label={addLabel} title={addLabel} aria-haspopup="dialog" data-rail-add onClick={() => { track("rail_add", { step: "opened" }); setAdding(true); }}
-        className="grid size-6 place-items-center rounded-[8px] border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+        className="grid size-6 place-items-center rounded-full border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
         <Plus size={13} aria-hidden="true" />
       </button>}
     </div>

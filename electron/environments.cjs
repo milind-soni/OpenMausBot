@@ -50,7 +50,7 @@ function workspaceWindowTitle(state, companion, homeOrigin = null, t = englishTe
   if (listedPlace(active)) return `Obot — ${active.name}`;
   if (active && active.kind !== "local" && active.origin !== homeOrigin) return t("native.title.hosted", { name: active.name, host: new URL(active.origin).host });
   if (active && homeOrigin && active.origin === homeOrigin && otherPlaces(state, homeOrigin) > 0) return `Obot — ${active.name}`;
-  return "Obot";
+  return "OTECH";
 }
 
 /** Switching is a main-process action; a cloud page must not navigate itself onto the local bridge. */
