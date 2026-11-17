@@ -144,7 +144,8 @@ podman_compose() {
       shift 2
       podman exec "$SERVER_UNIT" "$@" </dev/null
       ;;
-    logs) journalctl --user -u "$SERVER_UNIT.service" -n 40 -o cat --no-pager ;;
+    # The container's own lines, not systemd's about it.
+    logs) journalctl --user -u "$SERVER_UNIT.service" -t "$SERVER_UNIT" -n 40 -o cat --no-pager ;;
     *) return 1 ;;
   esac
 }
@@ -553,6 +554,8 @@ wait_healthy() {
   WHY=""
   while :; do
     cid=$(container)
+    # A Podman install's container goes with the process it ran (systemd starts a new one): gone is stopped.
+    if [ -z "$cid" ] && [ -n "$UNIT" ]; then WHY="it stopped as it started ($(last_words))"; return 1; fi
     if [ -z "$cid" ]; then WHY="its container is gone"; return 1; fi
     state=$(inspect '{{.State.Status}} {{.RestartCount}} {{.Image}}' "$cid")
     status=${state%% *}

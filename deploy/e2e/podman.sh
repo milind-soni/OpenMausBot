@@ -246,6 +246,7 @@ status=0
 OMB_UPDATE_WAIT_S=90 "$DIR/update.sh" --image localhost/omb-broken:e2e --allow-older >"$OUT/update-broken.txt" 2>&1 || status=$?
 cat "$OUT/update-broken.txt"
 [ "$status" = 1 ] || fail "the broken update exited $status, not 1"
+contains "$OUT/update-broken.txt" "did not work: it stopped as it started (broken on purpose)." "the broken update did not say why in the server's own words"
 contains "$OUT/update-broken.txt" "Your server runs $NEW_VERSION again, with its data as it was before the update." "the broken update was not rolled back"
 [ "$(sed -n 's/^Image=//p' "$UNIT")" = "$new_image" ] || fail "the unit does not name $NEW_VERSION again"
 healthy_again
