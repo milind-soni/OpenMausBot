@@ -12183,7 +12183,7 @@ ROUTES.push(createChannelRoutes({
   roomMemberContexts,
   skillReview,
   groupSpeakers,
-  groupTurnOperations,
+  groupTurnOperations, speakerOnHandedWork: (threadId, botId) => coordinator.runningIn(threadId).some((node) => node.botId === botId && node.parentId !== undefined),
   lastReply,
   cloudThreadRefusal,
   messageSender,
