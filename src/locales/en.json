@@ -1005,7 +1005,7 @@
   "attach.previewVideo": "Preview {name}",
   "attach.loadVideo": "Load video",
   "attach.closeVideo": "Close video preview",
-  "attach.videoHint": "Loads on request · up to 25 MB",
+  "attach.videoHintStreams": "Plays on request",
   "attach.videoLoading": "Loading video…",
   "attach.videoUnavailable": "This video cannot be played here. You can still save a copy.",
   "attach.previewAudio": "Play {name}",

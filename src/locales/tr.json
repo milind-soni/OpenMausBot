@@ -443,7 +443,6 @@
   "attach.previewVideo": "{name} önizlemesi",
   "attach.loadVideo": "Videoyu yükle",
   "attach.closeVideo": "Video önizlemesini kapat",
-  "attach.videoHint": "İstek üzerine yüklenir · 25 MB'a kadar",
   "attach.videoLoading": "Video yükleniyor…",
   "attach.videoUnavailable": "Bu video burada oynatılamıyor. Yine de bir kopyasını kaydedebilirsiniz.",
   "attach.previewAudio": "{name} çal",

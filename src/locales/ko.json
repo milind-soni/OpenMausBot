@@ -770,7 +770,6 @@
   "attach.previewVideo": "{name} 미리보기",
   "attach.loadVideo": "동영상 불러오기",
   "attach.closeVideo": "동영상 미리보기 닫기",
-  "attach.videoHint": "요청할 때 불러와요 · 최대 25MB",
   "attach.videoLoading": "동영상 불러오는 중…",
   "attach.videoUnavailable": "이 동영상은 여기서 재생할 수 없어요. 사본은 저장할 수 있어요.",
   "attach.previewAudio": "{name} 재생",

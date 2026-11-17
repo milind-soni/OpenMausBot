@@ -726,7 +726,6 @@
   "attach.previewVideo": "Podgląd: {name}",
   "attach.loadVideo": "Wczytaj wideo",
   "attach.closeVideo": "Zamknij podgląd wideo",
-  "attach.videoHint": "Wczytywane na żądanie · do 25 MB",
   "attach.videoLoading": "Wczytywanie wideo…",
   "attach.videoUnavailable": "Tego wideo nie można odtworzyć w tym miejscu. Nadal możesz zapisać kopię.",
   "attach.previewAudio": "Odtwórz: {name}",

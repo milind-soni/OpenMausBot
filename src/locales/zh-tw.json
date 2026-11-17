@@ -906,7 +906,6 @@
   "attach.previewVideo": "預覽 {name}",
   "attach.loadVideo": "載入影片",
   "attach.closeVideo": "關閉影片預覽",
-  "attach.videoHint": "依需求載入 · 最多 25 MB",
   "attach.videoLoading": "正在載入影片…",
   "attach.videoUnavailable": "無法在此播放這部影片，但你仍可儲存副本。",
   "attach.previewAudio": "播放 {name}",

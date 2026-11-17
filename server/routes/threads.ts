@@ -16,7 +16,7 @@ import type { Coordinator } from "../coordinator.ts";
 import type { WorkspaceAccess } from "../enterprise.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
 import { readMessage, searchMessagesAsync } from "../message-db.ts";
-import { MessageMediaLinks } from "../message-media-links.ts";
+import { cappedMediaRange, MessageMediaLinks, STREAMABLE_MEDIA_MIMES } from "../message-media-links.ts";
 import {
   listMessageFolder, MESSAGE_FILE_DOWNLOAD_MAX_BYTES, MESSAGE_FILE_MAX_BYTES, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
   messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName,
@@ -73,9 +73,6 @@ export interface ThreadRouteDeps {
   /** The stored files a Settings clear must leave (pictures, banner, routine and calendar-call files), null until those load; absent on a Team Cloud, which has no clear. */
   keptAttachments?(): ReadonlySet<string> | null;
 }
-
-/** The types the chat's video player accepts; anything else is never streamed inline. */
-const STREAMABLE_VIDEO_MIMES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/x-m4v"]);
 
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
   const {
@@ -289,9 +286,9 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         await file.handle.close();
         return json(res, 415, { error: "only images can be previewed here" });
       }
-      if ((asksMediaLink || mediaGrant) && !STREAMABLE_VIDEO_MIMES.has(file.mime)) {
+      if ((asksMediaLink || mediaGrant) && !STREAMABLE_MEDIA_MIMES.has(file.mime)) {
         await file.handle.close();
-        return json(res, 415, { error: "only videos can be played here" });
+        return json(res, 415, { error: "only videos and audio can be played here" });
       }
       if (asksMediaLink) {
         await file.handle.close();
@@ -302,7 +299,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       }
       const inline = streamsMessageImage || Boolean(mediaGrant);
       const rawRange = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
-      const range = mediaGrant ? parseAudioRange(rawRange, file.bytes) : { kind: "none" as const };
+      // Without a Range header (Save As) the whole file streams; a player's range never ties up more than one chunk.
+      const range = mediaGrant ? cappedMediaRange(parseAudioRange(rawRange, file.bytes)) : { kind: "none" as const };
       if (range.kind === "unsatisfiable") {
         await file.handle.close();
         res.writeHead(416, { "content-range": `bytes */${file.bytes}`, "cache-control": "private, no-store", "x-content-type-options": "nosniff" });
@@ -314,9 +312,9 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         "content-length": String(end - start + 1),
         ...(range.kind === "range" ? { "content-range": `bytes ${start}-${end}/${file.bytes}` } : {}),
         ...(mediaGrant ? { "accept-ranges": "bytes" } : {}),
-        ...(inline
-          ? { "content-disposition": "inline" }
-          : { "content-disposition": messageFileDisposition(messageFileDownloadName(downloadName, file.name)) }),
+        "content-disposition": mediaGrant
+          ? messageFileDisposition(messageFileDownloadName(downloadName, file.name), "inline")
+          : inline ? "inline" : messageFileDisposition(messageFileDownloadName(downloadName, file.name)),
         "cache-control": "private, no-store",
         "cdn-cache-control": "no-store",
         "cloudflare-cdn-cache-control": "no-store",

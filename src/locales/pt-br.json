@@ -972,7 +972,7 @@
   "attach.previewVideo": "Ver prévia de {name}",
   "attach.loadVideo": "Carregar vídeo",
   "attach.closeVideo": "Fechar a prévia do vídeo",
-  "attach.videoHint": "Carrega quando você pedir · até 25 MB",
+  "attach.videoHintStreams": "Reproduz quando você pedir",
   "attach.videoLoading": "Carregando vídeo…",
   "attach.videoUnavailable": "Não dá para reproduzir este vídeo aqui, mas você pode salvar uma cópia.",
   "attach.previewAudio": "Reproduzir {name}",
