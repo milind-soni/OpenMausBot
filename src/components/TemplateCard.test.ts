@@ -131,7 +131,7 @@ describe("a template's chat card on a Team Cloud", () => {
     return [...document.querySelectorAll<HTMLElement>("[role=menuitem]")];
   };
 
-  it("offers Add to the team's templates to its owner or an admin, and Your GitHub repo… to everyone", async () => {
+  it("offers Add to the team's templates and Your GitHub repo… to its owner or an admin", async () => {
     place.state = { config: { team: { id: "t1", name: "Acme" } } };
     place.admin = true;
     api.mockResolvedValueOnce({ template: { slug: "quill", name: "Quill", scope: "bot", tagline: "", addedAt: 1 }, replaced: false });
@@ -145,13 +145,14 @@ describe("a template's chat card on a Team Cloud", () => {
     } finally { unmount(); }
   });
 
-  it("leaves the team's templates out for a member", async () => {
+  it("leaves the team's templates and its repositories out for a member", async () => {
     place.state = { config: { team: { id: "t1", name: "Acme" } } };
     place.admin = false;
     const { container, unmount } = render(draft);
     try {
       const items = (await menuItems(container)).map((item) => item.textContent?.trim());
-      expect(items).toContain("Your GitHub repo…");
+      expect(items).toContain("Delete");
+      expect(items).not.toContain("Your GitHub repo…");
       expect(items).not.toContain("Add to Acme's templates");
     } finally { unmount(); }
   });

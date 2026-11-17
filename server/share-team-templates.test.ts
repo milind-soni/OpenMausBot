@@ -133,7 +133,8 @@ describe("the share tool and the team's templates", () => {
     expect(await call({ action: "export" })).toMatchObject({ status: 200 });
     expect(await call({ action: "add_to_team_library" }, { actsForAdmin: false })).toMatchObject({ status: 403 });
     expect(await call({ action: "add_to_team_library" }, { personMessage: null })).toMatchObject({ status: 403 });
-    expect(await call({ action: "add_to_team_library" })).toMatchObject({ status: 201, body: { text: expect.stringContaining("Added Reporter in Acme's templates") } });
+    expect(await call({ action: "add_to_team_library" }, { actingName: "Olive" })).toMatchObject({ status: 201, body: { text: expect.stringContaining("Added Reporter in Acme's templates") } });
+    expect((await call({ action: "list_team_library" })).body.text).toContain("added by Olive");
     expect(await call({ action: "add_to_team_library" })).toMatchObject({ status: 201, body: { text: expect.stringContaining("Replaced") } });
     expect((await call({ action: "list_team_library" })).body.text).toMatch(/- reporter: Reporter \(a bot\), Weekly reports; added 2023-11-14/);
     expect(await call({ action: "list_team_library" }, { actsForAdmin: false })).toMatchObject({ status: 403 });
@@ -222,6 +223,17 @@ describe("GitHub through the connection", () => {
     expect(await request(ADMIN, "POST", "/api/share/import?preview=1", { url: "https://github.com/acme/private/tree/main/none" })).toMatchObject({ status: 404, body: { error: "No bot.md or team.md was found in that folder." } });
     expect(publicReads).toBe(1);
     expect(await request(ADMIN, "POST", "/api/share/import?preview=1", { url: "https://github.com/acme/big/tree/main/t" })).toMatchObject({ status: 413 });
+  });
+
+  it("the share tool reads a private link through GitHub only for the team's admins", async () => {
+    let asked = 0;
+    const repo = fakeGithubRepo({ owner: "acme", repo: "private" });
+    const { call } = setup({ github: { ok: true, relay: async (...args) => { asked += 1; return repo.relay(...args); } } });
+    const link = "https://github.com/acme/private/tree/main/reporter";
+    expect(await call({ action: "import", url: link }, { personMessage: `import ${link}`, actsForAdmin: false })).toMatchObject({ status: 404, body: { error: "Nothing was found at that GitHub link." } });
+    expect(asked).toBe(0);
+    expect(await call({ action: "import", url: link }, { personMessage: `import ${link}` })).toMatchObject({ status: 404, body: { error: "No bot.md or team.md was found in that folder." } });
+    expect(asked).toBeGreaterThan(0);
   });
 
   it("the share tool publishes only to a repository the person named, for the team's admins", async () => {

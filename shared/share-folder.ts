@@ -1,7 +1,7 @@
 // A template folder, the one format a shared bot or department travels in:
 //   bot.md | team.md            BotMRR Markdown v2: YAML frontmatter with the package fields, and a readable body
 //   skills/<name>/SKILL.md      each skill the frontmatter names
-//   skills/<name>/<path>        the text files beside it the frontmatter's skillFiles names (shared/skill-files.ts)
+//   skills/<name>/<path>        the text files beside it that the frontmatter's skillFiles names
 //   avatars/<key>.<png|jpg|webp> each picture the frontmatter names
 //   README.md                   optional, for people browsing GitHub; never read back
 // Pure (no node:*): the server, the renderer and the Admin's submission check read folders with the same rules, and
@@ -78,6 +78,17 @@ function bytesOf(value: string | Uint8Array): Uint8Array | null {
   return data ? decodeBase64(data[1]!) : null;
 }
 
+/** The skill files the folder's bot.md or team.md names: only those are read, or counted against the folder's caps. */
+function namedSkillFiles(files: ReadonlyArray<readonly [string, string | Uint8Array]>): Set<string> {
+  const manifest = files.find(([path]) => path === MANIFEST_NAMES.bot || path === MANIFEST_NAMES.department)?.[1];
+  if (manifest === undefined) return new Set();
+  try {
+    return new Set(namedFolderFiles(textOf(manifest)!).filter(isSkillFilePath));
+  } catch {
+    return new Set();
+  }
+}
+
 /** The folder's files keyed by their path inside it: a single top folder (a browser's folder upload, a saved folder
  * picked one level up) is looked through. Unsafe paths and files the reader never opens are dropped. */
 export function normalizeShareFolder(files: ShareFolderFiles): ShareFolderFiles {
@@ -94,12 +105,12 @@ export function normalizeShareFolder(files: ShareFolderFiles): ShareFolderFiles 
     const top = tops.size === 1 ? [...tops][0]! : "";
     if (top && safe.some(([path]) => path.includes("/") && atRoot(path.slice(top.length + 1)))) prefix = `${top}/`;
   }
+  const inside = safe.flatMap(([path, value]) => (path.startsWith(prefix) && isShareFolderPath(path.slice(prefix.length)) ? [[path.slice(prefix.length), value] as const] : []));
+  const named = namedSkillFiles(inside);
   const kept: ShareFolderFiles = {};
   let total = 0, count = 0;
-  for (const [path, value] of safe) {
-    if (!path.startsWith(prefix)) continue;
-    const inner = path.slice(prefix.length);
-    if (!isShareFolderPath(inner)) continue;
+  for (const [inner, value] of inside) {
+    if (isSkillFilePath(inner) && !named.has(inner)) continue;
     total += typeof value === "string" ? utf8Bytes(value) : value.byteLength;
     if (++count > SHARE_FOLDER_MAX_FILES) throw refuse("This folder has too many files to be a template.");
     if (total > SHARE_FOLDER_MAX_BYTES) throw new PackageFormatError("too_large", "This folder is larger than 4 MB.");

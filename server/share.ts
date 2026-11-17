@@ -54,7 +54,7 @@ export interface ShareHostDeps {
   collectTeamSkills(bots: readonly BotRecord[], selection: "all"):
     | { ok: true; skillsByBot: Map<string, ExportablePackageSkill[]>; skipped: TeamExportSkip[] }
     | { ok: false; error: string };
-  /** The files beside one of the bot's skills (shared/skill-files.ts admits what travels); null when they changed since
+  /** The files beside one of the bot's skills, before what may travel is picked from them; null when they changed since
    * they came in. */
   skillFiles?(bot: BotRecord, name: string): Array<{ path: string; content: string | Uint8Array }> | null;
   /** The bot's picture as a data: URL, when it shows one instead of its mascot. */

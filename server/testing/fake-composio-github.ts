@@ -1,5 +1,5 @@
-// A GitHub repository behind a fake connected-apps relay, for template tests: the MCP frames
-// server/share-github-repo.ts sends (initialize, then COMPOSIO_MULTI_EXECUTE_TOOL) answered from memory, with no network.
+// A GitHub repository behind a fake connected-apps relay, for template tests: the MCP frames a template's GitHub reads
+// and writes send (initialize, then COMPOSIO_MULTI_EXECUTE_TOOL) answered from memory, with no network.
 import { createHash } from "node:crypto";
 
 import type { GithubRelay } from "../share-github-repo.ts";

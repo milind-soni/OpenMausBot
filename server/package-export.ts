@@ -71,7 +71,7 @@ export interface ExportablePackageSkill extends Omit<BotPackageSkill, "name" | "
   name: string;
   description: string;
   enabled?: boolean;
-  /** The text files beside SKILL.md that travel with it (shared/skill-files.ts). */
+  /** The text files beside SKILL.md that travel with it. */
   files?: SkillFile[];
 }
 

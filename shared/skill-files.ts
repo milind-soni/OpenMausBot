@@ -1,6 +1,6 @@
 // The files beside a skill's SKILL.md that travel in a template: its scripts, references and small text assets, as
-// skills/<name>/<path> in the folder and `files` on the package's skill entry. Pure (no node:*), like
-// shared/share-folder.ts: the folder reader, the writer and the package gate apply the same rules.
+// skills/<name>/<path> in the folder and `files` on the package's skill entry. Pure (no node:*): the folder reader, the
+// writer and the package gate apply the same rules, on the server, in the renderer and at the Admin.
 // Security: plain relative paths only (nothing hidden, no generated folders, nothing a skill folder can't hold), text
 // only, size-capped, and never a file named like a credential store or holding a credential's shape. Their text is not
 // passed through redactSecretsInText, which would rewrite ordinary code (`token = os.environ[...]`): a credential in
@@ -27,8 +27,8 @@ const encoder = new TextEncoder();
 const bytesOf = (text: string) => encoder.encode(text).length;
 const unsafeCharacter = (char: string) => char < " " || char === "\u007f" || '<>:"|?*\\'.includes(char);
 
-/** Why `path` can't be a file beside SKILL.md, by its name alone; null when it can. At least as strict as the skill
- * folder's storage rule (server/skill-folder.ts), so whatever passes here is stored whole when it is added. */
+/** Why `path` can't be a file beside SKILL.md, by its name alone; null when it can. At least as strict as the rule a
+ * skill folder is stored by, so whatever passes here is stored whole when it is added. */
 export function skillFilePathProblem(path: string): SkillFileRefusal | null {
   if (!path || path.length > 300) return "name";
   const parts = path.split("/");

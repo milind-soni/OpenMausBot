@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { canonicalJson, PackageFormatError, packageSecretFindings, parsePackageDocument, redactPackageSecrets } from "./package-format.ts";
-import { namedFolderFiles, readShareFolder, writeShareFolder } from "./share-folder.ts";
+import { namedFolderFiles, normalizeShareFolder, readShareFolder, writeShareFolder } from "./share-folder.ts";
 import { admitSkillFiles, SKILL_FILE_LIMITS, skillFilePathProblem, skillFileProblem, skillFileText } from "./skill-files.ts";
 
 const skillMd = (name: string) => `---\nname: ${name}\ndescription: ${name} steps.\n---\n\n# ${name}\n\nRun scripts/report.py.\n`;
@@ -79,6 +79,15 @@ describe("files beside a skill", () => {
     expect(() => readShareFolder(without)).toThrow(/scripts\/report\.py, but the file is missing/);
     expect(() => readShareFolder({ ...files, "skills/report/scripts/report.py": `token=${KEY}` })).toThrow(PackageFormatError);
     expect(() => readShareFolder({ ...files, "skills/report/scripts/report.py": new Uint8Array([0xff, 0xfe, 0x00, 0x01]) })).toThrow(/isn't a text file/);
+  });
+
+  it("files a manifest doesn't name are dropped before the folder's caps count them", () => {
+    const document = parsePackageDocument(withFiles([{ path: "run.sh", content: "echo hi\n" }]), { trust: "file" });
+    const files = writeShareFolder(document, "bot");
+    const clutter = Object.fromEntries(Array.from({ length: 400 }, (_, index) => [`skills/report/cache/f${index}.txt`, "x".repeat(20_000)]));
+    const kept = normalizeShareFolder({ ...files, ...clutter });
+    expect(Object.keys(kept).sort()).toEqual(["bot.md", "skills/report/SKILL.md", "skills/report/run.sh"]);
+    expect(readShareFolder({ ...files, ...clutter }).kind).toBe("package");
   });
 
   it("an older reader's folder (no skillFiles) still reads, and one naming a file outside the skill opens nothing", () => {

@@ -72,7 +72,7 @@ describe("template folders", () => {
     for (const path of ["../bot.md", "/etc/passwd", "skills\\x\\SKILL.md", ".hidden/bot.md", "a/../bot.md", "a//b"]) expect(safeFolderPath(path)).toBeNull();
     const kept = normalizeShareFolder({ "bot.md": "x", "../team.md": "y", "skills/a/SKILL.md": "z", "skills/a/run.sh": "rm -rf", "skills/a/.env": "KEY=1",
       "skills/a/node_modules/x.js": "x", "avatars/a.svg": "<svg/>", "memory/notes.md": "secret" });
-    expect(Object.keys(kept).sort()).toEqual(["bot.md", "skills/a/SKILL.md", "skills/a/run.sh"]);
+    expect(Object.keys(kept).sort()).toEqual(["bot.md", "skills/a/SKILL.md"]);
   });
 
   it("refuses a folder too large or with too many files before parsing it", () => {

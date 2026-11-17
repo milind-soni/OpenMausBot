@@ -297,6 +297,8 @@ export interface ShareToolContext {
   actsForAdmin?: boolean;
   /** The person whose own GitHub this turn may use (in their own chat), when each person on the team connects it. */
   githubPerson?: string | null;
+  /** The name the team's library records for whoever this turn acts for. */
+  actingName?: string;
 }
 
 function within(root: string, path: string): boolean {
@@ -319,7 +321,7 @@ export function createShareToolRoute(deps: Omit<ShareRouteDeps, "bots"> & { bots
   const { host } = deps;
   const toolReaders = (ctx: ShareToolContext): ImportReaders => ({
     localFolders: true, fetchTemplate: deps.fetchTemplate, library: deps.library?.templates ?? null,
-    ...(deps.github ? { github: () => deps.github!(ctx.githubPerson ?? null) } : {}),
+    ...(deps.github && ctx.actsForAdmin !== false ? { github: () => deps.github!(ctx.githubPerson ?? null) } : {}),
   });
   const shown = (ctx: ShareToolContext, card: TemplateCard) => {
     const messageId = ctx.post(cardText(card), card);
@@ -378,7 +380,7 @@ export function createShareToolRoute(deps: Omit<ShareRouteDeps, "bots"> & { bots
         if (body.action === "add_to_team_library") {
           const record = host.latest(ctx.bot.id, department ? "department" : "bot");
           if (!record) return reply(404, "There is no template to add yet. Call share with action export first.");
-          const added = addToLibrary(host, templates, record.id, undefined);
+          const added = addToLibrary(host, templates, record.id, ctx.actingName);
           return reply(201, `${added.replaced ? "Replaced" : "Added"} ${added.template.name} in ${team}'s templates${added.replaced ? "; the one it replaced is kept beside it" : ""}. Everyone who can add bots on ${team} finds it in Import.`);
         }
         const slug = typeof body.slug === "string" ? body.slug.trim() : "";

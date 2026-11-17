@@ -114,6 +114,7 @@ describe("a Team Cloud's own templates", () => {
     await say("olive", "Share yourself to the team's templates");
     toolCalls([]);
     await until(async () => (await as("olive", "GET", "/api/share/library")).body.templates[0].addedAt > listedBefore, 30_000);
+    expect((await as("olive", "GET", "/api/share/library")).body.templates[0].addedBy).toMatch(/olive/i);
   }, hostTimeout(180_000));
 
   it("only an admin removes one, and its folder stays as <slug>.previous", async () => {

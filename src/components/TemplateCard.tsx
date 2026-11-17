@@ -187,6 +187,13 @@ export function useTeamTemplatesOwner(): string | null {
   return team && admin === true ? team : null;
 }
 
+/** Publishing to one's own repository goes through Share's routes, which a Team Cloud keeps for its owner and admins. */
+export function useRepoPublishOffered(): boolean {
+  const { state } = useStore();
+  const admin = useOwnerOrAdmin();
+  return !state.config?.team || admin === true;
+}
+
 /** The template card a bot posts in its chat. `botId` and `threadId` are this chat's, for Update; a group chat leaves them out. */
 export function TemplateChatCard({ message, botId, threadId }: { message: Message; botId?: string; threadId?: string }) {
   const { dispatch } = useStore();
@@ -194,11 +201,12 @@ export function TemplateChatCard({ message, botId, threadId }: { message: Messag
   const [details, setDetails] = useState(false);
   const [repo, setRepo] = useState(false);
   const team = useTeamTemplatesOwner();
+  const repoOffered = useRepoPublishOffered();
   const { card } = actions;
   const overflow: SidebarMenuItem[] = card.status === "gone" ? [] : [
     ...(botId ? [{ key: "update", label: t("template.update"), icon: <RefreshCw size={16} />, onSelect: () => askBot(dispatch, botId, threadId, TEMPLATE_UPDATE_MESSAGE) }] : []),
     ...(team ? [{ key: "team", label: t("template.addToTeam", { team }), icon: <Library size={16} />, onSelect: () => void actions.addToTeam(team) }] : []),
-    { key: "repo", label: t("template.publishToRepo"), icon: <Github size={16} />, onSelect: () => setRepo(true) },
+    ...(repoOffered ? [{ key: "repo", label: t("template.publishToRepo"), icon: <Github size={16} />, onSelect: () => setRepo(true) }] : []),
     ...(card.fallback ? [] : [{ key: "save", label: t("template.saveFolder"), icon: <FolderDown size={16} />, onSelect: () => void actions.save() }]),
     { key: "delete", label: t("template.delete"), icon: <Trash2 size={16} />, separatorBefore: true, onSelect: () => void actions.remove() },
   ];
@@ -326,7 +334,8 @@ export function TemplateDetailsSheet({ id, name, onClose }: { id: string; name: 
 /** Share's second GitHub target: the person's own repository, through the GitHub connection in Apps. A pull request from
  * a new branch, or one commit on the default branch when they tick it. */
 
-type Connection = { state: "checking" } | { state: "connected" } | { state: "missing"; error?: string };
+/** `missing`: connect GitHub in Apps; `refused`: the server's own sentence (the team's Rules, Apps unreachable, no access). */
+type Connection = { state: "checking" } | { state: "connected" } | { state: "missing" } | { state: "refused"; error: string };
 
 const repoField = "h-8 w-full min-w-0 rounded-lg border border-hairline bg-inset px-2.5 text-[13px] text-ink focus:border-focus focus:outline-none";
 const repoSpinner = <Loader2 size={14} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />;
@@ -344,8 +353,10 @@ export function TemplateRepoPublishDialog({ card, onClose }: { card: Pick<Templa
 
   useEffect(() => {
     let live = true;
-    githubConnection().then((answer) => { if (live) setConnection(answer.connected ? { state: "connected" } : { state: "missing", ...(answer.error ? { error: answer.error } : {}) }); },
-      () => { if (live) setConnection({ state: "missing" }); });
+    githubConnection().then((answer) => {
+      if (!live) return;
+      setConnection(answer.connected ? { state: "connected" } : answer.reason === "not_connected" || !answer.error ? { state: "missing" } : { state: "refused", error: answer.error });
+    }, (cause: unknown) => { if (live) setConnection({ state: "refused", error: cause instanceof Error && cause.message ? cause.message : t("template.failed") }); });
     return () => { live = false; };
   }, []);
 
@@ -375,7 +386,9 @@ export function TemplateRepoPublishDialog({ card, onClose }: { card: Pick<Templa
   </> : connection.state === "missing" ? <>
     <button type="button" className="ui-button ui-button-md" onClick={onClose}>{t("common.cancel")}</button>
     <button type="button" data-template-open-apps className="ui-button ui-button-md ui-button-primary" onClick={openApps}>{t("template.repo.openApps")}</button>
-  </> : <>
+  </> : connection.state === "refused" ? (
+    <button type="button" className="ui-button ui-button-md" onClick={onClose}>{t("common.close")}</button>
+  ) : <>
     <button type="button" className="ui-button ui-button-md" onClick={onClose} disabled={busy}>{t("common.cancel")}</button>
     <button type="submit" form={titleId} data-template-repo-publish className="ui-button ui-button-md ui-button-primary" disabled={busy || connection.state !== "connected" || !repo.trim()}>
       {busy && repoSpinner}{t(busy ? "template.repo.working" : direct ? "template.repo.commit" : "template.repo.openPullRequest")}
@@ -390,7 +403,9 @@ export function TemplateRepoPublishDialog({ card, onClose }: { card: Pick<Templa
         ) : connection.state === "checking" ? (
           <p role="status" className="flex items-center gap-2 text-[13px] text-ink-secondary">{repoSpinner}{t("template.repo.checking")}</p>
         ) : connection.state === "missing" ? (
-          <p role="alert" dir="auto" className="text-[13px] text-ink-secondary">{connection.error && connection.error !== t("template.repo.connectFirst") ? connection.error : t("template.repo.connectFirst")}</p>
+          <p role="alert" dir="auto" className="text-[13px] text-ink-secondary">{t("template.repo.connectFirst")}</p>
+        ) : connection.state === "refused" ? (
+          <p role="alert" dir="auto" className="text-[13px] text-ink-secondary">{connection.error}</p>
         ) : (
           <form id={titleId} onSubmit={(event) => { event.preventDefault(); void publish(); }} className="flex flex-col gap-3">
             <div>

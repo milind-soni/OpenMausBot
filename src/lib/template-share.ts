@@ -41,7 +41,7 @@ export const addToTeamTemplates = (id: string) =>
 export const removeTeamTemplate = (slug: string) => api<{ ok: true }>(`/api/share/library/${encodeURIComponent(slug)}`, { method: "DELETE" });
 
 /** Whether a GitHub connection is there to publish to the person's own repository through. */
-export const githubConnection = () => api<{ connected: boolean; error?: string }>("/api/share/github");
+export const githubConnection = () => api<{ connected: boolean; reason?: "not_connected" | "refused" | "unavailable"; error?: string }>("/api/share/github");
 export const publishToRepo = (id: string, target: { repo: string; folder?: string; direct?: boolean }) =>
   api<TemplateRepoPublish>(`/api/share/${encodeURIComponent(id)}/publish-repo`, post(target));
 

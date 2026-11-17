@@ -164,7 +164,7 @@ describe("a department's Share", () => {
   it("publishes to the person's own repository as a pull request, or says to connect GitHub in Apps first", async () => {
     let connected = false;
     api.mockImplementation(async (path: string) => path === "/api/share/export" ? card
-      : path === "/api/share/github" ? (connected ? { connected: true } : { connected: false, error: "Connect GitHub in Apps first." })
+      : path === "/api/share/github" ? (connected ? { connected: true } : { connected: false, reason: "not_connected", error: "Connect GitHub in Apps first." })
       : { kind: "pull_request", url: "https://github.com/acme/playbooks/pull/3", link: "https://github.com/acme/playbooks/tree/mausbot-sales-desk-abc123/sales-desk", branch: "mausbot-sales-desk-abc123" });
     const view = mount(createElement(ShareDepartmentDialog, { department: "Sales desk", onClose: vi.fn() }));
     try {
@@ -187,6 +187,31 @@ describe("a department's Share", () => {
       expect(api).toHaveBeenCalledWith("/api/share/tpl2/publish-repo", { method: "POST", body: JSON.stringify({ repo: "acme/playbooks", folder: "templates", direct: false }) });
       [...document.querySelectorAll("button")].find((each) => each.textContent?.includes("View pull request") && each.closest("footer"))!.click();
       expect(openLink).toHaveBeenCalledWith("https://github.com/acme/playbooks/pull/3");
+    } finally { view.unmount(); }
+  });
+
+  it("shows the server's own sentence when GitHub is refused here, with no Open Apps", async () => {
+    api.mockImplementation(async (path: string) => path === "/api/share/export" ? card
+      : { connected: false, reason: "refused", error: "Acme's rules turn GitHub off." });
+    const view = mount(createElement(ShareDepartmentDialog, { department: "Sales desk", onClose: vi.fn() }));
+    try {
+      await vi.waitFor(() => expect(button("Your GitHub repo…")).toBeTruthy());
+      button("Your GitHub repo…")!.click();
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Acme's rules turn GitHub off."));
+      expect(button("Open Apps")).toBeUndefined();
+      expect(document.body.textContent).not.toContain("Connect GitHub in Apps first.");
+    } finally { view.unmount(); }
+  });
+
+  it("offers no repository or team library to a team member", async () => {
+    place.state = { config: { team: { id: "t1", name: "Acme" } } };
+    place.admin = false;
+    api.mockResolvedValue(card);
+    const view = mount(createElement(ShareDepartmentDialog, { department: "Sales desk", onClose: vi.fn() }));
+    try {
+      await vi.waitFor(() => expect(button("Publish to community")).toBeTruthy());
+      expect(button("Your GitHub repo…")).toBeUndefined();
+      expect(button("Add to Acme's templates")).toBeUndefined();
     } finally { view.unmount(); }
   });
 
