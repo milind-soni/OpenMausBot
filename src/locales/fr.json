@@ -3708,6 +3708,7 @@
   "sidebar.update.restartAction": "Redémarrer",
   "sidebar.update.retryAction": "Réessayer",
   "sidebar.nav.publishedApps": "Apps publiées",
+  "sidebar.nav.teamFiles": "Fichiers de l'équipe",
   "settings.advancedMode.subtitle": "Affiche chaque réglage technique sur cet appareil : usage et tokens, l'inspecteur et d'autres outils pour bâtisseurs. Désactivez-le pour une app plus simple. Rien n'est supprimé dans un cas comme dans l'autre.",
   "settings.analytics.link": "Voir tout ce qui est envoyé",
   "settings.analytics.subtitle": "Des événements produit anonymes et, une fois par jour, un décompte de ce qui est configuré : quels fournisseurs ont une clé (jamais la clé) et combien de bots, salons, routines et ordinateurs. Jamais de conversations, prompts, contenus de fichiers, noms ou adresses. Votre email n'est joint que si vous l'avez partagé pendant la configuration, ou si vous choisissez de passer à un forfait, de le gérer ou de comparer les forfaits dans la fenêtre Cloud Pro en étant connecté à MausBot Cloud (l'email de votre compte Cloud).",

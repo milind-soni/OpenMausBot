@@ -1,4 +1,5 @@
-import type { TemplateCard, TemplateDetails } from "../../shared/share-card";
+import type { TeamTemplate, TemplateCard, TemplateDetails, TemplateRepoPublish } from "../../shared/share-card";
+import { SKILL_FILE_LIMITS, skillFilePathProblem } from "../../shared/skill-files";
 import { t } from "./i18n";
 import { api, type Action, type Bot, type Group } from "@/state/store";
 import type { Routine } from "@/lib/routines";
@@ -7,6 +8,13 @@ import type { Routine } from "@/lib/routines";
 export const TEMPLATE_FOLDER_MAX_BYTES = 4 * 1024 * 1024;
 const PICTURE = /\.(png|jpe?g|webp)$/i;
 const TEXT = /\.(md|json|txt)$/i;
+const SKILL_FILE = /(?:^|\/)skills\/[a-z0-9][a-z0-9-]{0,63}\/(.+)$/;
+
+/** A file beside a skill's SKILL.md that may travel with it, judged by its path and size before it is read. */
+function skillFileOf(file: File): boolean {
+  const inner = ((file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name).match(SKILL_FILE)?.[1];
+  return inner !== undefined && inner !== "SKILL.md" && skillFilePathProblem(inner) === null && file.size <= SKILL_FILE_LIMITS.fileBytes;
+}
 
 export interface ImportedTemplate {
   name: string;
@@ -24,7 +32,18 @@ export const templateDetails = (id: string) => api<{ card: TemplateCard; details
 export const publishTemplate = (id: string) => api<TemplateCard>(`/api/share/${encodeURIComponent(id)}/publish`, post({}));
 export const deleteTemplate = (id: string) => api<{ ok: true }>(`/api/share/${encodeURIComponent(id)}`, { method: "DELETE" });
 
-export type ImportSource = { url: string } | { path: string } | { files: Record<string, string> };
+export type ImportSource = { url: string } | { path: string } | { files: Record<string, string> } | { library: string };
+
+/** A Team Cloud's own templates, for its owner and admins. */
+export const teamTemplates = () => api<{ team: string; templates: TeamTemplate[] }>("/api/share/library");
+export const addToTeamTemplates = (id: string) =>
+  api<{ template: TeamTemplate; replaced: boolean }>(`/api/share/${encodeURIComponent(id)}/library`, post({}));
+export const removeTeamTemplate = (slug: string) => api<{ ok: true }>(`/api/share/library/${encodeURIComponent(slug)}`, { method: "DELETE" });
+
+/** Whether a GitHub connection is there to publish to the person's own repository through. */
+export const githubConnection = () => api<{ connected: boolean; reason?: "not_connected" | "refused" | "unavailable"; error?: string }>("/api/share/github");
+export const publishToRepo = (id: string, target: { repo: string; folder?: string; direct?: boolean }) =>
+  api<TemplateRepoPublish>(`/api/share/${encodeURIComponent(id)}/publish-repo`, post(target));
 
 export const previewImport = (source: ImportSource) =>
   api<{ details: TemplateDetails }>("/api/share/import?preview=1", post(source)).then((answer) => answer.details);
@@ -89,15 +108,15 @@ const readDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
-/** A folder chosen in a browser, as the import route takes it: Markdown and JSON as text, pictures as data: URLs, and
- * nothing else. Refuses a folder over the size cap before reading it. */
+/** A folder chosen in a browser, as the import route takes it: Markdown, JSON and the files beside a skill as text,
+ * pictures as data: URLs, and nothing else. Refuses a folder over the size cap before reading it. */
 export async function folderFiles(files: ArrayLike<File>): Promise<Record<string, string>> {
-  const kept = Array.from(files).filter((file) => TEXT.test(file.name) || PICTURE.test(file.name));
+  const kept = Array.from(files).filter((file) => TEXT.test(file.name) || PICTURE.test(file.name) || skillFileOf(file));
   if (kept.reduce((total, file) => total + file.size, 0) > TEMPLATE_FOLDER_MAX_BYTES) throw new Error(t("templateImport.tooLarge"));
   const out: Record<string, string> = {};
   for (const file of kept) {
     const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-    out[path] = PICTURE.test(file.name) ? await readDataUrl(file) : await readText(file);
+    out[path] = PICTURE.test(file.name) && !skillFileOf(file) ? await readDataUrl(file) : await readText(file);
   }
   return out;
 }

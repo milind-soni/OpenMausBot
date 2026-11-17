@@ -11,7 +11,7 @@ import { botBox, type WrappedSpawn } from "../bot-box/box.ts";
 import { visibleInBox, type BoxRequest } from "../bot-box/plan.ts";
 import { DATA_DIR } from "../config.ts";
 import { engineHomes } from "../engine-homes/engine-homes.ts";
-import { boxedSpawn, sharedBoxScope } from "../procs.ts";
+import { boxAudienceKey, boxedSpawn, sharedBoxScope } from "../procs.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { ensureTaskWorkspace } from "../workspace.ts";
 import { createCloudTeamHost } from "./cloud-team-host.ts";
@@ -42,6 +42,13 @@ describe("the Team Cloud's box scope", () => {
     expect(scope({ threadId: "mira-new", botId: BOT, sharedProcess: true })?.threads, "a conversation the store has not listed yet is still its own")
       .toEqual({ rw: ["mira-1", "mira-2", "mira-new"], ro: ["main", "team-1"] });
     expect(botConversations(bots, "bot-gone")).toEqual([]);
+  });
+
+  it("gives every turn the team's shared folder as the host says, whatever its audience", () => {
+    const withFiles = createTeamBoxScope({ audienceOf: (threadId) => team(undefined).audienceOf(threadId), bots: () => bots,
+      teamFiles: (botId) => ({ source: "/data/team-files", write: botId === BOT }) });
+    expect(withFiles({ threadId: "mira-1", botId: BOT, sharedProcess: false })).toEqual({ teamReadOnly: true, teamFiles: { source: "/data/team-files", write: true } });
+    expect(withFiles({ threadId: "main", botId: "bot-other", sharedProcess: false })).toEqual({ teamReadOnly: false, teamFiles: { source: "/data/team-files", write: false } });
   });
 });
 
@@ -127,6 +134,19 @@ describe.skipIf(process.platform === "win32")("a Team Cloud turn's box, through 
     } finally {
       bots[0]!.tasks.pop();
     }
+  });
+
+  it("a process kept between turns starts again when the bot may no longer edit team files", () => {
+    let edit = true;
+    createCloudTeamHost({ team: { id: "team-acme", name: "Acme" } as never, dataDir: DATA_DIR, store, starters, markers: new Set(["nobody"]), engineHomes, box: botBox,
+      teamFiles: () => ({ source: at("team-files"), write: edit }) });
+    const key = () => engineHomes.within("mira-1", () => boxAudienceKey(folder("mira-1")), BOT);
+    const before = key();
+    expect(visibleInBox(planIn("mira-1", folder("mira-1")), "/team-files/payroll.csv")).toBe("rw");
+    edit = false;
+    expect(key(), "Claude Code's and the ACP engines' process keys carry it").not.toBe(before);
+    expect(visibleInBox(planIn("mira-1", folder("mira-1")), "/team-files/payroll.csv")).toBe("ro");
+    expect(engineHomes.within("mira-1", () => sharedBoxScope(folder("mira-1")), BOT)).toContain("#");
   });
 
   it("off a team the box is as it was: every turn writes the bot's own folder", () => {

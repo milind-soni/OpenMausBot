@@ -90,8 +90,9 @@ export class BoxRunner {
   private conversation(request: BoxRequest): { botId: string | null; threadId: string | null; folder: boolean } {
     const ids = request.cwd ? taskWorkspaceIds(request.cwd, this.options.setup.dataDir) : null;
     if (ids) return { ...ids, folder: true };
+    if (!request.cwd && request.conversationBot) return { botId: request.conversationBot, threadId: request.threadId ?? null, folder: false };
     const inWorkspaces = request.cwd ? relative(join(this.options.setup.dataDir, "workspaces"), resolve(request.cwd)).split(sep)[0] : undefined;
-    const botId = request.botId ?? (inWorkspaces && /^[A-Za-z0-9_-]{1,128}$/.test(inWorkspaces) ? inWorkspaces : null);
+    const botId = request.botId ?? (inWorkspaces && /^[A-Za-z0-9_-]{1,128}$/.test(inWorkspaces) ? inWorkspaces : null) ?? request.conversationBot ?? null;
     return { botId, threadId: request.threadId ?? null, folder: false };
   }
 
@@ -274,7 +275,7 @@ export class BotBox {
       broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
     });
     this.runner.scopeAudiences(this.audiences);
-    distrustHomePrograms(options.home, [options.dataDir], ["workspaces", "task-workspaces", "engine-homes"].map((name) => join(options.dataDir, name)));
+    distrustHomePrograms(options.home, [options.dataDir], ["workspaces", "task-workspaces", "engine-homes", "team-files"].map((name) => join(options.dataDir, name)));
     resetPathCache();
     log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker, seccomp ${this.seccompFile ? "on" : "unsupported here"})`);
     return this.detection;
@@ -327,9 +328,15 @@ export class BotBox {
 
   /** What a process the bot's conversations share is boxed with, as a key: the conversations its box puts back on a
    * Team Cloud, so a conversation made after it started gets a process whose box has its folder. Null elsewhere. */
-  sharedThreadsKey(request: Pick<BoxRequest, "cwd" | "threadId">): string | null {
-    const threads = this.runner?.audienceFor({ command: "", args: [], env: {}, ...request, botThreads: true })?.threads;
-    return threads ? JSON.stringify([threads.rw, threads.ro]) : null;
+  sharedThreadsKey(request: Pick<BoxRequest, "cwd" | "threadId" | "conversationBot">): string | null {
+    const audience = this.runner?.audienceFor({ command: "", args: [], env: {}, ...request, botThreads: true });
+    return audience?.threads ? JSON.stringify([audience.threads.rw, audience.threads.ro, audience.teamFiles?.write ?? null]) : null;
+  }
+
+  /** What the audience rule gives one box now, as a key: what a process kept between turns is started again on. */
+  audienceKey(request: Pick<BoxRequest, "cwd" | "threadId" | "conversationBot">): string | null {
+    const audience = this.runner?.audienceFor({ command: "", args: [], env: {}, ...request });
+    return audience ? JSON.stringify([audience.teamReadOnly, audience.teamFiles?.write ?? null]) : null;
   }
 
   /** More read-write folders for one conversation's boxes (a memory layer); nothing without a runner. */

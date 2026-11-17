@@ -12,8 +12,10 @@ import { createShareRoutes, createShareToolRoute } from "../routes/share.ts";
 import { createShareHost, type ShareHostDeps } from "../share.ts";
 import { createCommunityPublisher } from "../share-publish.ts";
 import type { BotRecord, GroupRecord } from "../store.ts";
+import { createTeamTemplates } from "../team-templates.ts";
+import { createShareGithubAccess, type ShareGithubAccessDeps } from "./share-github-access.ts";
 
-export interface ShareWiringDeps extends Pick<ShareHostDeps, "dataDir" | "groups" | "brief" | "botFolder" | "collectTeamSkills"> {
+export interface ShareWiringDeps extends Pick<ShareHostDeps, "dataDir" | "groups" | "brief" | "botFolder" | "collectTeamSkills" | "skillFiles"> {
   bots(): readonly BotRecord[];
   routines(): readonly Routine[];
   access(): PagesAccess | null;
@@ -27,6 +29,12 @@ export interface ShareWiringDeps extends Pick<ShareHostDeps, "dataDir" | "groups
   publicBot(bot: BotRecord): WireBot;
   publicGroup(group: GroupRecord): WireGroup;
   broadcast(payload: Record<string, unknown>): void;
+  /** A Team Cloud's team: it gets a library of its own templates. */
+  team: { name: string } | null;
+  /** A request's person on a Team Cloud, and how the team's library names them. */
+  personOf(auth: RequestAuth): string | null;
+  who(auth: RequestAuth): string | undefined;
+  github: ShareGithubAccessDeps;
 }
 
 /** A bot's own picture as a data: URL; none for a mascot. */
@@ -41,17 +49,19 @@ function botPicture(bot: BotRecord): string | undefined {
 export function createShareWiring(deps: ShareWiringDeps) {
   const host = createShareHost({
     dataDir: deps.dataDir, bots: deps.bots, groups: deps.groups, routines: deps.routines, brief: deps.brief, botFolder: deps.botFolder,
-    collectTeamSkills: deps.collectTeamSkills, picture: botPicture,
+    collectTeamSkills: deps.collectTeamSkills, skillFiles: deps.skillFiles, picture: botPicture,
     publisher: createCommunityPublisher({ access: deps.access, notOffered: deps.notOffered, selfHosted: deps.selfHosted }),
     patch: (threadId, messageId, text, template) => deps.patchMessage(threadId, messageId, { text, template }),
   });
   const view = { publicBot: deps.publicBot, publicGroup: deps.publicGroup, broadcast: deps.broadcast };
+  const library = deps.team ? { team: deps.team.name, templates: createTeamTemplates(deps.dataDir) } : null;
+  const github = createShareGithubAccess(deps.github);
   const routes = createShareRoutes({
-    host, localFolders: deps.localFolders, ...view,
+    host, localFolders: deps.localFolders, ...view, library, github, personOf: deps.personOf, who: deps.who,
     bots: (auth) => { const shown = deps.visibleBot?.(auth); return shown ? deps.bots().filter((bot) => shown(bot.id)) : deps.bots(); },
     routines: (auth) => { const shown = deps.visibleRoutine?.(auth); return shown ? deps.routines().filter(shown) : deps.routines(); },
     importDeps: async (auth) => ({ ...await deps.importDeps(), ...(auth ? teamCreator(auth) : {}) }),
   });
-  const tool = createShareToolRoute({ host, localFolders: deps.localFolders, ...view, bots: deps.bots, routines: deps.routines, importDeps: () => deps.importDeps() });
+  const tool = createShareToolRoute({ host, localFolders: deps.localFolders, ...view, library, github, bots: deps.bots, routines: deps.routines, importDeps: () => deps.importDeps() });
   return { host, routes, tool };
 }

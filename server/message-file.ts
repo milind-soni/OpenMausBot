@@ -587,7 +587,7 @@ export function messageFolderEntryName(value: unknown): string | null {
   return value;
 }
 
-export function messageFileDisposition(name: string): string {
+export function messageFileDisposition(name: string, type: "attachment" | "inline" = "attachment"): string {
   const safeName = safeDisplayName(name);
   const fallback = safeName
     .normalize("NFKD")
@@ -597,7 +597,7 @@ export function messageFileDisposition(name: string): string {
   const encoded = encodeURIComponent(safeName).replace(/[!'()*]/g, (char) =>
     `%${char.charCodeAt(0).toString(16).toUpperCase()}`
   );
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+  return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 /** A transport name must not disguise the bytes' canonical extension (PDF bytes named setup.exe). */
