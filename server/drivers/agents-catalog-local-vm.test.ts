@@ -18,4 +18,15 @@ describe("the Local VM's tools", () => {
   it("are listed when the server does not say", () => {
     expect(availableTools(PROFILE).map((tool) => tool.name)).toContain("vm_exec");
   });
+
+  it("are not offered as a place to pick either", () => {
+    const surfaces = (profile: CatalogProfile) => {
+      const tool = availableTools({ ...profile, computerSelection: true }).find((candidate) => candidate.name === "select_computer");
+      const properties = (tool?.inputSchema as { properties?: { surface?: { enum?: string[] } } } | undefined)?.properties;
+      return properties?.surface?.enum ?? [];
+    };
+    expect(surfaces({ ...PROFILE, localVm: false })).not.toContain("vm");
+    expect(surfaces({ ...PROFILE, localVm: false })).toContain("auto");
+    expect(surfaces({ ...PROFILE, localVm: true })).toContain("vm");
+  });
 });

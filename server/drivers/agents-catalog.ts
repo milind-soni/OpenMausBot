@@ -810,6 +810,11 @@ const CLOUD_HOME_SURFACE = {
   type: "string", enum: ["auto", "cloud", "browser"],
   description: "auto = suitable configured computer, cloud = the bot's cloud computer, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",
 };
+/** A server with no container runtime cannot give a bot a Local VM, so that surface is left out of the list. */
+const NO_LOCAL_VM_SURFACE = {
+  type: "string", enum: ["auto", "cloud", "local", "browser"],
+  description: "auto = suitable configured computer, cloud = the bot's cloud computer or self-hosted VPS, local = user's own desktop, browser = built-in browser. Omit to list. This server cannot give a bot a Local VM, so vm is not a place here.",
+};
 
 export function availableTools(profile: CatalogProfile) {
   const tools = withoutToolsOff(catalogTools(profile), profile.toolsOff ?? []);
@@ -818,9 +823,11 @@ export function availableTools(profile: CatalogProfile) {
       ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: CLOUD_HOME_SURFACE } } }
       : tool)
     // A model shown a tool it cannot use spends turns finding out: with no container runtime there is
-    // no Local VM to run a command in.
+    // no Local VM to run a command in, and no Local VM to pick as a place either.
     : profile.localVm === false
-      ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name))
+      ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
+        ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: NO_LOCAL_VM_SURFACE } } }
+        : tool)
       : tools;
   return placed.map((tool) => ({ ...tool, inputSchema: advertisedSchema(tool.inputSchema, tool.description) }));
 }
