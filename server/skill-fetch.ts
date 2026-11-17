@@ -13,7 +13,13 @@ const LISTING_MAX_BYTES = 1_048_576;
 const IMPORT_LIMITS = { apiRequests: 128, downloads: 1_000, bytes: 64 * 1_048_576, ms: 120_000 };
 const PARALLEL_DOWNLOADS = 4;
 class ImportLimitError extends Error {}
-class GitHubApiError extends Error {}
+export class GitHubApiError extends Error {}
+export class SkillImportUnavailableError extends Error {
+  constructor(message = "GitHub API unavailable; skill not imported — retry later") {
+    super(message);
+    this.name = "SkillImportUnavailableError";
+  }
+}
 
 // One budget for the whole import, enforced while reading the stream.
 function boundedImportFetch(fetcher: typeof fetch): typeof fetch {
@@ -340,18 +346,25 @@ async function fetchSkillFolder(target: Target, snapshot: Snapshot, dir: string,
   };
 }
 
-async function fetchSkills(target: Target, fetcher: typeof fetch): Promise<FetchedSkill[]> {
-  const commit = await resolveCommit(target.owner, target.repo, target.ref ?? "HEAD", fetcher);
-  const snapshot: Snapshot = { owner: target.owner, repo: target.repo, commit, trees: new Map() };
-  const dirs = await discoverSkillDirs(target, snapshot, fetcher);
-  if (!dirs.length) {
-    throw new Error(target.skill
-      ? `no skill named "${target.skill}" found there — check the exact name on the skills.sh page`
-      : "no SKILL.md found there — paste a skill folder or a repo with a skills/ directory");
+export async function fetchSkills(target: Target, fetcher: typeof fetch): Promise<FetchedSkill[]> {
+  try {
+    const commit = await resolveCommit(target.owner, target.repo, target.ref ?? "HEAD", fetcher);
+    const snapshot: Snapshot = { owner: target.owner, repo: target.repo, commit, trees: new Map() };
+    const dirs = await discoverSkillDirs(target, snapshot, fetcher);
+    if (!dirs.length) {
+      throw new Error(target.skill
+        ? `no skill named "${target.skill}" found there — check the exact name on the skills.sh page`
+        : "no SKILL.md found there — paste a skill folder or a repo with a skills/ directory");
+    }
+    const skills: FetchedSkill[] = [];
+    for (const dir of dirs) skills.push(await fetchSkillFolder(target, snapshot, dir, fetcher));
+    return skills;
+  } catch (error) {
+    if (error instanceof GitHubApiError) {
+      throw new SkillImportUnavailableError("GitHub API unavailable; skill not imported — retry later");
+    }
+    throw error;
   }
-  const skills: FetchedSkill[] = [];
-  for (const dir of dirs) skills.push(await fetchSkillFolder(target, snapshot, dir, fetcher));
-  return skills;
 }
 
 export async function fetchSkillFromSource(
@@ -364,12 +377,6 @@ export async function fetchSkillFromSource(
   try {
     return { skills: await fetchSkills(parsed, fetcher) };
   } catch (error) {
-    if (parsed.rawUrl && error instanceof GitHubApiError) {
-      try {
-        const content = await fetchBytes(parsed.rawUrl, fetcher);
-        return { skills: [{ source: parsed.rawUrl, files: [{ path: "SKILL.md", content, executable: false }], skipped: [{ path: "", reason: "unlisted" }] }] };
-      } catch {}
-    }
     return { error: error instanceof Error ? error.message : String(error) };
   }
 }

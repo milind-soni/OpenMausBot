@@ -165,17 +165,14 @@ describe("importing a skill's whole folder", () => {
     }
   });
 
-  it("falls back to SKILL.md alone, said so, when GitHub will not list a linked SKILL.md's folder", async () => {
+  it("fails closed without importing unverified SKILL.md when GitHub API is rate-limited", async () => {
     const github = fakeGitHub({ "a/b": PDF_SKILL }, { rateLimited: true });
     const link = "https://raw.githubusercontent.com/a/b/main/skills/pdf/SKILL.md";
-    const [skill] = ok(await fetchSkillFromSource(link, github.fetch));
-    expect(skill).toEqual({
-      source: link,
-      files: [{ path: "SKILL.md", content: Buffer.from(SKILL("pdf")), executable: false }],
-      skipped: [{ path: "", reason: "unlisted" }],
+    expect(await fetchSkillFromSource(link, github.fetch)).toEqual({
+      error: "GitHub API unavailable; skill not imported — retry later",
     });
     expect(await fetchSkillFromSource("https://github.com/a/b/tree/main/skills/pdf", github.fetch))
-      .toEqual({ error: expect.stringContaining("limit for requests without sign-in") });
+      .toEqual({ error: "GitHub API unavailable; skill not imported — retry later" });
   });
 
   it.each([
@@ -383,5 +380,47 @@ describe("skill sources", () => {
     const github = fakeGitHub({ "vercel-labs/skills": entries });
     const [skill] = ok(await fetchSkillFromSource("https://skills.sh/vercel-labs/skills/find-skills", github.fetch));
     expect(skill!.source).toBe("github.com/vercel-labs/skills/skills/find-skills");
+  });
+});
+
+describe("fail-closed GitHub API error handling", () => {
+  it.each([403, 404, 500])("fails closed on GitHub API %i error without fetching unverified raw URL", async (statusCode) => {
+    const rawUrl = "https://raw.githubusercontent.com/a/b/main/skills/pdf/SKILL.md";
+    const rawHostCalls: string[] = [];
+    const fetcher = vi.fn(async (input: any) => {
+      const url = String(input);
+      if (url.startsWith("https://api.github.com")) {
+        return new Response(JSON.stringify({ message: "API error" }), { status: statusCode });
+      }
+      if (url.includes("raw.githubusercontent.com")) {
+        rawHostCalls.push(url);
+        return new Response(SKILL("pdf"));
+      }
+      return new Response(null, { status: 404 });
+    }) as any;
+
+    const result = await fetchSkillFromSource(rawUrl, fetcher);
+    expect(result).toEqual({ error: "GitHub API unavailable; skill not imported — retry later" });
+    expect(rawHostCalls).toEqual([]);
+  });
+
+  it("fails closed on network error to GitHub API", async () => {
+    const rawUrl = "https://raw.githubusercontent.com/a/b/main/skills/pdf/SKILL.md";
+    const rawHostCalls: string[] = [];
+    const fetcher = vi.fn(async (input: any) => {
+      const url = String(input);
+      if (url.startsWith("https://api.github.com")) {
+        return new Response(null, { status: 502 });
+      }
+      if (url.includes("raw.githubusercontent.com")) {
+        rawHostCalls.push(url);
+        return new Response(SKILL("pdf"));
+      }
+      return new Response(null, { status: 404 });
+    }) as any;
+
+    const result = await fetchSkillFromSource(rawUrl, fetcher);
+    expect(result).toEqual({ error: "GitHub API unavailable; skill not imported — retry later" });
+    expect(rawHostCalls).toEqual([]);
   });
 });
