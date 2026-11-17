@@ -473,8 +473,6 @@ export function describeSpawnFailure(err: NodeJS.ErrnoException, cli: string, cw
   }
   if (err.code === "EACCES" || err.code === "EPERM")
     return { message: `\`${cli}\` isn't executable — check its file permissions`, setup: true };
-  if (err.code === "EAGAIN")
-    return { message: `\`${cli}\` couldn't start: this machine has reached its limit of running processes. Run fewer bots at once, or restart the server if this continues`, setup: false };
   if (err.code === "ENAMETOOLONG")
     return {
       message: `\`${cli}\` received too much launch data for Windows; update this provider or pass its prompt through stdin/a file`,

@@ -25,6 +25,6 @@ it("offers the install steps for a CLI that is missing, without the server-only 
 it("offers no install for a CLI that could not start because the machine is out of processes", async () => {
   const result = await testCliBinary(FULL_PROCESS_TABLE_CLI, OpenCodeDriver);
   expect(result.ok).toBe(false);
-  expect(result.message).toContain("limit of running processes");
+  expect(result.message).toContain("There is no room to start another program (EAGAIN)");
   expect(result).not.toHaveProperty("install");
 });
