@@ -28,10 +28,15 @@ export function object(value: unknown): Record<string, unknown> | undefined {
 export function toolArguments(text: string): Record<string, unknown> {
   let args: unknown;
   try { args = JSON.parse(text.trim() || "{}"); }
-  catch { throw new ChatProtocolError("tool arguments are not complete JSON"); }
+  catch { throw new ChatProtocolError(`tool arguments are not complete JSON; you sent ${text.length} characters: ${shownArguments(text)}`); }
   const found = object(args);
   if (!found) throw new ChatProtocolError("tool arguments must be a JSON object");
   return found;
+}
+
+/** Rejected arguments as the failed call's result quotes them back, so the model sees where they broke off. */
+function shownArguments(text: string): string {
+  return text.length <= 1_000 ? text : `${text.slice(0, 500)} … ${text.slice(-500)}`;
 }
 
 /** The calls as the next request replays them. A strict server refuses the whole request over arguments that don't

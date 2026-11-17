@@ -436,7 +436,7 @@ describe("createOpenAIChatRuntime tool approvals", () => {
   });
 
   it.each([
-    ["not JSON", '{"path":"a.md","content":"cut off', "{}", "tool arguments are not complete JSON"],
+    ["not JSON", '{"path":"a.md","content":"cut off', "{}", 'tool arguments are not complete JSON; you sent 33 characters: {"path":"a.md","content":"cut off'],
     ["empty", "", "{}", undefined],
     ["blank", "   ", "{}", undefined],
     ["led by a byte-order mark", '\uFEFF{"n":1}', '{"n":1}', undefined],
@@ -472,8 +472,8 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       expect(bodies).toHaveLength(3);
       expect(bodies[1].messages.find((message: any) => message.tool_calls)?.tool_calls[0].function.arguments).toBe(replayedArguments);
       if (toolError) {
-        expect(bodies[1].messages.find((message: any) => message.role === "tool" && message.tool_call_id === "c1")?.content)
-          .toContain(toolError);
+        expect(JSON.parse(bodies[1].messages.find((message: any) => message.role === "tool" && message.tool_call_id === "c1")?.content).result)
+          .toBe(toolError);
       }
       expect((events.find((event) => event.type === "turn.completed") as any).ok).toBe(true);
     } finally {
