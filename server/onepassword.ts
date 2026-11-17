@@ -5,6 +5,7 @@
 import type { LoginBots, LoginPlace, LoginSummary, OnePasswordItemRef, OnePasswordStatus, OnePasswordVault } from "../shared/logins.ts";
 import { loginSite, normalizeLoginHost } from "../shared/logins.ts";
 import { parseTotpKey } from "./totp.ts";
+import type { LinkedSecret } from "../shared/vault.ts";
 import type { LinkedItem, LinkedValue, VaultProvider } from "./vault/providers.ts";
 
 export interface OnePasswordItemFields {
@@ -431,16 +432,19 @@ export class OnePasswordLogins implements VaultProvider {
 
   /** The secret an `op://` reference names, by vault and item title or id: null for one that names no secret, or more
    * than one (two items of the same title), or a field the secret does not offer. */
-  resolve(reference: string): { id: string; field?: string } | null {
+  resolve(reference: string): { secret: LinkedSecret; field?: string } | null {
     const ref = this.token() ? parseOnePasswordReference(reference) : null;
     if (!ref) return null;
     const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
     const found = this.secrets.filter((entry) => (entry.vaultId === ref.vault || same(entry.vault, ref.vault)) && (entry.itemId === ref.item || same(entry.name, ref.item)));
     if (found.length !== 1) return null;
     const entry = found[0]!;
-    if (!ref.field || (entry.main && same(entry.main, ref.field))) return { id: entry.id };
+    const secret = this.items().find((item): item is { kind: "secret" } & LinkedSecret => item.kind === "secret" && item.id === entry.id);
+    if (!secret) return null;
+    const { kind: _kind, ...listed } = secret;
+    if (!ref.field || (entry.main && same(entry.main, ref.field))) return { secret: listed };
     const field = entry.fields.find((one) => same(one, ref.field!));
-    return field ? { id: entry.id, field } : null;
+    return field ? { secret: listed, field } : null;
   }
 
   markUsed(id: string): void {

@@ -111,7 +111,7 @@ it("the Admin's signed report names the team's secrets and 1Password's state, ne
 
   const report = await team.signed("GET", CLOUD_TEAM_ADMIN_PATH);
   expect(report.status, JSON.stringify(report.body)).toBe(200);
-  expect(report.body.vault.providers).toEqual([{ kind: "1password", connected: true, label: VAULT }]);
+  expect(report.body.vault.providers).toEqual([{ kind: "1password", connected: true, label: VAULT }, { kind: "bitwarden", connected: false, label: "" }]);
   expect(report.body.vault.secrets).toEqual([{ name: "Team deploy key", addedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/u), usedBy: expect.arrayContaining(["Ledger"]) }]);
   const text = JSON.stringify(report.body);
   for (const [what, value] of [["a member's own secret", "Ada's own key"], ["the token", TOKEN], ["the team's value", TEAM_VALUE], ["1Password's value", STRIPE], ["her value", ADA_VALUE]] as const) {
