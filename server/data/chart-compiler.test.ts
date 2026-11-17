@@ -231,7 +231,7 @@ describe("compileChart: reductions per chart type and column class", () => {
       name: "scatter samples a repeatable reservoir",
       spec: { type: "scatter", x: "qty", y: "amount", color: "channel", size: 'we"ird' },
       method: "sample",
-      sql: [`SELECT src."qty" AS x, src."amount" AS y, src."channel" AS color, src."we""ird" AS size FROM src USING SAMPLE reservoir(${DATA_LIMITS.chartMaxMarks} ROWS) REPEATABLE (42)`],
+      sql: [`SELECT src."qty" AS x, src."amount" AS y, src."channel" AS color, src."we""ird" AS size FROM (SELECT * FROM src WHERE src."qty" IS NOT NULL AND src."amount" IS NOT NULL) AS src USING SAMPLE reservoir(${DATA_LIMITS.chartMaxMarks} ROWS) REPEATABLE (42)`],
       notSql: ["GROUP BY"],
       check: (vl) => {
         expect(mark(vl)).toBe("point");
