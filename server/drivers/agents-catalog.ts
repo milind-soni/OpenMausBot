@@ -721,13 +721,13 @@ const TOOL_DEFINITIONS = [
   {
     name: "skill_manage",
     description:
-      "Create or update a reusable skill (SKILL.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill." + APPLIES_OUTCOME,
+      "Create or update a reusable skill (SKILL.md), import one from GitHub or skills.sh (action import with source; same review as create, brings SKILL.md and references/*.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        action: { type: "string", enum: ["create", "update", "enable", "disable", "delete"] },
-        skill_name: { type: "string", description: "Every action but create: the exact name from skills_list." },
+        action: { type: "string", enum: ["create", "update", "import", "enable", "disable", "delete"] },
+        skill_name: { type: "string", description: "Every action but create and import: the exact name from skills_list." },
         skill_md: { type: "string", description: "create or update: the full SKILL.md with its YAML frontmatter." },
         references: {
           type: "array",
@@ -745,7 +745,7 @@ const TOOL_DEFINITIONS = [
         },
         gist: { type: "string", description: "Optional one-line summary of the change." },
         base_revision: { type: "string", description: "To update a skill shared with your team: its revision from skills_list." },
-        source: { type: "string", description: "create or update: the URL, folder or 'conversation' it came from." },
+        source: { type: "string", description: "create or update: the URL, folder or 'conversation' it came from. import: owner/repo, a GitHub link to the skill's folder or SKILL.md, or a skills.sh link." },
       },
       required: ["action"],
     },

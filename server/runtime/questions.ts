@@ -1,7 +1,7 @@
 // A bot's question to the person, read the same way wherever it was asked.
 import type { Assignment } from "./types.ts";
 
-/** At Full access ("Just do it") a teammate's question is its requester's to answer, in work the person or their routine
+/** At Full access a teammate's question is its requester's to answer, in work the person or their routine
  * started. Security: work an outside event started (a webhook, a relay, a guest) still asks the person, since its brief
  * is not the person's authority. */
 export const requesterDecides = (a: Pick<Assignment, "level" | "requester" | "origin">): boolean =>

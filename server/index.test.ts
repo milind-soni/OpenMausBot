@@ -12144,6 +12144,26 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("refuses a skill_manage import it cannot fetch with the reason, and stages nothing", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { skillAuthoring: true });
+      const post = async (body: Record<string, unknown>) => {
+        const response = await fetch(`${BASE}/api/internal/skills/stage`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, action: "import", ...body }),
+        });
+        return { status: response.status, error: ((await response.json()) as { error: string }).error };
+      };
+      expect(await post({})).toEqual({ status: 422, error: expect.stringContaining("skill_manage import needs source") });
+      expect(await post({ source: "not a link" })).toEqual({ status: 422, error: expect.stringMatching(/^Could not import a skill from not a link: /) });
+      expect((await api("GET", `/api/bots/${bot.id}/skills`)).body.skills).toEqual([]);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("turns a bot's own skill on, off or deletes it at once, with a receipt the person can undo", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
