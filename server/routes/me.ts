@@ -1,6 +1,6 @@
 // GET and PUT /api/me: a person's own profile on a Team Cloud (people-about.ts): the name and picture they go by and their
 // "About you", read into their own turns only, with the address of their verified sign-in. On a self-hosted server the one
-// profile (Settings → Profile) is the owner's, and each signed-in person only chooses the name they go by here. Anywhere
+// profile (Settings → You and your bots → About you) is the owner's, and each signed-in person only chooses the name they go by here. Anywhere
 // else this answers 404.
 import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
 import type { CloudTeam } from "../cloud-team.ts";
@@ -34,7 +34,7 @@ export function createMeRoutes(deps: MeRouteDeps): RouteHandler {
     if (path !== "/api/me" && path !== "/api/me/welcome") return PASS;
     if (!deps.team && deps.names && path === "/api/me") {
       const session = deps.session(auth);
-      if (!session) return json(res, 404, { error: "This computer goes by the name in Settings → Profile." });
+      if (!session) return json(res, 404, { error: "This computer goes by the name in Settings → You and your bots → About you." });
       const { store, shownAs } = deps.names;
       if (method === "PUT") {
         const body = await readBody(req, 8 * 1024);
