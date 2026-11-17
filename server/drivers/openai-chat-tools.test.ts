@@ -5,7 +5,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../data/instructions.ts";
@@ -103,8 +103,31 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 });
 `;
 
+/** What the turn's own tool session has in hand: each server that has listed its tools (or failed) and can be taken in,
+ * also written as a file named after the server in `gates` when set. */
+const mountSettled = vi.hoisted(() => ({ servers: new Set<string>(), gates: undefined as string | undefined }));
+vi.mock("./chat-mcp-tools.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./chat-mcp-tools.ts")>();
+  return { ...actual, mountChatTools: (...args: Parameters<typeof actual.mountChatTools>) => {
+    const call: Parameters<typeof actual.mountChatTools> = [...args];
+    call[9] = { ...call[9], onSettled: (server) => {
+      mountSettled.servers.add(server);
+      if (mountSettled.gates) writeFileSync(join(mountSettled.gates, server), "");
+    } };
+    return actual.mountChatTools(...call);
+  } };
+});
+/** Waits until the turn's tool session has `server` in hand; fails if it has not within 30 s. */
+async function settledServer(server: string) {
+  for (const since = Date.now(); !mountSettled.servers.has(server);) {
+    if (Date.now() - since > 30_000) throw new Error(`the turn's tool session never had ${server} in hand`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  mountSettled.servers.clear();
+  mountSettled.gates = undefined;
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -1491,18 +1514,67 @@ describe("a configured MCP server that cannot mount", () => {
 });
 
 describe("a turn with the person's Windows computer, the built-in browser and the agents server", () => {
-  function catalog(names: readonly string[]) {
-    const { dir, server } = catalogServer(names);
+  function catalog(names: readonly string[], options: Parameters<typeof catalogServer>[1] = {}) {
+    const { dir, server } = catalogServer(names, options);
     cleanups.push(() => removeTempDir(dir));
     return server;
   }
-  const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => ({
-    localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" },
-    browser: catalog(syntheticToolNames("agent_browser", 32)),
-    agents: catalog(syntheticToolNames("agent", agents)),
-    composio: catalog(syntheticToolNames("router", 7)),
-    data: catalog(syntheticToolNames("table", 5)),
-    ...more,
+  const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => {
+    const others = { localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" as const }, browser: catalog(syntheticToolNames("agent_browser", 32)),
+      composio: catalog(syntheticToolNames("router", 7)), data: catalog(syntheticToolNames("table", 5)), ...more };
+    const names = Object.entries(others).flatMap(([key, server]) => key === "localComputer" ? ["computer"] : key === "custom" ? Object.keys(server as object) : [key]);
+    // Started once the turn's tool session has every other server in hand, so the ones that start in the background are listed from the first request.
+    const gates = mkdtempSync(join(tmpdir(), "omb-chat-tools-settled-"));
+    cleanups.push(() => removeTempDir(gates));
+    mountSettled.gates = gates;
+    return { ...others, agents: catalog(syntheticToolNames("agent", agents), { after: names.map((name) => join(gates, name)) }) };
+  };
+
+  it("sends the first request without waiting for a slow server, and lists its tools from the next round", async () => {
+    let firstAt = 0;
+    const notes = catalog(["note"], { startMs: 1_500 });
+    const f = await fixture(async (_body, response, round) => {
+      if (round > 1) return answer(response);
+      firstAt = Date.now();
+      // The turn has the slow server's tools in hand before the next round.
+      await settledServer("notes");
+      sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
+    });
+    const startedAt = Date.now();
+    await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(firstAt - startedAt).toBeLessThan(1_000);
+    expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([["agents_agent_1", "ask_user"], ["agents_agent_1", "notes_note", "ask_user"]]);
+  });
+
+  it("lists fewer tools when servers that joined after a tool call go past the provider's limit", async () => {
+    const gate = mkdtempSync(join(tmpdir(), "omb-chat-tools-gate-"));
+    cleanups.push(() => removeTempDir(gate));
+    const go = join(gate, "go");
+    const notes = catalog(syntheticToolNames("note", 5), { after: [go] });
+    const f = await fixture(async (body, response) => {
+      if (!body.messages.some((message) => message.role === "tool")) {
+        // The slow server starts, and the turn has its tools in hand, before the next round.
+        writeFileSync(go, "");
+        await settledServer("notes");
+        return sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
+      }
+      if ((body.tools?.length ?? 0) <= 6) return answer(response);
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: `Invalid 'tools': array too long. Expected an array with maximum length 6, but got an array with length ${body.tools!.length} instead.`, type: "invalid_request_error" } }));
+    });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([
+      ["agents_agent_1", "ask_user"],
+      ["agents_agent_1", ...syntheticToolNames("notes_note", 5), "ask_user"],
+      ["agents_agent_1", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool", "ask_user"],
+    ]);
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
   it("sends at most 128 tools, ask_user and every agents tool among them", async () => {
