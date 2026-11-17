@@ -2,8 +2,9 @@
 // recorded ("would have stopped": its measured memory, the cap, its engines, the room left) in the health report's perf
 // part and the server log, and nothing is signalled or closed. Only a number of MB set in OMB_BOT_MEMORY_MAX_MB makes it
 // act, and then only when the server is short of memory, only on the bot using the most, and in steps: what the bot left
-// running and its idle engines first, then (measured again, still over) its largest busy engine or browser, never all at
-// once. A process several bots share, or one other conversations may join, is never stopped.
+// running and its idle engines first, then (measured again, still over) its largest busy engine, never all at once; a
+// stopped engine's conversations then have their browsers closed. A process several bots share, or one other
+// conversations may join, is never stopped.
 //
 // The design's ladder is a systemd scope, then a delegated cgroup v2, then this server's own watchdog, then nothing (the
 // desktop). The kernel rungs are probed and reported but not used yet: putting each bot's processes in a cgroup of its
@@ -121,8 +122,8 @@ export interface CapEvent {
   /** Whether the server was short of memory then: the opt-in cap acts only then. */
   pressure: boolean;
   /** logged: watch only (the default); held: an opt-in cap with room to spare; idle: stopped what it left running and its
-   * idle engines; engine: stopped its largest busy engine; browser: closed its largest browser. */
-  action: "logged" | "held" | "idle" | "engine" | "browser";
+   * idle engines; engine: stopped its largest busy engine; nothing: all it runs may serve other conversations. */
+  action: "logged" | "held" | "idle" | "engine" | "nothing";
 }
 
 /** An engine stopped for its bot's memory: the conversations it ran, for the line their turn ends with. */
@@ -137,8 +138,9 @@ export interface WatchdogOptions {
   owners: () => readonly FootprintOwner[];
   pressure: () => CapPressure;
   pss?: (pid: number) => number | null;
-  /** Closes one browser session the way a memory stop closes one (its sign-ins saved). */
-  closeBrowser?: (session: string) => Promise<void>;
+  /** Closes the browsers of these conversations (their stopped engines') the way a memory stop closes one: its sign-ins
+   * saved, once no turn holds it. */
+  closeBrowsers?: (threadIds: readonly string[]) => Promise<void>;
   signal?: (pid: number, signal: NodeJS.Signals) => void;
   /** What each pid's start is now (Linux's start tick): only the process that was read is signalled. */
   startOf?: (pid: number) => string | null;
@@ -256,16 +258,21 @@ export class BotMemoryWatchdog {
     const top = due[0]!;
     if (top.id !== largest?.id) return [];
     const over = this.#over.get(top.id)!;
-    const units = [...top.tally.units.values()].filter((unit) => !unit.shareable);
+    // Only engines are stopped: a browser goes with the engines of its conversations (it is closed once their turn lets
+    // it go), so a browser a running turn holds is never the step, and a Team Cloud's other members keep theirs.
+    const engines = [...top.tally.units.values()].filter((unit) => unit.kind === "engine" && !unit.shareable);
     const busy = this.#options.busy ?? ((threadId: string) => runningTurns.has(threadId));
-    const first = over.stepped ? [] : units.filter((unit) => unit.kind === "engine" && (unit.exited || !unit.threads.some(busy)));
-    let step: { action: CapEvent["action"]; units: FootprintUnit[] };
-    if (first.length) step = { action: "idle", units: first };
-    else {
-      const size = (unit: FootprintUnit) => unit.pids.reduce((sum, pid) => sum + (top.sizes.get(pid) ?? 0), 0);
-      const largest = units.filter((unit) => !unit.exited).sort((a, b) => size(b) - size(a))[0];
-      if (!largest) return [];
-      step = { action: largest.kind === "browser" ? "browser" : "engine", units: [largest] };
+    const first = over.stepped ? [] : engines.filter((unit) => unit.exited || !unit.threads.some(busy));
+    const size = (unit: FootprintUnit) => unit.pids.reduce((sum, pid) => sum + (top.sizes.get(pid) ?? 0), 0);
+    const largestBusy = engines.filter((unit) => !unit.exited).sort((a, b) => size(b) - size(a))[0];
+    const step = first.length ? { action: "idle" as const, units: first } : largestBusy ? { action: "engine" as const, units: [largestBusy] } : null;
+    if (!step) {
+      // All it runs is shared or may be joined by other conversations: nothing it may stop, written down once.
+      if (over.logged) return [];
+      over.logged = true;
+      const noted = event(top, "nothing");
+      this.#note(noted, "nothing it may stop (its engines may serve other conversations)");
+      return [noted];
     }
     // The next step waits for a new measure past the window (or memory still short on two looks).
     over.stepped = true;
@@ -273,19 +280,17 @@ export class BotMemoryWatchdog {
     over.looks = 0;
     const done = event(top, step.action);
     this.#stops += 1;
-    this.#note(done, step.action === "idle" ? `stopping what it left running and its idle engines (${step.units.length})`
-      : step.action === "engine" ? "stopping its largest busy engine" : "closing its largest browser");
+    this.#note(done, step.action === "idle" ? `stopping what it left running and its idle engines (${step.units.length})` : "stopping its largest busy engine");
     for (const unit of step.units) {
-      if (unit.kind === "engine" && !unit.exited) this.#stopped.set(unit.root, { at: now, pid: unit.root, threads: [...unit.threads], botId: top.id, usedBytes: top.used, capBytes: top.cap });
+      if (!unit.exited) this.#stopped.set(unit.root, { at: now, pid: unit.root, threads: [...unit.threads], botId: top.id, usedBytes: top.used, capBytes: top.cap });
     }
     for (const [pid, stop] of this.#stopped) if (now - stop.at > EXPLAIN_FOR_MS) this.#stopped.delete(pid);
-    const browsers = step.units.filter((unit) => unit.kind === "browser");
-    const engines = step.units.filter((unit) => unit.kind === "engine");
     const starts = new Map(rows.map((row) => [row.pid, row.start]));
-    // The browser closes on its own time (it waits for the stopped turn to let it go): the next look does not wait.
-    const closing = browsers.map((unit) => (unit.session !== undefined && this.#options.closeBrowser ? this.#options.closeBrowser(unit.session).catch(() => undefined) : Promise.resolve()));
-    await this.#signalUnits(top.id, engines, starts);
-    this.#acting = Promise.all(closing);
+    await this.#signalUnits(top.id, step.units, starts);
+    // Their conversations' browsers close on their own time (each waits for its stopped turn to let it go): the next look
+    // does not wait.
+    const threads = [...new Set(step.units.flatMap((unit) => unit.threads))];
+    this.#acting = threads.length && this.#options.closeBrowsers ? this.#options.closeBrowsers(threads).catch(() => undefined) : Promise.resolve();
     return [done];
   }
 
@@ -342,7 +347,7 @@ export class BotMemoryWatchdog {
     return stop !== undefined && stop.threads.includes(threadId) && at - stop.at <= EXPLAIN_FOR_MS;
   }
 
-  /** Resolves once the last step's browser close has finished: for tests. */
+  /** Resolves once the last step's browsers have closed: for tests. */
   closed(): Promise<unknown> { return this.#acting; }
 
   /** Steps taken since the server started (the opt-in cap only). */
@@ -428,7 +433,7 @@ let report: () => CapReport = () => ({ mb: null, mode: null, rung: "none", offer
  * each look, as the most turns at once may change (a plan's limit arrives after start). */
 export function startBotMemoryCap(deps: {
   gate: GateHost; turns: () => number | undefined; owners: () => readonly FootprintOwner[]; botName: (botId: string) => string;
-  closeBrowser: (session: string) => Promise<void>; list: () => readonly ProcessRow[]; startOf: (pid: number) => string | null; pressure: () => CapPressure;
+  closeBrowsers: (threadIds: readonly string[]) => Promise<void>; list: () => readonly ProcessRow[]; startOf: (pid: number) => string | null; pressure: () => CapPressure;
   env?: NodeJS.ProcessEnv; memoryBytes?: number; log?: (line: string) => void; platform?: NodeJS.Platform;
 }): BotMemoryWatchdog | null {
   const env = deps.env ?? process.env, log = deps.log ?? ((line: string) => console.warn(line));
@@ -436,7 +441,7 @@ export function startBotMemoryCap(deps: {
   const cap = () => botMemoryCap(env, { gate: deps.gate, memoryBytes: deps.memoryBytes ?? boxMemory().bytes, ...(deps.turns() === undefined ? {} : { turns: deps.turns() }) },
     (line) => { if (!warned) { warned = true; log(`memory: ${line}`); } });
   const first = cap(), ladder = capLadder(first, { platform: deps.platform ?? process.platform });
-  const dog = ladder.rung === "watchdog" ? new BotMemoryWatchdog({ cap, list: deps.list, owners: deps.owners, pressure: deps.pressure, pss: (pid) => pssBytes(pid), closeBrowser: deps.closeBrowser, startOf: deps.startOf, log }) : null;
+  const dog = ladder.rung === "watchdog" ? new BotMemoryWatchdog({ cap, list: deps.list, owners: deps.owners, pressure: deps.pressure, pss: (pid) => pssBytes(pid), closeBrowsers: deps.closeBrowsers, startOf: deps.startOf, log }) : null;
   report = () => {
     const now = dog ? cap() : null;
     return { mb: now ? mb(now.bytes) : null, mode: now?.mode ?? null, rung: dog ? ladder.rung : "none", offered: ladder.offered, stops: dog?.stops() ?? 0, flagged: dog?.flagged() ?? 0, events: dog?.events() ?? [] };

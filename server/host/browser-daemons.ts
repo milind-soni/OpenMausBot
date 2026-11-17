@@ -91,8 +91,6 @@ export function createBrowserDaemons(options: BrowserDaemonsOptions = {}) {
       }
       return known?.pid === pid && known.daemon ? { pid } : null;
     },
-    /** A session closed: its check goes. */
-    forget(session: string): void { checked.delete(session); },
   };
 }
 export type BrowserDaemons = ReturnType<typeof createBrowserDaemons>;

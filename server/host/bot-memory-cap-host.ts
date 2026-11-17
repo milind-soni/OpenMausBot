@@ -14,20 +14,22 @@ const startOf = (pid: number): string | null => {
   try { return parseProcStat(pid, readFileSync(`/proc/${pid}/stat`, "utf8"))?.start ?? null; } catch { return null; }
 };
 
-/** The room the watchdog weighs: engine-memory's own signals where turns wait for room; elsewhere (an explicit cap on a
- * server without the gate) the same arithmetic from the memory read directly, so an opt-in cap still sees a shortage. */
-export function capPressure(memory: Pick<EngineMemory, "enabled" | "roomFactor" | "shortOfRoom"> = engineMemory, read: () => HostMemory | null = () => readHostMemory()): CapPressure {
+/** The room the watchdog weighs: engine-memory's room factor where turns wait for room (memory's and the pids limit's);
+ * elsewhere (an explicit cap on a server without the gate) the same arithmetic from memory read directly. Short means
+ * memory itself, below the floor admission keeps (never only the pids limit): the line a stopped turn ends with says so. */
+export function capPressure(memory: Pick<EngineMemory, "enabled" | "roomFactor"> = engineMemory, read: () => HostMemory | null = () => readHostMemory()): CapPressure {
   const host = read();
   const free = host ? host.availableBytes + host.swapFreeBytes / 2 : null;
-  if (memory.enabled) return { room: memory.roomFactor(), short: memory.shortOfRoom(), freeBytes: free };
+  const floor = host ? Math.max(320 * MB, host.totalBytes * 0.1) : 0;
+  const short = host !== null && free !== null && free < floor;
+  if (memory.enabled) return { room: memory.roomFactor(), short, freeBytes: free };
   if (!host || free === null) return { room: 1, short: false, freeBytes: null };
-  const floor = Math.max(320 * MB, host.totalBytes * 0.1);
-  return { room: Math.min(1, Math.max(0.1, (free - floor) / (host.totalBytes / 2))), short: free < floor, freeBytes: free };
+  return { room: Math.min(1, Math.max(0.1, (free - floor) / (host.totalBytes / 2))), short, freeBytes: free };
 }
 
-export function startBotMemoryCapHost(deps: { owners: () => readonly FootprintOwner[]; botName: (botId: string) => string | undefined; closeBrowser: (session: string) => Promise<void> }): BotMemoryWatchdog | null {
+export function startBotMemoryCapHost(deps: { owners: () => readonly FootprintOwner[]; botName: (botId: string) => string | undefined; closeBrowsers: (threadIds: readonly string[]) => Promise<void> }): BotMemoryWatchdog | null {
   return startBotMemoryCap({
     gate: gateHost(), turns: () => engineMemory.most(), owners: deps.owners, botName: (botId) => deps.botName(botId) ?? "This bot",
-    closeBrowser: deps.closeBrowser, list: () => linuxProcessList().rows, startOf, pressure: () => capPressure(),
+    closeBrowsers: deps.closeBrowsers, list: () => linuxProcessList().rows, startOf, pressure: () => capPressure(),
   });
 }

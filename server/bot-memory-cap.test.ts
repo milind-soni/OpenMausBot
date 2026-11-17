@@ -57,11 +57,13 @@ describe("the cap's setting", () => {
 
   it("reads pressure from engine-memory where the gate runs, else from memory directly", () => {
     const host = (availableGB: number) => () => ({ totalBytes: 16 * GB, availableBytes: availableGB * GB, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 });
-    expect(capPressure({ enabled: true, roomFactor: () => 0.2, shortOfRoom: () => true }, host(1))).toEqual({ room: 0.2, short: true, freeBytes: GB });
-    expect(capPressure({ enabled: false, roomFactor: () => 1, shortOfRoom: () => false }, host(12))).toMatchObject({ room: 1, short: false });
+    expect(capPressure({ enabled: true, roomFactor: () => 0.2 }, host(1))).toEqual({ room: 0.2, short: true, freeBytes: GB });
+    // The pids limit alone lowers the room factor, never "short": a stopped turn's line says memory ran short.
+    expect(capPressure({ enabled: true, roomFactor: () => 0.1 }, host(12))).toEqual({ room: 0.1, short: false, freeBytes: 12 * GB });
+    expect(capPressure({ enabled: false, roomFactor: () => 1 }, host(12))).toMatchObject({ room: 1, short: false });
     // 1 GB free of 16 GB: below the 1.6 GB floor, so short; a tenth of the room.
-    expect(capPressure({ enabled: false, roomFactor: () => 1, shortOfRoom: () => false }, host(1))).toMatchObject({ room: 0.1, short: true });
-    expect(capPressure({ enabled: false, roomFactor: () => 1, shortOfRoom: () => false }, () => null)).toEqual({ room: 1, short: false, freeBytes: null });
+    expect(capPressure({ enabled: false, roomFactor: () => 1 }, host(1))).toMatchObject({ room: 0.1, short: true });
+    expect(capPressure({ enabled: false, roomFactor: () => 1 }, () => null)).toEqual({ room: 1, short: false, freeBytes: null });
   });
 });
 
@@ -94,14 +96,14 @@ function dog(rows: () => ProcessRow[], options: {
   mode?: CapSetting["mode"]; pressure?: () => CapPressure; busy?: ReadonlySet<string>; owners?: () => FootprintOwner[];
   pss?: (pid: number) => number | null; startOf?: (pid: number) => string | null;
 } = {}) {
-  const signals: string[] = [], closed: string[] = [], logs: string[] = [];
+  const signals: string[] = [], closed: string[][] = [], logs: string[] = [];
   let clock = 1_800_000_000_000, pssReads = 0;
   const pss = options.pss ?? ((pid: number) => rows().find((row) => row.pid === pid)?.rssBytes ?? null);
   const watchdog = new BotMemoryWatchdog({
     cap: () => ({ mode: options.mode ?? "enforce", bytes: 1000 * MB }), list: rows, owners: options.owners ?? (() => OWNERS), pressure: options.pressure ?? (() => SHORT),
     pss: (pid) => { pssReads += 1; return pss(pid); }, startOf: options.startOf ?? ((pid) => `s${pid}`), graceMs: 0, now: () => clock,
     busy: (threadId) => (options.busy ?? new Set(["tb", "ta"])).has(threadId),
-    signal: (pid, value) => signals.push(`${value} ${pid}`), closeBrowser: async (session) => { closed.push(session); }, log: (line) => logs.push(line),
+    signal: (pid, value) => signals.push(`${value} ${pid}`), closeBrowsers: async (threadIds) => { closed.push([...threadIds]); }, log: (line) => logs.push(line),
   });
   return { watchdog, signals, closed, logs, pssReads: () => pssReads, advance: (ms: number) => { clock += ms; }, now: () => clock };
 }
@@ -188,7 +190,7 @@ describe("an opt-in cap (a number of MB set)", () => {
     // Memory short and over on a second look: the first step.
     expect((await h.watchdog.check()).map((event) => event.action)).toEqual(["idle"]);
     expect(h.signals).toEqual(["SIGTERM 310", "SIGTERM 311", "SIGTERM 321", "SIGKILL 310", "SIGKILL 311", "SIGKILL 321"]);
-    expect(h.closed).toEqual([]);
+    expect(h.closed).toEqual([["tc", "td"]]);
     // Those gone, one engine of 1,600 MB and its browser: still over. The next step waits for a new measure.
     sizes = { a: 1200, b: 1600, b2: 0, orphan: 0 };
     h.signals.length = 0;
@@ -196,21 +198,29 @@ describe("an opt-in cap (a number of MB set)", () => {
     h.advance(5_000);
     expect((await h.watchdog.check()).map((event) => event.action)).toEqual(["engine"]);
     expect(h.signals).toEqual(["SIGTERM 300", "SIGTERM 301", "SIGKILL 300", "SIGKILL 301"]);
-    expect(h.closed).toEqual([]);
+    // Its browser goes with the conversation whose engine stopped, once that turn lets it go: never a step of its own.
+    expect(h.closed).toEqual([["tc", "td"], ["tb"]]);
     expect(h.watchdog.stops()).toBe(2);
     expect(h.logs.at(-1)).toMatch(/^memory: bot bot_b uses 1700 MB \(proportional\), over the 1000 MB .*: stopping its largest busy engine$/);
   });
 
-  it("acts on the bot using the most only, and closes a browser by its session alone when that is the largest", async () => {
-    // Both far over with memory short: due at once. Bot B (2,000 MB) over bot A (1,500 MB): bot B only; its browser is
-    // larger than its busy engine.
+  it("acts on the bot using the most only, and stops an engine even when its browser is larger (the browser goes with it)", async () => {
+    // Both far over with memory short: due at once. Bot B (2,000 MB) over bot A (1,500 MB): bot B only. Its browser
+    // (1,400 MB) is larger than its busy engine, but a browser a running turn holds can't be closed: the engine goes,
+    // and its conversation's browser with it.
     const h = dog(() => processes({ a: 1500, b: 600, browser: 1400 }));
     const [event, ...more] = await h.watchdog.check();
     expect(more).toEqual([]);
-    expect(event).toMatchObject({ botId: "bot_b", action: "browser" });
+    expect(event).toMatchObject({ botId: "bot_b", action: "engine" });
     await h.watchdog.closed();
-    expect(h.closed).toEqual(["bot-b"]);
-    expect(h.signals).toEqual([]);
+    expect(h.closed).toEqual([["tb"]]);
+    expect(h.signals).toEqual(["SIGTERM 300", "SIGTERM 301", "SIGKILL 300", "SIGKILL 301"]);
+    // Its browser never closes (the turn still holds it): the next step is an engine again, never the browser.
+    h.advance(10_000);
+    await h.watchdog.check();
+    expect((await h.watchdog.check()).map((step) => step.action)).toEqual(["engine"]);
+    // Bot A, over too, is left alone while bot B uses more.
+    expect(h.signals.some((line) => /\b20[01]$/.test(line))).toBe(false);
   });
 
   it("stops at once only far over with memory short, and with room factor alone waits the window", async () => {
@@ -224,13 +234,18 @@ describe("an opt-in cap (a number of MB set)", () => {
     expect((await near.watchdog.check()).map((event) => event.action)).toEqual(["engine"]);
   });
 
-  it("never stops an engine other conversations may join, even when it is the bot's largest", async () => {
+  it("never stops an engine other conversations may join, even when it is the bot's largest, and says so when that is all", async () => {
     const owners = () => OWNERS.map((owner) => (owner.pid === 300 ? { ...owner, shareable: true } : owner));
     const h = dog(() => processes({ b: 1600, b2: 400 }), { owners, busy: new Set(["tb", "tc"]) });
     await h.watchdog.check();
     h.advance(OVER_FOR_MS);
     await h.watchdog.check();
     expect(h.signals).toEqual(["SIGTERM 310", "SIGTERM 311", "SIGKILL 310", "SIGKILL 311"]);
+    const only = dog(() => processes({ b: 1600 }), { owners, busy: new Set(["tb"]) });
+    expect((await only.watchdog.check()).map((event) => event.action)).toEqual(["nothing"]);
+    for (let look = 0; look < 5; look++) { only.advance(OVER_FOR_MS); expect(await only.watchdog.check()).toEqual([]); }
+    expect(only.signals).toEqual([]);
+    expect(only.watchdog.stops()).toBe(0);
   });
 
   it("signals nothing whose start can't be read now, and kills only what is still the bot's after the grace", async () => {

@@ -497,11 +497,19 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       return [{ ...daemon, session, botIds, kind: "browser" as const }];
     });
   }
-  /** Closes one browser session the memory cap stopped (bot-memory-cap.ts), as one stopped for memory is: only that
-   * session, so on a Team Cloud the same bot's browsers for other members stay open; never one on the person's own Chrome. */
-  async function closeCapBrowser(session: string): Promise<void> {
-    const spec = usedBrowserSessions.get(session);
-    if (spec && !chromeTarget(session, spec) && !attachesToChrome(spec.env)) await closeForMemory(session, spec);
+  /** Closes the browsers of the conversations whose engine the memory cap stopped (bot-memory-cap.ts), as one stopped for
+   * memory is: each conversation's own session, so on a Team Cloud the same bot's browsers for other members stay open;
+   * never one on the person's own Chrome, never a profile another bot uses. */
+  async function closeCapBrowsers(threadIds: readonly string[]): Promise<void> {
+    const sessions = new Map<string, Spec>();
+    for (const threadId of threadIds) {
+      const browser = threadBrowser(threadId), botId = store.botByThread(threadId)?.id;
+      const { session, spec } = browser ?? {};
+      if (session === undefined || !spec || chromeTarget(session, spec) || attachesToChrome(spec.env)) continue;
+      if (store.bots.some((other) => other.id !== botId && browserSessionsOf(other.id, other.browserProfile).includes(session))) continue;
+      sessions.set(session, spec);
+    }
+    await Promise.all([...sessions].map(([session, spec]) => closeForMemory(session, spec)));
   }
   /** The browser a thread's bot would start; a temporary one has no session until its first call. My Chrome is the person's own. */
   function threadBrowser(threadId: string): { session: string | undefined; spec: Spec | undefined } | null {
@@ -639,6 +647,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, lentChromeSummary, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,
-    eraseAudienceBrowsers, browserOwners, closeCapBrowser,
+    eraseAudienceBrowsers, browserOwners, closeCapBrowsers,
   };
 }

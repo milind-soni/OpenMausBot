@@ -613,11 +613,13 @@ the desktop app included); `auto` is the default (watch only) and `off` turns
 the watching off. Even then it acts only while the server is short of
 memory, only on the bot using the most, and in steps: first what the bot
 left running and its idle engines; then, measured again and still over, its
-largest busy engine or browser. A turn whose engine is stopped ends with a
+largest busy engine. The browser of a stopped engine's conversation is
+closed once that turn lets it go. A turn whose engine is stopped ends with a
 line saying the bot used more memory than this computer allows for one bot.
 Engines and browsers several bots share, and a process other conversations
-may join, are never stopped this way; on a Team Cloud only the browser that
-was over is closed, never the same bot's browsers for other members. The
+may join, are never stopped this way; on a Team Cloud only the stopped
+conversation's own browser is closed, never the same bot's browsers for
+other members. The
 server watches by reading its process list; it logs at start whether the
 host also offers a systemd scope or a delegated cgroup, which are not used
 yet.
