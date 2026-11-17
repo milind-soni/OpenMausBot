@@ -49,4 +49,19 @@ describe("importedSkillRequest", () => {
     expect(body).toEqual({ importError: expect.stringMatching(/^Could not import a skill from /) });
     expect(github.requests.length).toBe(before);
   });
+
+  it("cancels a fetch that is still running when the turn ends", async () => {
+    const turnEnded = new AbortController();
+    let calls = 0;
+    const slowGitHub: typeof fetch = (_input, init) => {
+      calls += 1;
+      queueMicrotask(() => turnEnded.abort());
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      });
+    };
+    const body = await importedSkillRequest({ action: "import", source: "https://github.com/acme/skills/tree/main/skills/pdf" }, slowGitHub, turnEnded.signal);
+    expect(body).toEqual({ importError: expect.stringMatching(/^Could not import a skill from /) });
+    expect(calls).toBe(1);
+  });
 });
