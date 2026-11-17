@@ -1824,3 +1824,43 @@ engine credentials, browser state, and external workspaces. For Docker, the
 whole `/data` volume includes the CLI homes. See the
 [backup and restore instructions](deploy-vps.md#back-up) for the exact scope
 and stop/start commands.
+
+### The doctor: checking and repairing the data
+
+The doctor checks a server's data folder and repairs what can be repaired
+without losing anything. It runs by itself on the first start of each new
+version, before the server reads its data. It writes one log line for each
+thing it found, and adds a short `doctor` summary to `/api/health` (as seen by
+the owner): the names of the checks it fixed and of those left for you, never a
+path. When the new version fails its health check, `update.sh` runs that
+version's doctor with `--fix`. If the doctor repairs something, the update
+starts the new version once more; otherwise it rolls back as before.
+
+You can run it yourself, as the server's user:
+
+```sh
+openmausbot doctor --data                 # check and report; changes nothing
+openmausbot doctor --data --fix           # also apply the safe repairs (stop the server first)
+openmausbot doctor --data --json          # the report as JSON
+docker compose exec omb openmausbot doctor --data   # Docker
+```
+
+`--data-dir DIR` points it at another folder. It exits 0 when everything is
+fine (after `--fix`, fine now) and 8 when a problem is left.
+
+| Check | Looks at | Repaired by `--fix` |
+|---|---|---|
+| Data format | `data-format.json` | Never. Data from a newer version stops every repair: install that version, or roll back. |
+| Data folder lease | `openmausbot-server.lease` | A lease a dead process on this machine left is retired. A live server means nothing is changed. |
+| Folders | the data folder, `events`, `native` | Missing folders are made. |
+| Bots and rooms | `bots.json`, `groups.json` | An unreadable file is put back from the whole temp file of a save that was cut short. With no such copy, a copy of the damaged file is kept and you are told how to restore it. |
+| Unfinished saves | `<file>.<pid>.<id>.tmp` at the top of the data folder | Moved into the backup. |
+| Engine-run records | `engine-runs/` | Records with neither a server nor a process to stop are moved into the backup. |
+| Messages database | `messages.db` | A large write-ahead log is folded back into the database. A damaged database is reported, never rewritten. |
+| Private files | `config.json`, `sessions.json`, `bots.json`, `messages.db`, … | Made owner-only (0600). Not on Windows. |
+| Settings file | `config.json` | Never: it tells you `openmausbot config restore latest` when dated copies exist. |
+
+Before changing anything, a repair copies it into
+`<data>/doctor-backups/<time>/`, with a `manifest.json` that lists what changed
+(for a file mode, the old mode). These copies stay on that computer and are not
+part of a workspace backup. Delete them once the server runs well.

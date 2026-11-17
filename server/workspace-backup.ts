@@ -54,6 +54,9 @@ const EXCLUDED = new Set([
   // The data folder's format marker (data-format.ts) describes the folder it is in. Carried into a server older than the
   // one that wrote it, it would stop that server on every start; the destination keeps its own.
   "data-format.json",
+  // The doctor's copies of what it repaired, and the version it last ran for (doctor/backup.ts, doctor/start.ts): this
+  // folder's own history, and copies of files a backup already holds.
+  "doctor-backups", "doctor-state.json",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",
