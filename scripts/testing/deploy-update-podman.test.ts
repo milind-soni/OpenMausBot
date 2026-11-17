@@ -34,8 +34,9 @@ function tree(dir: string, prefix = ""): Record<string, string> {
 
 const unitText = (image: string) => `[Container]\nContainerName=openmausbot\nImage=${image}\nNetwork=host\n\n[Service]\nRestart=on-failure\n`;
 
-/** A Podman install on 0.1.150, its unit and settings as the installer writes them, and a stable channel naming `target`. */
-function install(target: Record<string, unknown> = {}) {
+/** A Podman install on 0.1.150, its unit and settings as the installer writes them, and a stable channel naming `target`.
+ * `extra`: the fake's own switches (failRestore); `old`: what the running version does when it is started again. */
+function install(target: Record<string, unknown> = {}, extra: Record<string, unknown> = {}, old: Record<string, unknown> = {}) {
   const root = mkdtempSync(join(tmpdir(), "omb-update-podman-"));
   dirs.push(root);
   const home = join(root, "share", "openmausbot");
@@ -73,14 +74,17 @@ function install(target: Record<string, unknown> = {}) {
     "shift",
     'case "$1" in',
     "  show-environment | daemon-reload) exit 0 ;;",
-    `  stop) exec ${node} "${FAKE}" compose stop ;;`,
+    // stop-fails-on-new: the new version, once started, cannot be stopped (a rollback's stop fails).
+    `  stop) if [ -f "$FAKE_DOCKER_DIR/stop-fails-on-new" ] && grep -qx "Image=${NEW.refs[0]}" "${unit}"; then echo "Failed to stop openmausbot.service" >&2; exit 1; fi; exec ${node} "${FAKE}" compose stop ;;`,
     `  restart) OMB_IMAGE=$(sed -n 's/^Image=//p' "${unit}") exec ${node} "${FAKE}" compose up -d ;;`,
     "esac",
     "exit 64",
   ].join("\n"));
   shim("journalctl", `exec ${node} "${FAKE}" compose logs`);
+  // Linger on, as on a server; FAKE_LINGER=no for a user whose services stop at logout.
+  shim("loginctl", '[ "$1" = show-user ] && echo "${FAKE_LINGER:-yes}"');
   writeFileSync(join(fake, "state.json"), JSON.stringify({
-    serial: 1, composeReadsPin: true, defaultImage: OLD.refs[1], dataVolume: "deploy_data", images: [OLD, { ...NEW, ...target }],
+    ...extra, serial: 1, composeReadsPin: true, defaultImage: OLD.refs[1], dataVolume: "deploy_data", images: [{ ...OLD, ...old }, { ...NEW, ...target }],
     containers: { omb: { id: "omb-1", image: OLD.id, status: "running", restarts: 0 } },
   }));
   writeFileSync(join(root, "stable.json"), JSON.stringify({ channel: "stable", version: "0.1.151", image: NEW.refs[0], history: [] }));
@@ -98,7 +102,7 @@ function install(target: Record<string, unknown> = {}) {
   const log = (name: string) => (existsSync(join(fake, `${name}.log`)) ? readFileSync(join(fake, `${name}.log`), "utf8").trim().split("\n") : []);
   const copies = () => readdirSync(join(fake, "volumes")).filter((name) => name.includes("-before-update-")).sort();
   return {
-    data, run, log, copies,
+    data, run, log, copies, fake,
     state: () => JSON.parse(readFileSync(join(fake, "state.json"), "utf8")),
     env: () => readFileSync(join(home, ".env"), "utf8"),
     unit: () => readFileSync(unit, "utf8"),
@@ -147,6 +151,36 @@ describe.skipIf(!posix)("deploy/update.sh on a Podman install", () => {
     expect(box.unit()).toBe(unitText(OLD.refs[1]!));
     expect(box.state().containers.omb).toMatchObject({ image: OLD.id, status: "running" });
     expect(tree(box.data)).toEqual({ ...before, "started-by.txt": "0.1.150\n0.1.150\n" });
+  });
+
+  it("names systemctl and journalctl, never docker compose, when a person has to step in", () => {
+    // The data cannot be put back: the way to run the server on the data as it is.
+    const restore = install({ behaviour: "silent" }, { failRestore: true });
+    const failed = restore.run([], { OMB_UPDATE_WAIT_S: "2" });
+    expect(failed.status).toBe(2);
+    expect(failed.stdout).toContain("To run the server on the data as it is instead: systemctl --user start openmausbot (that starts 0.1.151 again).");
+    expect(failed.stdout).not.toContain("docker compose");
+
+    // The old version is back but does not become healthy either: its log.
+    const unhealthy = install({ behaviour: "silent" }, {}, { behaviour: "crashes", lastWords: "the old one fails too" });
+    const back = unhealthy.run([], { OMB_UPDATE_WAIT_S: "2" });
+    expect(back.status).toBe(2);
+    expect(back.said.at(-1)).toBe("0.1.150 and its data are back, but it did not become healthy either (it kept stopping as it started (the old one fails too)). See: journalctl --user -u openmausbot");
+
+    // The new version cannot be stopped to roll back: the command to stop it.
+    const stuck = install({ behaviour: "silent" });
+    writeFileSync(join(stuck.fake, "stop-fails-on-new"), "");
+    const kept = stuck.run([], { OMB_UPDATE_WAIT_S: "2" });
+    expect(kept.status).toBe(2);
+    expect(kept.said.at(-1)).toContain("run ./update.sh --rollback again once systemctl --user stop openmausbot works.");
+  });
+
+  it("says when the user's services stop at logout (linger off), and goes on", () => {
+    const box = install();
+    const done = box.run([], { FAKE_LINGER: "no" });
+    expect(done.status, done.stdout + done.stderr).toBe(0);
+    expect(done.said[0]).toBe("Note: your user may not run services while logged out (linger is off), so the server stops when you log out and does not start at boot. Once, as an administrator: sudo loginctl enable-linger " + spawnSync("id", ["-un"], { encoding: "utf8" }).stdout.trim());
+    expect(done.said.at(-2)).toMatch(/^The data from before the update is kept in the Podman volume /);
   });
 
   it("refuses to run as root, whose Podman is not this install's", () => {

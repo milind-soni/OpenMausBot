@@ -6,9 +6,14 @@
 # data. It also records whether the bots' sandbox (bubblewrap) can run in a rootless container, and with what.
 # The files the installer places (update.sh) come from this checkout.
 # ONLY ON A THROWAWAY HOST (a CI runner): it writes into this user's ~/.local/share/openmausbot and removes it at the
-# end, and restarts this user's systemd. It refuses to start where a MausBot Podman install already exists.
+# end, and restarts this user's systemd. It refuses to start where a MausBot Podman install already exists, and anywhere
+# but a CI runner (GITHUB_ACTIONS or CI set to true): it runs sudo.
 #   OUT=<evidence folder> bash deploy/e2e/podman.sh
 set -euo pipefail
+if [ "${GITHUB_ACTIONS:-}" != true ] && [ "${CI:-}" != true ]; then
+  echo "This changes the host with sudo (linger, subordinate ids, a restart of this user's systemd): it runs only on a CI runner, where GITHUB_ACTIONS or CI is true." >&2
+  exit 2
+fi
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 OUT=${OUT:-$(mktemp -d)}
 mkdir -p "$OUT"
@@ -110,6 +115,10 @@ cp "$UNIT" "$OUT/openmausbot.container"
 contains "$OUT/quadlet-dryrun.txt" "---openmausbot.service---" "quadlet did not make the service"
 systemctl --user is-active --quiet openmausbot || fail "the service is not active"
 healthy || fail "the server does not answer on 127.0.0.1:8799"
+# The health check reads the port in the container when it runs (server.env's OMB_PORT): systemd made the unit's $$ one $.
+health_test=$(podman inspect -f '{{json .Config.Healthcheck.Test}}' openmausbot)
+# shellcheck disable=SC2016 # the literal text the check must hold
+grep -qF '${OMB_PORT:-8799}/api/health' <<<"$health_test" || fail "the health check does not read OMB_PORT when it runs: $health_test"
 ss -ltnH >"$OUT/listening.txt"
 grep -q "127.0.0.1:8799 " "$OUT/listening.txt" || fail "nothing listens on 127.0.0.1:8799: $(cat "$OUT/listening.txt")"
 [ -z "$(new_outside)" ] || fail "the server listens beyond this machine without --lan: $(new_outside)"
@@ -199,6 +208,9 @@ server=$(ss -ltnpH "( sport = :8799 )" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | he
 [ -n "$server" ] || fail "no server process to pause"
 # Past the health check's start period first: failures inside it do not count.
 for _ in $(seq 1 60); do [ "$(podman inspect -f '{{.State.Health.Status}}' openmausbot)" = healthy ] && break; sleep 5; done
+[ "$(podman inspect -f '{{.State.Health.Status}}' openmausbot)" = healthy ] ||
+  fail "the health check never passed: $(podman inspect -f '{{json .State.Health}}' openmausbot 2>&1 | head -c 600)"
+finding "health: the check ran in the container as $health_test, and passed"
 podman inspect -f '{{.State.Health.Status}} {{json .Config.Healthcheck}} {{.Config.HealthcheckOnFailureAction}}' openmausbot >"$OUT/health-before.txt" 2>&1 || true
 systemctl --user list-timers --all --no-pager >"$OUT/timers.txt" 2>&1 || true
 kill -STOP "$server"

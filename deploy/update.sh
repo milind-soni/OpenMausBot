@@ -80,6 +80,8 @@ unset OMB_IMAGE
 # unit that podman.unit names. The steps are the same, through Podman and `systemctl --user` (podman_compose below).
 UNIT=""
 STORE=Docker
+# The commands this script names when a person has to step in.
+STOP_HINT="docker compose stop" START_HINT="docker compose up -d" LOGS_HINT="docker compose logs $SERVICE"
 if [ -f podman.unit ]; then
   UNIT=$(head -n 1 podman.unit)
   STORE=Podman
@@ -118,6 +120,7 @@ image_version() { docker image inspect -f '{{index .Config.Labels "org.openconta
 if [ -n "$UNIT" ]; then
   # The unit's name is its container's: openmausbot.container runs openmausbot.service, container openmausbot.
   SERVER_UNIT=$(basename "$UNIT" .container)
+  STOP_HINT="systemctl --user stop $SERVER_UNIT" START_HINT="systemctl --user start $SERVER_UNIT" LOGS_HINT="journalctl --user -u $SERVER_UNIT"
   # Podman takes the same commands as Docker here. The helpers mount the data folder, which SELinux labels for the
   # server's container alone, so they run without a label of their own.
   docker() { if [ "$1" = run ]; then shift; podman run --security-opt label=disable "$@"; else podman "$@"; fi; }
@@ -609,7 +612,7 @@ roll_back() { # why, exit code when the old version is back
   say "$why"
   say "Putting back the version and the data from before the update…"
   if ! stop_server; then
-    say "The server could not be stopped (see $LOG), so its data was left as it is. The update's journal is kept: run ./update.sh --rollback again once docker compose stop works."
+    say "The server could not be stopped (see $LOG), so its data was left as it is. The update's journal is kept: run ./update.sh --rollback again once $STOP_HINT works."
     exit 2
   fi
   if ! docker volume inspect "$J_backup" >/dev/null 2>&1; then
@@ -623,7 +626,7 @@ roll_back() { # why, exit code when the old version is back
   # The settings go back with the data, never before it: an old version is not started on data a newer one left.
   if ! put_back "$J_backup" "$J_data" "$helper_image" >>"$LOG" 2>&1; then
     say "The data could not be put back from the $STORE volume $J_backup (see $LOG). Neither was changed: the data is as $(new_name) left it, and the volume still holds the copy. The server is stopped."
-    say "Once the cause is fixed (often disk space), ./update.sh --rollback tries again. To run the server on the data as it is instead: docker compose up -d (that starts $(new_name) again)."
+    say "Once the cause is fixed (often disk space), ./update.sh --rollback tries again. To run the server on the data as it is instead: $START_HINT (that starts $(new_name) again)."
     exit 2
   fi
   restore_env
@@ -637,7 +640,7 @@ roll_back() { # why, exit code when the old version is back
   if wait_healthy "$J_previous_id"; then back=yes; fi
   rm -f "$JOURNAL" "$LAST"
   if [ "$back" = no ]; then
-    say "$(old_name) and its data are back, but it did not become healthy either ($WHY). See: docker compose logs $SERVICE"
+    say "$(old_name) and its data are back, but it did not become healthy either ($WHY). See: $LOGS_HINT"
     exit 2
   fi
   say "Your server runs $(old_name) again, with its data as it was before the update."
@@ -788,6 +791,9 @@ if [ -n "$UNIT" ]; then
   command -v podman >/dev/null 2>&1 || refuse "This needs Podman (podman version)."
   systemctl --user show-environment >/dev/null 2>&1 || refuse "systemd for your user is not reachable (systemctl --user). Log in to this machine directly or over SSH, then run this again."
   [ -f "$UNIT" ] || refuse "The service's unit $UNIT is gone. Run the Podman installer again, then this."
+  if [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || true)" = no ]; then
+    say "Note: your user may not run services while logged out (linger is off), so the server stops when you log out and does not start at boot. Once, as an administrator: sudo loginctl enable-linger $(id -un)"
+  fi
 else
 docker compose version >/dev/null 2>&1 || refuse "This needs Docker with the Compose plugin (docker compose version)."
 [ -f docker-compose.yml ] || [ -f compose.yaml ] || [ -n "${COMPOSE_FILE:-}" ] || refuse "There is no docker-compose.yml or compose.yaml in $DIR. Name the install's folder: ./update.sh --dir PATH"

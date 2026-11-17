@@ -2,7 +2,7 @@
 export type ServerPlatform = "aix" | "android" | "cygwin" | "darwin" | "freebsd" | "haiku" | "linux" | "netbsd" | "openbsd" | "sunos" | "win32";
 
 /** How an operator's server was installed. */
-export type ServerInstall = "npx" | "global" | "docker" | "source";
+export type ServerInstall = "npx" | "global" | "docker" | "source" | "podman-service";
 
 /** GET /.well-known/openmausbot/environment, served without auth, and the `environment` of a POST /api/auth/pair answer:
  * a saved connection checks it still reaches the same server. */
