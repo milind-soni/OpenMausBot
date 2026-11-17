@@ -6892,6 +6892,7 @@
   "sidebar.update.restartAction": "Riavvia",
   "sidebar.update.retryAction": "Riprova",
   "sidebar.nav.publishedApps": "App pubblicate",
+  "sidebar.nav.teamFiles": "File del team",
   "settings.followUp.subtitle": "Inserirlo aggiunge il tuo messaggio a ciò che il bot sta facendo; metterlo in coda lo esegue alla fine del turno. {key} fa l'altra cosa per un solo messaggio, e la freccia accanto a Invia può anche riavviare il turno. Solo su questo dispositivo.",
   "settings.openAtLogin.subtitle": "Apre {app} quando accedi a questo computer, così bot e routine sono pronti senza aprirlo tu.",
   "settings.simple.advancedMode": "Mostra ogni controllo, compresi gli strumenti per chi costruisce. Non si cancella nulla in nessun caso.",

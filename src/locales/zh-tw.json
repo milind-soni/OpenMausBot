@@ -10077,6 +10077,7 @@
   "settings.font.line": "在這台裝置上取代主題字型。",
   "settings.profile.awayEmails": "我不在時寄電子郵件給我",
   "sidebar.nav.publishedApps": "已發佈的 App",
+  "sidebar.nav.teamFiles": "團隊檔案",
   "phone.pair.rowTitle": "你的手機",
   "phone.pair.rowLine": "從 App Store 或 Google Play 在手機上安裝 {app}，然後在這裡配對。",
   "phone.otherPlace.line": "與 {place} 配對的手機",
