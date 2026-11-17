@@ -2751,6 +2751,8 @@
   "ask.detail.more": "Tout afficher",
   "inbox.action.closeQuestion": "Fermer sans répondre",
   "inbox.markAllRead": "Tout marquer comme lu",
+  "inbox.settled.title": "Terminé",
+  "inbox.settled.read": "Lu",
   "question.somethingElse": "Autre chose…",
   "question.done": "Terminé",
   "common.done": "Terminé",
@@ -3796,5 +3798,6 @@
   "remote.tailscale.needsApproval": "Cet ordinateur attend d'être approuvé sur votre réseau Tailscale. Approuvez-le dans la console d'administration Tailscale, puis réessayez.",
   "together.switch.title": "Cet ordinateur et Mon Cloud ensemble",
   "together.switch.line": "Désactivé par défaut. Les bots du Cloud et ceux de cet ordinateur s'affichent dans une seule liste, et chacun s'ouvre là où il se trouve.",
-  "together.switch.failed": "Impossible d'enregistrer. Réessayez."
+  "together.switch.failed": "Impossible d'enregistrer. Réessayez.",
+  "devices.computers.typeCode": "Sur votre autre ordinateur, ouvrez Se connecter à un serveur dans {app} et saisissez ce code."
 }

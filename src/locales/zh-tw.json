@@ -9598,6 +9598,8 @@
   "settings.userBubbles.simpleTitle": "將我的訊息套用機器人的顏色",
   "sidebar.newConversationWith": "與 {name} 開始新對話",
   "inbox.emptyHint": "當機器人需要你的同意、有問題想問或完成某件事時，都會顯示在這裡。",
+  "inbox.settled.title": "已完成",
+  "inbox.settled.read": "已讀",
   "chat.engineCompactionTitle": "對話已整理成摘要",
   "chat.engineCompactionHint": "AI 已將較早的訊息整理成摘要以騰出空間。完整對話仍會保留，但機器人可能無法準確記住較早的細節。",
   "chat.openBotPanel": "詳細資料與對話",
@@ -10166,5 +10168,6 @@
   "remote.tailscale.needsApproval": "這台電腦正在等待你的 Tailscale 網路核准。請在 Tailscale 管理主控台中核准它，然後再試一次。",
   "together.switch.title": "這台電腦和 My Cloud 合在一起",
   "together.switch.line": "預設為關閉。Cloud 上的機器人和這台電腦上的機器人顯示在同一個清單中，各自在所在的位置開啟。",
-  "together.switch.failed": "無法儲存。請再試一次。"
+  "together.switch.failed": "無法儲存。請再試一次。",
+  "devices.computers.typeCode": "在另一台電腦上，於 {app} 開啟「連線到伺服器」並輸入這組代碼。"
 }

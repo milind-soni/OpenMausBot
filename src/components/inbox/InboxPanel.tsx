@@ -7,9 +7,13 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { closeInbox, markAllInboxRead, readInboxLine, readInboxRow, useInboxMarkingAll, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
-import { InboxActive } from "./InboxActive";
+import { useStore } from "@/state/store";
+import { InboxActive, inboxAttentionEntries, inboxOpenThread, readNewsThreads, unreadConversations } from "./InboxActive";
+import { attentionJumpAction, attentionUnpinAction } from "../SidebarBotActivity";
 import { InboxReading } from "./InboxReading";
 import { InboxRowItem } from "./InboxRow";
+import { FinishedThreads } from "./FinishedThreads";
+import { PinnedThreads, pinnedThreadRows } from "./PinnedThreads";
 import { matchesSearch, nextAfter } from "./inbox-answer";
 import { listedRows, waitingCount } from "./inbox-view";
 import { useInboxActions } from "./use-inbox-actions";
@@ -18,6 +22,7 @@ import { roundButtonCls } from "../bot-panel/rows";
 
 export function InboxPanel() {
   const view = useInboxView();
+  const { state, dispatch } = useStore();
   const panel = useInboxPanel();
   const markingAll = useInboxMarkingAll();
   const phone = useMediaQuery(PHONE_LAYOUT);
@@ -37,7 +42,10 @@ export function InboxPanel() {
   };
   const reading = panel.reading ? view?.rows.find((row) => row.id === panel.reading) : undefined;
   const open = (row: InboxRow) => { readInboxRow(row); readInboxLine(row.id); };
-  const rows = listedRows(view).filter((row) => matchesSearch(row, query));
+  // The notice list is upstream's: a read line stays until the person marks it done. Reading a conversation moves the
+  // conversation to Finished; it does not remove the notice it came from.
+  const listed = listedRows(view);
+  const rows = listed.filter((row) => matchesSearch(row, query));
   const ids = rows.map((row) => row.id);
   const at = reading ? ids.indexOf(reading.id) : -1;
 
@@ -59,7 +67,9 @@ export function InboxPanel() {
     const row = rows[at + by];
     if (row) open(row);
   };
-  const count = waitingCount(view);
+  const pinnedThreads = new Set(pinnedThreadRows(state.bots, state.groups, state.pendingQueued).map((row) => row.task.threadId));
+  const count = waitingCount(view) + unreadConversations(inboxAttentionEntries(state, view), view);
+  const openThread = inboxOpenThread(state);
   const body = (
     <>
       <div className="flex h-[50px] shrink-0 items-start gap-2.5 px-[13px] pt-[13px]">
@@ -90,14 +100,16 @@ export function InboxPanel() {
         ) : (
           <>
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {listedRows(view).length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
+              {/* The conversations each bot and room pinned, at the top of the list. */}
+              {!query.trim() && <PinnedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
+              {listed.length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
                 <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
                 <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
                   className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary [&::-webkit-search-cancel-button]:hidden" />
               </label>}
               <div role="list" data-inbox-list aria-label={t("inbox.panel.title")} className="space-y-0.5 px-1.5 pb-1.5">
                 {rows.length === 0
-                  ? query.trim() && listedRows(view).length
+                  ? query.trim() && listed.length
                     ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
                     : (
                       <div data-inbox-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
@@ -108,7 +120,9 @@ export function InboxPanel() {
                     )
                   : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
               </div>
-              {!query.trim() && <InboxActive view={view} />}
+              {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} />}
+              {/* The finished, already-read conversations. */}
+              {!query.trim() && <FinishedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} readThreads={readNewsThreads(view)} exclude={pinnedThreads} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} />}
             </div>
           </>
         )}

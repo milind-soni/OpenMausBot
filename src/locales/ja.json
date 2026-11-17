@@ -7191,6 +7191,8 @@
   "ask.detail.more": "すべて表示",
   "inbox.action.closeQuestion": "回答せずに閉じる",
   "inbox.markAllRead": "すべて既読にする",
+  "inbox.settled.title": "完了",
+  "inbox.settled.read": "既読",
   "question.somethingElse": "その他…",
   "question.done": "完了",
   "question.yourAnswer": "自分の回答",
@@ -7938,5 +7940,6 @@
   "remote.tailscale.needsApproval": "このコンピューターは Tailscale ネットワークでの承認を待っています。Tailscale の管理コンソールで承認してから、もう一度お試しください。",
   "together.switch.title": "このコンピューターと My Cloud をまとめる",
   "together.switch.line": "既定ではオフです。Cloud のボットとこのコンピューターのボットを 1 つの一覧に表示し、それぞれがある場所で開きます。",
-  "together.switch.failed": "保存できませんでした。もう一度お試しください。"
+  "together.switch.failed": "保存できませんでした。もう一度お試しください。",
+  "devices.computers.typeCode": "もう一台のコンピュータで {app} の「サーバーに接続」を開き、このコードを入力してください。"
 }

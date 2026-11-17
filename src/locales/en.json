@@ -2286,6 +2286,7 @@
   "sidebar.people.yourInboxWaiting": "Your inbox: waiting on you, {count}",
   "sidebar.people.invite": "Invite someone",
   "inbox.panel.title": "Inbox",
+  "inbox.settled.title": "Finished",
   "inbox.empty": "Nothing for you yet.",
   "inbox.emptyHint": "When a bot needs your OK, has a question or finishes something, it shows up here.",
   "inbox.row.count": "Inbox, {count} waiting",
@@ -2734,6 +2735,10 @@
   "chat.jumpToLatestAria": "Jump to latest messages",
   "chat.newMessages": "New",
   "chat.newMessagesAria": "New messages",
+  "chat.unreadContext.title": "Previous message",
+  "chat.unreadContext.images": "Image",
+  "chat.unreadContext.files": "File",
+  "chat.unreadContext.moreCitations": "and {count} more",
   "chat.verify.title": "This run",
   "chat.verify.aria": "This run",
   "chat.verify.steps": "Run steps",
@@ -11016,5 +11021,6 @@
   "templateImport.remove": "Remove {name}",
   "sidebar.addDepartment": "Add department",
   "sidebar.import": "Import…",
-  "team.shareDepartment": "Share"
+  "team.shareDepartment": "Share",
+  "inbox.settled.read": "Read"
 }

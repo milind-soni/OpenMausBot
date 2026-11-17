@@ -5060,6 +5060,8 @@
   "ask.detail.more": "Hiện tất cả",
   "inbox.action.closeQuestion": "Đóng mà không trả lời",
   "inbox.markAllRead": "Đánh dấu tất cả là đã đọc",
+  "inbox.settled.title": "Đã xong",
+  "inbox.settled.read": "Đã đọc",
   "question.somethingElse": "Điều khác…",
   "question.done": "Xong",
   "common.done": "Xong",
@@ -5892,5 +5894,6 @@
   "remote.tailscale.needsApproval": "Máy tính này đang chờ được phê duyệt trên mạng Tailscale của bạn. Hãy phê duyệt trong bảng điều khiển quản trị Tailscale, rồi thử lại.",
   "together.switch.title": "Máy tính này và My Cloud cùng nhau",
   "together.switch.line": "Mặc định là tắt. Bot trên Cloud và bot trên máy tính này hiện trong một danh sách, và mỗi bot mở ở nơi nó đang ở.",
-  "together.switch.failed": "Không lưu được. Hãy thử lại."
+  "together.switch.failed": "Không lưu được. Hãy thử lại.",
+  "devices.computers.typeCode": "Trên máy tính kia, mở Kết nối với máy chủ trong {app} và nhập mã này."
 }

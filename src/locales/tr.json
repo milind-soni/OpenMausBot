@@ -5060,6 +5060,8 @@
   "ask.detail.more": "Tümünü göster",
   "inbox.action.closeQuestion": "Yanıtlamadan kapat",
   "inbox.markAllRead": "Tümünü okundu olarak işaretle",
+  "inbox.settled.title": "Tamamlandı",
+  "inbox.settled.read": "Okundu",
   "question.somethingElse": "Başka bir şey…",
   "question.done": "Tamam",
   "common.done": "Tamam",
@@ -5892,5 +5894,6 @@
   "remote.tailscale.needsApproval": "Bu bilgisayar Tailscale ağınızda onay bekliyor. Tailscale yönetici konsolunda onaylayın, ardından tekrar deneyin.",
   "together.switch.title": "Bu bilgisayar ve Cloud'um birlikte",
   "together.switch.line": "Varsayılan olarak kapalı. Cloud'daki botlar ile bu bilgisayardaki botlar tek listede görünür ve her biri bulunduğu yerde açılır.",
-  "together.switch.failed": "Kaydedilemedi. Yeniden deneyin."
+  "together.switch.failed": "Kaydedilemedi. Yeniden deneyin.",
+  "devices.computers.typeCode": "Diğer bilgisayarınızda {app} içinde Sunucuya bağlan'ı açın ve bu kodu yazın."
 }

@@ -6180,6 +6180,8 @@
   "ask.detail.more": "Mostra tutto",
   "inbox.action.closeQuestion": "Chiudi senza rispondere",
   "inbox.markAllRead": "Segna tutto come letto",
+  "inbox.settled.title": "Completato",
+  "inbox.settled.read": "Letto",
   "question.somethingElse": "Altro…",
   "question.done": "Fatto",
   "approval.status.timedOut": "Nessuna risposta in tempo: non eseguito",
@@ -6966,5 +6968,6 @@
   "remote.tailscale.needsApproval": "Questo computer è in attesa di approvazione sulla tua rete Tailscale. Approvalo nella console di amministrazione di Tailscale, poi riprova.",
   "together.switch.title": "Questo computer e Il mio Cloud insieme",
   "together.switch.line": "Disattivato per impostazione predefinita. I bot del Cloud e quelli di questo computer compaiono in un unico elenco, e ognuno si apre dove si trova.",
-  "together.switch.failed": "Non è stato possibile salvare. Riprova."
+  "together.switch.failed": "Non è stato possibile salvare. Riprova.",
+  "devices.computers.typeCode": "Sull'altro computer, apri Connetti a un server in {app} e digita questo codice."
 }

@@ -5568,6 +5568,8 @@
   "ask.detail.more": "Mostrar todo",
   "inbox.action.closeQuestion": "Cerrar sin responder",
   "inbox.markAllRead": "Marcar todo como leído",
+  "inbox.settled.title": "Terminado",
+  "inbox.settled.read": "Leído",
   "question.somethingElse": "Otra cosa…",
   "question.done": "Listo",
   "common.done": "Listo",
@@ -6392,5 +6394,6 @@
   "remote.tailscale.needsApproval": "Este ordenador espera la aprobación en tu red de Tailscale. Apruébalo en la consola de administración de Tailscale y vuelve a intentarlo.",
   "together.switch.title": "Este equipo y My Cloud juntos",
   "together.switch.line": "Desactivado de forma predeterminada. Los bots del Cloud y los de este equipo aparecen en una sola lista, y cada uno se abre donde está.",
-  "together.switch.failed": "No se pudo guardar. Inténtalo de nuevo."
+  "together.switch.failed": "No se pudo guardar. Inténtalo de nuevo.",
+  "devices.computers.typeCode": "En tu otro ordenador, abre Conectar a un servidor en {app} y escribe este código."
 }

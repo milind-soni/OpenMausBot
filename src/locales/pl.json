@@ -6311,6 +6311,8 @@
   "ask.detail.more": "Pokaż wszystko",
   "inbox.action.closeQuestion": "Zamknij bez odpowiedzi",
   "inbox.markAllRead": "Oznacz wszystko jako przeczytane",
+  "inbox.settled.title": "Zakończone",
+  "inbox.settled.read": "Przeczytane",
   "question.somethingElse": "Coś innego…",
   "question.done": "Gotowe",
   "approval.status.timedOut": "Brak odpowiedzi na czas — nie uruchomiono",
@@ -7100,5 +7102,6 @@
   "remote.tailscale.needsApproval": "Ten komputer czeka na zatwierdzenie w Twojej sieci Tailscale. Zatwierdź go w konsoli administracyjnej Tailscale, a potem spróbuj ponownie.",
   "together.switch.title": "Ten komputer i My Cloud razem",
   "together.switch.line": "Domyślnie wyłączone. Boty z Cloud i boty z tego komputera są na jednej liście, a każdy otwiera się tam, gdzie działa.",
-  "together.switch.failed": "Nie udało się zapisać. Spróbuj ponownie."
+  "together.switch.failed": "Nie udało się zapisać. Spróbuj ponownie.",
+  "devices.computers.typeCode": "Na drugim komputerze otwórz Połącz z serwerem w {app} i wpisz ten kod."
 }

@@ -18,7 +18,7 @@ vi.mock("../../state/api", () => ({
 import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
 import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 import { closeInbox, currentInbox, currentInboxPanel, inboxVersion, openInbox, setInboxView, useInboxLoader } from "@/state/inbox";
-import { approvalRow, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
+import { approvalRow, INBOX_NOW, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
 import type { InboxView } from "../../../shared/inbox";
 import { InboxCardSlot } from "./InboxCard";
 import { InboxPanel } from "./InboxPanel";
@@ -111,6 +111,24 @@ describe("the inbox panel", () => {
     await mount(createElement(InboxPanel));
     expect(document.querySelector('[data-inbox-panel="sheet"]')).not.toBeNull();
     expect(document.querySelector('[data-inbox-panel="side"]')).toBeNull();
+  });
+
+  it("shows a pinned conversation once, and counts its unread news once", async () => {
+    const reporter = {
+      id: "reporter", name: "Reporter", threadId: "rep-main", tasks: [
+        { threadId: "rep-daily", title: "Daily digest", createdAt: 0, updatedAt: INBOX_NOW, pinned: true, unread: true },
+        { threadId: "rep-old", title: "Older digest", createdAt: 0, updatedAt: INBOX_NOW - 60_000, pinned: true },
+      ],
+    } as unknown as Bot;
+    shown(inboxView([{ ...reportRow, unread: true }]));
+    openInbox();
+    await mount(createElement(InboxPanel), [reporter]);
+    expect([...document.querySelectorAll("[data-pinned-title]")].map((el) => el.textContent)).toEqual(["Daily digest", "Older digest"]);
+    const active = [...document.querySelectorAll("[data-inbox-active] button")].map((button) => button.textContent).join(" ");
+    expect(active, "the pinned section already shows it").not.toContain("Daily digest");
+    const finished = [...document.querySelectorAll("[data-inbox-finished] button")].map((button) => button.textContent).join(" ");
+    expect(finished).not.toContain("Older digest");
+    expect(document.querySelector("[data-inbox-tab-count]")?.textContent, "one line plus the same conversation is one").toBe("1");
   });
 });
 
