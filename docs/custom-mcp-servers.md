@@ -134,7 +134,7 @@ account at [livecore.ai](https://www.livecore.ai); no API key is needed. After
 sign-in and tool discovery it enables the connection, and **Disconnect** and
 **Bot access** work as they do for Whop and BubblaV.
 
-A bot that can use Levea can inspect projects, assets, brand kits and 60+
+A bot that can use Levea can inspect projects, assets, brand kits and 280+
 built-in caption templates, run autonomous natural-language edits
 (`autonomous_edit`, `queue_edit`) for viral clips, captions, 9:16 speaker
 reframing, silence cleanup, B-roll, voiceover and cloud MP4 exports, and
