@@ -27,6 +27,14 @@ const TRIAL_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days trial
 
 // Built-in offline fallback database for known keys & development/offline evaluation
 const OFFLINE_KEYS_DB: Record<string, { plan: OtechPlanType; customer: string; phone: string; shop: string; expiresAt: string; revoked?: boolean }> = {
+  "OTECH-JO-MHT7-7EWK": {
+    plan: "local",
+    customer: "Test otech",
+    phone: "+962776801240",
+    shop: "Amman",
+    expiresAt: "2026-12-17T18:32:41.961Z",
+    revoked: false,
+  },
   "OTECH-JO-CLD8-5W3X": {
     plan: "cloud",
     customer: "شركة الأفق للاستشارات",
@@ -102,7 +110,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 /**
- * Verifies a key against https://russell-garbage-elimination-productions.trycloudflare.com/api/verify
+ * Verifies a key against https://fleet-bromine-86sri60.tmp.now/api/verify
  * Falls back to offline keys or 3-day grace period if network unavailable
  */
 export async function verifyLicenseKey(keyToVerify: string): Promise<{ success: boolean; state: OtechLicenseState; message?: string }> {
@@ -113,7 +121,7 @@ export async function verifyLicenseKey(keyToVerify: string): Promise<{ success: 
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
-    const resp = await fetch(`https://license.otech.jo/api/verify?key=${encodeURIComponent(normalizedKey)}`, {
+    const resp = await fetch(`https://fleet-bromine-86sri60.tmp.now/api/verify?key=${encodeURIComponent(normalizedKey)}`, {
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
