@@ -9,7 +9,10 @@ const __dirname = path.dirname(__filename);
 const DATA_FILE = path.join(__dirname, 'data', 'keys.json');
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
-const ADMIN_SECRET = process.env.ADMIN_SECRET || 'otech-secret-key-2026';
+const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
+if (!ADMIN_SECRET) {
+  console.warn('WARNING: ADMIN_SECRET is not set in environment variables. Admin endpoints are disabled.');
+}
 
 function readKeys() {
   try {
@@ -55,6 +58,7 @@ function sendJson(res, statusCode, data) {
 }
 
 function checkAdminAuth(req) {
+  if (!ADMIN_SECRET) return false;
   const secretHeader = req.headers['x-admin-secret'];
   const authHeader = req.headers['authorization'];
   if (secretHeader && secretHeader === ADMIN_SECRET) return true;

@@ -38,7 +38,7 @@ ExecStart=/usr/bin/node server.mjs
 Restart=always
 RestartSec=5
 Environment=PORT=4000
-Environment=ADMIN_SECRET=otech-secret-key-2026
+Environment=ADMIN_SECRET=<YOUR_SECURE_ADMIN_SECRET>
 
 [Install]
 WantedBy=multi-user.target
