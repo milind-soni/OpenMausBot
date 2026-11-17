@@ -15,6 +15,7 @@ describe("toolkitOf", () => {
     expect(toolkitOf("GMAIL_SEND_EMAIL")).toBe("gmail");
     expect(toolkitOf("GOOGLESHEETS_BATCH_UPDATE")).toBe("googlesheets");
     expect(toolkitOf("COMPOSIO_PROXY_EXECUTE")).toBe("composio");
+    expect(toolkitOf("_1PASSWORD_GET_ITEM")).toBe("_1password");
   });
 });
 
@@ -27,6 +28,9 @@ describe("isReadOnlyAction", () => {
     expect(isReadOnlyAction("GOOGLESHEETS_BATCH_UPDATE")).toBe(false);
     expect(isReadOnlyAction("GMAIL_CREATE_EMAIL_DRAFT")).toBe(false);
     expect(isReadOnlyAction("COMPOSIO_PROXY_EXECUTE")).toBe(false);
+    expect(isReadOnlyAction("_1PASSWORD_GET_ITEM")).toBe(true);
+    expect(isReadOnlyAction("_1PASSWORD_LIST_ITEMS")).toBe(true);
+    expect(isReadOnlyAction("_1PASSWORD_CREATE_ITEM")).toBe(false);
   });
 
   it("takes the second word as the verb only for toolkits that name the resource first", () => {
@@ -88,6 +92,13 @@ describe("connectorAccessDecision", () => {
       ok: false,
       slug: "GMAIL_SEND_EMAIL",
       toolkit: "gmail",
+      reason: "write",
+    });
+    expect(connectorAccessDecision({ apps: { _1password: "read" } }, calls("_1PASSWORD_GET_ITEM"))).toEqual({ ok: true });
+    expect(connectorAccessDecision({ apps: { _1password: "read" } }, calls("_1PASSWORD_CREATE_ITEM"))).toEqual({
+      ok: false,
+      slug: "_1PASSWORD_CREATE_ITEM",
+      toolkit: "_1password",
       reason: "write",
     });
   });
