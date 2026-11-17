@@ -189,17 +189,20 @@ export interface WiderReach<T extends RosterMember> {
 const ID_PREFIX_MIN = 8;
 
 /** In this order, and identity before any name: the id, exactly as written; the id in any case when exactly one bot's
- * id matches it that way; then, before names either, the start of an id; then a name that only one reachable bot
- * answers to. An id or id start that names a bot the caller cannot see is refused at once, never narrowed to whichever
- * candidate is visible and never left to fall through to a name: two bots can carry ids that differ only by case (one
- * brought in from another place, or one here from before admission compared ids that way), and a brief meant for one
- * must not land on the other, nor on a visible bot named after that id.
+ * id matches it that way; then the start of an id, before either kind of name matching; then a name that only one
+ * reachable bot answers to. An id, an id start, or a name that belongs to a bot the caller cannot see is refused at
+ * once, never narrowed to whichever candidate is visible and never left to fall through to a name: two bots can carry
+ * ids that differ only by case (one brought in from another place, or one here from before admission compared ids that
+ * way), and a brief meant for one must not land on the other, nor on a visible bot named after that id or its start.
  * Identity is settled before visibility: who an id names is decided across every bot on the roster, and only then is
  * whether this caller may reach that bot asked. Hiding a bot from its caller (wider.hides, an archived bot, another
  * audience) must never turn that bot's own id into a different bot's, so an id, or an id start, that names a bot the
  * caller cannot see is refused rather than narrowed to whichever candidate is visible.
- * A refusal names only what the caller may already see: when any candidate is invisible the answer is the words a
- * truly unknown id gets — no count, no candidates, no roles, no ids — so probing an id cannot confirm a hidden bot.
+ * A refusal names only what the caller may already see: a bot in another audience — one `list_bots` does not show —
+ * answers with the same generic words a spelling that names nothing gets (no name, role, id casing, owner or count),
+ * so a probe can neither confirm it nor learn whose it is.
+ * No owner ("ask …") is ever named here: this function is handed no way to find one, so no id probe and no invisible
+ * bot can produce that sentence. It survives only where the target is a room the caller is addressing (room-access).
  * `elsewhere(name)`: why no bot here has that name past "no such bot", when one of the person's other places has it, or when
  * they work as one place. */
 export function resolveTeammate<T extends RosterMember>(
@@ -207,7 +210,6 @@ export function resolveTeammate<T extends RosterMember>(
   from: RosterMember,
   raw: string,
   elsewhere: (name: string) => { where: string } | { hint: string } | null = () => null,
-  lookedAfterBy?: LookedAfterBy,
   wider?: WiderReach<T>,
 ): { id: string; byName: boolean } | { error: string } {
   const wanted = raw.trim();
@@ -229,16 +231,16 @@ export function resolveTeammate<T extends RosterMember>(
     if (away && "where" in away) return { error: away.where };
     return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result.${teammateChoices(reachable.filter(bot => exposed(bot)))}${away ? ` ${away.hint}` : ""} ${PEER_ACCESS_HELP} A teammate's name is enough in bot_ids, so a long id never has to be copied exactly.` };
   };
-  /** The id names one bot the caller cannot reach: refuse in that bot's own refusal words, never another bot's.
-   * A bot the caller may not be told of at all (the reach hides it, or it is archived) is never named here: no name,
-   * role, owner or count, and never its stored id's casing either — those refusals repeat only what the caller typed.
-   * A bot in another audience keeps the words it has always had ("… is shared with different people …", and, on a
-   * Team Cloud, who looks after it): that is the answer its name gets too, and server/team-small-fixes.e2e.test.ts
-   * and server/thread-aware-bots.e2e.test.ts pin it for its id as well. */
+  /** The id names one bot the caller cannot reach: the answer names only what the caller may already be shown.
+   * A bot the reach hides, or one in another audience, is a bot `list_bots` does not show, so it answers exactly as a
+   * spelling that names nothing does: no name, role, id casing, owner or count. An archived bot keeps the route's own
+   * "no longer available" words, and repeats only the spelling the caller typed. Nothing here can name an owner: this
+   * function is given no way to look one up. */
   const outOfReach = (bot: T): string => {
     if (wider?.hides(bot)) return unknownId;
+    if (!sameAudience(from.visibility, bot.visibility)) return unknownTarget().error;
     if (bot.hidden) return goneIdRefusal(shown);
-    return wider?.refusal(bot) ?? reachRefusal(from, bot, lookedAfterBy) ?? unknownId;
+    return wider?.refusal(bot) ?? unknownId;
   };
   // Identity is settled first, and completely: an id that names a bot the caller cannot see is refused here, so it
   // can never fall through to a name that happens to look like that id.
@@ -261,13 +263,16 @@ export function resolveTeammate<T extends RosterMember>(
     return { error: `${sameId.length} bots differ only by the case of their ids, so nothing was sent: ${sharedNameChoices(identified)}. Send it again with the exact id of the one you mean, copied from list_bots.` };
   }
   if (!name) return { error: unknownId };
-  // An id start is settled before any name too, for the same reason: a visible bot whose name looks like the start
-  // of an id the caller cannot see must not answer for it. Every bot whose id starts with it is counted; if the
-  // caller cannot see them all, the start names nothing it may be told.
+  // An id start is settled before either kind of name matching, for the same reason an id is: a visible bot a person
+  // named after the first 8 characters of another bot's id would otherwise take that bot's brief, and every file
+  // attached to it. One candidate the caller can see: that bot. More than one candidate, or any candidate the caller
+  // cannot see: the generic unknown-target answer, which names nobody it may not name and lists only what it may show.
   const started = wanted.length >= ID_PREFIX_MIN && !/\s/u.test(wanted)
     ? bots.filter(bot => bot.id.toLowerCase().startsWith(wanted.toLowerCase())) : [];
-  const startedSeen = started.filter(exposed);
-  if (startedSeen.length !== started.length) return unknownTarget();
+  if (started.length) {
+    if (started.length === 1 && exposed(started[0]!)) return { id: started[0]!.id, byName: false };
+    return unknownTarget();
+  }
   const matches = reachable.filter(bot => fold(bot.name) === name);
   if (matches.length === 1) return { id: matches[0]!.id, byName: true };
   if (matches.length > 1) {
@@ -275,13 +280,8 @@ export function resolveTeammate<T extends RosterMember>(
   }
   const near = reachable.filter(bot => loose(bot.name) === loose(wanted));
   if (near.length === 1) return { id: near[0]!.id, byName: true };
-  // Every candidate of the start is visible here (an invisible one refused it above), so it may be described.
-  if (started.length === 1) return { id: started[0]!.id, byName: false };
-  if (started.length > 1) {
-    return { error: `${started.length} teammates you can reach have an id starting "${shown}", so nothing was sent: ${sharedNameChoices(startedSeen)}. Send it again with the name of the one you mean.` };
-  }
-  const apart = bots.find(bot => bot.id !== from.id && !bot.hidden && !bot.defaultBot && !wider?.hides(bot) && !sameAudience(from.visibility, bot.visibility) && (fold(bot.name) === name || loose(bot.name) === loose(wanted)));
-  if (apart) return { error: wider?.refusal(apart) ?? reachRefusal(from, apart, lookedAfterBy)! };
+  // A name only a bot in another audience answers to is one `list_bots` does not show, so it gets the same generic
+  // unknown-target answer as a name nobody has: the typed name is not confirmed as a bot, and no owner is named.
   return unknownTarget();
 }
 

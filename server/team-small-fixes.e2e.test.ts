@@ -1,5 +1,6 @@
 // The small team fixes, end to end on a Team Cloud with the synthetic Claude CLI playing scripted plans through the real
-// agents tools: a bot that cannot reach a bot shared with other people is told who looks after it; a lent computer is
+// agents tools: a bot that cannot reach a bot shared with other people is refused as if that bot were unknown (no name,
+// no owner), since list_bots does not show it; a lent computer is
 // refused in the team's one honest line; a personal place takes the person's team as a place its bots can name; a rule
 // blocking an MCP server applies to the next thing each bot does; the Owner's export carries nothing of a member's alone; and
 // a question left for a day is mentioned in the person's inbox chat, on a fake clock. It proves what the engine was sent and
@@ -118,9 +119,9 @@ afterAll(async () => {
   rmSync(clockDir, { recursive: true, force: true });
 });
 
-it("a bot shared with other people: Support is told that Ada looks after Sales, and Mira hears it in plain words", async () => {
+it("a bot shared with other people: Support's call is refused as if Sales were unknown, and Mira hears it in plain words", async () => {
   await rules(null);
-  const reply = "Sales isn't shared here; ask Ada, who looks after it.";
+  const reply = "I couldn't reach Sales from here, so I don't have the Q3 numbers.";
   plan({ [support.id]: { turns: [
     { steps: [
       { expectError: true, arguments: { bot_ids: ["Sales"], message: "Pull the Q3 numbers for Mira.", reason: "Mira needs Sales' data" } },
@@ -134,11 +135,19 @@ it("a bot shared with other people: Support is told that Ada looks after Sales, 
   const asked = turns().find((turn) => turn.botId === support.id && turn.turnIndex === 0)!;
   const refusals = asked.evidence.filter((entry) => Array.isArray(entry.step?.arguments?.bot_ids)).map((entry) => entry.response!.result!);
   expect(refusals).toHaveLength(2);
+  // Sales is in another audience, so list_bots does not show it to Support: its name and its id are answered exactly as
+  // a spelling that names nothing is (peer-roster.ts outOfReach), with no stored name and nobody named as its owner.
   for (const refused of refusals) {
     expect(refused.isError).toBe(true);
-    expect(refused.content![0]!.text).toContain("Sales is shared with different people from Support, so nothing was sent.");
-    expect(refused.content![0]!.text).toContain("Sales isn't shared here; ask Ada, who looks after it.");
+    const text = refused.content![0]!.text;
+    expect(text).toContain("No bot with id or name");
+    expect(text).not.toContain("Sales is shared with different people");
+    expect(text).not.toContain("Sales isn't shared here");
   }
+  // The id probe carries nothing of the bot but the id it was sent.
+  const byId = refusals[1]!.content![0]!.text;
+  expect(byId).toContain(`No bot with id or name "${sales.id}"`);
+  expect(byId).not.toContain("Sales");
   // Sales did no work, and Mira still cannot see it.
   expect(turns().some((turn) => turn.botId === sales.id)).toBe(false);
   expect(((await team.as(mira, "GET", "/api/bots?messages=0")).body.bots as Bot[]).map((bot) => bot.name)).not.toContain("Sales");
