@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AppWindow, AudioLines, Bell, ChevronRight, ExternalLink, Eye, FileText, MessageSquareText, ShieldCheck, Slack, Tag } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { simpleApprovalName } from "@/lib/approval-mode-options";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
 import { CALL_MODES, callModeHint, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
@@ -34,14 +35,6 @@ import { buttonCls, Card, ColRow, NavRow, RowIcon, rowCls, RowText, Segmented, S
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
-const ACTS_LABEL: Record<ApprovalMode, () => string> = {
-  ask: () => t("botSettings.simple.ask"),
-  full: () => t("botSettings.simple.justDoIt"),
-  auto: () => t("botSettings.simple.decide"),
-  edits: () => t("approvalMode.edits.label"),
-  custom: () => t("botPanel.acts.custom"),
-};
-
 export function SettingsPage({ bot, derived, onOpen, editingInstructions = false, onEditInstructions }: {
   bot: Bot;
   derived: Derived;
@@ -67,12 +60,13 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
 
   // Antigravity's old Auto still executes as Ask: show that without changing the saved mode or granting Full.
   const displayedMode: ApprovalMode = engine?.driverKind === "antigravityAgent" && approvalMode === "auto" ? "ask" : approvalMode;
+  const actsLabel = (mode: ApprovalMode) => simpleApprovalName(mode, engine?.driverKind);
   const actsOptions: SegmentOption<ApprovalMode>[] = [
-    { value: "ask", label: ACTS_LABEL.ask(), tooltip: t("botSettings.simple.askHint") },
-    { value: "full", label: ACTS_LABEL.full(), tooltip: t("botSettings.simple.fullHint") },
+    { value: "ask", label: actsLabel("ask"), tooltip: t("botSettings.simple.askHint") },
+    { value: "full", label: actsLabel("full"), tooltip: t("botSettings.simple.fullHint") },
     ...(displayedMode === "ask" || displayedMode === "full"
       ? []
-      : [{ value: displayedMode, label: ACTS_LABEL[displayedMode](), disabled: true, tooltip: displayedMode === "custom" ? t("botPanel.acts.customHint") : undefined }]),
+      : [{ value: displayedMode, label: actsLabel(displayedMode), disabled: true, tooltip: displayedMode === "custom" ? t("botPanel.acts.customHint") : undefined }]),
   ];
   const chooseActs = (mode: ApprovalMode) => {
     if (mode === approvalMode || (mode !== "ask" && mode !== "full")) return;

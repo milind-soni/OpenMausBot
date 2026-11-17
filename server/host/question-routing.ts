@@ -1,4 +1,4 @@
-// Who answers a bot's question. At Full access ("Just do it") a question asked with an ask tool in work handed on that the
+// Who answers a bot's question. At Full access a question asked with an ask tool in work handed on that the
 // person started is not put to them: the bot takes its default, or hands a real choice to its requester.
 // Otherwise a question waits for the person, and an answer counts wherever it is given, also when their Chief or another
 // bot passes it on to the bot that asks, naming the question it answers. What the bot that handed work on sends to the

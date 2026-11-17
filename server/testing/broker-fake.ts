@@ -66,7 +66,7 @@ export async function startBrokerFake(): Promise<BrokerFake> {
   const session = (id: string, userId: string) => ({
     session_id: id,
     mcp: { url: `https://mcp.composio.dev/${id}` },
-    config: { user_id: userId, multi_account: { enable: true, max_accounts_per_toolkit: 5, require_explicit_selection: true } },
+    config: { user_id: userId, multi_account: { enable: true, max_accounts_per_toolkit: 10, require_explicit_selection: true } },
   });
   let sessions = 0;
   const sessionUsers: string[] = [];
