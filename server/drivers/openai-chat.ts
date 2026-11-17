@@ -35,7 +35,7 @@ import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
-import { FETCH_LIMIT_MS, fetchPastLimit } from "./openai-chat-fetch.ts";
+import { FETCH_LIMIT_MS, fetchPastLimit, prepareChatModel } from "./openai-chat-fetch.ts";
 import { announcesAction } from "./chat-announcement.ts";
 
 export interface OpenAIChatMessage {
@@ -277,7 +277,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ? AbortSignal.any([signal, timeoutController.signal])
         : timeoutController.signal;
 
-      const served = options.servedModel ? await options.servedModel(model) : model;
+      const served = options.servedModel ? await prepareChatModel(() => options.servedModel!(model), activeSignal) : model;
       const payload = JSON.stringify(route === "responses"
         ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort: options.requestBody(served, messages, stream, variant).reasoning_effort })
         : {
