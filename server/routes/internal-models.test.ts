@@ -56,6 +56,17 @@ describe("modelMenu", () => {
     }]);
   });
 
+  it("keeps the reason on an engine whose only matching model is a gated current one that start_thread refuses", () => {
+    const claude = engine("claude", [], {
+      models: { default: "claude-sonnet-5", options: [{ id: "claude-fable-5-2", label: "Claude Fable 5.2", needsCliUpdate: "2.1.321" }] },
+    });
+    const fable: ModelSelection = { instanceId: "claude", model: "claude-fable-5-2" };
+    const refused = "Claude · claude-fable-5-2 can't run now: update Claude Code.";
+    expect(modelMenu({ engines: [claude], current: fable, pinned: [], refusal: () => refused, search: "claude-fable-5-2" }).engines).toEqual([{
+      instanceId: "claude", name: "Claude", unusable: refused, blocked: [{ id: "claude-fable-5-2", why: "needs Claude CLI 2.1.321 or newer: update it" }],
+    }]);
+  });
+
   it("marks an engine unusable with start_thread's own reason after a few refusals, without checking the rest of a big catalog", () => {
     const grok = engine("grok", Array.from({ length: 500 }, (_, i) => `grok-${i}`));
     const refusal = vi.fn((selection: ModelSelection) => selection.instanceId === "grok" ? "Grok · grok-0 can't run now: it is signed out." : null);

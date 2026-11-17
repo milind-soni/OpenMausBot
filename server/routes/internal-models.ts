@@ -91,7 +91,7 @@ export function modelMenu(input: {
     }
     const more = matching.length - examined;
     if (!listed.length && why) {
-      engines.push({ instanceId, name, unusable: why });
+      engines.push({ instanceId, name, unusable: why, ...(blocked.length ? { blocked } : {}) });
       continue;
     }
     room -= listed.length;
