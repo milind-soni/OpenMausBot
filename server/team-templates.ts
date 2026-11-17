@@ -12,10 +12,10 @@ import type { TeamTemplate, TemplateScope } from "../shared/share-card.ts";
 import type { ShareFolderFiles } from "../shared/share-folder.ts";
 import { renameWithRetry, writeFileAtomic } from "./atomic.ts";
 import { readFolderFromDisk, ShareError, writeFolder } from "./share.ts";
+import { TEAM_FILES_DIR, TEAM_FILES_TEMPLATES } from "./host/team-files.ts";
 
-/** The team's shared files. Its templates are one folder of it. */
-export const TEAM_FILES_FOLDER = "team-files";
-export const teamTemplatesFolder = (dataDir: string): string => join(dataDir, TEAM_FILES_FOLDER, "templates");
+/** The team's shared files (server/host/team-files.ts). Its templates are one folder of it. */
+export const teamTemplatesFolder = (dataDir: string): string => join(dataDir, TEAM_FILES_DIR, TEAM_FILES_TEMPLATES);
 
 export const TEAM_TEMPLATE_SLUG = /^[a-z0-9][a-z0-9-]{0,47}$/;
 const MAX_TEMPLATES = 500;

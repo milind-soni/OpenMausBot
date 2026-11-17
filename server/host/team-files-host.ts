@@ -1,8 +1,11 @@
 // Team files on a Team Cloud at run time (server/host/team-files.ts is the folder itself): what each bot's box gets of
 // the folder, the one line a bot's prompt says about it, and the before-and-after of every turn that could write it, so
 // the page says "Changed by Mira with Payroll". Off a Team Cloud there is no folder, no line and no route.
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+
 import { TEAM_FILES_IN_BOX } from "../bot-box/plan.ts";
-import { createTeamFiles, type TeamFiles } from "./team-files.ts";
+import { createTeamFiles, TEAM_FILES_TEMPLATES, type TeamFiles } from "./team-files.ts";
 
 export interface TeamFilesHostDeps {
   team: { name: string } | null;
@@ -24,7 +27,10 @@ export function createTeamFilesHost(deps: TeamFilesHostDeps) {
     /** What a bot's boxes get of the folder: read-write for a bot that may edit it while it has room, else read-only. */
     boxFolder(botId: string | null): { source: string; write: boolean } | null {
       if (!files) return null;
-      return { source: files.ensure(), write: canEdit(botId) && !files.full() };
+      const source = files.ensure();
+      // Made first, so the read-only bind over it has something to cover in a box that may write the rest.
+      try { mkdirSync(join(source, TEAM_FILES_TEMPLATES), { recursive: true, mode: 0o700 }); } catch {}
+      return { source, write: canEdit(botId) && !files.full() };
     },
     /** One line for every bot's turn on a Team Cloud: where the folder is, and whether this bot may change it. */
     promptLine(botId: string): string {

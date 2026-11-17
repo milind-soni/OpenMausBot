@@ -44,7 +44,7 @@ function disposition(kind: "inline" | "attachment", name: string): string {
 }
 
 export function createTeamFilesRoutes(deps: TeamFilesRouteDeps): RouteHandler {
-  const view = (entry: TeamFileEntry, actor: TeamFilesActor): TeamFileView => {
+  const view = (files: TeamFiles, entry: TeamFileEntry, actor: TeamFilesActor): TeamFileView => {
     const { last, owner, ...rest } = entry;
     const named = last && {
       at: last.at, action: last.action,
@@ -52,7 +52,7 @@ export function createTeamFilesRoutes(deps: TeamFilesRouteDeps): RouteHandler {
       ...(last.bot ? { bot: deps.botName(last.bot) ?? "" } : {}),
       ...(last.from ? { from: last.from } : {}),
     };
-    return { ...rest, ...(named ? { last: named } : {}), canDelete: actor.admin || owner === actor.person, mine: owner === actor.person };
+    return { ...rest, ...(named ? { last: named } : {}), canDelete: files.mayRemove(entry.path, actor), mine: owner === actor.person };
   };
 
   return async (ctx: RouteContext) => {
@@ -68,7 +68,7 @@ export function createTeamFilesRoutes(deps: TeamFilesRouteDeps): RouteHandler {
         if (folder === null) return json(res, 400, { error: "That isn't a path in team files.", code: "bad_path" });
         const listed = files.list(folder, actor);
         return json(res, 200, {
-          path: folder, entries: listed.entries.map((entry) => view(entry, actor)),
+          path: folder, entries: listed.entries.map((entry) => view(files, entry, actor)),
           used: files.used(), cap: files.cap, uploadMax: files.uploadMax, admin: actor.admin,
         });
       }
@@ -94,7 +94,7 @@ export function createTeamFilesRoutes(deps: TeamFilesRouteDeps): RouteHandler {
         const declared = length === undefined ? null : Number(length);
         if (declared !== null && (!Number.isFinite(declared) || declared < 0)) { req.resume(); return json(res, 400, { error: "That upload has no usable length.", code: "bad_length" }); }
         const entry = await files.upload(folder, name, req, declared, actor);
-        return json(res, 201, { entry: view(entry, actor), used: files.used() });
+        return json(res, 201, { entry: view(files, entry, actor), used: files.used() });
       }
       if (method !== "POST") { req.resume(); return json(res, 405, { error: "method not allowed" }); }
       const body = await readBody(req) as Record<string, unknown> | null;

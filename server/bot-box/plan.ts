@@ -111,6 +111,8 @@ export interface BoxAudience {
 
 /** Where every bot's box has its Team Cloud's shared folder. */
 export const TEAM_FILES_IN_BOX = "/team-files";
+/** Its template library, read-only in every box. */
+export const TEAM_FILES_LIBRARY = "templates";
 
 /** What stays read-only in a bot's own folder that is a non-team turn's working folder. */
 export const TEAM_FOLDER_KEPT = ["MEMORY.md", "memory", "skills"] as const;
@@ -312,6 +314,8 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   if (teamFiles) {
     mounts.push({ kind: teamFiles.write ? "bind" : "ro", source: resolve(teamFiles.source), target: TEAM_FILES_IN_BOX, optional: true });
     if (teamFiles.write && !writable.includes(TEAM_FILES_IN_BOX)) writable.push(TEAM_FILES_IN_BOX);
+    // The team's template library (server/team-templates.ts) is its admins', so it stays read-only for a bot that may edit.
+    if (teamFiles.write) mounts.push({ kind: "ro", source: join(resolve(teamFiles.source), TEAM_FILES_LIBRARY), target: join(TEAM_FILES_IN_BOX, TEAM_FILES_LIBRARY), optional: true });
   }
 
   const options = ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--hostname", BOX_HOSTNAME];

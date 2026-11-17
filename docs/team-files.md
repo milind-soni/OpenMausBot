@@ -15,6 +15,8 @@ space used of 5 GB.
   fit is refused and says why; a file with the same name is replaced only by whoever uploaded it, or an admin.
 - **New folder**, **Download**, **Rename** and **Delete**. An Owner or Admin renames and deletes anything; a member what
   they uploaded (and a folder of theirs only when everything in it is theirs too).
+- **`templates/`** is the team's template library (`server/team-templates.ts`, added from Share): everyone sees it,
+  only an Owner or Admin uploads, renames or deletes anything in it there.
 - **Preview** of text, Markdown, CSV and JSON (up to 1 MB) and of PNG, JPEG, GIF and WebP pictures; anything else downloads.
 
 The desktop app and the browser show the same page. The routes (`/api/team-files/*`, below) are a member's, so the phone app
@@ -28,7 +30,9 @@ An admin turns on **Can edit team files** in the bot's settings (Access) to let 
 chat, members' private chats included: that is how a record from a private chat lands where the team keeps it. Nothing of
 a conversation goes there by itself; the bot writes only what it is asked to.
 
-When the folder is full the box has it read-only for every bot, and the line says so. A process an engine keeps between
+`/team-files/templates`, the template library, is read-only in every box, for a bot that may edit too: the library is
+its admins', and every import reads a template again through the package gate. When the folder is full the box has it
+read-only for every bot, and the line says so. A process an engine keeps between
 turns (Claude Code's, an ACP engine's) is started again when a bot's access changes, so turning the switch off takes effect
 at its next turn.
 

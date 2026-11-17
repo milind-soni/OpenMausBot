@@ -332,6 +332,7 @@ linuxBox("the box plan", () => {
       expect(edit.writable).toContain("/team-files");
       expect(writesTeamThings(edit), "editing team files is not writing the bot's own folder").toEqual(["ro", "ro", "ro", "ro"]);
       expect(bwrapArgs(edit).join(" ")).toContain(`--bind-try ${source} /team-files`);
+      expect(visibleInBox(edit, "/team-files/templates/reporter/bot.yaml"), "the team's template library stays the admins'").toBe("ro");
       expect(visibleInBox(ask({ teamReadOnly: false }), "/team-files/x")).toBe("none");
     });
 

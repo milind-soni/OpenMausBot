@@ -100,6 +100,26 @@ describe("the folder", () => {
   });
 });
 
+describe("the team's template library", () => {
+  it("is the admins' to change; members see it; it counts toward the space used", async () => {
+    files.ensure();
+    mkdirSync(join(dataDir, TEAM_FILES_DIR, "templates", "reporter"), { recursive: true });
+    writeFileSync(join(dataDir, TEAM_FILES_DIR, "templates", "reporter", "bot.yaml"), "name: Reporter\n");
+    expect(files.list("templates", MIRA).entries.map((entry) => entry.name)).toEqual(["reporter"]);
+    expect(files.mayRemove("templates/reporter", MIRA)).toBe(false);
+    expect(files.mayRemove("templates/reporter", ADA)).toBe(true);
+    expect(await refused(() => files.upload("templates", "x.yaml", body("x"), 1, MIRA))).toEqual({ status: 403, code: "forbidden" });
+    expect(await refused(() => files.folder("templates/mine", MIRA))).toEqual({ status: 403, code: "forbidden" });
+    expect(await refused(() => files.remove("templates/reporter", MIRA))).toEqual({ status: 403, code: "forbidden" });
+    await files.upload("", "a.md", body("a"), 1, MIRA);
+    expect(await refused(() => files.rename("a.md", "templates/a.md", MIRA))).toEqual({ status: 403, code: "forbidden" });
+    files.reload();
+    expect(files.used()).toBe(1 + "name: Reporter\n".length);
+    expect([...files.snapshot()!.keys()], "never a turn's change").toEqual(["a.md"]);
+    files.remove("templates/reporter", ADA);
+  });
+});
+
 describe("a turn's changes", () => {
   const root = () => join(dataDir, TEAM_FILES_DIR);
 

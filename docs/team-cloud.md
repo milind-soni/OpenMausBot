@@ -560,6 +560,8 @@ anything, a member what they uploaded) and a preview of text and pictures.
   from Mira's private chat with Payroll lands in the team's folder, and its line says *"Changed by Mira with Payroll"*.
   This is the one place a private chat writes into the team's audience, by an admin's choice; the conversation itself
   never goes there. The audience rule otherwise holds: the bot's own folder stays read-only in that chat (above).
+- **The template library** (`templates/`, `server/team-templates.ts`) is one folder of it: everyone reads it, only an
+  admin changes it from the page, and it is read-only in every box. It counts toward the 5 GB.
 - **Who changed what** is kept in `team-files-activity.json`: the page's changes as they happen, a bot's after each turn
   that could write (the folder's sizes and times compared before and after), with the person the turn worked for (whoever
   asked, else the person whose private chat it is).

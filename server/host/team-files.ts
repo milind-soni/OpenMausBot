@@ -14,6 +14,8 @@ import { pipeline } from "node:stream/promises";
 import { writeFileAtomic } from "../atomic.ts";
 
 export const TEAM_FILES_DIR = "team-files";
+/** The team's library of templates, one folder of Team files (server/team-templates.ts): its admins' to change. */
+export const TEAM_FILES_TEMPLATES = "templates";
 export const TEAM_FILES_ACTIVITY = "team-files-activity.json";
 /** Where every bot's box has the folder. */
 export const TEAM_FILES_IN_BOX = "/team-files";
@@ -178,7 +180,7 @@ export function createTeamFiles(options: TeamFilesOptions) {
   };
 
   /** Every regular file under the folder, by path; null when there are more than `max` (too large to compare cheaply). */
-  const walk = (max = Number.POSITIVE_INFINITY): { files: Map<string, Stats>; bytes: number } | null => {
+  const walk = (max = Number.POSITIVE_INFINITY, countAll = true): { files: Map<string, Stats>; bytes: number } | null => {
     ensure();
     const files = new Map<string, Stats>();
     let bytes = 0, seen = 0;
@@ -190,6 +192,7 @@ export function createTeamFiles(options: TeamFilesOptions) {
       for (const name of names) {
         if (++seen > max) return null;
         const path = rel ? `${rel}/${name}` : name;
+        if (!countAll && path === TEAM_FILES_TEMPLATES) continue;
         let stat: Stats;
         try { stat = lstatSync(join(root, path)); } catch { continue; }
         if (stat.isDirectory()) stack.push(path);
@@ -201,7 +204,8 @@ export function createTeamFiles(options: TeamFilesOptions) {
 
   /** The folder's files as they are now, or null when it is too large to compare. */
   const snapshot = (): TeamFilesSnapshot | null => {
-    const walked = walk(TEAM_FILES_SNAPSHOT_MAX);
+    // The template library is no turn's to change (read-only in every box) and keeps its own record of who added what.
+    const walked = walk(TEAM_FILES_SNAPSHOT_MAX, false);
     if (!walked) return null;
     return new Map([...walked.files].map(([path, stat]) => [path, `${stat.size}:${Math.round(stat.mtimeMs)}`]));
   };
@@ -240,8 +244,14 @@ export function createTeamFiles(options: TeamFilesOptions) {
     return last;
   };
 
+  /** The template library is the admins': members see it, only an admin changes anything in it. */
+  const librarys = (rel: string) => inside(rel, TEAM_FILES_TEMPLATES);
+  const mayAdd = (folder: string, actor: TeamFilesActor) => {
+    if (!actor.admin && librarys(folder)) throw new TeamFilesError(403, "forbidden", "The team's templates are the admins' to change.");
+  };
   const mayRemove = (rel: string, actor: TeamFilesActor): boolean => {
     if (actor.admin) return true;
+    if (librarys(rel)) return false;
     const owners = readActivity().owners;
     return owners[rel] === actor.person;
   };
@@ -298,6 +308,7 @@ export function createTeamFiles(options: TeamFilesOptions) {
     async upload(folder: string, name: string, body: Readable, declared: number | null, actor: TeamFilesActor): Promise<TeamFileEntry> {
       resolve(folder, "folder");
       const path = folder ? `${folder}/${name}` : name;
+      mayAdd(path, actor);
       const target = resolve(path, "maybe");
       if (target.stat?.isDirectory()) throw new TeamFilesError(409, "exists", "A folder with that name is already there.");
       if (target.stat && !mayRemove(path, actor)) throw new TeamFilesError(409, "exists", "A file with that name is already there, and it isn't yours to replace.");
@@ -334,6 +345,7 @@ export function createTeamFiles(options: TeamFilesOptions) {
 
     folder(rel: string, actor: TeamFilesActor): void {
       if (!rel) throw new TeamFilesError(400, "bad_path", "Name the new folder.");
+      mayAdd(rel, actor);
       const { full } = resolve(rel, "absent");
       settledParent(full);
       mkdirSync(full, { mode: 0o700 });
@@ -346,6 +358,7 @@ export function createTeamFiles(options: TeamFilesOptions) {
       if (inside(to, from)) throw new TeamFilesError(400, "bad_path", "A folder can't go inside itself.");
       const source = resolve(from, "any");
       if (!mayRemove(from, actor)) throw new TeamFilesError(403, "forbidden", "Only an admin, or whoever uploaded it, can rename this.");
+      mayAdd(to, actor);
       if (dirname(to) !== "." && dirname(to) !== "") resolve(dirname(to), "folder");
       const target = resolve(to, "absent");
       settledParent(source.full);
