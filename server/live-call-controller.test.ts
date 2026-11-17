@@ -9,7 +9,7 @@ import { LIVE_CUSTOM_REFUSAL } from "./live-access.ts";
 import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, LiveSessionError, type LiveEndpoint } from "./live-call.ts";
 import { FishRelays, FISH_AGENT_VOICE } from "./live-fish.ts";
 import type { LiveElevenLabsSession, LiveFishSessionToken, LiveGeminiSession } from "../shared/wire.ts";
-import { addHeldSecretScrubber, HELD_SECRET_MASK } from "./redact.ts";
+import { addHeldSecretScrubber, HELD_SECRET_MASK, redactSecretsInText } from "./redact.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -1728,6 +1728,34 @@ describe("LiveCallController record", () => {
     const record = recorded(t)[0]!.record;
     expect(record.spoken).toEqual([{ at: expect.any(Number), text: `Your code is ${HELD_SECRET_MASK}.` }]);
     expect(JSON.stringify(record)).not.toContain("24LM");
+  });
+
+  it("masks a held code said across a pause, which splits it over two lines", async () => {
+    const code = "Q7XK-24LM";
+    const forget = addHeldSecretScrubber((text) => text.replaceAll(code, HELD_SECRET_MASK));
+    const t = setup({ recordCall: vi.fn() });
+    try {
+      await t.start();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Your code is Q7XK", start_ms: 1_000, end_ms: 1_500 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "-24", start_ms: 3_000, end_ms: 3_200 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "LM.", start_ms: 3_200, end_ms: 3_500 });
+    } finally {
+      forget();
+    }
+    t.socket().drop();
+    const record = recorded(t)[0]!.record;
+    expect(record.spoken).toEqual([{ at: expect.any(Number), text: `Your code is ${HELD_SECRET_MASK}.` }]);
+    expect(JSON.stringify(record)).not.toContain("Q7XK");
+  });
+
+  it("leaves a credential shape whole until the record is redacted, so a key split across deltas is masked in full", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    await t.start();
+    t.socket().receive({ type: "session.output_transcript.delta", delta: "Set service_key=Q7XK", start_ms: 1_000, end_ms: 1_500 });
+    t.socket().receive({ type: "session.output_transcript.delta", delta: "-24LM now.", start_ms: 1_500, end_ms: 2_000 });
+    t.socket().drop();
+    const spoken = recorded(t)[0]!.record.spoken!.map((line) => redactSecretsInText(line.text));
+    expect(spoken).toEqual(["Set service_key=«redacted 9 chars» now."]);
   });
 
   it("counts wall-clock seconds when OpenAI sent none", async () => {

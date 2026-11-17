@@ -81,14 +81,17 @@ export class LiveTranscript {
 const SPOKEN_LINE_GAP_MS = 1_000;
 const MAX_SPOKEN_LINES = 2_000;
 
+type SpokenLineState = { at: number; text: string; endMs: number };
+
 /** The bot's own words on a call (`session.output_transcript.delta` text), one
  * line per stretch of speech, for the call record. A delta without timing
  * continues the current line. */
 export class SpokenLines {
-  private lines: Array<{ at: number; text: string; endMs: number }> = [];
+  private lines: SpokenLineState[] = [];
   private readonly scrub: (text: string) => string;
 
-  /** `scrub` masks each line as it grows, while anything it masks is still known to it. */
+  /** `scrub` masks known values (held one-time codes) in each line as it grows, while they are still known to it.
+   * It must only replace exact values: a mask it leaves stays, so a value it forgets later stays masked. */
   constructor(scrub: (text: string) => string = (text) => text) {
     this.scrub = scrub;
   }
@@ -100,10 +103,25 @@ export class SpokenLines {
     if (last && (!timed || startMs <= last.endMs + SPOKEN_LINE_GAP_MS)) {
       last.text = this.scrub(last.text + text);
       if (timed) last.endMs = Math.max(last.endMs, endMs);
-      return;
+    } else {
+      if (this.lines.length >= MAX_SPOKEN_LINES) return;
+      this.lines.push({ at, text: this.scrub(text), endMs: timed ? endMs : Number.NEGATIVE_INFINITY });
     }
-    if (this.lines.length >= MAX_SPOKEN_LINES) return;
-    this.lines.push({ at, text: this.scrub(text), endMs: timed ? endMs : Number.NEGATIVE_INFINITY });
+    this.joinAcrossPause();
+  }
+
+  /** A value said across a pause is split over two lines, neither of which holds all of it: when the scrub
+   * masks something in the two joined, they become one line. */
+  private joinAcrossPause(): void {
+    while (this.lines.length >= 2) {
+      const [previous, last] = this.lines.slice(-2) as [SpokenLineState, SpokenLineState];
+      const joined = previous.text + last.text;
+      const scrubbed = this.scrub(joined);
+      if (scrubbed === joined) return;
+      previous.text = scrubbed;
+      previous.endMs = Math.max(previous.endMs, last.endMs);
+      this.lines.pop();
+    }
   }
 
   list(): LiveSpokenLine[] {

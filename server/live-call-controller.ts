@@ -10,7 +10,7 @@ import type { LiveCallRecord, LiveCallState, LiveClient, LiveElevenLabsTransport
 import { FISH_AGENT_VOICE } from "./live-fish.ts";
 import { LIVE_NEEDS_KEY, liveAuthHeaders, liveCallSummaryLine, liveProviderName, LiveSessionError, liveVoice, spokenHangUp, type LiveEndpoint } from "./live-call.ts";
 import { LIVE_CUSTOM_REFUSAL } from "./live-access.ts";
-import { redactSecretsInText } from "./redact.ts";
+import { scrubHeldSecrets } from "./redact.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -297,7 +297,7 @@ export class LiveCallController {
       socket: null,
       attached: false,
       transcript: new LiveTranscript(),
-      spoken: new SpokenLines(redactSecretsInText),
+      spoken: new SpokenLines(scrubHeldSecrets),
       heardThroughMs: 0,
       lastDecision: null,
       eventCounter: 0,
