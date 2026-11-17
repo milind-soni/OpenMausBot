@@ -31,6 +31,10 @@ describe("managed Composio desktop registration", () => {
     expect(managedComposioBrokerUrl("http://broker.example", true)).toBe("");
   });
 
+  it("keeps the service on mcp.mausbot.com: every Grok Bot link people paste is made from this address", () => {
+    expect(DEFAULT_MANAGED_COMPOSIO_BROKER_URL).toBe("https://mcp.mausbot.com");
+  });
+
   it("accepts HTTPS and loopback development brokers but rejects insecure remote URLs", async () => {
     expect(normalizeManagedComposioBrokerUrl("https://broker.example/root/")).toBe(
       "https://broker.example/root",

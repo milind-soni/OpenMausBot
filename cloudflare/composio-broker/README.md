@@ -207,6 +207,18 @@ A link's address is all a caller needs, so it must not reach a log:
 logs record every request's URL) and the catch-all error log writes
 `/mcp/move/[key]`. Traces (5% sampling) may still record request URLs.
 
+The shipped address is `https://mcp.mausbot.com`
+(`DEFAULT_MANAGED_COMPOSIO_BROKER_URL` in `electron/managed-composio.mjs`), and
+every Grok Bot link is made from it, so it can never change once released. The
+app's connected apps use the same address. `mausbot.com`'s DNS is on Vercel, not
+Cloudflare, so `wrangler.jsonc` has no route for it (a route on a zone outside
+this account fails the deploy). Before a desktop release ships, make
+`mcp.mausbot.com` reach this Worker: either Cloudflare for SaaS on a zone in this
+account (custom hostname `mcp.mausbot.com`, its CNAME and validation records in
+Vercel DNS, a Worker route for `mcp.mausbot.com/*`), or move `mausbot.com`'s DNS
+to Cloudflare and add a Custom Domain. `workers_dev` stays on for desktops
+released before this.
+
 Before the code reaches `main`: apply migration `0006_grok_links.sql` and
 create the `LINK_LIMITER` rate-limit namespace. The first deploy creates the
 `GrokLinkObject` class (migration tag `v1`, SQLite-backed, which the Free plan
