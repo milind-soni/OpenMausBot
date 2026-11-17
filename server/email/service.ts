@@ -110,6 +110,16 @@ export function createEmailService(deps: EmailServiceDeps) {
   };
   const discover = deps.discover ?? liveDiscoverDeps(allowed);
   const now = deps.now ?? Date.now;
+  const pendingChanges = new Map<string, object>();
+  // Network checks can finish in any order. Only the most recent change for
+  // this address may save; disconnect also invalidates a check still in flight.
+  async function changing<T>(address: string, run: (current: () => boolean) => Promise<T>): Promise<T> {
+    const key = address.toLowerCase(), token = {};
+    pendingChanges.set(key, token);
+    const current = () => pendingChanges.get(key) === token;
+    try { return await run(current); }
+    finally { if (current()) pendingChanges.delete(key); }
+  }
 
   const status = (): EmailStatus => (deps.refusal
     ? { state: "unavailable", accounts: [], reason: deps.refusal }
@@ -212,40 +222,45 @@ export function createEmailService(deps: EmailServiceDeps) {
       if (!ADDRESS.test(address)) return { ok: false, error: "Enter your whole email address, like you@example.com." };
       if (!password) return { ok: false, error: "Enter the password for this mailbox." };
       for (const host of [request.imapHost, request.smtpHost]) if (host?.trim() && !HOST.test(host.trim())) return { ok: false, error: "A mail server is a name like mail.example.com.", needsServer: true };
-      const existing = store.get(address);
-      if (!existing && store.list().length >= MAX_EMAIL_ACCOUNTS) return { ok: false, error: `You can connect at most ${MAX_EMAIL_ACCOUNTS} mailboxes.` };
-      const deadline = now() + FIND_MS;
-      const imapHost = request.imapHost?.trim().toLowerCase();
-      const outgoing = typedOutgoing(request);
-      const found: MailCandidates = imapHost && outgoing ? { imap: [], smtp: [] } : await discoverMailServers(address, discover);
-      // A provider with no password sign-in at all never gets one.
-      if (!imapHost && found.provider?.rule === "no-password") return { ok: false, error: passwordHelp(found.provider), signIn: found.provider.hint };
-      if (imapHost) found.imap = onPort(imapHost, request.imapPort, [993, 143]);
-      else if (existing) found.imap = [existing.imap, ...found.imap.filter((server) => server.host !== existing.imap.host || server.port !== existing.imap.port)];
-      let signedIn: Awaited<ReturnType<typeof signIn>>;
-      try { signedIn = await signIn(address, password, request.username?.trim() || undefined, found, deadline); } catch (error) {
-        const failed = error instanceof EmailError ? error : new EmailError("server", "The mail server said no.");
-        if (failed.code !== "password") return { ok: false, error: failed.message };
-        return { ok: false, error: passwordHelp(found.provider), ...(found.provider ? { signIn: found.provider.hint } : {}) };
-      }
-      if (signedIn instanceof EmailError) {
-        if (signedIn.code === "refused") return { ok: false, needsServer: true, error: signedIn.message };
-        return { ok: false, needsServer: true, error: imapHost ? "That mail server did not answer over a secure connection. Check its name and port." : "We couldn't find your mail server. Type its name, which your mail provider's help pages list." };
-      }
-      reading?.(signedIn.imap.host);
-      const smtpPassword = request.smtpPassword || password;
-      const logins = sendingNames(address, signedIn.username, request.smtpUsername?.trim()).map((username) => ({ username, password: smtpPassword }));
-      const places = outgoing ?? [...(existing?.smtp ? [existing.smtp] : []), ...found.smtp, ...smtpBeside(signedIn.imap.host)];
-      const sending = await findSending(logins, places, { exact: Boolean(request.smtpSecurity), hint: found.provider?.hint });
-      const account: EmailAccount = {
-        address, username: signedIn.username, password, imap: signedIn.imap, connectedAt: now(),
-        ...("smtp" in sending
-          ? { smtp: sending.smtp, ...ownLogin(sending.login, { username: signedIn.username, password }) }
-          : { ...ownLogin({ username: request.smtpUsername?.trim() || signedIn.username, password: smtpPassword }, { username: signedIn.username, password }), sendingProblem: sending.problem, ...(sending.tried ? { smtpTried: sending.tried } : {}) }),
-      };
-      store.put(account);
-      const hint = "smtp" in sending ? undefined : found.provider?.hint;
-      return { ok: true, account: view(account), inbox: signedIn.inbox, sending: "smtp" in sending ? { ok: true } : { ok: false, problem: sending.problem, ...(hint ? { signIn: hint } : {}) } };
+      return changing<EmailConnectAnswer>(address, async (current) => {
+        const existing = store.get(address);
+        if (!existing && store.list().length >= MAX_EMAIL_ACCOUNTS) return { ok: false, error: `You can connect at most ${MAX_EMAIL_ACCOUNTS} mailboxes.` };
+        const deadline = now() + FIND_MS;
+        const imapHost = request.imapHost?.trim().toLowerCase();
+        const outgoing = typedOutgoing(request);
+        const found: MailCandidates = imapHost && outgoing ? { imap: [], smtp: [] } : await discoverMailServers(address, discover);
+        // A provider with no password sign-in at all never gets one.
+        if (!imapHost && found.provider?.rule === "no-password") return { ok: false, error: passwordHelp(found.provider), signIn: found.provider.hint };
+        if (imapHost) found.imap = onPort(imapHost, request.imapPort, [993, 143]);
+        else if (existing) found.imap = [existing.imap, ...found.imap.filter((server) => server.host !== existing.imap.host || server.port !== existing.imap.port)];
+        let signedIn: Awaited<ReturnType<typeof signIn>>;
+        try { signedIn = await signIn(address, password, request.username?.trim() || undefined, found, deadline); } catch (error) {
+          const failed = error instanceof EmailError ? error : new EmailError("server", "The mail server said no.");
+          if (failed.code !== "password") return { ok: false, error: failed.message };
+          return { ok: false, error: passwordHelp(found.provider), ...(found.provider ? { signIn: found.provider.hint } : {}) };
+        }
+        if (!current()) return { ok: false, error: "This mailbox changed while it was checked. Connect again." };
+        if (signedIn instanceof EmailError) {
+          if (signedIn.code === "refused") return { ok: false, needsServer: true, error: signedIn.message };
+          return { ok: false, needsServer: true, error: imapHost ? "That mail server did not answer over a secure connection. Check its name and port." : "We couldn't find your mail server. Type its name, which your mail provider's help pages list." };
+        }
+        reading?.(signedIn.imap.host);
+        const smtpPassword = request.smtpPassword || password;
+        const logins = sendingNames(address, signedIn.username, request.smtpUsername?.trim()).map((username) => ({ username, password: smtpPassword }));
+        const places = outgoing ?? [...(existing?.smtp ? [existing.smtp] : []), ...found.smtp, ...smtpBeside(signedIn.imap.host)];
+        const sending = await findSending(logins, places, { exact: Boolean(request.smtpSecurity), hint: found.provider?.hint });
+        if (!current()) return { ok: false, error: "This mailbox changed while it was checked. Connect again." };
+        if (!store.get(address) && store.list().length >= MAX_EMAIL_ACCOUNTS) return { ok: false, error: `You can connect at most ${MAX_EMAIL_ACCOUNTS} mailboxes.` };
+        const account: EmailAccount = {
+          address, username: signedIn.username, password, imap: signedIn.imap, connectedAt: now(),
+          ...("smtp" in sending
+            ? { smtp: sending.smtp, ...ownLogin(sending.login, { username: signedIn.username, password }) }
+            : { ...ownLogin({ username: request.smtpUsername?.trim() || signedIn.username, password: smtpPassword }, { username: signedIn.username, password }), sendingProblem: sending.problem, ...(sending.tried ? { smtpTried: sending.tried } : {}) }),
+        };
+        store.put(account);
+        const hint = "smtp" in sending ? undefined : found.provider?.hint;
+        return { ok: true, account: view(account), inbox: signedIn.inbox, sending: "smtp" in sending ? { ok: true } : { ok: false, problem: sending.problem, ...(hint ? { signIn: hint } : {}) } };
+      });
     },
 
     /** Checks sending again for a connected mailbox, at the outgoing server typed here or the ones found for it, without
@@ -256,26 +271,28 @@ export function createEmailService(deps: EmailServiceDeps) {
       if (!account) return { ok: false, error: `No mailbox ${address} is connected.` };
       const bad = outgoingHostProblem(fields);
       if (bad) return { ok: false, error: bad };
-      const password = fields.smtpPassword || account.smtpPassword || account.password;
-      const logins = sendingNames(account.address, account.smtpUsername ?? account.username, fields.smtpUsername?.trim()).map((username) => ({ username, password }));
-      const typed = typedOutgoing(fields);
-      const found = typed ? null : await discoverMailServers(account.address, discover);
-      const places = typed ?? [...(account.smtp ? [account.smtp] : []), ...(account.smtpTried ? [account.smtpTried] : []), ...found!.smtp, ...smtpBeside(account.imap.host)];
-      const sending = await findSending(logins, places, { exact: Boolean(fields.smtpSecurity), hint: found?.provider?.hint });
-      const current = store.get(address);
-      if (!current || current.password !== account.password) return { ok: false, error: "This mailbox changed while sending was checked. Check again." };
-      const { smtpUsername: _username, smtpPassword: _password, sendingProblem: _problem, smtpTried: _tried, ...rest } = current;
-      if ("smtp" in sending) {
-        const next: EmailAccount = { ...rest, smtp: sending.smtp, ...ownLogin(sending.login, current) };
+      return changing<EmailOutgoingAnswer>(address, async (stillCurrent) => {
+        const password = fields.smtpPassword || account.smtpPassword || account.password;
+        const logins = sendingNames(account.address, account.smtpUsername ?? account.username, fields.smtpUsername?.trim()).map((username) => ({ username, password }));
+        const typed = typedOutgoing(fields);
+        const found = typed ? null : await discoverMailServers(account.address, discover);
+        const places = typed ?? [...(account.smtp ? [account.smtp] : []), ...(account.smtpTried ? [account.smtpTried] : []), ...found!.smtp, ...smtpBeside(account.imap.host)];
+        const sending = await findSending(logins, places, { exact: Boolean(fields.smtpSecurity), hint: found?.provider?.hint });
+        const current = store.get(address);
+        if (!stillCurrent() || !current || current.password !== account.password) return { ok: false, error: "This mailbox changed while sending was checked. Check again." };
+        const { smtpUsername: _username, smtpPassword: _password, sendingProblem: _problem, smtpTried: _tried, ...rest } = current;
+        if ("smtp" in sending) {
+          const next: EmailAccount = { ...rest, smtp: sending.smtp, ...ownLogin(sending.login, current) };
+          store.put(next);
+          return { ok: true, account: view(next) };
+        }
+        // A server that sends stays until one typed here works instead.
+        if (current.smtp && !current.sendingProblem) return { ok: false, error: sending.problem };
+        const { smtp: _smtp, ...unsent } = rest;
+        const next: EmailAccount = { ...unsent, ...ownLogin({ username: logins[0]!.username, password }, current), sendingProblem: sending.problem, ...(sending.tried ? { smtpTried: sending.tried } : {}) };
         store.put(next);
-        return { ok: true, account: view(next) };
-      }
-      // A server that sends stays until one typed here works instead.
-      if (current.smtp && !current.sendingProblem) return { ok: false, error: sending.problem };
-      const { smtp: _smtp, ...unsent } = rest;
-      const next: EmailAccount = { ...unsent, ...ownLogin({ username: logins[0]!.username, password }, current), sendingProblem: sending.problem, ...(sending.tried ? { smtpTried: sending.tried } : {}) };
-      store.put(next);
-      return { ok: false, error: sending.problem, account: view(next) };
+        return { ok: false, error: sending.problem, account: view(next) };
+      });
     },
 
     /** Sends a short message from a mailbox to itself: sending proven end to end. */
@@ -295,6 +312,7 @@ export function createEmailService(deps: EmailServiceDeps) {
     },
 
     disconnect(address: string): EmailStatus {
+      pendingChanges.delete(address.toLowerCase());
       store.remove(address);
       return status();
     },
