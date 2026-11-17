@@ -97,6 +97,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   A reference reaches only what a name does: a Login's username, password and one-time code never, an item two items'
   titles fit is refused, and one kept to other bots is not found. A member sees and changes none of it: their Vault
   shows only their own secrets and `onePassword: { connected: false }`, and every `/api/logins` route answers them 403.
+- **Bitwarden for the team** ([bitwarden.md](bitwarden.md)). The same rules: an Admin connects a dedicated Bitwarden
+  account (*Use a dedicated Bitwarden account that can only see one collection.*) for the whole team, its logins and
+  secrets serve the team's bots in every chat, by name or by `bw://<item>/<field>` reference, and a member sees and
+  changes none of it (`bitwarden: { connected: false }`).
 - **Browsers.** Each private chat with a bot drives that person's own browser of the bot, each group chat the group
   chat's, and the bot's main chat the team's: separate Chrome profiles, saved sign-ins and live views, so a site one
   member signed in to in their chat never opens signed in for another member. The live view shows the browser of the
@@ -276,9 +280,10 @@ this server shares with every bot. It exists only on a Team Cloud.
     connections: whether they connected what an admin asked everyone to connect, never when or how they used it, nor
     any other connection of theirs. A member who left is not listed.
 - **The team's Vault** (`server/host/team-vault-report.ts`), additive: `vault: { secrets: [{ name, addedAt, usedBy }],
-  providers: [{ kind: "1password", connected, label, lastError? }] }`. `secrets` are the team's saved secrets (an
+  providers: [{ kind: "1password" | "bitwarden", connected, label, lastError? }] }`. `secrets` are the team's saved secrets (an
   Admin's, or a shared or group chat's card), never a member's own; `usedBy` names the team bots that may use each (each
-  member's own MausBot left out). `label` is the 1Password vaults the token reads ("" while not connected); `lastError`
+  member's own MausBot left out). `label` is the 1Password vaults the token reads, or Bitwarden's server host ("" while
+  not connected); `lastError`
   a fixed class (`refused`, `rate-limited`, `cant-connect`, `unavailable`, `unreadable`). 1Password's own items and
   saved logins are not listed. Never a value, the token or a header. The Admin's Apps page shows it as *Keys &
   passwords*, read-only, with *Manage in the app* opening Settings → Vault here (`/?connect=vault`, an admin's only).
