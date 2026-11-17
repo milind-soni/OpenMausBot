@@ -115,7 +115,7 @@ quadlet_binary() {
 
 podman_version() { podman version --format '{{.Client.Version}}' 2>/dev/null || podman --version 2>/dev/null | sed 's/.* //'; }
 
-# Podman 4.4 brought Quadlet; keep-id with a uid of its own, and a health check that restarts, came by 4.6.
+# The unit's keys (UserNS=keep-id:uid=, ShmSize=, HealthOnFailure=) are tested with Podman 4.9, the oldest asked for.
 check_host() {
   say "Checking this machine..."
   [ "$(uname -s)" = Linux ] || fail "This installs a systemd service, which needs Linux. On a Mac or Windows, use the desktop app or Docker."
@@ -127,8 +127,8 @@ check_host() {
   case "$major.$minor" in
     *[!0-9.]* | .*) fail "Could not tell which Podman this is (podman version said: ${version:-nothing})." ;;
   esac
-  if [ "$major" -lt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -lt 6 ]; }; then
-    fail "This needs Podman 4.6 or newer, for its systemd units; this machine has $version. Ubuntu 24.04, Debian 13 and Fedora 39 or newer have it."
+  if [ "$major" -lt 4 ] || { [ "$major" -eq 4 ] && [ "$minor" -lt 9 ]; }; then
+    fail "This needs Podman 4.9 or newer, for its systemd units; this machine has $version. Ubuntu 24.04, Debian 13, Fedora 40 and RHEL 9.4 or newer have it."
   fi
   ok "Podman $version"
   [ "$(podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null || true)" = true ] ||

@@ -34,7 +34,7 @@ healthy() { curl -sf --max-time 5 "http://127.0.0.1:${1:-8799}/api/health" 2>/de
 healthy_again() {
   local _
   for _ in $(seq 1 80); do
-    healthy "${1:-8799}" && return 0
+    healthy && return 0
     sleep 3
   done
   fail "the server did not answer again"
@@ -43,17 +43,21 @@ container_id() { podman inspect -f '{{.Id}}' openmausbot 2>/dev/null || true; }
 in_server() { podman exec openmausbot "$@"; }
 
 step "this host: rootless Podman, and systemd for this user without a login (linger, as a server has it)"
-podman version | tee "$OUT/podman-version.txt"
-if ! grep -q "^$(id -un):" /etc/subuid; then
-  sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$(id -un)"
-  podman system migrate
-fi
 sudo loginctl enable-linger "$(id -un)"
 XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export XDG_RUNTIME_DIR
 for _ in $(seq 1 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 systemctl --user show-environment >/dev/null || fail "no systemd for this user"
+if ! grep -q "^$(id -un):" /etc/subuid; then
+  sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$(id -un)"
+  podman system migrate
+fi
+podman version | tee "$OUT/podman-version.txt"
+# What listens beyond loopback before MausBot: with the host's network, anything the server or Chrome opens is a host port.
+outside() { ss -ltnH | awk '{ print $4 }' | grep -vE '^(127\.[0-9.]+|\[::1\]|\[::ffff:127\.[0-9.]+\]):[0-9]+$' | sort -u; }
+outside >"$OUT/outside-before.txt"
+new_outside() { outside | comm -13 "$OUT/outside-before.txt" -; }
 finding "host: $(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"'), kernel $(uname -r), $(uname -m), Podman $(podman version --format '{{.Client.Version}}'), $(podman info --format '{{.Host.NetworkBackend}} network, {{.Host.CgroupsVersion}}, rootless={{.Host.Security.Rootless}}')"
 finding "host: kernel.apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo absent)"
 
@@ -72,7 +76,22 @@ cat >"$DIR/data/.openmausbot/config.json" <<'JSON'
 JSON
 chmod 700 "$DIR/data"
 
-step "install $OLD_VERSION as this user's service"
+step "without linger the installer prints the one sudo line, and never runs sudo"
+stubs=$(mktemp -d)
+cat >"$stubs/loginctl" <<'STUB'
+#!/bin/sh
+if [ "$1" = show-user ]; then echo no; exit 0; fi
+exec /usr/bin/loginctl "$@"
+STUB
+printf '#!/bin/sh\necho "sudo $*" >>"%s/sudo-called"\nexit 97\n' "$stubs" >"$stubs/sudo"
+chmod 755 "$stubs/loginctl" "$stubs/sudo"
+PATH="$stubs:$PATH" OMB_INSTALL_IMAGE="$REPO:v$OLD_VERSION" "${INSTALL[@]}" >"$OUT/install-no-linger.txt" 2>&1 || { cat "$OUT/install-no-linger.txt"; fail "the install without linger failed"; }
+contains "$OUT/install-no-linger.txt" "  sudo loginctl enable-linger $(id -un)" "the install did not print the linger line"
+[ ! -e "$stubs/sudo-called" ] || fail "the installer ran sudo: $(cat "$stubs/sudo-called")"
+rm -rf "$stubs"
+finding "linger: without it the installer printed 'sudo loginctl enable-linger $(id -un)' and ran no sudo"
+
+step "install $OLD_VERSION as this user's service (run again, now with linger)"
 OMB_INSTALL_IMAGE="$REPO:v$OLD_VERSION" "${INSTALL[@]}" >"$OUT/install.txt" 2>&1 || { cat "$OUT/install.txt"; fail "the install failed"; }
 cat "$OUT/install.txt"
 contains "$OUT/install.txt" "MausBot is running as your user's service (openmausbot), on http://127.0.0.1:8799." "the install did not finish"
@@ -86,10 +105,11 @@ systemctl --user is-active --quiet openmausbot || fail "the service is not activ
 healthy || fail "the server does not answer on 127.0.0.1:8799"
 ss -ltnH >"$OUT/listening.txt"
 grep -q "127.0.0.1:8799 " "$OUT/listening.txt" || fail "nothing listens on 127.0.0.1:8799: $(cat "$OUT/listening.txt")"
-if grep -qE "(0\.0\.0\.0|\*|\[::\]):8799 " "$OUT/listening.txt"; then fail "the server answers beyond this machine without --lan"; fi
+[ -z "$(new_outside)" ] || fail "the server listens beyond this machine without --lan: $(new_outside)"
+grep -q "127.0.0.1:8800 " "$OUT/listening.txt" || fail "the webhook port 8800 is not on loopback"
 [ "$(stat -c %u "$DIR/data")" = "$(id -u)" ] || fail "the data folder is not this user's"
 [ -z "$(find "$DIR/data" ! -user "$(id -u)" -print -quit)" ] || fail "the server wrote files that are not this user's on the host: $(find "$DIR/data" ! -user "$(id -u)" | head -n 5)"
-[ "$(stat -c %a "$DIR/.env")" = 600 ] && [ "$(stat -c %a "$DIR/server.env")" = 600 ] || fail "the settings are readable by others"
+{ [ "$(stat -c %a "$DIR/.env")" = 600 ] && [ "$(stat -c %a "$DIR/server.env")" = 600 ]; } || fail "the settings are readable by others"
 { [ -x "$DIR/update.sh" ] && cmp -s "$ROOT/deploy/update.sh" "$DIR/update.sh"; } || fail "update.sh was not placed"
 finding "install: service active, 127.0.0.1:8799 only, image pinned by digest, data owned by the user on the host"
 
@@ -107,13 +127,23 @@ contains "$OUT/run.json" "hello from fake claude" "the turn did not answer with 
 finding "turn: new-bot + run answered \"hello from fake claude\" through the server in the rootless container"
 
 step "Chrome in the server's container"
-if in_server sh -c 'agent-browser open "data:text/html,<title>podman-e2e</title>" >/dev/null && agent-browser get title; agent-browser close >/dev/null 2>&1 || true' >"$OUT/chrome.txt" 2>&1 &&
+# agent-browser, run directly in the server's container, as a bot's browser call runs it.
+python3 -m http.server 8765 --bind 127.0.0.1 --directory "$(mktemp -d)" >/dev/null 2>&1 &
+page_server=$!
+if in_server sh -c 'agent-browser open "data:text/html,<title>podman-e2e</title>" >/dev/null && agent-browser get title' >"$OUT/chrome.txt" 2>&1 &&
   grep -q podman-e2e "$OUT/chrome.txt"; then
-  finding "chrome: agent-browser started the image's browser and read a page title, with no extra flags"
+  podman top openmausbot args | grep -iE 'chrom' | grep -v grep | head -n 3 >"$OUT/chrome-argv.txt" || true
+  in_server agent-browser open http://127.0.0.1:8765/ >>"$OUT/chrome.txt" 2>&1 || fail "the browser did not load a page over http"
+  [ -z "$(new_outside)" ] || fail "with Chrome open, something listens beyond this machine: $(new_outside)"
+  in_server agent-browser close >/dev/null 2>&1 || true
+  sandbox_flag=no
+  if grep -q -- '--no-sandbox' "$OUT/chrome-argv.txt"; then sandbox_flag=yes; fi
+  finding "chrome: agent-browser started the image's Chrome in the rootless container and loaded a data: page and an http page; --no-sandbox on its command line: $sandbox_flag (the container marker /run/.containerenv); no listener beyond loopback"
 else
   cat "$OUT/chrome.txt"
   fail "the image's browser did not start in the rootless container"
 fi
+kill "$page_server" 2>/dev/null || true
 
 step "the bots' sandbox (bubblewrap) in a rootless container: the first setting that lets it run"
 image=$(sed -n 's/^Image=//p' "$UNIT")
@@ -123,21 +153,23 @@ podman build -q -t localhost/omb-box-probe:e2e -f "$OUT/Containerfile.box" "$OUT
 probe=(--unshare-user --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent --ro-bind /usr /usr
   --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp /bin/true)
 box_rung=""
-for rung in "default" "seccomp=repository profile" "unmask=/proc" "apparmor=unconfined"; do
+seccomp=(--security-opt "seccomp=$ROOT/connector/profiles/seccomp-omb-home.json")
+for rung in default seccomp unmask-proc unmask-all apparmor-unconfined; do
   extra=()
   case "$rung" in
-    seccomp*) extra=(--security-opt "seccomp=$ROOT/connector/profiles/seccomp-omb-home.json") ;;
-    unmask*) extra=(--security-opt "seccomp=$ROOT/connector/profiles/seccomp-omb-home.json" --security-opt unmask=/proc/*) ;;
-    apparmor*) extra=(--security-opt "seccomp=$ROOT/connector/profiles/seccomp-omb-home.json" --security-opt unmask=/proc/* --security-opt apparmor=unconfined) ;;
+    seccomp) extra=("${seccomp[@]}") ;;
+    unmask-proc) extra=("${seccomp[@]}" --security-opt "unmask=/proc/*") ;;
+    unmask-all) extra=("${seccomp[@]}" --security-opt unmask=ALL) ;;
+    apparmor-unconfined) extra=("${seccomp[@]}" --security-opt unmask=ALL --security-opt apparmor=unconfined) ;;
   esac
   if podman run --rm --userns "$userns" ${extra[@]+"${extra[@]}"} --entrypoint bwrap localhost/omb-box-probe:e2e "${probe[@]}" >"$OUT/bwrap-$rung.txt" 2>&1; then
     box_rung=$rung
     break
   fi
-  finding "bot box: bubblewrap refused with $rung: $(head -c 300 "$OUT/bwrap-$rung.txt" | tr '\n' ' ')"
+  finding "bot box: bubblewrap refused at rung $rung (${extra[*]:-no options}): $(head -c 300 "$OUT/bwrap-$rung.txt" | tr '\n' ' ')"
 done
 if [ -n "$box_rung" ]; then
-  finding "bot box: bubblewrap ran its probe with: $box_rung"
+  finding "bot box: bubblewrap ran its probe at rung $box_rung (${extra[*]:-no options})"
   podman run --rm --userns "$userns" --network host -e OMB_BOT_BOX=1 -e OMB_DATA_DIR=/tmp/box-data ${extra[@]+"${extra[@]}"} \
     --entrypoint node localhost/omb-box-probe:e2e dist-server/bot-box/box-check.js --public=none >"$OUT/box-check.json" 2>&1 || true
   finding "bot box self-check (published image + bubblewrap): $(head -c 600 "$OUT/box-check.json" | tr '\n' ' ')"
@@ -156,6 +188,16 @@ healthy_again
 [ "$(container_id)" != "$before" ] || fail "the killed server was not started again"
 finding "restart: kill -9 of server-launcher; systemd started a new container ($(systemctl --user show -p NRestarts --value openmausbot) restart(s)) and it answered"
 
+step "a server that stops answering is stopped by its health check and started again"
+before=$(container_id)
+server=$(podman top openmausbot hpid args | awk '/dist-server\/index.js/ { print $1; exit }')
+[ -n "$server" ] || fail "no server process to pause"
+kill -STOP "$server"
+for _ in $(seq 1 120); do [ -n "$(container_id)" ] && [ "$(container_id)" != "$before" ] && break; sleep 3; done
+[ "$(container_id)" != "$before" ] || { kill -CONT "$server" 2>/dev/null || true; fail "the health check did not restart a server that stopped answering"; }
+healthy_again
+finding "health: a paused server (SIGSTOP) was killed by HealthOnFailure=kill and systemd started a new container"
+
 step "a restart of this user's systemd (what a boot does, with linger) starts it again"
 sudo systemctl restart "user@$(id -u).service"
 for _ in $(seq 1 30); do systemctl --user show-environment >/dev/null 2>&1 && break; sleep 1; done
@@ -168,13 +210,15 @@ step "--lan: other devices on this network reach it, and must pair; --local take
 healthy_again
 address=$(ip -4 -o route get 1.1.1.1 | sed -n 's/.* src \([0-9.]*\).*/\1/p')
 ss -ltnH | grep -qE "(0\.0\.0\.0|\*):8799 " || fail "the server does not listen beyond loopback with --lan"
+ss -ltnH | grep -E ":8800 " >"$OUT/lan-8800.txt" || true
 from_lan=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$address:8799/api/bots" || true)
 from_here=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:8799/api/bots" || true)
 [ "$from_lan" = 403 ] || [ "$from_lan" = 401 ] || fail "a request from $address got $from_lan from /api/bots, not a refusal"
 [ "$from_here" = 200 ] || fail "this machine's own request got $from_here from /api/bots"
 "${INSTALL[@]}" --local >"$OUT/install-local.txt" 2>&1 || { cat "$OUT/install-local.txt"; fail "the --local run failed"; }
 healthy_again
-if ss -ltnH | grep -qE "(0\.0\.0\.0|\*):8799 "; then fail "--local left the server listening beyond loopback"; fi
+[ -z "$(new_outside)" ] || fail "--local left something listening beyond loopback: $(new_outside)"
+finding "lan: webhook port with --lan: $(awk '{ print $4 }' "$OUT/lan-8800.txt" | tr '\n' ' ')"
 finding "lan: with --lan, $address got $from_lan and 127.0.0.1 got $from_here on /api/bots; --local went back to loopback"
 
 step "update to $NEW_VERSION, through update.sh"

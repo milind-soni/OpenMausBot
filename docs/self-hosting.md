@@ -163,8 +163,8 @@ npx openmausbot pair
 
 ### Podman (rootless, as a service)
 
-On Linux with Podman 4.6 or newer (Ubuntu 24.04, Debian 13, Fedora 39 and
-later), one command run as your own user, without `sudo`, installs the
+On Linux with Podman 4.9 or newer (Ubuntu 24.04, Debian 13, Fedora 40,
+RHEL 9.4 and later), one command run as your own user, without `sudo`, installs the
 published server image as your user's systemd service:
 
 ```sh
