@@ -98,7 +98,7 @@ describe("Settings → AI: a provider hidden from its own card", () => {
     expect(rows()).not.toContain("kimi");
     expect(hiddenRows()).toEqual(["kimi"]);
     expect(moreCount()).toContain("More providers");
-    // Hidden Kimi and the Google AI Studio row (#6352).
+    // Hidden Kimi and the Google AI Studio row.
     expect(moreCount()).toContain("2");
     const hiddenRow = container.querySelector('[data-hidden-engine="kimi"]')!;
     expect(hiddenRow.textContent).toContain("Kimi");
