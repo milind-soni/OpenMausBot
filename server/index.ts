@@ -649,7 +649,7 @@ import { createWebhookRoutes } from "./routes/webhooks.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
 import { connectorFileDeps, connectorFileScope, prepareConnectorFiles, withMissingFileHint } from "./connector-files.ts";
 import { createConnectorCards } from "./host/connector-cards.ts";
-import { createLoginMailCodes } from "./host/login-mail-codes.ts"; import { createLateToolResults } from "./host/late-tool-results.ts";
+import { createLoginMailCodes } from "./host/login-mail-codes.ts"; import { createLateToolResults } from "./host/late-tool-results.ts"; import { internalBodyRefusal } from "./host/internal-body-ids.ts";
 import { onThreadSeen, personAsks as personAskAt, sawThread } from "./thread-presence.ts"; import { createWarmSummaryHost, HARNESS_IDLE_FRACTION } from "./host/warm-summary-host.ts";
 
 const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
@@ -12879,18 +12879,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!internalCapabilityIsActive(internalCapability)) {
           throw Object.assign(new Error(TURN_ENDED_REFUSAL), { status: 401 });
         }
-        if (body && typeof body === "object" && !Array.isArray(body)) {
-          for (const key of ["fromBotId", "botId"] as const) {
-            if (body[key] !== undefined && String(body[key]) !== internalSender.id) {
-              throw Object.assign(new Error("the internal capability belongs to a different bot"), { status: 403 });
-            }
-          }
-          for (const key of ["fromThreadId", "threadId"] as const) {
-            if (body[key] !== undefined && String(body[key]) !== internalCapability.threadId) {
-              throw Object.assign(new Error("the internal capability belongs to a different conversation"), { status: 403 });
-            }
-          }
-        }
+        const refused = internalBodyRefusal(body, internalSender.id, internalCapability.threadId);
+        if (refused) throw Object.assign(new Error(refused.error), { status: refused.status });
         return body;
       };
       const requireActiveInternalCapability = () => {
@@ -12943,6 +12933,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (method === "POST" && path === "/api/internal/hook") {
         const body = await readBody(req), turnEnded = !internalCapabilityIsActive(internalCapability); if (turnEnded && !lateToolResults.holder(req.headers.authorization)) return json(res, 401, { error: TURN_ENDED_REFUSAL });
+        const refused = internalBodyRefusal(body, internalSender.id, internalCapability.threadId); if (refused) return json(res, refused.status, { error: refused.error });
         return json(res, 200, ingestEngineHook(internalCapability, body, req.headers.authorization, turnEnded));
       }
       if (method === "POST" && path === "/api/internal/tool-result") {
