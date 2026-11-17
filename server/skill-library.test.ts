@@ -150,3 +150,24 @@ describe("bundled data-dashboards skill", () => {
     expect(Buffer.byteLength(template)).toBeLessThan(APP_LIMITS.htmlBytes / 4);
   });
 });
+
+describe("bundled muapi-media skill", () => {
+  const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const ids = (text: string) => selectBundledSkills(text, [], skills).map((skill) => skill.manifest.id);
+
+  it("mounts for MuAPI and image or video generation requests, and stays out of other turns", () => {
+    for (const text of ["use muapi to render this", "generate a video of a wave", "Make an image of a cat", "text to video please"]) {
+      expect(ids(text), text).toContain("muapi-media");
+    }
+    for (const text of ["summarise this thread", "fix the failing test", "chart revenue by month"]) {
+      expect(ids(text), text).not.toContain("muapi-media");
+    }
+  });
+
+  it("names the MCP endpoint and never asks for a key in the chat", () => {
+    const guide = skills.find((skill) => skill.manifest.id === "muapi-media")?.instructions ?? "";
+    expect(guide).toContain("https://api.muapi.ai/mcp");
+    expect(guide).toContain("Never ask for the key in the chat");
+    expect(guide).toContain("muapi_account_topup");
+  });
+});
