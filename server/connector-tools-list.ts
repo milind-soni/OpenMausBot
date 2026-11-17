@@ -65,7 +65,8 @@ export async function withToolsListFallback(
 ): Promise<Response> {
   const request = toolsListId(payload);
   if (!request) return send();
-  const cached = lastToolsLists.get(backend)?.get(request.cursor);
+  const pagesAtStart = lastToolsLists.get(backend);
+  const cached = pagesAtStart?.get(request.cursor);
   const fallback = () => Response.json({ jsonrpc: "2.0", id: request.id, result: cached });
   let response: Response;
   try {
@@ -77,9 +78,16 @@ export async function withToolsListFallback(
   if (response.ok) {
     const result = toolsResult(await response.clone().text(), request.id);
     if (result !== undefined) {
-      const pages = lastToolsLists.get(backend) ?? new Map<string | undefined, unknown>();
-      pages.set(request.cursor, result);
-      lastToolsLists.set(backend, pages);
+      if (request.cursor === undefined) {
+        lastToolsLists.set(backend, new Map([[undefined, result]]));
+      } else {
+        const pages = lastToolsLists.get(backend);
+        if (pages === pagesAtStart || (pagesAtStart === undefined && !pages?.has(undefined))) {
+          const current = pages ?? new Map<string | undefined, unknown>();
+          current.set(request.cursor, result);
+          lastToolsLists.set(backend, current);
+        }
+      }
     }
   } else if (cached !== undefined && (response.status >= 500 || response.status === 429)) {
     await response.body?.cancel();
