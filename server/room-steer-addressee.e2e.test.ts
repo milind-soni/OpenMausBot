@@ -13,7 +13,7 @@ it("with parallel room jobs off, an unnamed steer while a member works a handed 
   const cli = (...args: string[]) => runControlOmb(args, { env }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, headers: { Origin: session.info.url }, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   try {
-    // Side-by-side room jobs (the default since #6149) run a handed job in its own thread, so the person's line goes to
+    // Side-by-side room jobs (the default) run a handed job in its own thread, so the person's line goes to
     // the lead at once; the one-at-a-time room is where a steer could fold into a member's job.
     expect((await api("/api/config", { features: { parallelRoomJobs: false } }, "PATCH")).features.parallelRoomJobs).toBe(false);
     const lead = (await cli("new-bot", "--name", "Lead", "--section", "A")).bot;
