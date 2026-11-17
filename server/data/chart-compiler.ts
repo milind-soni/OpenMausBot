@@ -409,11 +409,12 @@ function planPie(spec: OmbChartSpec, x: Resolved, y: Resolved | undefined): Plan
   const ctes = topNCtes(xExpr, m.expr, n);
   const folded = foldToOther(xExpr);
   const orderBy = spec.sort === "y" ? "y" : spec.sort === "-x" ? "x DESC" : spec.sort === "x" ? "x" : "y DESC";
+  const categoryOrder = spec.sort === "x" || spec.sort === "-x";
   const body = `SELECT ${folded} AS x,\n       ${m.expr} AS y\nFROM src\nGROUP BY ALL\nORDER BY ${orderBy}`;
   const encoding: Encoding = {
     theta: { field: "y", type: "quantitative", title: m.title },
     color: { field: "x", type: "nominal", title: x.column.name },
-    order: { field: "y", type: "quantitative", sort: spec.sort === "y" ? "ascending" : "descending" },
+    order: { field: categoryOrder ? "x" : "y", type: categoryOrder ? "nominal" : "quantitative", sort: spec.sort === "x" || spec.sort === "y" ? "ascending" : "descending" },
   };
   const tooltip: Encoding[] = [
     { field: "x", type: "nominal", title: x.column.name },
