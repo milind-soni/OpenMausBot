@@ -17,6 +17,24 @@ export interface FootprintOwner {
   kind: "engine" | "browser";
   /** It has exited: its pid may be another process's now, but its group and session still name what it left. */
   exited?: boolean;
+  /** An engine's conversations now (for the memory cap: which are running a turn). */
+  threads?: readonly string[];
+  /** An engine process other conversations may join (a shared ACP process): the memory cap never stops one. */
+  shareable?: boolean;
+  /** A browser's session. */
+  session?: string;
+}
+
+/** What one owner record brought a bot: the record's pid and its processes now. */
+export interface FootprintUnit {
+  root: number;
+  kind: FootprintOwner["kind"];
+  /** The root itself has exited: what is left ran on in its group or session. */
+  exited: boolean;
+  shareable: boolean;
+  threads: string[];
+  session?: string;
+  pids: number[];
 }
 
 export interface BotTally {
@@ -31,6 +49,10 @@ export interface BotTally {
   engines: number;
   browsers: number;
   pids: number[];
+  /** Those of `pids` that belong to it through a browser (its daemon and Chrome), not an engine. */
+  browserPids: number[];
+  /** Its processes by the record they count through, by that record's pid. */
+  units: Map<number, FootprintUnit>;
 }
 
 export interface Attribution {
@@ -39,7 +61,7 @@ export interface Attribution {
   shared: BotTally;
 }
 
-const emptyTally = (): BotTally => ({ procs: 0, threads: 0, rssBytes: 0, cpuMs: 0, cpuDeltaMs: 0, engines: 0, browsers: 0, pids: [] });
+const emptyTally = (): BotTally => ({ procs: 0, threads: 0, rssBytes: 0, cpuMs: 0, cpuDeltaMs: 0, engines: 0, browsers: 0, pids: [], browserPids: [], units: new Map() });
 
 /** Whose each row is: a bot's id, SHARED, or undefined for none (the server, its own helpers, anything else). */
 export const SHARED = "\0shared";
@@ -48,7 +70,8 @@ export function attributeRows(rows: readonly ProcessRow[], owners: readonly Foot
   const byPid = new Map(rows.map((row) => [row.pid, row]));
   // A leader the list shows with another start is another process now; one the list no longer shows (an engine that
   // exited) still names its group and session: the system gives no new process a number that still names one.
-  const roots = new Map<number, { label: string; kind: FootprintOwner["kind"] }>();
+  type Root = { label: string; kind: FootprintOwner["kind"]; pid: number; exited: boolean; shareable: boolean; threads: string[]; session?: string };
+  const roots = new Map<number, Root>();
   /** Leaders still running as themselves: only these name the process with their pid; the others name groups and sessions. */
   const live = new Set<number>();
   for (const owner of owners) {
@@ -58,31 +81,38 @@ export function attributeRows(rows: readonly ProcessRow[], owners: readonly Foot
     const label = ids.length === 1 && ID.test(ids[0]!) ? ids[0]! : SHARED;
     const known = roots.get(owner.pid);
     // Two records of one pid disagreeing about its bot: shared, never either bot's.
-    roots.set(owner.pid, { label: known && known.label !== label ? SHARED : label, kind: owner.kind });
+    roots.set(owner.pid, { label: known && known.label !== label ? SHARED : label, kind: owner.kind, pid: owner.pid, exited: (known?.exited ?? true) && owner.exited === true,
+      shareable: known?.shareable === true || owner.shareable === true, threads: [...new Set([...known?.threads ?? [], ...owner.threads ?? []])], session: known?.session ?? owner.session });
     if (!owner.exited) live.add(owner.pid);
   }
-  const labels = new Map<number, string | null>();
-  const labelOf = (row: ProcessRow, depth: number): string | null => {
+  type Label = Root | null;
+  const labels = new Map<number, Label>();
+  const labelOf = (row: ProcessRow, depth: number): Label => {
     const known = labels.get(row.pid);
     if (known !== undefined) return known;
     labels.set(row.pid, null);
     // Its own record first, then the nearest recorded ancestor, then (for what outlived its parent and was adopted by an
     // init) the session and group it still runs in.
-    let label: string | null = live.has(row.pid) ? roots.get(row.pid)?.label ?? null : null;
+    let label: Label = live.has(row.pid) ? roots.get(row.pid) ?? null : null;
     if (label === null && row.ppid !== row.pid && depth < 64) {
       const parent = byPid.get(row.ppid);
       if (parent) label = labelOf(parent, depth + 1);
     }
-    if (label === null && row.sid !== undefined && row.sid !== row.pid) label = roots.get(row.sid)?.label ?? null;
-    if (label === null && row.pgid !== undefined && row.pgid !== row.pid) label = roots.get(row.pgid)?.label ?? null;
+    if (label === null && row.sid !== undefined && row.sid !== row.pid) label = roots.get(row.sid) ?? null;
+    if (label === null && row.pgid !== undefined && row.pgid !== row.pid) label = roots.get(row.pgid) ?? null;
     labels.set(row.pid, label);
     return label;
   };
   const out: Attribution = { bots: new Map(), shared: emptyTally() };
   for (const row of rows) {
-    const label = labelOf(row, 0);
-    if (label === null) continue;
+    const found = labelOf(row, 0);
+    if (found === null) continue;
+    const label = found.label;
     const tally = label === SHARED ? out.shared : out.bots.get(label) ?? out.bots.set(label, emptyTally()).get(label)!;
+    if (found.kind === "browser") tally.browserPids.push(row.pid);
+    const unit = tally.units.get(found.pid) ?? tally.units.set(found.pid, { root: found.pid, kind: found.kind, exited: found.exited, shareable: found.shareable, threads: found.threads,
+      ...(found.session === undefined ? {} : { session: found.session }), pids: [] }).get(found.pid)!;
+    unit.pids.push(row.pid);
     tally.procs += 1;
     tally.threads = tally.threads === null || row.threads === undefined ? null : tally.threads + row.threads;
     tally.rssBytes += row.rssBytes;
@@ -111,6 +141,11 @@ export interface BotFootprintRow {
   browsers: number;
 }
 
+export interface BotCapReport {
+  mb: number | null; mode: "log" | "enforce" | null; rung: string; stops: number; flagged: number;
+  events: ReadonlyArray<{ at: number; botId: string; usedMB: number; measured: string; capMB: number; engines: number; room: number; freeMB: number | null; pressure: boolean; action: string }>;
+}
+
 export interface BotFootprintReport {
   at: number | null;
   /** Bots with any process running at the last sample. */
@@ -118,6 +153,9 @@ export interface BotFootprintReport {
   /** The bots using the most memory first. */
   shown: BotFootprintRow[];
   shared: Omit<BotFootprintRow, "id" | "peakMB">;
+  /** The memory one bot may use per engine it runs (bot-memory-cap.ts): MB or null for none; "log" (watch only, the
+   * default) or "enforce" (a set number); how; steps taken and bots written down as over since start; the latest events. */
+  cap?: BotCapReport;
 }
 
 const MB = 1_048_576;
@@ -175,6 +213,14 @@ export function createBotFootprints(options: BotFootprintsOptions) {
 }
 export type BotFootprints = ReturnType<typeof createBotFootprints>;
 
+function capLine(cap: BotCapReport): string {
+  if (cap.mb === null) return "  Memory one bot may use: no limit";
+  const last = cap.events.at(-1);
+  return `  Memory one bot may use: ${cap.mb} MB per engine (${cap.mode === "enforce" ? "enforced when memory runs short" : "watch only"}, ${cap.rung}); `
+    + `steps taken since start: ${cap.stops}, over with nothing stopped: ${cap.flagged}`
+    + (last ? `; latest: bot ${last.botId} ${last.usedMB} MB (${last.measured}) of ${last.capMB} MB, ${last.engines} engines, room ${last.room}, ${last.action}` : "");
+}
+
 /** The plain line for people: a @devs report and the desktop's diagnostics. */
 export function botFootprintLines(report: BotFootprintReport): string[] {
   if (report.at === null) return ["Per bot: not sampled yet"];
@@ -184,6 +230,7 @@ export function botFootprintLines(report: BotFootprintReport): string[] {
   const shared = report.shared;
   return [
     `Per bot (${report.bots} with processes running; most memory first): ${report.shown.length ? report.shown.map(one).join("; ") : "none"}`,
+    ...(report.cap ? [capLine(report.cap)] : []),
     `  Shared by several bots: ${shared.procs} processes${threads(shared.threads)}, ${shared.rssMB} MB, ${shared.engines} engines, ${shared.browsers} browsers`,
   ];
 }

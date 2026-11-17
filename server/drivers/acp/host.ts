@@ -136,6 +136,7 @@ export class AcpHost {
     this.child = child;
     this.key = key;
     this.options = options;
+    if (key !== null) engineOwners.shareable(child);
     let buf = "";
     // decode as UTF-8 across chunk boundaries — a raw `buf += chunk` splits
     // multibyte characters that straddle two reads and corrupts the text

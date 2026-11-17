@@ -11,7 +11,8 @@ export function footprintOwners(deps: { botOf: (threadId: string) => string | nu
   const engines = deps.engines ?? allEngineOwners;
   return () => [
     ...engines.list().map((engine): FootprintOwner => ({
-      pid: engine.pid, start: engine.start, kind: "engine", ...(engine.exited ? { exited: true } : {}),
+      pid: engine.pid, start: engine.start, kind: "engine", ...(engine.exited ? { exited: true } : {}), ...(engine.shareable ? { shareable: true } : {}),
+      threads: [...engine.threads.keys()],
       // The conversation's own bot, as the store says; a turn of another bot in it (a group's room) makes it shared.
       botIds: [...engine.threads].flatMap(([threadId, turnBot]) => {
         const owner = deps.botOf(threadId) ?? UNKNOWN;

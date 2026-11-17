@@ -13,11 +13,13 @@ export interface EngineOwner {
   start: string | null;
   threads: ReadonlyMap<string, string>;
   exited: boolean;
+  /** Other conversations may join it (a shared ACP process). */
+  shareable: boolean;
 }
 
 const MAX_ENTRIES = 4_096;
 
-interface Entry { pid: number; start: string | null; threads: Map<string, string>; exited: boolean; seenSinceExit: number }
+interface Entry { pid: number; start: string | null; threads: Map<string, string>; exited: boolean; seenSinceExit: number; shareable: boolean }
 
 export class EngineOwners {
   readonly #entries = new Map<number, Entry>();
@@ -28,7 +30,7 @@ export class EngineOwners {
     const pid = child.pid;
     if (!pid) return;
     const turn = currentTurn();
-    const entry: Entry = { pid, start, threads: new Map(turn?.threadId ? [[turn.threadId, turn.botId ?? ""]] : []), exited: false, seenSinceExit: 0 };
+    const entry: Entry = { pid, start, threads: new Map(turn?.threadId ? [[turn.threadId, turn.botId ?? ""]] : []), exited: false, seenSinceExit: 0, shareable: false };
     this.#entries.set(pid, entry);
     // Where no process list ever prunes it (no sampler runs), the oldest exited engines go first.
     if (this.#entries.size > MAX_ENTRIES) for (const [other, old] of this.#entries) { if (this.#entries.size <= MAX_ENTRIES) break; if (old.exited) this.#entries.delete(other); }
@@ -43,12 +45,18 @@ export class EngineOwners {
     entry.threads.set(threadId, turn?.threadId === threadId ? turn.botId ?? "" : "");
   }
 
+  /** Other conversations may join this engine process (a shared ACP process): the memory cap never stops it. */
+  shareable(child: { pid?: number }): void {
+    const entry = child.pid ? this.#entries.get(child.pid) : undefined;
+    if (entry) entry.shareable = true;
+  }
+
   detach(child: { pid?: number }, threadId: string): void {
     if (child.pid) this.#entries.get(child.pid)?.threads.delete(threadId);
   }
 
   list(): EngineOwner[] {
-    return [...this.#entries.values()].map((entry) => ({ pid: entry.pid, start: entry.start, threads: entry.threads, exited: entry.exited }));
+    return [...this.#entries.values()].map((entry) => ({ pid: entry.pid, start: entry.start, threads: entry.threads, exited: entry.exited, shareable: entry.shareable }));
   }
 
   /** After each process list: forgets an exited engine that no process, group or session in it still names, and one whose
