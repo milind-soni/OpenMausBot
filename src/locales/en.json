@@ -2652,6 +2652,7 @@
   "chat.callSheet.kicker": "Live call",
   "chat.callSheet.empty": "Nothing was asked on this call.",
   "chat.callSheet.kept": "Your requests and {name}’s answers and steps. Nothing else said on the call is kept.",
+  "chat.callSheet.keptSpoken": "Your requests, and what {name} said, did and answered. Nothing else you said on the call is kept.",
   "chat.showFull": "Show full message",
   "chat.showLess": "Show less",
   "chat.generatedImage": "Generated image",

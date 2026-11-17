@@ -2470,6 +2470,7 @@
   "chat.callSheet.kicker": "Chamada ao vivo",
   "chat.callSheet.empty": "Nada foi pedido nesta chamada.",
   "chat.callSheet.kept": "Seus pedidos, as respostas e os passos de {name}. Nada mais do que foi dito na chamada fica salvo.",
+  "chat.callSheet.keptSpoken": "Seus pedidos e o que {name} disse, fez e respondeu. Nada mais do que você disse na chamada fica salvo.",
   "chat.showFull": "Ver a mensagem inteira",
   "chat.showLess": "Mostrar menos",
   "chat.generatedImage": "Imagem gerada",

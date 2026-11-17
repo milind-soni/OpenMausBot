@@ -1697,6 +1697,21 @@ describe("LiveCallController record", () => {
     expect(JSON.stringify(recorded(t))).not.toContain("calendar");
   });
 
+  it("keeps what the bot said aloud, one line per stretch of speech, and still nothing the person said", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    await t.start();
+    t.socket().receive({ type: "session.input_transcript.delta", delta: "what is on my calendar", start_ms: 100, end_ms: 900 });
+    t.socket().receive({ type: "session.output_transcript.delta", delta: "You have two ", start_ms: 1_000, end_ms: 1_500 });
+    t.socket().receive({ type: "session.output_transcript.delta", delta: "meetings.", start_ms: 1_500, end_ms: 2_000 });
+    t.socket().receive({ type: "session.input_transcript.delta", delta: "thanks bye", start_ms: 4_000, end_ms: 4_600 });
+    t.socket().receive({ type: "session.output_transcript.delta", delta: "Bye!", start_ms: 5_000, end_ms: 5_400 });
+    t.socket().drop();
+    const record = recorded(t)[0]!.record;
+    expect(record.spoken).toEqual([{ at: expect.any(Number), text: "You have two meetings." }, { at: expect.any(Number), text: "Bye!" }]);
+    expect(JSON.stringify(record)).not.toContain("calendar");
+    expect(JSON.stringify(record)).not.toContain("thanks");
+  });
+
   it("counts wall-clock seconds when OpenAI sent none", async () => {
     const t = setup({ recordCall: vi.fn() });
     await t.start();
