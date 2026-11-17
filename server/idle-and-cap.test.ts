@@ -8,7 +8,10 @@ import {
 } from "./bot-memory-cap.ts";
 import type { ProviderInstance, RuntimeEvent, RuntimeEventListener, SendTurnInput } from "./contracts.ts";
 import { armIdleClose, engineIdleMs, idleAfter, stopIdleClose, stoppedForRoom, sweepIdleEngines, type WarmEngine } from "./drivers/session-idle.ts";
-import { EngineMemory, type HostMemory } from "./engine-memory.ts";
+import { EngineMemory, memoryStopped, type HostMemory } from "./engine-memory.ts";
+import { hostFaultOf, retryCannotFix } from "./host-fault.ts";
+import { namesOwnCause } from "./process-shortage.ts";
+import { retriesTeammateThread } from "./routine-recovery.ts";
 import type { FootprintOwner } from "./perf/bot-footprint.ts";
 import type { ProcessRow } from "./perf/process-buckets.ts";
 import { ProcessBudget } from "./process-room.ts";
@@ -339,6 +342,12 @@ describe("a memory cap per bot", () => {
       + "Send the message again to start over; if it keeps happening, give this task less to do at once, or give the server more memory.";
     expect(shown()).toEqual([line, "turn.completed", "something else"]);
     expect(seen[0]).toMatchObject({ text: { key: "chat.notice.botMemoryCap", params: { bot: "Researcher", used: "1700", cap: "1000" } } });
+    // A fault a retry cannot fix: no automatic retry or Chief retry starts the bot into the same cap again.
+    expect(hostFaultOf(line)).toBe("bot_memory");
+    expect(retryCannotFix("bot_memory")).toBe(true);
+    expect(retriesTeammateThread(line)).toBe(false);
+    expect(namesOwnCause(line)).toBe(true);
+    expect(memoryStopped(line)).toBe(false);
     // A turn that ends without an error of its own still says why, first.
     seen.length = 0;
     emit({ threadId: "tc", turnId: "t", type: "turn.completed", ok: false, stopReason: "exit_before_result" });

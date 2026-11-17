@@ -500,7 +500,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const shared = (session: string) => store.bots.some((other) => other.id !== botId && browserSessionsOf(other.id, other.browserProfile).includes(session));
     await Promise.all(browserSessionsOf(bot.id, bot.browserProfile).flatMap((session) => {
       const spec = usedBrowserSessions.get(session);
-      return spec && !chromeTarget(session, spec) && !shared(session) ? [closeForMemory(session, spec)] : [];
+      return spec && !chromeTarget(session, spec) && !attachesToChrome(spec.env) && !shared(session) ? [closeForMemory(session, spec)] : [];
     }));
   }
   /** The browser a thread's bot would start; a temporary one has no session until its first call. My Chrome is the person's own. */
