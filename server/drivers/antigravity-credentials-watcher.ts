@@ -1,4 +1,4 @@
-﻿import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -50,6 +50,9 @@ export class GeminiCredentialsWatcher {
   private readonly targetTokenPath: string;
   private readonly debounceMs: number;
   private readonly waiters = new Set<(synced: boolean) => void>();
+  private syncQueue: Promise<boolean> = Promise.resolve(false);
+  private syncGeneration = 0;
+  private isStopped = false;
 
   constructor(
     instanceId: string,
@@ -63,8 +66,13 @@ export class GeminiCredentialsWatcher {
     this.debounceMs = options?.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   }
 
+  public clearCachedRefreshToken(): void {
+    this.lastRefreshToken = null;
+  }
+
   public start(): void {
     if (this.watcher) return;
+    this.isStopped = false;
     const credsPath = join(this.geminiDir, "oauth_creds.json");
     if (!existsSync(this.geminiDir) && !existsSync(credsPath)) {
       return;
@@ -93,6 +101,8 @@ export class GeminiCredentialsWatcher {
   }
 
   public stop(): void {
+    this.isStopped = true;
+    this.syncGeneration++;
     if (this.watcher) {
       try {
         this.watcher.close();
@@ -110,6 +120,7 @@ export class GeminiCredentialsWatcher {
   }
 
   public scheduleSync(): void {
+    if (this.isStopped) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => {
       this.syncCredentials().catch((err) => {
@@ -119,6 +130,15 @@ export class GeminiCredentialsWatcher {
   }
 
   public async syncCredentials(): Promise<boolean> {
+    if (this.isStopped) return false;
+    const nextSync = this.syncQueue.then(() => this.doSyncCredentials());
+    this.syncQueue = nextSync.catch(() => false);
+    return nextSync;
+  }
+
+  private async doSyncCredentials(): Promise<boolean> {
+    if (this.isStopped) return false;
+    const currentGeneration = this.syncGeneration;
     const credsPath = join(this.geminiDir, "oauth_creds.json");
     let content: string;
     try {
@@ -126,6 +146,8 @@ export class GeminiCredentialsWatcher {
     } catch {
       return false;
     }
+
+    if (this.isStopped || this.syncGeneration !== currentGeneration) return false;
 
     let globalCreds: GlobalOAuthCreds;
     try {
@@ -150,6 +172,8 @@ export class GeminiCredentialsWatcher {
       existingToken = JSON.parse(await readFile(this.targetTokenPath, "utf8"));
     } catch {}
 
+    if (this.isStopped || this.syncGeneration !== currentGeneration) return false;
+
     const updatedToken: OmAcpToken = {
       client_id: existingToken.client_id || DEFAULT_CLIENT_ID,
       client_secret: existingToken.client_secret || "",
@@ -167,6 +191,8 @@ export class GeminiCredentialsWatcher {
       return false;
     }
 
+    if (this.isStopped || this.syncGeneration !== currentGeneration) return false;
+
     this.lastRefreshToken = globalCreds.refresh_token;
 
     if (this.onAccountSwitched) {
@@ -176,6 +202,8 @@ export class GeminiCredentialsWatcher {
         console.warn("[GeminiCredentialsWatcher] onAccountSwitched callback error:", callbackErr);
       }
     }
+
+    if (this.isStopped || this.syncGeneration !== currentGeneration) return false;
 
     for (const resolve of this.waiters) {
       resolve(true);

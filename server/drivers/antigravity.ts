@@ -11,6 +11,7 @@ import type {
   ProviderInstance,
   ProviderSnapshot,
   RuntimeEvent,
+  RuntimeEventListener,
   SendTurnInput,
 } from "../contracts.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./acp/core.ts";
@@ -202,7 +203,9 @@ interface TrackedTurn {
   turn: SendTurnInput;
   retrying: boolean;
   retried: boolean;
+  canceled: boolean;
   suppressedEvents: RuntimeEvent[];
+  bufferedRetryEvents: RuntimeEvent[];
 }
 
 export const AntigravityDriver: ProviderDriver<AcpConfig> = {
@@ -213,9 +216,26 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
     scheduleAntigravityTempSweep(VERIFICATION_TEMP_KEY);
     const activeTurns = new Map<string, TrackedTurn>();
     const turnIdRemap = new Map<string, string>();
+    const subscribers = new Set<RuntimeEventListener>();
+
+    const broadcast = (event: RuntimeEvent) => {
+      for (const sub of subscribers) {
+        try {
+          sub(event);
+        } catch (subErr) {
+          console.warn("[AntigravityDriver] Subscriber event error:", subErr);
+        }
+      }
+    };
+
     const watcher = startAntigravityWatcher(input.instanceId, async () => {
-      noteAntigravitySignedIn(antigravityTokenPath(input.instanceId));
       await base.adapter.stopAll().catch(() => {});
+      if (runtimeProcesses.count(input.instanceId)) {
+        await runtimeProcesses.stopped(input.instanceId).catch(() => {});
+      }
+      noteAntigravitySignedIn(antigravityTokenPath(input.instanceId));
+      watcher.clearCachedRefreshToken();
+      void watcher.syncCredentials().catch(() => {});
       void base.refreshModels?.();
     });
     const auth = new AntigravityAuthController(() => {
@@ -235,6 +255,98 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       });
       return { runtime, profile };
     };
+
+    base.adapter.onEvent(async (event) => {
+      let outgoing = event;
+      if (event.turnId && turnIdRemap.has(event.turnId)) {
+        outgoing = { ...event, turnId: turnIdRemap.get(event.turnId)! };
+      }
+
+      const threadId = event.threadId;
+      const tracked = activeTurns.get(threadId);
+
+      if (tracked?.retrying) {
+        if (event.turnId && turnIdRemap.has(event.turnId)) {
+          tracked.bufferedRetryEvents.push(outgoing);
+        } else {
+          tracked.suppressedEvents.push(outgoing);
+        }
+        return;
+      }
+
+      const isQuotaError =
+        (event.type === "runtime.error" && ((event as any).acpUsageLimit === true || (event as any).error === "quota")) ||
+        (event.type === "turn.completed" && event.stopReason === "quota");
+
+      if (isQuotaError && tracked && !tracked.retried && !tracked.canceled) {
+        tracked.retried = true;
+        tracked.retrying = true;
+        tracked.suppressedEvents.push(outgoing);
+
+        void (async () => {
+          try {
+            const switched = await handleQuotaExhaustedWithAutoSwitch(watcher);
+            if (tracked.canceled) {
+              activeTurns.delete(threadId);
+              return;
+            }
+            if (switched) {
+              await base.adapter.stopAll().catch(() => {});
+              if (tracked.canceled) {
+                activeTurns.delete(threadId);
+                return;
+              }
+              const retriedAck = await base.adapter.sendTurn(tracked.turn);
+              turnIdRemap.set(retriedAck.turnId, tracked.originalTurnId);
+              tracked.retrying = false;
+              tracked.suppressedEvents = [];
+
+              for (const buffered of tracked.bufferedRetryEvents) {
+                broadcast(buffered);
+                if (buffered.type === "turn.completed") {
+                  activeTurns.delete(threadId);
+                  turnIdRemap.delete(retriedAck.turnId);
+                }
+              }
+              tracked.bufferedRetryEvents = [];
+              return;
+            }
+          } catch (switchErr) {
+            console.warn("[AntigravityDriver] Error during quota auto-switch and retry:", switchErr);
+          }
+
+          tracked.retrying = false;
+          activeTurns.delete(threadId);
+          const hasCompletion = tracked.suppressedEvents.some((e) => e.type === "turn.completed");
+          if (!hasCompletion) {
+            tracked.suppressedEvents.push({
+              type: "turn.completed",
+              threadId,
+              turnId: tracked.originalTurnId,
+              createdAt: new Date().toISOString(),
+              ok: false,
+              stopReason: "error",
+              error: "Quota auto-switch failed",
+            } as any);
+          }
+          for (const suppressed of tracked.suppressedEvents) {
+            broadcast(suppressed);
+          }
+          tracked.suppressedEvents = [];
+        })();
+        return;
+      }
+
+      if (outgoing.type === "turn.completed") {
+        activeTurns.delete(threadId);
+        if (event.turnId && turnIdRemap.has(event.turnId)) {
+          turnIdRemap.delete(event.turnId);
+        }
+      }
+
+      broadcast(outgoing);
+    });
+
     return {
       ...base,
       adapter: {
@@ -247,11 +359,17 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
             turn: staged,
             retrying: false,
             retried: false,
+            canceled: false,
             suppressedEvents: [],
+            bufferedRetryEvents: [],
           });
           return result;
         },
         interruptTurn: async (threadId, turnId) => {
+          const tracked = activeTurns.get(threadId);
+          if (tracked) {
+            tracked.canceled = true;
+          }
           let targetTurnId = turnId;
           if (turnId) {
             for (const [newId, origId] of turnIdRemap.entries()) {
@@ -264,75 +382,10 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
           return base.adapter.interruptTurn(threadId, targetTurnId);
         },
         onEvent: (listener) => {
-          return base.adapter.onEvent(async (event) => {
-            let outgoing = event;
-            if (event.turnId && turnIdRemap.has(event.turnId)) {
-              outgoing = { ...event, turnId: turnIdRemap.get(event.turnId)! };
-            }
-
-            const threadId = event.threadId;
-            const tracked = activeTurns.get(threadId);
-
-            if (tracked?.retrying) {
-              tracked.suppressedEvents.push(outgoing);
-              return;
-            }
-
-            const isQuotaError =
-              (event.type === "runtime.error" && ((event as any).acpUsageLimit === true || (event as any).error === "quota")) ||
-              (event.type === "turn.completed" && event.stopReason === "quota");
-
-            if (isQuotaError && tracked && !tracked.retried) {
-              tracked.retried = true;
-              tracked.retrying = true;
-              tracked.suppressedEvents.push(outgoing);
-
-              void (async () => {
-                try {
-                  const switched = await handleQuotaExhaustedWithAutoSwitch(watcher);
-                  if (switched) {
-                    await base.adapter.stopAll().catch(() => {});
-                    const retriedAck = await base.adapter.sendTurn(tracked.turn);
-                    turnIdRemap.set(retriedAck.turnId, tracked.originalTurnId);
-                    tracked.retrying = false;
-                    tracked.suppressedEvents = [];
-                    return;
-                  }
-                } catch (switchErr) {
-                  console.warn("[AntigravityDriver] Error during quota auto-switch and retry:", switchErr);
-                }
-
-                tracked.retrying = false;
-                activeTurns.delete(threadId);
-                const hasCompletion = tracked.suppressedEvents.some((e) => e.type === "turn.completed");
-                if (!hasCompletion) {
-                  tracked.suppressedEvents.push({
-                    type: "turn.completed",
-                    threadId,
-                    turnId: tracked.originalTurnId,
-                    createdAt: new Date().toISOString(),
-                    ok: false,
-                    stopReason: "error",
-                    error: "Quota auto-switch failed",
-                  } as any);
-                }
-                for (const suppressed of tracked.suppressedEvents) {
-                  listener(suppressed);
-                }
-                tracked.suppressedEvents = [];
-              })();
-              return;
-            }
-
-            if (outgoing.type === "turn.completed") {
-              activeTurns.delete(threadId);
-              if (event.turnId && turnIdRemap.has(event.turnId)) {
-                turnIdRemap.delete(event.turnId);
-              }
-            }
-
-            listener(outgoing);
-          });
+          subscribers.add(listener);
+          return () => {
+            subscribers.delete(listener);
+          };
         },
       },
       get models() {

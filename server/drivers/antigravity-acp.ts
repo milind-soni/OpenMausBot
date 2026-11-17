@@ -863,11 +863,16 @@ export async function handleQuotaExhaustedWithAutoSwitch(
   timeoutMs = 3000,
   toolsApiUrl?: string,
 ): Promise<boolean> {
-  try {
-    await triggerAntigravityAccountSwitch(toolsApiUrl);
-  } catch {}
   if (watcher) {
-    return await watcher.waitForNewToken(timeoutMs);
+    const tokenWait = watcher.waitForNewToken(timeoutMs);
+    try {
+      await triggerAntigravityAccountSwitch(toolsApiUrl);
+    } catch {}
+    return await tokenWait;
   }
-  return false;
+  try {
+    return await triggerAntigravityAccountSwitch(toolsApiUrl);
+  } catch {
+    return false;
+  }
 }

@@ -22,6 +22,7 @@ import type { RuntimeEvent, RuntimeEventListener } from "../contracts.ts";
 describe("Antigravity Proxy & Auto Switching", () => {
   let tempDir: string;
   let fakeRuntime: AntigravityRuntime;
+  const createdInstances: any[] = [];
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), "omb-switching-test-"));
@@ -34,6 +35,10 @@ describe("Antigravity Proxy & Auto Switching", () => {
   });
 
   afterEach(async () => {
+    for (const inst of createdInstances) {
+      await inst.dispose?.().catch(() => {});
+    }
+    createdInstances.length = 0;
     vi.restoreAllMocks();
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -249,6 +254,7 @@ describe("Antigravity Proxy & Auto Switching", () => {
         config: { cli: "fake", fullAuto: false },
         environment: {},
       });
+      createdInstances.push(driverInstance);
 
       const receivedEvents: RuntimeEvent[] = [];
       driverInstance.adapter.onEvent((ev) => {
@@ -355,6 +361,7 @@ describe("Antigravity Proxy & Auto Switching", () => {
         config: { cli: "fake", fullAuto: false },
         environment: {},
       });
+      createdInstances.push(driverInstance);
 
       const receivedEvents: RuntimeEvent[] = [];
       driverInstance.adapter.onEvent((ev) => {
@@ -423,6 +430,7 @@ describe("Antigravity Proxy & Auto Switching", () => {
         config: { cli: "fake", fullAuto: false },
         environment: {},
       });
+      createdInstances.push(driverInstance);
 
       const receivedEvents: RuntimeEvent[] = [];
       driverInstance.adapter.onEvent((ev) => {
@@ -461,6 +469,139 @@ describe("Antigravity Proxy & Auto Switching", () => {
       expect(receivedEvents).toHaveLength(2);
       expect(receivedEvents[0].type).toBe("runtime.error");
       expect(receivedEvents[1].type).toBe("turn.completed");
+    });
+
+    it("does not retry turn if interruptTurn was called during quota recovery", async () => {
+      let registeredListener: RuntimeEventListener | undefined;
+      const baseSendTurn = vi.fn();
+      const baseStopAll = vi.fn().mockResolvedValue(undefined);
+      const baseInterruptTurn = vi.fn().mockResolvedValue(undefined);
+
+      const fakeBase = {
+        adapter: {
+          sendTurn: baseSendTurn,
+          onEvent: (l: RuntimeEventListener) => {
+            registeredListener = l;
+            return () => {};
+          },
+          stopAll: baseStopAll,
+          interruptTurn: baseInterruptTurn,
+        },
+        dispose: vi.fn().mockResolvedValue(undefined),
+        models: { default: "test-model", options: [] },
+      };
+
+      vi.spyOn(AcpAntigravityDriver, "create").mockResolvedValue(fakeBase as any);
+
+      let switchResolve: (value: boolean) => void = () => {};
+      const switchPromise = new Promise<boolean>((resolve) => {
+        switchResolve = resolve;
+      });
+      vi.spyOn(antigravityAcp, "handleQuotaExhaustedWithAutoSwitch").mockImplementation(async () => switchPromise);
+
+      const driverInstance = await AntigravityDriver.create({
+        instanceId: "driver-interrupt-test",
+        displayName: "Antigravity Test",
+        enabled: true,
+        config: { cli: "fake", fullAuto: false },
+        environment: {},
+      });
+      createdInstances.push(driverInstance);
+
+      baseSendTurn.mockResolvedValueOnce({ turnId: "turn-cancel-1" });
+      await driverInstance.adapter.sendTurn({
+        threadId: "thread-cancel",
+        text: "hello",
+      });
+
+      // 429 quota error begins recovery
+      registeredListener!({
+        type: "runtime.error",
+        threadId: "thread-cancel",
+        turnId: "turn-cancel-1",
+        createdAt: new Date().toISOString(),
+        acpUsageLimit: true,
+      } as any);
+
+      // User interrupts turn while auto-switch is pending
+      await driverInstance.adapter.interruptTurn("thread-cancel", "turn-cancel-1");
+      expect(baseInterruptTurn).toHaveBeenCalledWith("thread-cancel", "turn-cancel-1");
+
+      // Auto switch finishes
+      switchResolve(true);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Must NOT resend turn because it was canceled
+      expect(baseSendTurn).toHaveBeenCalledTimes(1);
+    });
+
+    it("broadcasts single event stream to multiple onEvent listeners with remapping", async () => {
+      let registeredListener: RuntimeEventListener | undefined;
+      const baseSendTurn = vi.fn();
+
+      const fakeBase = {
+        adapter: {
+          sendTurn: baseSendTurn,
+          onEvent: (l: RuntimeEventListener) => {
+            registeredListener = l;
+            return () => {};
+          },
+          stopAll: vi.fn().mockResolvedValue(undefined),
+          interruptTurn: vi.fn().mockResolvedValue(undefined),
+        },
+        dispose: vi.fn().mockResolvedValue(undefined),
+        models: { default: "test-model", options: [] },
+      };
+
+      vi.spyOn(AcpAntigravityDriver, "create").mockResolvedValue(fakeBase as any);
+
+      const driverInstance = await AntigravityDriver.create({
+        instanceId: "driver-multi-listener-test",
+        displayName: "Antigravity Test",
+        enabled: true,
+        config: { cli: "fake", fullAuto: false },
+        environment: {},
+      });
+      createdInstances.push(driverInstance);
+
+      const listener1Events: RuntimeEvent[] = [];
+      const listener2Events: RuntimeEvent[] = [];
+
+      const unsub1 = driverInstance.adapter.onEvent((ev) => listener1Events.push(ev));
+      const unsub2 = driverInstance.adapter.onEvent((ev) => listener2Events.push(ev));
+
+      registeredListener!({
+        eventId: "ev-1",
+        provider: "antigravity",
+        type: "turn.completed",
+        threadId: "thread-multi",
+        turnId: "turn-multi-1",
+        createdAt: new Date().toISOString(),
+        ok: true,
+        stopReason: "end_turn",
+      } as RuntimeEvent);
+
+      expect(listener1Events).toHaveLength(1);
+      expect(listener2Events).toHaveLength(1);
+      expect(listener1Events[0].eventId).toBe("ev-1");
+      expect(listener2Events[0].eventId).toBe("ev-1");
+
+      unsub1();
+      registeredListener!({
+        eventId: "ev-2",
+        provider: "antigravity",
+        type: "turn.completed",
+        threadId: "thread-multi",
+        turnId: "turn-multi-2",
+        createdAt: new Date().toISOString(),
+        ok: true,
+        stopReason: "end_turn",
+      } as RuntimeEvent);
+
+      expect(listener1Events).toHaveLength(1);
+      expect(listener2Events).toHaveLength(2);
+
+      unsub2();
     });
   });
 });
