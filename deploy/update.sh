@@ -545,6 +545,29 @@ wait_whole() {
   fi
 }
 
+# The new version did not become healthy. Its own doctor may repair what stopped it (a cut-short save, a lease a killed
+# server left): `openmausbot doctor --data --fix` in the server's container while it is up, else, with the server
+# stopped, in a one-off container of the new image. The doctor changes nothing while a server uses the data, copies what
+# it changes into the data folder first, and repairs only what cannot lose data. Succeeds when it repaired something,
+# and the new version is then started once more. A version without the doctor answers a usage error: nothing repaired.
+doctor_repaired() {
+  local out cid
+  say "Running $(new_name)'s doctor on the data before going back…"
+  cid=$(container)
+  if [ -n "$cid" ] && [ "$(inspect '{{.State.Running}}' "$cid")" = true ]; then
+    out=$(compose exec -T "$SERVICE" openmausbot doctor --data --fix --json </dev/null 2>>"$LOG")
+  else
+    compose stop "$SERVICE" >>"$LOG" 2>&1
+    out=$(compose run --rm --no-deps -T "$SERVICE" openmausbot doctor --data --fix --json </dev/null 2>>"$LOG")
+  fi
+  printf '%s\n' "$out" >>"$LOG"
+  printf '%s\n' "$out" | grep -Eq '"fixed": ?[1-9]' || return 1
+  say "The doctor repaired the data (see $LOG). Starting $(new_name) once more…"
+  # New containers: the one that kept stopping carries its restart count (and Caddy, in a Compose file that runs it in
+  # the server's network, must join the new one's).
+  compose up -d --no-build --force-recreate >>"$LOG" 2>&1
+}
+
 finish() {
   cp "$JOURNAL" "$LAST.tmp" && mv "$LAST.tmp" "$LAST"
   rm -f "$JOURNAL"
@@ -901,6 +924,11 @@ fi
 phase wait
 say "Waiting for it to answer and to be able to start bots…"
 if ! wait_healthy "$J_target_id" "$J_version" || ! wait_whole; then
-  roll_back "The update to $(new_name) did not work: $WHY." 1
+  first_why=$WHY
+  if doctor_repaired; then
+    if ! wait_healthy "$J_target_id" "$J_version" || ! wait_whole; then roll_back "The update to $(new_name) did not work: $WHY." 1; fi
+  else
+    roll_back "The update to $(new_name) did not work: $first_why." 1
+  fi
 fi
 finish
