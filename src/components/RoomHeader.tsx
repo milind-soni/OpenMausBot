@@ -10,6 +10,7 @@ import { effectivePlace, placeLabelKey } from "@/lib/place";
 import { openRoomPanel } from "@/lib/room-panel";
 import { chosenResponder, responderChoice, responderTitle } from "@/lib/room-responder";
 import { roomSpeakerIds } from "@/lib/room-threads";
+import { formatTokens } from "@/lib/usage";
 import { useStore, type Bot, type Group } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 import { RoomContextBadge } from "./ContextWarning";
@@ -18,6 +19,7 @@ import { useCaptionChrome } from "./DesktopCapabilities";
 import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 import { RoomHeaderCallButton } from "./GroupCallView";
 import { GroupUsageChip } from "./GroupUsageChip";
+import { PinnedMessagesMenu, pinnedPreview } from "./PinnedMessagesMenu";
 import { PlaceIcon } from "./PlaceIcon";
 import { roomMemberQueueTitle } from "./RoomQueueList";
 import { RoomWorkingFolderChip } from "./RoomWorkingFolder";
@@ -81,7 +83,7 @@ function memberMauses(group: Group, members: Bot[]) {
             ? t("room.holds.avatarHeld", { name: b.name })
             : queueTitle ?? (busyElsewhere
               ? t("room.memberWorkingElsewhere", { name: b.name })
-              : `${b.name}${busy ? ` — ${t("room.member.working")}` : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
+              : `${b.name}${busy ? ` — ${t("room.member.working")}` : ""}${contextWarning ? ` — ${t("contextWarning.short", { tokens: formatTokens(contextWarning.tokens) })}` : ""}`)
         }
         className={cn(
           "relative inline-flex rounded-full",
@@ -102,7 +104,7 @@ function memberMauses(group: Group, members: Bot[]) {
             <Pause size={8} strokeWidth={3} aria-hidden="true" />
           </span>
         )}
-        {contextWarning && <RoomContextBadge percent={contextWarning.percent} />}
+        {contextWarning && <RoomContextBadge tokens={formatTokens(contextWarning.tokens)} />}
         {busy && (
           showPlace ? (
             <span
@@ -147,7 +149,16 @@ export function RoomHeader({
   membersTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
+  const { dispatch } = useStore();
   const faces = memberMauses(group, members);
+  const pinned = (
+    <PinnedMessagesMenu
+      pins={pinnedPreview(group.messages, group.pinnedMessageId, t("room.aBot"), false)}
+      triggerClassName="transition-colors hover:bg-ink/[0.06]"
+      onJump={(messageId) => dispatch({ type: "focusMessage", threadId: group.threadId, messageId })}
+      onUnpin={remoteClient ? undefined : () => dispatch({ type: "patchGroup", groupId: group.id, patch: { pinnedMessageId: "" } })}
+    />
+  );
   const membersLabel = members.length === 1
     ? t("room.members.ariaOne")
     : t("room.members.ariaMany", { count: members.length });
@@ -174,6 +185,7 @@ export function RoomHeader({
           </div>
           <div data-roomhead-controls className="flex shrink-0 items-center gap-1.5">
             <ThreadPresenceFaces threadId={group.threadId} />
+            {pinned}
             <button
               ref={membersTriggerRef}
               type="button"
@@ -222,6 +234,7 @@ export function RoomHeader({
           className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
         >
           <ThreadPresenceFaces threadId={group.threadId} />
+          {pinned}
           <button
             type="button"
             onClick={onToggleFind}

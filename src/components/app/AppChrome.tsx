@@ -6,6 +6,7 @@ import { openExternalLink } from "@/lib/app-links";
 import type { AppDoneState, AppNetwork } from "../../../shared/app";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_QUIET_BUTTON } from "../AskCard";
 
+const PAGE_ICON = "flex shrink-0 text-ink-secondary";
 export const APP_SURFACE = "w-full overflow-hidden rounded-2xl bg-composer ring-1 ring-composer-ring";
 const ICON_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/[0.07] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
@@ -58,6 +59,45 @@ export function AppHeader({
           onClick={onInfo}
           className={cn(ICON_BUTTON, infoOpen && "bg-ink/[0.07] text-ink")}
         >
+          <Info size={15} />
+        </button>
+        {onReload && (
+          <button type="button" aria-label={t("app.reload")} title={t("app.reload")} onClick={onReload} disabled={reloading} className={ICON_BUTTON}>
+            <RotateCw size={14} className={cn(reloading && "animate-spin motion-reduce:animate-none")} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function PageCardFooter({ title, detail, updated, infoId, infoOpen, onInfo, onReload, reloading = false }: {
+  title: string;
+  detail: string;
+  updated: boolean;
+  infoId: string;
+  infoOpen: boolean;
+  onInfo(): void;
+  onReload?: () => void;
+  reloading?: boolean;
+}) {
+  return (
+    <div data-page-footer className="flex min-h-18 items-center gap-3 border-t border-ink/[0.08] px-5 py-4">
+      <span data-page-icon className={PAGE_ICON}>
+        <AppWindow aria-hidden="true" size={16} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div title={title} className="truncate text-sm font-medium leading-[18px] text-ink"><bdi dir="auto">{title}</bdi></div>
+        <div className="truncate text-[13px] leading-[18px] text-ink-secondary">{detail}</div>
+      </div>
+      {updated && <span role="status" data-page-updated className="shrink-0 rounded-full bg-accent/15 px-2 py-px text-[13px] font-medium text-accent-text">{t("chat.preview.updated")}</span>}
+      <div className={cn(
+        "relative z-[1] -me-1.5 flex shrink-0 items-center gap-0.5 transition-opacity duration-[120ms] motion-reduce:transition-none",
+        "group-hover/page:opacity-100 group-focus-within/page:opacity-100 touch:opacity-100",
+        !infoOpen && "opacity-0",
+      )}>
+        <button type="button" aria-label={t("app.info")} title={t("app.info")} aria-expanded={infoOpen} aria-controls={infoId} onClick={onInfo}
+          className={cn(ICON_BUTTON, infoOpen && "bg-ink/[0.07] text-ink")}>
           <Info size={15} />
         </button>
         {onReload && (
