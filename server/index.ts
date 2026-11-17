@@ -13767,7 +13767,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const refused = readRefusal(status.assignment); if (refused) return json(res, 403, { error: refused });
           if (!reachable(status.assignment)) return json(res, 403, { error: "Result withheld: team access changed while the teammate was working" });
           if (settled.has(status.assignment.status) || Date.now() >= deadline) {
-            if (EXTERNAL && !status.assignment.parentId) {
+            // Only the conversation that sent it takes its results; another of the bot's chats just reads them.
+            if (EXTERNAL && !status.assignment.parentId && coordinator.node(status.assignment.rootId)?.threadId === fromThreadId) {
               const lanes = new Map<string, { botId?: string; threadId?: string; runId?: string }>();
               for (const item of status.inbox) {
                 if (item.deliveredAt !== undefined) continue;
