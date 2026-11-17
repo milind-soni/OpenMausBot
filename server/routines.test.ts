@@ -51,6 +51,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
   }> = [];
   const runOns: string[] = [];
   const triggerSources: string[] = [];
+  const runIds: string[] = [];
   const taskTitles: string[] = [];
   const goalTasks: Array<{ groupId: string; title: string }> = [];
   const interruptedTurns: Array<{ botId: string; threadId: string }> = [];
@@ -77,10 +78,11 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
       goalTasks.push({ groupId, title });
       return { threadId: `goal-thread-${++goalTask}` };
     },
-    startTurn: async (botId, threadId, prompt, runOn, triggerSource) => {
+    startTurn: async (botId, threadId, prompt, runOn, triggerSource, _onDispatchError, runId) => {
       started.push({ botId, threadId, prompt });
       runOns.push(runOn);
       triggerSources.push(triggerSource);
+      runIds.push(runId);
     },
     startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, onDispatchError) => {
       startedGoals.push({ groupId, threadId, prompt, coordinatorBotId, runId, onDispatchError });
@@ -104,6 +106,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     startedGoals,
     runOns,
     triggerSources,
+    runIds,
     taskTitles,
     goalTasks,
     interruptedTurns,
@@ -2900,6 +2903,7 @@ describe("RoutineManager", () => {
     expect(h.started).toEqual([{ botId: "maus-webhook", threadId: "thread-1", prompt: "Handle ticket 42" }]);
     expect(h.runOns).toEqual(["cloud"]);
     expect(h.triggerSources).toEqual(["webhook"]);
+    expect(h.runIds).toEqual([queued.id]);
     expect(h.taskTitles).toHaveLength(1);
   });
 

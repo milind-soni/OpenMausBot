@@ -359,6 +359,12 @@ export async function createWorkspaceBackupSnapshot(dataDir: string, options: Cr
           skippedDependencies++;
           continue;
         }
+        // A link a bot made in a conversation's folder, or in Team files (which a bot may be let to write), is never
+        // followed or carried, and never stops the backup.
+        if (stat.isSymbolicLink() && path.startsWith("team-files/")) {
+          skippedWorkLinks++;
+          continue;
+        }
         if (stat.isSymbolicLink() && path.startsWith("task-workspaces/")) {
           if (managedTaskSkillLink(source, path, [root, resolve(dataDir)])) skippedLinks++; else skippedWorkLinks++;
           continue;

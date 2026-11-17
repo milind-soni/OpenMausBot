@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Notification } from "../shared/notification.ts";
 import type { Message } from "./store.ts";
-import { cancelWaitFromCard, createWaitHost, waitRunChat, type WaitHostDeps } from "./wait-host.ts";
+import { cancelWaitFromCard, createWaitHost, waitContinuesHere, waitContinuationCheck, waitRunChat, waitTurnRunId, type WaitHostDeps } from "./wait-host.ts";
 import type { WaitRecord } from "./waits.ts";
 
 const NOW = 1_700_000_000_000;
@@ -109,5 +109,67 @@ describe("the store side of waits", () => {
 
   it("knows a deleted bot from an idle one", () => {
     expect([host.botBusy("bot-1"), host.botBusy("gone")]).toEqual([false, undefined]);
+  });
+
+  it("carries run identity only from dispatch or a continuation of the same known request", () => {
+    const previous = { automationRunId: "run-1", messageId: "request-1" };
+    expect(waitTurnRunId({ automationRunId: "run-2" }, previous, "request-2")).toBe("run-2");
+    expect(waitTurnRunId({ cardContinuation: true }, previous, "request-1")).toBe("run-1");
+    expect(waitTurnRunId({ computerSelectionContinuation: true }, previous, "request-1")).toBe("run-1");
+    expect(waitTurnRunId(undefined, previous, "request-1")).toBeUndefined();
+    expect(waitTurnRunId({ cardContinuation: true }, previous, undefined)).toBeUndefined();
+    expect(waitTurnRunId({ cardContinuation: true }, previous, "unrelated-request")).toBeUndefined();
+    expect(waitTurnRunId({ cardContinuation: true }, { ...previous, stopped: true }, "request-1")).toBeUndefined();
+    expect(waitTurnRunId({ cardContinuation: true }, undefined, "request-1")).toBeUndefined();
+  });
+
+  it("binds a continuation capability to its own live request and run", () => {
+    host.post(wait, { status: "fired", text: "done" });
+    const run = { id: "run-1", eventSource: "wait" as const, triggerSource: "webhook" as const, botId: "bot-1", threadId: "t-1", resultsThreadId: "t-1", webhookId: "wait:w1", deliveryId: "w1" };
+    const capability = { botId: "bot-1", threadId: "t-1", generation: "generation-1" };
+    let request: { automationRunId?: string; stopped?: boolean; generations: Set<string> } = { automationRunId: run.id, generations: new Set([capability.generation]) };
+    let active = true;
+    let currentRun: typeof run | null = run;
+    const deps = { active: () => active, request: () => request, run: () => currentRun, store };
+    const allowed = waitContinuationCheck(capability, deps);
+    expect(allowed()).toBe(true);
+    request = { generations: new Set([capability.generation]) };
+    expect(allowed()).toBe(false);
+    request.automationRunId = "unrelated-run";
+    expect(allowed()).toBe(false);
+    request.automationRunId = run.id;
+    expect(allowed()).toBe(true);
+    request.generations = new Set(["unrelated-generation"]);
+    expect(allowed()).toBe(false);
+    request.generations.add(capability.generation);
+    active = false;
+    expect(allowed()).toBe(false);
+    active = true;
+    request.stopped = true;
+    expect(allowed()).toBe(false);
+    request.stopped = false;
+    currentRun = { ...run, id: "different-run" };
+    expect(allowed()).toBe(false);
+    currentRun = null;
+    expect(allowed()).toBe(false);
+    currentRun = run;
+    expect(waitContinuationCheck({ ...capability, externalRuntime: {} }, deps)()).toBe(false);
+  });
+
+  it("proves a wait continuation from the run and its fired notice in the same chat", () => {
+    const run = { id: "run-1", eventSource: "wait" as const, triggerSource: "webhook" as const, botId: "bot-1", threadId: "t-1", resultsThreadId: "t-1", webhookId: "wait:w1", deliveryId: "w1" };
+    expect(waitContinuesHere(run, "bot-1", "t-1", store, "run-1")).toBe(false);
+    host.post(wait, { status: "fired", text: "done" });
+    expect(waitContinuesHere(run, "bot-1", "t-1", store, "run-1")).toBe(true);
+    expect(waitContinuesHere(run, "bot-1", "t-1", store, undefined)).toBe(false);
+    expect(waitContinuesHere(run, "bot-1", "t-1", store, "unrelated-run")).toBe(false);
+    expect(waitContinuesHere(null, "bot-1", "t-1", store, "run-1")).toBe(false);
+    for (const patch of [
+      { eventSource: "app" as const }, { eventSource: undefined }, { triggerSource: "schedule" as const },
+      { id: "other" }, { botId: "other" }, { threadId: "other" }, { resultsThreadId: "other" },
+      { deliveryId: "other" }, { deliveryId: undefined }, { webhookId: "other" },
+    ]) expect(waitContinuesHere({ ...run, ...patch }, "bot-1", "t-1", store, "run-1")).toBe(false);
+    store.messages[0]!.wait!.status = "expired";
+    expect(waitContinuesHere(run, "bot-1", "t-1", store, "run-1")).toBe(false);
   });
 });

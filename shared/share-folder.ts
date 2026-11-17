@@ -1,6 +1,7 @@
 // A template folder, the one format a shared bot or department travels in:
 //   bot.md | team.md            BotMRR Markdown v2: YAML frontmatter with the package fields, and a readable body
 //   skills/<name>/SKILL.md      each skill the frontmatter names
+//   skills/<name>/<path>        the text files beside it that the frontmatter's skillFiles names
 //   avatars/<key>.<png|jpg|webp> each picture the frontmatter names
 //   README.md                   optional, for people browsing GitHub; never read back
 // Pure (no node:*): the server, the renderer and the Admin's submission check read folders with the same rules, and
@@ -20,6 +21,7 @@ import {
   type PackageDocument,
 } from "./package-format.ts";
 import type { TemplateScope } from "./share-card.ts";
+import { skillFilePathProblem, type SkillFile } from "./skill-files.ts";
 import { isSkillName, parseSkillMd, SKILL_FILE_MAX_BYTES } from "./skill-md.ts";
 
 export type ShareFolderFiles = Record<string, string | Uint8Array>;
@@ -35,6 +37,13 @@ const PICTURE_TYPES = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
 const PICTURE_EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
 const SKILL_PATH = /^skills\/([a-z0-9][a-z0-9-]{0,63})\/SKILL\.md$/;
 const PICTURE_PATH = /^avatars\/([a-z0-9][a-z0-9_-]{0,63})\.(png|jpg|jpeg|webp)$/;
+const SKILL_FILE_PATH = /^skills\/([a-z0-9][a-z0-9-]{0,63})\/(.+)$/;
+
+/** A file beside a skill's SKILL.md: skills/<name>/<path>, with a path a skill folder can hold. */
+export function isSkillFilePath(path: string): boolean {
+  const match = path.match(SKILL_FILE_PATH);
+  return Boolean(match) && match![2] !== "SKILL.md" && skillFilePathProblem(match![2]!) === null;
+}
 
 export type ShareFolder =
   | { kind: "package"; scope: TemplateScope; document: PackageDocument }
@@ -51,10 +60,11 @@ export function safeFolderPath(path: string): string | null {
   return parts.every((part) => part && part !== "." && part !== ".." && !part.startsWith(".")) ? clean : null;
 }
 
-/** Whether the reader ever opens this path: the manifest, a skill or a picture. Everything else in a folder is ignored. */
+/** Whether the reader ever opens this path: the manifest, a skill, a file beside one or a picture. Everything else in a
+ * folder is ignored. */
 export function isShareFolderPath(path: string): boolean {
   return path === MANIFEST_NAMES.bot || path === MANIFEST_NAMES.department || path === LEGACY_MARKDOWN || path === LEGACY_MANIFEST ||
-    /^[\w.-]+\.openmaus\.json$/.test(path) || SKILL_PATH.test(path) || PICTURE_PATH.test(path);
+    /^[\w.-]+\.openmaus\.json$/.test(path) || SKILL_PATH.test(path) || PICTURE_PATH.test(path) || isSkillFilePath(path);
 }
 
 function textOf(value: string | Uint8Array | undefined): string | undefined {
@@ -66,6 +76,17 @@ function bytesOf(value: string | Uint8Array): Uint8Array | null {
   if (typeof value !== "string") return value;
   const data = value.match(/^data:image\/(?:png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
   return data ? decodeBase64(data[1]!) : null;
+}
+
+/** The skill files the folder's bot.md or team.md names: only those are read, or counted against the folder's caps. */
+function namedSkillFiles(files: ReadonlyArray<readonly [string, string | Uint8Array]>): Set<string> {
+  const manifest = files.find(([path]) => path === MANIFEST_NAMES.bot || path === MANIFEST_NAMES.department)?.[1];
+  if (manifest === undefined) return new Set();
+  try {
+    return new Set(namedFolderFiles(textOf(manifest)!).filter(isSkillFilePath));
+  } catch {
+    return new Set();
+  }
 }
 
 /** The folder's files keyed by their path inside it: a single top folder (a browser's folder upload, a saved folder
@@ -84,12 +105,12 @@ export function normalizeShareFolder(files: ShareFolderFiles): ShareFolderFiles 
     const top = tops.size === 1 ? [...tops][0]! : "";
     if (top && safe.some(([path]) => path.includes("/") && atRoot(path.slice(top.length + 1)))) prefix = `${top}/`;
   }
+  const inside = safe.flatMap(([path, value]) => (path.startsWith(prefix) && isShareFolderPath(path.slice(prefix.length)) ? [[path.slice(prefix.length), value] as const] : []));
+  const named = namedSkillFiles(inside);
   const kept: ShareFolderFiles = {};
   let total = 0, count = 0;
-  for (const [path, value] of safe) {
-    if (!path.startsWith(prefix)) continue;
-    const inner = path.slice(prefix.length);
-    if (!isShareFolderPath(inner)) continue;
+  for (const [inner, value] of inside) {
+    if (isSkillFilePath(inner) && !named.has(inner)) continue;
     total += typeof value === "string" ? utf8Bytes(value) : value.byteLength;
     if (++count > SHARE_FOLDER_MAX_FILES) throw refuse("This folder has too many files to be a template.");
     if (total > SHARE_FOLDER_MAX_BYTES) throw new PackageFormatError("too_large", "This folder is larger than 4 MB.");
@@ -112,7 +133,18 @@ function frontmatterOf(markdown: string): { metadata: Record<string, unknown> } 
   return { metadata: metadata as Record<string, unknown> };
 }
 
-function folderSkill(files: ShareFolderFiles, name: unknown) {
+/** The skill's own files the frontmatter names, each required. Their rules are the package gate's (skillFilesSchema). */
+function folderSkillFiles(files: ShareFolderFiles, name: string, listed: unknown): SkillFile[] | undefined {
+  if (listed === undefined) return undefined;
+  if (!Array.isArray(listed) || listed.some((path) => typeof path !== "string")) throw refuse(`skillFiles for ${name} must be a list of paths.`);
+  return (listed as string[]).map((path) => {
+    const text = textOf(files[`skills/${name}/${path}`]);
+    if (text === undefined) throw refuse(`This template names skills/${name}/${path.slice(0, 120)}, but the file is missing.`);
+    return { path, content: text };
+  });
+}
+
+function folderSkill(files: ShareFolderFiles, name: unknown, listed?: unknown) {
   if (typeof name !== "string" || !isSkillName(name)) throw refuse(`A skill name in this template is not valid: ${String(name).slice(0, 80)}`);
   const text = textOf(files[`skills/${name}/SKILL.md`]);
   if (text === undefined) throw refuse(`This template names the skill ${name}, but skills/${name}/SKILL.md is missing.`);
@@ -120,9 +152,11 @@ function folderSkill(files: ShareFolderFiles, name: unknown) {
   const parsed = parseSkillMd(text);
   if ("error" in parsed) throw refuse(`skills/${name}/SKILL.md: ${parsed.error}`);
   if (parsed.name !== name) throw refuse(`skills/${name}/SKILL.md is named ${parsed.name} inside.`);
+  const beside = folderSkillFiles(files, name, listed);
   return {
     name, description: parsed.description, instructions: text,
     ...(parsed.license ? { license: parsed.license } : {}), ...(parsed.compatibility ? { compatibility: parsed.compatibility } : {}),
+    ...(beside?.length ? { files: beside } : {}),
   };
 }
 
@@ -141,14 +175,15 @@ function folderPicture(files: ShareFolderFiles, value: unknown, crop: unknown) {
 }
 
 function packageFromFolder(metadata: Record<string, unknown>, files: ShareFolderFiles): unknown {
-  const { botmrr: _version, skills: skillNames, ...definition } = metadata;
+  const { botmrr: _version, skills: skillNames, skillFiles, ...definition } = metadata;
+  const listedFiles = (skillFiles && typeof skillFiles === "object" && !Array.isArray(skillFiles) ? skillFiles : {}) as Record<string, unknown>;
   const agents = Array.isArray(definition.agents) ? definition.agents : [];
   const named = new Set<unknown>(Array.isArray(skillNames) ? skillNames : []);
   for (const agent of agents) {
     const skills = (agent as { skills?: unknown })?.skills;
     if (Array.isArray(skills)) for (const name of skills) named.add(name);
   }
-  const entries = [...named].map((name) => folderSkill(files, name));
+  const entries = [...named].map((name) => folderSkill(files, name, typeof name === "string" && Object.hasOwn(listedFiles, name) ? listedFiles[name] : undefined));
   const withPictures = agents.map((raw) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
     const agent = raw as Record<string, unknown>;
@@ -190,7 +225,7 @@ export function readShareFolder(input: ShareFolderFiles): ShareFolder {
   throw new PackageFormatError("not_a_package", "This folder has no bot.md or team.md.");
 }
 
-/** The paths a manifest names besides itself: its skills and pictures, the only files a remote reader fetches. */
+/** The paths a manifest names besides itself: its skills, their files and its pictures, the only files a reader opens. */
 export function namedFolderFiles(manifest: string): string[] {
   const { metadata } = frontmatterOf(manifest);
   if (metadata.botmrr !== BOTMRR_FOLDER_VERSION) return [];
@@ -202,6 +237,11 @@ export function namedFolderFiles(manifest: string): string[] {
     if (Array.isArray(record.skills)) record.skills.forEach(add);
     const picture = record.appearance?.avatar;
     if (typeof picture === "string" && PICTURE_PATH.test(picture)) names.add(picture);
+  }
+  const listed = metadata.skillFiles && typeof metadata.skillFiles === "object" && !Array.isArray(metadata.skillFiles) ? metadata.skillFiles as Record<string, unknown> : {};
+  for (const [skill, paths] of Object.entries(listed)) {
+    if (!names.has(`skills/${skill}/SKILL.md`) || !Array.isArray(paths)) continue;
+    for (const path of paths) if (typeof path === "string" && isSkillFilePath(`skills/${skill}/${path}`)) names.add(`skills/${skill}/${path}`);
   }
   return [...names].slice(0, SHARE_FOLDER_MAX_FILES);
 }
@@ -252,10 +292,15 @@ export function writeShareFolder(document: PackageDocument, scope: TemplateScope
     const { avatar: _picture, ...look } = agent.appearance;
     return { ...agent, appearance: { ...look, avatar: path, ...(avatar.crop === "circle" ? {} : { avatarCrop: avatar.crop }) } };
   });
-  for (const skill of pkg.skills?.entries ?? []) files[`skills/${skill.name}/SKILL.md`] = skill.instructions;
+  const skillFiles: Record<string, string[]> = {};
+  for (const skill of pkg.skills?.entries ?? []) {
+    files[`skills/${skill.name}/SKILL.md`] = skill.instructions;
+    for (const file of skill.files ?? []) files[`skills/${skill.name}/${file.path}`] = file.content;
+    if (skill.files?.length) skillFiles[skill.name] = skill.files.map((file) => file.path);
+  }
   const skills = (pkg.skills?.entries ?? []).map((skill) => skill.name);
   const { skills: _skills, agents: _agents, ...rest } = pkg;
-  const metadata = { botmrr: BOTMRR_FOLDER_VERSION, ...rest, agents, ...(skills.length ? { skills } : {}) };
+  const metadata = { botmrr: BOTMRR_FOLDER_VERSION, ...rest, agents, ...(skills.length ? { skills } : {}), ...(Object.keys(skillFiles).length ? { skillFiles } : {}) };
   files[MANIFEST_NAMES[scope]] = `---\n${stringifyYaml(metadata, { lineWidth: 0 }).trimEnd()}\n---\n\n${readableBody(document, scope)}\n`;
   return files;
 }

@@ -10,7 +10,9 @@
 //   - put back inside that empty folder: this turn's working folder, the bot's own folder (workspaces/<bot>) and what the
 //     caller names (the turn's permission socket, a read-only file the command line points at); and, read-only, the
 //     bot's own SOUL.md (bots/<bot>/SOUL.md, which it may read but never write) and the engines OpenMausBot installed
-//     there, whole, since npm's bin links point into the prefix by relative paths;
+//     there, whole, since npm's bin links point into the prefix by relative paths; on a Team Cloud a turn that is not the
+//     team's has the bot's own folder read-only and of a process its conversations share only those it may read
+//     (BoxAudience);
 //   - a private /proc (its own PID namespace: other turns' processes do not exist for it), /dev, /tmp and /run;
 //   - of /sys, only the machine's CPU list, read-only;
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
@@ -19,6 +21,8 @@
 //     also dials out to one more socket, through which the server reaches the box's own loopback, never the other way.
 import { statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+
+import { isLayerId } from "../audience.ts";
 
 export type BoxNet = "isolated" | "shared";
 
@@ -82,7 +86,36 @@ export interface BoxRequest {
   /** A host unix socket the box dials out to, so the server can reach a port the engine listens on inside the box's own
    * network, such as a sign-in's callback. Only an isolated box has one. */
   relay?: string;
+  /** The conversation this spawn runs for, when the caller knows it (a Team Cloud's engine homes do). */
+  threadId?: string;
+  /** The bot whose turn that is, for the audience rule only (BoxAudience); unlike `botId` it puts back nothing. */
+  conversationBot?: string;
+  /** On a Team Cloud: what the conversation's audience gives the box of the bot's team things (BoxAudience). */
+  audience?: BoxAudience;
 }
+
+/** On a Team Cloud, what one conversation's boxes get of what is the team's (docs/team-cloud.md, "The audience rule"):
+ * a turn writes only into its own audience, and reads only what everyone who sees its answer may see. */
+export interface BoxAudience {
+  /** The turn is not the team's: the bot's own folder (workspaces/<bot>, the team's notes and skills) is put back
+   * read-only, after every read-write line. Where that folder is the turn's working folder (a room's), files can still
+   * be made in it, and only the team's notes and skills there (MEMORY.md, memory/, skills/) are read-only. */
+  teamReadOnly: boolean;
+  /** With `botThreads`: the bot's conversations the shared process may see, in place of all of them. Its own audience's
+   * read-write, the team's read-only; another person's never. */
+  threads?: { rw: readonly string[]; ro: readonly string[] };
+  /** The Team Cloud's shared folder (team-files/), at TEAM_FILES_IN_BOX in every box of a turn: read-only, or read-write
+   * for a bot an admin marked "Can edit team files" while the folder has room (server/host/team-files.ts). */
+  teamFiles?: { source: string; write: boolean };
+}
+
+/** Where every bot's box has its Team Cloud's shared folder. */
+export const TEAM_FILES_IN_BOX = "/team-files";
+/** Its template library, read-only in every box. */
+export const TEAM_FILES_LIBRARY = "templates";
+
+/** What stays read-only in a bot's own folder that is a non-team turn's working folder. */
+export const TEAM_FOLDER_KEPT = ["MEMORY.md", "memory", "skills"] as const;
 
 export interface BoxPlan {
   mounts: Mount[];
@@ -198,11 +231,22 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
   const botId = request.botId ?? ids?.botId ?? null;
   const threads = request.botThreads && ids ? ids.botId : null;
-  if (threads) rw(join(dataDir, "task-workspaces", threads));
+  const scoped = threads ? request.audience?.threads ?? null : null;
+  if (threads && !scoped) rw(join(dataDir, "task-workspaces", threads));
+  for (const id of scoped?.rw ?? []) {
+    if (!ID.test(id)) continue;
+    const folder = join(dataDir, "task-workspaces", threads!, id);
+    // A conversation whose folder is not made yet is skipped, as its turn makes it and starts a box of its own.
+    mounts.push({ kind: "bind", source: folder, target: folder, optional: true });
+    if (!writable.includes(folder)) writable.push(folder);
+  }
   if (cwd && !covered(cwd)) rw(cwd);
+  // Security: on a Team Cloud a turn that is not the team's never writes the team's folder (BoxAudience.teamReadOnly).
+  const teamFolder = request.audience?.teamReadOnly ? teamFolderOf(botId, cwd, dataDir) : null;
+  const workingInTeamFolder = teamFolder !== null && cwd !== null && under(cwd, teamFolder);
   if (botId && ID.test(botId)) {
     const own = join(dataDir, "workspaces", botId);
-    if (!covered(own)) rw(own);
+    if (!covered(own) && own !== teamFolder) rw(own);
   }
   const ownFolders = botId && ID.test(botId) ? [join(dataDir, "workspaces", botId), join(dataDir, "task-workspaces", botId)] : [];
   if (mutate.has("bind-otherws")) {
@@ -229,8 +273,18 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   }
   // The person's uploads for this conversation, after every read-write line: readable, but never writable or swappable.
   if (ids) {
-    const shown = threads ? join(dataDir, "box-uploads", threads) : boxUploadsDir(dataDir, ids.botId, ids.threadId);
-    mounts.push({ kind: "ro", source: shown, target: shown, optional: true });
+    const shown = scoped ? [...scoped.rw, ...scoped.ro].filter((id) => ID.test(id)).map((id) => boxUploadsDir(dataDir, threads!, id))
+      : [threads ? join(dataDir, "box-uploads", threads) : boxUploadsDir(dataDir, ids.botId, ids.threadId)];
+    for (const folder of shown) mounts.push({ kind: "ro", source: folder, target: folder, optional: true });
+  }
+  // The team's conversations a non-team shared process may read, and the team's folder, after every read-write line too.
+  for (const id of scoped?.ro ?? []) {
+    if (ID.test(id)) mounts.push({ kind: "ro", source: join(dataDir, "task-workspaces", threads!, id), target: join(dataDir, "task-workspaces", threads!, id), optional: true });
+  }
+  if (teamFolder && workingInTeamFolder) {
+    for (const name of TEAM_FOLDER_KEPT) mounts.push({ kind: "ro", source: join(teamFolder, name), target: join(teamFolder, name), optional: true });
+  } else if (teamFolder) {
+    mounts.push({ kind: "ro", source: teamFolder, target: teamFolder, optional: true });
   }
   const readOnly = new Set<string>();
   const inBotFolder = (path: string) => ["workspaces", "task-workspaces"].some((kind) => {
@@ -255,6 +309,15 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: "ro", source: full, target: full, optional: true });
   }
 
+  // The team's shared folder, at one path in every box: its own line, as nothing else is bound there.
+  const teamFiles = request.audience?.teamFiles;
+  if (teamFiles) {
+    mounts.push({ kind: teamFiles.write ? "bind" : "ro", source: resolve(teamFiles.source), target: TEAM_FILES_IN_BOX, optional: true });
+    if (teamFiles.write && !writable.includes(TEAM_FILES_IN_BOX)) writable.push(TEAM_FILES_IN_BOX);
+    // The team's template library (server/team-templates.ts) is its admins', so it stays read-only for a bot that may edit.
+    if (teamFiles.write) mounts.push({ kind: "ro", source: join(resolve(teamFiles.source), TEAM_FILES_LIBRARY), target: join(TEAM_FILES_IN_BOX, TEAM_FILES_LIBRARY), optional: true });
+  }
+
   const options = ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--hostname", BOX_HOSTNAME];
   if (!mutate.has("share-pid")) options.push("--unshare-pid");
   if (setup.seccompFd !== undefined && !mutate.has("no-seccomp")) options.push("--seccomp", String(setup.seccompFd));
@@ -266,6 +329,15 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   }
   if (cwd) options.push("--chdir", cwd);
   return { mounts, options, net, writable, botId };
+}
+
+/** The bot's own folder (workspaces/<bot>) a turn has: its bot's, or the one its working folder is (a room's turn), never
+ * a memory layer (a sibling folder, the turn's own). */
+export function teamFolderOf(botId: string | null, cwd: string | null, dataDir: string): string | null {
+  if (botId && ID.test(botId) && !isLayerId(botId)) return join(dataDir, "workspaces", botId);
+  if (!cwd) return null;
+  const [owner, ...rest] = relative(join(dataDir, "workspaces"), cwd).split(sep);
+  return owner && ID.test(owner) && !isLayerId(owner) && !rest.includes("..") ? join(dataDir, "workspaces", owner) : null;
 }
 
 /** bubblewrap's argv for the plan (the command follows `--`). */

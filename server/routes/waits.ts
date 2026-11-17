@@ -15,7 +15,7 @@ const CANCEL = "/api/internal/waits/cancel";
 export const WAIT_MESSAGES = {
   notYours: "This conversation is not yours.",
   room: "Waits are made in a one-to-one chat with the person, not in a room.",
-  notPerson: "Only the person can set up or stop a wait, in their own chat with you; a routine or an outside event cannot, and work a bot handed you can set one only when the person's own request started it.",
+  notPerson: "A wait needs the person's own request in this chat or a verified continuation of its completed wait. Scheduled routines and outside events cannot set one. Work handed on by a bot needs the person's original request and can only create a wait.",
   handedStop: "Work handed to you by a bot can set one wait but not stop one: it ends on its own, or the person stops it.",
   serverHost: "File and program waits look at the computer MausBot runs on, and here that is a server, not the computer you work on. Use url_contains, url_missing or bot_idle.",
   guest: "File and program waits are only for the owner of this computer. Use url_contains, url_missing or bot_idle.",
@@ -124,10 +124,11 @@ export function parseWaitRequest(body: unknown, home: string): { ok: true; reque
 
 export function waitSourceRefusal(turn: {
   owned: boolean; room: boolean; depth: number; handedOff: boolean; routineRun: boolean; outsideDriven: boolean; personStarted: boolean; guest: boolean;
-  op?: "create" | "cancel"; assignmentId?: string;
+  op?: "create" | "cancel"; assignmentId?: string; waitContinuation?: boolean;
 }): string | null {
   if (!turn.owned) return WAIT_MESSAGES.notYours;
   if (turn.room) return WAIT_MESSAGES.room;
+  if (turn.waitContinuation && turn.routineRun && turn.depth === 0 && !turn.handedOff && !turn.guest && turn.op === "create") return null;
   if (turn.routineRun || turn.outsideDriven) return WAIT_MESSAGES.notPerson;
   if (turn.depth > 0 || turn.handedOff) {
     if (!turn.personStarted || turn.guest || !turn.assignmentId) return WAIT_MESSAGES.notPerson;
@@ -170,6 +171,7 @@ export interface WaitRouteContext {
   readBody: () => Promise<unknown>;
   sourceRefusal: (op: "create" | "cancel", assignmentId: string | undefined) => string | null;
   assignmentId?: () => string | undefined;
+  continuationAllowed?: () => boolean;
   hostRefusal: () => string | null;
   /** A Cloud guest's turn: its follow-up would run later as the owner's, so a guest's wait only tells. */
   guest: () => boolean;
@@ -196,6 +198,7 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     if (ctx.method !== "POST" || (ctx.path !== WAITS && ctx.path !== CANCEL)) return PASS;
 
     const assignmentId = ctx.assignmentId?.();
+    const continuation = ctx.continuationAllowed?.() === true;
     const refusal = ctx.sourceRefusal(ctx.path === CANCEL ? "cancel" : "create", assignmentId);
     if (refusal) return void json(res, 403, { error: refusal });
     const body = await ctx.readBody();
@@ -243,10 +246,19 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
       condition,
       ...(request.followUp ? { followUp: request.followUp } : {}),
       hours: request.hours,
-      ...(assignmentId ? { assignmentId, stillAllowed: () => (ctx.assignmentId?.() === assignmentId ? null : WAIT_MESSAGES.notPerson) } : {}),
+      ...(assignmentId ? { assignmentId } : {}),
+      ...(assignmentId || continuation ? {
+        stillAllowed: () => {
+          if (assignmentId && ctx.assignmentId?.() !== assignmentId) return WAIT_MESSAGES.notPerson;
+          if (continuation && (!ctx.continuationAllowed?.() || ctx.sourceRefusal("create", assignmentId))) return WAIT_MESSAGES.notPerson;
+          return null;
+        },
+      } : {}),
     });
     if (result.state === "refused") return void json(res, result.status, { error: result.error });
-    if (result.state === "already") return void json(res, 200, { text: result.text });
+    if (result.state === "already") return void json(res, 200, { text: request.followUp
+      ? `${result.text}\nCarry out follow_up now in this turn: ${request.followUp}`
+      : result.text });
     const { wait, note } = result;
     const then = request.followUp ? `, and you will then do what you wrote in follow_up${deps.cloudHome ? " in a run that reports in its own results chat, not this one" : ""}` : "";
     const every = WAIT_WAKE_MS / 60_000;

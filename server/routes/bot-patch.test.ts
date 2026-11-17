@@ -4,6 +4,7 @@ import { rmSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
@@ -40,7 +41,7 @@ beforeEach(() => {
   lifecycleBusy.mockReturnValue(false);
 });
 
-function fixture() {
+function fixture(extra: Partial<BotPatchRouteDeps> = {}) {
   const store = new Store(() => sonnet);
   const bot = store.createBot({ name: "Scout" });
   const cfg = { vps: { sshAlias: "production-vps" } } as AppConfig;
@@ -60,6 +61,8 @@ function fixture() {
     // A member's session may chat with this bot: the level that still can't move it or change what it may do.
     levelOf: () => "chat",
     mainThreadTasks: (botId: string) => store.tasks(botId).filter((task) => !privateThreads.has(task.threadId)),
+    activeGroupTurnForBot: () => null,
+    ...extra,
   } as unknown as BotPatchRouteDeps;
   const handler = createBotPatchRoutes(deps);
   const patch = async (botId: string, body: Record<string, unknown>, as: { auth?: RequestAuth; headers?: Record<string, string> } = {}) => {
@@ -386,6 +389,94 @@ describe("PATCH /api/bots/:id phoneApps", () => {
     expect(client.status).toBe(403);
     expect(paired.status).toBe(403);
     expect(store.bot(bot.id)?.phoneApps).toBeUndefined();
+  });
+});
+
+describe("PATCH /api/bots/:id while the bot works", () => {
+  const owner = { headers: { origin: "http://localhost:5173" } };
+
+  it("saves MCP servers and tool selection for the next turn", async () => {
+    const { store, bot, patch } = fixture();
+    store.patchBot(bot.id, { mcpServers: ["notes"], busy: true });
+
+    const added = await patch(bot.id, { mcpServers: ["notes", "docs"] }, owner);
+    const narrowed = await patch(bot.id, { mcpServers: ["docs"] });
+    const scoped = await patch(bot.id, { toolScope: { deny: ["mcp:docs:delete"] } });
+
+    expect([added.status, narrowed.status, scoped.status]).toEqual([200, 200, 200]);
+    expect(store.bot(bot.id)?.mcpServers).toEqual(["docs"]);
+    expect(store.bot(bot.id)?.toolScope).toEqual({ deny: ["mcp:docs:delete"] });
+  });
+
+  it("still refuses a local script that widens MCP servers while any bot works", async () => {
+    const { store, bot, patch } = fixture();
+    store.patchBot(bot.id, { mcpServers: ["notes"], busy: true });
+
+    const widened = await patch(bot.id, { mcpServers: ["notes", "docs"] });
+
+    expect(widened.status).toBe(409);
+    expect(store.bot(bot.id)?.mcpServers).toEqual(["notes"]);
+  });
+});
+
+describe("PATCH /api/bots/:id connectorScopes", () => {
+  it("refuses a local-API widening while another bot works in a room, and still allows narrowing", async () => {
+    let roomBotId = "";
+    const { store, bot, patch } = fixture({
+      activeGroupTurnForBot: (botId: string) => (botId === roomBotId ? { group: {} as never, threadId: "room-thread" } : null),
+    });
+    roomBotId = store.createBot({ name: "Room worker" }).id;
+    const firstAndSecond: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["first", "second"] } };
+    const firstOnly: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["first"] } };
+    store.patchBot(bot.id, { connectorScopes: firstAndSecond });
+
+    const widened = await patch(bot.id, { connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["first", "second", "third"] } } });
+
+    expect(widened.status).toBe(409);
+    expect(store.bot(bot.id)?.connectorScopes).toEqual(firstAndSecond);
+
+    const narrowed = await patch(bot.id, { connectorScopes: firstOnly });
+
+    expect(narrowed.status).toBe(200);
+    expect(store.bot(bot.id)?.connectorScopes).toEqual(firstOnly);
+  });
+
+  it("refuses a local-API widening when another bot starts working while the computer change is stopping this one", async () => {
+    let otherBotId = "";
+    const { store, bot, patch } = fixture({
+      interruptAllDirectThreads: async () => { store.patchBot(otherBotId, { busy: true }); },
+      routines: () => ({ activeBotRunForBot: () => null }),
+    } as unknown as Partial<BotPatchRouteDeps>);
+    otherBotId = store.createBot({ name: "Other worker" }).id;
+    const firstOnly: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["first"] } };
+    store.patchBot(bot.id, { computer: "local", connectorScopes: firstOnly });
+
+    const widened = await patch(bot.id, { computer: "off", connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["first", "second"] } } });
+
+    expect(widened.status).toBe(409);
+    expect(store.bot(bot.id)?.connectorScopes).toEqual(firstOnly);
+  });
+
+  it("refuses a local-API narrowing that became a widening after another change while the computer change was stopping this one", async () => {
+    let otherBotId = "";
+    let botId = "";
+    const secondOnly: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["second"] } };
+    const { store, bot, patch } = fixture({
+      interruptAllDirectThreads: async () => {
+        store.patchBot(botId, { connectorScopes: secondOnly });
+        store.patchBot(otherBotId, { busy: true });
+      },
+      routines: () => ({ activeBotRunForBot: () => null }),
+    } as unknown as Partial<BotPatchRouteDeps>);
+    botId = bot.id;
+    otherBotId = store.createBot({ name: "Other worker" }).id;
+    const firstAndSecond: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["first", "second"] } };
+    store.patchBot(bot.id, { computer: "local", connectorScopes: firstAndSecond });
+
+    const stale = await patch(bot.id, { computer: "off", connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["first"] } } });
+
+    expect(stale.status).toBe(409);
+    expect(store.bot(bot.id)?.connectorScopes).toEqual(secondOnly);
   });
 });
 

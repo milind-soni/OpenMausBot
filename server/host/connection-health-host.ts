@@ -26,6 +26,9 @@ type Bot = {
 };
 type OAuth = Pick<McpOAuthManager, "authState" | "tokenRefused" | "endsAt">;
 
+/** A bot the team shares, as the Admin's report names them: not hidden, not moved away, not a member's own MausBot. */
+export const isTeamBot = (bot: Pick<Bot, "hidden" | "movedTo" | "defaultBot">): boolean => !bot.hidden && !bot.movedTo && !bot.defaultBot?.person;
+
 export interface ConnectionHealthHostDeps<B extends Bot = Bot> {
   /** Where health is kept: a Team Cloud's data folder. Null elsewhere, where only the sign-in check runs. */
   dataDir: string | null;
@@ -106,7 +109,7 @@ export function createConnectionHealthHost<B extends Bot>(deps: ConnectionHealth
     now,
   }) : null;
 
-  const teamBots = () => deps.bots().filter((bot) => !bot.hidden && !bot.movedTo && !bot.defaultBot?.person);
+  const teamBots = () => deps.bots().filter(isTeamBot);
   const usesApp = (bot: B, slug: string) => bot.composio !== false
     && (!bot.connectorScopes || Object.hasOwn(bot.connectorScopes.apps, slug))
     && (bot.connectorTools === undefined || Object.hasOwn(bot.connectorTools, slug));

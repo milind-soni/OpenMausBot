@@ -4,10 +4,13 @@ import { Loader2 } from "lucide-react";
 import type { TemplateCard } from "../../shared/share-card";
 import { t } from "@/lib/i18n";
 import { exportDepartment } from "@/lib/template-share";
-import { TemplateButtons, TemplateCardBody, TemplateModal, TemplateNotes, useTemplateActions } from "./TemplateCard";
+import { TemplateButtons, TemplateCardBody, TemplateModal, TemplateNotes, TemplateRepoPublishDialog, useRepoPublishOffered, useTeamTemplatesOwner, useTemplateActions } from "./TemplateCard";
 
 function Shared({ card }: { card: TemplateCard }) {
   const actions = useTemplateActions(card);
+  const team = useTeamTemplatesOwner();
+  const repoOffered = useRepoPublishOffered();
+  const [repo, setRepo] = useState(false);
   return <>
     <div className="rounded-xl border border-hairline/40 px-3 py-2.5">
       <TemplateCardBody card={actions.card} />
@@ -15,12 +18,19 @@ function Shared({ card }: { card: TemplateCard }) {
     {!actions.card.fallback && actions.card.status !== "published" && <p className="mt-2 text-[12px] text-ink-secondary">{t("template.publicNote")}</p>}
     <TemplateButtons actions={actions} primary={t("template.publishToCommunity")}
       view={{ label: t("template.viewPullRequest"), url: actions.card.prUrl ?? actions.card.link }}
-      extra={actions.card.fallback || actions.card.status === "gone" ? null : (
-        <button type="button" data-template-save onClick={() => void actions.save()} disabled={actions.busy !== null} className="ui-button ui-button-md">
+      extra={actions.card.status === "gone" ? null : <>
+        {repoOffered && <button type="button" data-template-repo onClick={() => setRepo(true)} disabled={actions.busy !== null} className="ui-button ui-button-md">
+          {t("template.publishToRepo")}
+        </button>}
+        {team && <button type="button" data-template-team onClick={() => void actions.addToTeam(team)} disabled={actions.busy !== null} className="ui-button ui-button-md">
+          {actions.busy === "team" && <Loader2 size={14} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />}{t("template.addToTeam", { team })}
+        </button>}
+        {!actions.card.fallback && <button type="button" data-template-save onClick={() => void actions.save()} disabled={actions.busy !== null} className="ui-button ui-button-md">
           {t("template.saveFolder")}
-        </button>
-      )} />
+        </button>}
+      </>} />
     <TemplateNotes actions={actions} />
+    {repo && <TemplateRepoPublishDialog card={actions.card} onClose={() => setRepo(false)} />}
   </>;
 }
 

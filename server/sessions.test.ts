@@ -571,6 +571,14 @@ describe("sessions", () => {
     expect(reloaded.authenticate("omb_sess_nope")).toBeNull();
   });
 
+  it("names each device's person when asked, and leaves it out when that is just the label", () => {
+    const mac = pair("Chrome on Mac");
+    pair("iPhone");
+    const named = registry.list((record) => (record.id === mac.session.id ? "Ada" : record.label));
+    expect(named.map((s) => [s.label, s.person])).toEqual([["Chrome on Mac", "Ada"], ["iPhone", undefined]]);
+    expect(registry.list().every((s) => s.person === undefined)).toBe(true);
+  });
+
   it("expires after 30 days and can be revoked", () => {
     const { token, session } = pair();
     clock += SESSION_TTL_MS - 1;
