@@ -1359,9 +1359,10 @@ describe("agents-proxy MCP surface", () => {
       expect(missing.result.isError).toBe(true);
       expect(missing.result.content[0].text).toContain("No assignment asg-gone is known here");
       assignmentStatusCode = 403;
+      assignmentStatusResponse = { error: "it was handed off by another bot" };
       const foreign = await callTool("assignment_status", { id: "asg-theirs" });
       expect(foreign.result.isError).toBe(true);
-      expect(foreign.result.content[0].text).toContain("Assignment asg-theirs is not this conversation's");
+      expect(foreign.result.content[0].text).toBe("Assignment asg-theirs can't be read here: it was handed off by another bot.");
     } finally {
       assignmentStatusCode = 200;
       assignmentStatusResponse = DONE_ASSIGNMENT;
