@@ -208,6 +208,8 @@ const __APP_VERSION__: string;
         remove?: (id: string) => Promise<{ outcome: import("../../electron/cloud-account.mjs").CloudRemoveOutcome }>;
         /** Make a server of the person's own, which the rail lists with `makeHome`, their bots' home: the move starts. */
         makeHome?: (id: string) => Promise<{ started: true }>;
+        /** The ids of the servers main offers Make … my home for now (none once a move is done). Absent on an older app. */
+        homeOffers?: () => Promise<string[]>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
         /** A workspace of this computer's own (main refuses any page but the rail's and this computer's own): a new one,

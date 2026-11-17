@@ -188,6 +188,8 @@ const bridge = {
     // Make a server of the person's own their bots' home, from a click on the rail's own page (main refuses any other page).
     makeHome: (id) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:make-home", String(id)) : Promise.reject(new Error("Choose Make my home.")),
+    // The ids of the servers main offers Make … my home for now (this computer's own page and the rail's only).
+    homeOffers: () => ipcRenderer.invoke("workspaces:home-offers"),
     onChanged: (cb) => {
       const handler = () => cb();
       ipcRenderer.on("workspaces:changed", handler);

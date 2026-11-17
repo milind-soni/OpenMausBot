@@ -325,7 +325,7 @@ const serverSupervisor = createServerSupervisor({
     routineWake.stop();
   },
   onExhausted() {
-    slog("server recovery paused after repeated failures; quit and reopen to retry"); if (alwaysOnHome.on()) return;
+    slog("server recovery paused after repeated failures; quit and reopen to retry");
     dialog.showErrorBox(
       nativeT("native.dialog.serverStopped.title"),
       nativeT("native.dialog.serverStopped.body", { log: path.join(LOG_DIR, "server.log") }),
@@ -2164,7 +2164,7 @@ function createWindow({ deferNavigation = false } = {}) {
   } else if (remote) {
     void win.loadURL(remote.origin).catch(() => {});
   } else if (app.isPackaged) {
-    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly, logDir: LOG_DIR }, nativeText));
+    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly, logDir: LOG_DIR, keepTrying: alwaysOnHome.on() }, nativeText));
   } else {
     win.loadURL(DEV_URL);
   }
@@ -2996,6 +2996,7 @@ app.whenReady().then(async () => {
         app.quit();
       }
     }
+    if (!serverReady && !desktopShutdownStarted) serverSupervisor.startLater(startServerPackaged); // an always-on home keeps trying
   }
   if (desktopShutdownStarted) return;
   if (app.isPackaged && !desktopRemoteAccess) { void ensureManagedDesktop().start().then(() => companyBackupSchedule.start()).catch(() => {}); void managedDesktop.whenRestored().then(() => tailnetShare.recheck()); }

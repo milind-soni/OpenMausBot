@@ -29,7 +29,7 @@ export function alwaysOnLines(state: AlwaysOnHomeState): Line[] {
     { key: state.openAtLogin ? "alwaysOn.login.on" : state.available ? "alwaysOn.login.off" : "alwaysOn.login.unavailable", good: state.openAtLogin },
     { key: state.awake === "holding" ? "alwaysOn.awake.on" : "alwaysOn.awake.battery", good: state.awake === "holding" },
     { key: UPDATE_LINE[state.updates], good: state.updates === "by-itself" },
-    { key: "alwaysOn.windowClosed", good: true },
+    { key: state.platform === "linux" ? "alwaysOn.windowClosedLinux" : "alwaysOn.windowClosed", good: true },
     { key: "alwaysOn.restarts", good: true },
   ];
 }
@@ -45,14 +45,26 @@ export function homeStatusLine(devices: number): string {
   return devices === 1 ? t("alwaysOn.status.one") : t("alwaysOn.status.many", { count: devices });
 }
 
-/** Phones paired with this computer, and other computers and browsers signed in to it with a pairing code. */
+/** A computer or browser signed in here counts while it was seen within this long; an old sign-in nobody uses doesn't. */
+export const RECENT_SESSION_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** Sessions seen recently, of what /api/auth/sessions lists. */
+export function recentSessions(sessions: unknown, now: number): number {
+  if (!Array.isArray(sessions)) return 0;
+  return sessions.filter((session) => {
+    const seen = (session as { lastSeenAt?: unknown } | null)?.lastSeenAt;
+    return typeof seen === "number" && now - seen <= RECENT_SESSION_MS;
+  }).length;
+}
+
+/** Phones paired with this computer, and other computers and browsers signed in to it with a pairing code and seen lately. */
 function usePairedCount(state: CompanionState, on: boolean): number {
   const [signedIn, setSignedIn] = useState(0);
   const phones = state.devices.length;
   useEffect(() => {
     if (!on) return;
     let alive = true;
-    void api("/api/auth/sessions").then((body) => { if (alive) setSignedIn(Array.isArray(body?.sessions) ? body.sessions.length : 0); }).catch(() => {});
+    void api("/api/auth/sessions").then((body) => { if (alive) setSignedIn(recentSessions(body?.sessions, Date.now())); }).catch(() => {});
     return () => { alive = false; };
   }, [on, phones]);
   return phones + signedIn;
@@ -121,28 +133,33 @@ function AlwaysOnDetails({ home, c, onAddPhone, canAddComputer, blocked }: { hom
   );
 }
 
-/** The servers saved by hand on this computer, read again whenever the Connect sheet closes. */
-function useSavedServers(version: number): { servers: SavedServer[]; status: ServerStatus[] } {
+/** The servers saved by hand on this computer, and those main offers Make … my home for now, read again whenever the
+ * Connect sheet closes or main says the places changed. */
+function useSavedServers(version: number): { servers: SavedServer[]; status: ServerStatus[]; offers: string[] } {
   const environments = ogb()?.environments;
+  const workspaces = ogb()?.workspaces;
   const [servers, setServers] = useState<SavedServer[]>([]);
   const [status, setStatus] = useState<ServerStatus[]>([]);
+  const [offers, setOffers] = useState<string[]>([]);
   useEffect(() => {
     if (!environments) return;
     let alive = true;
     const read = () => {
       void environments.state().then((saved) => { if (alive) setServers(saved.environments.filter(byHand)); }).catch(() => {});
       void environments.status?.().then((rows) => { if (alive) setStatus(rows); }).catch(() => {});
+      void workspaces?.homeOffers?.().then((ids) => { if (alive) setOffers(Array.isArray(ids) ? ids : []); }).catch(() => {});
     };
     read();
     const off = environments.onStatus?.(read);
-    return () => { alive = false; off?.(); };
-  }, [environments, version]);
-  return { servers, status };
+    const offChanged = workspaces?.onChanged?.(read);
+    return () => { alive = false; off?.(); offChanged?.(); };
+  }, [environments, workspaces, version]);
+  return { servers, status, offers };
 }
 
 /** One computer added here: how it is doing, and one tap each for what it can do. Make … my home is the rail menu's own
- * one-tap move, with what it does said under it. */
-function AddedComputer({ server, status }: { server: SavedServer; status: ServerStatus | undefined }) {
+ * one-tap move, with what it does said under it, shown only while main offers it for this server (`offered`). */
+function AddedComputer({ server, status, offered }: { server: SavedServer; status: ServerStatus | undefined; offered: boolean }) {
   const [moving, setMoving] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
   const move = () => {
@@ -162,12 +179,12 @@ function AddedComputer({ server, status }: { server: SavedServer; status: Server
           <div data-always-on-health={status?.state ?? "checking"} className="text-[12px] leading-4 text-ink-secondary">{health}</div>
         </div>
         <button type="button" className="ui-button" data-always-on-open="" onClick={() => void ogb()?.environments?.switch(server.id)}>{t("alwaysOn.added.open")}</button>
-        <button type="button" className="ui-button" data-always-on-move="" disabled={moving} aria-busy={moving || undefined} onClick={move}>{t("rail.makeHome", { name: server.name })}</button>
+        {offered && <button type="button" className="ui-button" data-always-on-move="" disabled={moving} aria-busy={moving || undefined} onClick={move}>{t("rail.makeHome", { name: server.name })}</button>}
       </div>
       {said && <p role="alert" className="text-[12px] leading-4 text-danger">{said}</p>}
       <ul className="flex list-disc flex-col gap-1 pl-4 text-[12px] leading-4 text-ink-secondary">
         <li>{t("alwaysOn.added.sidebar", { name: server.name })}</li>
-        <li>{t("alwaysOn.added.keepRunning", { name: server.name })}</li>
+        {offered && <li>{t("alwaysOn.added.keepRunning", { name: server.name })}</li>}
         <li>{t("alwaysOn.added.screen", { app: productName() })}</li>
       </ul>
     </div>
@@ -176,12 +193,11 @@ function AddedComputer({ server, status }: { server: SavedServer; status: Server
 
 /** On the person's main computer: the steps to add a spare computer, then each one added and what it can do. */
 function AddAlwaysOnComputer() {
-  const [asked, setOpen] = useState<boolean | null>(null);
+  const [open, setOpen] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [version, setVersion] = useState(0);
-  const { servers, status } = useSavedServers(version);
+  const { servers, status, offers } = useSavedServers(version);
   const title = t("alwaysOn.add.title");
-  const open = asked ?? servers.length > 0;
   return (
     <>
       <SettingsFoldRow id="add-always-on" title={title} subtitle={t("alwaysOn.add.line")} open={open} onToggle={() => setOpen(!open)}>
@@ -193,7 +209,7 @@ function AddAlwaysOnComputer() {
             <button type="button" className="ui-button ui-button-primary" data-always-on-connect="" onClick={() => setConnecting(true)}>{t("alwaysOn.add.connect")}</button>
           </li>
         </ol>
-        {servers.map((server) => <AddedComputer key={server.id} server={server} status={status.find((row) => row.id === server.id)} />)}
+        {servers.map((server) => <AddedComputer key={server.id} server={server} status={status.find((row) => row.id === server.id)} offered={offers.includes(server.id)} />)}
       </SettingsFoldRow>
       {connecting && <RailSheet focusKey="connect" onClose={() => { setConnecting(false); setVersion((n) => n + 1); }}>
         <OwnServerLink onBack={null} onConnected={() => { setConnecting(false); setVersion((n) => n + 1); }} />

@@ -213,6 +213,8 @@ export function installCloudRail({ ipcMain, guard, trusted, lists = trusted, bes
     if (!place || !makeHome) throw new Error(t("native.home.notAvailable"));
     return makeHome(place.id);
   });
+  // The servers main offers Make … my home for now, by id: Settings → Phone & devices shows the button only for those.
+  handle("workspaces:home-offers", () => (makeHome ? places().filter(entry => entry.makeHome).map(entry => entry.id) : []));
   // A workspace of this computer's own: a new one from ＋ (on the rail's page, or this computer's own from the Server menu),
   // and a name, a colour or its removal from its circle's menu, only for one main listed.
   handle("workspaces:local-new", (_event, name, color) => {

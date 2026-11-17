@@ -101,6 +101,59 @@ test("an always-on home never gives up: a spent budget waits the long delay and 
   assert.equal(f.children.length, 8);
 });
 
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("an always-on home waits out a child that would not stop, then tries again: no dialog, and never a sibling", async (t) => {
+  let stuck = true;
+  const f = fixture(t, { keepTrying: () => true, longRetryMs: 500, retryDelaysMs: [10],
+    restart: async () => {
+      const proc = f.spawn();
+      if (stuck) { stuck = false; return { proc: null, abort: true }; }
+      return { proc };
+    } });
+  const first = f.spawn();
+  f.supervisor.ready(first);
+  first.emit("exit", 1);
+  await f.tick(10);
+  await settle();
+  assert.equal(f.children.length, 2);
+  assert.equal(f.events.some(([kind]) => kind === "exhausted"), false, "no dialog");
+  await f.tick(500);
+  await settle();
+  assert.equal(f.children.length, 2, "still owned: it waits again");
+  f.children[1].emit("exit", 0);
+  await f.tick(500);
+  await settle();
+  assert.equal(f.children.length, 3);
+  assert.equal(f.events.filter(([kind]) => kind === "ready").length, 2);
+});
+
+test("an always-on home whose first start never got ready tries again after the long wait, never beside a child still owned", async (t) => {
+  let home = true, succeed = false, starts = 0;
+  const f = fixture(t, { keepTrying: () => home, longRetryMs: 500 });
+  const start = async () => { starts++; if (!succeed) return false; f.supervisor.ready(f.spawn()); return true; };
+  assert.equal(f.supervisor.startLater(start), true);
+  await f.tick(499);
+  assert.equal(starts, 0);
+  await f.tick(1);
+  await settle();
+  assert.equal(starts, 1);
+  const owned = f.spawn();
+  await f.tick(500);
+  await settle();
+  assert.equal(starts, 1, "waited, not started beside it");
+  owned.emit("exit", 1);
+  succeed = true;
+  await f.tick(500);
+  await settle();
+  assert.equal(starts, 2);
+  assert.equal(f.events.filter(([kind]) => kind === "ready").length, 1);
+  await f.tick(5000);
+  assert.equal(starts, 2, "started: no more tries");
+  home = false;
+  assert.equal(f.supervisor.startLater(start), false, "not an always-on home: nothing waits");
+});
+
 test("only a stable ready uptime resets the recovery budget", async (t) => {
   const f = fixture(t);
   f.supervisor.ready(f.spawn());

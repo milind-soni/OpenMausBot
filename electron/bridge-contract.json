@@ -249,6 +249,7 @@
   "workspaces",
   "workspaces.add",
   "workspaces.color",
+  "workspaces.homeOffers",
   "workspaces.line",
   "workspaces.look",
   "workspaces.makeHome",
