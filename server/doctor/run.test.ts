@@ -29,6 +29,22 @@ describe("runDoctor", () => {
     expect(check.looks).toBe(3);
   });
 
+  it("does not count a fix whose look after it failed as a repair", () => {
+    let looks = 0;
+    const check: DoctorCheck = {
+      id: "breaks", title: "Breaks", looksAt: "nothing",
+      check: () => {
+        looks += 1;
+        if (looks === 3) throw new Error("cannot look");
+        return { status: "problem", fixable: true, summary: "Wrong." };
+      },
+      fix: () => "Done.",
+    };
+    const report = runDoctor({ dataDir: dataFolder(), version: "9.9.9", mode: "start", fix: true, now: () => NOW, checks: [check] });
+    expect(report.checks[0]).toMatchObject({ status: "failed", repaired: false });
+    expect(report.counts.fixed).toBe(0);
+  });
+
   it("hands the first look to the looks before and after a fix", () => {
     const earlier: unknown[] = [];
     const check: DoctorCheck = {

@@ -133,8 +133,8 @@ export function runDoctor(options: RunDoctorOptions): DoctorReport {
           const after = look(check, again);
           // A repair is counted only when the look after it finds the repairable part gone: all fine, or what is left is
           // not repairable (a registry file with no whole copy, beside one that was put back). A fix that changed nothing
-          // (a mode on a filesystem without modes) is not one.
-          const repaired = Boolean(fresh.fixable) && (after.status === "ok" || !after.fixable);
+          // (a mode on a filesystem without modes) is not one, nor one whose look after it failed.
+          const repaired = Boolean(fresh.fixable) && !after.failed && (after.status === "ok" || !after.fixable);
           results[at] = after.status === "ok"
             ? { ...resultOf(check, fresh), status: "fixed", fixable: false, fixed: did, repaired }
             : { ...resultOf(check, after), fixed: did, repaired };

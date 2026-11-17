@@ -13,28 +13,32 @@ import type { DoctorCheck, DoctorContext } from "../types.ts";
 export const REGISTRY_FILES = ["bots.json", "groups.json"] as const;
 
 type Damage = { file: string; path: string; copy: LeftoverTemp | null };
-type Unchecked = { file: string; reason: string };
+type Unchecked = { file: string; reason: string; copy: LeftoverTemp | null };
+
+/** The newest whole save of `file` begun after `path` was last written: an older one would bring back a list from before. */
+function newestCopy(ctx: DoctorContext, file: string, path: string): LeftoverTemp | null {
+  let since = Infinity;
+  try { since = statSync(path).mtimeMs; } catch {}
+  const copies = leftoverTemps(ctx).filter((temp) => temp.of === file && temp.mtimeMs >= since && registryState(temp.path).state === "ok").sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return copies[0] ?? null;
+}
 
 function look(ctx: DoctorContext): { damaged: Damage[]; unchecked: Unchecked[] } {
   const damaged: Damage[] = [], unchecked: Unchecked[] = [];
   for (const file of REGISTRY_FILES) {
     const path = join(ctx.dataDir, file);
     const state = registryState(path);
-    if (state.state === "unreadable") unchecked.push({ file, reason: state.reason });
-    if (state.state !== "damaged") continue;
-    // Only a save begun after the damaged file was written: an older one would bring back a list from before it.
-    let damagedAt = Infinity;
-    try { damagedAt = statSync(path).mtimeMs; } catch {}
-    const copies = leftoverTemps(ctx).filter((temp) => temp.of === file && temp.mtimeMs >= damagedAt && registryState(temp.path).state === "ok").sort((a, b) => b.mtimeMs - a.mtimeMs);
-    damaged.push({ file, path, copy: copies[0] ?? null });
+    if (state.state === "unreadable") unchecked.push({ file, reason: state.reason, copy: newestCopy(ctx, file, path) });
+    if (state.state === "damaged") damaged.push({ file, path, copy: newestCopy(ctx, file, path) });
   }
   return { damaged, unchecked };
 }
 
-/** The temp files the registry would put in place of a damaged file: while one is still chosen (its fix has not run, or
- * failed), the temp-file check leaves it where it is. */
+/** The temp files the registry would put in place of a damaged file, or of one it could not read: while one is still
+ * chosen (its fix has not run, or failed, or the file cannot be checked yet), the temp-file check leaves it where it is. */
 export function registryCopies(ctx: DoctorContext): Set<string> {
-  return new Set(look(ctx).damaged.flatMap((damage) => damage.copy ? [damage.copy.path] : []));
+  const { damaged, unchecked } = look(ctx);
+  return new Set([...damaged, ...unchecked].flatMap((item) => item.copy ? [item.copy.path] : []));
 }
 
 export function registryCheck(options: { rename?: (from: string, to: string) => void } = {}): DoctorCheck {

@@ -93,6 +93,10 @@ describe("registry check", () => {
     expect(report.checks[0]).toMatchObject({ status: "problem", fixable: false });
     expect(report.checks[0]!.fixed).toBeUndefined();
     expect(statSync(join(data, "bots.json")).isDirectory()).toBe(true);
+    // Its whole copy stays beside it too, for when it can be read again.
+    expect(report.checks[1]).toMatchObject({ id: "temp-files", status: "ok" });
+    expect(readFileSync(join(data, `bots.json.4242.${UUID}.tmp`), "utf8")).toBe("[]");
+    expect(report.backup).toBeNull();
   });
 
   it.skipIf(process.platform === "win32" || asRoot)("reports a bots.json this user may not read as not checked (EACCES), not damaged", () => {

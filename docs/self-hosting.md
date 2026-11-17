@@ -1864,9 +1864,10 @@ macOS).
 
 Before changing anything, a repair copies it into
 `<data>/doctor-backups/<time>/`, with a `manifest.json` that lists what changed
-(for a file mode, the old mode). The ten newest runs' copies are kept, and the
-older ones together stay under 2 GB; a run that kept a copy of `bots.json` or
-`groups.json` is kept for at least 30 days either way. They stay on that
+(for a file mode, the old mode). When a new run copies something, earlier runs
+go: any beyond the ten newest, and, oldest first, as many as it takes to bring
+the earlier runs together under 2 GB. A run that kept a copy of `bots.json` or
+`groups.json` stays for at least 30 days either way. The copies stay on that
 computer and are not part of a workspace backup.
 
 As a server starts, the doctor reads `messages.db` through and copies it before
