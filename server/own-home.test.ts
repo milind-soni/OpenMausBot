@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createOwnHome, oneOwner, ownServerOwner, selfHostedPersonName, type OwnServerFacts } from "./own-home.ts";
+import { createOwnHome, createSelfHostedNames, oneOwner, ownServerOwner, selfHostedPersonName, type OwnServerFacts } from "./own-home.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { SessionRecord } from "./sessions.ts";
 
@@ -97,5 +97,19 @@ describe("what a self-hosted server calls someone on their lines", () => {
     expect(selfHostedPersonName(signIn(["client"]), [], profile, " Robert ")).toBe("Robert");
     expect(selfHostedPersonName(signIn(["client"], "grace.hopper@example.test"), [], profile, " "), "an empty name is unset").toBe("Grace Hopper");
     expect(selfHostedPersonName(signIn(["client"]), [], profile, "")).toBe("Chrome on Mac");
+  });
+
+  it("shows a chat-only person their own name, and a device without an address the server's profile until it sets one", () => {
+    const names = new Map<string, string>();
+    const own = createSelfHostedNames({
+      selfHosted: true, keyOf: (session) => session.email ?? session.label, admins: () => [], serverProfile: () => profile,
+      people: () => ({ profile: (person) => ({ name: names.get(person) }), saveProfile: (person, patch) => { names.set(person, patch.name); return patch; } }),
+    });
+    const session = (scopes: Array<"admin" | "client">, email?: string) => signIn(scopes, email) as SessionRecord;
+    expect(own.profileFor(session(["client"], "grace@example.test"))).toEqual({ name: "", email: "grace@example.test" });
+    expect(own.profileFor(session(["client"])), "a paired device without an address").toBeNull();
+    expect(own.profileFor(session(["client"], "ada@example.test")), "the profile's own address").toBeNull();
+    names.set("Chrome on Mac", "Robert");
+    expect(own.profileFor(session(["client"]))).toEqual({ name: "Robert", email: "" });
   });
 });

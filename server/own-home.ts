@@ -58,11 +58,12 @@ export function createSelfHostedNames({ selfHosted, people, keyOf, admins, serve
   return {
     selfHosted,
     lineName: (session: SessionRecord) => selfHostedPersonName(session, admins(), serverProfile(), own(session)),
-    /** A session that may only chat is never shown the owner's profile as its own; null keeps the server's. */
+    /** A signed-in person who may only chat is never shown the owner's profile as their own; a device without an address keeps
+     * the server's until it sets a name. null keeps the server's. */
     profileFor(session: SessionRecord | null | undefined): { name: string; email: string } | null {
       if (!session || !selfHosted) return null;
       const name = own(session);
-      return name || !serverProfileIsTheirs(session, admins(), serverProfile()) ? mine(session, name) : null;
+      return name || (session.email?.trim() && !serverProfileIsTheirs(session, admins(), serverProfile())) ? mine(session, name) : null;
     },
     route: selfHosted ? {
       read: (session: SessionRecord) => mine(session, own(session)),
