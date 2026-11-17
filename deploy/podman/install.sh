@@ -275,7 +275,8 @@ Volume=$DATA_DIR:/data$label
 EnvironmentFile=$INSTALL_DIR/server.env
 # Chrome's shared memory, as the Docker install gives it. The image brings its own init (tini).
 ShmSize=512m
-HealthCmd=curl -sf http://127.0.0.1:$SERVER_PORT/api/health | grep -q openmausbot
+# curl's own limit: Podman 4.9 does not end a check that hangs on a server that accepts and never answers.
+HealthCmd=curl -sf --max-time 4 http://127.0.0.1:$SERVER_PORT/api/health | grep -q openmausbot
 HealthInterval=30s
 HealthTimeout=5s
 HealthRetries=3

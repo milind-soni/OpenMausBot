@@ -221,16 +221,26 @@ it through Podman: `podman unshare rm -rf ~/.local/share/openmausbot`.
 
 **What rootless does not do.**
 
-- The bots' sandbox (bubblewrap) is not part of the published server image,
-  so bots run in the server's container, beside its data. Use this install
-  on a machine only you sign in to, as with the Docker image.
-- Chrome runs without its own sandbox inside the container, as in every
-  container install. The container is the boundary.
-- Ports below 1024 need root or a sysctl change; put Caddy, a tunnel or
-  Tailscale in front for HTTPS (`--public-url`).
+- The bots' sandbox (bubblewrap) is off. The published server image does
+  not include bubblewrap, so bots run in the server's container, beside its
+  data, as with the Docker image. Use this install on a machine only you
+  sign in to. Bubblewrap itself can run in a rootless container, with the
+  repository's seccomp profile (`connector/profiles/seccomp-omb-home.json`)
+  and `/proc` left uncovered (`--security-opt unmask=/proc/*`). There the
+  box's self-check passes 31 of 32 checks; the kernel keyring stays
+  reachable. This install sets neither.
+- Chrome runs with `--no-sandbox` inside the container, as in every
+  container install, and the container is the boundary. It needs no other
+  flag: the built-in browser starts and loads pages.
+- No HTTPS of its own: put Caddy, a tunnel or Tailscale in front and pass
+  `--public-url`.
 - Per-bot Linux desktops (**Local VM**) need the Podman socket, which this
   install does not mount. [deploy/podman](../deploy/podman/README.md) runs
   the full stack with them.
+
+Tested on Ubuntu 24.04 (x86-64, Podman 4.9.3), with
+`kernel.apparmor_restrict_unprivileged_userns=1`. SELinux hosts (Fedora,
+RHEL), Podman 5 and ARM64 have not been tried yet.
 
 ## Troubleshooting
 
