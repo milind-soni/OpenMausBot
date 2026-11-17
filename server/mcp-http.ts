@@ -518,12 +518,8 @@ export function plainHttpProxyFetch(env: Record<string, string | undefined>, fal
   const authorization = proxy.username
     ? `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString("base64")}`
     : undefined;
-  const proxied = (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
-    const target = new URL(input instanceof Request ? input.url : String(input));
+  const throughProxy = (target: URL, init: RequestInit): Promise<Response> => {
     const body = init.body;
-    if (input instanceof Request || target.protocol !== "http:" || bypassesProxy(target, noProxy) || (body != null && typeof body !== "string")) {
-      return fallback(input, init);
-    }
     const headers: Record<string, string> = {};
     new Headers(init.headers).forEach((value, name) => { headers[name] = value; });
     headers.host = target.host;
@@ -535,7 +531,7 @@ export function plainHttpProxyFetch(env: Record<string, string | undefined>, fal
         host: proxy.hostname.replace(/^\[|\]$/g, ""),
         port: proxy.port || (proxy.protocol === "https:" ? 443 : 80),
         method: init.method ?? "GET",
-        path: target.href,
+        path: `${target.origin}${target.pathname}${target.search}`,
         headers,
         ...(init.signal ? { signal: init.signal } : {}),
       });
@@ -557,6 +553,45 @@ export function plainHttpProxyFetch(env: Record<string, string | undefined>, fal
       request.on("error", reject);
       request.end(body ?? undefined);
     });
+  };
+  const proxied = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
+    let target = new URL(input instanceof Request ? input.url : String(input));
+    if (input instanceof Request || target.protocol !== "http:" || bypassesProxy(target, noProxy) || (init.body != null && typeof init.body !== "string")) {
+      return fallback(input, init);
+    }
+    let next = init;
+    for (let redirects = 0; ; redirects++) {
+      const response = target.protocol === "http:" && !bypassesProxy(target, noProxy)
+        ? await throughProxy(target, next)
+        : await fallback(target, { ...next, redirect: "manual" });
+      if (![301, 302, 303, 307, 308].includes(response.status) || init.redirect === "manual") return response;
+      if (init.redirect === "error") {
+        drain(response);
+        throw new TypeError("HTTP proxy redirect refused");
+      }
+      const location = response.headers.get("location");
+      if (location === null) return response;
+      drain(response);
+      if (redirects >= 20) throw new TypeError("HTTP proxy redirect limit exceeded");
+      let redirected: URL;
+      try { redirected = new URL(location, target); }
+      catch { throw new TypeError("Invalid HTTP proxy redirect URL"); }
+      if (!["http:", "https:"].includes(redirected.protocol) || redirected.username || redirected.password) {
+        throw new TypeError("Invalid HTTP proxy redirect target");
+      }
+      const headers = new Headers(next.headers);
+      const method = (next.method ?? "GET").toUpperCase();
+      const dropBody = ((response.status === 301 || response.status === 302) && method === "POST")
+        || (response.status === 303 && method !== "GET" && method !== "HEAD");
+      if (dropBody) {
+        for (const name of ["content-encoding", "content-language", "content-location", "content-type", "content-length"]) headers.delete(name);
+      }
+      if (redirected.origin !== target.origin) {
+        for (const name of ["authorization", "proxy-authorization", "cookie", "host"]) headers.delete(name);
+      }
+      next = { ...next, headers, ...(dropBody ? { method: "GET", body: null } : {}) };
+      target = redirected;
+    }
   };
   return proxied as typeof fetch;
 }
