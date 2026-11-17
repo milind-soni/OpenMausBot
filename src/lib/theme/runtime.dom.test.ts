@@ -53,3 +53,26 @@ it("still wears the theme's own skin when it has no block for the other mode", a
   expect(await wear({ name: "Plain", accent: "#d97757" }, "midnight")).toBe("midnight");
   expect(await wear({ name: "Spooky", skin: "halloween", ...bothModes }, "daylight")).toBe("halloween");
 });
+
+it("follows the system's light or dark change while a theme with both blocks is worn", async () => {
+  let dark = true;
+  const onChange = new Set<() => void>();
+  vi.stubGlobal("matchMedia", () => ({
+    get matches() { return dark; },
+    addEventListener: (_type: string, listener: () => void) => { onChange.add(listener); },
+    removeEventListener: (_type: string, listener: () => void) => { onChange.delete(listener); },
+  }));
+  values.set("omb-theme", JSON.stringify({ id: "repro", theme: { name: "Repro", skin: "system", ...bothModes } }));
+  const runtime = await import("./runtime");
+  const skins = await import("../skins");
+  runtime.startTheme();
+  skins.applySkinChoice("system");
+  expect(document.documentElement.dataset.skin).toBe("midnight");
+  expect(appColor()).toBe("#121212");
+  for (const [nowDark, skin, canvas] of [[false, "daylight", "#ffffff"], [true, "midnight", "#121212"]] as const) {
+    dark = nowDark;
+    for (const listener of onChange) listener();
+    expect(document.documentElement.dataset.skin).toBe(skin);
+    expect(appColor()).toBe(canvas);
+  }
+});
