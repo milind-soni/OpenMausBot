@@ -31,13 +31,19 @@ export function leftoverTemps(ctx: DoctorContext, dir: string = ctx.dataDir): Le
   return found;
 }
 
-/** "missing", "ok" when the file parses as a JSON list, else "unreadable" (empty, cut short, not a list, not readable). */
-export function registryState(path: string): "missing" | "ok" | "unreadable" {
+/** "missing"; "ok" when the file parses as a JSON list; "damaged" when it was read and is not one (empty, cut short, not a
+ * list); "unreadable" when it could not be read at all (permissions, a folder in its place): that says nothing about the
+ * file, and is never repaired or reported as damage. */
+export type RegistryState = { state: "missing" | "ok" | "damaged" } | { state: "unreadable"; reason: string };
+
+export function registryState(path: string): RegistryState {
   let text: string;
   try { text = readFileSync(path, "utf8"); } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable";
+    const code = (error as NodeJS.ErrnoException).code;
+    // The code only: an fs message carries the full path.
+    return code === "ENOENT" ? { state: "missing" } : { state: "unreadable", reason: code ?? "read error" };
   }
-  try { return Array.isArray(JSON.parse(text)) ? "ok" : "unreadable"; } catch { return "unreadable"; }
+  try { return { state: Array.isArray(JSON.parse(text)) ? "ok" : "damaged" }; } catch { return { state: "damaged" }; }
 }
 
 export function pidAlive(pid: number): boolean {

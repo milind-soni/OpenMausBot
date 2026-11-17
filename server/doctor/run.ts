@@ -1,7 +1,10 @@
 // Runs the checks, and with `fix` the repairs that cannot lose data. Every check is looked at first; repairs run only
 // when nothing blocks (a data format this version cannot read), and only in a process that holds the data folder's lease:
 // the server as it starts, or `openmausbot doctor --data --fix`, which takes the lease for its run and changes nothing
-// while a server uses the folder. Each repair looks again right before it runs, and once more after.
+// while a server uses the folder, and only as the folder's owner. Each repair looks again right before it runs, and once
+// more after; those looks skip what is slow to read (SQLite's check of messages.db) and take it from the first look.
+import { statSync } from "node:fs";
+
 import { acquireDataDirLease, type DataDirLeaseHolder } from "../data-dir-lease.ts";
 import { DoctorBackup } from "./backup.ts";
 import { dataFormatCheck } from "./checks/data-format.ts";
@@ -32,6 +35,8 @@ export interface RunDoctorOptions {
   startedAt?: number;
   /** "command" mode only: takes the data folder's lease for the repairs. */
   acquireLease?: (dataDir: string) => { release(): unknown };
+  /** "command" mode only: this process's effective user id, null where there is none (Windows). */
+  euid?: () => number | null;
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 300);
@@ -56,6 +61,18 @@ function resultOf(check: DoctorCheck, finding: Finding & { failed?: boolean }): 
   };
 }
 
+/** The user ids of this process and of the data folder's owner, when they differ (POSIX only). */
+function otherOwner(dataDir: string, euid: () => number | null): { euid: number; owner: number } | null {
+  if (process.platform === "win32") return null;
+  const id = euid();
+  if (id === null) return null;
+  let owner: number;
+  try { owner = statSync(dataDir).uid; } catch { return null; }
+  return owner === id ? null : { euid: id, owner };
+}
+
+const defaultEuid = () => (typeof process.geteuid === "function" ? process.geteuid() : null);
+
 const wantsFix = (check: DoctorCheck, finding: Finding) => Boolean(check.fix && finding.status === "problem" && (finding.fixable || finding.keepCopy));
 
 export function runDoctor(options: RunDoctorOptions): DoctorReport {
@@ -78,7 +95,11 @@ export function runDoctor(options: RunDoctorOptions): DoctorReport {
     if (blocked) fix.why = `${blocked.title}: ${blocked.summary} Nothing was changed.`;
     else if (noFolder) fix.why = `${results[foldersAt]!.summary} Nothing was changed.`;
     else if (options.mode === "command") {
-      if (holder?.state === "alive") fix.why = `A server is using the data folder (process ${holder.pid}). Stop it, then run this again. Nothing was changed.`;
+      // What a fix moves keeps its owner, and what it copies or makes would be this user's: a server running as the
+      // folder's owner could then not read or tidy it.
+      const other = otherOwner(options.dataDir, options.euid ?? defaultEuid);
+      if (other) fix.why = `The data folder belongs to user ${other.owner}, and this runs as user ${other.euid}. Run it as the folder's owner. Nothing was changed.`;
+      else if (holder?.state === "alive") fix.why = `A server is using the data folder (process ${holder.pid}). Stop it, then run this again. Nothing was changed.`;
       else if (holder?.state === "other-machine" || holder?.state === "invalid") fix.why = `${results[leaseAt]!.summary} Nothing was changed.`;
       else {
         try {
@@ -96,7 +117,8 @@ export function runDoctor(options: RunDoctorOptions): DoctorReport {
       try {
         checks.forEach((check, at) => {
           if (check.id === "lease" || !wantsFix(check, findings[at]!)) return;
-          const fresh = look(check, ctx);
+          const again = { ...ctx, earlier: findings[at]! };
+          const fresh = look(check, again);
           if (!wantsFix(check, fresh)) {
             results[at] = resultOf(check, fresh);
             return;
@@ -108,8 +130,11 @@ export function runDoctor(options: RunDoctorOptions): DoctorReport {
             results[at] = { ...resultOf(check, fresh), status: "failed", summary: `${fresh.summary} The fix failed: ${errorText(error)}` };
             return;
           }
-          const after = look(check, ctx);
-          const repaired = Boolean(fresh.fixable);
+          const after = look(check, again);
+          // A repair is counted only when the look after it finds the repairable part gone: all fine, or what is left is
+          // not repairable (a registry file with no whole copy, beside one that was put back). A fix that changed nothing
+          // (a mode on a filesystem without modes) is not one.
+          const repaired = Boolean(fresh.fixable) && (after.status === "ok" || !after.fixable);
           results[at] = after.status === "ok"
             ? { ...resultOf(check, fresh), status: "fixed", fixable: false, fixed: did, repaired }
             : { ...resultOf(check, after), fixed: did, repaired };

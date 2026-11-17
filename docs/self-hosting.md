@@ -1846,25 +1846,29 @@ docker compose exec omb openmausbot doctor --data   # Docker
 ```
 
 `--data-dir DIR` points it at another folder. It exits 0 when everything is
-fine (after `--fix`, fine now) and 8 when a problem is left.
+fine (after `--fix`, fine now) and 8 when a problem is left. `--fix` changes
+nothing when it runs as a user other than the data folder's owner (Linux and
+macOS).
 
 | Check | Looks at | Repaired by `--fix` |
 |---|---|---|
 | Data format | `data-format.json` | Never. Data from a newer version stops every repair: install that version, or roll back. |
 | Data folder lease | `openmausbot-server.lease` | A lease a dead process on this machine left is retired. A live server means nothing is changed. |
 | Folders | the data folder, `events`, `native` | Missing folders are made. |
-| Bots and rooms | `bots.json`, `groups.json` | An unreadable file is put back from the whole temp file of a save that was cut short. With no such copy, a copy of the damaged file is kept and you are told how to restore it. |
+| Bots and rooms | `bots.json`, `groups.json` | A damaged file (not a whole list) is put back from the whole temp file of a save that was cut short. With no such copy, a copy of the damaged file is kept and you are told how to restore it. A file this user cannot read at all is reported as not checked and left alone. |
 | Unfinished saves | `<file>.<pid>.<id>.tmp` at the top of the data folder | Moved into the backup. |
 | Engine-run records | `engine-runs/` | Records with neither a server nor a process to stop are moved into the backup. |
-| Messages database | `messages.db` | SQLite's `quick_check`. A write-ahead log over 64 MB is folded back into the database. A damaged database is reported, never rewritten. |
+| Messages database | `messages.db` | SQLite's `quick_check`. A write-ahead log over 64 MB is folded back into the database. A damaged database is reported, never rewritten. One that cannot be opened (permissions, another program's lock) is reported as not checked, not as damaged. |
 | Private files | `config.json`, `sessions.json`, `bots.json`, `messages.db`, … | Made owner-only (0600). Not on Windows. |
 | Settings file | `config.json` | Never: it tells you `openmausbot config restore latest` when dated copies exist. |
 
 Before changing anything, a repair copies it into
 `<data>/doctor-backups/<time>/`, with a `manifest.json` that lists what changed
-(for a file mode, the old mode). The ten newest runs' copies are kept. They
-stay on that computer and are not part of a workspace backup.
+(for a file mode, the old mode). The ten newest runs' copies are kept, and the
+older ones together stay under 2 GB; a run that kept a copy of `bots.json` or
+`groups.json` is kept for at least 30 days either way. They stay on that
+computer and are not part of a workspace backup.
 
 As a server starts, the doctor reads `messages.db` through and copies it before
-a checkpoint only up to 256 MB, so an update never waits on a large database;
+a checkpoint only while it and its write-ahead log come to 256 MB or less, so an update never waits on a large database;
 `openmausbot doctor --data` does both at any size.

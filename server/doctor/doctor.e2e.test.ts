@@ -125,7 +125,9 @@ it("openmausbot doctor --data finds each problem, --fix repairs them all, and th
   expect(fixed.code).toBe(0);
   for (const id of FIXED) expect(fixed.report.checks.find((check) => check.id === id)!.status, id).toBe("fixed");
   expect(existsSync(join(fixed.report.backup!, "bots.json"))).toBe(true);
-  expect(statSync(join(home, "messages.db-wal")).size).toBe(0);
+  // Folded back: emptied, or removed as the last connection closed.
+  const wal = join(home, "messages.db-wal");
+  expect(existsSync(wal) ? statSync(wal).size : 0).toBe(0);
 
   await serverHasItsBots(home, bots);
 }, 180_000);
@@ -141,6 +143,6 @@ it("a new version's first start repairs the same damage itself and reports it in
   // The server retires a dead lease itself as it takes the lease, before the doctor runs; ensureDirs() makes the folders.
   expect(health.doctor).toMatchObject({ thisStart: true, problems: [] });
   for (const id of FIXED.filter((id) => id !== "lease" && id !== "folders")) expect(health.doctor.fixed).toContain(id);
-  expect(server.output()).toMatch(/\[doctor\] registry: bots\.json cannot be read.* Fixed: put back bots\.json/);
+  expect(server.output()).toMatch(/\[doctor\] registry: bots\.json is damaged.* Fixed: put back bots\.json/);
   expect(existsSync(join(home, `bots.json`))).toBe(true);
 }, 180_000);

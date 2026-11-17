@@ -14,6 +14,9 @@ export interface DoctorContext {
   startedAt: number;
   /** Whether a process with this pid runs on this machine (EPERM counts as running). */
   pidAlive(pid: number): boolean;
+  /** Set in the looks the runner takes again, right before and after a fix: what the first look found. A check whose
+   * look reads a lot (messages.db) does that read only in the first look, and takes its verdict from here. */
+  earlier?: Finding;
 }
 
 export type Finding = {
