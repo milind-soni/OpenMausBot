@@ -36,6 +36,18 @@ describe("late tool results", () => {
     expect(late.turnFor("Bearer other", "t1", "b1", "tool-z")).toBe("turn-2");
   });
 
+  it("remembers a revoked generation's hooks bearer for a turn bound after its cleanup, a bounded few, until the conversation's bearers go", () => {
+    const late = createLateToolResults(() => 0);
+    const hooks = { threadId: "t1", botId: "b1", token: "secret" };
+    late.generationRevoked("gen-1", hooks);
+    expect(late.revokedHooks("gen-1")).toEqual(hooks);
+    for (let i = 0; i < 64; i++) late.generationRevoked(`gen-${i + 2}`, { ...hooks, threadId: "t2" });
+    expect(late.revokedHooks("gen-1")).toBeUndefined();
+    expect(late.revokedHooks("gen-65")).toBeDefined();
+    late.forgetThread("t2");
+    expect(late.revokedHooks("gen-65")).toBeUndefined();
+  });
+
   it("ends with its window, when the conversation's bearers are revoked, or when nothing was left to save", () => {
     let now = 0;
     const late = createLateToolResults(() => now);

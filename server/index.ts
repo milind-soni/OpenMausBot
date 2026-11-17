@@ -1724,7 +1724,9 @@ function revokeInternalCapabilityGeneration(threadId: string, generation: string
   endForeignTurns(threadId, generation);
   if (guestDrivenTurns.get(threadId) === generation) guestDrivenTurns.delete(threadId);
   for (const [token, capability] of internalCapabilities) {
-    if (capability.threadId === threadId && capability.generation === generation) internalCapabilities.delete(token);
+    if (capability.threadId !== threadId || capability.generation !== generation) continue;
+    if (capability.kind === "hooks") lateToolResults.generationRevoked(generation, { threadId, botId: capability.botId, token });
+    internalCapabilities.delete(token);
   }
   if (activeInternalGenerationByThread.get(threadId) === generation) activeInternalGenerationByThread.delete(threadId);
   internalGenerationByProviderTurn.deleteGeneration(threadId, generation);
@@ -1773,8 +1775,9 @@ function revokeInternalCapabilityForProviderEvent(event: RuntimeEvent): void {
 }
 
 function rememberLateToolResults(threadId: string, generation: string, turnId: string): void {
-  const hooks = [...internalCapabilities].find(([, capability]) => capability.kind === "hooks" && capability.threadId === threadId && capability.generation === generation);
-  if (hooks) lateToolResults.turnEnded({ threadId, botId: hooks[1].botId, turnId, token: hooks[0], toolUseIds: new Set(store.activePath(threadId)
+  const live = [...internalCapabilities].find(([, capability]) => capability.kind === "hooks" && capability.threadId === threadId && capability.generation === generation);
+  const hooks = live ? { botId: live[1].botId, token: live[0] } : lateToolResults.revokedHooks(generation);
+  if (hooks) lateToolResults.turnEnded({ threadId, botId: hooks.botId, turnId, token: hooks.token, toolUseIds: new Set(store.activePath(threadId)
     .flatMap((m) => m.kind === "activity" && m.turnId === turnId && m.tool?.itemId && m.tool.fullResult === undefined ? [m.tool.itemId] : [])) });
 }
 

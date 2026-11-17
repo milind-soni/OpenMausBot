@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 
 /** How long after its turn ends a background `PostToolUse` may still save that turn's full tool output. */
 export const LATE_TOOL_RESULT_MS = 60_000;
+const REVOKED_KEPT = 64;
 
 export interface EndedHookTurn {
   threadId: string;
@@ -17,6 +18,7 @@ export interface EndedHookTurn {
  * tool calls, each once, until LATE_TOOL_RESULT_MS after the turn ended; revoking the thread's bearers ends it at once. */
 export function createLateToolResults(now: () => number = Date.now) {
   const ended: Array<Omit<EndedHookTurn, "toolUseIds"> & { toolUseIds: Set<string>; until: number }> = [];
+  const revoked = new Map<string, { threadId: string; botId: string; token: string }>();
   const live = () => {
     const at = now();
     for (let i = ended.length - 1; i >= 0; i--) if (ended[i]!.until <= at || ended[i]!.toolUseIds.size === 0) ended.splice(i, 1);
@@ -28,6 +30,14 @@ export function createLateToolResults(now: () => number = Date.now) {
     return got.length === expected.length && timingSafeEqual(got, expected);
   };
   return {
+    /** A turn can complete before its generation is bound to it, after cleanup revoked the generation's hooks bearer. */
+    generationRevoked(generation: string, hooks: { threadId: string; botId: string; token: string }): void {
+      revoked.set(generation, hooks);
+      for (const oldest of revoked.keys()) if (revoked.size > REVOKED_KEPT) revoked.delete(oldest); else break;
+    },
+    revokedHooks(generation: string): { threadId: string; botId: string; token: string } | undefined {
+      return revoked.get(generation);
+    },
     turnEnded(turn: EndedHookTurn): void {
       if (turn.toolUseIds.size) ended.push({ ...turn, toolUseIds: new Set(turn.toolUseIds), until: now() + LATE_TOOL_RESULT_MS });
     },
@@ -45,9 +55,11 @@ export function createLateToolResults(now: () => number = Date.now) {
     },
     forgetThread(threadId: string): void {
       for (let i = ended.length - 1; i >= 0; i--) if (ended[i]!.threadId === threadId) ended.splice(i, 1);
+      for (const [generation, hooks] of revoked) if (hooks.threadId === threadId) revoked.delete(generation);
     },
     clear(): void {
       ended.length = 0;
+      revoked.clear();
     },
   };
 }
