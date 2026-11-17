@@ -33,10 +33,10 @@ export type PersonConnectionState = "connected" | "needs-sign-in" | "not-connect
 
 /** The team's Vault, by name only: the secrets an Admin saved or a shared chat's card kept (never a member's own), and the
  * password managers linked to it. `usedBy`: the team bots that may use it (each member's own MausBot is left out).
- * `label`: the manager's vaults the token reads, "" while not connected. `lastError`: a fixed class, never the manager's words. */
+ * `label`: 1Password's vaults the token reads, or Bitwarden's server; "" while not connected. `lastError`: a fixed class, never the manager's words. */
 export interface TeamVaultSummary {
   secrets: { name: string; addedAt: string; usedBy?: string[] }[];
-  providers: { kind: "1password"; connected: boolean; label: string; lastError?: VaultProviderFailure }[];
+  providers: { kind: "1password" | "bitwarden"; connected: boolean; label: string; lastError?: VaultProviderFailure }[];
 }
 
 /** The wire shape of `GET /api/cloud/team/admin` (signed by the Admin). */

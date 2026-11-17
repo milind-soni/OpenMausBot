@@ -11064,5 +11064,19 @@
   "templateImport.remove": "Remove {name}",
   "sidebar.addDepartment": "Add department",
   "sidebar.import": "Import…",
-  "team.shareDepartment": "Share"
+  "team.shareDepartment": "Share",
+  "settings.logins.source.bitwarden": "From Bitwarden",
+  "settings.vault.bitwarden.title": "Bitwarden",
+  "settings.vault.bitwarden.line": "Let bots use logins and secrets from a Bitwarden account.",
+  "settings.vault.bitwarden.connected": "Connected as {account} · {count} logins and secrets",
+  "settings.vault.bitwarden.connect": "Connect Bitwarden",
+  "settings.vault.bitwarden.disconnect": "Disconnect Bitwarden",
+  "settings.vault.bitwarden.team": "For the whole team: its bots use it in shared and private chats. Use a dedicated Bitwarden account that can only see one collection.",
+  "settings.vault.bitwarden.guide": "Use a dedicated Bitwarden account that can only see one collection. In that account, open Account settings → Security → Keys → View API key, then paste its client_id and client_secret here with its master password. Bitwarden's own command line tool is downloaded from Bitwarden the first time.",
+  "settings.vault.bitwarden.server": "Server",
+  "settings.vault.bitwarden.selfHosted": "Self-hosted or Vaultwarden",
+  "settings.vault.bitwarden.address": "Server address",
+  "settings.vault.bitwarden.password": "Master password",
+  "settings.vault.bitwarden.note": "Kept encrypted on the computer this runs on and never shown again. Bitwarden's logins appear in the list above, filled the same way, and are changed in Bitwarden.",
+  "settings.vault.bitwarden.error": "Bitwarden could not be connected. Try again."
 }
