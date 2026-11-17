@@ -54,6 +54,13 @@ function unused(dir: string, name: string, taken: Set<string>): string {
   return candidate;
 }
 
+function unusedFolder(parent: string, name: string, taken: Set<string>): string {
+  let folder = join(parent, name);
+  for (let n = 2; taken.has(folder) || existsSync(folder); n++) folder = join(parent, `${name} (${n})`);
+  taken.add(folder);
+  return folder;
+}
+
 export function exportFolder(dir: string, force: boolean): string {
   const out = resolve(dir);
   if (!existsSync(out) || force) return out;
@@ -185,7 +192,7 @@ export async function exportJob(client: HeadlessClient, options: ExportOptions, 
       return keep(response, join(out, "files", folder), fileName(response.headers.get("content-disposition"), link), about, files);
     }
     const listing = await response.json() as Rec;
-    const dir = join(out, "files", folder, safeName(String(listing.name ?? "folder")));
+    const dir = unusedFolder(join(out, "files", folder), safeName(String(listing.name ?? "folder")), taken);
     for (const entry of Array.isArray(listing.entries) ? listing.entries as Rec[] : []) {
       const name = String(entry.name);
       const one = { ...about, entry: name };
