@@ -32,4 +32,23 @@ describe("quoted memory topic aliases", () => {
     expect(parseTopicHeader(merged).aliases).toEqual(["San Francisco, CA", "[draft]", 'The "Launch" project']);
     expect(merged).toContain("- Existing note.\n- New note.\n");
   });
+
+  it("preserves a legacy colon-containing alias through a merge", () => {
+    const existing = '---\ntitle: Food\naliases: [support: tier 2, lunch]\n---\n\n- Existing note.\n';
+    expect(parseTopicHeader(existing).aliases).toEqual(["support: tier 2", "lunch"]);
+    const merged = mergeTopicText(existing, { title: "Food", aliases: ["dinner"], lines: ["- New note."] });
+    expect(parseTopicHeader(merged).aliases).toEqual(["support: tier 2", "lunch", "dinner"]);
+    expect(merged).toContain("- Existing note.\n- New note.\n");
+  });
+
+  it("decodes quote-leading legacy comma lists without combining their aliases", () => {
+    expect(parseTopicHeader('---\naliases: "food", lunch\n---\n').aliases).toEqual(["food", "lunch"]);
+    expect(parseTopicHeader('---\naliases: "San Francisco, CA", lunch\n---\n').aliases).toEqual(["San Francisco, CA", "lunch"]);
+  });
+
+  it("preserves mixed legacy mappings and correctly quoted comma aliases", () => {
+    const existing = '---\naliases: ["San Francisco, CA", support: tier 2, lunch]\n---\n';
+    const merged = mergeTopicText(existing, { title: "Food", aliases: ["dinner"], lines: ["- New note."] });
+    expect(parseTopicHeader(merged).aliases).toEqual(["San Francisco, CA", "support: tier 2", "lunch", "dinner"]);
+  });
 });

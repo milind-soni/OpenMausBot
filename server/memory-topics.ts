@@ -1,6 +1,6 @@
 // A memory/<topic>.md may begin with YAML frontmatter: `title`, `description`, `aliases`.
 import { closeSync, openSync, readSync } from "node:fs";
-import { parse as parseYaml } from "yaml";
+import { isNode, isScalar, isSeq, parse as parseYaml, parseDocument } from "yaml";
 
 import { hasCjk } from "./cjk-search.ts";
 
@@ -45,17 +45,23 @@ export function parseTopicHeader(text: string): TopicHeader {
       continue;
     }
     const items: string[] = [];
-    if (value.trim().startsWith("[")) {
+    if (value.trim()) {
+      const raw = value.trim();
+      // A legacy comma list may start with a quoted item. Parse the whole
+      // list so commas inside that item retain their meaning.
+      const flow = raw.startsWith("[") ? raw : `[${raw}]`;
       try {
-        const parsed: unknown = parseYaml(value.trim(), { schema: "failsafe" });
-        if (Array.isArray(parsed)) items.push(...parsed.filter((item): item is string => typeof item === "string"));
+        const parsed = parseDocument(flow, { schema: "failsafe" });
+        if (parsed.errors.length || !isSeq(parsed.contents)) throw new Error("not an alias list");
+        for (const item of parsed.contents.items) {
+          if (isScalar(item) && typeof item.value === "string") items.push(item.value);
+          // Older writers emitted unquoted aliases such as support: tier 2.
+          // Preserve their exact spelling even when YAML sees a mapping.
+          else if (isNode(item) && item.range) items.push(flow.slice(item.range[0], item.range[1]));
+        }
       } catch {
-        items.push(...value.trim().replace(/^\[|\]$/g, "").split(",").map(unquote));
+        items.push(...(raw.startsWith("[") ? raw.replace(/^\[|\]$/g, "") : raw).split(",").map(unquote));
       }
-    } else if (/^["']/.test(value.trim())) {
-      items.push(unquote(value));
-    } else if (value.trim()) {
-      items.push(...value.split(",").map(unquote));
     } else {
       while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) items.push(unquote(lines[(i += 1)].replace(/^\s*-\s+/, "")));
     }

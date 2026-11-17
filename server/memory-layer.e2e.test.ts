@@ -7,6 +7,7 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import type { WireBot } from "../shared/wire.ts";
 import { CAPTURE_MARKER } from "./memory-capture.ts";
 import { TIDY_MARKER } from "./memory-tidy.ts";
+import { parseTopicHeader } from "./memory-topics.ts";
 
 it("recalls, captures, suggests, forgets and tidies a bot's memory", async () => {
   const scratch = mkdtempSync(join(tmpdir(), "omb-memory-layer-"));
@@ -120,7 +121,7 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     expect(captured).toContain("The account balance is -10");
     const food = (await memoryFile(bot.id, "memory/food.md")).text;
     expect(food).toContain("title: food");
-    expect(food).toContain("aliases: [restaurants, cafes]");
+    expect(parseTopicHeader(food).aliases).toEqual(["restaurants", "cafes"]);
     expect(food).toContain("The person loves Irani cafes");
     expect(captured).not.toContain("Irani cafes");
     const journal = await api<{ entries: Array<{ actor: string; via: string }> }>(`/api/bots/${bot.id}/memory/journal`);
