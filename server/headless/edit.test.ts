@@ -45,6 +45,24 @@ describe("edit conversation selection", () => {
     }, expect.any(Function), undefined, undefined);
   });
 
+  it("keeps a positional bot and message", async () => {
+    const h = harness();
+    expect((await h.run(["Lead", "Corrected request"])).code).toBe(0);
+    expect(h.callTool).toHaveBeenCalledWith("edit_bot_message", {
+      bot_id: "lead", message_id: "m1", text: "Corrected request",
+    }, expect.any(Function), undefined, undefined);
+  });
+
+  it.each([["--thread", "earlier"], ["--bot", "lead"]])(
+    "refuses a positional bot and message alongside %j before editing", async (...target) => {
+      const h = harness();
+      const result = await h.run(["Lead", "Corrected request", ...target]);
+      expect(result.code).toBe(2);
+      expect(result.result).toMatchObject({ ok: false, error: expect.stringContaining("one message argument") });
+      expect(h.callTool).not.toHaveBeenCalled();
+    },
+  );
+
   it("previews the selected thread without editing it", async () => {
     const h = harness();
     const preview = await h.run(["--thread", "earlier", "--text", "Corrected request", "--dry-run"]);

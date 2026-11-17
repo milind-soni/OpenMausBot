@@ -216,6 +216,8 @@ export async function setModel(ctx: VerbContext): Promise<VerbOutcome> {
 export async function edit(ctx: VerbContext): Promise<VerbOutcome> {
   const named = Boolean(flag(ctx.flags, "bot") ?? flag(ctx.flags, "channel") ?? flag(ctx.flags, "thread"));
   const [first, second] = ctx.positionals;
+  if (named && second !== undefined) throw usageError("edit with a named target takes at most one message argument",
+    "openmausbot edit --thread ID --message ID TEXT, or edit BOT --message ID TEXT");
   if (!named && !first) throw usageError("a bot is required", "openmausbot edit BOT --message ID TEXT, or --bot ID or --thread ID");
   const messageId = requiredFlag(ctx.flags, "message");
   const text = await readMessage(ctx, named ? first : second);
