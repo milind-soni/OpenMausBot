@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { acpRequestSteering, acpTurnSteering, advertisedCommands, type AcpCommandSteer as AcpSteerSupport } from "./steer.ts";
+import { acpPromptSteering, acpRequestSteering, acpTurnSteering, advertisedCommands, type AcpCommandSteer as AcpSteerSupport } from "./steer.ts";
 
 const support: AcpSteerSupport = {
   command: "steer",
@@ -135,5 +135,27 @@ describe("acpRequestSteering", () => {
     let sent = false;
     expect(await acpRequestSteering(() => false, async () => { sent = true; return {}; }).steer("x")).toBe("refused");
     expect(sent).toBe(false);
+  });
+});
+
+describe("acpPromptSteering", () => {
+  it("reports a steer as steered once sent, and keeps its reply for the end of the run", async () => {
+    let answer: (reply: unknown) => void = () => {};
+    const steering = acpPromptSteering(() => true, () => new Promise((resolve) => { answer = resolve; }));
+    expect(await steering.steer(" more ")).toBe("steered");
+    const ended = steering.promptAnswered();
+    expect(ended).not.toBeNull();
+    answer({ stopReason: "end_turn" });
+    await ended;
+    expect(steering.replies).toEqual([{ stopReason: "end_turn" }]);
+  });
+
+  it("refuses after the turn's own prompt is answered, and keeps a failed steer's error", async () => {
+    const failing = acpPromptSteering(() => true, () => Promise.reject(new Error("boom")));
+    expect(await failing.steer("x")).toBe("steered");
+    await failing.promptAnswered();
+    expect(failing.failure).toBeInstanceOf(Error);
+    expect(await failing.steer("late")).toBe("refused");
+    expect(await acpPromptSteering(() => false, async () => ({})).steer("x")).toBe("refused");
   });
 });

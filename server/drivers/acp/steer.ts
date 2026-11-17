@@ -1,5 +1,6 @@
 // ACP has no steer method, so each agent takes a message into its running turn its own way: a slash command it
-// advertises (`available_commands_update`, Hermes) or an extension request (`_session/steering`, OpenCode 2.3.0).
+// advertises (`available_commands_update`, Hermes), an extension request (`_session/steering`, OpenCode 2.3.0), or a
+// second session/prompt (Devin, 3000.13.4).
 import type { SteerOutcome } from "../../contracts.ts";
 
 /** How an agent takes a person's message into its running turn. */
@@ -19,7 +20,16 @@ export interface AcpRequestSteer {
   supported(initializeResult: unknown): boolean;
 }
 
-export type AcpSteerSupport = AcpCommandSteer | AcpRequestSteer;
+/** Devin: a second `session/prompt` joins the running turn, for a CLI whose `initialize` sets `agentCapabilities._meta[capability]`.
+ * Both prompts end together; their replies carry the same usage and the same `run`. */
+export interface AcpPromptSteer {
+  kind: "prompt";
+  capability: string;
+  /** The run a prompt reply ends; replies of one run report their usage once. */
+  run(response: unknown): string | undefined;
+}
+
+export type AcpSteerSupport = AcpCommandSteer | AcpRequestSteer | AcpPromptSteer;
 
 export interface AcpTurnSteering {
   /** True for the agent's answer to a steer still out, which is never part of the reply. */
@@ -28,6 +38,10 @@ export interface AcpTurnSteering {
   /** The turn's own prompt is answered: no new steer starts. Null when no steer is out; otherwise resolves once they
    * have ended, and a steer the agent ran as a prompt of its own streams into this turn until then. */
   promptAnswered(): Promise<void> | null;
+  /** Replies of the steer prompts that ended, once `promptAnswered` has resolved. */
+  replies?: unknown[];
+  /** A steer prompt that failed after it was reported as steered. */
+  failure?: unknown;
 }
 
 /** The names an `available_commands_update` advertises, or null when it is not one. */
@@ -118,6 +132,32 @@ export function acpRequestSteering(running: () => boolean, send: (text: string) 
   };
 }
 
+/** `send` carries one `session/prompt` and settles when the agent answers it, at the end of the run. A steer is reported as
+ * steered once it is sent: the agent gives no earlier answer. */
+export function acpPromptSteering(running: () => boolean, send: (text: string) => Promise<unknown>): AcpTurnSteering {
+  let answered = false;
+  const pending = new Set<Promise<unknown>>();
+  const steering: AcpTurnSteering = {
+    replies: [],
+    swallow: () => false,
+    async steer(text) {
+      const guidance = text.trim();
+      if (!guidance || answered || !running()) return "refused";
+      const sent = send(guidance).then(
+        (reply) => { steering.replies!.push(reply); },
+        (error) => { steering.failure ??= error; },
+      ).finally(() => pending.delete(sent));
+      pending.add(sent);
+      return "steered";
+    },
+    promptAnswered() {
+      answered = true;
+      return pending.size ? Promise.all(pending).then(() => undefined) : null;
+    },
+  };
+  return steering;
+}
+
 export interface AcpSteerIo {
   /** The turn's own prompt is out, nothing stopped it, and the session is live. */
   open(): boolean;
@@ -128,9 +168,12 @@ export interface AcpSteerIo {
 }
 
 export function turnSteering(support: AcpSteerSupport, io: AcpSteerIo): AcpTurnSteering {
-  if ("kind" in support) {
+  if ("kind" in support && support.kind === "request") {
     return acpRequestSteering(() => io.open() && support.supported(io.initializeResult()),
       (text) => io.extension(support.method, text));
+  }
+  if ("kind" in support && support.kind === "prompt") {
+    return acpPromptSteering(() => io.open() && io.initializeResult()?.agentCapabilities?._meta?.[support.capability] === true, io.prompt);
   }
   return acpTurnSteering(support, () => io.open() && io.commands()?.has(support.command) === true, io.prompt);
 }

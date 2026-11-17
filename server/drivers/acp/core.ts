@@ -1433,16 +1433,24 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 );
               }
             }
-            const tokens = promptTokenUsage(result);
-            if (tokens) emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...tokens });
-            const reason = result?.stopReason, reported = await promptOutcome?.(result); if (reported) throw reported;
+            const answers = [result, ...(current.steering?.replies ?? [])];
+            if (current.steering?.failure !== undefined && !state.stopped) throw current.steering.failure;
+            const runOf = (answer: unknown) => support.steer && "run" in support.steer ? support.steer.run(answer) : undefined;
+            for (const [index, answer] of answers.entries()) {
+              const run = runOf(answer);
+              if (run !== undefined && answers.slice(index + 1).some((later) => runOf(later) === run)) continue;
+              const tokens = promptTokenUsage(answer);
+              if (tokens) emit({ ...base(threadId, turnId), type: "thread.token-usage.updated", ...tokens });
+            }
+            const final = answers.at(-1);
+            const reason = final?.stopReason, reported = await promptOutcome?.(final); if (reported) throw reported;
             if (reason === "end_turn") settle(threadId, session, true, null);
             else if (reason === "cancelled" || state.stopped) settle(threadId, session, true, "cancelled");
             else {
               emit({
                 ...base(threadId, turnId),
                 type: "runtime.error",
-                ...acpStopFailure(result, support.displayName),
+                ...acpStopFailure(final, support.displayName),
               });
               settle(threadId, session, false, reason ?? "failed");
             }
