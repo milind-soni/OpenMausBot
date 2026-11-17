@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement as h, useReducer } from "react";
+import { StrictMode, act, createElement as h, useReducer } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { initialState, reducer, type Action } from "@/state/store";
@@ -17,16 +17,17 @@ function Shell() {
   useRememberedSidePanel(state, dispatch, options);
   return h("div", null,
     state.activeView === "chat" && h("main", { "data-view": "chat" }),
+    state.appSettingsOpen && h("dialog", { "data-modal": "settings" }),
     state.computerOpen && h("aside", { "data-panel": "computer" }),
     state.inspectorOpen && h("aside", { "data-panel": "inspector" }));
 }
 
 /** A fresh app start: a new store, as after a restart. */
-const start = async () => {
+const start = async (strict = false) => {
   await act(async () => root?.unmount());
   container.replaceChildren();
   root = createRoot(container);
-  await act(async () => root.render(h(Shell)));
+  await act(async () => root.render(strict ? h(StrictMode, null, h(Shell)) : h(Shell)));
 };
 const run = (action: Action) => act(async () => send(action));
 const panel = () => container.querySelector("aside")?.getAttribute("data-panel") ?? null;
@@ -115,6 +116,41 @@ it("doesn't open the bot info panel where the app never shows it", async () => {
   await start();
   expect(panel()).toBeNull();
   expect(localStorage.getItem(SIDE_PANEL_OPEN_KEY)).toBe("inspector");
+});
+
+it("keeps the choice when the bot info panel can't show, also when React replays effects", async () => {
+  await start();
+  await run({ type: "toggleInspector" });
+  options = { enabled: true, inspector: false };
+
+  await start(true);
+  expect(panel()).toBeNull();
+  expect(localStorage.getItem(SIDE_PANEL_OPEN_KEY)).toBe("inspector");
+});
+
+it("keeps Settings open when the window grows out of the phone layout", async () => {
+  await start();
+  await run({ type: "toggleComputer" });
+  options = { enabled: false, inspector: true };
+  await start();
+  await run({ type: "toggleAppSettings", open: true });
+
+  options = { enabled: true, inspector: true };
+  await act(async () => root.render(h(Shell)));
+  expect(container.querySelector("[data-modal=settings]")).not.toBeNull();
+  expect(panel()).toBeNull();
+  expect(localStorage.getItem(SIDE_PANEL_OPEN_KEY)).toBe("computer");
+});
+
+it("opens the panel again after Settings closes it", async () => {
+  await start();
+  await run({ type: "toggleComputer" });
+  await run({ type: "toggleAppSettings", open: true });
+  expect(panel()).toBeNull();
+  expect(localStorage.getItem(SIDE_PANEL_OPEN_KEY)).toBe("computer");
+
+  await run({ type: "toggleAppSettings", open: false });
+  expect(panel()).toBe("computer");
 });
 
 it("starts with panels closed when storage is blocked", async () => {
