@@ -151,12 +151,15 @@ posixOnly("engine hooks e2e: full tool output that arrives after its turn ended"
     expect(bot.messages.find((m: Msg) => m.kind === "digest").digest?.hookCoverage).toBe("preview");
     const rows = async (): Promise<Msg[]> => (await h.getBot(bot.id)).messages.filter((m: Msg) => m.kind === "activity" && m.tool?.itemId);
     await h.waitFor(async () => (await rows()).every((m) => m.tool!.fullResult === true), "the late hooks to save both outputs");
+    const digest = (await h.getBot(bot.id)).messages.find((m: Msg) => m.kind === "digest");
+    expect(digest.digest?.hookCoverage).toBe("full");
+    expect(digest.text).not.toContain("from tool previews");
     const root = join(h.home(), ".openmausbot", "tool-results");
     const spilled = readdirSync(join(root, readdirSync(root)[0]!)).map((name) => readFileSync(join(root, readdirSync(root)[0]!, name), "utf8"));
     expect(spilled.some((text) => text.includes(BIG.slice(0, 200)))).toBe(true);
 
-    const digest = createHash("sha256").update(`${bot.id}\0${bot.threadId}`).digest("hex").slice(0, 24);
-    const bearer = { authorization: `Bearer ${readFileSync(join(h.home(), ".openmausbot", "hook-tokens", digest, "token"), "utf8").trim()}` };
+    const tokenDir = createHash("sha256").update(`${bot.id}\0${bot.threadId}`).digest("hex").slice(0, 24);
+    const bearer = { authorization: `Bearer ${readFileSync(join(h.home(), ".openmausbot", "hook-tokens", tokenDir, "token"), "utf8").trim()}` };
     const [first] = await rows();
     const again = await h.api("POST", "/api/internal/hook", { event: "PostToolUse", payload: { tool_use_id: first!.tool!.itemId, tool_response: "replaced" } }, bearer);
     expect(again.status).toBe(401);

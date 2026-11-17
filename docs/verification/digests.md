@@ -37,8 +37,9 @@ does: the hint for a timed-out Bash call (`PostToolUseFailure`, matcher
 a 60 s timeout; there is no `Stop` hook. A `PostToolUse` can land after its
 turn has ended. For 60 s after that, the ended turn's hook token is honoured
 for one thing only: saving the full output of that turn's own tool calls not
-yet saved, each once. The digest was written at the turn's end, so it still
-says "from tool previews". `server/hooks.e2e.test.ts` plays this with
+yet saved, each once. The digest is written at the turn's end and says "from
+tool previews" until those outputs complete the turn's evidence; then it is
+marked full again. `server/hooks.e2e.test.ts` plays this with
 `FAKE_CLAUDE_HOOKS_AFTER_TURN_MS`.
 
 To see the difference with the real CLI, run `claude -p` in an empty folder

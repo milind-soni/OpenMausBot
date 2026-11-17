@@ -284,7 +284,7 @@ function runHooks(event: FakeHookEvent, payload: Record<string, unknown>): strin
         hooksAfterTurn.push(() => new Promise((settled) => {
           const child = spawn(hook.command!, hook.args ?? [], { ...options, stdio: ["pipe", "ignore", "ignore"] });
           child.on("error", settled).on("close", settled);
-          child.stdin!.end(input);
+          child.stdin!.on("error", () => {}).end(input);
         }));
       } else stdout += spawnSync(hook.command, hook.args ?? [], { ...options, input, stdio: ["pipe", "pipe", "pipe"], encoding: "utf8" }).stdout ?? "";
     }
