@@ -817,7 +817,11 @@ export function availableTools(profile: CatalogProfile) {
     ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
       ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: CLOUD_HOME_SURFACE } } }
       : tool)
-    : tools;
+    // A model shown a tool it cannot use spends turns finding out: with no container runtime there is
+    // no Local VM to run a command in.
+    : profile.localVm === false
+      ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name))
+      : tools;
   return placed.map((tool) => ({ ...tool, inputSchema: advertisedSchema(tool.inputSchema, tool.description) }));
 }
 
