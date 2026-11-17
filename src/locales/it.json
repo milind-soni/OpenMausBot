@@ -6979,5 +6979,14 @@
   "call.capability.turnsNeedDeepSeekKey": "Aggiungi una chiave DeepSeek per parlare a turni nelle chiamate",
   "alwaysOn.section": "Casa sempre accesa",
   "alwaysOn.title": "Usa questo computer come casa sempre accesa",
-  "alwaysOn.add.title": "Aggiungi un Mac mini o un altro computer sempre acceso"
+  "alwaysOn.add.title": "Aggiungi un Mac mini o un altro computer sempre acceso",
+  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek è la tua voce, quindi la modalità A turni ti ascolta con la trascrizione vocale di DeepSeek. Aggiungi una chiave DeepSeek in Impostazioni → Chiavi API.",
+  "serverError.voice.deepseekKeyRequired": "Aggiungi una chiave API DeepSeek in Impostazioni → Chiavi API per parlare con i tuoi bot con la voce DeepSeek.",
+  "higgsfield.description": "Immagini e video con l’IA che i tuoi bot creano con i modelli Higgsfield, sul tuo account Higgsfield.",
+  "higgsfield.notice": "Accedi con il tuo account Higgsfield. Non serve una chiave API. Un bot che può usare Higgsfield può avviare generazioni di immagini e video che consumano crediti del tuo account, quindi scegli quali bot lo ottengono in Accesso dei bot.",
+  "imageGen.slot.needsHiggsfield": "Richiede Higgsfield collegato: collegalo qui sotto.",
+  "imageGen.higgsfield.connected": "Collegato al tuo account Higgsfield",
+  "imageGen.higgsfield.notConnected": "Non collegato, oppure l’accesso è scaduto",
+  "imageGen.higgsfield.help": "{app} crea immagini con l’account Higgsfield a cui accedi in Plugin. Ogni immagine consuma crediti di quell’account.",
+  "imageGen.higgsfield.open": "Apri Plugin"
 }

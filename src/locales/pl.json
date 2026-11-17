@@ -7113,5 +7113,14 @@
   "call.capability.turnsNeedDeepSeekKey": "Dodaj klucz DeepSeek, aby rozmawiać po kolei w połączeniach",
   "alwaysOn.section": "Zawsze włączony dom",
   "alwaysOn.title": "Używaj tego komputera jako zawsze włączonego domu",
-  "alwaysOn.add.title": "Dodaj Maca mini lub inny zawsze włączony komputer"
+  "alwaysOn.add.title": "Dodaj Maca mini lub inny zawsze włączony komputer",
+  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek jest twoim głosem, więc tryb Po kolei słyszy cię przez rozpoznawanie mowy DeepSeek. Dodaj klucz DeepSeek w Ustawienia → Klucze API.",
+  "serverError.voice.deepseekKeyRequired": "Dodaj klucz API DeepSeek w Ustawienia → Klucze API, aby rozmawiać z botami głosem DeepSeek.",
+  "higgsfield.description": "Obrazy i filmy AI, które twoje boty tworzą modelami Higgsfield, na twoim własnym koncie Higgsfield.",
+  "higgsfield.notice": "Zaloguj się na swoje konto Higgsfield. Klucz API nie jest potrzebny. Bot, który może używać Higgsfield, może rozpocząć generowanie obrazów i filmów zużywające kredyty z twojego konta, więc w sekcji Dostęp botów wybierz, które boty to dostaną.",
+  "imageGen.slot.needsHiggsfield": "Wymaga połączenia z Higgsfield: połącz go poniżej.",
+  "imageGen.higgsfield.connected": "Połączono z twoim kontem Higgsfield",
+  "imageGen.higgsfield.notConnected": "Brak połączenia lub logowanie wygasło",
+  "imageGen.higgsfield.help": "{app} tworzy obrazy na koncie Higgsfield, na które logujesz się w sekcji Wtyczki. Każdy obraz zużywa kredyty z tego konta.",
+  "imageGen.higgsfield.open": "Otwórz Wtyczki"
 }

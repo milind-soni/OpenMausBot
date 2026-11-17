@@ -1290,6 +1290,7 @@
               "xai",
               "gemini",
               "openrouter",
+              "higgsfield",
               "custom"
             ],
             "description": "Only when the person named one; it must be their base or backup."

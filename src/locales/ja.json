@@ -7950,5 +7950,14 @@
   "call.capability.turnsNeedDeepSeekKey": "通話で交互に話すには DeepSeek キーを追加してください",
   "alwaysOn.section": "常時オンの拠点",
   "alwaysOn.title": "このコンピュータを常時オンの拠点として使う",
-  "alwaysOn.add.title": "Mac mini などの常時オンのコンピュータを追加"
+  "alwaysOn.add.title": "Mac mini などの常時オンのコンピュータを追加",
+  "call.capability.turnsNeedDeepSeekKeyReason": "音声に DeepSeek を選んでいるため、「交互に話す」は DeepSeek の音声認識であなたの声を聞き取ります。設定 → API キー で DeepSeek キーを追加してください。",
+  "serverError.voice.deepseekKeyRequired": "DeepSeek の音声でボットと話すには、設定 → API キー で DeepSeek API キーを追加してください。",
+  "higgsfield.description": "ボットが Higgsfield のモデルで作る AI の画像と動画です。お使いの Higgsfield アカウントで動きます。",
+  "higgsfield.notice": "Higgsfield アカウントでサインインしてください。API キーは不要です。Higgsfield を使えるボットは、アカウントのクレジットを消費する画像や動画の生成を開始できます。どのボットに使わせるかは「ボットのアクセス」で選んでください。",
+  "imageGen.slot.needsHiggsfield": "Higgsfield の接続が必要です。下で接続してください。",
+  "imageGen.higgsfield.connected": "Higgsfield アカウントに接続済み",
+  "imageGen.higgsfield.notConnected": "未接続、またはサインインが切れています",
+  "imageGen.higgsfield.help": "{app} は、プラグインでサインインした Higgsfield アカウントで画像を作ります。画像 1 枚ごとにそのアカウントのクレジットを消費します。",
+  "imageGen.higgsfield.open": "プラグインを開く"
 }
