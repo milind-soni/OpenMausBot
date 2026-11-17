@@ -38,6 +38,7 @@ You can use Preview in two places:
    - **Rotate** (`⇄`) to swap width and height
    - Change **Zoom** (**Fit**, **50%**, **75%**, or **100%**)
    - Click the **camera button** to send a screenshot of the visible area or the full page to your current chat
+   - Full-page screenshots scroll through the page and restore your position afterward. Sticky and fixed elements appear once. Capture uses the current viewport layout and produces one image pixel per CSS pixel; scrolling can trigger lazy-loaded content.
    - Click **Open in Preview page** (`⤢`) to carry your current address and size into the full Preview page
 
 ---

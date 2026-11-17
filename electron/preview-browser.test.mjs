@@ -28,3 +28,29 @@ describe("Preview debugger ownership", () => {
     browser.dispose(); expect(wc.debugger.listenerCount("message")).toBe(0); expect(wc.debugger.detach).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Preview page validation", () => {
+  it.each(["100\u202f000 FCFA", "100\u00a0000 FCFA", "100 \n 000 FCFA"])("waits for formatted prices: %s", async text => {
+    const wc = target();
+    wc.executeJavaScriptInIsolatedWorld = async (_world, [{ code }]) => {
+      const document = { body: { innerText: text } };
+      return new Function("document", `return ${code}`)(document);
+    };
+    const browser = new PreviewBrowserSession(wc, () => true);
+    try {
+      await expect(browser.perform("wait", { text: "100 000 FCFA", timeout_ms: 0 }, new AbortController().signal)).resolves.toMatchObject({ completed: "wait" });
+      await expect(browser.perform("wait", { text: "100 001 FCFA", timeout_ms: 0 }, new AbortController().signal)).rejects.toThrow("timed out");
+    } finally { browser.dispose(); }
+  });
+  it("preserves disabled-control errors without sending mouse input", async () => {
+    const wc = target();
+    const el = { isConnected: true, matches: () => true };
+    wc.executeJavaScriptInIsolatedWorld = async (_world, [{ code }]) => new Function("globalThis", `return ${code}`)({ __gbsPreviewNodes: new Map([["disabled", el]]) });
+    const browser = new PreviewBrowserSession(wc, () => true);
+    try {
+      await expect(browser.perform("click", { ref: "disabled" }, new AbortController().signal)).rejects.toThrow("This control is disabled.");
+      expect(wc.debugger.sendCommand.mock.calls.some(([method]) => method.startsWith("Input."))).toBe(false);
+      await expect(browser.perform("click", { ref: "stale" }, new AbortController().signal)).rejects.toThrow("Stale element reference");
+    } finally { browser.dispose(); }
+  });
+});

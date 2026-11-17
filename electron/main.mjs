@@ -257,10 +257,8 @@ ipcMain.handle("screen:frame", async () => {
   return sources[0]?.thumbnail.toDataURL() ?? null;
 });
 
-// Mobile preview screenshots. Visible-area capture uses the normal
-// capturePage() API; full-page capture needs the CDP debugger to grab
-// content beyond the current viewport (Page.captureScreenshot with
-// captureBeyondViewport), since capturePage() can only see what's rendered.
+// Preview screenshots share the bot browser capture path. Full-page images
+// assemble viewport captures, avoiding Electron's repeated compositor tiles.
 ipcMain.handle("webview:screenshot", async (_event, { webContentsId, fullPage }) => {
   if (!previewGuestIds.has(webContentsId)) return null;
   const wc = webContents.fromId(webContentsId);

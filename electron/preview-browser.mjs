@@ -26,15 +26,74 @@ export function withPreviewDebugger(wc, work) {
   state.tail = operation.catch(() => {});
   return operation;
 }
-export async function capturePreviewPNG(wc, fullPage = false) {
+export async function capturePreviewPNG(wc, fullPage = false, signal) {
   if (!fullPage) return (await wc.capturePage()).toPNG().toString("base64");
   return withPreviewDebugger(wc, async dbg => {
     const metrics = await dbg.sendCommand("Page.getLayoutMetrics");
     const size = metrics.cssContentSize ?? metrics.contentSize;
     const width = Math.ceil(size.width), height = Math.ceil(size.height);
-    if (width < 1 || height < 1 || width > 16384 || height > 16384 || width * height > 24_000_000) throw new Error("Page is too large for a full-page image. Capture the visible area instead.");
-    const { data } = await dbg.sendCommand("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height, scale: 1 } });
-    return data;
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1 || width > 16384 || height > 16384 || width * height > 24_000_000) throw new Error("Page is too large for a full-page image. Capture the visible area instead.");
+    // Electron's beyond-viewport compositor capture can repeat tiles (notably
+    // in Retina webviews). Assemble real viewport captures at CSS resolution.
+    const { nativeImage } = await import("electron");
+    const key = JSON.stringify(`__gbsCapture_${randomUUID()}`);
+    const script = code => wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code }], true);
+    const pixels = Buffer.alloc(width * height * 4);
+    try {
+      await script(`(() => {
+        const saved = { x: scrollX, y: scrollY, styles: [] };
+        globalThis[${key}] = saved;
+        const set = (el, values) => {
+          saved.styles.push([el, el.getAttribute('style')]);
+          for (const [name, value] of Object.entries(values)) el.style.setProperty(name, value, 'important');
+        };
+        set(document.documentElement, { 'scroll-behavior': 'auto', 'scroll-snap-type': 'none', 'overflow-anchor': 'none', 'scrollbar-color': 'transparent transparent' });
+        scrollTo(0, 0);
+        // Pin overlays once at their initial document coordinates. Sticky
+        // elements retain their place in flow while later tiles scroll past.
+        const overlays = Array.from(document.querySelectorAll('*')).map(el => ({ el, position: getComputedStyle(el).position, rect: el.getBoundingClientRect() })).filter(o => ['fixed', 'sticky'].includes(o.position));
+        for (const { el, position, rect } of overlays) {
+          if (position === 'sticky') set(el, { position: 'relative', top: 'auto', bottom: 'auto', left: 'auto', right: 'auto' });
+          else set(el, { position: 'absolute', top: rect.top + 'px', left: rect.left + 'px', bottom: 'auto', right: 'auto', width: rect.width + 'px', height: rect.height + 'px', 'box-sizing': 'border-box', margin: '0' });
+        }
+      })()`);
+      let tileHeight = 0, tileWidth = 0;
+      for (let y = 0; y < height; y += tileHeight) {
+        for (let x = 0; x < width; x += tileWidth) {
+          if (signal?.aborted || wc.isDestroyed()) throw new Error("Preview screenshot cancelled.");
+          const view = await script(`(async () => {
+            scrollTo(${x}, ${y});
+            await new Promise(resolve => { const timer = setTimeout(resolve, 250); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(timer); resolve(); })); });
+            return { x: scrollX, y: scrollY, width: innerWidth, height: innerHeight };
+          })()`);
+          tileWidth = Math.floor(view.width); tileHeight = Math.floor(view.height);
+          const sourceX = Math.round(x - view.x), sourceY = Math.round(y - view.y);
+          const copyWidth = Math.min(tileWidth - sourceX, width - x), copyHeight = Math.min(tileHeight - sourceY, height - y);
+          if (copyWidth <= 0 || copyHeight <= 0) throw new Error("Page cannot be scrolled for a full-page image. Capture the visible area instead.");
+          const captured = await wc.capturePage();
+          const actual = captured.getSize();
+          if (Math.abs(actual.width * tileHeight - actual.height * tileWidth) > Math.max(actual.width, actual.height) * 2) throw new Error("Preview viewport changed or was clipped during screenshot. Try the visible area.");
+          const shot = captured.resize({ width: tileWidth, height: tileHeight });
+          if (signal?.aborted) throw new Error("Preview screenshot cancelled.");
+          const bitmap = shot.toBitmap({ scaleFactor: 1 });
+          if (bitmap.length !== tileWidth * tileHeight * 4) throw new Error("Unexpected Preview screenshot dimensions.");
+          for (let row = 0; row < copyHeight; row++) {
+            const start = ((sourceY + row) * tileWidth + sourceX) * 4;
+            bitmap.copy(pixels, ((y + row) * width + x) * 4, start, start + copyWidth * 4);
+          }
+        }
+      }
+      return nativeImage.createFromBitmap(pixels, { width, height, scaleFactor: 1 }).toPNG().toString("base64");
+    } finally {
+      if (!wc.isDestroyed()) await script(`(() => {
+        const saved = globalThis[${key}]; if (!saved) return;
+        for (const [el, style] of saved.styles.reverse()) {
+          if (style === null) el.removeAttribute('style'); else el.setAttribute('style', style);
+        }
+        scrollTo({ left: saved.x, top: saved.y, behavior: 'instant' });
+        delete globalThis[${key}];
+      })()`);
+    }
   });
 }
 const WORLD = 1004;
@@ -62,7 +121,16 @@ export class PreviewBrowserSession {
   }
   log(entry) { this.diagnostics.push({ at: Date.now(), ...entry }); if (this.diagnostics.length > 100) this.diagnostics.shift(); }
   dispose() { this.wc.debugger.removeListener("message", this.listener); this.release(); }
-  async script(code) { return this.wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code }], true); }
+  async script(code) {
+    // Electron replaces thrown guest errors with "Script failed to execute".
+    // Carry expected validation errors across the world boundary as data.
+    const result = await this.wc.executeJavaScriptInIsolatedWorld(WORLD, [{ code: `(() => {
+      try { return { ok: true, value: (${code}) }; }
+      catch (error) { return { ok: false, error: String(error?.message ?? error).slice(0, 1000) }; }
+    })()` }], true);
+    if (!result.ok) throw new Error(result.error);
+    return result.value;
+  }
   async snapshot() {
     const revision = randomUUID();
     return this.script(`(() => {
@@ -74,7 +142,7 @@ export class PreviewBrowserSession {
         const ref = ${JSON.stringify(revision)} + ':' + (controls.length + 1); nodes.set(ref, el);
         const labelIds = (el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean);
         const name = el.getAttribute('aria-label') || labelIds.map(id => document.getElementById(id)?.textContent || '').join(' ') || Array.from(el.labels || []).map(n => { const clone = n.cloneNode(true); clone.querySelectorAll('input,select,textarea,button').forEach(c => c.remove()); return clone.textContent; }).join(' ') || el.innerText || el.getAttribute('placeholder') || el.getAttribute('title') || '';
-        controls.push({ ref, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || undefined, name: name.trim().slice(0, 200), type: el.getAttribute('type') || undefined, disabled: Boolean(el.disabled), value: el.type === 'password' ? '[redacted]' : typeof el.value === 'string' ? el.value.slice(0, 300) : undefined });
+        controls.push({ ref, tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || undefined, name: name.trim().slice(0, 200), type: el.getAttribute('type') || undefined, disabled: el.matches(':disabled') || Boolean(el.closest('[aria-disabled="true"]')), value: el.type === 'password' ? '[redacted]' : typeof el.value === 'string' ? el.value.slice(0, 300) : undefined });
       }
       return { url: location.href, title: document.title, viewport: { width: innerWidth, height: innerHeight, devicePixelRatio }, text: (document.body?.innerText || '').slice(0, 20000), controls, limitations: ['Main document only; nested frames and shadow DOM are not inspected.'] };
     })()`);
@@ -84,7 +152,7 @@ export class PreviewBrowserSession {
     return this.script(`(() => {
       const el = globalThis.__gbsPreviewNodes?.get(${JSON.stringify(ref)});
       if (!el?.isConnected) throw new Error('Stale element reference. Take a new preview_snapshot.');
-      if (el.disabled || el.getAttribute('aria-disabled') === 'true') throw new Error('This control is disabled.');
+      if (el.matches(':disabled') || el.closest('[aria-disabled="true"]')) throw new Error('This control is disabled.');
       el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
       ${operation}
     })()`);
@@ -96,7 +164,7 @@ export class PreviewBrowserSession {
     if (operation === "snapshot" || operation === "open") return this.snapshot();
     if (operation === "diagnostics") return { url: this.wc.getURL(), events: [...this.diagnostics] };
     if (operation === "screenshot") {
-      const image = await capturePreviewPNG(this.wc, args.full_page === true); check();
+      const image = await capturePreviewPNG(this.wc, args.full_page === true, signal); check();
       if (image.length > 11_000_000) throw new Error("Screenshot is too large; try the visible area.");
       return { image, mimeType: "image/png", ...(await this.script('({ url: location.href, viewport: { width: innerWidth, height: innerHeight } })')) };
     }
@@ -134,7 +202,7 @@ export class PreviewBrowserSession {
     } else if (operation === "scroll") {
       const x = Number(args.x ?? 0), y = Number(args.y ?? 600);
       if (!Number.isFinite(x) || !Number.isFinite(y) || Math.abs(x) > 10000 || Math.abs(y) > 10000) throw new Error("Scroll distances must be within ±10000 pixels.");
-      await this.script(`scrollBy({ left: ${x}, top: ${y}, behavior: 'instant' }); true`);
+      await this.script(`(scrollBy({ left: ${x}, top: ${y}, behavior: 'instant' }), true)`);
     } else if (operation === "wait") {
       if ((!args.text && !args.ref) || (args.text && (typeof args.text !== "string" || args.text.length > 2000))) throw new Error("Wait needs text or an element ref.");
       const timeout = args.timeout_ms ?? 5000;
@@ -142,7 +210,10 @@ export class PreviewBrowserSession {
       const deadline = Date.now() + timeout;
       while (true) {
         check();
-        const matched = args.ref ? await this.element(args.ref, 'return Boolean(el.getClientRects().length);') : await this.script(`Boolean(document.body?.innerText.includes(${JSON.stringify(args.text)}))`);
+        const matched = args.ref ? await this.element(args.ref, 'return Boolean(el.getClientRects().length);') : await this.script(`(() => {
+          const normalize = text => text.replace(/\\s+/gu, ' ').trim();
+          return normalize(document.body?.innerText || '').includes(normalize(${JSON.stringify(args.text)}));
+        })()`);
         if (matched) break;
         if (Date.now() >= deadline) throw new Error("Preview wait timed out.");
         await pause(100);
