@@ -80,6 +80,8 @@ export class LiveTranscript {
 /** A pause on the session timeline longer than this starts a new spoken line. */
 const SPOKEN_LINE_GAP_MS = 1_000;
 const MAX_SPOKEN_LINES = 2_000;
+/** Held values said across pauses are looked for over this many characters of the latest lines. */
+const SPOKEN_JOIN_WINDOW = 512;
 
 type SpokenLineState = { at: number; text: string; endMs: number };
 
@@ -107,20 +109,22 @@ export class SpokenLines {
       if (this.lines.length >= MAX_SPOKEN_LINES) return;
       this.lines.push({ at, text: this.scrub(text), endMs: timed ? endMs : Number.NEGATIVE_INFINITY });
     }
-    this.joinAcrossPause();
+    this.joinAcrossPauses();
   }
 
-  /** A value said across a pause is split over two lines, neither of which holds all of it: when the scrub
-   * masks something in the two joined, they become one line. */
-  private joinAcrossPause(): void {
-    while (this.lines.length >= 2) {
-      const [previous, last] = this.lines.slice(-2) as [SpokenLineState, SpokenLineState];
-      const joined = previous.text + last.text;
+  /** A value said across pauses is split over several lines, none of which holds all of it: when the scrub
+   * masks something in the last lines joined, they become one line. Looks back while the text after the line
+   * it adds is shorter than SPOKEN_JOIN_WINDOW, so any held value up to that length is caught. */
+  private joinAcrossPauses(): void {
+    let joined = this.lines.at(-1)?.text ?? "";
+    for (let start = this.lines.length - 2; start >= 0 && joined.length < SPOKEN_JOIN_WINDOW; start--) {
+      joined = this.lines[start]!.text + joined;
       const scrubbed = this.scrub(joined);
-      if (scrubbed === joined) return;
-      previous.text = scrubbed;
-      previous.endMs = Math.max(previous.endMs, last.endMs);
-      this.lines.pop();
+      if (scrubbed === joined) continue;
+      const merged = this.lines.splice(start);
+      this.lines.push({ at: merged[0]!.at, text: scrubbed, endMs: Math.max(...merged.map((line) => line.endMs)) });
+      this.joinAcrossPauses();
+      return;
     }
   }
 
