@@ -301,7 +301,11 @@ export function createHomeWindow(deps) {
     if (home.kind === "signin" && !name) return { screen: "signin" };
     const own = ownMove();
     if (own && MOVING.has(own.phase)) return { screen: "moving", name: own.name };
-    return named({ screen: MOVING.has(parseJournal(journal())?.phase ?? "") ? "moving" : "opening" });
+    const moving = MOVING.has(parseJournal(journal())?.phase ?? "");
+    // A frozen copy's way back opens the person's own server: the screen names it, never My Cloud.
+    const parked = !moving && !name && !own && !asked && home.kind === "computer" && !home.clean ? home.frozenPlace?.place : null;
+    if (parked) return { screen: "opening", name: parked };
+    return named({ screen: moving ? "moving" : "opening" });
   }
   const tell = () => { try { publish(view()); } catch {} };
   let splashSaid = null;
@@ -586,6 +590,7 @@ export function createHomeWindow(deps) {
       if (!current.clean && parkedAt && !ownMove() && onOwnPage()) {
         clearRetry(); screen = null; status = null; shown = null; away = false;
         ensureWindow();
+        tell();
         let slow = null;
         const mine = {}; recovering = mine;
         try {
@@ -596,7 +601,7 @@ export function createHomeWindow(deps) {
           timers.clear(slow);
           if (!wanted(token)) return;
           if (back) return;
-          toScreen({ screen: "offline", reason: `Your bots are on ${parkedAt.place}.` });
+          toScreen({ screen: "offline", name: parkedAt.place, reason: `Your bots are on ${parkedAt.place}.` });
           return later();
         } finally { if (recovering === mine) recovering = null; }
       }
@@ -793,7 +798,7 @@ export function createHomeWindow(deps) {
       if (!place && parkedAt?.origin && at === parkedAt.origin) {
         ++opens;
         if (ownMove()) tell();
-        else toScreen({ screen: "offline", reason: `Your bots are on ${parkedAt.place}.` });
+        else { opening = null; toScreen({ screen: "offline", name: parkedAt.place, reason: `Your bots are on ${parkedAt.place}.` }); }
         later();
         return true;
       }

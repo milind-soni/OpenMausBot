@@ -351,6 +351,46 @@ describe("BotListItem", () => {
     expect(markup).toContain("Waiting on a teammate…");
   });
 
+  it("marks a bot whose last turn failed with a red dot, kept apart from the orange waiting badge", () => {
+    const failedTurn = [
+      { id: "u1", role: "user", kind: "text", text: "check the site", at: 1 },
+      { id: "e1", role: "bot", kind: "activity", at: 2, tool: { name: "error: The site did not answer.", ok: false } },
+    ] as Bot["messages"];
+    const opening = (markup: string, testId: string) => markup.match(new RegExp(`<span[^>]*data-testid="${testId}"[^>]*>`))?.[0] ?? "";
+    const failed = renderRow(bot({ messages: failedTurn }));
+    const dot = opening(failed, "failed-dot");
+    expect(dot).toContain("bg-danger");
+    expect(dot).toContain('role="status"');
+    expect(dot).toContain('aria-label="Ran into a problem"');
+    expect(dot).toContain("size-2.5");
+    expect(failed).not.toContain('data-testid="waiting-dot"');
+    expect(failed).not.toContain("bg-warning");
+    const icons = renderRow(bot({ messages: failedTurn }), "icons");
+    expect(opening(icons, "failed-dot")).toContain("size-3");
+    expect(icons).toContain('aria-label="Atlas · Ran into a problem"');
+    // An engine that could not start writes the same row in its own thread; another thread's state alone paints nothing.
+    expect(renderRow(bot({ activity: "dead" }))).not.toContain('data-testid="failed-dot"');
+    // A failure outranks a teammate wait, but a question for you or a new turn already running wins.
+    const teammate = renderRow(bot({ messages: failedTurn, waitingForTeammates: true }));
+    expect(teammate).toContain('data-testid="failed-dot"');
+    expect(teammate).not.toContain('data-testid="teammate-wait-dot"');
+    // The preview follows the dot: the failed turn's line, not the teammate wait.
+    expect(teammate).not.toContain("Waiting on a teammate");
+    expect(teammate).toContain("The site did not answer.");
+    const waiting = renderRow(bot({ messages: failedTurn, activity: "waiting-on-you" }));
+    expect(waiting).toContain('data-testid="waiting-dot"');
+    expect(waiting).not.toContain('data-testid="failed-dot"');
+    const retrying = renderRow(bot({ messages: failedTurn, busy: true }));
+    expect(retrying).toContain('data-testid="working-dot"');
+    expect(retrying).not.toContain('data-testid="failed-dot"');
+    expect(renderRow(bot({ messages: [{ ...failedTurn[1]!, tool: { name: "Read", ok: true } }] }))).not.toContain('data-testid="failed-dot"');
+    // A message queued behind the failed turn leaves the preview on the failure, like the dot.
+    const queuedState = { ...initialState, pendingQueued: { "thread-atlas": [{ queueId: "q1", text: "try again" }] } };
+    const queuedBehind = renderToStaticMarkup(createElement(BotListItem, botRowProps(queuedState, vi.fn(), bot({ messages: failedTurn }), { density: "comfortable", query: "", onMenu: vi.fn() })));
+    expect(queuedBehind).toContain('data-testid="failed-dot"');
+    expect(queuedBehind).not.toContain(">Queued<");
+  });
+
   it("keeps real sibling work visible while another thread waits for a teammate", () => {
     const markup = renderRow(bot({ waitingForTeammates: true, busy: true, activity: "working" }));
     expect(markup).toContain('data-testid="working-dot"');

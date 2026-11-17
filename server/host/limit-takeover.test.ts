@@ -68,7 +68,8 @@ describe("which AI carries on while one is limited", () => {
     const clock = new LimitResetClock({ accounts: () => [{ id: "opencode", name: "OpenCode", driver: "opencode", environment: {} }], now: () => NOW });
     clock.noteUsage({ fetchedAt: new Date(NOW).toISOString(), providers: [{ id: "opencode", name: "OpenCode", driver: "opencode", ok: true, error: null,
       ...parseOpenCodeUsage({ usage: { rolling: { percent: 100, resetsAt: new Date(NOW + HOUR).toISOString() }, weekly: { percent: 50, resetsAt: new Date(NOW + 48 * HOUR).toISOString() } } }) }] });
-    const { instance } = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), resetAt: (id, model) => clock.resetAt(id, model) });
+    const { instance } = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), resetAt: (id, model) => clock.resetAt(id, model),
+      chosen: () => [on("claude", "claude-opus-5-5")] });
     expect(instance.heldAtStart(KAI, on("opencode", "opencode/big-pickle")), "a free model has its own allowance").toBeNull();
     expect(instance.heldAtStart(KAI, on("opencode", "opencode-go/kimi-k2"))).toEqual({ scope: "engine", resetsAt: NOW + HOUR });
     const chosen = takeover({ engines: () => [openCode, CLAUDE, CODEX], blockedUntil: (id, model) => clock.blockedUntil(id, model), chosen: () => [on("opencode", "opencode/big-pickle")] }).instance;
@@ -79,36 +80,45 @@ describe("which AI carries on while one is limited", () => {
     expect(free?.resetsAt).toBeLessThan(NOW + HOUR);
   });
 
-  it("never picks an AI that bills each use by itself, only as a backup the person chose", () => {
+  it("carries on only with a backup the person chose, one that bills each use included", () => {
     const apiClaude = engine("claude-api", "claudeAgent", ["claude-opus-5-5"], { access: "api" });
     const keyedClaude = engine("claude-key", "claudeAgent", ["claude-opus-5-5"]);
     const keyed = { "claude-key": { environment: { ANTHROPIC_API_KEY: "sk-ant-fixture" } } } as unknown as InstanceConfigMap;
     expect(takeover({ engines: () => [CODEX, apiClaude] }).instance.backups("kai", on("codex", "gpt-6"))).toEqual([]);
     expect(takeover({ engines: () => [CODEX, keyedClaude], configs: () => keyed }).instance.backups("kai", on("codex", "gpt-6"))).toEqual([]);
-    expect(takeover({ engines: () => [CODEX, apiClaude, GO] }).instance.backups("kai", on("codex", "gpt-6"))).toEqual([on("opencode", "go-default")]);
+    expect(takeover({ engines: () => [CODEX, apiClaude, GO] }).instance.backups("kai", on("codex", "gpt-6")), "nor one on a plan").toEqual([]);
     expect(takeover({ engines: () => [CODEX, apiClaude], chosen: () => [on("claude-api", "claude-opus-5-5")] }).instance.backups("kai", on("codex", "gpt-6")))
       .toEqual([on("claude-api", "claude-opus-5-5")]);
   });
 
-  it("takes the backups the person chose first, then the AI a new bot would get, and never the limited AI", () => {
-    const { instance } = takeover({ chosen: () => [on("opencode", "go-default"), on("codex", "gpt-6-mini")] });
+  it("takes the backups the person chose, in their order, and never the limited AI", () => {
+    const { instance } = takeover({ chosen: () => [on("opencode", "go-default"), on("codex", "gpt-6-mini"), on("claude", "claude-opus-5-5")] });
     expect(instance.backups("kai", on("codex", "gpt-6"))).toEqual([on("opencode", "go-default"), on("claude", "claude-opus-5-5")]);
-    expect(takeover().instance.backups("kai", on("codex", "gpt-6"))).toEqual([on("claude", "claude-opus-5-5")]);
+  });
+
+  it("picks no other AI by itself: with no backup chosen the bot waits for the reset", () => {
+    const { instance, told } = takeover({ blockedUntil: (id) => (id === "codex" ? NOW + HOUR : null) });
+    expect(instance.backups("kai", on("codex", "gpt-6")), "Claude and OpenCode Go are set up, but not chosen").toEqual([]);
+    expect(instance.heldAtStart(KAI, on("codex", "gpt-6")), "the AI is tried as usual and the limit tells the person").toBeNull();
+    instance.tell(KAI, on("codex", "gpt-6"), { resetsAt: NOW + HOUR });
+    expect(told[0]!.text).toMatch(/^Codex reached its limit until .+, so Kai waits until then: no backup you chose can take over\.$/);
   });
 
   it("for one model's own limit tries that AI's default model first, and never the limited model", () => {
-    const { instance } = takeover();
+    const { instance } = takeover({ chosen: () => [on("codex", "gpt-6")] });
     expect(instance.backups("kai", on("claude", "claude-sonnet-5"), "model")).toEqual([on("claude", "claude-opus-5-5"), on("codex", "gpt-6")]);
     expect(instance.backups("kai", on("claude", "claude-opus-5-5"), "credits")).toEqual([on("codex", "gpt-6")]);
+    expect(takeover().instance.backups("kai", on("claude", "claude-sonnet-5"), "model"), "the same AI's default model, with no backup chosen").toEqual([on("claude", "claude-opus-5-5")]);
   });
 
   it("leaves out an AI that is signed out, held by its own limit, short of this AI's tools, or another sign-in to the same plan", () => {
     const signedOut = engine("claude", "claudeAgent", ["claude-opus-5-5"], { snapshot: { state: "available", authenticated: false } });
-    expect(takeover({ engines: () => [signedOut, CODEX] }).instance.backups("kai", on("codex", "gpt-6"))).toEqual([]);
-    expect(takeover({ blockedUntil: (id) => (id === "claude" ? NOW + HOUR : null) }).instance.backups("kai", on("codex", "gpt-6")))
+    const claudeChosen = { chosen: () => [on("claude", "claude-opus-5-5"), on("opencode", "go-default")] };
+    expect(takeover({ engines: () => [signedOut, CODEX], ...claudeChosen }).instance.backups("kai", on("codex", "gpt-6"))).toEqual([]);
+    expect(takeover({ blockedUntil: (id) => (id === "claude" ? NOW + HOUR : null), ...claudeChosen }).instance.backups("kai", on("codex", "gpt-6")))
       .toEqual([on("opencode", "go-default")]);
     const fewerTools = engine("claude", "claudeAgent", ["claude-opus-5-5"], { capabilities: { agentsMcp: true } as unknown as TakeoverEngine["capabilities"] });
-    expect(takeover({ engines: () => [fewerTools, CODEX] }).instance.backups("kai", on("codex", "gpt-6"))).toEqual([]);
+    expect(takeover({ engines: () => [fewerTools, CODEX], ...claudeChosen }).instance.backups("kai", on("codex", "gpt-6"))).toEqual([]);
     const secondCodex = engine("codex-2", "codex", ["gpt-6"]);
     expect(takeover({ engines: () => [CODEX, secondCodex], chosen: () => [on("codex-2", "gpt-6")] }).instance.backups("kai", on("codex", "gpt-6")),
       "never another sign-in to the same plan").toEqual([]);
@@ -129,7 +139,7 @@ describe("a model's own limit", () => {
   }) as RuntimeEvent;
 
   it("holds that model alone until the reset it named, at most six hours, an hour when it named none, and not once it works", () => {
-    const { instance, now } = takeover();
+    const { instance, now } = takeover({ chosen: () => [on("claude", "claude-opus-5-5"), on("opencode", "go-default")] });
     instance.noteRuntimeEvent("kai", on("claude", "claude-opus-5-5"), error("model", NOW + 2 * HOUR));
     expect(instance.modelHeld(on("claude", "claude-opus-5-5"))).toEqual({ until: NOW + 2 * HOUR, resetsAt: NOW + 2 * HOUR, scope: "model" });
     expect(instance.modelHeld(on("claude", "claude-sonnet-5")), "the AI's other models still work").toBeNull();
@@ -168,7 +178,7 @@ describe("what the person hears", () => {
     instance.tell({ id: "rosa", name: "Rosa" }, on("codex", "gpt-6"), { resetsAt });
     expect(told.map((entry) => entry.bot)).toEqual(["Kai", "Rosa"]);
     expect(told[0]!.text).toMatch(/^Codex reached its limit until .+, so Kai is using Claude meanwhile\.$/);
-    expect(told[1]!.text).toMatch(/^Codex reached its limit until .+, so Rosa waits until then: no other AI you have set up can take over\.$/);
+    expect(told[1]!.text).toMatch(/^Codex reached its limit until .+, so Rosa waits until then: no backup you chose can take over\.$/);
     instance.worked("kai", on("codex", "gpt-6"));
     instance.tell(KAI, on("codex", "gpt-6"), { resetsAt, backup: on("claude", "claude-opus-5-5") });
     expect(told).toHaveLength(3);
@@ -217,7 +227,7 @@ describe("a new conversation once an AI is known to be at its limit", () => {
     const at = { now: NOW };
     const boot = () => {
       const clock = new LimitResetClock({ accounts: () => [], now: () => at.now, file: join(dir, "limit-holds.json") });
-      const { instance, told } = takeover({ blockedUntil: (id) => clock.blockedUntil(id), resetAt: (id) => clock.resetAt(id), now: () => at.now }, dir);
+      const { instance, told } = takeover({ blockedUntil: (id) => clock.blockedUntil(id), resetAt: (id) => clock.resetAt(id), now: () => at.now, chosen: () => [on("codex", "gpt-6")] }, dir);
       return { clock, instance, told };
     };
     return { at, boot };
@@ -278,10 +288,11 @@ describe("a new conversation once an AI is known to be at its limit", () => {
 
   it("keeps one model's own limit through a restart, and a turn that works on another model leaves it held", () => {
     const dir = freshDir();
-    const { instance } = takeover({}, dir);
+    const codexChosen = { chosen: () => [on("codex", "gpt-6")] };
+    const { instance } = takeover(codexChosen, dir);
     instance.noteRuntimeEvent("kai", on("claude", "claude-opus-5-5"), event("t1", "runtime.error", { message: "limit", limit: "model", limitResetsAt: NOW + 2 * HOUR }));
     instance.noteRuntimeEvent("kai", on("claude", "claude-sonnet-5"), event("t2", "turn.completed", { ok: true }));
-    const restarted = takeover({}, dir).instance;
+    const restarted = takeover(codexChosen, dir).instance;
     expect(restarted.modelHeld(on("claude", "claude-opus-5-5"))).toEqual({ until: NOW + 2 * HOUR, resetsAt: NOW + 2 * HOUR, scope: "model" });
     expect(restarted.heldAtStart(KAI, on("claude", "claude-opus-5-5"))).toEqual({ scope: "model", resetsAt: NOW + 2 * HOUR });
   });
@@ -436,7 +447,7 @@ it("sends a signed-out AI's turns only to the backups a turn its AI never starte
   const event = (type: string, extra: Record<string, unknown> = {}) =>
     ({ eventId: "e", provider: "claudeAgent", createdAt: new Date(NOW).toISOString(), threadId: "t1", type, ...extra }) as RuntimeEvent;
   let startup: ModelSelection[] = [];
-  const { instance } = takeover({ chosen: () => [on("codex", "gpt-6")], signedOutChosen: () => startup });
+  const { instance } = takeover({ chosen: () => [on("opencode", "go-default")], signedOutChosen: () => startup });
   instance.noteRuntimeEvent("kai", on("claude", "claude-opus-5-5"), event("turn.completed", { ok: false, stopReason: "auth_required" }));
   expect(instance.backups("kai", on("claude", "claude-opus-5-5"), "signed-out"), "Automatic recovery off and no list of the bot's own").toEqual([]);
   expect(instance.heldAtStart(KAI, on("claude", "claude-opus-5-5"))).toBeNull();

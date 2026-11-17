@@ -1,13 +1,8 @@
-// Generated thread titles: automatic ones only when features.llmThreadTitles is on, "Regenerate title" whenever the person
-// asks. The engine's one-shot text call, given 10 seconds once it starts, its reply cleaned to a title or null.
-import type { AppConfig } from "./config.ts";
+// Generated thread titles: automatic for every new thread, and "Regenerate title" whenever the person asks. The engine's
+// one-shot text call, given 10 seconds once it starts, its reply cleaned to a title or null.
 import { backgroundTextSlots, type JobSlots } from "./job-slots.ts";
 import { titleFromLlm } from "./store.ts";
 import { threadTitlePrompt, type ThreadTitleSource } from "./thread-title.ts";
-
-export function llmThreadTitlesEnabled(cfg: Pick<AppConfig, "features">): boolean {
-  return cfg.features?.llmThreadTitles === true;
-}
 
 export const THREAD_TITLE_TIMEOUT_MS = 10_000;
 
