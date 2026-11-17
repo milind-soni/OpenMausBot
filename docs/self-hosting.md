@@ -579,6 +579,16 @@ never came up, and processes that had to be force-stopped or outlived their
 turn. It holds numbers and fixed words only: no command line, path, bot name
 or message.
 
+**Per bot.** The same report carries each bot's share, taken from the same
+process list (no extra work per bot): its processes, threads, resident memory
+(now and at its most since start) and CPU time, counting its engine, what the
+engine started (including what outlived its turn in the engine's process group
+or session) and its own browser. An engine or browser several bots share (a
+shared engine process, a browser profile used by more than one bot) is counted
+once as "shared", never against any one bot. The report shows the ten bots
+using the most memory; `GET /api/diagnostics/bots` (admin only) lists every
+bot. Bot ids and numbers only.
+
 **Bots' cloud computers do not count.** A bot's cloud computer runs at the
 provider that hosts it, not in this container, so its desktop and browser
 use none of the container's processes or memory. Only the built-in browser
