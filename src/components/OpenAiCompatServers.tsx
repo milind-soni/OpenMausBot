@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Pencil, RotateCw, Trash2 } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { openExternalLink } from "@/lib/app-links";
 import { keySaved } from "@/lib/product-events";
 import { addedServers } from "@/lib/openai-compat-endpoints";
 import { cn } from "@/lib/cn";
@@ -19,6 +20,7 @@ const EDIT_LABEL = "flex flex-col gap-1 text-[12px] leading-4 text-ink-secondary
 const ICON_BUTTON = "ui-icon-button shrink-0 hover:text-ink";
 /** Google's Gemini API speaks the OpenAI protocol here; the key comes from Google AI Studio. */
 export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai" } as const;
+const OPENDESIGN_GO_PRESET = { name: "OpenDesign Go", url: "https://amr-link.open-design.ai/v1" } as const;
 
 /** The server accepts at most this many model IDs per server, each up to this many characters. */
 const MODEL_ID_LIMITS = { count: 64, length: 200 } as const;
@@ -103,6 +105,15 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
   /** The server saved at an address whose model list could not be read: the open editor says so in one line. */
   const [unreadable, setUnreadable] = useState<string | null>(null);
   const ready = Boolean(name.trim() && url.trim() && key.trim());
+
+  const fillPreset = (preset: { name: string; url: string }) => {
+    if (url.trim() !== preset.url) {
+      setKey("");
+      setModels("");
+    }
+    setName(preset.name);
+    setUrl(preset.url);
+  };
 
   const run = (kind: "add" | "other", request: () => Promise<{ instances?: unknown; warning?: unknown }>, onDone?: (warned: boolean) => void, at?: string) => {
     if (busy) return;
@@ -239,15 +250,20 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
         );
       })}
       <div className="mt-2 flex flex-col gap-1.5">
-        <button
-          type="button"
-          onClick={() => { setName(GEMINI_PRESET.name); setUrl(GEMINI_PRESET.url); }}
-          disabled={busy !== null}
-          className="ui-button self-end"
-        >
-          {t("apiInstances.geminiPreset")}
-        </button>
+        <div className="flex flex-wrap justify-end gap-1.5">
+          <button type="button" onClick={() => fillPreset(GEMINI_PRESET)} disabled={busy !== null} className="ui-button">
+            {t("apiInstances.geminiPreset")}
+          </button>
+          <button type="button" onClick={() => fillPreset(OPENDESIGN_GO_PRESET)} disabled={busy !== null} className="ui-button">
+            {t("apiInstances.openDesignGoPreset")}
+          </button>
+        </div>
         {url.trim() === GEMINI_PRESET.url && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.geminiKeyHint")}</p>}
+        {url.trim() === OPENDESIGN_GO_PRESET.url && (
+          <button type="button" onClick={() => void openExternalLink("https://go.open-design.ai/")} className="self-start text-[12px] text-accent-text hover:underline">
+            {t("apiInstances.openDesignGoKeyLink")}
+          </button>
+        )}
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("apiInstances.name")} aria-label={t("apiInstances.name")}
           spellCheck={false} disabled={busy !== null} className={INPUT} />
         <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com/v1" aria-label={t("apiInstances.url")}

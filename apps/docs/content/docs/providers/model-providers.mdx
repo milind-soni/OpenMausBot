@@ -19,8 +19,7 @@ differences with OpenCode 2.x.
 | Your own Anthropic-compatible address | Not tested | No | Custom endpoint, or Claude Code's own settings | No |
 
 "Chat engine" is MausBot's built-in engine for OpenAI-compatible services.
-In a bot's model picker it is called **OpenAI-compatible (OpenRouter / Groq)**
-and, for now, sits in the Local group.
+In a bot's model picker it is called **Other (OpenAI-compatible)**.
 
 The Cline row lists its hosted model service. To run Cline's own coding agent,
 use the [Cline engine](#cline-engine).
@@ -97,9 +96,10 @@ OpenCode, `opencode auth login` also keeps its sign-in in OpenCode's own setting
 
 The chat engine uses one provider at a time.
 
-1. Open **Settings → Connections → Model providers**.
-2. Paste your key into **OpenAI-compatible API key** and set
-   **OpenAI-compatible base URL**:
+1. Open **Settings → AI** and find **Your own model servers** under
+   **Other services**. Expand **Other services** if it is collapsed.
+2. With no existing key configured for this engine, enter the
+   **OpenAI-compatible base URL** and press Enter to save it:
 
    | Provider | Base URL |
    |---|---|
@@ -107,10 +107,21 @@ The chat engine uses one provider at a time.
    | Fireworks AI | `https://api.fireworks.ai/inference/v1` |
    | DeepSeek | `https://api.deepseek.com` |
    | Cline | `https://api.cline.bot/api/v1` |
+   | [OpenDesign Go](https://go.open-design.ai/) | `https://amr-link.open-design.ai/v1` |
    | Anything else | The OpenAI-compatible address your provider gives you, usually ending in `/v1` |
 
-3. Press **Test**. Then pick **OpenAI-compatible (OpenRouter / Groq)** in a
-   bot's model picker and choose a model.
+3. After the URL has saved, paste your key into **OpenAI-compatible API key**.
+   Use **Save** if the key has not already been saved. Saving the key checks
+   the model catalog. Select **Check again** to repeat that check.
+4. In a bot's model picker, choose **Other (OpenAI-compatible)** and select a
+   chat model. Send a short message to verify that the bot can reply.
+
+To add OpenDesign Go as a named connection, expand the **OpenAI-compatible API key**
+row and select **Fill in OpenDesign Go** under **More servers**. Create a
+workspace key in the OpenDesign web
+console under **API Keys**, paste it in the form, and select **Add server**.
+In the bot's model picker, choose **OpenDesign Go** and a chat model
+available to that workspace.
 
 On a server you can set `OPENAI_COMPAT_API_KEY` and `OPENAI_COMPAT_URL`
 instead.

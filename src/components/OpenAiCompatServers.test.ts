@@ -120,6 +120,31 @@ describe("adding another OpenAI-compatible server", () => {
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/instances/openai-compat", expect.objectContaining({ method: "POST" }));
     expect(JSON.parse(fixture.api.mock.calls[0][1].body)).toEqual({ displayName: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", key: "gemini-fixture" });
   });
+
+  it("fills in OpenDesign Go and requires a key for the selected host", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockResolvedValueOnce({ instances: [] });
+    const button = (text: string) => form().find((node) => node.type === "button" && node.props.children === text)!;
+    const field = (label: string) => form().find((node) => node.props["aria-label"] === label)!;
+
+    button("Fill in Google Gemini").props.onClick!();
+    field("API key").props.onChange!({ target: { value: "gemini-fixture" } });
+    button("Fill in OpenDesign Go").props.onClick!();
+    expect(button("Get an OpenDesign Go API key")).toBeDefined();
+    button("Add server").props.onClick!();
+    expect(fixture.api).not.toHaveBeenCalled();
+
+    field("API key").props.onChange!({ target: { value: "go-fixture" } });
+    button("Add server").props.onClick!();
+    await flush();
+    expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/instances/openai-compat", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(fixture.api.mock.calls[0][1].body)).toEqual({
+      displayName: "OpenDesign Go",
+      url: "https://amr-link.open-design.ai/v1",
+      key: "go-fixture",
+    });
+  });
 });
 
 describe("how long a server may take to reply", () => {
