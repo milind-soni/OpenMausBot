@@ -19,7 +19,7 @@ import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
 import { distrustHomePrograms } from "./program-trust.ts";
 import { procHidepid } from "./hidepid.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
-import { RELAY_SOCKET_NAME, boxUploadsDir, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxAudience, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { RELAY_SOCKET_NAME, TEAM_FOLDER_KEPT, boxUploadsDir, teamFolderOf, under, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxAudience, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
 import { openBoxRelay, type BoxRelay } from "./relay.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
@@ -121,6 +121,12 @@ export class BoxRunner {
     if (ids) try { mkdirSync(boxUploadsDir(this.options.setup.dataDir, ids.botId, ids.threadId), { recursive: true, mode: 0o700 }); } catch (error) {
       // The bind stays optional, but an upload named later would then be unreadable in this box: say so.
       console.error(`bot box: could not make the uploads folder, so uploads stay unreadable in this box: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    // A room's turn in the bot's own folder: the team's notes and skills are bound read-only only where they exist, so
+    // they are made first, or the turn could make them.
+    const team = audience?.teamReadOnly && given.cwd ? teamFolderOf(botId, resolve(given.cwd), this.options.setup.dataDir) : null;
+    if (team && under(resolve(given.cwd!), team) && existsSync(team)) {
+      for (const name of TEAM_FOLDER_KEPT) if (name !== "MEMORY.md") try { mkdirSync(join(team, name), { recursive: true, mode: 0o700 }); } catch {}
     }
     const request: BoxRequest = { ...given, ...(lent.length ? { rw: [...(given.rw ?? []), ...lent] } : {}), ...(audience ? { audience } : {}) };
     const extraFds: number[] = [];

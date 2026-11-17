@@ -87,6 +87,8 @@ it.runIf(posix)("Mira's private chat is told the team's folder is read-only ther
   expect(dump.systemPrompt).toContain(`${join("workspaces", bot.id)}) holds Acme's notes and skills: in this conversation they are read-only`);
   const main = await turn(owner, bot.mainThreadId, "Hello, team.");
   expect(main.dump.systemPrompt ?? "").not.toContain("in this conversation they are read-only");
+  // A conversation folder of its own, so in a box its turns have the bot's folder (read-write, as the team's).
+  expect(realpathSync(main.dump.cwd)).toBe(realpathSync(join(dataDir, "task-workspaces", bot.id, bot.mainThreadId)));
 }, hostTimeout(120_000));
 
 it.runIf(boxed)("a shell in Mira's private chat reads the team's notes but cannot write them, nor read Ben's conversation", async () => {

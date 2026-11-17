@@ -2,7 +2,7 @@
 // its scope with the box, a spawn inside a conversation (engine homes) asks the box for its plan, and the plan says what
 // that box may write. bubblewrap itself is a stand-in here that records and runs nothing boxed; the plan is what a real
 // one is given (team-box-scope.linux.test.ts runs it in a real box where one can run).
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -101,8 +101,10 @@ describe.skipIf(process.platform === "win32")("a Team Cloud turn's box, through 
     const host = team(botBox);
     const own = at(`workspaces/${BOT}`);
     mkdirSync(own, { recursive: true });
+    rmSync(join(own, "skills"), { recursive: true, force: true });
     botBox.lend(BOT, "room-1", host.layerDirs(BOT, "room-1"));
     const plan = planIn("room-1", own);
+    expect(existsSync(join(own, "skills")), "made first, so the read-only bind has something to cover").toBe(true);
     expect(visibleInBox(plan, join(own, "report.md"))).toBe("rw");
     expect(visibleInBox(plan, join(own, "MEMORY.md"))).toBe("ro");
     expect(visibleInBox(plan, join(own, "skills", "x", "SKILL.md"))).toBe("ro");

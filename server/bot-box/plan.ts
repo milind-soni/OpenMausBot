@@ -314,7 +314,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
 
 /** The bot's own folder (workspaces/<bot>) a turn has: its bot's, or the one its working folder is (a room's turn), never
  * a memory layer (a sibling folder, the turn's own). */
-function teamFolderOf(botId: string | null, cwd: string | null, dataDir: string): string | null {
+export function teamFolderOf(botId: string | null, cwd: string | null, dataDir: string): string | null {
   if (botId && ID.test(botId) && !isLayerId(botId)) return join(dataDir, "workspaces", botId);
   if (!cwd) return null;
   const [owner, ...rest] = relative(join(dataDir, "workspaces"), cwd).split(sep);
