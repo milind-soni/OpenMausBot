@@ -259,9 +259,16 @@ const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ ty
 })();
 const hooksAfterTurnMs = Number(process.env.FAKE_CLAUDE_HOOKS_AFTER_TURN_MS);
 const hooksAfterTurn: Array<() => unknown> = [];
+let hookBatchesWaiting = 0;
 const runHooksAfterTurn = () => {
   const due = hooksAfterTurn.splice(0);
-  if (due.length) setTimeout(() => { for (const run of due) run(); }, hooksAfterTurnMs);
+  if (!due.length) return;
+  hookBatchesWaiting += 1;
+  setTimeout(() => {
+    for (const run of due) run();
+    hookBatchesWaiting -= 1;
+    finishIfDone();
+  }, hooksAfterTurnMs);
 };
 function runHooks(event: FakeHookEvent, payload: Record<string, unknown>): string {
   let stdout = "";
@@ -643,6 +650,7 @@ const startLateTurn = (): boolean => {
 const finishIfDone = () => {
   if (turnRunning) return;
   if (startLateTurn()) return;
+  if (hookBatchesWaiting > 0) return;
   if (stdinEnded) process.exit(0);
   if (process.env.FAKE_CLAUDE_EXIT_AFTER_TURN === "1") process.stdout.write("", () => process.exit(0));
   const gone = process.env.FAKE_CLAUDE_GONE_AFTER_TURN;
@@ -1309,6 +1317,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
       out({ type: "assistant", message: { content: [{ type: "text", text: `reply to: ${promptText(prompt)}${tail}` }] } });
       if (!lateContinuation && finishGate && readFileSync(finishGate, "utf8").trim() === "fail") {
         out({ type: "result", is_error: true, stop_reason: "error", result: "fixture turn failed" });
+        runHooksAfterTurn();
         turnRunning = false;
         finishIfDone();
         return;

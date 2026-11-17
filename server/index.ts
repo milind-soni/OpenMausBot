@@ -1759,6 +1759,7 @@ function revokeAllInternalCapabilities(): void {
 
 function bindInternalCapabilityToProviderTurn(threadId: string, generation: string, turnId?: string): void {
   if (turnId && !internalGenerationByProviderTurn.bind(threadId, generation, turnId)) {
+    rememberLateToolResults(threadId, generation, turnId);
     revokeInternalCapabilityGeneration(threadId, generation);
   }
 }
@@ -1767,10 +1768,14 @@ function revokeInternalCapabilityForProviderEvent(event: RuntimeEvent): void {
   if (!event.turnId) return;
   const owner = internalGenerationByProviderTurn.complete(event.threadId, event.turnId);
   if (!owner) return;
-  const hooks = [...internalCapabilities].find(([, capability]) => capability.kind === "hooks" && capability.threadId === owner.threadId && capability.generation === owner.generation);
-  if (hooks) lateToolResults.turnEnded({ threadId: owner.threadId, botId: hooks[1].botId, turnId: event.turnId, token: hooks[0], toolUseIds: new Set(store.activePath(owner.threadId)
-    .flatMap((m) => m.kind === "activity" && m.turnId === event.turnId && m.tool?.itemId && m.tool.fullResult === undefined ? [m.tool.itemId] : [])) });
+  rememberLateToolResults(owner.threadId, owner.generation, event.turnId);
   revokeInternalCapabilityGeneration(owner.threadId, owner.generation);
+}
+
+function rememberLateToolResults(threadId: string, generation: string, turnId: string): void {
+  const hooks = [...internalCapabilities].find(([, capability]) => capability.kind === "hooks" && capability.threadId === threadId && capability.generation === generation);
+  if (hooks) lateToolResults.turnEnded({ threadId, botId: hooks[1].botId, turnId, token: hooks[0], toolUseIds: new Set(store.activePath(threadId)
+    .flatMap((m) => m.kind === "activity" && m.turnId === turnId && m.tool?.itemId && m.tool.fullResult === undefined ? [m.tool.itemId] : [])) });
 }
 
 /** Constant-time comparisons, so the check does not leak a matching prefix length. */
@@ -5419,7 +5424,7 @@ const TOOL_RESULTS_DIR = join(DATA_DIR, "tool-results");
 const TOOL_RESULT_SPILL_MAX = 512 * 1024;
 
 const DIGESTS_AFTER_COMPACTION = 2;
-function ingestEngineHook(capability: Pick<InternalCapability, "botId" | "threadId">, body: unknown, turnEnded = false): { ok: boolean; ignored?: string; context?: string; hookSpecificOutput?: unknown } {
+function ingestEngineHook(capability: Pick<InternalCapability, "botId" | "threadId">, body: unknown, bearer: string | string[] | undefined, turnEnded = false): { ok: boolean; ignored?: string; context?: string; hookSpecificOutput?: unknown } {
   const event = body && typeof body === "object" ? (body as { event?: unknown; payload?: unknown }) : {};
   const name = typeof event.event === "string" ? event.event : "";
   const payload = event.payload && typeof event.payload === "object" ? (event.payload as Record<string, unknown>) : {};
@@ -5450,7 +5455,8 @@ function ingestEngineHook(capability: Pick<InternalCapability, "botId" | "thread
   const text = typeof response === "string" ? response : JSON.stringify(response ?? null, null, 2);
   const rows = store.activePath(threadId), toolRow = (turn: string | null | undefined) => turn ? rows.findLast((m) => m.kind === "activity" && m.turnId === turn && m.tool?.itemId === toolUseId) : undefined;
   let turnId: string | null | undefined = turnEnded ? undefined : liveTurnByThread.get(threadId), row = toolRow(turnId);
-  if (!row) row = toolRow(turnId = lateToolResults.claim(threadId, capability.botId, toolUseId));
+  const late = row ? null : lateToolResults.turnFor(bearer, threadId, capability.botId, toolUseId);
+  if (late) row = toolRow(turnId = late);
   if (!turnId || !row?.tool) return { ok: true, ignored: "tool not observed in this turn" };
   const key = `${threadId}:${turnId}:${toolUseId}`;
   if (!commandReceipt("hook.ingest", key)) {
@@ -5459,6 +5465,7 @@ function ingestEngineHook(capability: Pick<InternalCapability, "botId" | "thread
     const fullResult = spillToolResult(dir, key, redacted, TOOL_RESULT_SPILL_MAX);
     store.patchMessage(threadId, row.id, { tool: { ...row.tool, fullResult } }, { kind: "hook.ingest", key });
   }
+  if (late) lateToolResults.saved(threadId, late, toolUseId);
   return { ok: true };
 }
 
@@ -12837,7 +12844,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const internalCapability = authorizedInternalCapability(req.headers.authorization);
       if (!internalCapability) {
         const ended = method === "POST" && path === "/api/internal/hook" ? lateToolResults.holder(req.headers.authorization) : null;
-        return ended ? json(res, 200, ingestEngineHook(ended, await readBody(req), true)) : json(res, 401, { error: "unauthorized" });
+        return ended ? json(res, 200, ingestEngineHook(ended, await readBody(req), req.headers.authorization, true)) : json(res, 401, { error: "unauthorized" });
       }
       const internalSender = store.bot(internalCapability.botId);
       if (!internalSender) {
@@ -12948,8 +12955,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           message: `End this turn now without using the previous computer tools. OpenMausBot will continue the original request on ${option.label} with a fresh tool connection.` });
       }
       if (method === "POST" && path === "/api/internal/hook") {
-        const body = await readInternalBody();
-        return json(res, 200, ingestEngineHook(internalCapability, body));
+        const body = await readBody(req), turnEnded = !internalCapabilityIsActive(internalCapability);
+        if (turnEnded && !lateToolResults.holder(req.headers.authorization)) return json(res, 401, { error: TURN_ENDED_REFUSAL });
+        return json(res, 200, ingestEngineHook(internalCapability, body, req.headers.authorization, turnEnded));
       }
       if (method === "POST" && path === "/api/internal/tool-result") {
         const body = await readInternalBody();
