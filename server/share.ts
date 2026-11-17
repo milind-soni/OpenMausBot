@@ -176,7 +176,7 @@ export function readFolderFromDisk(chosen: string): ShareFolderFiles {
   return files;
 }
 
-function writeFolder(dir: string, files: Record<string, string | Uint8Array>): void {
+export function writeFolder(dir: string, files: Record<string, string | Uint8Array>): void {
   mkdirSync(dir, { recursive: true });
   for (const [path, value] of Object.entries(files)) {
     const target = join(dir, ...path.split("/"));
