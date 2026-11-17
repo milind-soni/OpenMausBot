@@ -63,7 +63,7 @@ a hand edit races the next save.
 | Which model picks between bots, and whose key decides | `decision-model.md` |
 | How a bot chooses a tool | `tool-selection.md` |
 | Work one bot hands to another, and what wakes it | `runtime-contract.md` |
-| Teams, shared departments, escalations, incidents | `team-sharing.md`, `team-cloud.md`, `team-escalations.md`, `team-incidents.md` |
+| Teams, shared departments, incidents | `team-sharing.md`, `team-cloud.md`, `team-incidents.md` |
 | Self-hosting, a VPS, My Cloud | `self-hosting.md`, `deploy-vps.md`, `byo-vps.md`, `cloud-pro.md` |
 | Where a bot's files go, and how to get them out | `files.md`, `bot-box.md` |
 | Browser and computer control | `computer-use-integration.md`, `browser-packaging.md` |

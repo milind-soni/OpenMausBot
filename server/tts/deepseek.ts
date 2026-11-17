@@ -31,7 +31,7 @@ export function listVoices(): Voice[] {
 export const isDeepSeekVoice = (voice: unknown): voice is DeepSeekVoice => DEEPSEEK_VOICES.some((id) => id === voice);
 
 function refusal(status: number, action: "speech" | "transcription"): DeepSeekSpeechError {
-  if (status === 401 || status === 403) return new DeepSeekSpeechError("DeepSeek rejected the API key. Check the DeepSeek key in Settings → API keys.", 409);
+  if (status === 401 || status === 403) return new DeepSeekSpeechError("DeepSeek rejected the API key. Check the DeepSeek key in Settings → AI → Other services.", 409);
   if (status === 402) return new DeepSeekSpeechError("The DeepSeek account has insufficient balance for speech.");
   if (status === 429) return new DeepSeekSpeechError("DeepSeek is rate-limiting speech. Wait a moment and try again.");
   if (status === 400 || status === 413 || status === 422) {
@@ -125,7 +125,7 @@ export function readWav(bytes: Uint8Array): WavInfo | undefined {
 }
 
 export async function synthesize(text: string, voiceId: string, key: string, signal?: AbortSignal): Promise<Audio> {
-  if (!key) throw new DeepSeekSpeechError("Add a DeepSeek API key in Settings → API keys to use DeepSeek voice.", 409);
+  if (!key) throw new DeepSeekSpeechError("Add a DeepSeek API key in Settings → AI → Other services to use DeepSeek voice.", 409);
   if (!isDeepSeekVoice(voiceId)) throw new DeepSeekSpeechError("Choose Stella or Tide as the DeepSeek voice.", 409);
   const spoken = text.trim();
   if (!spoken) throw new DeepSeekSpeechError("There is no text to read aloud.", 400);
@@ -148,7 +148,7 @@ export async function synthesize(text: string, voiceId: string, key: string, sig
 }
 
 export async function transcribe(audio: Uint8Array, key: string, signal?: AbortSignal): Promise<string> {
-  if (!key) throw new DeepSeekSpeechError("Add a DeepSeek API key in Settings → API keys to dictate with DeepSeek.", 409);
+  if (!key) throw new DeepSeekSpeechError("Add a DeepSeek API key in Settings → AI → Other services to dictate with DeepSeek.", 409);
   if (audio.byteLength > ASR_MAX_BYTES) throw new DeepSeekSpeechError("DeepSeek hears at most 8 MiB of audio at once.", 413);
   const wav = readWav(audio);
   if (!wav || wav.format !== 1 || wav.bitsPerSample !== 16) throw new DeepSeekSpeechError("DeepSeek needs a 16-bit PCM WAV recording.", 400);

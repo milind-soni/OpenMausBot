@@ -512,7 +512,9 @@ describe("agents-proxy MCP surface", () => {
         expect(description).toContain("Only a pending result requires ending the turn");
       } else {
         expect(description).toContain("It applies at once, with an Undo where possible: read the result before saying it did.");
-        expect(description).toContain("It never raises another bot's execution permissions.");
+        // A Chief's team setup may set a bot's MCP servers, so it names that instead.
+        if (tool === "propose_team_setup") expect(description).toContain("mcpServers sets an existing bot's MCP servers; no other execution permission changes.");
+        else expect(description).toContain("It never raises another bot's execution permissions.");
       }
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
