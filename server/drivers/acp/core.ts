@@ -20,7 +20,7 @@ import { AcpBrowserAuth, acpBrowserAuthInstanceSurface, type AcpBrowserSignInSpe
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
-import { runAcpOneShot } from "./background-text.ts";
+import { runAcpOneShot } from "./background-text.ts"; import type { OpenCodeBackgroundWork } from "./opencode-background.ts";
 import { acpCapabilities } from "./capabilities.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
@@ -156,7 +156,7 @@ export interface AcpSupport extends AcpDriverHooks {
    * confirms it; an approval change never respawns the process. */
   sessionScopedApproval?: boolean;
   /** False when this engine cannot run memory upkeep's one-shot text call cleanly; oneShotFolder holds a one-shot's folder. */
-  backgroundText?: false; oneShotFolder?(): Promise<string>;
+  backgroundText?: false; oneShotFolder?(): Promise<string>; /** Work the agent goes on with after its turn: ended at Stop and when it wakes a turn between ours. */ backgroundWork?: OpenCodeBackgroundWork;
   /** Mutate the child env in place. `instanceEnvironment` tells a key put there on purpose from one
    *  riding along in the server's own env. */
   transformEnv?(
@@ -406,6 +406,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
       const sessionIdle = sessionIdlePolicy("ACP");
 
+      const backgroundEnds = new Map<string, Promise<void>>(), endBackground = (threadId: string, session: AcpSession) => support.backgroundWork && !backgroundEnds.has(threadId) && session.child.exitCode === null
+        && backgroundEnds.set(threadId, support.backgroundWork.end(session, (m, p, t) => session.host.request(null, m, p, t)).finally(() => backgroundEnds.delete(threadId)));
       const closeSession = (threadId: string, why: string) => {
         const session = sessions.get(threadId);
         if (!session || session.closing) return;
@@ -573,7 +575,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         session.acp.failAll(new Error("turn settled"));
       // Detach before the final events: a listener may start the next turn synchronously.
         session.current = null;
-        active.delete(threadId);
+        active.delete(threadId); if (current.state.stopped) endBackground(threadId, session);
         const end = endTurn(current, ok, stopReason, support.displayName);
         if (end.error) emit({ ...base(threadId, current.turnId), type: "runtime.error", ...end.error });
         emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: end.ok, stopReason: end.stopReason, cost: null });
@@ -814,7 +816,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (current && ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan"].includes(p.update?.sessionUpdate)) {
             current.state.startupActivity = true; if (current.state.promptSent) current.acknowledge();
           }
-          if (!current || !current.state.promptSent) return;
+          if (!current || !current.state.promptSent) return void (!current && support.backgroundWork?.wakes(p.update) && endBackground(threadId, session));
           const u = filterUpdate ? filterUpdate(p.update ?? {}) : p.update ?? {};
           if (!u || (u.sessionUpdate === "agent_message_chunk" && typeof u.content?.text === "string" && current.steering?.swallow(u.content.text))) return;
           const finished = u.status === "completed" || u.status === "failed";
@@ -956,7 +958,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       const sendTurn = async (turn: SendTurnInput, retryOf?: string) => {
         requireRunning();
         if (startupModelRefresh) await startupModelRefresh;
-        requireRunning();
+        await backgroundEnds.get(turn.threadId); requireRunning();
         const parsedScope = parseToolScope(turn.toolScope);
         if (!parsedScope.ok) throw new Error(parsedScope.error);
         turn = { ...turn, toolScope: parsedScope.scope };
@@ -1212,7 +1214,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             let runtimeAcceptsImages = await handshake();
             let init = session.initResult;
 
-            const cursor = !turn.sessionReset && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+            await backgroundEnds.get(threadId); const cursor = turn.sessionReset ? null : support.backgroundWork ? support.backgroundWork.resumeCursor(turn.resumeCursor, session.sessionId) : typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             let promptTurn = turn;
             let rebuiltFromReplay = false;
             for (;;) {

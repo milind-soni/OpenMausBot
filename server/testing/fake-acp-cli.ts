@@ -26,6 +26,11 @@
 //       grok 1.0.25's initialize, or FAKE_ACP_MCP_HANDSHAKE; FAKE_ACP_MCP_SCHEMA_BYTES=1 adds each schema's length)
 //     | lend-question (list_shared_computers around a question)
 //     | list-peers (list_bots through the agents MCP; keeps the first agents server it is offered, like Hermes)
+//     | background-wake (OpenCode 2.3.1+: the first prompt's shell call moves to the background and the prompt ends, or with
+//       STOP_ME in it waits for session/cancel; FAKE_ACP_WAKE_MS (300) later that shell's finish wakes a turn no prompt
+//       asked for, one step every FAKE_ACP_STEP_MS (50), each appended to FAKE_ACP_WOKEN_FILE, until session/close or
+//       session/delete interrupts it; only session/delete ends the job. session/fork answers <id>-fork; a closed or
+//       deleted session refuses session/prompt until loaded. Advertises close, delete and, unless FAKE_ACP_NO_FORK=1, fork)
 //   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list reports these comma-separated native servers after the session's accepted ones
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
@@ -293,6 +298,7 @@ const dumpEnv = Object.fromEntries(
     "OPENCODE_API_KEY",
     "OPENCODE_PERMISSION",
     "OPENCODE_DISABLE_AUTOUPDATE",
+    "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -502,6 +508,14 @@ let onAskQuestionAnswered: (() => void) | null = null;
 
 let hangingPromptId: unknown = null;
 let streamingPromptId: unknown = null;
+let backgroundWakePlayed = false;
+const backgroundJobs = new Map<string, { job: ReturnType<typeof setTimeout> | null; step: ReturnType<typeof setInterval> | null }>();
+const detachedSessions = new Set<string>();
+const endWokenStep = (sessionId: unknown) => {
+  const job = backgroundJobs.get(String(sessionId));
+  if (job?.step) clearInterval(job.step);
+  if (job) job.step = null;
+};
 let hangKeepAlive: ReturnType<typeof setInterval> | null = null;
 
 type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
@@ -887,7 +901,7 @@ function handle(msg: any) {
       const acceptsImages = process.env.FAKE_ACP_IMAGE_CAPABILITY === "1";
       const mcpTransports = (process.env.FAKE_ACP_MCP_TRANSPORTS ?? "").split(",").map((entry) => entry.trim()).filter(Boolean);
       const closesSessions = ["1", "error"].includes(process.env.FAKE_ACP_SESSION_CLOSE ?? "");
-      const deletesSessions = process.env.FAKE_ACP_SESSION_DELETE === "1";
+      const deletesSessions = process.env.FAKE_ACP_SESSION_DELETE === "1" || mode === "background-wake";
       if (["1", "stuck"].includes(process.env.FAKE_ACP_CURSOR_FAST ?? "") && msg.params?.clientCapabilities?._meta?.parameterizedModelPicker === true) {
         currentFast = "true";
       }
@@ -902,7 +916,8 @@ function handle(msg: any) {
               ...(mode === "devin-steer" && process.env.FAKE_ACP_STEERING !== "off" ? { _meta: { "cognition.ai/midTurnPrompts": true } } : {}),
               ...(agentName ? { loadSession: true, sessionCapabilities: { resume: true }, auth: { logout: true } } : {}),
               ...(closesSessions || deletesSessions
-                ? { sessionCapabilities: { ...(closesSessions ? { close: {} } : {}), ...(deletesSessions ? { delete: {} } : {}) } }
+                ? { sessionCapabilities: { ...(closesSessions ? { close: {} } : {}), ...(deletesSessions ? { delete: {} } : {}),
+                  ...(mode === "background-wake" ? { close: {}, ...(process.env.FAKE_ACP_NO_FORK === "1" ? {} : { fork: {} }) } : {}) } }
                 : {}),
               ...(acceptsImages ? { promptCapabilities: { image: true } } : {}),
               ...(mcpTransports.length ? { mcpCapabilities: { http: mcpTransports.includes("http"), sse: mcpTransports.includes("sse") } } : {}),
@@ -964,12 +979,23 @@ function handle(msg: any) {
       break;
     }
     case "session/close":
+      endWokenStep(msg.params?.sessionId);
+      if (mode === "background-wake") detachedSessions.add(String(msg.params?.sessionId));
       if (process.env.FAKE_ACP_SESSION_CLOSE === "error") out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "close failed" } });
       else if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
       else result(msg.id, {});
       break;
-    case "session/delete":
+    case "session/delete": {
+      endWokenStep(msg.params?.sessionId);
+      const job = backgroundJobs.get(String(msg.params?.sessionId))?.job;
+      if (job) clearTimeout(job);
+      backgroundJobs.delete(String(msg.params?.sessionId));
+      if (mode === "background-wake") detachedSessions.add(String(msg.params?.sessionId));
       result(msg.id, {});
+      break;
+    }
+    case "session/fork":
+      result(msg.id, { sessionId: `${msg.params?.sessionId}-fork` });
       break;
     case "session/load": {
       if (process.env.FAKE_ACP_LOAD_ERROR) {
@@ -1002,6 +1028,7 @@ function handle(msg: any) {
       const opts = configOptions();
       const mdls = sessionModels();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
+      detachedSessions.delete(String(msg.params?.sessionId));
       resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
       if (mode === "hermes-steer") advertiseHermesCommands(msg.params.sessionId);
       break;
@@ -1291,6 +1318,44 @@ function handle(msg: any) {
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", title: "run", rawInput: { command: "echo done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
+        complete();
+        return;
+      }
+      if (mode === "background-wake") {
+        // OpenCode 2.3.1+: a shell command still running at its timeout moves to the background, the prompt ends, and the
+        // command's finish later wakes a turn OpenCode streams as session/updates no session/prompt asked for.
+        const sessionId = String(msg.params?.sessionId);
+        if (detachedSessions.has(sessionId)) {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params", data: { sessionId } } });
+          return;
+        }
+        const update = (u: Record<string, unknown>) => out({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: u } });
+        if (backgroundWakePlayed) {
+          update({ sessionUpdate: "agent_message_chunk", content: { text: "second answer" } });
+          complete();
+          return;
+        }
+        backgroundWakePlayed = true;
+        update({ sessionUpdate: "tool_call", toolCallId: "tc-build", status: "in_progress", kind: "execute", title: "make", rawInput: { command: "make" } });
+        update({ sessionUpdate: "tool_call_update", toolCallId: "tc-build", status: "completed", rawOutput: { output: "Command moved to the background (shell ID: sh_1)." } });
+        update({ sessionUpdate: "agent_message_chunk", content: { text: "build started" } });
+        const entry: { job: ReturnType<typeof setTimeout> | null; step: ReturnType<typeof setInterval> | null } = { job: null, step: null };
+        backgroundJobs.set(sessionId, entry);
+        entry.job = setTimeout(() => {
+          entry.job = null;
+          let step = 0;
+          entry.step = setInterval(() => {
+            step += 1;
+            update({ sessionUpdate: "session_info_update", _meta: { "opencode/retry": null } });
+            update({ sessionUpdate: "agent_message_chunk", content: { text: `WOKEN step ${step}` } });
+            update({ sessionUpdate: "tool_call", toolCallId: `tc-woken-${step}`, status: "completed", kind: "execute", title: "make test", rawOutput: { output: "WOKEN ok" } });
+            if (process.env.FAKE_ACP_WOKEN_FILE) appendFileSync(process.env.FAKE_ACP_WOKEN_FILE, `${sessionId} ${step}\n`);
+          }, Number(process.env.FAKE_ACP_STEP_MS ?? 50));
+        }, Number(process.env.FAKE_ACP_WAKE_MS ?? 300));
+        if (JSON.stringify(msg.params?.prompt ?? []).includes("STOP_ME")) {
+          hangingPromptId = msg.id;
+          return;
+        }
         complete();
         return;
       }
