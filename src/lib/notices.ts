@@ -2,7 +2,7 @@ import { hintSeen, hintSeenPatch, type OnboardingStatus } from "@/lib/onboarding
 
 /** "MausBot is better with your team": every person sees it once, on every surface but a branded build or an organization's
  * desktop, ahead of every other notice. On a Team Cloud its record is each person's (TEAM_PERSONAL_HINTS). */
-export const TEAMS_NOTICE = "teams-2026-11";
+export const TEAMS_NOTICE = "teams-2026-11b";
 /** The What's new popup's campaign: each person sees it once. A new id shows it once more. */
 export const WHATS_NEW_NOTICE = "whats-new-2026-11";
 export const UPDATES_CONSENT_NOTICE = "updates-consent";

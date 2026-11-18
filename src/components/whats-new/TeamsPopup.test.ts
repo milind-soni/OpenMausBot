@@ -9,6 +9,8 @@ import type { TeamsAction } from "@/lib/teams-whats-new";
 
 const avatars = vi.hoisted(() => [] as Array<{ animated?: boolean }>);
 vi.mock("@/components/Avatar", () => ({ MausAvatar: (props: { animated?: boolean }) => { avatars.push(props); return null; } }));
+const opened = vi.hoisted(() => [] as string[]);
+vi.mock("@/lib/app-links", async (original) => ({ ...(await original<typeof import("@/lib/app-links")>()), openExternalLink: async (url: string) => { opened.push(url); } }));
 const { TeamsPopup, TEAMS_POPUP } = await import("./TeamsPopup");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,7 +27,7 @@ const key = async (name: string, shiftKey = false) => {
 const buttons = (popup: HTMLElement) => [...popup.querySelectorAll("button")].map(button => button.textContent || button.getAttribute("aria-label"));
 
 beforeEach(() => {
-  setLocale("en"); avatars.length = 0; vi.clearAllMocks();
+  setLocale("en"); avatars.length = 0; opened.length = 0; vi.clearAllMocks();
   delete document.documentElement.dataset.reducedMotion;
   host = document.createElement("div"); document.body.append(host);
 });
@@ -37,7 +39,7 @@ describe("the Teams popup", () => {
     expect(popup.getAttribute("role")).toBe("dialog");
     expect(popup.textContent).toContain("MausBot is better with your team");
     expect(popup.textContent).toContain("$40 a month for 2 people, $20 for each extra person.");
-    expect(buttons(popup)).toEqual(["Start a team", "Not now", "Close"]);
+    expect(buttons(popup)).toEqual(["Start a team", "See Team plans", "Not now", "Close"]);
     expect(document.activeElement?.textContent, "focus starts at its main button").toBe("Start a team");
     await act(async () => { (popup.querySelector("[data-primary] button") as HTMLElement).click(); });
     expect(onStart).toHaveBeenCalled();
@@ -46,10 +48,21 @@ describe("the Teams popup", () => {
     await act(async () => root?.unmount()); root = null;
 
     popup = await show({ kind: "got-it" });
-    expect(buttons(popup)).toEqual(["Got it", "Close"]);
+    expect(buttons(popup)).toEqual(["Got it", "See Team plans", "Close"]);
     await act(async () => root?.unmount()); root = null;
     popup = await show({ kind: "invite", url: "https://admin.example/cloud/team/t/people?do=invite" });
-    expect(buttons(popup)).toEqual(["Invite your team", "Not now", "Close"]);
+    expect(buttons(popup)).toEqual(["Invite your team", "See Team plans", "Not now", "Close"]);
+  });
+
+  it("links every audience to the website's Team plans", async () => {
+    for (const action of [{ kind: "start", inApp: false, url: "https://cloud.example/pro/buy" }, { kind: "got-it" }, { kind: "invite", url: "https://admin.example/people" }] as TeamsAction[]) {
+      const popup = await show(action);
+      const link = [...popup.querySelectorAll("button")].find(button => button.textContent === "See Team plans");
+      await act(async () => { link!.click(); });
+      expect(opened.at(-1), action.kind).toBe("https://www.openmausbot.com/pricing#teams");
+      expect(onStep, action.kind).toHaveBeenLastCalledWith("see_team_plans");
+      await act(async () => root?.unmount()); root = null;
+    }
   });
 
   it("Escape closes it, and Tab keeps focus inside", async () => {
