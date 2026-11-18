@@ -4,6 +4,8 @@
 
 export interface RankableAi {
   driverKind: string;
+  /** A custom endpoint someone configured is a bring-your-own engine, not the provider's own plan. */
+  access?: string;
   snapshot?: { freeFallback?: boolean };
 }
 
@@ -27,7 +29,10 @@ export function freeFallback(instance: RankableAi): boolean {
 }
 
 function tier(instance: RankableAi): number {
-  return freeFallback(instance) ? FREE_FALLBACK : TIERS[instance.driverKind] ?? OTHER;
+  if (freeFallback(instance)) return FREE_FALLBACK;
+  // Same driver, but not the provider's own plan: a new bot still starts on the plan someone already has.
+  if (instance.access === "custom") return OTHER;
+  return TIERS[instance.driverKind] ?? OTHER;
 }
 
 /** A new list, best first; AIs of one kind keep the order they came in. */

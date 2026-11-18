@@ -23,9 +23,9 @@ function runner(overrides: Partial<Record<keyof Home, unknown>> = {}) {
   const run = jobRunner({
     home,
     hostHealth: async () => ({ arch: "x86_64" }) as HostHealth,
-    identity: () => ({ version: "1.0.0", protocol: 1, image: null }),
-    admin: () => ({ origin: "https://cloud.example.test", token: "t" }),
-    selfUpdate: async (job) => ({ id: job.id, ok: true, result: { connector: { version: "1.0.0", protocol: 1, image: job.args.image } } }),
+    identity: () => ({ version: "1.0.0", protocol: 2, image: null }),
+    admin: () => ({ origin: "https://cloud.example.test", authorization: (jobId) => `Box token-for-${jobId}` }),
+    selfUpdate: async (job) => ({ id: job.id, ok: true, result: { connector: { version: "1.0.0", protocol: 2, image: job.args.image } } }),
   });
   return { run, calls, pending };
 }
@@ -34,7 +34,7 @@ describe("the jobs the connector runs", () => {
   it("answers status with a fresh health read, the copies and the connector, and host-health with the host", async () => {
     const { run, calls } = runner();
     expect(await run({ id: "s", type: "status", args: {} })).toEqual({
-      id: "s", ok: true, result: { home: { state: "running", image: HOME, health: null }, connector: { version: "1.0.0", protocol: 1, image: null }, backups: [], snapshot: null },
+      id: "s", ok: true, result: { home: { state: "running", image: HOME, health: null }, connector: { version: "1.0.0", protocol: 2, image: null }, backups: [], snapshot: null },
     });
     expect(calls).toEqual(["refreshHealth"]);
     expect(await run({ id: "h", type: "host-health", args: {} })).toEqual({ id: "h", ok: true, result: { host: { arch: "x86_64" } } });

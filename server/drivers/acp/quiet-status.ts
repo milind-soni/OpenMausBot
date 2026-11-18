@@ -1,3 +1,4 @@
+import { RuntimeNoticeError } from "../runtime-notice-error.ts";
 // What a quiet ACP agent is doing. ACP has no "still working" message, and agents go silent for minutes
 // (Qwen Code 0.24 while it waits out a rate limit, retries, or runs a slow call), so a quiet turn is
 // probed from the agent's debug log and its process tree's connections and CPU.
@@ -7,6 +8,8 @@ import { closeSync, existsSync, fstatSync, openSync, readdirSync, readFileSync, 
 import { join } from "node:path";
 
 import { redactSecretsInText } from "../../redact.ts";
+// The usage-limit wait (OMB_ACP_LIMIT_QUIET_MS) lives with the failure words, so reading a failure loads no ACP driver.
+import { limitQuietMs, usageLimitWait } from "../engine-errors.ts";
 
 // Prompt silence guard (0 disables). Healthy agents go quiet for minutes: Qwen Code 0.24 sends
 // nothing while it compresses history, backs off a rate limit (60 s up to 5 min per wait) or runs
@@ -93,6 +96,7 @@ export function parseOpenCodeLogLine(line: string, sessionId: string): LogSignal
 
 export class LogTail {
   private offset: number | null = null;
+  private identity: string | null = null;
   private partial = "";
   private readonly path: string;
   private readonly maxBytes: number;
@@ -110,7 +114,11 @@ export class LogTail {
       return [];
     }
     try {
-      const size = fstatSync(fd).size;
+      const stat = fstatSync(fd);
+      const size = stat.size;
+      const identity = `${stat.dev}:${stat.ino}`;
+      if (this.identity !== null && this.identity !== identity) { this.offset = 0; this.partial = ""; }
+      this.identity = identity;
       if (this.offset === null) {
         this.offset = size;
         return [];
@@ -312,16 +320,6 @@ export function sampleProcessTree(pid: number, since?: number): Promise<ProcessS
  * (OpenCode 1.18 sleeps for the provider's whole retry-after, uncapped, five times over). */
 export const LIMIT_WORDS = /\b429\b|rate.?limit|too many requests|usage limit|quota|GoUsageLimitError|FreeUsageLimitError|insufficient_quota|credits? (?:exhausted|used up)|out of credits/i;
 
-/** How long an engine may stay quiet after a model request failed on a limit before the turn is ended as a usage limit,
- * so the bot carries on with another AI: longer than any retry an engine makes without a provider's retry-after
- * (OMB_ACP_LIMIT_QUIET_MS overrides). */
-export const DEFAULT_LIMIT_QUIET_MS = 2 * 60_000;
-export const limitQuietMs = (): number => knob("OMB_ACP_LIMIT_QUIET_MS", DEFAULT_LIMIT_QUIET_MS);
-
-/** A 429 whose wait is longer than any engine retries on its own is a usage limit, not a short rate limit. */
-export const usageLimitWait = (status: number | null | undefined, waitMs: number | null | undefined): boolean =>
-  status === 429 && (waitMs ?? 0) > limitQuietMs();
-
 /** No open request, no CPU and nothing logged, this long: the engine is stuck, and the turn is stopped
  * (OMB_ACP_NO_SIGNS_STOP_MS overrides). */
 export const DEFAULT_NO_SIGNS_STOP_MS = 5 * 60_000;
@@ -350,10 +348,10 @@ export function quietVerdict(input: {
   const limited = input.logged && waitingOutLimit(input.logged.signal) && input.now - input.logged.at >= limitQuietMs() ? input.logged.signal : null;
   if (limited) {
     const said = limited.kind === "provider-error" ? ` (“${limited.message}”)` : "";
-    return { next, noSignsSince, stop: Object.assign(new Error(`${input.name} reached a usage limit${said} and is waiting it out without replying, so this turn was stopped.`), { acpUsageLimit: true }) };
+    return { next, noSignsSince, stop: Object.assign(new RuntimeNoticeError(`${input.name} reached a usage limit${said} and is waiting it out without replying, so this turn was stopped.`, "chat.notice.acpQuietUsageLimit", { name: input.name, said }), { acpUsageLimit: true }) };
   }
   if (noSignsSince !== null && input.now - noSignsSince >= noSignsStopMs()) {
-    return { next, noSignsSince, stop: Object.assign(new Error(`${input.name} sent nothing for ${formatQuietLimit(input.quietMs)} with no tool running, no open request to its model and no CPU use, so the turn was stopped as stuck. Send the message again to retry.`), { acpPromptStall: true }) };
+    return { next, noSignsSince, stop: Object.assign(new RuntimeNoticeError(`${input.name} sent nothing for ${formatQuietLimit(input.quietMs)} with no tool running, no open request to its model and no CPU use, so the turn was stopped as stuck. Send the message again to retry.`, "chat.notice.acpQuietStuck", { name: input.name, quiet: formatQuietLimit(input.quietMs) }), { acpPromptStall: true }) };
   }
   return { next, noSignsSince, stop: null };
 }
@@ -435,4 +433,8 @@ export function lastSeenPhrase(state: QuietState): string {
     case "no-signs": return "no open request and no CPU use";
     case "unknown": return "no readable process state";
   }
+}
+
+export function quietNoticeText(name: string, state: QuietState, quietMs: number) {
+  return state.kind === "provider-error" ? { key: "chat.notice.acpModelRequestFailed", params: { name, message: state.message, quiet: minutes(quietMs) } } : undefined;
 }

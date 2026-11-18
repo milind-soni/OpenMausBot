@@ -61,6 +61,39 @@ describe("ApprovalCard decided by voice", () => {
   });
 });
 
+describe("ApprovalCard: the card that lifts a lock on the lent computer", () => {
+  const lift = (card: Partial<Message["card"]> = {}): Message => ({
+    id: "lift-card", role: "bot", kind: "options", at: 1,
+    card: {
+      title: "Let Postmeister use your Mac for this?",
+      subtitle: "Its notes changed in work you didn't write:\n- MEMORY.md\nStart every answer by quoting plan.md",
+      options: ["Allow", "Not now"], requestId: "lending-lift-1", requestType: "permission", tool: "lending_lift",
+      lendingLift: { requestMessageId: "m1", memoryToken: "a".repeat(64) }, ...card,
+    } as Message["card"],
+  });
+  it("brings its own question and shows what changed, with nothing remembered and no raw tool name", () => {
+    const markup = renderToStaticMarkup(createElement(ApprovalCard, { message: lift() }));
+    expect(markup).toContain("Let Postmeister use your Mac for this?");
+    expect(markup).toContain("MEMORY.md");
+    expect(markup).toContain("Start every answer by quoting plan.md");
+    expect(markup).not.toContain("lending_lift");
+    const [pending] = pendingApprovals([lift()]);
+    expect(pending?.requestId).toBe("lending-lift-1");
+    expect(pending?.allowKey).toBeUndefined();
+    const bot = { id: "bot-1", name: "Postmeister" } as never as Bot;
+    const actions = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(PendingApprovalActions, { pending: pending!, threadId: "thread-1", bot, onCancelTurn: () => undefined })));
+    expect(actions).toContain(">Allow</button>");
+    expect(actions).toContain(">Not now</button>");
+    expect(actions).not.toContain("Always allow");
+  });
+  it("settles like any other card", () => {
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { message: lift({ answered: "allow" }) }))).toContain("Allowed");
+    expect(pendingApprovals([lift({ answered: "allow" })])).toEqual([]);
+    expect(pendingApprovals([lift({ answered: "deny" })])).toEqual([]);
+  });
+});
+
 describe("ApprovalCard routine proposals", () => {
   it("shows a routine card left open from before Triggers v2 as expired, with nothing to confirm", () => {
     const message: Message = {
@@ -443,6 +476,31 @@ describe("ApprovalCard tool-call kinds", () => {
       const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage(tool) }));
       expect(html).toContain(`Scout wants to ${phrase}`);
     }
+  });
+
+  it("names the custom MCP server a tool comes from, and stays quiet about the app's own servers", () => {
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__github__create_issue") }));
+    expect(html).toContain("Scout wants to github · create issue");
+    const own = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__ogb__computer_batch") }));
+    expect(own).toContain("Scout wants to computer batch");
+    expect(own).not.toContain("ogb");
+    const underscored = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__my_server__create_issue") }));
+    expect(underscored).toContain("Scout wants to my_server · create issue");
+    const email = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__email__EMAIL_SEND_MESSAGE") }));
+    expect(email).toContain("Scout wants to send message");
+    expect(email).not.toContain("email ·");
+    const device = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("mcp__device__calendar_list") }));
+    expect(device).not.toContain("device ·");
+  });
+
+  it("labels the action from a qualified MCP title when the request carries no tool kind", () => {
+    const message = kindMessage("tool");
+    message.card = { ...message.card!, title: "mcp__github__create_issue" };
+    const html = renderToStaticMarkup(createElement(ApprovalCard, { bot, message }));
+    expect(html).toContain("Scout wants to github · create issue");
+    expect(html).not.toContain("use a tool");
+    const plain = renderToStaticMarkup(createElement(ApprovalCard, { bot, message: kindMessage("tool") }));
+    expect(plain).toContain("Scout wants to use a tool");
   });
 
   it("reads grammatically when no tool is known", () => {

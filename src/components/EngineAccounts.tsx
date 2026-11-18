@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, Loader2, MoreHorizontal, Plus } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { engineDisplayName } from "@/lib/engine-name";
 import { cn } from "@/lib/cn";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -35,11 +36,14 @@ const COPY: Record<AccountGroup, Record<"title" | "add" | "removeBody", LocaleKe
   chatgpt: { title: "accounts.chatgpt", add: "accounts.addChatgpt", removeBody: "accounts.removeBodyChatgpt" },
 };
 
-/** What an account's menu offers. Only accounts added here can be removed; each provider's first account stays. */
-export function accountActions(group: AccountGroup, instance: InstanceInfo): { signOut: boolean; remove: boolean } {
+/** What an account's menu offers. Only accounts added here can be removed; each provider's first account stays, and
+ * ChatGPT's built-in rows (Codex, ChatGPT plan) can be hidden instead. */
+export function accountActions(group: AccountGroup, instance: InstanceInfo): { signOut: boolean; remove: boolean; hide: boolean } {
+  const remove = group === "claude" ? instance.instanceId !== "claude" && instance.claudeAccount?.isDefault !== true : instance.instanceId.startsWith("chatgpt-");
   return {
     signOut: accountState(instance) === "signedIn" && instance.authentication?.signOut === true && instance.snapshot.account?.method !== "api-key",
-    remove: group === "claude" ? instance.instanceId !== "claude" && instance.claudeAccount?.isDefault !== true : instance.instanceId.startsWith("chatgpt-"),
+    remove,
+    hide: group === "chatgpt" && !remove,
   };
 }
 
@@ -71,8 +75,8 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const { signOut: canSignOut, remove: canRemove } = accountActions(group, instance);
-  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length;
+  const { signOut: canSignOut, remove: canRemove, hide: canHide } = accountActions(group, instance);
+  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId || bot.fallback?.some((backup) => backup.instanceId === instance.instanceId)).length;
 
   useEffect(() => {
     if (!open) return;
@@ -88,13 +92,15 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
     };
   }, [open]);
 
-  const run = async (action: "signOut" | "remove") => {
+  const run = async (action: "signOut" | "remove" | "hide") => {
     setConfirm(null);
     setBusy(true);
     setError(null);
     try {
       const path = `/api/instances/${encodeURIComponent(instance.instanceId)}${action === "signOut" ? "/auth/sign-out" : ""}`;
-      const { instances } = await api(path, action === "signOut" ? { method: "POST" } : { method: "DELETE" });
+      // Hide leaves the account out of every model list until Unhide (Settings → AI → More providers).
+      const init = action === "signOut" ? { method: "POST" } : action === "remove" ? { method: "DELETE" } : { method: "PATCH", body: JSON.stringify({ hidden: true }) };
+      const { instances } = await api(path, init);
       // The response is the confirmed state: a second request could fail and leave a stale row.
       if (Array.isArray(instances)) dispatch({ type: "instances", instances });
       else await refreshInstances().catch(() => {});
@@ -114,7 +120,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
         {t("accounts.remove")}
       </button>}
       <button type="button" onClick={() => setOpen((value) => !value)} disabled={busy} aria-haspopup="menu" aria-expanded={open}
-        aria-label={t("accounts.menu", { name: instance.displayName })}
+        aria-label={t("accounts.menu", { name: engineDisplayName(instance) })}
         className="flex size-8 items-center justify-center rounded-lg text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50">
         {busy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={16} />}
       </button>
@@ -122,13 +128,14 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
         <div role="menu" className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
           <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); onRename(); }}>{t("accounts.rename")}</button>
           {canSignOut && <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); setConfirm("signOut"); }}>{t("accounts.signOut")}</button>}
-          {canRemove && usedBy > 0 && <p className="px-3 pb-1 pt-0.5 text-[11px] leading-snug text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
+          {canHide && <button type="button" role="menuitem" disabled={usedBy > 0} title={t("engines.hideHint")} className={cn(item, "text-ink")} onClick={() => { setOpen(false); void run("hide"); }}>{t("engines.hide")}</button>}
+          {(canRemove || canHide) && usedBy > 0 && <p className="px-3 pb-1 pt-0.5 text-[11px] leading-snug text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
         </div>
       )}
       {error && <p role="alert" className="absolute right-0 top-full z-30 mt-1 w-[260px] rounded-lg bg-card p-2 text-[12px] text-danger shadow-lg">{error}</p>}
       <ConfirmDialog
         open={confirm === "signOut"}
-        title={t("accounts.signOutTitle", { name: instance.displayName })}
+        title={t("accounts.signOutTitle", { name: engineDisplayName(instance) })}
         body={t("accounts.signOutBody")}
         confirmLabel={t("accounts.signOut")}
         onCancel={() => setConfirm(null)}
@@ -136,7 +143,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
       />
       <ConfirmDialog
         open={confirm === "remove"}
-        title={t("accounts.removeTitle", { name: instance.displayName })}
+        title={t("accounts.removeTitle", { name: engineDisplayName(instance) })}
         body={t(COPY[group].removeBody)}
         confirmLabel={t("accounts.remove")}
         tone="neutral"
@@ -149,12 +156,12 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
 
 function RenameForm({ instance, onDone }: { instance: InstanceInfo; onDone: () => void }) {
   const { dispatch } = useStore();
-  const [name, setName] = useState(instance.displayName);
+  const [name, setName] = useState(engineDisplayName(instance));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async () => {
     const next = name.trim();
-    if (!next || next === instance.displayName) return onDone();
+    if (!next || next === engineDisplayName(instance)) return onDone();
     setSaving(true);
     setError(null);
     try {
@@ -212,7 +219,7 @@ function AccountRow({ group, instance, signingIn, onSignIn, onSignInDone }: {
         {renaming ? <RenameForm instance={instance} onDone={() => setRenaming(false)} /> : (
           <>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium text-ink" title={instance.displayName}>{instance.displayName}</div>
+              <div className="truncate text-[13px] font-medium text-ink" title={engineDisplayName(instance)}>{engineDisplayName(instance)}</div>
               <div className="truncate text-[12px] text-ink-secondary" title={detail}>{detail}</div>
             </div>
             {state !== "signedIn" && state !== "unavailable" && !blocked && !signingIn && (
@@ -248,11 +255,12 @@ function AccountRow({ group, instance, signingIn, onSignIn, onSignInDone }: {
 }
 
 /** Names a new account and hands its id back, so the caller can start its sign-in at once. */
-export function AddAccount({ label, endpoint, extra, folder: offerFolder = false, onAdded }: {
+export function AddAccount({ label, endpoint, extra, folder: offerFolder = false, describedBy, onAdded }: {
   label: string;
   endpoint: string;
   extra?: Record<string, unknown>;
   folder?: boolean;
+  describedBy?: string;
   onAdded: (instanceId: string) => void;
 }) {
   const { dispatch } = useStore();
@@ -283,7 +291,7 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
 
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
+      <button type="button" onClick={() => setOpen(true)} aria-describedby={describedBy} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
         <Plus size={14} />{label}
       </button>
     );
@@ -292,7 +300,7 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
     <form data-add-account={endpoint} className="space-y-2.5 rounded-xl border border-hairline/50 bg-app p-3" onSubmit={(event) => { event.preventDefault(); void add(); }}>
       <label className="flex flex-col gap-1 text-[12px] font-medium text-ink">
         {t("accounts.nameLabel")}
-        <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("accounts.namePlaceholder")} maxLength={80} autoFocus required disabled={saving}
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("accounts.namePlaceholder")} maxLength={80} autoFocus required disabled={saving} aria-describedby={describedBy}
           className="rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] font-normal text-ink outline-none focus:border-accent-border disabled:opacity-50" />
       </label>
       {offerFolder && (
@@ -321,6 +329,7 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
   const primary = accounts[0]!;
   const installed = accounts.some((instance) => instance.snapshot.state === "available");
   const policy = accounts.find((instance) => instance.policy)?.policy;
+  const noteId = useId();
   return (
     <EngineCard instance={primary} summary={summaryFor(group, accounts)} bare={bare}>
       {policy && <p className="mb-3 text-[12px] leading-relaxed text-ink-secondary">
@@ -336,7 +345,12 @@ export function AccountsCard({ group, accounts, advanced, bare = false }: { grou
                 onSignInDone={() => setSigningIn((current) => current === instance.instanceId ? null : current)} />
             ))}
           </ul>
-          {!primary.snapshot.authenticationUnavailableReason && <AddAccount label={t(COPY[group].add)} endpoint={`/api/instances/${group}-accounts`} folder={group === "claude"} onAdded={setSigningIn} />}
+          {!primary.snapshot.authenticationUnavailableReason && <>
+            <AddAccount label={t(COPY[group].add)} endpoint={`/api/instances/${group}-accounts`} folder={group === "claude"}
+              describedBy={group === "chatgpt" ? noteId : undefined} onAdded={setSigningIn} />
+            {group === "chatgpt" && <p id={noteId} className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.addChatgptWorkspaceNote")}</p>}
+          </>}
+          {group === "chatgpt" && <p data-codex-shared-setup className="px-2 text-[12px] leading-relaxed text-ink-secondary">{t("accounts.chatgptSharedSetupNote")}</p>}
         </div>
       )}
       {primary.snapshot.update && <EngineUpdateNotice update={primary.snapshot.update} instance={primary} className="mt-3" quiet />}

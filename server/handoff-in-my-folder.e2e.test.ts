@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 
-it("starts a teammate's thread in the delegating bot's project folder by default, and refuses an explicit in_my_folder when there is none", async () => {
+it("starts a teammate's thread in the delegating bot's project folder by default, and hands off without one when there is none, even when asked", async () => {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const { url, dataDir } = session.info;
   const cli = (...args: string[]) => runControlOmb([...args, "--url", url]) as Promise<any>;
@@ -34,12 +34,12 @@ it("starts a teammate's thread in the delegating bot's project folder by default
     await api("PATCH", `/api/bots/${sam.id}`, { cwd: site });
     await api("PATCH", `/api/bots/${cliff.id}`, { cwd: own });
 
-    const ask = (thread: string, inMyFolder?: boolean, expectError = false) =>
-      ({ arguments: { bot_ids: [cliff.id], message: "Draft the launch post.", thread, ...(inMyFolder === undefined ? {} : { in_my_folder: inMyFolder }) }, ...(expectError ? { expectError } : {}) });
+    const ask = (thread: string, inMyFolder?: boolean) =>
+      ({ arguments: { bot_ids: [cliff.id], message: "Draft the launch post.", thread, ...(inMyFolder === undefined ? {} : { in_my_folder: inMyFolder }) } });
     writeFileSync(join(dataDir, "room-plan.json"), JSON.stringify({
       [sam.id]: { steps: [ask("standing")], reply: "Assigned", resumeReply: "Done" },
-      // Pip has no folder of its own: its conversation runs in a private task folder.
-      [pip.id]: { steps: [ask("standing", true, true), ask("new", true, true), ask("standing")], reply: "Could not hand it over" },
+      // Pip has no folder of its own: its conversation runs in a private task folder, so in_my_folder has nothing to share.
+      [pip.id]: { steps: [ask("standing", true)], reply: "Handed over" },
       [cliff.id]: { reply: "Drafted", writeFiles: { "cliff-was-here.txt": "yes" } },
     }));
 
@@ -54,9 +54,8 @@ it("starts a teammate's thread in the delegating bot's project folder by default
     await expect.poll(() => evidence().some((turn) => turn.botId === pip.id && Array.isArray(turn.evidence)), { timeout: 40_000 }).toBe(true);
     const replies = evidence().find((turn) => turn.botId === pip.id).evidence
       .filter((entry: any) => entry?.step).map((entry: any) => String(entry.response.result?.content?.[0]?.text ?? JSON.stringify(entry.response)));
-    expect(replies).toHaveLength(3);
-    expect(replies[0]).toMatch(/no project folder/);
-    expect(replies[1]).toMatch(/no project folder/);
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).not.toMatch(/in_my_folder|no project folder/);
     await expect.poll(() => existsSync(join(own, "cliff-was-here.txt")), { timeout: 40_000 }).toBe(true);
   } finally {
     await session.close();

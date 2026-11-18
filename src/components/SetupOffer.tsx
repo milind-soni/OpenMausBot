@@ -71,7 +71,7 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
   showedWait.current = pending || updating;
   const quiet = settled || updating;
   const choices = pending ? [] : shown.current!.choices;
-  const title = t("chat.setupCard.title");
+  const title = t("chat.setupCard.heading");
 
   const ask = (text?: string) => {
     if (sending.current || settled) return;
@@ -107,9 +107,12 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
 
   return (
     <section data-setup-card={message.id} aria-label={title} aria-busy={busy || pending || updating || undefined} onKeyDown={quiet || pending ? undefined : byLetter}
-      className="w-full max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-[24px] bg-composer px-2 pb-2 pt-3 ring-[0.5px] ring-ink/10">
+      className="w-full max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-[18px] bg-composer px-2 pb-2 pt-3 ring-[0.5px] ring-ink/10">
       <div className="flex items-start justify-between gap-2 ps-3 pe-1">
-        <h3 dir="auto" className="py-px text-[16px] font-semibold leading-[22px] text-ink-secondary">{title}</h3>
+        <div className="min-w-0">
+          <h3 dir="auto" className="py-px text-[16px] font-semibold leading-[22px] text-ink">{title}</h3>
+          {!settled && <p dir="auto" className="text-[13px] leading-[18px] text-ink-tertiary">{t("chat.setupCard.hint", { name: bot.name })}</p>}
+        </div>
         {!settled && <button type="button" onClick={close} aria-label={t("common.close")} title={t("common.close")}
           className="-mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.07] hover:text-ink-secondary">
           <X size={15} aria-hidden="true" />
@@ -122,16 +125,14 @@ export function SetupOffer({ botId, threadId, message, transcript }: { botId: st
           </div>
         ))}
       </div> : <div key={choices.join("\n")} data-setup-updating={updating ? "" : undefined}
-        className={cn("mt-1.5 flex flex-col", updating ? "motion-safe:animate-pulse" : waitedOnce.current && "motion-safe:animate-msg-in")}>
+        className={cn("mt-2 flex flex-col", updating ? "motion-safe:animate-pulse" : waitedOnce.current && "motion-safe:animate-msg-in")}>
         {options.map((option, index) => (
           <button key={option.label} type="button" data-ask-choice="" disabled={quiet || busy} onClick={option.pick}
-            className={cn("group flex min-h-10 items-center gap-3 rounded-xl px-3 py-2 text-start",
+            className={cn("group flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-start",
               quiet ? "cursor-default" : "hover:bg-ink/[0.05] disabled:cursor-default")}>
-            <kbd className={cn("flex size-6 shrink-0 items-center justify-center rounded-md font-sans text-[12px] font-medium",
-              quiet ? "bg-ink/[0.04] text-ink-tertiary" : "bg-ink/[0.07] text-ink-secondary group-hover:bg-ink/[0.1]")}>
-              {LETTERS[index]}
-            </kbd>
-            <span dir="auto" className={cn("min-w-0 break-words text-[14px] leading-5", quiet ? "text-ink-tertiary" : "text-ink")}>{option.label}</span>
+            <span dir="auto" className={cn("min-w-0 flex-1 break-words text-[14px] leading-5", quiet ? "text-ink-tertiary" : "text-ink")}>{option.label}</span>
+            {/* The letter picks the row from the keyboard; it trails the words so they line up with the heading. */}
+            <kbd className="shrink-0 font-mono text-[12px] text-ink-tertiary">{LETTERS[index]}</kbd>
           </button>
         ))}
       </div>}

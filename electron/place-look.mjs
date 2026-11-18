@@ -1,3 +1,4 @@
+import nativeText from "./native-text.cjs";
 // The colour of the place a page shows: drawn faintly at the top of its sidebar and on its circle in the rail, and
 // changed from its own Settings. A Cloud's colour (My Cloud, another of the person's own, a team's) is the Admin's, so
 // every app of theirs follows it: its owner or its team's Super admin and Admins change it there; everyone else sees it.
@@ -77,13 +78,13 @@ export function pageLook(look) {
  * rail, which changes the colour of any place it lists with a colour to show (`workspaces:recolor`, its circle's id and
  * a swatch): `owns(event)` its page asks, `places()` railPlaces' list now, `saved(id)` that place (This computer's too).
  */
-export function installPlaceLook({ ipcMain, guard, place, session, setColor, save, rail = null }) {
+export function installPlaceLook({ ipcMain, guard, place, session, setColor, save, rail = null, t = nativeText.englishText.t }) {
   const look = () => placeLook(place(), session());
   /** `entry`'s place (none: a server of theirs only the Admin lists) takes `swatch`; `now()` is its look at each step. */
   const recolor = async (entry, now, swatch) => {
-    if (!(swatch === null || CLOUD_SWATCHES.includes(swatch))) throw new Error("Choose one of the colors.");
+    if (!(swatch === null || CLOUD_SWATCHES.includes(swatch))) throw new Error(t("native.places.chooseColor"));
     const current = now();
-    if (!current) throw new Error("This place has no color to change.");
+    if (!current) throw new Error(t("native.places.noColor"));
     if (!current.change) return { outcome: "refused", look: pageLook(current) };
     if (current.change === "admin") {
       const result = await setColor(current.cloudId, swatch);
@@ -96,7 +97,7 @@ export function installPlaceLook({ ipcMain, guard, place, session, setColor, sav
   ipcMain.handle("workspaces:color", guard((_event, swatch) => recolor(place(), look, swatch)));
   if (rail) ipcMain.handle("workspaces:recolor", (event, id, swatch) => {
     if (!rail.owns(event)) throw new Error("workspaces:recolor is only available to the window's rail");
-    if (!rail.places().some(listed => listed.id === id && listed.paint)) return Promise.reject(new Error("That place isn't here any more."));
+    if (!rail.places().some(listed => listed.id === id && listed.paint)) return Promise.reject(new Error(t("native.places.noLongerHere")));
     const entry = rail.saved(id);
     const now = () => (entry ? placeLook(rail.saved(id) ?? entry, session())
       : listedLook(session().clouds?.find(cloud => `${SIGNED_IN}${cloud.id}` === id && cloud.managed === false) ?? null));

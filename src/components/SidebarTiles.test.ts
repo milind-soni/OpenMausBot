@@ -11,7 +11,7 @@ vi.mock("@/lib/interface-mode", async (original) => ({
 }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
-import { botRowProps } from "./Sidebar";
+import { BotListItem, botRowProps } from "./Sidebar";
 import { SidebarBotTile, SidebarTileGrid } from "./SidebarTiles";
 
 const bot = (extra: Partial<Bot> = {}): Bot => ({
@@ -42,9 +42,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the sidebar tiles", () => {
-  it.each([true, false])("draws the main tile and a pinned tile the same: 78 by 92, radius 10, a 56px avatar over a one-line 13px medium name (main %s)", (primary) => {
+  it.each([true, false])("draws the main tile and a pinned tile the same: 78 by 92, radius 8, a 56px avatar over a one-line 13px medium name (main %s)", (primary) => {
     const html = renderToStaticMarkup(createElement(SidebarBotTile, { ...props(bot({ chiefOfStaff: primary })), primary }));
-    expect(html).toMatch(new RegExp(`data-sidebar-tile="${primary ? "primary" : "pinned"}"[^>]*class="[^"]*\\bh-\\[92px\\] w-\\[78px\\][^"]*\\brounded-\\[10px\\]`));
+    expect(html).toMatch(new RegExp(`data-sidebar-tile="${primary ? "primary" : "pinned"}"[^>]*class="[^"]*\\bh-\\[92px\\] w-\\[78px\\][^"]*\\brounded-\\[8px\\]`));
     expect(html).toContain('width="56px" height="56px"');
     expect(html).toMatch(/truncate text-center text-\[13px\] font-medium leading-4 text-ink"[^>]*>MausBot</);
     expect(html).not.toContain("data-provider-mark");
@@ -70,6 +70,18 @@ describe("the sidebar tiles", () => {
     expect(unread).toContain('aria-label="MausBot · Unread"');
   });
 
+  it("shows a failed last turn as a red dot on the tile and on a Simple row, never the orange waiting one", () => {
+    const failed = bot({ messages: [{ id: "e1", role: "bot", kind: "activity", at: 2, tool: { name: "error: The site did not answer.", ok: false } }] as Bot["messages"] });
+    const html = renderToStaticMarkup(createElement(SidebarBotTile, props(failed)));
+    expect(html).toMatch(/data-testid="failed-dot"[^>]*class="[^"]*\bbg-danger\b/);
+    expect(html).toContain('aria-label="MausBot · Ran into a problem"');
+    expect(html).not.toContain('data-testid="waiting-dot"');
+    const row = renderToStaticMarkup(createElement(BotListItem, props(failed)));
+    expect(row).toMatch(/data-testid="failed-dot"[^>]*class="[^"]*\bbg-danger\b/);
+    expect(row).not.toContain('data-testid="waiting-dot"');
+    expect(row).toContain('<span class="sr-only">Ran into a problem</span>');
+  });
+
   it("opens the bot on Enter and its menu from the ContextMenu key", () => {
     let tree: ReactNode;
     function Capture() { tree = tile({ ...props(bot()), primary: true }); return tree; }
@@ -82,6 +94,17 @@ describe("the sidebar tiles", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "select", id: "mausbot" });
     key("ContextMenu");
     expect(onMenu).toHaveBeenCalledWith({ botId: "mausbot", x: 57, y: 66 });
+  });
+});
+
+describe("a tile with a dot", () => {
+  it("lands on the thread the dot is about: a tile has no row under it to reach it from", () => {
+    const withWork = bot({ threadId: "main", mainThreadId: "main", unread: true, tasks: [{ threadId: "main", title: "Main", createdAt: 1 }, { threadId: "work", title: "@Scout · work", createdAt: 2, unread: true }] });
+    let tree: ReactNode;
+    function Capture() { tree = tile({ ...props(withWork), primary: true }); return tree; }
+    renderToStaticMarkup(createElement(Capture));
+    (find(tree, "data-sidebar-tile")!.props.onKeyDown as (event: KeyboardEvent) => void)({ key: "Enter", preventDefault: vi.fn() } as unknown as KeyboardEvent);
+    expect(dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "mausbot", threadId: "work" });
   });
 });
 

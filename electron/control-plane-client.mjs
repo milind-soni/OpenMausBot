@@ -62,13 +62,34 @@ const reportableAppVersion = (value) => {
   return version;
 };
 
+/** A self-hosted server says so; the control plane then never gives its tunnel to the relay. Sent only when given, since
+ * a control plane older than the field refuses it. */
+const installationKind = (kind) => (kind === "desktop" || kind === "server" ? { kind } : {});
+
+/** `send(extra)` with the kind, and once more without it when the control plane refuses the request as invalid (400
+ * invalid_request): one older than the field refuses it, as it does any field it does not know. */
+async function withKind(kind, send) {
+  const extra = installationKind(kind);
+  try {
+    return await send(extra);
+  } catch (error) {
+    if (!extra.kind || error?.code !== "invalid_request" || error?.status !== 400) throw error;
+    return send({});
+  }
+}
+
 const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1_000;
 
+/** What `409 relay_capable` may say about the tunnel this computer goes without: old phone apps no longer get one
+ * ("retired"), or every account is at its limit ("full"). */
+const RELAY_ONLY_REASONS = new Set(["retired", "full"]);
+
 export class ControlPlaneError extends Error {
-  constructor(code, status = 0, requestId = "", retryAfterMs = 0) {
+  constructor(code, status = 0, requestId = "", retryAfterMs = 0, tunnel = null) {
     super(code);
     this.name = "ControlPlaneError";
     this.code = code;
+    this.tunnel = code === "relay_capable" && RELAY_ONLY_REASONS.has(tunnel) ? tunnel : null;
     this.status = status;
     this.requestId = REQUEST_ID.test(requestId) ? requestId : "";
     this.retryAfterMs =
@@ -244,6 +265,7 @@ export function createControlPlaneClient({
         response.status,
         response.headers.get("x-request-id") ?? "",
         retryAfterMilliseconds(response.headers.get("retry-after")),
+        stringValue(plainObject(payload)?.tunnel),
       );
     }
     if (!allowEmpty && !plainObject(payload)) {
@@ -325,7 +347,7 @@ export function createControlPlaneClient({
       return accountInstallations(accountToken);
     },
 
-    async ensureInstallation({ accountToken, currentCredential, clientInstanceId, name, platform, appVersion }) {
+    async ensureInstallation({ accountToken, currentCredential, clientInstanceId, name, platform, appVersion, kind }) {
       if (
         !validClientInstance(clientInstanceId)
       ) {
@@ -361,11 +383,11 @@ export function createControlPlaneClient({
             method: "POST",
             token: accountToken,
           })
-        : await request("/v1/installations", {
+        : await withKind(kind, (extra) => request("/v1/installations", {
             method: "POST",
             token: accountToken,
-            body: { clientInstanceId, name, platform, appVersion },
-          });
+            body: { clientInstanceId, name, platform, appVersion, ...extra },
+          }));
       const installation = existing ?? validatedInstallation(result.payload.installation);
       const credential = stringValue(result.payload.credential);
       if (!installation || credential === null || !INSTALLATION_CREDENTIAL.test(credential)) {
@@ -381,7 +403,10 @@ export function createControlPlaneClient({
       };
     },
 
-    async ensureEndpoint(installationCredential, { appVersion } = {}) {
+    /** `legacyDevices`: paired phones that can't use the encrypted connection; a relay-capable desktop with none gets
+     * `409 relay_capable` instead of a new tunnel. The error's `tunnel` is "retired" when old phone apps no longer
+     * get one and "full" when every account is at its limit; otherwise null. */
+    async ensureEndpoint(installationCredential, { appVersion, legacyDevices, kind } = {}) {
       if (
         typeof installationCredential !== "string" ||
         !INSTALLATION_CREDENTIAL.test(installationCredential)
@@ -389,15 +414,35 @@ export function createControlPlaneClient({
         throw new ControlPlaneError("signed_out", 401);
       }
       const version = reportableAppVersion(appVersion);
-      const { payload } = await request("/v1/installations/self/endpoint", {
-        method: "POST",
-        token: installationCredential,
-        ...(version === null ? {} : { body: { appVersion: version } }),
+      const legacy = Number.isSafeInteger(legacyDevices) && legacyDevices >= 0 && legacyDevices <= 100 ? legacyDevices : null;
+      const { payload } = await withKind(kind, (extra) => {
+        const body = { ...(version === null ? {} : { appVersion: version }), ...(legacy === null ? {} : { legacyDevices: legacy }), ...extra };
+        return request("/v1/installations/self/endpoint", {
+          method: "POST",
+          token: installationCredential,
+          ...(Object.keys(body).length ? { body } : {}),
+        });
       });
       const endpoint = validatedEndpoint(payload.endpoint);
       const connectorToken = boundedSecret(payload.connectorToken, 16_384);
       if (!endpoint || !connectorToken) throw new ControlPlaneError("invalid_response");
       return { endpoint, connectorToken };
+    },
+
+    /** MausBot Relay: `{token, hostId, nodes, expiresAt, refreshAfter}`, or `relay_unavailable` (503) while this
+     * computer is outside the rollout. */
+    async relayToken(installationCredential, { appVersion, devices, kind }) {
+      if (typeof installationCredential !== "string" || !INSTALLATION_CREDENTIAL.test(installationCredential)) {
+        throw new ControlPlaneError("signed_out", 401);
+      }
+      const version = reportableAppVersion(appVersion);
+      if (version === null) throw new ControlPlaneError("invalid_request");
+      const { payload } = await withKind(kind, (extra) => request("/v1/installations/self/relay-token", {
+        method: "POST",
+        token: installationCredential,
+        body: { appVersion: version, devices: { e2e: devices.e2e, legacy: devices.legacy }, ...extra },
+      }));
+      return payload;
     },
 
     /** Never returns or requests a connector token. */

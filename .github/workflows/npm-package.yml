@@ -48,23 +48,24 @@ jobs:
           HOME=/tmp/omb-pack/home node cli.js serve --no-pair --port 18799 --data-dir /tmp/omb-pack/data --label ci --public-url https://ci.example > serve.log 2>&1 &
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:18799/api/health >/dev/null && break; sleep 1; done
           # The server answers /api/health before the CLI prints its "running" line, so wait for the line too.
-          for i in $(seq 1 30); do grep -q "reachable at https://ci.example" serve.log && break; sleep 1; done
-          grep -q "reachable at https://ci.example" serve.log
-          OMB_PORT=18799 node cli.js status | grep -q "ci ·"
-          OMB_PORT=18799 node cli.js pair --label "CI phone" | grep -q "open or scan:  https://ci.example/pair#code="
+          for i in $(seq 1 30); do grep -q "^Reach .*https://ci.example" serve.log && break; sleep 1; done
+          grep -q "^Reach .*https://ci.example" serve.log
+          grep -q "Get a pairing code: openmausbot pair" serve.log
+          OMB_PORT=18799 node cli.js status | grep -q 'Server "ci"'
+          OMB_PORT=18799 node cli.js pair --label "CI phone" | grep -q "Link           https://ci.example/pair#code="
           OMB_PORT=18799 node cli.js sessions | grep -q "no paired devices yet"
           # the bundles also run directly by path (the image and docs do that), not only through cli.js:
           # a bundled module with a "run when executed directly" block would fire here
           node dist-server/openmausbot.js --help | grep -q "openmausbot serve"
           OMB_PORT=1 node dist-server/pair-cli.js > pair.out 2>&1 || true
           cat pair.out
-          grep -q "no OpenMausBot server" pair.out
+          grep -q "No MausBot server is running here" pair.out
           # --tunnel ships its own processes and fails closed without an account
           test -f dist-server/tunnel-guardian.js && test -f dist-server/prepare-cloudflared.js
           # the enterprise layer ships bundled (inert without a key) so a white-label key works on an npm install
           test -f enterprise/server/index.js && test -f enterprise/LICENSE
           if HOME=/tmp/omb-pack/home node cli.js serve --tunnel --port 18798 --data-dir /tmp/omb-pack/data2 > tunnel.log 2>&1; then echo "serve --tunnel should refuse without login"; exit 1; fi
-          grep -q "run \`openmausbot login\` first" tunnel.log
+          grep -q "run openmausbot login first" tunnel.log
           kill %1; wait %1 || true
       - name: Prove an npm install brings the Data engine's native modules
         working-directory: /tmp/omb-pack/package

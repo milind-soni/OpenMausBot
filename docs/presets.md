@@ -62,27 +62,11 @@ bot** under the Starting role list (no confirmation step).
 
 ## Sharing presets
 
-Two ways, both saving the same file format ([team-sharing.md](team-sharing.md)):
-
-- **With a department.** In **Share department…**, tick **Include my New bot defaults as
-  a preset**. It is off unless you tick it: your New bot defaults are yours
-  until you share them. The department's **Include starter notes** box also decides
-  whether the preset's notes go in.
-- **On their own.** **Settings → General → Defaults for new bots → Share as
-  preset…** saves a preset file: the preset and its skills, no team, no bots.
-  Choose the preset's name, a description, the version and whether to include
-  the picture and starter notes.
-
-Either way the preset is made from your saved New bot defaults through the
-allowlist above, and every text part passes through the same secret redaction
-as a team file. The dialog lists what was removed or left out. There is no
-confirmation step: **Save file** is the decision.
-
-A preset file is added in **Templates → Import** like a team file. The
-preview shows the preset bots and any skills the file only offers; **Add
-presets** puts the presets in the review's **Starting role** list and changes nothing else. A file with
-skills but no bots or presets has nothing to add here and is refused with a
-sentence. Adding the same file twice offers its presets once.
+Presets reach a desktop from an organization's library ([org-library.md](org-library.md)) or from an older preset
+file, which `/api/teams/import` still reads: the preview shows the preset bots and any skills the file only offers, and
+adding it puts the presets in the review's **Starting role** list and changes nothing else. A file with skills but no
+bots or presets has nothing to add and is refused with a sentence. Adding the same file twice offers its presets once.
+Bots and departments are shared as templates ([team-sharing.md](team-sharing.md)).
 
 ## Where presets are kept
 

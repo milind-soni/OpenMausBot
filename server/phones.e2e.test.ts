@@ -297,12 +297,9 @@ it("a thread a webhook's run opens has no phone; one the owner's turn opens does
 
 it("a conversation an outside event's run reported into loses the phone", async () => {
   await settle();
-  // Off a Cloud home an outside event's run reports into the bot's main chat (the one the person asked in last): here a
-  // new conversation of the owner's, which has the phone until then.
-  const main = (await api("POST", `/api/bots/${chief.id}/tasks`, { title: "Leads" })).body.task.threadId as string;
-  const before = await turn({ id: chief.id, threadId: main }, "Anything new today?");
+  const own = (await api("POST", `/api/bots/${chief.id}/tasks`, { title: "Leads" })).body.task.threadId as string;
+  const before = await turn({ id: chief.id, threadId: own }, "Anything new today?");
   expect(before.mcpConfig.mcpServers).toHaveProperty(PHONE_MCP_SERVER);
-  expect((await api("GET", "/api/bots")).body.bots.find((bot: { id: string }) => bot.id === chief.id).mainThreadId).toBe(main);
   await settle();
   const digest = await hook("Lead digest");
   writeFileSync(release, "");
@@ -313,12 +310,16 @@ it("a conversation an outside event's run reported into loses the phone", async 
   } finally {
     rmSync(release, { force: true });
   }
-  expect((await runOf(runId)).report.threadId).toBe(main);
-  expect((await api("GET", `/api/threads/${main}/messages?limit=200`)).body.messages
+  const results = (await runOf(runId)).report.threadId as string;
+  expect(results).not.toBe(own);
+  expect((await api("GET", `/api/threads/${results}/messages?limit=200`)).body.messages
     .some((line: { automation?: { routineId?: string; trigger?: string } }) => line.automation?.routineId === digest.id && line.automation.trigger === "webhook")).toBe(true);
   await settle();
-  const after = await turn({ id: chief.id, threadId: main }, "What did that lead want?");
+  const after = await turn({ id: chief.id, threadId: results }, "What did that lead want?");
   expect(after.mcpConfig.mcpServers[PHONE_MCP_SERVER]).toBeUndefined();
+  await settle();
+  const untouched = await turn({ id: chief.id, threadId: own }, "Anything else today?");
+  expect(untouched.mcpConfig.mcpServers).toHaveProperty(PHONE_MCP_SERVER);
 }, 90_000);
 
 it("a send reaches the phone with no card of OpenMausBot's own in the chat: the person taps Send on the phone", async () => {

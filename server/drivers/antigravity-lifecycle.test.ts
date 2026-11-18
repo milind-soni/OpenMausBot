@@ -204,6 +204,22 @@ describe("Antigravity initialization diagnostics", () => {
     acp.close();
   });
 
+  it("explains an exit with what the runtime last printed, masked, and never the sign-in link's query", async () => {
+    const child = fakeChild(null);
+    const acp = client();
+    const rejected = acp.initialize().catch((error: Error) => error);
+    child.stderr.write("private auth code: do-not-disclose\n");
+    child.stderr.write("https://accounts.google.com/o/oauth2/v2/auth?state=private-state&code=secret-code\n");
+    // Google's runtime in a box without /sys, measured on a Fly Cloud home; bubblewrap reports its SIGABRT as 134.
+    child.stderr.write("2 third_party/tcmalloc/internal/sysinfo.h:76] CHECK in NumCPUs: maybe_cpus.has_value() (false) ");
+    child.emit("close", 134, null);
+    const error = await rejected;
+    expect(error.message).toBe("Antigravity ACP exited 134: it stopped itself (abort). Last output: private auth code: «redacted 15 chars» | "
+      + "https://accounts.google.com/o/oauth2/v2/auth?«redacted 36 chars» | 2 third_party/tcmalloc/internal/sysinfo.h:76] CHECK in NumCPUs: maybe_cpus.has_value() (false).");
+    for (const secret of ["do-not-disclose", "private-state", "secret-code"]) expect(error.message).not.toContain(secret);
+    acp.close();
+  });
+
   it("does not reuse a startup warning after initialization succeeds", async () => {
     const child = fakeChild(null);
     const acp = client();

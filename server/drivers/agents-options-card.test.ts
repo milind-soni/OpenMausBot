@@ -20,7 +20,6 @@ function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
   return {
     botId: WATCHER_OPTIONS_CARD_BOT_ID,
     threadId: "thread-watcher",
-    depth: 0,
     externalRuntime: false,
     sharedComputers: false,
     client: {

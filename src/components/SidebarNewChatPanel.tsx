@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Plus, Users, X } from "lucide-react";
 import { openBot, useStore, type Bot } from "@/state/store";
 import { rankByName } from "@/lib/palette-rank";
+import { imeComposing } from "@/lib/send-key";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { t } from "@/lib/i18n";
@@ -10,7 +11,6 @@ import { BotAvatar } from "./Avatar";
 
 const MIN_BESIDE_WIDTH = 320;
 const PANEL_WIDTH = 360;
-const ACTION_COUNT = 2;
 
 const GAP = 8;
 export const FLOATING_TOP = 56;
@@ -46,14 +46,15 @@ export function SidebarNewChatPanel({
 }: {
   anchor: HTMLElement | null;
   onClose: () => void;
-  onNewBot: () => void;
+  /** Absent for someone who can't make a bot here. */
+  onNewBot?: () => void;
   onNewGroup: () => void;
   style?: CSSProperties;
 }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const [query, setQuery] = useState("");
-  const [cursor, setCursor] = useState(ACTION_COUNT);
+  const [cursor, setCursor] = useState(onNewBot ? 2 : 1);
   const [place, setPlace] = useState(() => newChatPanelPlacement(null, typeof window === "undefined" ? 0 : window.innerWidth));
   const [maxHeight, setMaxHeight] = useState(() => newChatPanelMaxHeight(typeof window === "undefined" ? 0 : window.innerHeight));
   const rootRef = useRef<HTMLDivElement>(null);
@@ -84,7 +85,7 @@ export function SidebarNewChatPanel({
 
   const bots = rankByName(state.bots.filter((bot) => !bot.hidden), query);
   const actions = [
-    { key: "bot", icon: <Plus size={16} />, label: t("sidebar.newChat.createBot"), run: onNewBot },
+    ...(onNewBot ? [{ key: "bot", icon: <Plus size={16} />, label: t("sidebar.newChat.createBot"), run: onNewBot }] : []),
     { key: "group", icon: <Users size={16} />, label: t("sidebar.newChat.createGroup"), run: onNewGroup },
   ];
   const count = actions.length + bots.length;
@@ -105,7 +106,8 @@ export function SidebarNewChatPanel({
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.nativeEvent.isComposing) return;
+    // Enter and Escape that pick or cancel an input-method candidate belong to the IME, not to this list or the panel.
+    if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; }
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setCursor(selected < 0 ? 0 : (selected + 1) % count);

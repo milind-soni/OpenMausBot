@@ -13,6 +13,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { cloudPairingSignature } from "./cloud-home.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0123456789ab.fly.dev";
@@ -225,13 +226,12 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   const ownerKeyAtBoot = `p_${createHash("sha256").update("cloud-owner:3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93").digest("base64url").slice(0, 22)}`;
   writeFileSync(join(dataDir, "lending-routines.json"), JSON.stringify({ version: 1, routines: { [before.stale]: "0".repeat(64) }, writers: { [before.stale]: ownerKeyAtBoot, [before.fullApproved]: ownerKeyAtBoot } }));
   // A bot at Full access (set where only the desktop app can set it: its record).
-  const bots = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"));
-  const record = Array.isArray(bots) ? bots : bots.bots;
-  const full = record.find((bot: any) => bot.id === before.full.id);
+  const bots = readRegistry(dataDir).bots;
+  const full = bots.find((bot: any) => bot.id === before.full.id);
   full.approvalMode = "full";
   delete full.approvalGrant;
   for (const task of full.tasks ?? []) { task.approvalMode = "full"; delete task.approvalGrant; delete task.autoApprove; }
-  writeFileSync(join(dataDir, "bots.json"), JSON.stringify(bots));
+  writeRegistry(dataDir, { bots });
   // A v0.1.91 Cloud home recorded who allowed a card by their device's key (a
   // self-hosted server records no key): write it the way that release did.
   const db = new DatabaseSync(join(dataDir, "messages.db"));
@@ -272,7 +272,7 @@ afterAll(async () => {
 
 it("boots without anyone else's session: the chat-only device is signed out, and only the owner's devices are listed", async () => {
   expect(log).toContain("cloud home: revoked 1 session that was not the owner's own device");
-  expect(log).toContain("Review Settings → Remote access → Paired devices");
+  expect(log).toContain("Review Settings → Phone & devices → Paired");
   for (const path of ["/api/auth/session", "/api/bots", `/api/threads/${before.theirs}/messages`]) {
     expect((await api("GET", path, { token: before.chatOnly })).status, path).toBe(401);
   }
@@ -286,9 +286,9 @@ it("boots without anyone else's session: the chat-only device is signed out, and
 it("no route mints or accepts a session without admin scope: pairing, email sign-in and invites answer in one plain line", async () => {
   const owner = await adminPairing();
   const chatOnly = await api("POST", "/api/auth/pairing", { token: owner, body: { label: "Guest phone", scopes: ["client"] } });
-  expect(chatOnly).toEqual({ status: 403, body: { error: PERSONAL, code: "cloud_personal" } });
+  expect(chatOnly).toEqual({ status: 403, body: { error: PERSONAL, code: "cloud_personal", errorKey: "serverError.cloud.personal" } });
   for (const path of ["/api/auth/email/start", "/api/auth/email/verify"]) {
-    expect(await api("POST", path, { body: { email: "friend@example.test", code: "123456" } }), path).toEqual({ status: 403, body: { error: PERSONAL, code: "cloud_personal" } });
+    expect(await api("POST", path, { body: { email: "friend@example.test", code: "123456" } }), path).toEqual({ status: 403, body: { error: PERSONAL, code: "cloud_personal", errorKey: "serverError.cloud.personal" } });
   }
   for (const signIn of [{ admins: [], members: ["friend@example.test"] }, { admins: ["friend@example.test"], members: [] }]) {
     expect((await api("PUT", "/api/config", { token: owner, body: { signIn } })).body.error).toBe(PERSONAL);

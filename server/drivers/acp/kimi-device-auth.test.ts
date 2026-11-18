@@ -1,5 +1,5 @@
 // Every process here is the offline fake kimi in a disposable HOME: no real Kimi, no Moonshot call, no credentials.
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,6 +76,26 @@ describe("Kimi device prompt", () => {
     expect(isDeviceSignInCode("kimi", CODE)).toBe(true);
     expect(isDeviceSignInCode("kimi", "KLXE-NNPJ")).toBe(true);
     for (const line of ["Code expires in 600s.", "Waiting", "Opening", "klxe-nnpj", "AB", ""]) expect(isDeviceSignInCode("kimi", line)).toBe(false);
+  });
+});
+
+describe("Kimi sign-out from the server", () => {
+  it("has no logout command to drive, so sign-out removes the stored credential files it checks", () => {
+    expect(KIMI_DEVICE_SIGN_IN.logoutArgs).toBeUndefined();
+    expect(KIMI_DEVICE_SIGN_IN.removeCredentials).toBeTypeOf("function");
+    expect(KIMI_DEVICE_SIGN_IN.signInState).toBeTypeOf("function");
+  });
+
+  it("reports an unreadable credential folder as unknown instead of signed-out", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-kimi-state-"));
+    try {
+      const env = { KIMI_CODE_HOME: scratch };
+      expect(KIMI_DEVICE_SIGN_IN.signInState!(env)).toBe("signed-out");
+      writeFileSync(join(scratch, "credentials"), "a file where the credentials folder would go");
+      expect(KIMI_DEVICE_SIGN_IN.signInState!(env)).toBe("unknown");
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });
 
@@ -224,5 +244,15 @@ describe.skipIf(process.platform === "win32")("Kimi Code sign-in with a device c
     expect((await instance.getAuthentication!(start.flowId!)).phase).toBe("waiting");
     writeFileSync(join(home, ".omb-fake-kimi-approved"), "approve fixture only\n");
     await expect.poll(async () => (await instance.getAuthentication!(start.flowId!)).phase, { timeout: 5_000 }).toBe("succeeded");
+  });
+
+  it("signs out by removing the stored credential files, without driving a CLI command", async () => {
+    const instance = await kimi("success");
+    const start = await instance.startAuthentication!();
+    await expect.poll(async () => (await instance.getAuthentication!(start.flowId!)).phase, { timeout: 5_000 }).toBe("succeeded");
+    expect(existsSync(credential())).toBe(true);
+    await instance.signOut!();
+    expect(existsSync(credential())).toBe(false);
+    expect(calls().every((call) => call.args[0] === "login")).toBe(true);
   });
 });

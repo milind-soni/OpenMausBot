@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { engineFailureKind, engineFailureMessage, errorReplyFailure, httpStatusOf, plainFailureMessage, providerReason, stopCause } from "./engine-errors.ts";
+import { engineFailure, engineFailureKind, engineFailureMessage, errorReplyFailure, httpStatusOf, plainFailureMessage, providerReason, stopCause } from "./engine-errors.ts";
 import { classifyError } from "./retry.ts";
 
 const reason = (text: string) => classifyError({ text }).reason;
@@ -114,6 +114,10 @@ describe("errorReplyFailure", () => {
     const reply = `${anthropic(429, "rate_limit_error", "[1308][Usage limit reached for 5 hour. Your limit will reset at 2026-10-27 15:22:19][2026]")} retry-after-ms=4171000`;
     expect(errorReplyFailure("omp", reply, NOW, "UTC")).toEqual({
       message: 'This omp account has reached its usage limit (omp says: "[1308][Usage limit reached for 5 hour"), which resets Oct 27, 7:22 AM (UTC). Until then, switch this bot to another AI.',
+      text: { key: "chat.notice.usageLimitResets", params: {
+        provider: "omp", detail: ' (omp says: "[1308][Usage limit reached for 5 hour")',
+        resetsAt: NOW + 4_171_000, timeZone: "UTC", resets: "Oct 27, 7:22 AM (UTC)",
+      } },
       stopReason: "quota",
       limit: "engine",
       limitResetsAt: NOW + 4_171_000,
@@ -214,5 +218,56 @@ describe("stopCause", () => {
         expect(engineFailureKind(cause)).toBeNull();
       }
     }
+  });
+});
+
+describe("engineFailure", () => {
+  it("carries the reset instant and zone for the reader's language, with the same English fallback", () => {
+    const resetsAt = Date.UTC(2026, 9, 27, 7, 22);
+    const failure = engineFailure("Grok", "usage limit", { resetsAt, timeZone: "UTC" })!;
+    expect(failure.message).toBe('This Grok account has reached its usage limit (Grok says: "usage limit"), which resets Oct 27, 7:22 AM (UTC). Until then, switch this bot to another AI.');
+    expect(failure.text).toEqual({ key: "chat.notice.usageLimitResets", params: {
+      provider: "Grok", detail: ' (Grok says: "usage limit")', resetsAt, timeZone: "UTC", resets: "Oct 27, 7:22 AM (UTC)",
+    } });
+    const unknownZone = engineFailure("Grok", "usage limit", { resetsAt, timeZone: "not-a-zone" })!;
+    expect(unknownZone.message).toContain("2026-10-27 07:22 UTC");
+    expect(unknownZone.text?.params).toMatchObject({ resetsAt, timeZone: "UTC" });
+    expect(classifyError({ text: failure.message })).toEqual({ transient: false, reason: "quota" });
+  });
+
+  it("names a usage limit by its catalog key, its provider's quoted words kept raw", () => {
+    const failure = engineFailure("Grok", "Internal error: API error (status 429): You have reached your usage limit for this month (session/prompt)", { kind: "usage_limit" });
+    expect(failure?.text?.key).toBe("chat.notice.usageLimit");
+    expect(failure?.message).toBe(engineFailureMessage("Grok", "Internal error: API error (status 429): You have reached your usage limit for this month (session/prompt)", { kind: "usage_limit" }));
+    expect(failure?.text?.params).toEqual({ provider: "Grok", detail: expect.stringMatching(/^ \(Grok says: ".+"\)$/) });
+    expect(engineFailure("Grok", "429 Too Many Requests", { kind: "rate_limit" })).toEqual({ message: expect.stringContaining("rate limit") });
+  });
+});
+
+describe("a model the engine has no route to", () => {
+  // OpenCode 2.2.5's session/prompt answer for a model declared under a provider it has no SDK package for, as acpRpcError words it.
+  const raw = (model: string, pkg = "unknown") => `Internal error: Unsupported package for ${model}: ${pkg} (session/prompt, service: session, provider.no-route)`;
+
+  it("says in one plain sentence that the named model can't be used here, with no Internal error", () => {
+    const failure = engineFailure("OpenCode", raw("chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017"))!;
+    expect(failure.message).toBe("OpenCode can't use the model chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017 here, so choose another model for this bot.");
+    expect(failure.text).toEqual({ key: "chat.notice.modelNoRoute", params: { provider: "OpenCode", model: "chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017" } });
+    expect(engineFailureMessage("OpenCode", raw("ollama-cloud/deepseek-v4.1-flash:1017", ""))).toBe("OpenCode can't use the model ollama-cloud/deepseek-v4.1-flash:1017 here, so choose another model for this bot.");
+    expect(engineFailureMessage("OpenCode", "Internal error: Model unavailable: test/missing (session/prompt, service: session, provider.no-route)"))
+      .toBe("OpenCode can't use the model test/missing here, so choose another model for this bot.");
+    expect(engineFailure("OpenCode", "Internal error (session/prompt, service: session, provider.no-route)")).toEqual({
+      message: "OpenCode can't use this bot's model here, so choose another model for this bot.",
+      text: { key: "chat.notice.modelNoRouteUnnamed", params: { provider: "OpenCode" } },
+    });
+  });
+
+  it("is a final failure, raw or in plain words, and no other failure is", () => {
+    const plain = engineFailureMessage("OpenCode", raw("chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017"))!;
+    for (const text of [raw("chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017"), plain, engineFailureMessage("OpenCode", "provider.no-route")!]) {
+      expect(classifyError({ text })).toEqual({ transient: false, reason: "unknown_model" });
+    }
+    expect(engineFailureKind(raw("x/y"))).toBe("model_no_route");
+    expect(engineFailureKind("Internal error: Cannot connect to API: ECONNREFUSED (session/prompt, service: session, APIError)")).toBeNull();
+    expect(classifyError({ text: "Internal error: OpenCode service failure (session/prompt)" }).reason).toBe("unknown");
   });
 });

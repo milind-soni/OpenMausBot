@@ -45,7 +45,7 @@ let firstBot = "other";
 let state: AppState;
 let dispatch: (action: Action) => void;
 
-const { StoreProvider, useStore, openBot } = await import("./store");
+const { StoreProvider, useStore, openBot, openBotRow, openThread } = await import("./store");
 const { landOnSearchHit } = await import("@/lib/focus-message");
 const { threadsWhenTreeHidden } = await import("@/components/SidebarBotActivity");
 const { setAdvancedMode } = await import("@/lib/interface-mode");
@@ -155,6 +155,7 @@ describe("following a notification", () => {
   it("selects the bot first while threads are shown, as it always has", async () => {
     await threadsShown(true);
     await followNotification();
+    expect(state.revealThread?.threadId, "the thread it landed on is shown in the sidebar").toBe("finished");
     expect(reads()).toEqual(["left-behind", "finished"]);
     expect(sent().filter((request) => request.startsWith("/api/bots/scout/tasks/finished"))).toHaveLength(1);
     expect(scoutNow().threadId).toBe("finished");
@@ -211,6 +212,39 @@ describe("opening a bot with threads hidden", () => {
     expect(reads()).toEqual(["finished"]);
     expect(unread("left-behind")).toBe(true);
     expect(state.focusMessage).toMatchObject({ threadId: "finished", messageId: "hit" });
+  });
+});
+
+describe("a click on a bot's message", () => {
+  it("lands from a row on the unread thread its dot is about, and reads only that thread", async () => {
+    await threadsShown(false);
+    flushSync(() => openBotRow(dispatch, scoutNow(), false, false));
+    await settle();
+    expect(state.selectedId).toBe("scout");
+    expect(scoutNow().threadId).toBe("finished");
+    expect(reads()).toEqual(["finished"]);
+    expect(unread("left-behind")).toBe(true);
+  });
+
+  it("lands from the bell on a thread another bot opened, over Settings, and the thread's row is revealed", async () => {
+    await threadsShown(true);
+    flushSync(() => dispatch({ type: "toggleAppSettings", open: true }));
+    expect(state.appSettingsOpen).toBe(true);
+    flushSync(() => { openThread(dispatch, { botId: "scout", threadId: "finished" }, state, true); });
+    await settle();
+    expect(state.appSettingsOpen).toBe(false);
+    expect(state.selectedId).toBe("scout");
+    expect(scoutNow().threadId).toBe("finished");
+    expect(state.revealThread?.threadId).toBe("finished");
+  });
+
+  it("says a thread is gone instead of landing silently on some other chat", async () => {
+    await threadsShown(false);
+    let found = true;
+    flushSync(() => { found = openThread(dispatch, { botId: "scout", threadId: "deleted" }, state, false); });
+    await settle();
+    expect(found).toBe(false);
+    expect(state.notice).toEqual({ kind: "thread-gone", botName: "Scout" });
   });
 });
 

@@ -15,6 +15,10 @@ describe("a server's mark comes from its host", () => {
     ["https://api.deepseek.com", "deepseek"],
     ["https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen"],
     ["https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "qwen"],
+    ["https://workspace-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "qwen"],
+    ["https://workspace-123.us-east-1.maas.aliyuncs.com/compatible-mode/v1", "qwen"],
+    ["https://workspace-123.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1", "qwen"],
+    ["https://workspace-123.ap-northeast-1.maas.aliyuncs.com/compatible-mode/v1", "qwen"],
     ["https://api.moonshot.ai/v1", "moonshot"],
     ["https://api.moonshot.cn/v1", "moonshot"],
     ["https://api.mistral.ai/v1", "mistral"],
@@ -33,6 +37,7 @@ describe("a server's mark comes from its host", () => {
     expect(serverIconPreset("http://api.deepseek.com/v1")).toBe("deepseek");
     expect(serverIconPreset("HTTPS://API.DeepSeek.COM/v1")).toBe("deepseek");
     expect(serverIconPreset("https://api.openai.com./v1")).toBe("openai");
+    expect(serverIconPreset("HTTPS://WORKSPACE-123.CN-BEIJING.MAAS.ALIYUNCS.COM.:8443/compatible-mode/v1")).toBe("qwen");
   });
 
   it.each([
@@ -48,6 +53,13 @@ describe("a server's mark comes from its host", () => {
     "https://bedrock-runtime.my-bucket.s3.amazonaws.com/openai/v1",
     "https://dashscope.aliyuncs.com.evil.test/compatible-mode/v1",
     "https://evil-dashscope.aliyuncs.com/compatible-mode/v1",
+    "https://workspace-123.cn-beijing.maas.aliyuncs.com.evil.test/compatible-mode/v1",
+    "https://workspace-123.cn-beijing.maas.aliyuncs.com@evil.test/v1",
+    "https://evil.test/workspace-123.cn-beijing.maas.aliyuncs.com/v1",
+    "https://evil.test/v1?host=workspace-123.cn-beijing.maas.aliyuncs.com",
+    "https://extra.workspace-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    "https://cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    "https://workspace-123.cn-beijing.other.aliyuncs.com/compatible-mode/v1",
     "https://api.x.ai.evil.test/v1",
   ])("never matches the look-alike %s", (url) => {
     expect(serverIconPreset(url)).toBeUndefined();
@@ -79,6 +91,12 @@ describe("an instance's mark", () => {
   it("is the mark of whoever runs an OpenAI-compatible server", () => {
     expect(instanceIcon(server("https://api.deepseek.com/v1"))).toEqual({ icon: { kind: "preset", preset: "deepseek" } });
     expect(instanceIcon(server("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"))).toEqual({ icon: { kind: "preset", preset: "qwen" } });
+    expect(instanceIcon(server("https://workspace-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"))).toEqual({ icon: { kind: "preset", preset: "qwen" } });
+  });
+
+  it("is Ollama's mark for a server on Ollama's port or added as Ollama", () => {
+    expect(instanceIcon(server("http://127.0.0.1:11434/v1"))).toEqual({ icon: { kind: "preset", preset: "ollama" } });
+    expect(instanceIcon({ driver: "openai-compat", config: { url: "http://gpu-box.local:8080/v1", catalog: "ollama" } })).toEqual({ icon: { kind: "preset", preset: "ollama" } });
   });
 
   it("keeps a stored icon, preset or custom, over the server's", () => {
@@ -86,12 +104,13 @@ describe("an instance's mark", () => {
     const custom = { kind: "custom", dataUrl: "data:image/png;base64,iVBORw0KGgo=" } as const;
     expect(instanceIcon(server("https://api.deepseek.com/v1", { icon: preset }))).toEqual({ icon: preset });
     expect(instanceIcon(server("https://api.deepseek.com/v1", { icon: custom }))).toEqual({ icon: custom });
+    expect(instanceIcon(server("https://workspace-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", { icon: custom }))).toEqual({ icon: custom });
     expect(instanceIcon({ driver: "claudeAgent", icon: preset })).toEqual({ icon: preset });
   });
 
   it("leaves the driver's own mark for an unknown or missing address and for other drivers", () => {
     expect(instanceIcon(server("https://llm.example.test/v1"))).toEqual({});
-    expect(instanceIcon(server("http://127.0.0.1:11434/v1"))).toEqual({});
+    expect(instanceIcon(server("http://127.0.0.1:1234/v1"))).toEqual({});
     expect(instanceIcon(server(42))).toEqual({});
     expect(instanceIcon({ driver: "openai-compat" })).toEqual({});
     expect(instanceIcon({ driver: "openai-compat", config: null })).toEqual({});

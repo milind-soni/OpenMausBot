@@ -7,6 +7,7 @@ import type { ProviderInstance } from "../contracts.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import { CLAUDE_ACCOUNT_ENV_KEYS, ClaudeDriver, resolveClaudeConfigDir } from "./claude.ts";
+import { AWS_CREDENTIAL_ENV_KEYS } from "./claude-bedrock-aws.ts";
 
 // Reads synthetic account labels and records its spawn contract; never the real CLI, Keychain or network.
 const FAKE_CLI = `#!/usr/bin/env node
@@ -16,7 +17,7 @@ import { createInterface } from "node:readline";
 const args = process.argv.slice(2);
 const configDir = process.env.CLAUDE_CONFIG_DIR || join(process.env.HOME, ".claude");
 const auth = JSON.parse(readFileSync(join(configDir, "fixture-auth.json"), "utf8"));
-const keys = ${JSON.stringify(CLAUDE_ACCOUNT_ENV_KEYS)};
+const keys = ${JSON.stringify([...CLAUDE_ACCOUNT_ENV_KEYS, ...AWS_CREDENTIAL_ENV_KEYS, "AWS_PROFILE", "AWS_REGION"])};
 appendFileSync(join(configDir, "calls.ndjson"), JSON.stringify({
   args, configDir, home: process.env.HOME,
   env: Object.fromEntries(keys.map(key => [key, process.env[key]]))
@@ -49,12 +50,12 @@ function account(name: string, auth: unknown = { loggedIn: true, email: `${name}
   return dir;
 }
 
-async function create(configDir?: string, environment: Record<string, string> = {}) {
+async function create(configDir?: string, environment: Record<string, string> = {}, extra: Record<string, unknown> = {}) {
   const instance = await ClaudeDriver.create({
     instanceId: `claude-${instances.length}`,
     displayName: "Fixture Claude",
     enabled: true,
-    config: { cli, configDir, permissionMode: "acceptEdits" },
+    config: { cli, configDir, permissionMode: "acceptEdits", ...extra },
     environment,
   });
   instances.push(instance);
@@ -133,6 +134,14 @@ describe("Claude account configuration", () => {
     expect(calls(dir)[0]?.env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
+  it("gives an endpoint without its own directory none of the parent's credentials", async () => {
+    const dir = account("endpoint-no-dir");
+    vi.stubEnv("CLAUDE_CONFIG_DIR", dir);
+    const provider = await create(undefined, { ANTHROPIC_BASE_URL: "https://api.anthropic.com", ANTHROPIC_API_KEY: "fixture-endpoint-key" }, { endpointModels: ["claude-sonnet-5"] });
+    await provider.generateText?.("fixture review");
+    expect(calls(dir)[0]?.env).toEqual({ ANTHROPIC_BASE_URL: "https://api.anthropic.com", ANTHROPIC_API_KEY: "fixture-endpoint-key" });
+  });
+
   it("preserves explicit custom endpoints and injected local models without inheriting subscription OAuth", async () => {
     const dir = account("custom");
     const provider = await create(dir, {
@@ -153,6 +162,36 @@ describe("Claude account configuration", () => {
       ANTHROPIC_BASE_URL: "http://127.0.0.1:8888",
       ANTHROPIC_AUTH_TOKEN: "fixture-local-key",
       ANTHROPIC_API_KEY: "fixture-local-key",
+    });
+  });
+
+  it("keeps a named account's inherited AWS credentials, since only Bedrock engines are AWS-scoped", async () => {
+    const dir = account("named-with-bedrock-env");
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "fixture-parent-AWS_ACCESS_KEY_ID");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "fixture-parent-AWS_SECRET_ACCESS_KEY");
+    const provider = await create(dir, { CLAUDE_CODE_USE_BEDROCK: "1" });
+    await provider.generateText?.("fixture review");
+    expect(calls(dir)[0]?.env).toMatchObject({
+      AWS_ACCESS_KEY_ID: "fixture-parent-AWS_ACCESS_KEY_ID",
+      AWS_SECRET_ACCESS_KEY: "fixture-parent-AWS_SECRET_ACCESS_KEY",
+    });
+  });
+
+  it("strips the parent shell's AWS credentials for a Bedrock engine, keeping its own profile", async () => {
+    const dir = account("bedrock-engine");
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "fixture-parent-AWS_ACCESS_KEY_ID");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "fixture-parent-AWS_SECRET_ACCESS_KEY");
+    vi.stubEnv("AWS_SESSION_TOKEN", "fixture-parent-AWS_SESSION_TOKEN");
+    const provider = await create(
+      dir,
+      { CLAUDE_CODE_USE_BEDROCK: "1", AWS_PROFILE: "fixture-bedrock-profile", AWS_REGION: "us-east-1" },
+      { bedrock: true },
+    );
+    await provider.generateText?.("fixture review");
+    expect(calls(dir)[0]?.env).toEqual({
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      AWS_PROFILE: "fixture-bedrock-profile",
+      AWS_REGION: "us-east-1",
     });
   });
 

@@ -90,10 +90,20 @@ export function upgradeLabel(plan: { tier: string; amount: number }): string {
   return t("usageMeter.upgradeTo", { plan: cloudPlanLabel(plan.tier), price: usd(plan.amount / 100) });
 }
 
-export function upgradeConfirmBody(preview: { plan: string; trial: boolean; price: number; chargeNow: number; tax: number; nextBillingAt?: number }): string {
+const DAY_MS = 24 * 60 * 60_000;
+/** Whether "nothing is charged today" can't be promised: a trial's first charge is within a day, or nobody here knows when
+ * it is. A running trial says only when it ends, not how long it was. */
+export function trialChargeIsNear(endsAt: number | undefined, now: number = Date.now()): boolean {
+  return endsAt === undefined || endsAt - now <= DAY_MS;
+}
+
+export function upgradeConfirmBody(preview: { plan: string; trial: boolean; price: number; chargeNow: number; tax: number; nextBillingAt?: number },
+  context: { trialEndsAt?: number; now?: number } = {}): string {
   const plan = cloudPlanLabel(preview.plan), price = usd(preview.price / 100);
   if (preview.trial) {
-    return preview.nextBillingAt ? t("usageMeter.confirm.trial", { plan, price, date: shortDate(preview.nextBillingAt) }) : t("usageMeter.confirm.trialNoDate", { plan, price });
+    const near = trialChargeIsNear(preview.nextBillingAt ?? context.trialEndsAt, context.now);
+    return preview.nextBillingAt ? t(near ? "usageMeter.confirm.trial.one" : "usageMeter.confirm.trial.many", { plan, price, date: shortDate(preview.nextBillingAt) })
+      : t(near ? "usageMeter.confirm.trialNoDate.one" : "usageMeter.confirm.trialNoDate.many", { plan, price });
   }
   const today = usd(preview.chargeNow / 100);
   const charge = preview.tax > 0 ? t("usageMeter.confirm.todayTax", { amount: today }) : t("usageMeter.confirm.today", { amount: today });

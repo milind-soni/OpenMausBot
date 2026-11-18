@@ -4,17 +4,21 @@
 // when it calls it.
 import { AGENTS_PROXY_ENV } from "./agents-bridge-switch.ts";
 import { roleToolEnv } from "./chief-level.ts";
+import { TOOLS_OFF_ENV } from "../shared/tool-groups.ts";
 
 /** The facts of a conversation that decide its agents tools. A settings change may change them; a turn never does. */
 export interface AgentsConversation {
   threadId: string;
-  bot: NonNullable<Parameters<typeof roleToolEnv>[0]> & { id: string; computer?: string; memoryEnabled?: boolean; xResearch?: boolean };
+  bot: NonNullable<Parameters<typeof roleToolEnv>[0]> & { id: string; computer?: string; memoryEnabled?: boolean; xResearch?: boolean; toolsOff?: readonly string[] };
   /** A room's thread: rooms refuse widgets, pages and a computer pick. */
   room: boolean;
   /** The bot works on its team's cloud computer, so it has no computer of its own to pick. */
   teamComputer: boolean;
-  /** `x`: a research credential is held (a treg key or a plan's); `research`: research works for it too. */
-  host: { skillAuthoring: boolean; sharedComputers: boolean; cloudHome: boolean; team: boolean; escalations: boolean; voiceNotes: boolean; x: boolean; research: boolean };
+  /** Only bots or automation drive it (`botDrivenConversation`): no turn in it is a person's own message to pick a computer for. */
+  botDriven?: boolean;
+  /** `x`: a research credential is held (a treg key or a plan's); `research`: research works for it too; `appHosting`:
+   * the plan's included app hosting reaches this server. */
+  host: { skillAuthoring: boolean; sharedComputers: boolean; cloudHome: boolean; team: boolean; voiceNotes: boolean; x: boolean; research: boolean; imageGeneration: boolean; meetings?: boolean; appHosting?: boolean; localVm: boolean };
 }
 
 /** What one turn may do. Its bearer carries this to the harness, which checks it on every call. */
@@ -37,7 +41,6 @@ export function agentsServerEnv(conversation: AgentsConversation, turn: AgentsTu
     OMB_BOT_ID: bot.id,
     OMB_THREAD_ID: conversation.threadId,
     OMB_COMMS_TOKEN: bearer(turn),
-    OMB_TURN_DEPTH: String(turn.depth),
     OMB_SKILL_AUTHORING_ENABLED: flag(host.skillAuthoring),
     OMB_MEMORY_ENABLED: flag(bot.memoryEnabled !== false),
     OMB_SHARED_COMPUTERS_ENABLED: flag(host.sharedComputers),
@@ -46,19 +49,29 @@ export function agentsServerEnv(conversation: AgentsConversation, turn: AgentsTu
     OMB_X_RESEARCH: flag(host.x && bot.xResearch !== false),
     OMB_RESEARCH: flag(host.x && host.research && bot.xResearch !== false),
     ...roleToolEnv(bot),
-    OMB_ESCALATIONS: flag(host.escalations),
-    OMB_COMPUTER_SELECTION: flag(!conversation.room && bot.computer !== "off" && !conversation.teamComputer),
+    OMB_IMAGE_GENERATION: flag(host.imageGeneration),
+    OMB_MEETINGS: flag(host.meetings === true && !conversation.room),
+    OMB_APP_HOSTING: flag(host.appHosting === true),
+    OMB_COMPUTER_SELECTION: flag(!conversation.room && bot.computer !== "off" && !conversation.teamComputer && !conversation.botDriven),
+    OMB_LOCAL_VM: flag(host.localVm),
+    [TOOLS_OFF_ENV]: (bot.toolsOff ?? []).join(","),
   };
 }
 
+/** A conversation a bot opened, the Bot API's, or a routine's run: a fact of the conversation, so its tool list stays the same turn to turn. */
+export function botDrivenConversation(task: { openedBy?: unknown; botApi?: boolean; routineRunId?: string } | undefined): boolean {
+  return Boolean(task && (task.openedBy || task.botApi || task.routineRunId));
+}
+
 /** What started a direct turn, in the words a refusal uses. */
-export type TurnKind = "person" | "routine" | "webhook" | "handoff" | "continuation";
+export type TurnKind = "person" | "routine" | "webhook" | "api" | "handoff" | "continuation";
 
 export function directTurnKind(turn: {
   automationSource?: string; commsDepth?: number; coordination?: unknown; peerAsk?: unknown;
   cardContinuation?: boolean; computerSelectionContinuation?: boolean; unattended?: boolean; compactOnly?: boolean;
 }): TurnKind {
   if (turn.automationSource === "webhook") return "webhook";
+  if (turn.automationSource === "api") return "api";
   if (turn.automationSource !== undefined) return "routine";
   if (turn.commsDepth || turn.coordination || turn.peerAsk) return "handoff";
   if (turn.cardContinuation || turn.computerSelectionContinuation || turn.unattended || turn.compactOnly) return "continuation";
@@ -68,6 +81,7 @@ export function directTurnKind(turn: {
 const THIS_TURN: Record<Exclude<TurnKind, "person">, string> = {
   routine: "This turn is a routine run",
   webhook: "This turn was started by a webhook",
+  api: "This turn came in through the Bot API",
   handoff: "This turn is a teammate's hand-off",
   continuation: "This turn continues earlier work",
 };

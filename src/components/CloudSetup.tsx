@@ -9,7 +9,7 @@ import { cloudIntentDue, cloudIntentShown, jobRoutine, reopenCloudIntent, useClo
 import { cn } from "@/lib/cn";
 import { CLOUD_INTENT_GIVEN, CLOUD_SETUP_HIDDEN, cloudSetupItems, cloudSetupStage, cloudWelcomeStage, type CloudSetupItem, type CloudSetupStep } from "@/lib/cloud-setup";
 import { endWelcomeHere, returnToWelcome, saveWelcomeHints, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import type { MausMotion } from "@/lib/mascot";
 import { hintSeen, type WelcomeViewer } from "@/lib/onboarding";
 import type { LocaleKey } from "@/locales";
@@ -40,10 +40,10 @@ function nextRunLabel(at: number | null, now = Date.now()): string | null {
   if (!at) return null;
   const when = new Date(at), today = new Date(now);
   const days = Math.round((new Date(when).setHours(0, 0, 0, 0) - new Date(today).setHours(0, 0, 0, 0)) / 86_400_000);
-  const time = when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const time = when.toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit" });
   if (days === 0) return t("cloudSetup.ready.today", { time });
   if (days === 1) return t("cloudSetup.ready.tomorrow", { time });
-  return t("cloudSetup.ready.on", { day: when.toLocaleDateString([], { weekday: "long" }), time });
+  return t("cloudSetup.ready.on", { day: when.toLocaleDateString(intlLocale(), { weekday: "long" }), time });
 }
 
 function CloudReady({ routine, onDone }: { routine?: Routine; onDone: () => void }) {

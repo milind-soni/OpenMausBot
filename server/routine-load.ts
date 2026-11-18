@@ -4,12 +4,15 @@ import { z } from "zod";
 
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { ROUTINE_CHECKS, type RoutineCheck } from "../shared/routines.ts";
+import { isEffortLevel, type ModelSelection } from "../shared/wire.ts";
+import { isModelVariant } from "./contracts.ts";
 import { ROUTINE_PARTS, type PartPair, type RoutinePart } from "./package-parts.ts";
 import { loadAttachments, loadTimeoutMinutes } from "./routine-attachments.ts";
 import { isRoutineHoldCause } from "./routine-holds.ts";
 import { MAX_DATE_MS } from "./routine-intervals.ts";
 import { loadSchedule } from "./routine-schedules.ts";
-import type { Routine, RoutineGoalStatus, RoutinePackageStamp, RoutineRequestReceipt, RoutineRun, RoutineTarget } from "./routines.ts";
+import { loadSkips } from "./routine-skips.ts";
+import type { Routine, RoutineGoalStatus, RoutinePackageStamp, RoutineRequestCommit, RoutineRequestReceipt, RoutineRun, RoutineTarget } from "./routines.ts";
 
 const persistedSourceThreadId = z.string().trim().min(1).optional().catch(undefined);
 
@@ -76,6 +79,15 @@ function withoutUndefined<T extends object>(record: T, keys: ReadonlyArray<keyof
 }
 
 /** Null when its schedule cannot load: the caller keeps it on disk, unscheduled. */
+export function loadModelSelection(value: unknown): ModelSelection | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { instanceId, model, effort, variant } = value as Record<keyof ModelSelection, unknown>;
+  if (typeof instanceId !== "string" || !instanceId.trim() || typeof model !== "string" || !model.trim()) return undefined;
+  if (effort !== undefined && (!isEffortLevel(effort) || variant !== undefined)) return undefined;
+  if (variant !== undefined && !isModelVariant(variant)) return undefined;
+  return { instanceId: instanceId.trim(), model: model.trim(), ...(effort === undefined ? {} : { effort }), ...(variant === undefined ? {} : { variant }) };
+}
+
 export function loadRoutine(routine: Routine, now: number): Routine | null {
   const schedule = loadSchedule(routine.schedule, now);
   if (!schedule) return null;
@@ -92,16 +104,19 @@ export function loadRoutine(routine: Routine, now: number): Routine | null {
     resultsThreadId: persistedSourceThreadId.parse(routine.resultsThreadId),
     overlap: routine.overlap === "queue" ? "queue" : undefined,
     runOnStartup: routine.runOnStartup === true ? true : undefined,
+    modelSelection: routine.target === "room-goal" ? undefined : loadModelSelection(routine.modelSelection),
     skippedRuns: Number.isSafeInteger(routine.skippedRuns) && routine.skippedRuns! > 0 ? routine.skippedRuns : undefined,
     lastSkippedAt: Number.isSafeInteger(routine.lastSkippedAt) && routine.lastSkippedAt! >= 0 && routine.lastSkippedAt! <= MAX_DATE_MS ? routine.lastSkippedAt : undefined,
     installedPackage: loadInstalledPackage(routine.installedPackage),
     checkedAt: instant(routine.checkedAt),
     checkTrouble: typeof routine.checkTrouble === "string" && routine.checkTrouble ? routine.checkTrouble.slice(0, 300) : undefined,
+    checkTroubleCode: typeof routine.checkTrouble === "string" && routine.checkTrouble && typeof routine.checkTroubleCode === "string" ? routine.checkTroubleCode.slice(0, 80) : undefined,
     wakeAt: instant(routine.wakeAt),
     heldFor: isRoutineHoldCause(routine.heldFor) ? routine.heldFor : undefined,
   };
   delete loaded.failureStreak;
-  return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "installedPackage", "checkedAt", "checkTrouble", "wakeAt", "heldFor"]));
+  delete loaded.noStartStreak;
+  return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "modelSelection", "installedPackage", "checkedAt", "checkTrouble", "checkTroubleCode", "wakeAt", "heldFor"]));
 }
 
 export function loadRun(run: RoutineRun): RoutineRun {
@@ -119,8 +134,11 @@ export function loadRun(run: RoutineRun): RoutineRun {
     access: run.access === "read-and-draft" ? "read-and-draft" : undefined,
     deliver: run.deliver === "brief" ? "brief" : undefined,
     checkKey: typeof run.checkKey === "string" && /^[\w-]{1,128}$/.test(run.checkKey) ? run.checkKey : undefined,
+    busyMs: instant(run.busyMs),
+    workedMs: instant(run.workedMs),
+    skipped: loadSkips(run.skipped),
   };
-  return withoutUndefined(loaded, ["timeoutMinutes", "access", "deliver", "checkKey"]);
+  return withoutUndefined(loaded, ["timeoutMinutes", "access", "deliver", "checkKey", "busyMs", "workedMs", "skipped"]);
 }
 
 const REQUEST_ACTIONS = new Set<RoutineRequestOperation["action"]>(["create", "update", "pause", "resume", "run_now", "delete"]);
@@ -138,4 +156,31 @@ export function loadRequestReceipts(value: unknown): RoutineRequestReceipt[] {
     typeof receipt?.fingerprint === "string" && /^[a-f0-9]{64}$/.test(receipt.fingerprint) &&
     typeof receipt?.resultId === "string" &&
     Number.isFinite(receipt?.appliedAt));
+}
+
+/** The receipt of a request already applied; null when there is none. One that names another card throws. */
+export function matchingRequestReceipt(receipts: readonly RoutineRequestReceipt[], request: RoutineRequestCommit): RoutineRequestReceipt | null {
+  const receipt = receipts.find((candidate) => candidate.requestId === request.requestId);
+  if (!receipt) return null;
+  if (
+    receipt.action !== request.action ||
+    receipt.messageId !== request.messageId ||
+    receipt.botId !== request.botId ||
+    receipt.threadId !== request.threadId ||
+    receipt.fingerprintVersion !== request.fingerprintVersion ||
+    receipt.fingerprint !== request.fingerprint
+  ) {
+    throw new Error("Routine request receipt does not match this confirmation card");
+  }
+  return receipt;
+}
+
+/** Keeps the receipt of a request just applied, newest first; applied before with another result, it throws. */
+export function rememberRequest(receipts: RoutineRequestReceipt[], request: RoutineRequestCommit, resultId: string, appliedAt: number): void {
+  const existing = matchingRequestReceipt(receipts, request);
+  if (existing) {
+    if (existing.resultId !== resultId) throw new Error("Routine request receipt has another result");
+    return;
+  }
+  receipts.unshift({ ...request, resultId, appliedAt });
 }

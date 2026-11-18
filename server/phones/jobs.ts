@@ -1,18 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { z } from "zod";
 
 import { isPhoneWrite } from "../../shared/phone-apps.ts";
+import type { PhoneJobDelivery, PhoneJobOutcome } from "../../shared/phone-jobs.ts";
 
-export const PHONE_JOB_CODES = ["denied", "foreground_required", "not_found", "too_large", "unsupported", "offline", "timeout", "turn_ended"] as const;
-export type PhoneJobCode = (typeof PHONE_JOB_CODES)[number];
-export type PhoneJobOutcome = { ok: true; result: unknown } | { ok: false; error: string; code?: PhoneJobCode };
-const KNOWN_CODES: readonly unknown[] = PHONE_JOB_CODES;
-/** A newer phone's extra field is stripped, and a code this server does not know yet reads as none: the error still
- * reaches the bot. */
-export const phoneJobOutcome = z.union([
-  z.object({ ok: z.literal(true), result: z.unknown() }),
-  z.object({ ok: z.literal(false), error: z.string().max(2000), code: z.preprocess((code) => (KNOWN_CODES.includes(code) ? code : undefined), z.enum(PHONE_JOB_CODES).optional()) }),
-]);
+export { PHONE_JOB_CODES, phoneJobOutcome, type PhoneJobCode, type PhoneJobDelivery, type PhoneJobOutcome } from "../../shared/phone-jobs.ts";
 
 export const PHONE_JOB_TIMEOUT_MS = 45_000;
 export const PHONE_SEND_TIMEOUT_MS = 120_000;
@@ -24,7 +15,6 @@ export const PHONE_RECONNECT_WAIT_MS = 15_000;
 const RESTARTING = "This server is restarting. Phone jobs resume by themselves once it is back.";
 
 export type PhoneJobOptions = { active: () => boolean; timeoutMs: number; offlineText: string; online: () => boolean; background?: boolean };
-export type PhoneJobDelivery = { id: string; tool: string; arguments: Record<string, unknown>; expiresAt: number };
 
 type Job = {
   id: string; tool: string; args: Record<string, unknown>; active: () => boolean; background: boolean; seq: number; expiresAt: number;

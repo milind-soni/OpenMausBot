@@ -261,7 +261,7 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
         {empty && (
           <div className="flex flex-col items-center gap-3 py-12 text-center" data-testid="data-empty">
             <Database size={22} className="text-ink-secondary" aria-hidden="true" />
-            <p className="text-[13px] text-ink-secondary">{t("data.empty")}</p>
+            <p className="px-6 text-[13px] text-ink-secondary">{t("data.empty")}</p>
           </div>
         )}
         {card && <DataCard key={card.id} bot={bot} card={card} theme={theme} controls={controls} running={running} onCancel={cancel} />}

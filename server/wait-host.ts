@@ -1,3 +1,5 @@
+import { waitNoticeText } from "./wait-notice-text.ts";
+import { redactParams } from "../shared/redact.ts";
 import type { Notification } from "../shared/notification.ts";
 import { buildNotification } from "./notify.ts";
 import type { RoutineManager, RoutineRun } from "./routines.ts";
@@ -24,6 +26,55 @@ export function waitRunChat(
 ): string | null {
   if (cloudHome || !run.resultsThreadId) return null;
   return directChat(run.botId, run.resultsThreadId) ? run.resultsThreadId : null;
+}
+
+/** A wait continuation is proved by the turn's originating run and fired notice in the same bot's chat, never its prompt. */
+export function waitContinuesHere(
+  run: Pick<RoutineRun, "id" | "eventSource" | "triggerSource" | "botId" | "threadId" | "resultsThreadId" | "webhookId" | "deliveryId"> | null,
+  botId: string,
+  threadId: string,
+  store: Pick<Store, "messagesFor">,
+  originatingRunId: string | undefined,
+): boolean {
+  if (!run || !originatingRunId || run.id !== originatingRunId || run.eventSource !== "wait" || run.triggerSource !== "webhook" || run.botId !== botId
+    || run.threadId !== threadId || run.resultsThreadId !== threadId || !run.deliveryId
+    || run.webhookId !== `wait:${run.deliveryId}`) return false;
+  return store.messagesFor(threadId).some((message) => message.wait?.status === "fired" && message.wait.id === run.deliveryId);
+}
+
+interface WaitRunOwner {
+  automationRunId?: string;
+  messageId?: string;
+  stopped?: boolean;
+  generations: ReadonlySet<string>;
+}
+
+export function waitTurnRunId(
+  turn: { automationRunId?: string; cardContinuation?: boolean; computerSelectionContinuation?: boolean } | undefined,
+  previous: Pick<WaitRunOwner, "automationRunId" | "messageId" | "stopped"> | undefined,
+  requestMessageId: string | undefined,
+): string | undefined {
+  if (turn?.automationRunId) return turn.automationRunId;
+  if (!(turn?.cardContinuation || turn?.computerSelectionContinuation) || !requestMessageId
+    || previous?.stopped || previous?.messageId !== requestMessageId) return undefined;
+  return previous.automationRunId;
+}
+
+export function waitContinuationCheck<T extends { botId: string; threadId: string; generation: string; externalRuntime?: unknown }>(
+  capability: T,
+  deps: {
+    active: (capability: T) => boolean;
+    request: (threadId: string) => WaitRunOwner | undefined;
+    run: (threadId: string) => Parameters<typeof waitContinuesHere>[0];
+    store: Pick<Store, "messagesFor">;
+  },
+): () => boolean {
+  return () => {
+    const request = deps.request(capability.threadId);
+    return !capability.externalRuntime && deps.active(capability)
+      && request?.stopped !== true && request?.generations.has(capability.generation) === true
+      && waitContinuesHere(deps.run(capability.threadId), capability.botId, capability.threadId, deps.store, request.automationRunId);
+  };
 }
 
 type CardStore = Pick<Store, "messagesFor" | "patchMessage">;
@@ -62,7 +113,8 @@ export function createWaitHost(deps: WaitHostDeps): Pick<WaitManagerOptions, "so
       if (deps.threadBusy(wait.botId, wait.threadId)) return false;
       const posted = store.messagesFor(wait.threadId).some((m) => m.wait?.id === wait.id && m.wait.status === notice.status);
       if (posted) return true;
-      store.appendMessage(wait.threadId, { role: "bot", kind: "text", text: notice.text, wait: { id: wait.id, status: notice.status } });
+      const words = waitNoticeText(wait, notice);
+      store.appendMessage(wait.threadId, { role: "bot", kind: "text", text: notice.text, textCode: words?.key, textParams: words?.params && redactParams(words.params), wait: { id: wait.id, status: notice.status } });
       store.patchTask(wait.botId, wait.threadId, { unread: true });
       deps.wrote(bot, wait.threadId);
       if (notice.status === "fired") deps.notify(buildNotification("wait", bot, wait.threadId, notice.text, { avatarUrl: bot.avatarUrl }));

@@ -47,6 +47,14 @@ export function effectiveLanguage(choice: string | null, serverDefault: string |
   return choice ?? serverDefault ?? "";
 }
 
+export function localeTag(language: string, system: string | undefined = globalThis.navigator?.language): string | undefined {
+  return language || system;
+}
+
+export function startupLocaleTag(system: string | undefined = globalThis.navigator?.language): string | undefined {
+  return localeTag(effectiveLanguage(languageChoice(), undefined), system);
+}
+
 function notify() {
   for (const listener of listeners) listener();
 }
@@ -106,10 +114,14 @@ export function loadPageLanguage(): Promise<string> {
   return loadLocale(effectiveLanguage(languageChoice(), undefined) || globalThis.navigator?.language);
 }
 
-/** Shows `language` (the system's when empty) once its pack has loaded, and draws the caller again then. */
-export function usePageLanguage(language: string): void {
+/** Shows `language` (the system's when empty) once its pack has loaded, and draws the caller again then. `windowPage`:
+ * the window's own page, whose language the desktop app's menus, tray and dialogs follow while nothing is picked. */
+export function usePageLanguage(language: string, windowPage = false): void {
   const [, setShown] = useState(0);
   useEffect(() => {
-    void loadLocale(language || globalThis.navigator?.language).then(() => setShown((shown) => shown + 1));
-  }, [language]);
+    void loadLocale(language || globalThis.navigator?.language).then((shown) => {
+      if (windowPage) desktop()?.shown?.(shown);
+      setShown((count) => count + 1);
+    });
+  }, [language, windowPage]);
 }

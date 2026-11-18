@@ -4,7 +4,7 @@ import { Trash2 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { api, useStore } from "@/state/store";
 import { phoneAppChips, phonePlatformLabel, phoneRemovePath, usePhones } from "../lib/phones";
-import { relative } from "./CompanionSection";
+import { relative } from "./PhoneDevicesSection";
 
 export function PhonesList() {
   const { phase, phones, refresh } = usePhones();
@@ -23,17 +23,16 @@ export function PhonesList() {
       });
   };
 
+  if (phones.length === 0) return null;
   return (
-    <div className="border-t border-hairline/30 pt-4">
-      <div className="text-[13px] text-ink">{t("remote.phones.title")}</div>
-      {phones.length === 0 ? (
-        <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t("remote.phones.empty")}</div>
-      ) : (
-        <ul className="mt-3 flex flex-col gap-2">
+    <section className="flex flex-col gap-2" data-settings-block="phone-apps">
+      <h3 className="px-4 text-[13px] font-medium leading-[18px] text-ink">{t("remote.phones.title")}</h3>
+      {(
+        <ul data-settings-rows="" className="flex flex-col overflow-hidden rounded-[12px] border-[0.5px] border-(--settings-edge) bg-menu">
           {phones.map((phone) => {
             const { name, platform } = phone.registration;
             return (
-              <li key={phone.key} className="rounded-xl bg-inset px-3 py-3">
+              <li key={phone.key} className="px-4 py-3">
                 <div className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[14px] font-medium text-ink">
@@ -64,6 +63,6 @@ export function PhonesList() {
           })}
         </ul>
       )}
-    </div>
+    </section>
   );
 }

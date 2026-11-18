@@ -62,6 +62,15 @@ const support: AcpSupport = {
   nativeSource: "gemini.acp",
   loginNote:
     "Gemini CLI needs a GEMINI_API_KEY, a Vertex AI setup, or an enterprise Code Assist login — consumer Google logins stopped working on 2026-06-18 (use the Antigravity engine for those accounts)",
+  install: {
+    command: {
+      darwin: "npm install -g @google/gemini-cli",
+      linux: "npm install -g @google/gemini-cli",
+      win32: "npm install -g @google/gemini-cli",
+    },
+    npmPackage: "@google/gemini-cli",
+    docsUrl: "https://github.com/google-gemini/gemini-cli",
+  },
 
   // --acp is stable; --experimental-acp still works but warns.
   spawnArgs: (config, turn) => ["--acp", ...geminiApprovalArgs(config.fullAuto, turn.approvalMode), ...(turn.model ? ["-m", turn.model] : [])],

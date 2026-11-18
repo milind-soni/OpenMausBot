@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 // /api/phones: a paired phone offering its own apps (calendar, contacts, ...) to this server's bots. The phone is known by
 // what authenticated it (a Cloud session, or the companion sidecar's device header), never by anything in the body.
 import { phoneJobOutcome, type PhoneJobs } from "../phones/jobs.ts";
@@ -41,7 +42,7 @@ export function createPhoneRoutes(deps: PhoneRouteDeps): RouteHandler {
     res.setHeader("Cache-Control", "no-store");
 
     if (path === "/api/phones" && method === "GET") {
-      if (!deps.isAdmin(auth)) return json(res, 403, { error: "Only the owner or an admin can list phones." });
+      if (!deps.isAdmin(auth)) return json(res, 403, userError("serverError.phone.list"));
       return json(res, 200, { phones: registry.list(deps.owner(auth), (key) => jobs.busy(key)) });
     }
 
@@ -88,7 +89,7 @@ export function createPhoneRoutes(deps: PhoneRouteDeps): RouteHandler {
 
     const one = /^\/api\/phones\/([^/]+)$/.exec(path);
     if (one && method === "DELETE") {
-      if (!deps.isAdmin(auth)) return json(res, 403, { error: "Only the owner or an admin can remove phones." });
+      if (!deps.isAdmin(auth)) return json(res, 403, userError("serverError.phone.remove"));
       // Removed on the computer: its waiting jobs fail and the key stays refused, so the phone must pair again.
       const key = decodeURIComponent(one[1]!);
       const removed = removePhone(key, true);

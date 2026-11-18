@@ -23,6 +23,8 @@ describe("a new bot's greeting", () => {
     expect(initialGreeting("Scout", "en", "Milind Soni")).toBe("Hi Milind, I'm Scout. What would you like me to do?");
     expect(initialGreeting("Scout", "es-MX", "  Ana  María ")).toBe("Hola Ana, soy Scout. ¿Qué te gustaría que hiciera?");
     expect(initialGreeting("Scout", "pt-BR", "João")).toBe("Oi João, eu sou Scout. O que você gostaria que eu fizesse?");
+    expect(initialGreeting("Scout", "zh-TW", "王小明")).toBe("嗨 王小明，我是 Scout。你想要我幫你做什麼？");
+    expect(initialGreeting("Scout", "zh-Hant")).toBe("嗨，我是 Scout。你想要我幫你做什麼？");
   });
 
   it("names no one when the person has not given a name", () => {

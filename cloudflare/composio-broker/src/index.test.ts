@@ -17,7 +17,7 @@ import { streamedBody } from "./test-harness";
 
 const multiAccount = {
   enable: true,
-  max_accounts_per_toolkit: 5,
+  max_accounts_per_toolkit: 10,
   require_explicit_selection: true,
 };
 
@@ -340,10 +340,64 @@ describe("connected-apps broker boundaries", () => {
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toEqual({ error: "Add an account alias so the existing connection is not replaced" });
     }
-    fixture.accounts = Array.from({ length: 5 }, (_, id) => ({ id: String(id), status: "INITIALIZING", toolkit: { slug: "gmail" } }));
-    expect((await fixture.authorize()).status).toBe(409);
+    fixture.accounts = Array.from({ length: 10 }, (_, id) => ({ id: String(id), status: "INITIALIZING", toolkit: { slug: "gmail" } }));
+    const full = await fixture.authorize();
+    expect(full.status).toBe(409);
+    await expect(full.json()).resolves.toEqual({ error: "gmail already has the maximum of 10 accounts" });
     expect(fixture.links()).toHaveLength(successfulLinks);
     expect(fixture.deletes()).toEqual([]);
+  });
+
+  it("links a sixth account, raising a Session made under the old cap of 5 in place first", async () => {
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const { env, ctx } = testEnv(fetchCalls, "agency-user");
+    const installation = { id: "agency-install", composio_user_id: "agency-user", session_id: "trs_old_cap", disabled_at: null };
+    let cap = 5;
+    const accounts = Array.from({ length: 5 }, (_, id) => ({ id: `ca_${id}`, alias: `sub-${id}`, status: "ACTIVE", toolkit: { slug: "gmail" } }));
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      fetchCalls.push({ url, init });
+      if (url.includes("/connected_accounts")) return Response.json({ items: accounts });
+      if (url.endsWith("/link")) return Response.json({ redirect_url: "https://connect.composio.dev/link/gmail" });
+      if (url.includes("/auth_configs")) return Response.json({ items: [] });
+      if (init?.method === "PATCH") {
+        cap = (JSON.parse(String(init.body)) as { multi_account: { max_accounts_per_toolkit: number } }).multi_account.max_accounts_per_toolkit;
+        return Response.json({ session_id: "trs_old_cap" });
+      }
+      const old = session("trs_old_cap", "agency-user");
+      return Response.json({ ...old, config: { ...old.config, multi_account: { ...multiAccount, max_accounts_per_toolkit: cap } } });
+    });
+
+    const response = await authorize("gmail", "sub-5", installation, env as never, ctx as never);
+    expect(response.status).toBe(200);
+    const steps = fetchCalls.filter((call) => call.init?.method === "PATCH" || call.url.endsWith("/link"));
+    expect(steps.map((call) => [call.init?.method, call.url])).toEqual([
+      ["PATCH", "https://backend.composio.dev/api/v3.1/tool_router/session/trs_old_cap"],
+      ["POST", "https://backend.composio.dev/api/v3.1/tool_router/session/trs_old_cap/link"],
+    ]);
+    expect(JSON.parse(String(steps[0]!.init?.body))).toEqual({ multi_account: multiAccount });
+    expect(fetchCalls.some((call) => call.init?.method === "POST" && call.url.endsWith("/tool_router/session"))).toBe(false);
+  });
+
+  it("still links when the request to raise the old cap cannot reach Composio", async () => {
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const { env, ctx } = testEnv(fetchCalls, "offline-cap-user");
+    const installation = { id: "offline-cap-install", composio_user_id: "offline-cap-user", session_id: "trs_cap_offline", disabled_at: null };
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      fetchCalls.push({ url, init });
+      if (init?.method === "PATCH") throw new TypeError("fetch failed");
+      if (url.includes("/connected_accounts")) return Response.json({ items: [{ id: "ca_0", alias: "sub-0", status: "ACTIVE", toolkit: { slug: "gmail" } }] });
+      if (url.endsWith("/link")) return Response.json({ redirect_url: "https://connect.composio.dev/link/gmail" });
+      if (url.includes("/auth_configs")) return Response.json({ items: [] });
+      const old = session("trs_cap_offline", "offline-cap-user");
+      return Response.json({ ...old, config: { ...old.config, multi_account: { ...multiAccount, max_accounts_per_toolkit: 5 } } });
+    });
+
+    const response = await authorize("gmail", "sub-1", installation, env as never, ctx as never);
+    expect(response.status).toBe(200);
+    expect(fetchCalls.some((call) => call.init?.method === "PATCH")).toBe(true);
+    expect(fetchCalls.some((call) => call.url.endsWith("/trs_cap_offline/link"))).toBe(true);
   });
 
   it("links a toolkit whose only account failed to sign in", async () => {
@@ -377,10 +431,10 @@ describe("connected-apps broker boundaries", () => {
     expect(fixture.deletes()).toHaveLength(1);
     expect(fixture.links()).toHaveLength(1);
 
-    const working = Array.from({ length: 4 }, (_, id) => ({ id: `ca_${id}`, alias: `other-${id}`, status: "ACTIVE", toolkit: { slug: "gmail" } }));
+    const working = Array.from({ length: 9 }, (_, id) => ({ id: `ca_${id}`, alias: `other-${id}`, status: "ACTIVE", toolkit: { slug: "gmail" } }));
     fixture.accounts = [{ id: "ca_old_work", alias: "work", status: "INITIATED", toolkit: { slug: "gmail" } }, ...working];
     expect((await fixture.authorize("work")).status).toBe(200);
-    fixture.accounts.push({ id: "ca_4", alias: "other-4", status: "ACTIVE", toolkit: { slug: "gmail" } });
+    fixture.accounts.push({ id: "ca_9", alias: "other-9", status: "ACTIVE", toolkit: { slug: "gmail" } });
     expect((await fixture.authorize("work")).status).toBe(409);
     expect(fixture.links()).toHaveLength(2);
 
@@ -707,7 +761,7 @@ describe("MCP relay Session reuse", () => {
 describe("project auth configs", () => {
   afterEach(() => vi.useRealTimers());
 
-  const highlevel = { id: "ac_new", status: "ENABLED", is_composio_managed: false, last_updated_at: "2026-10-01T00:00:00Z", toolkit: { slug: "HighLevel_Location" } };
+  const zohoCrm = { id: "ac_new", status: "ENABLED", is_composio_managed: false, last_updated_at: "2026-10-01T00:00:00Z", toolkit: { slug: "Zoho_Crm" } };
 
   function projectHarness(authConfigs: () => Response | Promise<Response>) {
     const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
@@ -752,8 +806,8 @@ describe("project auth configs", () => {
         ? { items: [{ id: "ac_x", is_composio_managed: false, toolkit: { slug: "X" } }] }
         : {
           items: [
-            { id: "ac_old", is_composio_managed: false, last_updated_at: "2026-09-01T00:00:00Z", toolkit: { slug: "highlevel_location" } },
-            highlevel,
+            { id: "ac_old", is_composio_managed: false, last_updated_at: "2026-09-01T00:00:00Z", toolkit: { slug: "zoho_crm" } },
+            zohoCrm,
             { id: "ac_gmail", is_composio_managed: true, toolkit: { slug: "gmail" } },
             { id: "ac_hubspot", status: "DISABLED", is_composio_managed: false, toolkit: { slug: "hubspot" } },
             { id: "ac_slack", is_composio_managed: false, is_enabled_for_tool_router: false, toolkit: { slug: "slack" } },
@@ -765,27 +819,27 @@ describe("project auth configs", () => {
 
     await expect(ensureSession(harness.install(null), harness.env as never, harness.ctx as never)).resolves.toMatchObject({
       sessionId: "trs_new_1",
-      authConfigs: { highlevel_location: "ac_new", twitter: "ac_x" },
+      authConfigs: { zoho_crm: "ac_new", twitter: "ac_x" },
     });
     expect(harness.authConfigReads().map((call) => new URL(call.url).searchParams.get("is_composio_managed"))).toEqual(["false", "false"]);
     expect(harness.creations()).toEqual([expect.objectContaining({
       user_id: "omb_stable",
       multi_account: multiAccount,
-      auth_configs: { highlevel_location: "ac_new", twitter: "ac_x" },
+      auth_configs: { zoho_crm: "ac_new", twitter: "ac_x" },
     })]);
     expect(harness.dbRuns.some((run) => run.sql.includes("SET session_id") && run.values[0] === "trs_new_1")).toBe(true);
-    await expect(listCustomAuthConfigs(harness.env as never)).resolves.toEqual({ highlevel_location: "ac_new", twitter: "ac_x" });
+    await expect(listCustomAuthConfigs(harness.env as never)).resolves.toEqual({ zoho_crm: "ac_new", twitter: "ac_x" });
   });
 
   it("recreates a Session that lacks the project's auth configs once, keeping the Composio user", async () => {
     const { ensureSession } = await freshBroker();
-    const harness = projectHarness(() => Response.json({ items: [highlevel] }));
+    const harness = projectHarness(() => Response.json({ items: [zohoCrm] }));
     harness.sessions.set("trs_old", session("trs_old", "omb_stable"));
     harness.echoAuthConfigs = false;
 
     const upgraded = await ensureSession(harness.install("trs_old"), harness.env as never, harness.ctx as never);
     expect(upgraded.sessionId).toBe("trs_new_1");
-    expect(harness.creations()).toEqual([expect.objectContaining({ user_id: "omb_stable", auth_configs: { highlevel_location: "ac_new" } })]);
+    expect(harness.creations()).toEqual([expect.objectContaining({ user_id: "omb_stable", auth_configs: { zoho_crm: "ac_new" } })]);
     expect(harness.dbRuns.filter((run) => run.sql.includes("SET session_id")).map((run) => [run.values[0], run.values[2]])).toEqual([["trs_new_1", "install-1"]]);
 
     // Composio left auth_configs out of the echo: the upgrade is not retried.
@@ -793,7 +847,7 @@ describe("project auth configs", () => {
     expect(harness.creations()).toHaveLength(1);
 
     // A Session that echoes the config (in any slug case) is reused as is.
-    harness.sessions.set("trs_covered", { ...session("trs_covered", "omb_stable"), config: { user_id: "omb_stable", multi_account: multiAccount, auth_configs: { HighLevel_Location: "ac_new" } } });
+    harness.sessions.set("trs_covered", { ...session("trs_covered", "omb_stable"), config: { user_id: "omb_stable", multi_account: multiAccount, auth_configs: { Zoho_Crm: "ac_new" } } });
     await expect(ensureSession(harness.install("trs_covered"), harness.env as never, harness.ctx as never)).resolves.toMatchObject({ sessionId: "trs_covered" });
     expect(harness.creations()).toHaveLength(1);
     expect(harness.authConfigReads()).toHaveLength(1);
@@ -820,7 +874,7 @@ describe("project auth configs", () => {
     vi.setSystemTime(new Date("2026-10-15T12:00:00Z"));
     const { ensureSession } = await freshBroker();
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
-    let items: unknown[] | "fail" = [highlevel];
+    let items: unknown[] | "fail" = [zohoCrm];
     const harness = projectHarness(() => items === "fail"
       ? Response.json({ error: "down" }, { status: 503 })
       : Response.json({ items }));
@@ -842,14 +896,14 @@ describe("project auth configs", () => {
     expect(errors).toHaveBeenCalledTimes(1);
 
     // The failed read is retried after a minute; a new auth config upgrades the Session once more.
-    items = [highlevel, { id: "ac_x", is_composio_managed: false, toolkit: { slug: "x" } }];
+    items = [zohoCrm, { id: "ac_x", is_composio_managed: false, toolkit: { slug: "x" } }];
     vi.setSystemTime(new Date("2026-10-15T12:10:30Z"));
     await verify("trs_new_1");
     expect(harness.authConfigReads()).toHaveLength(2);
     vi.setSystemTime(new Date("2026-10-15T12:11:02Z"));
-    await expect(verify("trs_new_1")).resolves.toMatchObject({ sessionId: "trs_new_2", authConfigs: { highlevel_location: "ac_new", twitter: "ac_x" } });
+    await expect(verify("trs_new_1")).resolves.toMatchObject({ sessionId: "trs_new_2", authConfigs: { zoho_crm: "ac_new", twitter: "ac_x" } });
     expect(harness.authConfigReads()).toHaveLength(3);
-    expect(harness.creations().at(-1)).toEqual(expect.objectContaining({ user_id: "omb_stable", auth_configs: { highlevel_location: "ac_new", twitter: "ac_x" } }));
+    expect(harness.creations().at(-1)).toEqual(expect.objectContaining({ user_id: "omb_stable", auth_configs: { zoho_crm: "ac_new", twitter: "ac_x" } }));
     errors.mockRestore();
   });
 });

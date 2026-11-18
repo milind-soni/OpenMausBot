@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   open,
+  readdir,
   readFile,
   rename,
   rm,
@@ -38,6 +39,8 @@ export interface RetryOptions {
   attempts?: number;
   delayMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** Which errors are worth another try; Windows file locks by default. */
+  retryable?: (error: unknown) => boolean;
 }
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -45,11 +48,12 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 export async function retryOnWindowsFileLock<T>(step: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
   const attempts = options.attempts ?? 8;
   const sleep = options.sleep ?? wait;
+  const retryable = options.retryable ?? transientWindowsFileError;
   for (let attempt = 1; ; attempt += 1) {
     try {
       return await step();
     } catch (error) {
-      if (attempt >= attempts || !transientWindowsFileError(error)) throw error;
+      if (attempt >= attempts || !retryable(error)) throw error;
       await sleep(Math.min(2_000, (options.delayMs ?? 250) * 2 ** (attempt - 1)));
     }
   }
@@ -338,6 +342,21 @@ export function installAntigravityRuntime(options: AntigravityInstallOptions = {
   const running = installOnce(options).finally(() => installs.delete(key));
   installs.set(key, running);
   return running;
+}
+
+/** The newest runtime the app installed here, when it is not the pinned one; null when the pinned one is installed or none is. */
+export async function antigravityOlderRuntime(baseDir = DATA_DIR, asset = resolveAntigravityReleaseAsset()): Promise<string | null> {
+  if (!asset) return null;
+  const versions = join(runtimeRoot(baseDir), "versions");
+  if (await completedRelease(join(versions, asset.sha256), asset)) return null;
+  const found: string[] = [];
+  for (const name of await readdir(versions).catch(() => [] as string[])) {
+    try {
+      const record = JSON.parse(await readFile(join(versions, name, INSTALL_RECORD), "utf8")) as Partial<InstallRecord>;
+      if (record.sha256 === name && typeof record.version === "string") found.push(record.version);
+    } catch {}
+  }
+  return found.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0] ?? null;
 }
 
 export function antigravityManagedInstallAvailable(): boolean {

@@ -1,5 +1,6 @@
 import { formatQuestionAnswers, questionChoices } from "../../../shared/ask-question";
 import type { InboxRow, InboxTab, InboxView } from "../../../shared/inbox";
+import type { NeedsYouItem } from "../../../shared/today";
 import { liveCardKind } from "../../../shared/live-approval";
 import { t } from "@/lib/i18n";
 import { dismissResponse, type CardResponse } from "@/lib/card-answer";
@@ -19,6 +20,26 @@ export function tabCounts(view: InboxView | null): Record<InboxTab, number> {
   for (const row of view?.rows ?? []) counts[row.tab] += 1;
   return counts;
 }
+
+/** What the Inbox row counts: every line waiting on the person, and news they have not read. */
+export const waitingCount = (view: InboxView | null): number => (view?.rows ?? []).filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length;
+
+/** What a team's person is told needs them beyond the inbox's lines: something to fix, or a question in their own chat. */
+export const inboxFixes = (items: readonly NeedsYouItem[] | undefined, view: InboxView | null): NeedsYouItem[] =>
+  (items ?? []).filter((item) => item.kind !== "message" && !(item.kind === "question" && view?.rows.some((row) => row.tab === "needs-you" && row.origin?.threadId === item.threadId)));
+
+/** The conversation an answer to this line goes to: a team's copy, in the inbox's own, or where it was asked anywhere else. */
+export const answerThread = (view: Pick<InboxView, "threadId"> | null, row: Pick<InboxRow, "origin">): string | null => view?.threadId ?? row.origin?.threadId ?? null;
+
+/** Who a line is from, and for whom when a bot was working for another or a guest asked. */
+export function senderLabel(row: Pick<InboxRow, "from" | "workingFor" | "askedBy">): string {
+  const name = row.from.name;
+  if (row.askedBy) return row.askedBy.name ? t("inbox.askedBy", { name, who: row.askedBy.name }) : t("inbox.askedBySomeone", { name });
+  return row.workingFor ? t("inbox.workingFor", { name, other: row.workingFor.name }) : name;
+}
+
+/** The conversation a line came from, when its subject doesn't already say it. */
+export const placeOf = (row: Pick<InboxRow, "kind" | "origin">): string | null => (row.kind !== "message" && row.origin?.title ? t("inbox.in", { title: row.origin.title }) : null);
 
 /** What an ask asks: an approval, a question, or something to review where it was asked; null for anything else or an
  * ask already settled. */

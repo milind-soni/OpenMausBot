@@ -193,11 +193,35 @@ it.skipIf(process.platform === "win32")("fills a login saved for example.com on 
     page.navigate("https://www.example.com/login", LOGIN_FORM);
     page.answer = () => ({ error: "Incorrect password." });
     await turn("Try www.", 3);
-    expect(answered(2, "fill_login")[0].content[0].text).toBe(`The site did not accept the login for ${USERNAME} on www.example.com. It said: “Incorrect password.”. Check the saved login in Settings → Logins, or call request_sign_in. The password was cleared from the page.`);
+    expect(answered(2, "fill_login")[0].content[0].text).toBe(`The site did not accept the login for ${USERNAME} on www.example.com. It said: “Incorrect password.”. Check the saved login in Settings → Vault, or call request_sign_in. The password was cleared from the page.`);
     expect(page.sent).toHaveLength(1);
     expect(page.field("#password").value).toBe("");
     expect(JSON.stringify(evidence())).not.toContain(PASSWORD);
     expect(JSON.stringify(browser.engineArgs)).not.toContain(PASSWORD);
+  } finally {
+    await browser.close();
+  }
+}, 120_000);
+
+it.skipIf(process.platform === "win32")("fills a login kept to one bot on its guest browser even while another bot uses guest too, since each guest browser is its own", async () => {
+  const browser = await browserFixture("https://accounts.example.com/login");
+  const { page, api, evidence, answered } = browser;
+  try {
+    expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+    const capacity = (await api("POST", "/api/bots", { name: "Capacity" })).body.bot;
+    const costs = (await api("POST", "/api/bots", { name: "Costs" })).body.bot;
+    for (const bot of [capacity, costs]) expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser", browserProfile: "guest" })).status).toBe(200);
+    expect((await api("POST", "/api/logins", { site: "example.com", username: USERNAME, password: PASSWORD, bots: [capacity.id] })).status).toBe(201);
+    const logins = (await api("GET", "/api/logins")).body.logins as Array<{ bots: unknown }>;
+    expect(logins).toEqual([expect.objectContaining({ bots: [capacity.id] })]);
+    writeFileSync(browser.planPath, JSON.stringify({ [capacity.id]: { turns: [{ steps: [{ tool: "fill_login", arguments: { submit: false } }], reply: "Filled." }] } }));
+
+    await runControlOmb(["send", "--bot", capacity.id, "--task", capacity.threadId, "--text", "Sign in to example.com.", "--url", browser.base]);
+    await expect.poll(() => evidence().length, { timeout: 20_000 }).toBe(1);
+    expect(answered(0, "fill_login")[0].isError).toBeFalsy();
+    expect(evidence()[0].system).toContain(`example.com (${USERNAME})`);
+    expect(page.sent).toEqual([]);
+    expect(JSON.stringify(evidence())).not.toContain(PASSWORD);
   } finally {
     await browser.close();
   }

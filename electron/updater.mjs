@@ -13,6 +13,7 @@ import {
 import { canInstallElevated, installPackageElevated } from "./elevated-install.mjs";
 import { releaseSingleInstanceLock } from "./single-instance.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
+import { UPDATE_TEXT } from "./update-errors.mjs";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
 import { createQuietInstall, installFailed, launchAfter, LOOK_EVERY_MS, updateSeen } from "./update-when-quiet.mjs";
 
@@ -109,7 +110,8 @@ function relaunchAfterInstall() {
 }
 
 function setState(patch) {
-  state = { ...state, ...patch };
+  const { messageCode: _stale, messageKey: _key, messageParams: _params, ...kept } = state;
+  state = { ...(Object.hasOwn(patch, "message") ? kept : state), ...patch };
   if (quiet && patch.status === "error") installFailed(quietRecord());
   try {
     const contents = win?.webContents;
@@ -122,7 +124,36 @@ export function sendUpdaterState() {
   setState({});
 }
 
-export function registerUpdaterIpc({ pageAllowed: allowed }) {
+/** How long a server's page's answer stands before it may ask again: one click never opens a second dialog. */
+export const SERVER_PAGE_ASK_COOLDOWN_MS = 10_000;
+let serverPageAsk = null;
+
+async function askForServerPage(confirmRestart, server) {
+  if (!updaterCoordinator) return "unavailable";
+  if (state.status !== "downloaded") await updaterCoordinator.check(true);
+  if (state.status === "downloaded") {
+    if (!(await confirmRestart(state.version ?? "", server))) return "later";
+    updaterCoordinator.install();
+    return "installing";
+  }
+  if (state.status === "downloading" || state.status === "preparing" || state.status === "available") return "downloading";
+  return state.status === "error" ? "failed" : "current";
+}
+
+/** What a server's page learns when it asks for this app's own update; never the updater's state. Asks at once share
+ * one answer, and that answer stands for SERVER_PAGE_ASK_COOLDOWN_MS. `server`: the asking page's address, for the dialog. */
+export function updateForServerPage(confirmRestart, server = "", now = Date.now) {
+  if (serverPageAsk && (!serverPageAsk.done || now() - serverPageAsk.done < SERVER_PAGE_ASK_COOLDOWN_MS)) return serverPageAsk.answer;
+  const ask = { done: 0, answer: null };
+  ask.answer = askForServerPage(confirmRestart, server).finally(() => { ask.done = now(); });
+  serverPageAsk = ask;
+  return ask.answer;
+}
+
+/** `serverPage`: the address of the page this app's window shows when it may ask for this app's update
+ * (`update:for-server-page`), a server from the Server menu newer than the app; null for any other sender. Nothing restarts
+ * until `confirmRestart`, this app's own dialog naming that address, says so. */
+export function registerUpdaterIpc({ pageAllowed: allowed, serverPage = () => null, confirmRestart = async () => false }) {
   pageAllowed = allowed;
   const guarded = (channel, handler) => (event) => {
     if (!pageAllowed(event)) throw new Error(`${channel} is only available in this app's window`);
@@ -131,6 +162,11 @@ export function registerUpdaterIpc({ pageAllowed: allowed }) {
   ipcMain.handle("update:get-state", guarded("update:get-state", view));
   ipcMain.handle("update:check", guarded("update:check", () => updaterCoordinator?.check(true)));
   ipcMain.handle("update:install", guarded("update:install", () => updaterCoordinator?.install()));
+  ipcMain.handle("update:for-server-page", (event) => {
+    const server = serverPage(event);
+    if (!server) throw new Error("update:for-server-page is only available to the page this app's window shows");
+    return updateForServerPage(confirmRestart, server);
+  });
   ipcMain.handle("update:seen", guarded("update:seen", () => {
     if (!launch?.updated) return;
     updateSeen(quietRecord());
@@ -155,7 +191,7 @@ export function startUpdater(signals = null) {
     ({ autoUpdater } = require("./vendor/electron-updater.cjs"));
   } catch {
     updaterCoordinator = null;
-    setState({ status: "error", message: "updater unavailable" });
+    setState({ status: "error", message: UPDATE_TEXT.unavailable, messageCode: "unavailable" });
     return;
   }
   // The coordinator starts each download itself, so it owns macOS staging and quiet failures.

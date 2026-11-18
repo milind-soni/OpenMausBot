@@ -23,6 +23,8 @@ if (args.join(' ') === 'login status') {
     process.stderr.write('Logged in using ChatGPT\\n'); process.exit(0);
   } else if (mode === 'api') {
     process.stderr.write('Logged in using an API key - sk-private-token\\n'); process.exit(0);
+  } else if (mode === 'api-configured') {
+    process.stderr.write('API key configured - sk-private-token\\nAuthentication is checked when you send a request.\\n'); process.exit(0);
   } else if (mode === 'unknown-status') {
     process.stderr.write('Unrecognized login status secret-token\\n'); process.exit(0);
   } else { process.stderr.write('Not logged in\\n'); process.exit(1); }
@@ -246,6 +248,11 @@ describe("Codex server-owned device authentication", () => {
 
   it("does not replace another auth method or expose its secret", async () => {
     await expect(create("api").start()).rejects.toThrow("different sign-in method");
+    expect(calls()).toHaveLength(1);
+  });
+
+  it("does not replace an API key that newer Codex reports as configured", async () => {
+    await expect(create("api-configured").start()).rejects.toThrow("different sign-in method");
     expect(calls()).toHaveLength(1);
   });
 

@@ -25,14 +25,14 @@ describe("Linux lanes", () => {
     ]);
     expect(lanes[0]).toEqual({
       name: "vitest (ubuntu-latest, shard 1/8)",
-      env: { OMB_VITEST_RETRY_LOG: "/t/retries.jsonl", OMB_VITEST_E2E: "all", OMB_VITEST_SUBSET: "" },
+      env: { OMB_VITEST_RETRY_LOG: "/t/retries.jsonl", OMB_VITEST_E2E: "all", OMB_VITEST_SUBSET: "", OMB_VITEST_WORKERS: 4 },
       commands: ["pnpm exec vitest run  --shard=1/8 --reporter=default --reporter=github-actions", "pnpm broker:test && pnpm test:electron"],
     });
     expect(lanes.slice(1, 8).every((lane) => lane.commands.length === 1)).toBe(true);
   });
 
   it("runs a subset's files and leaves out what the plan leaves out", () => {
-    const entry = { os: "ubuntu-latest", part: "docs tests", shard: 1, shards: 1, files: "a.test.ts b.test.ts", e2e: "all", node_tests: false };
+    const entry = { os: "ubuntu-latest", part: "docs tests", shard: 1, shards: 1, files: "a.test.ts b.test.ts", e2e: "all", node_tests: false, workers: 4 };
     expect(lanesFor({ vitest: [entry], evals: false, packaged_server: false }, "/r")).toEqual([vitestLane(entry, "/r")]);
     expect(vitestLane(entry, "/r").commands).toEqual(["pnpm exec vitest run a.test.ts b.test.ts --shard=1/1 --reporter=default --reporter=github-actions"]);
     expect(lanesFor({ vitest: [], evals: true, packaged_server: false }, "/r")).toEqual([EVALS_LANE]);

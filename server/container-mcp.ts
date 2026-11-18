@@ -21,6 +21,7 @@ runMcpBridge({
   command: runtime,
   args: cuaExecArgs(["mcp", "--socket", socket], { container, interactive: true }),
   label: "Cua Driver",
+  consoleChild: true,
   // No liveness watchdog: the runtime CLI talks to a local daemon and fails fast on its own.
   ...(controlUrl && controlToken ? { gate: { url: controlUrl, token: controlToken } } : {}),
 });

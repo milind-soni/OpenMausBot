@@ -11,9 +11,10 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import type { SetupDetection, SetupImportRequest, SetupImportResult, SetupSource, SkillSkip, SkillSource, ToolSkip } from "../shared/setup-import.ts";
 import { holdsCredential } from "../shared/redact.ts";
-import { parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
+import { parseSkillMd, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 import { importedSkillIntact, readImportedSkills, storeImportedSkills, type ImportedSkillEntry, type ImportedSkillInput } from "./imported-skills.ts";
-import { importedMcpServerName, isRemoteMcpServer, MAX_MCP_SERVERS, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
+import { scanSkillFolder } from "./skill-folder.ts";
+import { importedMcpServerName, isRemoteMcpServer, mcpSharedServerRoom, parseMcpServersImport, parseStoredMcpServer, type StoredMcpServer } from "./mcp-registry.ts";
 import { parseToml } from "./toml-lite.ts";
 
 /** The file operations finding and copying use, so tests can see every path touched. Each answers null on failure. */
@@ -357,15 +358,6 @@ function freshSkill(skill: FoundSkill, held: ImportedSkillEntry | undefined): bo
   return !held || (held.origin === skill.origin && !alreadyHere(skill, held));
 }
 
-const MAX_WARNINGS = 20;
-
-/** The scan over SKILL.md and every file copied beside it, which can hold the same instructions. */
-function skillWarnings(skillMd: string, files: readonly SkillFile[]): string[] {
-  const all = [...scanSkillText(skillMd), ...files.flatMap((file) => scanSkillText(file.content).map((warning) => `${file.path}: ${warning}`))];
-  const unique = [...new Set(all)];
-  return unique.length > MAX_WARNINGS ? [...unique.slice(0, MAX_WARNINGS), `${unique.length - MAX_WARNINGS} more warnings in its files`] : unique;
-}
-
 /** A found skill as an import stores it: SKILL.md and the text files beside it, with the scan's warnings. */
 function skillInput(machine: SetupMachine, skill: FoundSkill, budget: { bytes: number }): { input: ImportedSkillInput; leftOut: number } {
   const copy = skillFiles(machine.fs, skill.folder, budget);
@@ -382,7 +374,7 @@ function skillInput(machine: SetupMachine, skill: FoundSkill, budget: { bytes: n
         origin: skill.origin,
         label: skill.label,
         sha256: skill.sha256,
-        warnings: skillWarnings(skill.text, copy.files),
+        warnings: scanSkillFolder(skill.text, copy.files),
         ...(skill.parsed.license ? { license: skill.parsed.license } : {}),
         ...(skill.parsed.compatibility ? { compatibility: skill.parsed.compatibility } : {}),
       },
@@ -672,7 +664,7 @@ function importTools(machine: SetupMachine, host: SetupHost): NonNullable<SetupI
   try {
     const current = host.mcpServers();
     const { fresh, present, conflicts, refused } = findTools(machine, current, host);
-    const room = Math.max(0, MAX_MCP_SERVERS - Object.keys(current).length);
+    const room = mcpSharedServerRoom(current);
     const adding = fresh.slice(0, room);
     let saved = true;
     if (adding.length) {
@@ -700,7 +692,7 @@ export function detectSetup(machine: SetupMachine, host: SetupHost): SetupDetect
   const index = readImportedSkills();
   const skills = findSkills(machine).filter((skill) => freshSkill(skill, index[skill.name])).map(({ name, source }) => ({ name, source }));
   const current = host.mcpServers();
-  const tools = Object.keys(current).length < MAX_MCP_SERVERS
+  const tools = mcpSharedServerRoom(current) > 0
     ? findTools(machine, current, host).fresh.map(({ name, source }) => ({ name, source }))
     : [];
   return { skills, tools };

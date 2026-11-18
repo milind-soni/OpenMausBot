@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { describe, expect, it, vi } from "vitest";
 import { createInternalSignInRoutes } from "./sign-in.ts";
 import { dispatchRoutes, PASS, type RouteContext } from "./table.ts";
@@ -105,8 +105,7 @@ it.each(["createInternalSignInRoutes", "createInternalThreadRoutes", "createInte
     "authorizedInternalCapability(req.headers.authorization)", "!internalCapability", "!internalSender",
     "externalRuntimeMayCall(method, path)", "internalCapability.kind !== requiredCapabilityKind",
     "claimed !== internalSender.id", "claimedThread !== internalCapability.threadId",
-    "internalCapabilityIsActive(internalCapability)", "String(body[key]) !== internalSender.id",
-    "String(body[key]) !== internalCapability.threadId",
+    "internalCapabilityIsActive(internalCapability)", "internalBodyRefusal(body, internalSender.id, internalCapability.threadId)",
   ]) expect(before).toContain(guard);
 });
 

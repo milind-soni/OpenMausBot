@@ -128,6 +128,8 @@ describe("group attention", () => {
     const idle = group("g", "Crew", "g0");
     const dm = group("d", "Bot DM", "d0", { working: true, dm: true });
     expect(sidebarGroupActivityTasks(idle, [], {})).toEqual([]);
+    const resting = { ...idle, tasks: [{ threadId: "card", title: "Rests on a card", createdAt: 1, activity: "waiting-on-you" as const }] };
+    expect(sidebarGroupActivityTasks(resting, [], {})).toEqual([expect.objectContaining({ threadId: "card", activity: "waiting-on-you", busy: false })]);
     expect(sidebarGroupActivityTasks(dm, [], {})).toEqual([]);
   });
 
@@ -138,6 +140,14 @@ describe("group attention", () => {
     expect(tasks.map((task) => task.threadId)).toEqual(["g0"]);
     expect(tasks[0].busy).toBe(true);
     expect(tasks[0].unread).toBe(true);
+  });
+
+  it("shows an unread reply in a background room fork", () => {
+    const room = group("g", "Crew", "g0", { unread: true, tasks: [
+      { threadId: "g0", title: "Main", createdAt: 0, unread: false },
+      { threadId: "fork", title: "Fork", createdAt: 1, unread: true },
+    ] });
+    expect(sidebarGroupActivityTasks(room, [], {}).map((task) => task.threadId)).toEqual(["fork"]);
   });
 
   it("shows each thread's own work when a room's threads run side by side", () => {

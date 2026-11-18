@@ -1,6 +1,9 @@
 // The MCP app-access approval forms Codex asks for, moved out of codex.ts (file-size ratchet).
 
-export type McpApprovalForm = {
+import type { ServerToolText } from "../../shared/server-text.ts";
+import { noticeFailure, noticeSummary } from "../chat-notices.ts";
+
+export type McpApprovalForm = ServerToolText & {
   tool: string;
   summary: string;
   allowResult: { action: "accept"; content: Record<string, string> };
@@ -25,6 +28,15 @@ export function boundedLabel(value: unknown): string | null {
   return label && label.length <= 160 && !containsControlCharacter(label) ? label : null;
 }
 
+export function mcpElicitationDeclined(value: unknown) {
+  const server = boundedLabel(value);
+  return server ? noticeFailure("chat.notice.codexElicitationDeclined", { server }) : noticeFailure("chat.notice.codexElicitationDeclinedGeneric");
+}
+
+export function mcpAppApprovalText(form: McpApprovalForm | null): ServerToolText {
+  return form?.summaryCode ? { summaryCode: form.summaryCode, ...(form.summaryParams ? { summaryParams: form.summaryParams } : {}) } : {};
+}
+
 function ordinaryApprovalValue(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   if (/session|always|permanent|forever|persistent/.test(normalized)) return false;
@@ -39,7 +51,8 @@ export function mcpAppApprovalForm(params: unknown): McpApprovalForm | null {
   const metadata = plainRecord(request._meta);
   const target = plainRecord(metadata?.target);
   const toolParams = plainRecord(metadata?.tool_params);
-  const message = boundedLabel(request.message) ?? "App access requested";
+  const message = boundedLabel(request.message);
+  const summary = message ? { summary: message } : noticeSummary("chat.notice.appAccessRequested");
   const appName = [
     metadata?.app_name,
     metadata?.appName,
@@ -50,7 +63,7 @@ export function mcpAppApprovalForm(params: unknown): McpApprovalForm | null {
     toolParams?.app,
     metadata?.connector_name,
     metadata?.connectorName,
-  ].map(boundedLabel).find(Boolean) ?? message.match(/^Allow ChatGPT to use (.+?)\?$/i)?.[1]?.trim();
+  ].map(boundedLabel).find(Boolean) ?? message?.match(/^Allow ChatGPT to use (.+?)\?$/i)?.[1]?.trim();
   if (!appName) return null;
 
   const schema = plainRecord(request.requestedSchema);
@@ -82,5 +95,5 @@ export function mcpAppApprovalForm(params: unknown): McpApprovalForm | null {
   }
 
   const tool = boundedLabel(appName) ?? boundedLabel(request.serverName) ?? "app_access";
-  return { tool, summary: message, allowResult: { action: "accept", content } };
+  return { tool, ...summary, allowResult: { action: "accept", content } };
 }

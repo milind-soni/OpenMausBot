@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const values = new Map<string, string>();
 const os = { dark: false, listeners: new Set<() => void>() };
 
-// Each case loads fresh modules over the same storage, as a launch would; interface-mode keeps a per-session choice.
+// Each case loads fresh modules over the same storage, as a launch would (main.tsx's order); interface-mode keeps a
+// per-session choice.
 async function boot() {
   vi.resetModules();
-  const [{ settleAdvancedModeDefault, readAdvancedMode }, skins] = await Promise.all([import("./interface-mode"), import("./skins")]);
-  settleAdvancedModeDefault();
+  const [{ readAdvancedMode }, { settleInterfaceMode }, skins] = await Promise.all([import("./interface-mode"), import("./new-look"), import("./skins")]);
+  settleInterfaceMode();
   skins.applySkinChoice(skins.readSkinChoice());
   return { skin: document.documentElement.dataset.skin, advanced: readAdvancedMode(), stored: values.get("omb-skin") };
 }
@@ -93,5 +94,15 @@ describe("default skin", () => {
     expect(pressed).toEqual(["Midnight"]);
     const theme = renderToStaticMarkup(createElement(ThemeRow));
     expect([...theme.matchAll(/aria-checked="true"[^>]*>([^<]+)</g)].map(([, label]) => label)).toEqual(["System"]);
+  });
+
+  it("reports the chosen skin in Settings as a checked radio, not a pressed button", async () => {
+    os.dark = true;
+    await boot();
+    const [{ SkinPicker }, { SettingsLook }] = await Promise.all([import("@/components/SkinPicker"), import("@/components/SettingsPrimitives")]);
+    const picker = renderToStaticMarkup(createElement(SettingsLook.Provider, { value: true }, createElement(SkinPicker)));
+    const radios = [...picker.matchAll(/<button[^>]*role="radio"[^>]*>/g)].map(([radio]) => radio);
+    expect(radios.filter((radio) => radio.includes('aria-checked="true"'))).toHaveLength(1);
+    expect(radios.filter((radio) => radio.includes("aria-pressed"))).toEqual([]);
   });
 });

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode, type Ref } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useStore } from "@/state/store";
 
 export const PRIMARY = "ui-button ui-button-primary min-h-9 px-4 text-[14px]";
 export const SECONDARY = "ui-button min-h-9 px-4 text-[14px]";
@@ -20,7 +21,7 @@ export function StepHeading({ title, sub, aside, headingRef }: { title: ReactNod
 }
 
 export function CardIcon({ icon: Icon }: { icon: LucideIcon }) {
-  return <span aria-hidden="true" className="flex size-[34px] shrink-0 items-center justify-center rounded-[10px] bg-accent/15 text-accent-text">
+  return <span aria-hidden="true" className="flex size-[34px] shrink-0 items-center justify-center rounded-[8px] bg-accent/15 text-accent-text">
     <Icon size={18} />
   </span>;
 }
@@ -35,6 +36,7 @@ export function Footer({ children, className }: { children: ReactNode; className
 
 /** The name this app keeps for the server open in the window; My Cloud wherever the app has none. */
 export function useCloudName(): string {
+  const team = useStore().state.config?.team?.name?.trim();
   const bridge = window.ogb?.workspaces;
   const [name, setName] = useState<string | null>(null);
   useEffect(() => {
@@ -44,5 +46,5 @@ export function useCloudName(): string {
     }).catch(() => {});
     return () => { alive = false; };
   }, [bridge]);
-  return name ?? t("cloudSetup.myCloud");
+  return team || (name ?? t("cloudSetup.myCloud"));
 }

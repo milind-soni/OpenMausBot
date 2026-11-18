@@ -9,12 +9,14 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "@/lib/cn";
+import { avatarMarks, type AvatarKind } from "@/lib/avatar-marks";
 import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
-import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
-import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
+import { isCarvedBody, type BotBodyId } from "../../shared/bot-body";
+import { useFestivalDress, wornBody } from "@/lib/festival-dress";
+import { t } from "@/lib/i18n";
 import { CarvedAvatar } from "./CarvedAvatar";
 import { steelBodyImage } from "@/lib/steel-body";
 
@@ -96,11 +98,13 @@ export type MausAvatarProps = {
   bodyId?: BotBodyId;
   gradient?: [string, string, string];
   faceColor?: MascotFaceColor | null;
+  /** Whose face this is; a decorative mascot has none. */
+  kind?: AvatarKind;
 };
 
 function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHandle>) {
-  const { bodyId, color, size, state, motion, motionKey, gaze, trackPointer, animated, label } = props;
-  if (isHalloweenBody(bodyId)) {
+  const { bodyId, color, size, state, motion, motionKey, gaze, trackPointer, animated, label, kind } = props;
+  if (isCarvedBody(bodyId)) {
     return (
       <CarvedAvatar
         ref={ref}
@@ -115,6 +119,7 @@ function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHa
         trackPointer={trackPointer}
         animated={animated}
         label={label}
+        kind={kind}
       />
     );
   }
@@ -143,6 +148,7 @@ function GradientAvatarComponent(
     bodyId,
     gradient,
     faceColor,
+    kind,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
@@ -183,6 +189,7 @@ function GradientAvatarComponent(
 
   return (
     <span
+      {...avatarMarks(kind, "mascot")}
       className="inline-flex shrink-0"
       onPointerMove={trackPointer && animated ? onPointerMove : undefined}
       onPointerLeave={trackPointer && animated ? onPointerLeave : undefined}
@@ -246,7 +253,7 @@ export function resolveBotAvatarOutcome(params: {
 
 export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotProps }: BotAvatarProps) {
   const profile = botAvatarProfile(bot);
-  const dressed = useHalloweenDressed();
+  const festival = useFestivalDress();
   const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => setImageFailed(false), [profile.avatarUrl]);
@@ -260,13 +267,14 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
   if (outcome !== "flatImage") {
     return (
       <MausAvatar
-        bodyId={wornBody(bot.mascotBody, bot.color, dressed)}
+        bodyId={wornBody(bot.mascotBody, bot.color, festival)}
         {...mascotProps}
         color={bot.color}
         faceColor={bot.mascotFaceColor}
         gradient={readable ? roomAvatarGradient(bot.color) : undefined}
         size={size}
         label={label ?? bot.name}
+        kind="bot"
       />
     );
   }
@@ -278,12 +286,13 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
   const origin = `${focusX * 100}% ${focusY * 100}%`;
   return (
     <span
+      {...avatarMarks("bot", "picture")}
       className="relative block shrink-0 overflow-hidden bg-raised"
       style={{ width: size, height: size, borderRadius: radius }}
     >
       <img
         src={profile.avatarUrl}
-        alt={label ?? (bot.name ? `${bot.name} avatar` : "Bot avatar")}
+        alt={label ?? (bot.name ? t("avatar.alt", { name: bot.name }) : t("avatar.altFallback"))}
         width={size}
         height={size}
         draggable={false}
@@ -320,10 +329,11 @@ export function InitialsAvatar({
   // A picture that is gone (a restored backup carries the address, not the file) falls back to the initials.
   const [failed, setFailed] = useState<string | null>(null);
   if (avatarUrl && failed !== avatarUrl) {
-    return <img src={avatarUrl} alt="" onError={() => setFailed(avatarUrl)} className={cn("shrink-0 rounded-full object-cover", className)} style={{ width: size, height: size }} />;
+    return <img {...avatarMarks("person", "picture")} src={avatarUrl} alt="" onError={() => setFailed(avatarUrl)} className={cn("shrink-0 rounded-full object-cover", className)} style={{ width: size, height: size }} />;
   }
   return (
     <div
+      {...avatarMarks("person", "initials")}
       className={cn("flex shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary font-medium", className)}
       style={{ width: size, height: size, fontSize: fontSize ?? size * 0.38 }}
     >

@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 import localOrigin from "./local-origin.cjs";
 import environments from "./environments.cjs";
+import nativeText from "./native-text.cjs";
 
 const ORIGIN = "http://127.0.0.1:48994";
 const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
@@ -22,7 +23,7 @@ function fixture(response = 0) {
     ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
     localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed,
     mainWindow, rendererOrigin: () => ORIGIN, environmentsState: { activeId: "local", environments: [] },
-    dialog: { showMessageBox: async (...args) => { calls.push(args); return { response }; } },
+    dialog: { showMessageBox: async (...args) => { calls.push(args); return { response }; } }, nativeT: nativeText.englishText.t,
   });
   vm.runInContext(section("const workspaceOnly =", 'ipcMain.handle("organization:settings-opened"')
     + section('ipcMain.handle("dialog:confirm"', 'ipcMain.handle("environments:state"'), context);

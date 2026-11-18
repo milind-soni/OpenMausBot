@@ -46,6 +46,54 @@ function plan(bots: Array<{ id: string }>) {
 
 type App = Awaited<ReturnType<typeof openApp>>;
 
+(enabled ? it : it.skip)("explains an old automation notification and keeps it cleared after restart", async () => {
+  const server = await launchRestartableServer({ scripted: true, dataDirRoot: SHORT_TMP });
+  let app: App | undefined;
+  try {
+    const api = async (method: string, path: string, body?: unknown) => {
+      const response = await fetch(`${server.url}${path}`, { method, headers: { "content-type": "application/json", origin: server.url }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      expect(response.ok).toBe(true);
+      return response.json();
+    };
+    const bot = (await api("GET", "/api/bots?messages=0")).bots[0];
+    const setReply = (fail: boolean) => writeFileSync(server.planPath, JSON.stringify({ [bot.id]: { script: [{ key: "check", match: ["Check notification history."], repeat: true, steps: [], ...(fail ? { failWith: "Provider disconnected." } : { reply: "Nothing new." }) }] } }));
+    const { routine } = await api("POST", "/api/routines", { name: "Keep an eye on my day", prompt: "Check notification history.", botId: bot.id, schedule: { type: "interval", everyMinutes: 1440, anchorAt: Date.now() + 86_400_000 } });
+    let failedId = "";
+    for (let index = 0; index < 7; index++) {
+      setReply(index === 0);
+      const { run } = await api("POST", `/api/routines/${routine.id}/run`);
+      if (index === 0) failedId = run.id;
+      await expect.poll(async () => (await api("GET", "/api/routines")).runs.find((candidate: { id: string }) => candidate.id === run.id)?.status, { timeout: 30_000 }).toBe(index === 0 ? "failed" : "completed");
+    }
+    await server.stop();
+    await server.start();
+    app = await openApp(server, { shots: join(SHOTS, "notification"), bots: { [bot.name]: bot.id } });
+    await app.openAutomations();
+    await expect.poll(() => app!.rowText(routine.name)).toContain("Provider disconnected.");
+    expect(await app.evaluate('Boolean(document.querySelector(\'[data-testid="routines-attention"]\'))')).toBe(true);
+    await app.screenshot("unread-failure-explained");
+    await app.openRow(routine.name);
+    await expect.poll(app.panel).toContain("Provider disconnected.");
+    await expect.poll(async () => Boolean((await api("GET", "/api/routines")).runs.find((run: { id: string }) => run.id === failedId)?.seenAt)).toBe(true);
+    await expect.poll(() => app!.evaluate('Boolean(document.querySelector(\'[data-testid="routines-attention"]\'))')).toBe(false);
+    await app.screenshot("failure-read");
+    await app.close();
+    app = undefined;
+    await server.stop();
+    await server.start();
+    app = await openApp(server, { shots: join(SHOTS, "notification-restarted"), bots: { [bot.name]: bot.id } });
+    await app.openAutomations();
+    await expect.poll(() => app!.rowText(routine.name)).toContain("Keep an eye on my day");
+    expect(await app.rowText(routine.name)).not.toContain("Provider disconnected.");
+    expect(await app.evaluate('Boolean(document.querySelector(\'[data-testid="routines-attention"]\'))')).toBe(false);
+    await app.screenshot("notification-cleared-after-restart");
+  } finally {
+    await app?.close();
+    console.info(JSON.stringify({ logPath: server.logPath, screenshots: join(SHOTS, "notification") }));
+    await server.close();
+  }
+}, 240_000);
+
 /** The real renderer on `server` in headless Chrome, and what a person does with it. */
 async function openApp(server: { url: string; port: number; dataDir: string; logPath: string }, options: { shots: string; bots: Record<string, string>; proxyHeaders?: Record<string, string> }) {
   mkdirSync(options.shots, { recursive: true });

@@ -214,14 +214,15 @@ export async function releaseBrowserProfile(dir: string | undefined, binaryPath?
   for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) { try { unlinkSync(join(dir, name)); } catch {} }
 }
 
-/** Windows has no tree to re-parent to: the Chromes naming the profile, each with its image, start time and its parent's (a
- * pid the system gave on to a newer process is not the parent). Start times are UTC strings, which sort as they compare and
+/** Windows has no tree to re-parent to: the Chromes naming the profile, each with its image, start time and its parent's and
+ * grandparent's (a pid the system gave on to a newer process is not the parent). Start times are UTC strings, which sort as they compare and
  * keep their precision. The folder goes in through the environment, so no path is ever quoted into the script. */
 const WINDOWS_PROFILE_BROWSERS = "$d = $env:OMB_BROWSER_PROFILE; $all = @(Get-CimInstance Win32_Process); $by = @{}; foreach ($p in $all) { $by[$p.ProcessId] = $p }"
   + " ; ConvertTo-Json -Compress -InputObject @($all | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($d, [StringComparison]::OrdinalIgnoreCase) -ge 0 }"
-  + " | ForEach-Object { $q = $by[$_.ParentProcessId]; [pscustomobject]@{ ProcessId = $_.ProcessId; ParentProcessId = $_.ParentProcessId; CommandLine = $_.CommandLine;"
+  + " | ForEach-Object { $q = $by[$_.ParentProcessId]; $g = $(if ($q) { $by[$q.ParentProcessId] }); [pscustomobject]@{ ProcessId = $_.ProcessId; ParentProcessId = $_.ParentProcessId; CommandLine = $_.CommandLine;"
   + " Name = $_.Name; Started = $_.CreationDate.ToUniversalTime().ToString('o'); ParentName = $(if ($q) { $q.Name });"
-  + " ParentStarted = $(if ($q) { $q.CreationDate.ToUniversalTime().ToString('o') }) } })";
+  + " ParentStarted = $(if ($q) { $q.CreationDate.ToUniversalTime().ToString('o') }); GrandparentId = $(if ($q) { $q.ParentProcessId });"
+  + " GrandparentName = $(if ($g) { $g.Name }); GrandparentStarted = $(if ($g) { $g.CreationDate.ToUniversalTime().ToString('o') }) } })";
 
 /** One process's start time, read again right before it is stopped. */
 const WINDOWS_PROCESS_STARTED = "(Get-CimInstance Win32_Process -Filter ('ProcessId=' + [uint32]$env:OMB_PROCESS_ID)).CreationDate.ToUniversalTime().ToString('o')";
@@ -249,18 +250,18 @@ function lockReleased(lock: string): boolean {
   catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; }
 }
 
-const heldWindowsProfiles = new Map<string, { browser: number; daemon: number; image: string }>();
+const heldWindowsProfiles = new Map<string, { browser: number; daemon: number; image: string; shell?: number }>();
 
 /** Windows Chrome keeps `lockfile` in its profile open and undeletable while it runs. One whose daemon was killed keeps running
  * and makes every later launch on the profile exit with code 21 (profile in use), even after the app restarts, so it is
- * stopped, once it is checked to be the same Chrome; a daemon's own Chrome (its parent runs `binaryPath` or another
- * agent-browser) is kept. The profile's contents are never touched. */
+ * stopped, once it is checked to be the same Chrome; a daemon's own Chrome (its parent, or the cmd.exe its launcher runs
+ * in, runs `binaryPath` or another agent-browser) is kept. The profile's contents are never touched. */
 async function releaseWindowsProfile(dir: string, binaryPath?: string, chromePath?: string): Promise<void> {
   const lock = join(dir, "lockfile");
   if (lockReleased(lock)) { heldWindowsProfiles.delete(dir); return; }
   // The Chrome kept last time still runs under the same daemon: every process is not listed again on each turn.
   const held = heldWindowsProfiles.get(dir);
-  if (held && processAlive(held.browser) && await imageOf(held.daemon) === held.image) return;
+  if (held && processAlive(held.browser) && await imageOf(held.daemon) === held.image && (held.shell === undefined || await imageOf(held.shell) === "cmd.exe")) return;
   heldWindowsProfiles.delete(dir);
   const listing = await execText("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", WINDOWS_PROFILE_BROWSERS], { OMB_BROWSER_PROFILE: dir }, 15_000);
   let rows: unknown;
@@ -269,19 +270,29 @@ async function releaseWindowsProfile(dir: string, binaryPath?: string, chromePat
   const text = (value: unknown) => typeof value === "string" ? value : "";
   const chromeImage = chromePath ? win32.basename(chromePath).toLowerCase() : undefined;
   const isChrome = (name: string) => CHROMIUM_IMAGE.test(name) || name.toLowerCase() === chromeImage;
-  const browsers = (Array.isArray(rows) ? rows : [rows]).flatMap((row) => {
-    const { ProcessId: pid, ParentProcessId: ppid, CommandLine: line, Name: name, Started: started, ParentName: parent, ParentStarted: parentStarted } = (row ?? {}) as Record<string, unknown>;
+  // A parent started after its child holds a reused pid: the child's own parent is gone.
+  const parentOf = (name: unknown, parentStarted: unknown, started: unknown) =>
+    text(name) && text(parentStarted) && text(parentStarted) <= text(started) ? text(name).toLowerCase() : "";
+  const browsers = (Array.isArray(rows) ? rows : [rows]).flatMap((row): { pid: number; started: string; daemonPid: number; shell?: number; daemon: string }[] => {
+    const {
+      ProcessId: pid, ParentProcessId: ppid, CommandLine: line, Name: name, Started: started, ParentName: parent, ParentStarted: parentStarted,
+      GrandparentId: gppid, GrandparentName: grandparent, GrandparentStarted: grandparentStarted,
+    } = (row ?? {}) as Record<string, unknown>;
     if (!Number.isInteger(pid) || !Number.isInteger(ppid) || typeof line !== "string" || !isChrome(text(name)) || !text(started)) return [];
     // A path's case does not matter on Windows.
     const args = windowsArgs(line).map((arg) => arg.toLowerCase());
     if (!args.includes(flag) || args.some((arg) => arg.startsWith("--type="))) return [];
-    // A parent started after the Chrome holds a reused pid: the Chrome's own parent is gone.
-    const daemon = text(parent) && text(parentStarted) && text(parentStarted) <= text(started) ? text(parent).toLowerCase() : "";
-    return [{ pid: pid as number, ppid: ppid as number, started: started as string, daemon }];
+    const daemon = parentOf(parent, parentStarted, started);
+    // Rust's Command runs a .cmd launcher through cmd.exe, so that Chrome's daemon is the shell's parent. agent-browser 0.36
+    // stops only its child on Windows: a Chrome whose shell it stopped is orphaned under a daemon that still runs.
+    if (daemon === "cmd.exe") {
+      return [{ pid: pid as number, started: started as string, daemonPid: gppid as number, shell: ppid as number, daemon: Number.isInteger(gppid) ? parentOf(grandparent, grandparentStarted, parentStarted) : "" }];
+    }
+    return [{ pid: pid as number, started: started as string, daemonPid: ppid as number, daemon }];
   });
-  for (const { pid, ppid, started, daemon } of browsers) {
+  for (const { pid, started, daemonPid, shell, daemon } of browsers) {
     if (daemon.startsWith("agent-browser") || (binaryPath && daemon === win32.basename(binaryPath).toLowerCase())) {
-      heldWindowsProfiles.set(dir, { browser: pid, daemon: ppid, image: daemon });
+      heldWindowsProfiles.set(dir, { browser: pid, daemon: daemonPid, image: daemon, shell });
       return;
     }
     // Between the listing and now the pid may have gone to another program: only the same Chrome is stopped.

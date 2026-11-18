@@ -61,6 +61,20 @@ describe("startDueTimer", () => {
     timer.stop();
   });
 
+  it("runs work due now on a poke after a wake, though the clock has passed the timer the sleep left behind", async () => {
+    const run = vi.fn();
+    let due = Date.now() + 30_000;
+    const timer = startDueTimer({ run, next: () => due });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(Date.now() + 9 * 60 * 60_000);
+    due = Date.now();
+    timer.poke();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run).toHaveBeenCalledTimes(2);
+    timer.stop();
+  });
+
   it("retries work still due after a run (waiting on something outside) every retryMs, not in a tight loop", async () => {
     const run = vi.fn();
     const timer = startDueTimer({ run, next: () => Date.now() - 1, retryMs: 5_000 });

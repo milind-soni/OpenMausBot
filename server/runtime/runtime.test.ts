@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { addHeldSecretScrubber, HELD_SECRET_MASK } from "../../shared/redact.ts";
 
 import { checkInvariants } from "./invariants.ts";
-import { Runtime, type BeginRequest } from "./runtime.ts";
+import { PROGRESS_WRITE_MS, RERUN_BURST, RERUN_GAP_MS, RERUN_HELD, RERUN_SUPERSEDED, Runtime, type BeginRequest } from "./runtime.ts";
 import { openRuntimeStore, type RuntimeStore } from "./store.ts";
 import { CUT_TWICE, INTERRUPTED_OUTWARD, loopStop, nextGuard, outwardDetail } from "./tree.ts";
 import type { Assignment, Clock, EnqueueRequest, Limits, RunInput, RunResult, TurnRunner } from "./types.ts";
@@ -221,14 +222,43 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
+  it("work held for a place that was away is not expired by the look that finds the place back: its queue window starts then", () => {
+    const w = world(undefined, { queueMs: 1_000, stallMs: 1e9 });
+    let away = true;
+    w.runner.away = a => a.assignee.botId === "far" && away;
+    w.runner.canStartAnswer = "far is not ready";
+    const root = w.runtime.begin(beginReq());
+    const held = ok(w.runtime.enqueue(toBot("far", root.id)));
+    w.runtime.tick();
+    w.clock.advance(50_000);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    // The place comes back, and the next look comes later than the whole queue window.
+    w.clock.advance(5_000);
+    away = false;
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    w.clock.advance(999);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "queued" });
+    // From then on it is ordinary queued work, and the queue window is its bound again.
+    w.clock.advance(2);
+    w.runtime.tick();
+    expect(w.store.get(held.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "never started" });
+  });
+
   it("expires a queue entry that never started and a question nobody answered, never as completed", async () => {
     const w = world(undefined, { queueMs: 1_000, inputWaitMs: 5_000 });
     const root = w.runtime.begin(beginReq());
     w.runner.canStartAnswer = "builder is busy on another thread";
     const stuck = ok(w.runtime.enqueue(toBot("builder", root.id)));
     w.runtime.tick(); w.runtime.tick();
-    expect(w.store.events(stuck.id).filter(e => e.kind === "admitted")).toHaveLength(1);
-    expect(w.store.events(stuck.id).at(-1)?.detail).toBe("waiting: builder is busy on another thread");
+    expect(w.store.events(stuck.id).filter(e => e.kind === "held")).toHaveLength(1);
+    expect(w.store.events(stuck.id).filter(e => e.kind === "admitted")).toHaveLength(0);
+    expect(w.store.events(stuck.id).at(-1)?.detail).toBe("builder is busy on another thread");
+    w.runner.canStartAnswer = "builder's room turn is running";
+    w.runtime.tick();
+    expect(w.store.events(stuck.id).filter(e => e.kind === "held").map(e => e.detail)).toEqual(["builder is busy on another thread", "builder's room turn is running"]);
     w.clock.advance(1_001);
     w.runtime.tick();
     expect(w.store.get(stuck.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "never started" });
@@ -282,6 +312,27 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
+  it("masks a held secret, even one with spaces, before an over-long answer is clipped", async () => {
+    const secret = "alpha bravo charlie";
+    const removeScrubber = addHeldSecretScrubber((text) => text.replaceAll(secret, HELD_SECRET_MASK));
+    try {
+      const w = world();
+      w.runner.script = a => a.assignee.botId === "lead" && a.executions === 1 ? { kind: "needs_input", question: "Done?" } : undefined;
+      const root = w.runtime.begin(beginReq());
+      const lead = ok(w.runtime.enqueue(toBot("lead", root.id)));
+      w.runtime.tick(); await flush();
+      const leadIn = "x".repeat(11_990);
+      expect(w.runtime.answer(lead.id, `${leadIn}${secret} and more`)).toBe(true);
+      const stored = w.store.get(lead.id)?.answer ?? "";
+      expect(stored.length).toBeLessThanOrEqual(12_000);
+      expect(stored).not.toContain("alpha");
+      expect(stored).toContain(HELD_SECRET_MASK);
+      expect(w.runtime.answer(lead.id, "short")).toBe(false);
+    } finally {
+      removeScrubber();
+    }
+  });
+
   it("stalls a turn with no activity on the monotonic clock, and a tree with no progress, but never a parked tree", async () => {
     const w = world(() => "hold", { turnStallMs: 1_000, stallMs: 10_000 });
     const root = w.runtime.begin(beginReq());
@@ -316,6 +367,56 @@ describe("Runtime: one tree, one lane", () => {
     expect(w.store.get(b.id)).toMatchObject({ status: "failed", outcome: "stalled" });
     expect(w.store.events(root.id).some(e => e.kind === "stalled")).toBe(true);
     expect(w.runner.reports.map(r => r.a.id)).toEqual([a.id, b.id, root.id]);
+    invariants(w);
+  });
+
+  it("re-stamps a running node's lastActivityAt on real activity, on a coarse cadence and without event rows", () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const a = ok(w.runtime.enqueue(toBot("a", root.id)));
+    w.runtime.tick();
+    const dispatched = w.store.get(a.id)!.lastActivityAt;
+    const rootDispatched = w.store.get(root.id)!.lastActivityAt;
+    const eventsBefore = w.store.events(a.id).length;
+    // Inside the cadence the stall windows still move, but the row keeps its dispatch stamp.
+    w.clock.advance(PROGRESS_WRITE_MS - 1);
+    w.runtime.progress(a.id);
+    expect(w.store.get(a.id)!.lastActivityAt).toBe(dispatched);
+    // Past it, one progress call durably re-stamps the node and its root.
+    w.clock.advance(1);
+    w.runtime.progress(a.id);
+    const stamped = w.store.get(a.id)!.lastActivityAt;
+    expect(stamped).toBe(w.clock.t);
+    expect(stamped).toBeGreaterThan(rootDispatched);
+    expect(w.store.get(root.id)!.lastActivityAt).toBe(stamped);
+    // The next event inside the new window leaves the row alone, and none of this wrote event rows.
+    w.runtime.progress(a.id);
+    expect(w.store.get(a.id)!.lastActivityAt).toBe(stamped);
+    expect(w.store.events(a.id).length).toBe(eventsBefore);
+    invariants(w);
+  });
+
+  it("writes the root's activity stamp at most once per cadence, however many children report", () => {
+    const w = world(() => "hold");
+    const root = w.runtime.begin(beginReq());
+    const a = ok(w.runtime.enqueue(toBot("a", root.id)));
+    w.runtime.tick();
+    const b = ok(w.runtime.enqueue(toBot("b", root.id)));
+    w.runtime.tick();
+    // Both dispatched at T. a reports at T+10s: the node and the root are stamped.
+    w.clock.advance(PROGRESS_WRITE_MS);
+    w.runtime.progress(a.id);
+    const rootStamp = w.store.get(root.id)!.lastActivityAt;
+    expect(rootStamp).toBe(w.clock.t);
+    // b reports at T+11s: its own row is still due, but the root is not — it stays at T+10s.
+    w.clock.advance(1_000);
+    w.runtime.progress(b.id);
+    expect(w.store.get(b.id)!.lastActivityAt).toBe(w.clock.t);
+    expect(w.store.get(root.id)!.lastActivityAt).toBe(rootStamp);
+    // Once the root's window has passed, the next report moves it again.
+    w.clock.advance(PROGRESS_WRITE_MS);
+    w.runtime.progress(b.id);
+    expect(w.store.get(root.id)!.lastActivityAt).toBe(w.clock.t);
     invariants(w);
   });
 
@@ -393,6 +494,33 @@ describe("Runtime: one tree, one lane", () => {
     store.close();
   });
 
+  it("records an expired question's reason on the node that asked it, never on the work under it", async () => {
+    const w = world(() => "hold", { inputWaitMs: 5_000 });
+    const root = w.runtime.begin(beginReq());
+    const lead = ok(w.runtime.enqueue(toBot("lead", root.id)));
+    w.runtime.tick();
+    const helper = ok(w.runtime.enqueue({ ...toBot("helper", lead.id), requester: { kind: "bot_turn", botId: "lead", threadId: "lead-work" } }));
+    w.runtime.tick();
+    await w.runner.release(lead.id, { kind: "needs_input", question: "Which bucket?" });
+    expect(w.store.get(lead.id)?.status).toBe("needs_input");
+    w.clock.advance(5_001);
+    w.runtime.tick();
+    expect(w.store.get(lead.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "the person did not answer" });
+    expect(w.store.get(helper.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "Stopped with the request it was for" });
+    expect(w.runner.reports.filter(r => r.a.outcomeDetail === "the person did not answer").map(r => r.a.id)).toEqual([lead.id]);
+  });
+
+  it("charges the request budget once per fan-out, and still refuses the next call", () => {
+    const w = world(() => "hold", { requests: 1 });
+    const root = w.runtime.begin(beginReq());
+    ok(w.runtime.enqueue({ ...toBot("builder", root.id), fanOut: "call-1" }));
+    ok(w.runtime.enqueue({ ...toBot("tester", root.id), fanOut: "call-1" }));
+    expect(w.store.get(root.id)?.budgets?.requests).toBe(1);
+    expect(w.store.children(root.id).map(c => c.fanOut)).toEqual(["call-1", "call-1"]);
+    expect(w.runtime.enqueue({ ...toBot("scout", root.id), fanOut: "call-2" })).toMatchObject({ ok: false, outcome: "budget" });
+    expect(w.runtime.enqueue(toBot("scout", root.id))).toMatchObject({ ok: false, outcome: "budget" });
+  });
+
   it("cancels down the tree, aborts running turns and reports each stop", async () => {
     const w = world(() => "hold");
     const root = w.runtime.begin(beginReq());
@@ -402,8 +530,8 @@ describe("Runtime: one tree, one lane", () => {
     w.runtime.tick();
     const signals = w.runner.runs.map(r => r.signal);
     w.runtime.cancel(lead.id);
-    expect(w.store.get(helper.id)).toMatchObject({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped by user" });
-    expect(w.store.get(lead.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
+    expect(w.store.get(helper.id)).toMatchObject({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped with the request it was for" });
+    expect(w.store.get(lead.id)).toMatchObject({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped by user" });
     expect(signals.every(s => s.aborted)).toBe(true);
     expect(w.runner.reports.map(r => r.a.id)).toEqual([helper.id, lead.id]);
     expect(w.runtime.liveEdges()).toEqual([]);
@@ -416,7 +544,7 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
-  it("stops awaiting: queued work is dropped, a teammate mid-turn keeps its process and still reports", async () => {
+  it("stops awaiting, and stop means stop: queued work is dropped and a teammate mid-turn is stopped too", async () => {
     const w = world(() => "hold");
     const root = w.runtime.begin(beginReq());
     const running = ok(w.runtime.enqueue(toBot("running", root.id)));
@@ -424,19 +552,98 @@ describe("Runtime: one tree, one lane", () => {
     w.runner.canStartAnswer = false;
     const queued = ok(w.runtime.enqueue(toBot("queued", root.id)));
     w.runtime.tick();
-    const left = w.runtime.stopRequester({ threadId: "chief-chat" });
-    expect(left.map(a => a.id)).toEqual([running.id]);
+    w.runtime.stopRequester({ threadId: "chief-chat" });
     expect(w.store.get(queued.id)).toMatchObject({ status: "cancelled", outcomeDetail: "Stopped before it started" });
+    expect(w.store.get(running.id)).toMatchObject({ status: "cancelled", outcome: "stopped", outcomeDetail: "Stopped with the request it was for" });
     expect(w.store.get(root.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
-    expect(w.runner.runs[0]!.signal.aborted).toBe(false);
+    expect(w.runner.runs[0]!.signal.aborted).toBe(true);
     await w.runner.release(running.id, { kind: "completed", text: "finished anyway" });
-    expect(w.store.get(running.id)).toMatchObject({ status: "completed", result: "finished anyway" });
-    expect(w.runner.reports.map(r => r.a.id)).toEqual([queued.id, root.id, running.id]);
+    expect(w.store.get(running.id)).toMatchObject({ status: "cancelled", result: "Stopped with the request it was for" });
+    expect(w.runner.reports.map(r => r.a.id).sort()).toEqual([queued.id, running.id, root.id].sort());
     w.runtime.tick();
     expect(w.store.get(root.id)?.status).toBe("cancelled");
     expect(w.runner.runs).toHaveLength(1);
-    expect(w.runtime.stopRequester({ threadId: "chief-chat" })).toEqual([]);
+    expect(w.store.all({ nonTerminal: true })).toEqual([]);
     invariants(w);
+  });
+
+  it("takes no turn for a teammate's reply that only acknowledged, and keeps it in the report", async () => {
+    const w = world(a => a.assignee.botId === "builder" ? { kind: "completed", text: "Noted.", statusOnly: true } : undefined);
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "I told the builder." });
+    w.runtime.tick(); await flush(); w.runtime.tick();
+    expect(w.runner.runs.map(r => r.a.id)).toEqual([child.id]);
+    expect(w.store.get(root.id)).toMatchObject({ status: "completed", outcome: "done", result: "I told the builder.", executions: 1 });
+    expect(w.runner.reports.map(r => r.a.id)).toEqual([child.id, root.id]);
+    invariants(w);
+  });
+
+  it("wakes the requester for a reply nobody marked, or a failure even if marked", async () => {
+    for (const result of [{ kind: "completed", text: "The host is imap.example.com." }, { kind: "failed", outcome: "provider_error", text: "It broke." }] as RunResult[]) {
+      const w = world(a => a.assignee.botId === "builder" ? result : undefined);
+      const root = w.runtime.begin(beginReq());
+      const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+      w.runtime.end(root.id, { ok: true, text: "I asked." });
+      w.runtime.tick(); await flush(); w.runtime.tick();
+      expect(w.runner.runs.map(r => r.a.id)).toEqual([child.id, root.id]);
+      expect(w.runner.runs[1]!.input.resumed).toBe(true);
+    }
+  });
+
+  it("wakes the requester when any new result needs it, and it reads the marked one too", async () => {
+    const w = world(a => a.assignee.botId === "builder" ? { kind: "completed", text: "Noted.", statusOnly: true } : a.assignee.botId === "tester" ? { kind: "completed", text: "Two tests fail." } : undefined);
+    const root = w.runtime.begin(beginReq());
+    const noted = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    const real = ok(w.runtime.enqueue(toBot("tester", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Asked both." });
+    w.runtime.tick(); await flush(); w.runtime.tick();
+    const resume = w.runner.runs.find(r => r.a.id === root.id)!;
+    expect(resume.input.resumed).toBe(true);
+    expect(resume.input.settled?.map(s => s.id).sort()).toEqual([noted.id, real.id].sort());
+  });
+
+  it("wakes a requester that owes an answer: an assignment under someone, or a routine's run", async () => {
+    let leadTurns = 0;
+    const lead = world(a => {
+      if (a.assignee.botId === "builder") return { kind: "completed", text: "Noted.", statusOnly: true };
+      return a.assignee.botId === "lead" && ++leadTurns === 1 ? "hold" : undefined;
+    });
+    const root = lead.runtime.begin(beginReq());
+    const middle = ok(lead.runtime.enqueue(toBot("lead", root.id)));
+    lead.runtime.end(root.id, { ok: true, text: "Asked the lead." });
+    lead.runtime.tick();
+    const below = ok(lead.runtime.enqueue(toBot("builder", middle.id, "FYI", { requester: { kind: "bot_turn", botId: "lead", threadId: "lead-work" } })));
+    await lead.runner.release(middle.id, { kind: "completed", text: "Told the builder." });
+    lead.runtime.tick(); await flush(); lead.runtime.tick();
+    expect(lead.runner.runs.map(r => r.a.id).slice(0, 3)).toEqual([middle.id, below.id, middle.id]);
+
+    const routine = world(a => a.assignee.botId === "builder" ? { kind: "completed", text: "Noted.", statusOnly: true } : undefined);
+    const run = routine.runtime.begin(beginReq({ requester: { kind: "routine_run", runId: "run-1", botId: "chief", threadId: "chief-chat" }, origin: { kind: "routine", source: "routine" } }));
+    const asked = ok(routine.runtime.enqueue(toBot("builder", run.id)));
+    routine.runtime.end(run.id, { ok: true, text: "Asked." });
+    routine.runtime.tick(); await flush(); routine.runtime.tick();
+    expect(routine.runner.runs.map(r => r.a.id)).toEqual([asked.id, run.id]);
+  });
+
+  it("takes no third turn for an acknowledgement of what its second turn said, though its first result was real", async () => {
+    let thanked: Assignment | undefined;
+    const w = world((a, input) => {
+      if (a.assignee.botId === "tester") return { kind: "completed", text: "Two tests fail." };
+      if (a.assignee.botId === "builder") return { kind: "completed", text: "Noted.", statusOnly: true };
+      return input.resumed ? "hold" : undefined;
+    });
+    const root = w.runtime.begin(beginReq());
+    ok(w.runtime.enqueue(toBot("tester", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Asked the tester." });
+    w.runtime.tick(); await flush(); w.runtime.tick();
+    expect(w.runner.runs.at(-1)!.a.id).toBe(root.id);
+    thanked = ok(w.runtime.enqueue(toBot("builder", root.id, "FYI: two tests fail.")));
+    await w.runner.release(root.id, { kind: "completed", text: "Told the builder. Two tests fail." });
+    w.runtime.tick(); await flush(); w.runtime.tick();
+    expect(w.runner.runs.filter(r => r.a.id === root.id)).toHaveLength(1);
+    expect(w.runner.runs.map(r => r.a.id)).toContain(thanked.id);
+    expect(w.store.get(root.id)).toMatchObject({ status: "completed", result: "Told the builder. Two tests fail." });
   });
 
   it("completes a poll root without a turn and hands its children's lane to poll()", async () => {
@@ -503,6 +710,7 @@ describe("Runtime: one tree, one lane", () => {
     w.runtime.tick();
     expect(w.runner.changes.length - before).toBe(1);
     expect(w.runner.runs.map(r => r.a.id)).toEqual([one.id, notice.id]);
+    expect(w.store.events(two.id).filter(e => e.kind === "held").map(e => e.detail)).toEqual(["an earlier turn in its conversation is running"]);
     await w.runner.release(one.id, { kind: "completed", text: "one" });
     w.runtime.tick();
     expect(w.runner.runs.map(r => r.a.id)).toEqual([one.id, notice.id, two.id]);
@@ -648,7 +856,7 @@ describe("Runtime: what the host relies on for the new modes and openers", () =>
     expect(w.runtime.poll({ runId: "run-9" }).items).toEqual([]);
     expect(w.store.inbox({ threadId: "chief-chat" }).map(i => i.assignmentId)).toEqual([a.id]);
     expect(w.runtime.outstanding({ runId: "run-9" }).map(x => x.id)).toEqual([root.id]);
-    expect(w.runtime.stopRequester({ runId: "run-9" })).toEqual([]);
+    w.runtime.stopRequester({ runId: "run-9" });
     expect(w.store.get(b.id)).toMatchObject({ status: "cancelled", outcomeDetail: "Stopped before it started" });
     expect(w.store.get(root.id)).toMatchObject({ status: "cancelled", outcome: "stopped" });
     expect(w.runtime.outstanding({ runId: "run-9" })).toEqual([]);
@@ -801,6 +1009,88 @@ describe("Runtime: a root's later executions (every turn a root)", () => {
     expect(w.store.get(root.id)).toMatchObject({ status: "waiting", result: "" });
     expect(w.logs.filter(line => /not a running root/.test(line))).toHaveLength(3);
     invariants(w);
+  });
+
+  it("reminds the person once when handed-off work has waited, then closes it, across a restart and on the wall clock", async () => {
+    const store = openRuntimeStore(":memory:");
+    const w = world((a) => a.assignee.botId === "builder" ? { kind: "needs_input", question: "Region?" } : undefined, { inputRemindMs: 1_000, inputWaitMs: 3_000 }, store);
+    const reminded: Array<{ id: string; closesAt: number }> = [];
+    w.runner.remind = (a, closesAt) => { reminded.push({ id: a.id, closesAt }); };
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick(); await flush();
+    w.runtime.end(root.id, { ok: true, text: "" });
+    const parkedAt = w.store.get(child.id)!.lastActivityAt;
+    w.clock.advance(1_000);
+    w.runtime.tick();
+    expect(reminded).toEqual([]);
+    w.clock.advance(1);
+    w.runtime.tick(); w.runtime.tick();
+    expect(reminded).toEqual([{ id: child.id, closesAt: parkedAt + 3_001 }]);
+    expect(w.store.events(child.id).filter(e => e.kind === "reminded")).toHaveLength(1);
+
+    const again = new Runtime(store, w.runner, { clock: w.clock, limits: { inputRemindMs: 1_000, inputWaitMs: 3_000 }, log: () => {} });
+    again.open();
+    w.clock.advance(1_999);
+    again.tick();
+    expect(reminded).toHaveLength(1);
+    expect(store.get(child.id)?.status).toBe("needs_input");
+    w.clock.advance(2);
+    again.tick();
+    expect(store.get(child.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "the person did not answer" });
+  });
+
+  it("reminds late work first and still gives it the rest of the window after a long downtime", async () => {
+    const w = world((a) => a.assignee.botId === "builder" ? { kind: "needs_input", question: "Region?" } : undefined, { inputRemindMs: 1_000, inputWaitMs: 3_000 });
+    const reminded: number[] = [];
+    w.runner.remind = (_a, closesAt) => { reminded.push(closesAt); };
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick(); await flush();
+    w.runtime.end(root.id, { ok: true, text: "" });
+    w.clock.advance(50_000);
+    w.runtime.tick();
+    expect(reminded).toEqual([w.clock.t + 2_000]);
+    expect(w.store.get(child.id)?.status).toBe("needs_input");
+    w.clock.advance(2_000);
+    w.runtime.tick();
+    expect(w.store.get(child.id)?.status).toBe("needs_input");
+    w.clock.advance(1);
+    w.runtime.tick();
+    expect(w.store.get(child.id)).toMatchObject({ status: "failed", outcome: "expired" });
+  });
+
+  it("a newer question restarts the wait and its reminder; a question its requester decides reminds nobody", async () => {
+    const asks: RunResult = { kind: "needs_input", question: "Region?" };
+    const w = world((a) => a.assignee.botId === "builder" ? asks : undefined, { inputRemindMs: 1_000, inputWaitMs: 3_000 });
+    const reminded: string[] = [];
+    w.runner.remind = (a) => { reminded.push(a.id); };
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick(); await flush();
+    w.runtime.end(root.id, { ok: true, text: "" });
+    w.clock.advance(1_001);
+    w.runtime.tick();
+    expect(reminded).toEqual([child.id]);
+    expect(w.runtime.answer(child.id, "eu-west")).toBe(true);
+    w.runtime.tick(); await flush();
+    expect(w.store.get(child.id)).toMatchObject({ status: "needs_input" });
+    expect(w.store.get(child.id)?.remindedAt).toBeUndefined();
+    w.clock.advance(1_001);
+    w.runtime.tick();
+    expect(reminded).toEqual([child.id, child.id]);
+
+    const quiet = world((a) => a.assignee.botId === "builder" ? { kind: "needs_input", question: "Region?", decide: {} } : undefined, { inputRemindMs: 1_000, inputWaitMs: 3_000 });
+    const told: string[] = [];
+    quiet.runner.remind = (a) => { told.push(a.id); };
+    const root2 = quiet.runtime.begin(beginReq());
+    const decided = ok(quiet.runtime.enqueue(toBot("builder", root2.id)));
+    quiet.runtime.tick(); await flush();
+    expect(quiet.store.get(decided.id)?.decide).toEqual({});
+    quiet.clock.advance(3_001);
+    quiet.runtime.tick();
+    expect(told).toEqual([]);
+    expect(quiet.store.get(decided.id)).toMatchObject({ status: "failed", outcome: "expired" });
   });
 
   it("a root parked on cards never expires; a child's question does; a non-finite inputWaitMs never expires anything", async () => {
@@ -1303,5 +1593,57 @@ describe("Runtime: at Full access a question is its requester's to answer, and o
     expect(runsOf(w, root.id)[1]!.input.settled?.map(a => a.id)).toEqual([builder.id, tester.id]);
     expect(w.store.get(root.id)?.status).toBe("completed");
     invariants(w);
+  });
+});
+
+describe("Runtime: turns a restart cut start again a few at a time", () => {
+  it("starts the first few at once and the rest one per gap, and a second restart cuts only the ones that had started", async () => {
+    const store = openRuntimeStore(":memory:");
+    const first = world(() => "hold", {}, store);
+    const roots = Array.from({ length: RERUN_BURST + 3 }, (_, i) => first.runtime.begin(beginReq({
+      requester: { kind: "person", threadId: `chat-${i}`, chief: true }, assignee: { botId: `bot-${i}`, destination: { kind: "standing_thread", threadId: `chat-${i}` } } })));
+    first.runtime.close();
+
+    const second = world(() => "hold", {}, store);
+    second.runtime.tick(); await flush();
+    expect(second.runner.runs.map(r => r.input.turn)).toEqual(Array(RERUN_BURST).fill("rerun"));
+    const waiting = roots.filter(root => store.get(root.id)?.status === "queued");
+    expect(waiting).toHaveLength(3);
+    for (const root of waiting) expect(store.events(root.id).at(-1)).toMatchObject({ kind: "held", detail: RERUN_HELD });
+    second.clock.advance(RERUN_GAP_MS - 1);
+    second.runtime.tick(); await flush();
+    expect(second.runner.runs).toHaveLength(RERUN_BURST);
+    second.clock.advance(1);
+    second.runtime.tick(); await flush();
+    expect(second.runner.runs).toHaveLength(RERUN_BURST + 1);
+    second.runtime.close();
+
+    // Down again during the reruns: those that had started fail as cut twice; the two still waiting are not cut again.
+    const third = world(() => "hold", {}, store);
+    const cutTwice = roots.filter(root => store.get(root.id)?.status === "failed");
+    expect(cutTwice).toHaveLength(RERUN_BURST + 1);
+    for (const root of cutTwice) expect(store.get(root.id)).toMatchObject({ outcome: "interrupted", result: CUT_TWICE });
+    third.runtime.tick(); await flush();
+    expect(third.runner.runs.map(r => r.input.turn)).toEqual(["rerun", "rerun"]);
+  });
+
+  it("does not run a cut turn again after newer work in its conversation started first: it fails with a line saying so", async () => {
+    const store = openRuntimeStore(":memory:");
+    const first = world(() => "hold", {}, store);
+    const chat = (i: number) => ({ requester: { kind: "person" as const, threadId: `chat-${i}`, chief: true }, assignee: { botId: `bot-${i}`, destination: { kind: "standing_thread" as const, threadId: `chat-${i}` } } });
+    const roots = Array.from({ length: RERUN_BURST + 1 }, (_, i) => first.runtime.begin(beginReq(chat(i))));
+    first.runtime.close();
+
+    const second = world(() => "hold", {}, store);
+    second.runtime.tick(); await flush();
+    const late = roots[RERUN_BURST]!;
+    expect(store.get(late.id)?.status).toBe("queued");
+    // The person writes in that chat while its cut turn waits its turn: the new request runs, and the old one does not.
+    const newer = second.runtime.begin(beginReq(chat(RERUN_BURST)));
+    second.clock.advance(RERUN_GAP_MS);
+    second.runtime.tick(); await flush();
+    expect(store.get(late.id)).toMatchObject({ status: "failed", outcome: "interrupted", result: RERUN_SUPERSEDED });
+    expect(second.runner.runs.filter(r => r.a.id === late.id)).toHaveLength(0);
+    expect(store.get(newer.id)?.status).toBe("running");
   });
 });

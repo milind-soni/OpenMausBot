@@ -30,7 +30,7 @@ function PlanCard({ card, shown, details, compare, busy, onStart }: {
 }) {
   const nameId = `cloud-plan-${card.tier}`;
   return <li data-plan={card.tier} aria-labelledby={nameId} data-plan-current={card.current ? "" : undefined}
-    className={cn("grid min-w-0 grid-rows-subgrid gap-y-3 rounded-[14px] border-[0.5px] bg-menu p-4", compare ? "row-span-5" : "row-span-4",
+    className={cn("grid min-w-0 grid-rows-subgrid gap-y-3 rounded-[12px] border-[0.5px] bg-menu p-4", compare ? "row-span-5" : "row-span-4",
       card.popular ? "border-ink/25" : "border-ink/10")}>
     <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-2 gap-y-1">
       <h4 id={nameId} className="text-[15px] font-medium leading-[22px] text-ink">{card.name}</h4>
@@ -127,7 +127,7 @@ export function ChooseScreen({ offer, current = null, own = null, now, busy, sig
         <span className="inline-flex items-center gap-1.5"><Lock size={13} strokeWidth={1.5} aria-hidden="true" />{t("cloudBuy.secure")}</span>
         <span role="img" aria-label={t("cloudBuy.wallets")} className="inline-flex gap-1">
           {[t("cloudBuy.applePay"), t("cloudBuy.googlePay"), t("cloudBuy.card")].map(mark => <span key={mark} aria-hidden="true"
-            className="rounded-[5px] border-[0.5px] border-ink/20 px-1.5 py-px text-[11px] font-medium text-ink-secondary">{mark}</span>)}
+            className="rounded-[6px] border-[0.5px] border-ink/20 px-1.5 py-px text-[11px] font-medium text-ink-secondary">{mark}</span>)}
         </span>
         <span aria-hidden="true">·</span><span>{t("cloudBuy.cancelEasy")}</span>
       </p>

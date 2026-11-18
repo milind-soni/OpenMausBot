@@ -16,6 +16,7 @@ describe("liveCardKind", () => {
     // propose_model cards carry update_model; a spoken yes must never reach
     // them as an approval
     expect(liveCardKind(card({ requestId: "r1", tool: "update_model", modelRequest: {} as OptionCardData["modelRequest"] }))).toBe("review");
+    expect(liveCardKind(card({ requestId: "r1", tool: "lending_lift", lendingLift: { requestMessageId: "m1" } }))).toBe("review");
     expect(liveDecisionRefusal(card({ requestId: "r1", tool: "update_model", modelRequest: {} as OptionCardData["modelRequest"] })))
       .toBe("This request is reviewed on screen.");
   });
@@ -75,6 +76,11 @@ describe("spoken prompts", () => {
   it("never doubles the question mark of a question that ends in one", () => {
     expect(spokenQuestionPrompt(card({ requestId: "r1", subtitle: "Which one??", options: [] }))).toBe(
       "Ask the user, in your own words: Which one? Then delegate their answer.",
+    );
+  });
+  it.each(["选哪一个？", "选哪一个？?"])("does not append an ASCII question mark to %s", (subtitle) => {
+    expect(spokenQuestionPrompt(card({ requestId: "r1", subtitle, options: ["主账户", "储蓄账户"] }))).toBe(
+      "Ask the user, in your own words: 选哪一个？ The options are 主账户, 储蓄账户. Then delegate their answer.",
     );
   });
   it("has fixed copy for the call", () => {

@@ -76,7 +76,7 @@ export function WidgetBadge({ node }: { node: WidgetNode }) {
       dir="auto"
       className={cn(
         "inline-flex shrink-0 items-center whitespace-nowrap font-medium", BADGE_SIZE[widgetString(node, "size") ?? "md"] ?? BADGE_SIZE.md,
-        node.pill === false ? "rounded-[7px]" : "rounded-full",
+        node.pill === false ? "rounded-[8px]" : "rounded-full",
         variant === "solid" ? BADGE_SOLID[color] ?? BADGE_SOLID.secondary : BADGE_INK[color] ?? BADGE_INK.secondary,
         variant === "outline" && "shadow-[inset_0_0_0_1px_color-mix(in_srgb,currentColor_45%,transparent)]",
         variant !== "solid" && variant !== "outline" && "bg-[color:color-mix(in_srgb,currentColor_13%,transparent)]",

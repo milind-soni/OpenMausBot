@@ -74,7 +74,7 @@ compose.yaml` prefix for `maus.ps1`.
 In **App Settings -> Local VM**, prepare the managed image, select **Per bot**,
 and set the maximum number of desktops. Give each bot **Local VM** as its computer,
 then create its desktop. The first image preparation needs a large download.
-Each desktop has the existing 4 GiB / 2 CPU limits; allow capacity for the server
+Each desktop gets 4 GiB / 2 CPUs unless `localVm.memoryGb` and `localVm.cpus` say otherwise; allow capacity for the server
 and build as well as all concurrent desktops. See the
 [Local VM guide](../../apps/docs/content/docs/computers/local-vm.mdx).
 
@@ -92,7 +92,7 @@ existing data.
 Caddy listens on loopback only. To use Tailscale Serve, route the tailnet HTTPS
 endpoint to `http://127.0.0.1:8080`, set `OMB_PUBLIC_URL` to that HTTPS URL and
 `OMB_HTTPS_HOST` to its hostname, then recreate the services with `up -d`.
-Mint a pairing code with `maus.ps1 exec omb node dist-server/openmausbot.js pair`.
+Mint a pairing code with `maus.ps1 exec omb openmausbot pair`.
 The proxy forwards the client address and scheme so the server's pairing checks
 remain in force. Do not publish the server, webhook listener, or Podman socket
 directly. For public-domain HTTPS, use the existing Docker deployment or design

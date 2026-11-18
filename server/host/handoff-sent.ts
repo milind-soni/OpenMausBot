@@ -1,5 +1,7 @@
-import { serverLine } from "../server-lines.ts";
+import { isServerLine, serverLine } from "../server-lines.ts";
 import type { Message } from "../store.ts";
+
+export const WAIT_CARD_CLOSED_REASON = "The card it waited on was replaced or closed";
 
 type Who = { id: string; name: string; color: string };
 
@@ -18,10 +20,11 @@ export function outsideRoomNote(room: AddressedRoom | undefined, via: SentVia): 
 
 /** `language`: the sender's conversation's, where the row is shown. */
 export function sentRow(input: { sender: Who; recipient: Who; threadId: string; title?: string; reason?: string; doneWhen?: string; room?: AddressedRoom; via: SentVia;
-  language?: string }): Omit<Message, "id" | "at"> {
+  language?: string; /** The files passed with it, shown as chips. */ attachments?: Message["attachments"] }): Omit<Message, "id" | "at"> {
   const { sender, recipient, threadId, room, via, language } = input;
   const outside = room && via === "direct" ? room : undefined;
-  const name = outside ? outside.here ? serverLine(language, "server.teammates.sentDirectlyHere", { bot: recipient.name })
+  const name = sender.id === recipient.id ? serverLine(language, "server.rooms.openedThread", { title: input.title ?? "" })
+    : outside ? outside.here ? serverLine(language, "server.teammates.sentDirectlyHere", { bot: recipient.name })
     : serverLine(language, "server.teammates.sentDirectly", { bot: recipient.name, room: outside.name })
     : room && !room.here ? serverLine(language, "server.teammates.sentInRoom", { bot: recipient.name, room: room.name })
     : serverLine(language, "server.teammates.sent", { bot: recipient.name });
@@ -33,6 +36,7 @@ export function sentRow(input: { sender: Who; recipient: Who; threadId: string; 
       ok: true, ...(input.reason ? { output: input.reason } : {}),
     },
     ...(input.doneWhen ? { doneWhen: input.doneWhen } : {}),
+    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     ...(outside ? { sentDirectly: { name: recipient.name, ...(outside.here ? {} : { room: outside.name }) } } : {}),
     ...(room && via === "room"
       ? { comm: { groupId: room.id, threadId, withBotId: recipient.id, withName: recipient.name, withColor: recipient.color } }
@@ -50,5 +54,7 @@ export function teammateResultRow(language: string | undefined, child: { status:
       : serverLine(language, "server.teammates.replied", { bot });
   }
   const key = child.status === "failed" ? "server.teammates.failed" : child.status === "cancelled" ? "server.teammates.cancelled" : "server.teammates.other";
-  return serverLine(language, key, { bot, status: child.status, detail: child.result.split("\n", 1)[0]!.slice(0, 180) });
+  const detail = child.status === "cancelled" && isServerLine("server.teammates.waitCardClosed", child.result)
+    ? serverLine(language, "server.teammates.waitCardClosed") : child.result;
+  return serverLine(language, key, { bot, status: child.status, detail: detail.split("\n", 1)[0]!.slice(0, 180) });
 }

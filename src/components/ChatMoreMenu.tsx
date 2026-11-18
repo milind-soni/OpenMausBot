@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX } from "react";
-import { Bug, Copy, Cpu, Download, Gauge, ListChecks, MessagesSquare, Monitor, MoreHorizontal, Search, Share, SquarePen, UserRound } from "lucide-react";
+import { Bug, Copy, Cpu, Download, Gauge, LayoutTemplate, ListChecks, MessagesSquare, Monitor, MoreHorizontal, RotateCcw, Search, Share, SquarePen, UserPlus, UserRound, Users } from "lucide-react";
 import { currentTaskBot, openBotThread, useStore, visibleMessages, type Bot } from "@/state/store";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -14,12 +14,19 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
+import { useContextAction } from "./ContextWarning";
 import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
+import { UsageBars } from "./EngineUsage";
+import { useConversationSide } from "./TeamSideSwitch";
+import { tasksOfSide } from "@/state/team-side";
+import { openConversationDialog, shareChoices } from "./conversation-share/conversation-share";
+import { askBot } from "@/lib/template-share";
+import { TEMPLATE_SHARE_MESSAGE } from "../../shared/share-card";
 
 /** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. The
  * Simple bot panel draws the same items as rows, and its Share button holds the two that export. */
@@ -34,8 +41,20 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const usage = usageSummary(bot, state.instances);
   const hasMessages = messages.length > 0;
+  const contextAction = useContextAction();
+  const atFreshStart = messages.at(-1)?.compaction?.fresh === true;
   const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
-  const threads = showThreads ? [] : orderedThreadList((profile.tasks ?? []).filter((task) => !task.routineRunId));
+  const side = useConversationSide(profile);
+  const threads = showThreads ? [] : orderedThreadList((side ? tasksOfSide(profile, side) : profile.tasks ?? []).filter((task) => !task.routineRunId));
+  const sharing = shareChoices(profile, profile.tasks?.find((task) => task.threadId === bot.threadId), Boolean(useTeamName()));
+  const shareItems: SidebarMenuItem[] = [
+    { key: TEMPLATE_ITEM, label: t("template.shareAsTemplate"), icon: <LayoutTemplate size={16} />,
+      onSelect: () => askBot(dispatch, profile.id, bot.threadId, TEMPLATE_SHARE_MESSAGE) },
+    ...(sharing.team ? [{ key: "share-team", label: t("conversationShare.withTeam"), icon: <Users size={16} />,
+      onSelect: () => openConversationDialog({ kind: "team", botId: profile.id, threadId: bot.threadId }) }] : []),
+    ...(sharing.person ? [{ key: "share-person", label: t("conversationShare.withPerson"), icon: <UserPlus size={16} />,
+      onSelect: () => openConversationDialog({ kind: "person", botId: profile.id, threadId: bot.threadId }) }] : []),
+  ].map((item, index) => (index === 0 ? { ...item, separatorBefore: true } : item));
   const selection = profile.modelSelection;
   const modelName = phoneHeader && selection
     ? state.instances.find((candidate) => candidate.instanceId === selection.instanceId)?.models.options.find((option) => option.id === selection.model)?.label ?? selection.model
@@ -55,6 +74,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       label: t("model.simple.model"),
       icon: <Cpu size={16} />,
       value: modelName,
+      trailing: <UsageBars engine={selection?.instanceId} hover={false} />,
       onSelect: () => openBotSettings(dispatch, "model"),
     } satisfies SidebarMenuItem]),
     {
@@ -76,7 +96,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       onSelect: () => requestChatFind(bot.threadId),
     },
     ...phoneScreen,
-    ...(showThreads ? [] : [{
+    ...(showThreads || side === "team" ? [] : [{
       key: "new-thread",
       heading: t("task.list"),
       separatorBefore: true,
@@ -87,6 +107,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
     // With one thread there is nothing to switch to.
     ...(threads.length < 2 ? [] : [{
       key: "threads",
+      ...(side === "team" ? { heading: t("task.list"), separatorBefore: true } : {}),
       label: t("task.switch"),
       icon: <MessagesSquare size={16} />,
       value: String(threads.length),
@@ -98,6 +119,15 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       })),
       onSelect: () => {},
     } satisfies SidebarMenuItem]),
+    {
+      key: "start-fresh",
+      label: t("chat.startFresh"),
+      icon: <RotateCcw size={16} />,
+      disabled: bot.busy || contextAction.pending || !hasMessages || atFreshStart,
+      title: t(bot.busy ? "contextWarning.busy" : "chat.startFresh.hint"),
+      onSelect: () => contextAction.run(`/api/bots/${profile.id}/start-fresh`, { threadId: bot.threadId }),
+    },
+    ...shareItems,
     {
       key: "copy",
       heading: t("chat.export.heading"),
@@ -121,7 +151,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       label: t("chat.usage.menu"),
       icon: <Gauge size={16} />,
       separatorBefore: true,
-      trailing: <span title={usage.detail} data-testid="usage-chip" className={cn("tabular-nums text-[12px]", usage.tone === "danger" ? "text-danger" : usage.tone === "warning" ? "text-warning" : "text-ink-secondary")}>{usage.short}</span>,
+      trailing: <span title={usage.detail} data-testid="usage-chip" className="tabular-nums text-[12px] text-ink-secondary">{usage.short}</span>,
       onSelect: () => advanced ? openBotSettings(dispatch, "usage") : dispatch({ type: "toggleAppSettings", open: true, section: "usage" }),
     } satisfies SidebarMenuItem] : []),
     ...(remoteClient ? [] : [{
@@ -180,6 +210,8 @@ export function ChatMoreMenu({ bot, phoneHeader = false }: { bot: Bot; phoneHead
 }
 
 export const EXPORT_ITEMS = ["copy", "download"];
+/** Asks the bot to make a shareable template of itself. */
+export const TEMPLATE_ITEM = "as-template";
 
 /** The bot panel's round Share button: on a team who has access, with copying or downloading this conversation under
  * the ⋯ of its header; anywhere else a menu of those two. */
@@ -188,11 +220,16 @@ export function ChatShareMenu({ bot, className }: { bot: Bot; className: string 
     : <ShareMenu key={bot.threadId} bot={bot} className={className} />;
 }
 
-const exportItems = (items: SidebarMenuItem[]): SidebarMenuItem[] => items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item) => ({
-  ...item, heading: undefined, separatorBefore: false, label: t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation"),
-}));
+/** The Share button's items: the bot as a template, then this conversation copied or downloaded. */
+const exportItems = (items: SidebarMenuItem[]): SidebarMenuItem[] => [
+  ...items.filter((item) => item.key === TEMPLATE_ITEM).map((item) => ({ ...item, separatorBefore: false })),
+  ...items.filter((item) => EXPORT_ITEMS.includes(item.key)).map((item, index) => ({
+    ...item, heading: undefined, separatorBefore: index === 0, label: t(item.key === "copy" ? "chat.export.copyConversation" : "chat.export.downloadConversation"),
+  })),
+];
 
-function ExportMore({ bot }: { bot: Bot }) {
+/** The ⋯ in a team bot's Share dialog: the bot as a template, and this conversation copied or downloaded. */
+export function ExportMore({ bot }: { bot: Bot }) {
   const { items } = useChatMoreItems(bot);
   return (
     <SidebarPopoverMenu items={exportItems(items)} ariaLabel={t("chat.more")} align="end" triggerTitle={t("chat.more")}

@@ -101,7 +101,7 @@ above passed. Before that rebase (main `0bb37982` plus #1708),
 `server/paired-thread-targets-api.test.ts`, `server/chief-rooms.e2e.test.ts`,
 `server/direct-coordination.e2e.test.ts`, `server/request-auth.test.ts`,
 `server/decision-log.test.ts`, `server/decision-log-wiring.test.ts`,
-`server/card-answerers.e2e.test.ts`, `server/peer-allowlist.e2e.test.ts`,
+`server/card-answerers.e2e.test.ts`,
 `server/runtime-coordinator.test.ts`, `server/chief-of-staff.test.ts`,
 `server/thread-capacity-api.test.ts`, `server/cli-service-trust.e2e.test.ts`
 and the Settings/People/session UI tests passed on macOS.

@@ -116,7 +116,7 @@ export function BrowserSignInScreen({ code, checkout, trial, busy, onReopen, onC
     <Heading title={t("cloudAdd.browserTitle")} />
     {code ? <ol className="flex list-decimal flex-col gap-1.5 ps-5 text-[14px] leading-5 text-ink marker:text-ink-tertiary">
       <li>{t("cloudAdd.signInStep1")}</li>
-      <li>{t("cloudAccount.codeCheck")}<code dir="ltr" className="mt-1.5 block w-fit select-all rounded-[10px] bg-ink/[0.05] px-3 py-1.5 font-mono text-[17px] font-medium tracking-[0.12em]">{code}</code></li>
+      <li>{t("cloudAccount.codeCheck")}<code dir="ltr" className="mt-1.5 block w-fit select-all rounded-[8px] bg-ink/[0.05] px-3 py-1.5 font-mono text-[17px] font-medium tracking-[0.12em]">{code}</code></li>
       <li>{t(!checkout ? "cloudAdd.signInStep3Connect" : trial ? "cloudAdd.signInStep3Trial" : "cloudAdd.signInStep3")}</li>
     </ol> : <p role="status" className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />{t("cloudAdd.opening")}</p>}
     <div className={ACTIONS}>

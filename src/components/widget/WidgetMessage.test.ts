@@ -30,13 +30,14 @@ const fetchMock = vi.fn<(path: string, init?: RequestInit) => Promise<Response>>
 const openExternal = vi.fn(async (_url: string) => {});
 const flushBotPatches = vi.fn<(botId: string) => Promise<null>>();
 const store = { state: {}, dispatch: vi.fn(), flushBotPatches } as unknown as ReturnType<typeof useStore>;
-const inStore = (message: Message) => createElement(BotEditorStore, { value: store, children: createElement(WidgetMessage, { botId: "scout", threadId: "t1", message }) });
+const inStore = (message: Message, viewOnly?: boolean) =>
+  createElement(BotEditorStore, { value: store, children: createElement(WidgetMessage, { botId: "scout", threadId: "t1", message, ...(viewOnly ? { viewOnly } : {}) }) });
 
 let host: HTMLDivElement;
 let root: Root;
 
-function mount(message: Message) {
-  act(() => root.render(inStore(message)));
+function mount(message: Message, viewOnly?: boolean) {
+  act(() => root.render(inStore(message, viewOnly)));
 }
 
 const find = <T extends Element = HTMLElement>(selector: string) => host.querySelector<T>(selector);
@@ -512,6 +513,19 @@ describe("pressing", () => {
     const line = find('[data-ask-card="settled"]')!;
     expect(line.textContent).toContain("Never mind");
     expect(line.querySelector("svg.lucide-x")).not.toBeNull();
+  });
+
+  it("in a room, locks every press and field, still opens a link, and posts nothing", async () => {
+    mount(row(sample("routineForm")), true);
+    expect(find('[data-widget="w1"]')!.getAttribute("data-widget-state")).toBe("view-only");
+    const create = button("Create routine")!;
+    expect(create.disabled).toBe(true);
+    await press(create);
+    for (const control of all<HTMLInputElement | HTMLButtonElement>("[data-widget-field]")) expect(control.matches(":disabled, [aria-disabled=true]"), control.outerHTML.slice(0, 80)).toBe(true);
+    mount(row(sample("kitchenSink")), true);
+    await press(button("Open the docs")!);
+    expect(openExternal).toHaveBeenLastCalledWith("https://mausbot.com/docs");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("opens an open_url link on this device and posts nothing", async () => {

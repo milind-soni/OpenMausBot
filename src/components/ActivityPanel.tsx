@@ -1,9 +1,12 @@
+import { routineLineText } from "@/lib/activity-text";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListChecks, RefreshCw, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import {
+  activityApp,
+  activityLabel,
   formatActivityTime,
   groupActivityByDay,
   outcomeChip,
@@ -165,12 +168,12 @@ function ActivityLine({ row, current, focused, onJump }: { row: ActivityRow; cur
       <span className="mt-[2px] shrink-0 tabular-nums text-[11px] text-ink-secondary">{formatActivityTime(row.at)}</span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5 text-[13px] text-ink">
-          {row.app && <span className="font-medium">{row.app}</span>}
+          {row.app && <span className="font-medium">{activityApp(row)}</span>}
           {row.app && <span className="text-ink-secondary">·</span>}
-          <span className="truncate">{row.label}</span>
+          <span className="truncate">{activityLabel(row)}</span>
         </span>
         {row.summary && (
-          <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-secondary">{row.summary}</span>
+          <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-secondary">{routineLineText(row.summaryCode, row.summary, row.summaryParams)}</span>
         )}
       </span>
       <span className={cn("mt-[2px] shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium", TONE_CLASS[chip.tone])}>

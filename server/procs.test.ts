@@ -11,6 +11,7 @@ import {
   describeSpawnFailure,
   estimatedWindowsCommandLineChars,
   execCli,
+  execCliBoxed,
   killCliTree,
   spawnCli,
   WINDOWS_SAFE_COMMAND_LINE_CHARS,
@@ -78,6 +79,20 @@ describe("spawn ENOENT", () => {
   });
 });
 
+describe("execCliBoxed output", () => {
+  it("preserves UTF-8 characters across stdout and stderr pipe reads", async () => {
+    const output = "模型é😀".repeat(40_000);
+    const result = await new Promise<{ error: Error | null; stdout: string; stderr: string }>((resolve) => {
+      execCliBoxed(process.execPath, ["-e", "const text = '模型é😀'.repeat(40_000); process.stdout.write(text); process.stderr.write(text);"], {
+        env: process.env, timeout: hostTimeout(5_000), box: { allowEnv: [] },
+      }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
+    });
+    expect(result.error).toBeNull();
+    expect(result.stdout).toBe(output);
+    expect(result.stderr).toBe(output);
+  });
+});
+
 describe("execCli timeout", () => {
   it.skipIf(process.platform === "win32")("calls back when the CLI traps SIGTERM and outlives its timeout", async () => {
     const started = Date.now();
@@ -111,7 +126,7 @@ describe("CLI version probes", () => {
     const timedOut = await new Promise<Error | null>((resolve) => {
       execCli(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeout: 200 }, (error) => resolve(error));
     });
-    expect(cliVersionReader("claude")(timedOut, "")).toEqual({ reason: expect.stringContaining("took longer than 8 seconds") });
+    expect(cliVersionReader("claude")(timedOut, "")).toEqual({ reason: expect.stringContaining("took longer than 30 seconds") });
     const read = cliVersionReader("claude");
     expect(read(null, " 2.1.302\n")).toEqual({ version: "2.1.302" });
     expect(read(timedOut, "")).toEqual({ version: "2.1.302" });
@@ -120,5 +135,16 @@ describe("CLI version probes", () => {
     });
     expect(read(trapped, "")).toEqual({ version: "2.1.302" });
     expect(read(Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" }), "")).toEqual({ reason: "`claude` CLI not found" });
+  }, hostTimeout(20_000));
+
+  it("names a timeout, not a missing CLI, when a busy server reads the answer only after the timeout", async () => {
+    const late = await new Promise<{ err: Error | null; stdout: string }>((resolve) => {
+      execCli(process.execPath, ["-e", "process.stdout.write('2.1.302')"], { timeout: 100 }, (err, stdout) => resolve({ err, stdout }));
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_500);
+    });
+    expect(cliVersionReader("claude")(late.err, late.stdout)).toEqual({ reason: expect.stringContaining("took longer than 30 seconds") });
+    const read = cliVersionReader("claude");
+    expect(read(null, "2.1.302")).toEqual({ version: "2.1.302" });
+    expect(read(late.err, late.stdout)).toEqual({ version: "2.1.302" });
   }, hostTimeout(20_000));
 });

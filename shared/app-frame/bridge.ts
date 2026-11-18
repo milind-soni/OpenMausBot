@@ -1,28 +1,19 @@
 // The host side of the MCP Apps bridge (io.modelcontextprotocol/ui, stable 2026-01-26) for one app frame. It
 // runs in the desktop renderer and, bundled, in the phones' web views, so it never touches a window: a platform
 // hands it each `message` event and an adapter for the rest.
-import { APP_LIMITS, APP_PROTOCOL_VERSION, utf8Bytes, type AppDocument } from "../app.ts";
+import { APP_LIMITS, APP_PROTOCOL_VERSION, ROOM_VIEW_ONLY, utf8Bytes, type AppDocument } from "../app.ts";
+import {
+  APP_RPC_METHODS,
+  RPC_HOST_REFUSED,
+  RPC_INVALID_PARAMS,
+  RPC_METHOD_NOT_FOUND,
+  type AppRpcMethod,
+  type JsonRpcError,
+  type JsonRpcId,
+  type JsonRpcMessage,
+} from "../../packages/phone-protocol/src/app-rpc.ts";
 
-export type JsonRpcId = string | number;
-
-export interface JsonRpcError {
-  code: number;
-  message: string;
-  data?: unknown;
-}
-
-export type JsonRpcMessage =
-  | { jsonrpc: "2.0"; id: JsonRpcId; method: string; params?: Record<string, unknown> }
-  | { jsonrpc: "2.0"; method: string; params?: Record<string, unknown> }
-  | { jsonrpc: "2.0"; id: JsonRpcId; result: unknown }
-  | { jsonrpc: "2.0"; id: JsonRpcId; error: JsonRpcError };
-
-export const APP_RPC_METHODS = ["tools/call", "tools/list", "resources/read", "resources/list"] as const;
-export type AppRpcMethod = (typeof APP_RPC_METHODS)[number];
-
-export const RPC_METHOD_NOT_FOUND = -32601;
-export const RPC_INVALID_PARAMS = -32602;
-export const RPC_HOST_REFUSED = -32000;
+export * from "../../packages/phone-protocol/src/app-rpc.ts";
 
 export const APP_FRAME_LIMITS = {
   messageBytes: 1_000_000,
@@ -280,7 +271,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
   const onRpc = async (id: JsonRpcId, method: AppRpcMethod, params: Record<string, unknown>) => {
     if (!mcp) return fail(id, RPC_METHOD_NOT_FOUND, "Method not found");
     const allowed = method.startsWith("tools/") ? doc.can.serverTools : doc.can.serverResources;
-    if (!allowed) return fail(id, RPC_HOST_REFUSED, doc.blocked?.text ?? "This app cannot reach its server right now.");
+    if (!allowed) return fail(id, RPC_HOST_REFUSED, doc.room ? ROOM_VIEW_ONLY : doc.blocked?.text ?? "This app cannot reach its server right now.");
     if (method === "tools/call" && (typeof params.name !== "string" || !params.name || (params.arguments !== undefined && !isRecord(params.arguments)))) {
       return fail(id, RPC_INVALID_PARAMS, "tools/call needs {name, arguments?}.");
     }
@@ -326,7 +317,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
         }
       }
       case "ui/message": {
-        if (!doc.can.message) return fail(id, RPC_HOST_REFUSED, "This app cannot send messages here.");
+        if (!doc.can.message) return fail(id, RPC_HOST_REFUSED, doc.room ? ROOM_VIEW_ONLY : "This app cannot send messages here.");
         if (!adapter.engaged()) return fail(id, RPC_HOST_REFUSED, "Messages are sent only after the person clicks in the app.");
         const text = messageText(params);
         if (text === null) return fail(id, RPC_INVALID_PARAMS, `Only text messages of 1 to ${APP_LIMITS.messageText} characters can be sent.`);
@@ -340,7 +331,7 @@ export function createAppBridge(options: AppBridgeOptions): AppBridge {
         }
       }
       case "ui/update-model-context": {
-        if (!doc.can.modelContext) return fail(id, RPC_HOST_REFUSED, "This app cannot update the model's context here.");
+        if (!doc.can.modelContext) return fail(id, RPC_HOST_REFUSED, doc.room ? ROOM_VIEW_ONLY : "This app cannot update the model's context here.");
         if ((params?.content !== undefined && !Array.isArray(params.content)) || (params?.structuredContent !== undefined && !isRecord(params.structuredContent))) {
           return fail(id, RPC_INVALID_PARAMS, "ui/update-model-context takes {content?, structuredContent?}.");
         }

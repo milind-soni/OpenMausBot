@@ -38,7 +38,7 @@ export type RoomRun = { requestMessageId?: string; cancelled: boolean; queuedQue
 
 const fileSchema = z.object({
   v: z.literal(1),
-  work: z.record(z.string().regex(WORK), z.object({ person: z.string().regex(PERSON), at: z.number().int().nonnegative() })),
+  work: z.record(z.string().regex(WORK), z.object({ person: z.string().regex(PERSON), at: z.number().int().nonnegative(), lends: z.literal(true).optional() })),
 });
 
 /** Whom each piece of handed-on work acts for, recorded once as it is handed on. A missing or damaged file holds nobody:
@@ -46,7 +46,7 @@ const fileSchema = z.object({
 export class HandedPeople {
   readonly #file: string;
   readonly #now: () => number;
-  readonly #work = new Map<string, { person: string; at: number }>();
+  readonly #work = new Map<string, { person: string; at: number; lends?: true }>();
 
   constructor(file: string, now: () => number = Date.now) {
     this.#file = file;
@@ -59,11 +59,12 @@ export class HandedPeople {
     }
   }
 
-  /** Work handed on by a turn that acted for `person`; once, so handing the same work on again changes nothing. */
-  record(workId: string, person: string | null): void {
+  /** Work handed on by a turn that acted for `person`; once, so handing the same work on again changes nothing. `lends`: a
+   * turn that could use their lent computer when it handed this on, so the work may go on using it. */
+  record(workId: string, person: string | null, lends = false): void {
     if (!person || !PERSON.test(person) || !WORK.test(workId) || this.#work.has(workId)) return;
     const now = this.#now();
-    this.#work.set(workId, { person, at: now });
+    this.#work.set(workId, { person, at: now, ...(lends ? { lends: true as const } : {}) });
     for (const [id, entry] of this.#work) if (now - entry.at > KEEP_MS) this.#work.delete(id);
     while (this.#work.size > MAX_ENTRIES) this.#work.delete(this.#work.keys().next().value!);
     try {
@@ -73,7 +74,7 @@ export class HandedPeople {
     }
   }
 
-  get(workId: string): { person: string; at: number } | undefined {
+  get(workId: string): { person: string; at: number; lends?: true } | undefined {
     return this.#work.get(workId);
   }
 }
@@ -90,11 +91,12 @@ export function onlyTheirs(thread: readonly ActingLine[], person: string, since:
     || (answeredByPerson(line.card) && line.card!.answeredBy?.kind === "session" && line.card!.answeredBy.person !== person)));
 }
 
-/** A handed-on origin names the person the work acts for, and only a person's own request can. */
-export function withPerson(origin: WorkOrigin, person: string | null | undefined): WorkOrigin {
+/** A handed-on origin names the person the work acts for, and only a person's own request can. Security invariant: it
+ * lends only on this hop's own record, never from the origin it was built on. */
+export function withPerson(origin: WorkOrigin, person: string | null | undefined, lends = false): WorkOrigin {
   if (origin.kind !== "user") return origin;
-  const { person: _previous, ...rest } = origin;
-  return person && PERSON.test(person) ? { ...rest, person } : rest;
+  const { person: _previous, lends: _inherited, ...rest } = origin;
+  return person && PERSON.test(person) ? { ...rest, person, ...(lends ? { lends: true as const } : {}) } : rest;
 }
 
 export interface ActingPeopleDeps {
@@ -137,15 +139,17 @@ export function createActingPeople(deps: ActingPeopleDeps) {
   return {
     requester,
     /** Work this turn hands on now acts for whoever this turn acts for; the first hand-on of a turn that started its
-     * work is kept for that turn too, so it still acts for them if a restart runs it again. */
-    handOn(turn: { threadId: string; generation: string }, work: { id: string; rootId: string }): void {
+     * work is kept for that turn too, so it still acts for them if a restart runs it again. `lends`: this turn could use
+     * the person's lent computer (cloud-lending-turns handsOnLending). */
+    handOn(turn: { threadId: string; generation: string }, work: { id: string; rootId: string }, lends = false): void {
       const person = requester(turn.threadId, turn.generation);
-      deps.handed.record(work.id, person);
-      if (work.rootId === turn.generation) deps.handed.record(work.rootId, person);
+      deps.handed.record(work.id, person, lends);
+      if (work.rootId === turn.generation) deps.handed.record(work.rootId, person, lends);
     },
     /** A handed-on origin with the person its work was handed on for, if any. */
     handedOrigin(origin: WorkOrigin, workId: string): WorkOrigin {
-      return withPerson(origin, deps.handed.get(workId)?.person);
+      const handed = deps.handed.get(workId);
+      return withPerson(origin, handed?.person, handed?.lends === true);
     },
     /** What a room member doing handed-on work acts for: the room's words since it was handed on count against it. */
     handedRun(workId: string): HandedRun | undefined {
@@ -157,7 +161,7 @@ export function createActingPeople(deps: ActingPeopleDeps) {
 
 export type ActingPeople = ReturnType<typeof createActingPeople>;
 
-type HandedBack = { ok: boolean; text: string; evidence?: unknown; cards?: { question: string; ids: string[] }; privateQuestion?: boolean };
+type HandedBack = { ok: boolean; text: string; evidence?: unknown; cards?: { question: string; ids: string[] }; privateQuestion?: boolean; approvalAsk?: string };
 type Place = { child: string | null; parent: string | null };
 
 /** Work in one person's private chat, for a requester whose chat is not that one: its words stay with that person. */
@@ -178,6 +182,7 @@ export function privateHandBack<T extends HandedBack>(outcome: T, place: Place &
     ...rest,
     text: asks ? `NEEDS INPUT: ${question}` : `${outcome.ok ? "Done" : "It stopped before it finished"}. The result is in ${where}.`,
     ...(outcome.cards ? { cards: { ...outcome.cards, question } } : {}),
-    ...(asks || outcome.cards ? { privateQuestion: true } : {}),
+    ...(outcome.approvalAsk ? { approvalAsk: question } : {}),
+    ...(asks || outcome.cards || outcome.approvalAsk ? { privateQuestion: true } : {}),
   } as T;
 }

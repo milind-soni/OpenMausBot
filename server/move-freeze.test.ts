@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createMoveFreeze, ENDED_REFUSAL, HOME_SCREEN, MOVED_REFUSAL, movedRefusal, RAIL_PAGE, switchAutomationsOff, type MoveAutomations } from "./move-freeze.ts";
+import { createMoveFreeze, ENDED_REFUSAL, HOME_SCREEN, MOVED_REFUSAL, movedRefusal, phoneMovedRefusal, RAIL_PAGE, switchAutomationsOff, type MoveAutomations } from "./move-freeze.ts";
 import type { MoveWait } from "./move-waits.ts";
 import { createMoveFreezeRoutes } from "./routes/move-freeze.ts";
 import { PASS } from "./routes/table.ts";
@@ -128,9 +128,9 @@ describe("switching this computer's automations off for a move", () => {
 });
 
 describe("/api/move/freeze", () => {
-  const ask = async (route: ReturnType<typeof createMoveFreezeRoutes>, method: string, path = "/api/move/freeze", body: unknown = {}, kind = "loopback") => {
+  const ask = async (route: ReturnType<typeof createMoveFreezeRoutes>, method: string, path = "/api/move/freeze", body: unknown = {}, kind = "loopback", companionDevice?: string) => {
     let answered: { status: number; body: any } | undefined;
-    const out = await route({ path, method, url: new URL(`http://127.0.0.1${path}`), req: {} as never, res: {} as never, auth: { kind, scopes: ["admin"] } as never,
+    const out = await route({ path, method, url: new URL(`http://127.0.0.1${path}`), req: {} as never, res: {} as never, auth: { kind, scopes: ["admin"], ...(companionDevice ? { companionDevice } : {}) } as never,
       json: (_res: unknown, status: number, value: unknown) => { answered = { status, body: value }; }, readBody: async () => body } as never);
     return out === PASS ? "pass" : answered!;
   };
@@ -166,6 +166,24 @@ describe("/api/move/freeze", () => {
     expect(relaunched.unfreeze()).toBe(true);
     expect([relaunched.place(), movedRefusal(null)]).toEqual([null, MOVED_REFUSAL]);
     expect(await ask(route, "POST", undefined, { cloud: "https://garage.example.test", place: "x".repeat(121) }), "a name past 120 characters").toMatchObject({ status: 400 });
+  });
+
+  it("a phone still paired with this computer hears where its bots went, on every route, reads and its event stream too", async () => {
+    const dir = dataDir();
+    const freeze = createMoveFreeze({ dataDir: dir });
+    const route = createMoveFreezeRoutes({ freeze, busy: () => null, restart() {}, platform: "darwin" });
+    expect(await ask(route, "GET", "/api/bots", {}, "loopback", "phone-1"), "not frozen: the phone uses this computer as ever").toBe("pass");
+    freeze.freeze("https://omb-t-1.fly.dev");
+    const moved = { status: 410, body: { error: "This computer's bots moved to My Cloud. Open This Mac in the app on this computer to use it from your phone, or open My Cloud.", code: "home_moved" } };
+    for (const [method, path] of [["GET", "/api/bots"], ["GET", "/api/events"], ["POST", "/api/bots/b1/messages"], ["GET", "/api/move/freeze"]]) {
+      expect(await ask(route, method!, path, {}, "loopback", "phone-1"), `${method} ${path}`).toEqual(moved);
+    }
+    expect(await ask(route, "GET", "/api/health", {}, "loopback", "phone-1"), "this computer is up, so the phone reads the reason instead of trying again").toBe("pass");
+    expect(await ask(route, "GET", "/api/bots"), "this computer's own app still reads its frozen copy").toBe("pass");
+    expect(phoneMovedRefusal(null, "win32")).toMatch(/Open This PC in the app/);
+    const garage = createMoveFreezeRoutes({ freeze: createMoveFreeze({ dataDir: dataDir() }), busy: () => null, restart() {}, platform: "darwin" });
+    await ask(garage, "POST", undefined, { cloud: "https://garage.example.test", place: "Garage server" });
+    expect(await ask(garage, "GET", "/api/bots", {}, "loopback", "phone-1")).toEqual({ status: 410, body: { error: "This computer's bots moved to Garage server. Open Garage server from your phone instead.", code: "home_moved", place: "Garage server" } });
   });
 
   it("is only for OpenMausBot on this computer, never a paired device", async () => {

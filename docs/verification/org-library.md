@@ -23,7 +23,7 @@ checks the following:
 - **Catalog (§7.3.1).** Unknown fields are ignored and a bad entry is
   dropped. A bad envelope, another organization's catalog, a digest that
   does not name the bytes, and a plain-http Admin each keep the last
-  catalog. A `formatVersion: 3` entry shows as "update" and its file is
+  catalog. A `formatVersion: 4` entry shows as "update" and its file is
   never read.
 - **Files (§7.3.2).** A file whose bytes do not match its name is refused on
   read: shown as not downloaded, Add answers `503 blob_unavailable`, and the
@@ -138,8 +138,7 @@ This ran on macOS (arm64) against disposable fixtures only. These passed:
 - `server/package-import.test.ts`, `server/package-export.test.ts`,
   `shared/package-format.test.ts`, `server/bot-package.test.ts`,
   `server/skills.test.ts`, `server/routines.test.ts`, `server/store.test.ts`,
-  `server/team-share.e2e.test.ts`, `src/components/ShareTeamDialog.test.ts`
-  and `src/lib/team-import.test.ts`.
+  `server/share.e2e.test.ts` and `src/components/ImportDialog.test.ts`.
 
 Each of these was mutation-checked: the behaviour was broken, the named test
 was seen failing, and the fix was restored.
@@ -195,7 +194,7 @@ fixtures only:
 These passed: `pnpm typecheck`, `pnpm lint`, the four commands above
 (including the headless-renderer run with `OMB_UI_E2E=1`, together with
 `scripts/testing/team-share-ui.e2e.test.ts`), and the neighbouring tests
-listed in the section above plus `src/lib/team-share.test.ts`.
+listed in the section above plus `src/lib/template-share.test.ts`.
 
 Each of these was mutation-checked, with the named test seen failing:
 

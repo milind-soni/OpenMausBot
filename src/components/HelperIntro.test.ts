@@ -46,7 +46,8 @@ vi.mock("@/lib/setup-import", () => ({
   detectSetupWithin: () => { f.detect(); return { found: Promise.resolve(f.found), cancel: () => {} }; },
 }));
 const { HelperIntro } = await import("./HelperIntro");
-const { followupLine, INTRO_TIMING, introLines } = await import("./SimpleHelperIntro");
+const { followupLine, INTRO_TIMING, introLines, whoConnectsAi } = await import("./SimpleHelperIntro");
+const { setTeamPeople } = await import("@/state/team-people");
 const { chipAction, setupAction } = await import("./HelperSetup");
 const { SIMPLE_BOT_BUBBLE } = await import("./chat-bubble");
 
@@ -128,6 +129,9 @@ describe("what MausBot says first", () => {
     expect(followupLine({ ai: "own", apps: ["Gmail", "GitHub", "Slack", "Notion", "Linear"], bots: 0, routines: 0 })).toContain("Gmail, GitHub, Slack, and 2 more");
     expect(followupLine({ ai: "none", ...none })).toBe(t("helperIntro.followup.noAi"));
     expect(followupLine({ ai: "backup", ...none })).toContain("free backup model");
+    expect(whoConnectsAi(null), "off a team").toBeUndefined();
+    expect(followupLine({ ai: "backup", ...none, connects: "" })).toBe(t("helperIntro.followup.backupTeamOwner"));
+    expect(followupLine({ ai: "own", ...none, connects: "Olive" }), "with an AI there is nothing to connect").toContain("nothing's waiting");
   });
 });
 
@@ -145,13 +149,30 @@ describe("in the chat (Simple mode)", () => {
     expect(f.followups, "only a first run asks for a follow-up").toEqual([]);
   });
 
+  it("tells a User the team's owner connects the AI, even under a follow-up written before it knew to", async () => {
+    const dana = { email: "dana@acme.test", name: "Dana", role: "member", you: true as const };
+    const olive = { email: "olive@acme.test", name: "Olive", role: "owner" };
+    f.state = { ...f.state, instances: [] };
+    setTeamPeople({ people: [dana, olive], me: dana, admin: false, needsYou: [] });
+    await show(false, saved({ ai: "none", apps: [], bots: 0, routines: 0 }));
+    expect(lines()[3]).toBe(t("helperIntro.followup.noAiOwner", { name: "Olive" }));
+    expect(lines()[3]).not.toMatch(/sign in/i);
+    setTeamPeople({ people: [dana], me: dana, admin: false, needsYou: [] });
+    await show(false, saved({ ai: "none", apps: [], bots: 0, routines: 0 }));
+    expect(lines()[3]).toBe(t("helperIntro.followup.noAiTeamOwner"));
+    setTeamPeople({ people: [{ ...dana, role: "admin" }, olive], me: dana, admin: true, needsYou: [] });
+    await show(false, saved({ ai: "none", apps: [], bots: 0, routines: 0 }));
+    expect(lines()[3], "an admin can connect one").toBe(t("helperIntro.followup.noAi"));
+    setTeamPeople(null);
+  });
+
   it("shows three chips at most, AI first, and one tapped makes room for the next", async () => {
     f.state = { ...f.state, instances: [claude(false)] };
     await show();
     expect(lines()[3]).toBe(t("helperIntro.followup.noAi"));
     expect(chips()).toEqual(["ai", "apps", "phone"]);
     await act(async () => { host.querySelector<HTMLElement>('[data-helper-step="phone"]')!.click(); });
-    expect(f.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "toggleAppSettings", section: "companion" }));
+    expect(f.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "toggleAppSettings", section: "phone" }));
     expect(chips()).toEqual(["ai", "apps", "cloud"]);
   });
 
@@ -196,7 +217,7 @@ describe("in the chat (Simple mode)", () => {
 
   it("opens the app's own flow for each chip", () => {
     expect(chipAction("apps")).toEqual({ type: "togglePlugins", open: true, surface: "apps" });
-    expect(chipAction("phone")).toMatchObject({ type: "toggleAppSettings", section: "companion", phonePairing: true });
+    expect(chipAction("phone")).toMatchObject({ type: "toggleAppSettings", section: "phone", phonePairing: true });
     expect(chipAction("cloud")).toEqual({ type: "openCloudAdd", source: "app_onboarding" });
   });
 
@@ -285,7 +306,7 @@ describe("in Advanced mode", () => {
     expect(setupAction("ai")).toEqual({ type: "toggleAppSettings", open: true, section: "engines" });
     expect(setupAction("bots")).toEqual({ type: "newBot" });
     expect(setupAction("apps")).toEqual({ type: "togglePlugins", open: true, surface: "apps" });
-    expect(setupAction("phone")).toMatchObject({ type: "toggleAppSettings", section: "companion", phonePairing: true });
+    expect(setupAction("phone")).toMatchObject({ type: "toggleAppSettings", section: "phone", phonePairing: true });
     expect(setupAction("cloud")).toEqual({ type: "openCloudAdd", source: "app_onboarding" });
   });
 });

@@ -37,7 +37,13 @@ describe("the lines", () => {
   it("say what is refused and who to ask, in the team's name", () => {
     expect(personalConnectionRefusal(ACME, "Gmail")).toBe("Personal connections never enter Acme. Ask an admin to connect Gmail for Acme.");
     expect(personalConnectionRefusal(ACME)).toBe("Personal connections never enter Acme. Ask an admin to connect it for Acme.");
-    expect(personalMoveRefusal(ACME)).toBe("Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.");
-    expect(memberLoginRefusal(ACME)).toBe("On Acme only an admin can save a login, and it is then used by every bot in Acme.");
+    expect(personalMoveRefusal(ACME)).toEqual({
+      error: "Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.",
+      errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" },
+    });
+    expect(memberLoginRefusal(ACME)).toEqual({
+      error: "On Acme only an admin can save a login, and it is then used by every bot in Acme.",
+      errorKey: "serverError.team.memberLogin", errorParams: { team: "Acme" },
+    });
   });
 });

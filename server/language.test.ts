@@ -11,3 +11,10 @@ it("picks the pack the app would: exact, alias, parent, else English", () => {
 it("formats in the language set, and in US English when none or a bad one is set", () => {
   expect([intlLocale("pt-br"), intlLocale(undefined), intlLocale("not a locale!")]).toEqual(["pt-BR", "en-US", "en-US"]);
 });
+
+
+it("returns a present-but-falsy value instead of falling back to English", () => {
+  expect(byLanguage({ en: true, fr: false }, "fr")).toBe(false);
+  expect(byLanguage({ en: "E", fr: "" }, "fr")).toBe("");
+  expect(byLanguage({ en: 1, fr: 0 }, "FR")).toBe(0);
+});

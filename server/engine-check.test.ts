@@ -52,7 +52,7 @@ describe("checking a just-connected engine with one tiny real message", () => {
       const hanging = { instanceId: "hanging", displayName: "Grok", driverKind: "grokAgent", generateText };
       const pending = checkEngine(hanging, { timeoutMs: 5_000 });
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(await pending).toEqual({ ok: false, error: "Grok didn't answer within 5 seconds." });
+      expect(await pending).toEqual({ ok: false, error: "Grok didn't answer within 5 seconds.", errorKey: "serverError.engineCheck.timeout", errorParams: { name: "Grok", seconds: "5" } });
       expect(signal?.aborted).toBe(true);
       expect(vi.getTimerCount()).toBe(0);
       // The engine is free for the next check.

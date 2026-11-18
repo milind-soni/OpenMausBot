@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT, GROK_NOTES_FILE, GrokImportError, grokMovePlan, mergeGrokBots, parseGrokExport, type GrokBot } from "./grok-import.ts";
+import { GROK_EXPORT_FORMAT, GROK_EXPORT_PROMPT, GROK_NOTES_FILE, GrokImportError, grokExportDocument, grokMovePlan, mergeGrokBots, parseGrokExport, type GrokBot } from "./grok-import.ts";
 import { parsePackageDocument } from "./package-format.ts";
 
 const TOKEN = "sk-abcdefghijklmnopqrstuvwx";
@@ -146,6 +146,12 @@ describe("what an export may never bring", () => {
     expect(document.package.agents[0]!.approval).toBeUndefined();
     expect(document.package.routines!.every((routine) => routine.enabledAfterInstall === false)).toBe(true);
     expect(() => parsePackageDocument(document, { trust: "file" })).not.toThrow();
+  });
+  it("writes back a document that reads as the same Bots, with nothing the parser does not read", () => {
+    const bots = parseGrokExport(JSON.stringify({ ...EXPORT, stray: "x", bots: [{ ...BOT, extra: { anything: 1 } }, { name: "Maus", memories: ["likes cheese"] }] }));
+    const written = JSON.stringify(grokExportDocument(bots));
+    expect(parseGrokExport(written)).toEqual(bots);
+    expect(written).not.toMatch(/stray|anything|real-secret-value|sk-abcdefghij/);
   });
 });
 

@@ -22,6 +22,8 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
     movedTo?(origin: string): Promise<"deleted" | "ended" | "live" | "unknown" | null>;
     reportMoveStatus?(report: import("./move-status.mjs").MoveStatusReport): Promise<boolean>;
     pairTeam(teamId: string): Promise<{ origin: string; code: string; expiresAt?: number }> } | null;
+  /** The person is asked which bots go before the first move starts. */
+  chooses?: boolean;
   journalFile(): string;
   tempRoot(): string;
   lend?(projects: string[]): Promise<unknown>;
@@ -38,12 +40,15 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   openTeam?(team: { id: string; name: string }): void;
   /** The team moves' journal, team-moves.json beside journalFile by default. */
   teamJournal?: { read(): unknown; write(value: unknown): void };
+  t?(key: string, params?: Record<string, string | number>): string;
   /** The waits of the move's report to the Admin (move-status.mjs), setTimeout's by default. */
   reportTimers?: { set(work: () => void, ms: number): unknown; clear(timer: unknown): void };
   /** The move to a server of the person's own: while it is chosen no move to My Cloud starts, and its line is this computer's page's. */
   other?(): null | { view(): unknown; seen(): unknown; retry(): Promise<unknown>; active(): boolean };
 }): ReturnType<typeof installCloudSend> & {
   keep: { state(): KeepHereState; set(on: boolean): Promise<void> };
+  /** Why the account signed in can't be left now, else null. */
+  holding(): "moving" | null;
   kick(): Promise<void>;
   away(): boolean;
   view(): OneHomeView | null;

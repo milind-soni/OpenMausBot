@@ -41,11 +41,40 @@ describe("MinimaxDriver", () => {
     expect(MinimaxDriver.models).toEqual({
       default: "MiniMax-M3",
       options: [
-        { id: "MiniMax-M3", label: "MiniMax M3", contextWindow: 1_000_000, custom: true },
+        {
+          id: "MiniMax-M3.1-Flash",
+          label: "MiniMax M3.1 Flash",
+          contextWindow: 1_000_000,
+          custom: true,
+          variants: [
+            { id: "low", label: "Low" },
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High" },
+            { id: "xhigh", label: "Xhigh" },
+            { id: "max", label: "Max" },
+          ],
+        },
+        {
+          id: "MiniMax-M3",
+          label: "MiniMax M3",
+          contextWindow: 1_000_000,
+          custom: true,
+          variants: [{ id: "off", label: "No thinking" }],
+        },
         { id: "MiniMax-M2.7", label: "MiniMax M2.7", contextWindow: 204_800, custom: true },
         { id: "MiniMax-M2.7-highspeed", label: "MiniMax M2.7 Highspeed", contextWindow: 204_800, custom: true },
       ],
     });
+  });
+
+  it("offers MiniMax's own thinking controls, and no other model any", () => {
+    expect(MinimaxDriver.models.options.map((option) => [option.id, option.variants?.map((choice) => choice.id)]))
+      .toEqual([
+        ["MiniMax-M3.1-Flash", ["low", "medium", "high", "xhigh", "max"]],
+        ["MiniMax-M3", ["off"]],
+        ["MiniMax-M2.7", undefined],
+        ["MiniMax-M2.7-highspeed", undefined],
+      ]);
   });
 
   it("flags every catalog model custom so the picker's custom-access pane lists them", () => {
@@ -72,6 +101,48 @@ describe("MinimaxDriver", () => {
       url: "https://api.minimaxi.com/v1",
       defaultModel: "MiniMax-M2.7-highspeed",
     });
+  });
+
+  const endpointCases: Array<{
+    name: string; configuredUrl?: string; environmentUrl?: string;
+    local: Record<string, string>; expectedUrl: string;
+  }> = [
+    { name: "explicit international URL over local CN region", configuredUrl: "https://api.minimax.io/v1", local: { region: "cn" }, expectedUrl: "https://api.minimax.io/v1" },
+    { name: "normalized explicit international URL over local proxy", configuredUrl: " https://api.minimax.io/v1/ ", local: { base_url: "https://saved-proxy.example.test/v1" }, expectedUrl: "https://api.minimax.io/v1" },
+    { name: "explicit custom URL over local CN region", configuredUrl: "https://chosen.example.test/", local: { region: "cn" }, expectedUrl: "https://chosen.example.test/v1" },
+    { name: "international environment URL over local CN region", environmentUrl: "https://api.minimax.io/v1", local: { region: "cn" }, expectedUrl: "https://api.minimax.io/v1" },
+    { name: "custom environment URL over local proxy", environmentUrl: "https://environment.example.test/v1", local: { base_url: "https://saved-proxy.example.test/v1" }, expectedUrl: "https://environment.example.test/v1" },
+    { name: "instance URL over environment and local settings", configuredUrl: "https://api.minimax.io/v1", environmentUrl: "https://environment.example.test/v1", local: { region: "cn" }, expectedUrl: "https://api.minimax.io/v1" },
+    { name: "local CN region when no explicit URL is set", local: { region: "cn" }, expectedUrl: "https://api.minimaxi.com/v1" },
+    { name: "local proxy when no explicit URL is set", local: { base_url: "https://saved-proxy.example.test/v1" }, expectedUrl: "https://saved-proxy.example.test/v1" },
+    { name: "international fallback when no URL is configured", local: {}, expectedUrl: "https://api.minimax.io/v1" },
+  ];
+
+  it.each(endpointCases)("routes a turn using $name", async ({ configuredUrl, environmentUrl, local, expectedUrl }) => {
+    const dir = join(home, ".mmx");
+    mkdirSync(dir);
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ api_key: "fixture-local-key", ...local }));
+    if (environmentUrl) process.env.MINIMAX_BASE_URL = environmentUrl;
+    const requests: Array<{ url: string; key: string | null }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({ url: String(input), key: new Headers(init?.headers).get("authorization") });
+      return new Response('data: {"choices":[{"delta":{"content":"fixture reply"}}]}\n' +
+        'data: [DONE]\n', { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await MinimaxDriver.create({
+      instanceId: "minimax-routing", displayName: "MiniMax fixture", enabled: true,
+      config: decodeMinimaxConfig({ ...(configuredUrl === undefined ? {} : { url: configuredUrl }), tools: false }),
+      environment: { MINIMAX_API_KEY: "fixture-instance-key" },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "routing-fixture", text: "fixture" });
+      expect(await recorder.until(event => event.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(requests).toEqual([{ url: `${expectedUrl}/chat/completions`, key: "Bearer fixture-instance-key" }]);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
   });
 
   it("skips blank environment credentials and does not probe on snapshot", async () => {
@@ -131,6 +202,98 @@ describe("MinimaxDriver", () => {
     expect(completed).toMatchObject({ ok: true, usage: { input: 12, output: 3 } });
     recorder.stop();
     await instance.dispose();
+  });
+
+  it("uses the MiniMax CLI's M3.1 Flash default for a turn", async () => {
+    mkdirSync(join(home, ".mmx"));
+    writeFileSync(join(home, ".mmx", "config.json"), JSON.stringify({ default_text_model: "MiniMax-M3.1-Flash" }));
+    let body: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response('data: {"choices":[{"delta":{"content":"hello"}}]}\n' + 'data: [DONE]\n',
+        { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await MinimaxDriver.create({
+      instanceId: "minimax-flash", displayName: "MiniMax", enabled: true,
+      config: MinimaxDriver.defaultConfig(), environment: { MINIMAX_API_KEY: "fixture-key" },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "flash", text: "hello" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(body?.model).toBe("MiniMax-M3.1-Flash");
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
+  /** Runs one turn and returns every chat body the driver sent, in order. */
+  async function chatBodies(
+    model: string,
+    variant?: string,
+    answer?: (call: number) => Response,
+  ): Promise<Array<Record<string, unknown>>> {
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return answer?.(bodies.length)
+        ?? new Response('data: {"choices":[{"delta":{"content":"hello"}}]}\n' + "data: [DONE]\n", { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await MinimaxDriver.create({
+      instanceId: "minimax-thinking",
+      displayName: "MiniMax",
+      enabled: true,
+      config: MinimaxDriver.defaultConfig(),
+      environment: { MINIMAX_API_KEY: "secret" },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "thinking", text: "hi", model, ...(variant ? { variant } : {}) });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      return bodies;
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  }
+
+  it("sends the picked thinking depth as MiniMax's own reasoning_effort", async () => {
+    const bodies = await chatBodies("MiniMax-M3.1-Flash", "high");
+    expect(bodies[0]).toMatchObject({ model: "MiniMax-M3.1-Flash", reasoning_effort: "high" });
+    expect(bodies[0]).not.toHaveProperty("thinking");
+  });
+
+  it("turns thinking off on MiniMax-M3 with MiniMax's own switch", async () => {
+    const bodies = await chatBodies("MiniMax-M3", "off");
+    expect(bodies[0]).toMatchObject({ model: "MiniMax-M3", thinking: { type: "disabled" } });
+    expect(bodies[0]).not.toHaveProperty("reasoning_effort");
+  });
+
+  it("sends no thinking control when none was picked", async () => {
+    const bodies = await chatBodies("MiniMax-M3.1-Flash");
+    expect(bodies[0]).not.toHaveProperty("reasoning_effort");
+    expect(bodies[0]).not.toHaveProperty("thinking");
+  });
+
+  it("sends nothing MiniMax would answer 400 to", async () => {
+    const flash = await chatBodies("MiniMax-M3.1-Flash", "off");
+    expect(flash[0]).not.toHaveProperty("reasoning_effort");
+    expect(flash[0]).not.toHaveProperty("thinking");
+    const older = await chatBodies("MiniMax-M2.7", "high");
+    expect(older[0]).not.toHaveProperty("reasoning_effort");
+    expect(older[0]).not.toHaveProperty("thinking");
+  });
+
+  it("never sends reasoning_effort none, which MiniMax refuses", async () => {
+    // The provider answers as OpenAI does when tools and reasoning meet: the runtime drops to
+    // reasoning-off, and MiniMax has no `reasoning_effort: "none"` to answer that with.
+    const bodies = await chatBodies("MiniMax-M3", undefined, (call) => call === 1
+      ? new Response(JSON.stringify({ error: { message: "Function tools with reasoning_effort are not supported in /v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'." } }), { status: 400, headers: { "content-type": "application/json" } })
+      : new Response('data: {"choices":[{"delta":{"content":"hello"}}]}\n' + "data: [DONE]\n", { headers: { "content-type": "text/event-stream" } }));
+    expect(bodies.length).toBeGreaterThan(1);
+    for (const body of bodies) expect(body).not.toHaveProperty("reasoning_effort");
+    expect(bodies.at(-1)).toMatchObject({ thinking: { type: "disabled" } });
   });
 
   it("smoke: offers ask_user and returns the person's reply verbatim", async () => {

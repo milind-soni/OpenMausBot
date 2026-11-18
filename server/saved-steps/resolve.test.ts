@@ -57,8 +57,10 @@ describe("resolveStep", () => {
     expect(calls).toStrictEqual(LOOKUPS);
   });
 
-  it("addresses by index when the snapshot has no tokens", async () => {
-    expect(await resolveStep(CLICK_DOCUMENT, caller(untokened), signal)).toStrictEqual({ ok: true, args: { pid: 4242, window_id: 7, element_index: 2 } });
+  it("refuses an element the snapshot gives no token, since the driver no longer acts on an index", async () => {
+    expect(await resolveStep(CLICK_DOCUMENT, caller(untokened), signal)).toStrictEqual({
+      ok: false, error: '"Document" (AXTextArea) in Untitled has no element token to act on',
+    });
   });
 
   it("keeps the saved arguments beside the fresh target", async () => {

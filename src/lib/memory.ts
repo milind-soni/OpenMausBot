@@ -1,6 +1,9 @@
 import { ApiError, api } from "@/state/store";
+import { intlLocale, t } from "@/lib/i18n";
+import { serverErrorText } from "@/lib/server-error";
 
 export const MEMORY_INDEX = "MEMORY.md";
+export const SOUL_PATH = "SOUL.md";
 
 export interface MemoryCapacity {
   lines: number;
@@ -82,7 +85,7 @@ export async function saveMemoryDoc(botId: string, path: string, text: string, e
   if (response.status === 409 && typeof body.current === "string" && typeof body.currentHash === "string") {
     return { ok: false, conflict: true, current: body.current, currentHash: body.currentHash };
   }
-  if (!response.ok) throw new ApiError(typeof body.error === "string" ? body.error : `${response.status} ${response.statusText}`, response.status);
+  if (!response.ok) throw new ApiError(serverErrorText(body, typeof body.error === "string" ? body.error : `${response.status} ${response.statusText}`), response.status);
   const saved = body as unknown as MemoryDoc & { overview: MemoryOverview };
   return { ok: true, doc: { path: saved.path, text: saved.text, hash: saved.hash, exists: saved.exists }, overview: saved.overview };
 }
@@ -98,6 +101,14 @@ export async function fetchMemoryJournal(botId: string, limit = 50): Promise<Mem
 
 export function revertMemoryChange(botId: string, entryId: string): Promise<MemoryDoc & { overview: MemoryOverview }> {
   return api(`/api/bots/${botId}/memory/journal/${encodeURIComponent(entryId)}/revert`, { method: "POST" });
+}
+
+export function fetchSoulChanges(botId: string): Promise<{ rows: MemoryJournalRow[]; revision: string }> {
+  return api(`/api/bots/${botId}/history?view=changes&limit=20`);
+}
+
+export function undoSoulChange(botId: string, id: string, expectedRevision: string): Promise<unknown> {
+  return api(`/api/bots/${botId}/history/rollback`, { method: "POST", body: JSON.stringify({ id, expectedRevision }) });
 }
 
 export interface TidyReport {
@@ -165,20 +176,20 @@ export function openMemoryLocation(botId: string, target: MemoryOpenTarget): Pro
 
 
 export function formatBytes(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 102.4) / 10} KB`;
+  return bytes < 1024 ? `${bytes} B` : `${new Intl.NumberFormat(intlLocale(), { useGrouping: false }).format(Math.round(bytes / 102.4) / 10)} KB`;
 }
 
 export function relativeTime(at: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - at) / 1000));
-  if (seconds < 45) return "just now";
+  if (seconds < 45) return t("remote.time.justNow");
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 60) return t("remote.time.minutes", { count: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} hr ago`;
+  if (hours < 24) return t("time.hoursAgo", { count: hours });
   const days = Math.round(hours / 24);
-  if (days === 1) return "yesterday";
-  if (days < 7) return `${days} days ago`;
-  return new Date(at).toLocaleDateString([], { month: "short", day: "numeric" });
+  if (days === 1) return t("time.yesterday");
+  if (days < 7) return t("time.daysAgo", { count: days });
+  return new Date(at).toLocaleDateString(intlLocale(), { month: "short", day: "numeric" });
 }
 
 export type CapacityLevel = "ok" | "near" | "over";
@@ -200,8 +211,8 @@ export function capacityStatus(index: MemoryCapacity): CapacityStatus {
   if (index.truncated) {
     const missingLines = index.lines - index.loadedLines;
     warning = missingLines > 0
-      ? `${index.lines} lines saved, ${index.loadedLines} load into every conversation. ${missingLines} ${missingLines === 1 ? "line is" : "lines are"} not being loaded. Trim this file or move notes into a topic file.`
-      : `${formatBytes(index.bytes)} saved, ${formatBytes(index.loadedBytes)} load into every conversation. The rest is not being loaded. Trim this file or move notes into a topic file.`;
+      ? t(missingLines === 1 ? "memory.capacity.overLinesOne" : "memory.capacity.overLinesMany", { lines: index.lines, loaded: index.loadedLines, missing: missingLines })
+      : t("memory.capacity.overBytes", { bytes: formatBytes(index.bytes), loaded: formatBytes(index.loadedBytes) });
   }
   return { level, lineShare, byteShare, sentence, warning };
 }

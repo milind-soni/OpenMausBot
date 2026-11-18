@@ -281,6 +281,56 @@ if (listening) {
   } catch (error) { backupReport = { error: String(error) }; }
 }
 
+// SECURITY.md's loopback promise has two halves. The backup export above proves the
+// packaged desktop's own loopback may run a public mutation. The other half: the same
+// request is refused when the server runs where "local" includes every bot's shell. Start
+// the same bundle again at service trust and check both sides of that gate.
+let serviceTrustReport = null;
+if (listening) {
+  const serviceHome = mkdtempSync(join(tmpdir(), "omb-smoke-service-"));
+  const [servicePort, serviceWebhookPort] = await freePorts(2);
+  const service = spawn(process.execPath, [join(staging, "server", "index.js")], {
+    cwd: staging,
+    env: { ...fixtureEnv, HOME: serviceHome, USERPROFILE: serviceHome, OMB_DATA_DIR: join(serviceHome, ".openmausbot"),
+      OMB_PORT: String(servicePort), OMB_WEBHOOK_PORT: String(serviceWebhookPort), OMB_LOOPBACK_TRUST: "service" },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let serviceOutput = "";
+  service.stdout.on("data", (chunk) => (serviceOutput += chunk));
+  service.stderr.on("data", (chunk) => (serviceOutput += chunk));
+  try {
+    const until = Date.now() + 45_000;
+    let serving = false;
+    while (Date.now() < until && service.exitCode === null) {
+      try {
+        // A stalled connection must not outlive the readiness deadline: every probe is bounded.
+        const remaining = Math.max(until - Date.now(), 1_000);
+        if ((await fetch(`http://127.0.0.1:${servicePort}/api/health`, { signal: AbortSignal.timeout(Math.min(remaining, 10_000)) })).ok) { serving = true; break; }
+      } catch { /* not up yet */ }
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    const healthStatus = serving ? (await fetch(`http://127.0.0.1:${servicePort}/api/health`, { signal: AbortSignal.timeout(10_000) })).status : null;
+    const mutation = await fetch(`http://127.0.0.1:${servicePort}/api/workspace-backup/export`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "packaged-fixture-password-only" }), signal: AbortSignal.timeout(15_000),
+    });
+    serviceTrustReport = { serving, healthStatus, exportStatus: mutation.status };
+  } catch (error) {
+    serviceTrustReport = { error: String(error) };
+  } finally {
+    // Windows holds data files open past the kill for a moment: wait for the exit before removing the home, and
+    // say so when the home could not go.
+    const exited = new Promise((resolve) => service.once("exit", () => resolve(null)));
+    if (service.exitCode === null) service.kill("SIGKILL");
+    await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 10_000).unref())]);
+    try {
+      rmSync(serviceHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (error) {
+      serviceTrustReport ??= {};
+      serviceTrustReport.cleanup = `could not remove the service-trust home: ${error}`;
+    }
+  }
+}
 // The container image runs the server through server-launcher.js: it must start
 // the server as its own child, through the bootstrap that keeps Node's compile
 // cache on the data volume, and SIGTERM must end both with a clean exit.
@@ -463,11 +513,17 @@ if (!backupReport?.ok) {
   console.error("the packaged backup worker failed its encrypted export smoke:", backupReport);
   process.exit(1);
 }
+if (!serviceTrustReport || serviceTrustReport.error || serviceTrustReport.serving !== true ||
+  serviceTrustReport.healthStatus !== 200 || serviceTrustReport.exportStatus !== 403) {
+  console.error("the packaged server's loopback trust gate did not hold at service trust:", serviceTrustReport);
+  process.exit(1);
+}
 console.log(`packaged server started with no node_modules in reach (port ${port}) ✓`);
 console.log(`all ${count} spawned proxy paths resolve inside the packaged server dir ✓`);
 console.log("packaged MCP stdio server reached the API and flushed its final frames ✓");
 console.log("packaged openmausbot doctor and bots answered from the bundle ✓");
 console.log("packaged backup worker exported an encrypted archive ✓");
+console.log("packaged loopback trust gate: health serves, a public mutation is refused at service trust ✓");
 if (launcherReport) console.log("packaged container launcher ran the server as its child and stopped it cleanly ✓");
 if (desktopEntryReport) console.log(`packaged desktop entry started the server twice on its compile cache (${desktopEntryReport.starts[0].cached.length} entries) ✓`);
 if (layerShipped) console.log("packaged server found its enterprise layer inside the server dir ✓");

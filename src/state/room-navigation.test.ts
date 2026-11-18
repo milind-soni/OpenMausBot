@@ -55,7 +55,7 @@ const switchTo = async (threadId: string) => {
   flushSync(() => dispatch({ type: "switchGroupTask", groupId: "room", threadId }));
   await settle();
 };
-const switchPath = (threadId: string) => `/api/groups/room/tasks/${threadId}?messages=200`;
+const switchPath = (threadId: string) => `/api/groups/room/tasks/${threadId}?messages=80`;
 
 beforeAll(async () => {
   vi.stubGlobal("EventSource", FixtureEventSource);

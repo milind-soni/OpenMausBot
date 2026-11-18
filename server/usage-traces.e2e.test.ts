@@ -26,7 +26,10 @@ it("traces a person's message to the Chief through the teammate it delegated to 
     const today = new Date().toISOString().slice(0, 10);
     const settled = async () => {
       const list: TraceList = await api(`/api/usage/traces?from=${today}&to=${today}`, undefined, "GET");
-      const root = list.roots.length === 1 && !list.roots[0]!.running ? list.roots[0]! : null;
+      // A teammate's reply can cost its requester a one-word check (runtime/status-reply.ts), booked like any side job as a root
+      // of its own: the person's message is the one root they started.
+      const own = list.roots.filter((one) => one.source === "owner");
+      const root = own.length === 1 && !own[0]!.running ? own[0]! : null;
       if (!root) return null;
       const detail: TraceDetail = await api(`/api/usage/traces/${encodeURIComponent(root.id)}?at=${root.startedAt}`, undefined, "GET");
       const turns = turnsOf(detail.turns[0]!);
@@ -40,7 +43,9 @@ it("traces a person's message to the Chief through the teammate it delegated to 
       title: "Launch the new pricing page by Friday", source: "owner", timed: true, running: false, errors: 0,
       bots: [{ id: chief.id, name: "Clive" }, { id: researcher.id, name: "Researcher" }],
     });
-    expect(list.totals).toMatchObject({ tools: root.tools, steps: root.steps, input: root.input, output: root.output });
+    for (const other of list.roots.filter((one) => one.id !== root.id)) expect(other).toMatchObject({ source: "bot", tools: 0, bots: [{ id: chief.id, name: "Clive" }] });
+    const sum = (key: "tools" | "steps" | "input" | "output") => list.roots.reduce((total, one) => total + one[key], 0);
+    expect(list.totals).toMatchObject({ tools: sum("tools"), steps: sum("steps"), input: sum("input"), output: sum("output") });
 
     const [first] = detail.turns;
     expect(first).toMatchObject({ kind: "turn", botId: chief.id, threadId: chief.activeTaskId, timed: true, status: "ok" });

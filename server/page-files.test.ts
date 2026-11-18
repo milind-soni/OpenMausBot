@@ -17,10 +17,10 @@ vi.mock("node:fs/promises", async (original) => {
 
 const PARQUET = Buffer.from("PAR1\u0000\u0001\u0002\u0003 rows and columns PAR1", "latin1");
 
-function setup() {
+function setup(more: Array<{ path: string; data: Buffer }> = []) {
   const docs = new AppDocs(join(mkdtempSync(join(tmpdir(), "omb-page-files-")), "app-docs"));
   const stored = docs.put({ source: "html", html: "<h1>Sales</h1><script src=\"app.js\"></script>", data: { folder: "/work/dash" },
-    files: [{ path: "app.js", data: Buffer.from("draw()") }, { path: "data/sales.parquet", data: PARQUET }, { path: "notes.html", data: Buffer.from("<p>n</p>") }] });
+    files: [{ path: "app.js", data: Buffer.from("draw()") }, { path: "data/sales.parquet", data: PARQUET }, { path: "notes.html", data: Buffer.from("<p>n</p>") }, ...more] });
   if (!stored.ok) throw new Error("not stored");
   let clock = 1_000;
   const files = createPageFiles({ docs, now: () => clock });
@@ -43,6 +43,20 @@ describe("a folder page's files route", () => {
     expect(folder).toMatch(new RegExp(`^${PAGE_FILES_PREFIX}[A-Za-z0-9_-]{43}/$`));
     expect(files.folder({ threadId: "t1", messageId: "m1", doc: stored.doc })).toBe(folder);
     expect(files.folder({ threadId: "t1", messageId: "m2", doc: stored.doc })).not.toBe(folder);
+  });
+
+  it("gives each viewer a token of their own, which stops answering the moment they may no longer see the page", () => {
+    const { files, folder, get, stored } = setup();
+    let seesIt = true;
+    const ann = files.folder({ threadId: "t1", messageId: "m1", doc: stored.doc }, { key: "session:ann", allowed: () => seesIt });
+    const bob = files.folder({ threadId: "t1", messageId: "m1", doc: stored.doc }, { key: "session:bob", allowed: () => true });
+    expect(new Set([folder, ann, bob]).size).toBe(3);
+    expect(files.folder({ threadId: "t1", messageId: "m1", doc: stored.doc }, { key: "session:ann", allowed: () => seesIt })).toBe(ann);
+    expect(get(`${ann}app.js`).status).toBe(200);
+    seesIt = false;
+    expect(get(`${ann}app.js`)).toMatchObject({ status: 404, body: Buffer.from("Not found.") });
+    expect(get(ann).status).toBe(404);
+    expect(get(`${bob}app.js`).status).toBe(200);
   });
 
   it("serves the stored files read-only, sandboxed if opened directly, and readable from the frame's opaque origin", () => {
@@ -72,6 +86,13 @@ describe("a folder page's files route", () => {
     expect(get(`${folder}data/sales.parquet`, { headers: { range: "bytes=0-3" } }).body.toString("latin1")).toBe("PAR1");
     expect(get(`${folder}data/sales.parquet`, { headers: { range: "bytes=999-" } }).status).toBe(416);
     expect(get(`${folder}data/sales.parquet`, { headers: { range: "lines=1-2" } }).status).toBe(416);
+  });
+
+  it("serves map and table data with its own type", () => {
+    const types = { "land.geojson": "application/geo+json", "world.topojson": "application/json; charset=utf-8",
+      "rows.tsv": "text/tab-separated-values; charset=utf-8", "events.ndjson": "application/x-ndjson; charset=utf-8" };
+    const { folder, get } = setup(Object.keys(types).map((path) => ({ path, data: Buffer.from("{}") })));
+    expect(Object.fromEntries(Object.keys(types).map((path) => [path, get(`${folder}${path}`).headers["content-type"]]))).toEqual(types);
   });
 
   it("refuses a path that steps out of the folder or isn't one of its files, and a token it didn't give or that went stale", () => {

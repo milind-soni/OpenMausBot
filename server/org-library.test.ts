@@ -174,7 +174,7 @@ describe("the catalog", () => {
     const app = await installation();
     const library = app.open();
     const team = release("full-team.v2.json");
-    const newer = entry(TEAM_ID, team, { release: { ...entry(TEAM_ID, team).release, formatVersion: 3 } });
+    const newer = entry(TEAM_ID, team, { release: { ...entry(TEAM_ID, team).release, formatVersion: 4 } });
     library.applyRelay(relay(catalog([newer])));
     await library.settled();
     const readBlob = vi.spyOn(library, "readBlob");
@@ -224,6 +224,33 @@ describe("release files", () => {
     expect(library.add(TEAM_ID, app.importDeps)).toMatchObject({ ok: false, status: 422, code: "invalid_package" });
     expect(app.store.bots).toHaveLength(0);
     expect(app.posted.at(-1).packages[0]).toMatchObject({ state: "failed", reason: "invalid_package" });
+  });
+});
+
+describe("adding from the shelf past five bots", () => {
+  it("adds a team to a Cloud that has five already, and refuses one past the workspace's ceiling as no broken package", async () => {
+    const app = await installation();
+    for (let i = 0; i < 5; i++) app.store.createBot({ name: `Bot ${i}` });
+    let maxBots = 7;
+    const deps = () => ({ ...app.importDeps, maxBots });
+    const library = app.open();
+    const team = release("full-team.v2.json");
+    app.writeBlob(team.bytes);
+    library.applyRelay(relay(catalog([entry(TEAM_ID, team)])));
+    await library.settled();
+    const before = app.store.bots.length;
+    app.posted.length = 0;
+
+    expect(library.add(TEAM_ID, deps())).toMatchObject({ ok: false, status: 409, code: "too_many_bots" });
+    await library.settled();
+    expect(app.store.bots).toHaveLength(before);
+    expect(app.posted.flatMap((report: { packages: Array<{ state: string }> }) => report.packages).filter((row) => row.state === "failed")).toEqual([]);
+    expect(app.readState().adding ?? {}).toEqual({});
+
+    maxBots = 100;
+    const added = library.add(TEAM_ID, deps());
+    expect(added).toMatchObject({ ok: true, status: 201 });
+    expect(app.store.bots.length).toBe(before + 3);
   });
 });
 

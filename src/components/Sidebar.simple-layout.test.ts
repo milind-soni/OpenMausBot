@@ -37,6 +37,7 @@ vi.mock("./DesktopCapabilities", async () => {
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) };
@@ -46,6 +47,7 @@ import { initialState } from "@/state/store";
 import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, PINNED_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
 import { SIDEBAR_COLLAPSED_SECTIONS_KEY, SIDEBAR_DENSITY_KEY, SIDEBAR_SECTION_ORDER_KEY, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_SECTION_ORDER_KEY, SIMPLE_SIDEBAR_WIDTH_KEY, setSidebarDensity } from "@/lib/sidebar-preferences";
 import { Sidebar, TeamMenuItems } from "./Sidebar";
+const drawSidebar = (Sidebar as unknown as { type: (props: import("react").ComponentProps<typeof Sidebar>) => import("react").ReactNode }).type;
 import { PinnedBotRoster } from "./PinnedCircleThreads";
 import { SidebarFooter } from "./SidebarFooter";
 import { SidebarResizeHandle } from "./SidebarResizeHandle";
@@ -74,7 +76,7 @@ function nodes(value: ReactNode): ReactElement<Props>[] {
 function render(collapseToIcons = false) {
   fixture.index = 0;
   fixture.effects = [];
-  const root = Sidebar({ open: false, onClose: () => {}, collapseToIcons }) as ReactElement<Props>;
+  const root = drawSidebar({ open: false, onClose: () => {}, collapseToIcons }) as ReactElement<Props>;
   return { root, tree: [root, ...nodes(root.props.children)] };
 }
 const sectionOrder = (tree: ReactElement<Props>[]) => tree.map((node) => node.props["data-sidebar-section-id"]).filter(Boolean);
@@ -107,12 +109,12 @@ afterEach(() => {
 });
 
 describe("Simple-mode sidebar layout", () => {
-  it("lists the bots with no heading, then gives group chats and a person's own departments a quiet heading with a count", () => {
+  it("lists the bots with no heading, then gives group chats and a person's own departments a quiet heading with no count", () => {
     const { tree } = render();
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
     expect(listedBots(tree)).toEqual(["atlas", "bea", "dodo"]);
     const lines = headers(tree);
-    expect(lines.map((header) => [header.props.name, header.props.line, header.props.count])).toEqual([["Group chats", true, 1], ["Work", true, 1]]);
+    expect(lines.map((header) => [header.props.name, header.props.line, "count" in header.props])).toEqual([["Group chats", true, false], ["Work", true, false]]);
     expect(lines[0]!.props.onMenu).toBeUndefined();
     expect(lines[1]!.props.onDelete).toBeUndefined();
     expect(lines[1]!.props.onMenu).toBeTypeOf("function");
@@ -318,7 +320,8 @@ describe("Simple-mode sidebar layout", () => {
     expect(menu.props.className).toEqual(expect.stringContaining("left-full top-0"));
     expect(menu.props.className).toEqual(expect.stringContaining("rounded-[var(--radius-menu)]"));
     const item = (label: string) => nodes(top().props.children).find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
-    expect(item("Create department"), "Simple makes a department from its bots, by dragging one onto another or from a bot's menu").toBeUndefined();
+    expect(item("Add department"), "Add department is offered in both modes").toBeDefined();
+    expect(item("Import…")).toBeDefined();
     expect(item("New chat"), "a new conversation starts from the bot panel").toBeUndefined();
     expect(item("New bot")).toBeDefined();
     expect(item("New group chat")).toBeDefined();
@@ -328,7 +331,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(render().tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
   });
 
-  it("New Bot makes a bot at once in both modes, Chief of Staff or not; Advanced keeps Create department and Templates", () => {
+  it("New Bot makes a bot at once in both modes, Chief of Staff or not; both keep Add department and Templates", () => {
     fixture.state = { ...fixture.state, bots: [bot("atlas", { chiefOfStaff: true }), bot("bea")] };
     const openMenu = () => {
       const plus = () => render().tree.find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
@@ -342,7 +345,7 @@ describe("Simple-mode sidebar layout", () => {
     fixture.values = [];
     fixture.advanced = true;
     const item = openMenu();
-    expect(item("Create department")).toBeDefined();
+    expect(item("Add department")).toBeDefined();
     expect(item("Templates")).toBeDefined();
     (item("New Bot")!.props.onClick as () => void)();
     expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "newBot" }]);

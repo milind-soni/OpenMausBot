@@ -28,19 +28,25 @@ export function resumableCards(store: Pick<Store, "activePath">, threadId: strin
     }
     const connector = message.connector;
     // An MCP Sign in card set aside before the turn parked is still answered ("didn't sign in"); an app's card is not.
-    if (connector && !connector.resumed && !connector.superseded && (!connector.dismissed || connector.source === "mcp")) {
+    if (connector && !connector.resumed && !connector.superseded && !connector.stopped && (!connector.dismissed || connector.source === "mcp")) {
       open.push({ id: message.id, waits: `connect ${connector.label}` });
       continue;
     }
     const secret = message.secret;
-    if (secret && !secret.resumed && !secret.superseded) {
+    if (secret && !secret.resumed && !secret.superseded && !secret.stopped) {
       open.push({ id: message.id, waits: `provide ${secret.label}` });
       continue;
     }
     const signIn = message.signIn;
-    if (signIn && !signIn.resumed && !signIn.superseded && !signIn.answeredInChat) {
+    if (signIn && !signIn.resumed && !signIn.superseded && !signIn.answeredInChat && !signIn.stopped) {
       open.push({ id: message.id, waits: `sign in to ${signIn.site}` });
     }
   }
   return open;
+}
+
+/** Whether any of these parked-on cards, on any branch, can still be answered or still has an answer for the turn to hear. */
+export function anyCardLive(store: Pick<Store, "messagesFor">, threadId: string, ids: readonly string[]): boolean {
+  const open = new Set(resumableCards({ activePath: (id) => store.messagesFor(id) as ReturnType<Store["activePath"]> }, threadId, 0).map((card) => card.id));
+  return ids.some((id) => open.has(id));
 }

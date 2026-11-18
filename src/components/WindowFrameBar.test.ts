@@ -15,11 +15,13 @@ const fixture = vi.hoisted(() => ({
   config: {} as { team?: { name: string } },
   look: null as { color: string | null } | null,
   frameDrawn: vi.fn(),
+  notifications: [] as Array<{ read: boolean }>,
+  notificationsOpen: false,
 }));
 vi.mock("@/lib/chrome-rail", () => ({ useChromeRail: () => fixture.rail, setChromeRailHidden: () => {}, sayFrameDrawn: fixture.frameDrawn }));
 vi.mock("@/lib/updater", () => ({ useUpdaterState: () => fixture.update }));
 vi.mock("@/lib/place-look", () => ({ usePlaceLook: () => fixture.look }));
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: fixture.config }, dispatch: fixture.dispatch }) }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: fixture.config, notifications: fixture.notifications, notificationsOpen: fixture.notificationsOpen }, dispatch: fixture.dispatch }) }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { windowChrome: fixture.windowChrome, windowFrame: fixture.windowFrame }, ready: true }),
@@ -27,6 +29,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 
 import { setLocale } from "@/lib/i18n";
 import { tilesClearCorner } from "./SidebarTiles";
+import { NotificationRail } from "./NotificationsPanel";
 import { UpdateIndicator } from "./UpdateIndicator";
 import { WindowFrameBar } from "./WindowFrameBar";
 
@@ -45,6 +48,8 @@ beforeEach(() => {
   fixture.look = null;
   fixture.dispatch.mockClear();
   fixture.frameDrawn.mockClear();
+  fixture.notifications = [];
+  fixture.notificationsOpen = false;
   place = { local: false, name: "My Cloud", origin: "https://cloud.example", color: "blue" };
   Object.assign(window, { ogb: { workspaces: { state: async () => place, onChanged: () => () => {}, menu: async () => {} } } });
 });
@@ -66,7 +71,7 @@ describe("the window frame's top bar", () => {
     expect(bar()!.hasAttribute("data-window-drag"), "the drag region every header marks (window-drag-regions.test.ts)").toBe(true);
     expect(host.querySelector("[data-frame-bar-start]")!.className).toContain("pl-20");
     const buttons = [...bar()!.querySelectorAll("button")].map((button) => button.getAttribute("aria-label"));
-    expect(buttons, "the rail's button, then the app's settings; no update while there is none").toEqual(["Hide your computers", "App settings"]);
+    expect(buttons, "the rail's button, then the app's settings; no update while there is none").toEqual(["Hide your computers", "Settings"]);
     expect(bar()!.querySelector("[data-rail-toggle]")!.className).toContain("size-[22px]");
   });
 
@@ -92,7 +97,8 @@ describe("the window frame's top bar", () => {
   it.each([
     [{ local: true, name: "Mac mini" }, {}, "This computer"],
     [{ local: true, name: "Lab", localPath: "/Users/me/lab" }, {}, "Lab"],
-    [{ local: false, name: "Saved name", home: true }, {}, "My Cloud"],
+    [{ local: false, name: "Saved name", home: true }, {}, "Saved name"],
+    [{ local: false, name: "My Cloud", home: true }, {}, "My Cloud"],
     [{ local: false, name: "Acme", role: "Admin" }, { team: { name: "Acme" } }, "Acme"],
     [{ local: false, name: "Office", origin: "https://office.example" }, {}, "Office"],
   ] as const)("names %o as it should", async (shown, config, name) => {
@@ -147,6 +153,29 @@ describe("the window frame's top bar", () => {
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true });
   });
 
+  it("holds the Notifications bell beside Settings, with the unread count, and it opens and closes the tray", async () => {
+    fixture.notifications = [{ read: false }, { read: true }, { read: false }];
+    await mount(createElement(WindowFrameBar, { notifications: true }));
+    const bell = () => bar()!.querySelector<HTMLButtonElement>("[data-notification-bell]")!;
+    expect(bell().getAttribute("aria-label")).toBe("Notifications, 2 unread");
+    expect(bell().textContent, "the unread count on the bell").toBe("2");
+    expect(bell().className.split(" ")).toEqual(expect.arrayContaining(["size-[22px]", "relative"]));
+    expect(bell().getAttribute("aria-pressed")).toBe("false");
+    const order = [...bar()!.querySelectorAll("button")].map((button) => button.hasAttribute("data-notification-bell") ? "bell" : button.getAttribute("aria-label"));
+    expect(order, "right before Settings, at the right end").toEqual(["Hide your computers", "bell", "Settings"]);
+    await act(async () => bell().click());
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleNotifications" });
+    fixture.notificationsOpen = true;
+    await act(async () => root!.render(createElement(WindowFrameBar, { notifications: true })));
+    expect(bell().getAttribute("aria-pressed"), "it stays in the bar while the tray is open, to close it").toBe("true");
+    expect(bell().className.split(" ")).toContain("text-accent");
+  });
+
+  it("has no bell where the tray is off (turned off, a remote client, the calendar)", async () => {
+    await mount(createElement(WindowFrameBar));
+    expect(bar()!.querySelector("[data-notification-bell]")).toBeNull();
+  });
+
   it("shows a download arrow in the accent while an update waits, its words in its name, and the sidebar's round buttons step aside for it", async () => {
     fixture.update = { status: "downloading", percent: 45.4 };
     await mount(createElement("div", null, createElement(WindowFrameBar), createElement("aside", null, createElement(UpdateIndicator))));
@@ -157,7 +186,7 @@ describe("the window frame's top bar", () => {
     expect(arrow().querySelector("svg")!.getAttribute("class"), "it pulses while it downloads").toContain("animate-pulse");
     expect(host.querySelector("aside")!.innerHTML, "one update button in a framed window").toBe("");
     const order = [...bar()!.querySelectorAll("button")].map((button) => button.hasAttribute("data-update-indicator") ? "update" : button.getAttribute("aria-label"));
-    expect(order, "before Settings, at the right end").toEqual(["Hide your computers", "update", "App settings"]);
+    expect(order, "before Settings, at the right end").toEqual(["Hide your computers", "update", "Settings"]);
     fixture.update = { status: "downloaded", version: "0.1.136" };
     await act(async () => root!.render(createElement(WindowFrameBar)));
     expect(arrow().getAttribute("aria-label")).toContain("0.1.136");
@@ -165,6 +194,21 @@ describe("the window frame's top bar", () => {
     fixture.windowChrome = "native";
     await act(async () => root!.render(createElement(UpdateIndicator)));
     expect(host.querySelector("[data-update-indicator='downloaded']"), "unframed, the sidebar keeps its own").not.toBeNull();
+  });
+});
+
+describe("the bell on the window's edge, for windows without the top bar", () => {
+  it("is the same bell at the edge's size, with the unread count, and steps away while the tray is open", async () => {
+    fixture.notifications = [{ read: false }];
+    await mount(createElement(NotificationRail));
+    const bell = host.querySelector<HTMLButtonElement>("aside [data-notification-bell]")!;
+    expect(bell.getAttribute("aria-label")).toBe("Notifications, 1 unread");
+    expect(bell.className.split(" ")).toEqual(expect.arrayContaining(["size-8", "relative"]));
+    await act(async () => bell.click());
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleNotifications" });
+    fixture.notificationsOpen = true;
+    await act(async () => root!.render(createElement(NotificationRail)));
+    expect(host.querySelector("aside")).toBeNull();
   });
 });
 

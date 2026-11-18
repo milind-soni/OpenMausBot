@@ -58,6 +58,7 @@ function fixture() {
       return store;
     },
     createManagedDesktopClient: options => { f.onState = options.onState; f.clientOptions = options; return client; },
+    tailnetShare: { recheck: () => { f.tailnetRechecks = (f.tailnetRechecks ?? 0) + 1; } },
     createOrgLibrary: options => { f.libraryOptions = options; return f.library; },
     managedDesktopRelay: { sendLibrary: async (proc, library) => { f.librarySent.push({ proc, library }); } },
     installCloudPlanIpc: () => {},
@@ -318,6 +319,13 @@ for (const state of [{ status: "signed-out" }, { status: "reauth-required" }, { 
     assert.equal(f.context.companyBackupState.busy, true, "Cleanup remains busy until the active operation settles");
   });
 }
+
+test("every change to the organization's state reaches the tailnet share, which follows its policy", () => {
+  const f = fixture();
+  f.onState({ status: "connected", cloudBackups: true });
+  f.onState({ status: "connected", cloudBackups: true });
+  assert.equal(f.tailnetRechecks, 2);
+});
 
 test("backup IPC requires the local main window's exact main frame", async () => {
   const f = fixture();

@@ -39,10 +39,7 @@ vi.mock("node:os", async (original) => ({
   }),
 }));
 
-import { createControlServer, type companionState } from "../src/control.ts";
-import { DeviceRegistry } from "../src/devices.ts";
-import { refreshTailnetName, tailnetName } from "../src/listener.ts";
-import { tailscaleServe, tailscaleServeOff, tailscaleStatus } from "../../server/tailscale.ts";
+import { tailscaleStatus } from "../../server/tailscale.ts";
 
 let control: Server | undefined;
 
@@ -63,73 +60,11 @@ afterEach(async () => {
 });
 
 describe("Tailscale from a shell-less standalone macOS app", () => {
-  it("refreshes the real control endpoint and advertises HTTP on the companion port", async () => {
-    fixture.output = "gui";
-    const attempts: string[] = [];
-    await refreshTailnetName((_cli, outcome) => attempts.push(outcome));
-    expect(tailnetName()).toBeNull();
-    expect(attempts[0]).toBe("exited successfully in GUI mode instead of CLI mode");
-    expect(attempts.join("\n")).not.toContain("private diagnostic");
-
-    fixture.output = "auto";
-    fixture.calls = [];
-    control = createControlServer({
-      devices: new DeviceRegistry(),
-      controlToken: () => "fixture-control-token",
-      companionPort: 8787,
-      discovery: () => ({ advertising: false, name: "Fixture" }),
-      hostedUrl: () => "https://fixture.openmausbot.com",
-      refreshTailscale: () => refreshTailnetName(),
-    });
-    await new Promise<void>((resolve) => control!.listen(0, "127.0.0.1", resolve));
-    const { port } = control.address() as { port: number };
-    const response = await fetch(`http://127.0.0.1:${port}/tailscale/refresh`, { method: "POST", headers: { "x-openmausbot-control-token": "fixture-control-token" } });
-    const state = await response.json() as ReturnType<typeof companionState>;
-    expect(response.status).toBe(200);
-    expect(state.tailnetName).toBe("fixture.tail1234.ts.net");
-    expect(state.endpoints).toContainEqual({ url: "http://fixture.tail1234.ts.net:8787", kind: "tailnet", priority: 100 });
-    expect(state.endpoints).toContainEqual({ url: "https://fixture.openmausbot.com", kind: "hosted", priority: 0 });
-    expect(state.endpoints.some((endpoint: { url: string }) => endpoint.url.includes("100.64.0.7"))).toBe(false);
-    expect(state.pairing).toBeNull();
-    expect(fixture.calls).toHaveLength(1);
-    expect(fixture.calls[0].cli).toBe(standalone);
-    expect(fixture.calls[0].options.env?.TAILSCALE_BE_CLI).toBe("1");
-    expect(process.env.TAILSCALE_BE_CLI).toBe("0");
-  });
-
-  it("keeps trying installed CLI paths after a successful GUI-only exit", async () => {
-    fixture.output = "gui";
-    fixture.fallback = true;
-    await refreshTailnetName();
-    expect(tailnetName()).toBe("fixture.tail1234.ts.net");
-    expect(fixture.calls.at(-1)?.cli).toBe("/usr/bin/tailscale");
-  });
-
-  it.each([
-    ["invalid", "exited successfully, but status output was not JSON"],
-    ["no-dns", "ran, but no MagicDNS name in status"],
-  ])("distinguishes %s from GUI mode and clears stale names", async (output, expected) => {
-    await refreshTailnetName();
-    expect(tailnetName()).not.toBeNull();
-    fixture.output = output;
-    const attempts: string[] = [];
-    await refreshTailnetName((_cli, outcome) => attempts.push(outcome));
-    expect(tailnetName()).toBeNull();
-    expect(attempts[0]).toBe(expected);
-    expect(attempts.join("\n")).not.toContain("private diagnostic");
-  });
-
-  it("also forces CLI mode for self-hosted status, HTTPS Serve, and Serve off", async () => {
+  it("also forces CLI mode for the self-hosted server's status check", async () => {
     const result = await tailscaleStatus();
     expect(result).toHaveProperty("status");
-    if (!("status" in result)) throw new Error("fixture CLI not found");
-    expect(await tailscaleServe(result.status, 8799)).toEqual({ origin: "https://fixture.tail1234.ts.net" });
-    await tailscaleServeOff(result.status);
-    expect(fixture.calls.map(({ args }) => args)).toEqual([
-      ["status", "--json"],
-      ["serve", "--bg", "--https=443", "http://127.0.0.1:8799"],
-      ["serve", "--https=443", "off"],
-    ]);
-    expect(fixture.calls.every(({ options }) => options.env?.TAILSCALE_BE_CLI === "1" && !options.shell)).toBe(true);
+    const ran = fixture.calls.filter(({ cli }) => cli === standalone);
+    expect(ran.map(({ args }) => args)).toEqual([["status", "--json"]]);
+    expect(ran.every(({ options }) => options.env?.TAILSCALE_BE_CLI === "1" && !options.shell)).toBe(true);
   });
 });

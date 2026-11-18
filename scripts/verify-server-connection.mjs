@@ -13,7 +13,8 @@ const fixtureFlag = "--omb-server-connection-fixture";
 
 if (process.versions.electron && process.argv.includes(fixtureFlag)) {
   const { app, BrowserWindow, ipcMain, Menu, session } = await import("electron");
-  const { parseHostedWorkspaceLink, withEnvironment, withActive, withoutEnvironment, workspaceSummary, workspaceMenuTemplate } = createRequire(import.meta.url)("../electron/environments.cjs");
+  const { parseServerInput } = await import("../electron/server-address.mjs");
+  const { withEnvironment, withActive, withoutEnvironment, workspaceSummary, workspaceMenuTemplate } = createRequire(import.meta.url)("../electron/environments.cjs");
   const [url, output, serverUrl] = process.argv.slice(process.argv.indexOf(fixtureFlag) + 1);
   app.setPath("userData", join(output, "user-data"));
   app.setPath("sessionData", join(output, "user-data"));
@@ -59,8 +60,9 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     throw new Error("Fixture companion pairing rejected");
   });
   ipcMain.handle("environments:add-from-link", (_event, link, name) => {
-    const parsed = parseHostedWorkspaceLink(link);
-    if (!parsed) throw new Error("Enter an HTTPS server address or a full pairing link.");
+    const read = parseServerInput(link);
+    if (!read.ok) throw new Error("Enter the server's address or its pairing link.");
+    const parsed = { origin: read.candidates[0] };
     calls.push({ kind: "server", link, ...(name === undefined ? {} : { name }) });
     return new Promise((resolve, reject) => { pending = { reject, resolve: (confirmed) => {
       if (confirmed) saved = withEnvironment(saved, { origin: parsed.origin, name }, () => "new-cloud");
@@ -159,7 +161,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
 
     await fill(addressLabel, "http://unsafe.fixture.example");
     await evaluate(`${hostedConnect}.click()`);
-    await until(() => evaluate("document.querySelector('[role=alert]')?.textContent === 'Enter an HTTPS server address or a full pairing link.'"), "invalid workspace input rejected visibly");
+    await until(() => evaluate("document.querySelector('[role=alert]')?.textContent === 'Enter the server\\'s address or its pairing link.'"), "invalid workspace input rejected visibly");
     await fill(addressLabel, "other.fixture.example");
     await fill("Name (optional)", "Research team");
     const beforeHosted = calls.length;

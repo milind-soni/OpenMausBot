@@ -11,7 +11,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   return { ...original, useStore: () => ({ state: { ...original.initialState, bots: fixture.bots }, dispatch: vi.fn() }) };
 });
 vi.mock("../DesktopCapabilities", () => ({
-  useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined } } }),
+  useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined }, localComputer: {} } }),
 }));
 vi.mock("@/lib/mcp-servers", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/mcp-servers")>(),

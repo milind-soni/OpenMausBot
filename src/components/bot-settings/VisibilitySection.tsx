@@ -4,7 +4,9 @@ import { Check, Loader2 } from "lucide-react";
 import { api, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import type { BotVisibility } from "../../../shared/wire";
+import { useTeamName } from "../bot-access/ShareBotButton";
 
 export type VisibilityMode = "everyone" | "admins" | "people";
 
@@ -46,6 +48,18 @@ const OPTIONS: Array<{ mode: VisibilityMode; key: "botSettings.visibility.everyo
   { mode: "admins", key: "botSettings.visibility.admins" },
   { mode: "people", key: "botSettings.visibility.people" },
 ];
+
+export function useChoosesVisibility(): boolean {
+  const { state } = useStore();
+  const ownerOrAdmin = useOwnerOrAdmin();
+  const teamName = useTeamName();
+  return !window.ogb && ownerOrAdmin === true && Boolean(state.config) && !teamName;
+}
+
+export function visibilityLabel(visibility: BotVisibility | undefined): string {
+  const { mode } = formFromVisibility(visibility);
+  return t(OPTIONS.find((option) => option.mode === mode)!.key);
+}
 
 export function VisibilitySection({ bot }: { bot: Bot }) {
   const { state } = useStore();

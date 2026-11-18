@@ -1,8 +1,11 @@
 // macOS privacy enforcement requires the code calling Speech/AVFoundation to launch with its own Info.plist identity.
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import {
+  closeSync,
+  constants,
   existsSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   rmSync,
   statSync,
@@ -109,39 +112,13 @@ export function startSpeech(target, options = {}) {
   const errorPath = path.join(sessionDir, "stderr.log");
   const stopPath = path.join(sessionDir, "stop");
   const finishPath = path.join(sessionDir, "finish");
+  const lifelinePath = path.join(sessionDir, "owner.pipe");
   writeFileSync(outputPath, "");
   writeFileSync(errorPath, "");
 
-  let proc;
-  try {
-    proc = spawn(
-      "/usr/bin/open",
-      [
-        "-n",
-        "-g",
-        "-W",
-        "-o",
-        outputPath,
-        "--stderr",
-        errorPath,
-        BUNDLE,
-        "--args",
-        ...args,
-        "--stop-file",
-        stopPath,
-        "--finish-file",
-        finishPath,
-      ],
-      { stdio: "ignore" },
-    );
-  } catch {
-    rmSync(sessionDir, { recursive: true, force: true });
-    sink.end({ code: 1, reason: "helper-start-failed" });
-    return;
-  }
-
+  let lifeline;
   const speechSession = {
-    proc, outputPath, errorPath, stopPath, finishPath, sessionDir,
+    proc: null, outputPath, errorPath, stopPath, finishPath, sessionDir,
     owner: sink.owner, target: sink,
   };
   child = speechSession;
@@ -177,36 +154,83 @@ export function startSpeech(target, options = {}) {
       }
     }
   };
-  watchFile(outputPath, { interval: 50, persistent: false }, drain);
-
   let cleaned = false;
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    if (lifeline !== undefined) closeSync(lifeline);
     forgetWindow();
     unwatchFile(outputPath, drain);
     rmSync(sessionDir, { recursive: true, force: true });
   };
-  proc.on("close", (code) => {
-    drain();
-    cleanup();
-    // stopSpeech() clears child before the stop marker, so intentional TTS muting never looks like the end of a spoken turn.
-    if (child !== speechSession) return;
-    child = null;
-    if (reportedError) {
-      sink.end({ code: 1, reason: reportedError });
-    } else if (completed && code === 0) {
-      sink.end({ code: 0, reason: "completed" });
-    } else {
-      sink.end({ code: 1, reason: "helper-exited" });
-    }
-  });
-  proc.on("error", () => {
+  speechSession.cleanup = cleanup;
+  const failed = () => {
     cleanup();
     if (child !== speechSession) return;
     child = null;
     sink.end({ code: 1, reason: "helper-start-failed" });
-  });
+  };
+  try {
+    execFile("/usr/bin/mkfifo", ["-m", "600", lifelinePath], { timeout: 5_000 }, (error) => {
+      if (cleaned) return;
+      if (error) {
+        failed();
+        return;
+      }
+      try {
+        const reader = openSync(lifelinePath, constants.O_RDONLY | constants.O_NONBLOCK);
+        try {
+          // Only Electron holds a writer; LaunchServices cannot inherit a lifeline through `open`.
+          lifeline = openSync(lifelinePath, constants.O_WRONLY | constants.O_NONBLOCK);
+        } finally {
+          closeSync(reader);
+        }
+        const proc = spawn(
+          "/usr/bin/open",
+          [
+            "-n",
+            "-g",
+            "-W",
+            "-o",
+            outputPath,
+            "--stderr",
+            errorPath,
+            BUNDLE,
+            "--args",
+            ...args,
+            "--stop-file",
+            stopPath,
+            "--finish-file",
+            finishPath,
+            "--lifeline-file",
+            lifelinePath,
+          ],
+          { stdio: "ignore" },
+        );
+        speechSession.proc = proc;
+        watchFile(outputPath, { interval: 50, persistent: false }, drain);
+        proc.on("close", (code) => {
+          drain();
+          cleanup();
+          // stopSpeech() clears child before the stop marker, so intentional TTS muting never looks like the end of a spoken turn.
+          if (child !== speechSession) return;
+          child = null;
+          if (reportedError) {
+            sink.end({ code: 1, reason: reportedError });
+          } else if (completed && code === 0) {
+            sink.end({ code: 0, reason: "completed" });
+          } else {
+            sink.end({ code: 1, reason: "helper-exited" });
+          }
+        });
+        proc.on("error", failed);
+      } catch {
+        failed();
+      }
+    });
+  } catch {
+    failed();
+  }
 }
 
 const ownedBy = (owner) => child !== null && (owner === undefined || child.owner === owner);
@@ -215,6 +239,10 @@ export function stopSpeech(owner) {
   if (!ownedBy(owner)) return;
   const speechSession = child;
   child = null;
+  if (!speechSession.proc) {
+    speechSession.cleanup();
+    return;
+  }
   try {
     writeFileSync(speechSession.stopPath, "stop");
   } catch {}

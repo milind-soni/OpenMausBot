@@ -1,5 +1,8 @@
 # Sidebar attention popover geometry
 
+The Inbox row replaced this menu. It opens only for a page on a server older than the page, which answers `/api/inbox` with
+404 off a team, and [the fixture](../../scripts/testing/sidebar-attention-preview.tsx) shows the sidebar that way.
+
 The Active Threads menu in the sidebar header is anchored `right-0` inside
 the header's icon group, which sits 16px (`px-4`) inside the sidebar's right
 edge, so the menu's width decides whether it fits: a menu wider than the

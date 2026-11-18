@@ -1,6 +1,6 @@
 // `--json` prints a tool's result unchanged; plain output is a line per item.
 import { EXIT, flag, parseCount, parseDuration, requiredFlag, usageError } from "./args.ts";
-import { newSendId, readMessage, resolveTarget, type Target, type VerbContext, type VerbOutcome } from "./context.ts";
+import { conversationFor, conversationTitle, newSendId, readMessage, resolveTarget, type Target, type VerbContext, type VerbOutcome } from "./context.ts";
 import { oneLine, shortId } from "./output.ts";
 import { stopConversation } from "./run.ts";
 
@@ -9,7 +9,7 @@ type Rec = Record<string, any>;
 const dryRun = (ctx: VerbContext, tool: string, args: Rec, extra: Rec = {}): VerbOutcome | undefined =>
   ctx.flags["dry-run"] === true
     ? { result: { ok: true, dryRun: true, command: ctx.verb, tool, arguments: args, ...extra }, exitCode: EXIT.done,
-      human: [`Would call ${tool} with ${JSON.stringify(args)}${extra.tree ? ", then stop every teammate still working on it" : ""}. Nothing was sent.`] }
+      human: [`Would ${extra.newConversation ? `start a new conversation, "${extra.newConversation.title}", then ` : ""}call ${tool} with ${JSON.stringify(args)}${extra.tree ? ", then stop every teammate still working on it" : ""}. Nothing was sent.`] }
     : undefined;
 
 const targetArgs = (target: Target): Rec => ({ [`${target.type}_id`]: target.id, ...(target.taskId ? { task_id: target.taskId } : {}) });
@@ -18,10 +18,16 @@ const DAY = 24 * 3_600_000;
 
 async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
   const client = await ctx.client();
-  const [rawHealth, models] = await Promise.all([client.tool("get_system_health", {}), client.tool("list_available_models", {})]);
+  // A shared server lets a local caller without a session count its engines, not list them: in the server's container
+  // (`docker compose exec omb openmausbot doctor`, as deploy/update.sh runs it) that count is the answer.
+  const counted = (refusal: unknown) => (refusal as { status?: unknown })?.status === 403
+    ? client.json<Rec>("/api/health/engines").then((answer) => ({ counted: Number(answer?.engines) || 0 }), () => Promise.reject(refusal))
+    : Promise.reject(refusal);
+  const [rawHealth, models] = await Promise.all([client.tool("get_system_health", {}), client.tool("list_available_models", {}).catch(counted)]);
   const health = { ...rawHealth, endpoint: client.baseUrl };
   const instances: Rec[] = Array.isArray(models?.instances) ? models.instances : [];
   const availableEngines = instances.filter((instance) => instance.snapshot?.state === "available").map((instance) => instance.instanceId);
+  const availableCount = typeof models?.counted === "number" ? models.counted : availableEngines.length;
   const quietly = <T>(read: Promise<T>) => read.catch(() => null);
   const [server, session, config] = await Promise.all([
     quietly(client.json<Rec>("/.well-known/openmausbot/environment")),
@@ -34,19 +40,19 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
   if (!isOmb) problems.push(`${client.baseUrl} answered, but it is not OpenMausBot`);
   const tooOld = Boolean(server) && server!.capabilities?.jobs !== true;
   if (tooOld) problems.push(`OpenMausBot ${server!.version ?? "(unknown version)"} is too old for the headless commands: it cannot report a conversation's job`);
-  if (isOmb && !availableEngines.length) problems.push("no engine is available: set one up with `openmausbot engine set KIND --key-env VAR`");
+  if (isOmb && !availableCount) problems.push("no engine is available: set one up with `openmausbot engine set KIND --key-env VAR`");
   if (session?.kind === "session" && typeof session.expiresAt === "number" && session.expiresAt - Date.now() < 14 * DAY) {
     warnings.push(`this session expires in ${Math.max(0, Math.floor((session.expiresAt - Date.now()) / DAY))} days: get a new one with openmausbot connect`);
   }
   const browser = config?.browserEngine ?? null;
   if (browser && browser.kind !== "engine") warnings.push(`bots have no built-in browser here: ${browser.reason ?? "not installed"}${browser.installable ? " (install it with `openmausbot browser install`)" : ""}`);
-  const ok = isOmb && !tooOld && availableEngines.length > 0;
+  const ok = isOmb && !tooOld && availableCount > 0;
   const who = !session ? "unknown" : session.kind === "loopback"
     ? `this computer${session.trust === "service" ? " (as a local service, not the owner)" : " (the owner)"}`
     : `session "${session.label || "unnamed"}" with ${Array.isArray(session.scopes) && session.scopes.includes("admin") ? "full access" : "chat access"}${typeof session.expiresAt === "number" ? `, until ${new Date(session.expiresAt).toISOString().slice(0, 10)}` : ""}`;
   return {
     result: {
-      ok, health, availableEngines, instances,
+      ok, health, availableEngines, availableEngineCount: availableCount, instances,
       server: server ? { version: server.version, label: server.label, environmentId: server.environmentId, capabilities: server.capabilities } : null,
       session: session ? { kind: session.kind, ...(session.label !== undefined ? { label: session.label } : {}), scopes: session.scopes,
         ...(session.expiresAt !== undefined ? { expiresAt: session.expiresAt } : {}), ...(session.trust ? { trust: session.trust } : {}) } : null,
@@ -56,7 +62,7 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
     human: [
       `${server ? `OpenMausBot ${server.version} ("${server.label}")` : "OpenMausBot"} at ${client.baseUrl}: ${ok ? "ready" : "not ready"}`,
       `You are: ${who}`,
-      `Engines available: ${availableEngines.length ? availableEngines.join(", ") : "none"}`,
+      `Engines available: ${availableEngines.length ? availableEngines.join(", ") : availableCount ? `${availableCount} (which ones needs a session)` : "none"}`,
       ...(browser ? [`Bots' browser: ${browser.kind === "engine" ? `installed${browser.version ? ` (${browser.version})` : ""}` : "not available"}`] : []),
       ...problems.map((line) => `problem: ${line}`),
       ...warnings.map((line) => `warning: ${line}`),
@@ -65,6 +71,11 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
 }
 
 export async function doctor(ctx: VerbContext): Promise<VerbOutcome> {
+  if (ctx.flags.host === true) {
+    if (flag(ctx.flags, "wait") !== undefined || flag(ctx.flags, "url") !== undefined) throw usageError("doctor --host checks this machine: drop --wait and --url");
+    return (await import("./host-doctor.ts")).hostDoctor(ctx);
+  }
+  if (flag(ctx.flags, "data-dir") !== undefined || flag(ctx.flags, "domain") !== undefined) throw usageError("--data-dir and --domain go with doctor --host");
   const raw = flag(ctx.flags, "wait");
   const deadline = Date.now() + (raw ? parseDuration(raw, "--wait") : 0);
   for (;;) {
@@ -111,15 +122,21 @@ export async function send(ctx: VerbContext): Promise<VerbOutcome> {
   const named = Boolean(flag(ctx.flags, "bot") ?? flag(ctx.flags, "channel") ?? flag(ctx.flags, "thread"));
   const [first, second] = ctx.positionals;
   const text = await readMessage(ctx, named ? first : second);
-  const target = await resolveTarget(ctx, named ? undefined : first, channelOnly ? "channel" : "any");
+  const task = flag(ctx.flags, "task")?.trim();
+  const opened = task === "new" || task === "current" ? task : undefined;
+  if (flag(ctx.flags, "title") !== undefined && opened !== "new") throw usageError("--title names a new conversation: add --task new");
+  const target = await resolveTarget(opened ? { ...ctx, flags: { ...ctx.flags, task: undefined } } : ctx, named ? undefined : first, channelOnly ? "channel" : "any");
   const tool = target.type === "bot" ? "send_bot_message" : "send_channel_message";
-  const args = { ...targetArgs(target), text, send_id: flag(ctx.flags, "send-id") ?? newSendId() };
-  const preview = dryRun(ctx, tool, args);
+  const title = opened === "new" && !target.taskId ? conversationTitle(ctx, text) : undefined;
+  const current = opened === "current" && !target.taskId ? await conversationFor(await ctx.client(), target, "current") : undefined;
+  const args = { ...targetArgs(current ? { ...target, taskId: current } : target), text, send_id: flag(ctx.flags, "send-id") ?? newSendId() };
+  const preview = dryRun(ctx, tool, args, title !== undefined ? { newConversation: { title } } : {});
   if (preview) return preview;
-  const result = await (await ctx.client()).tool(tool, args);
+  const client = await ctx.client();
+  const result = await client.tool(tool, title !== undefined ? { ...args, task_id: await conversationFor(client, target, "new", title) } : args);
   return {
-    result, exitCode: EXIT.done,
-    human: [`Sent to ${target.name ?? target.id} (thread ${result.taskId})${result.queued ? "; it waits until the turn running there ends" : ""}.`,
+    result: title !== undefined ? { ...result, newConversation: { title } } : result, exitCode: EXIT.done,
+    human: [`Sent to ${target.name ?? target.id} ${title !== undefined ? `in a new conversation, "${title}", ` : ""}(thread ${result.taskId})${result.queued ? "; it waits until the turn running there ends" : ""}.`,
       `Follow it with: openmausbot wait --thread ${result.taskId}`],
   };
 }

@@ -30,7 +30,7 @@ function cardStore() {
 
 function service(options: Partial<McpRequestOptions> & { store?: ReturnType<typeof cardStore> } = {}) {
   const store = options.store ?? cardStore();
-  const apply = vi.fn(options.apply ?? (async (): Promise<McpApplied> => ({ state: "applied", text: "Turned on MCP server linear. Test: it works. Its tools: list_issues." })));
+  const apply = vi.fn(options.apply ?? (async (): Promise<McpApplied> => ({ state: "applied", text: "Turned on MCP server linear. Test: it started and listed its tools: list_issues." })));
   const answers: string[] = [];
   let parked = true;
   const decisions: Array<{ decision: string }> = [];
@@ -103,7 +103,7 @@ describe("MCP approval cards", () => {
     const parked: string[] = [];
     expect(after.cards.resume(THREAD, messageId, (text) => { parked.push(text); return true; })).toBe(true);
     expect(parked).toHaveLength(1);
-    expect(parked[0]).toContain("Its tools: list_issues.");
+    expect(parked[0]).toContain("listed its tools: list_issues.");
     expect(after.store.rows[0]!.card.mcpRequest).toMatchObject({ resumed: true });
     expect(after.waiting()).toEqual([]);
     expect(after.apply, "the restart applies nothing again").not.toHaveBeenCalled();

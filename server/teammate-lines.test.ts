@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createGoalCards } from "./host/goal-cards.ts";
-import { sentRow, teammateResultRow } from "./host/handoff-sent.ts";
+import { sentRow, teammateResultRow, WAIT_CARD_CLOSED_REASON } from "./host/handoff-sent.ts";
 import { briefCrossingLabel, recallCrossingLabel } from "./recall-disclosure.ts";
 import "./server-line-packs.ts";
-import { setConversationLanguage } from "./server-lines.ts";
+import { serverLine, setConversationLanguage } from "./server-lines.ts";
 import type { Message } from "./store.ts";
 import { queuedBehindPersonText, settledWaitingChip } from "./waiting-on-person.ts";
 
@@ -27,6 +27,32 @@ describe("what a conversation shows about a teammate's work", () => {
     expect(teammateResultRow("de", { status: "failed", result: "boom\nmore" }, "Biber", undefined, undefined)).toBe("Biber: fehlgeschlagen: boom");
     expect(teammateResultRow("de", { status: "completed", result: "" }, undefined, "team access changed", undefined)).toBe("Ergebnis zurückgehalten: team access changed");
     expect(teammateResultRow(undefined, { status: "cancelled", result: "stopped" }, undefined, undefined, undefined)).toBe("Teammate — cancelled: stopped");
+  });
+
+  it("keeps the card wait cancellation reason byte-identical to English", () => {
+    expect(WAIT_CARD_CLOSED_REASON).toBe("The card it waited on was replaced or closed");
+    expect(serverLine(undefined, "server.teammates.waitCardClosed")).toBe(WAIT_CARD_CLOSED_REASON);
+  });
+
+  it.each([
+    [undefined, "The card it waited on was replaced or closed"],
+    ["pt-br", "O cartão aguardado foi substituído ou fechado"],
+    ["de", "Die Karte, auf die gewartet wurde, wurde ersetzt oder geschlossen"],
+  ])("shows a cancelled card wait in the conversation language %s", (language, expected) => {
+    expect(teammateResultRow(language, { status: "cancelled", result: WAIT_CARD_CLOSED_REASON }, "Biber", undefined, undefined)).toContain(expected);
+  });
+
+  it.each([
+    ["pt-br", "en", "Biber — trabalho cancelado: O cartão aguardado foi substituído ou fechado"],
+    ["en", "pt-br", "Biber — cancelled: The card it waited on was replaced or closed"],
+  ])("shows a %s requester's cancelled card wait from a %s child", (parentLanguage, childLanguage, expected) => {
+    const child = { status: "cancelled", result: serverLine(childLanguage, "server.teammates.waitCardClosed") };
+    expect(teammateResultRow(parentLanguage, child, "Biber", undefined, undefined)).toBe(expected);
+  });
+
+  it("keeps other cancellation diagnostics unchanged", () => {
+    expect(teammateResultRow("pt-br", { status: "cancelled", result: "A different stop reason\nmore" }, "Biber", undefined, undefined))
+      .toBe("Biber — trabalho cancelado: A different stop reason");
   });
 
   it("says what came of a teammate's question or approval, and what waits behind the person", () => {

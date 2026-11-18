@@ -21,21 +21,55 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function home(probes: Partial<CloudPowerProbes> = {}) {
+function home(probes: Partial<CloudPowerProbes> = {}, onWoke?: () => void, bootedFromSleep = false, onBootWakeRequest?: (at: number) => void) {
   let clock = START;
   const dataDir = mkdtempSync(join(tmpdir(), "omb-cloud-power-"));
   dirs.push(dataDir);
-  const state = { turn: false, run: false, liveCall: false, computer: false, maintenance: false, nextDueAt: null as number | null };
+  const state = { turn: false, run: false, handoff: false, liveCall: false, computer: false, maintenance: false, nextDueAt: null as number | null };
   const sent: Record<string, unknown>[] = [];
   const power = createCloudPower({ dataDir, now: () => clock, broadcast: (payload) => sent.push(payload), probes: {
-    turn: () => state.turn, run: () => state.run, liveCall: () => state.liveCall, computer: () => state.computer,
+    turn: () => state.turn, run: () => state.run, handoff: () => state.handoff, liveCall: () => state.liveCall, computer: () => state.computer,
     maintenance: () => state.maintenance, nextDueAt: () => state.nextDueAt, ...probes,
-  } });
+  }, onWoke, bootedFromSleep, onBootWakeRequest });
   powers.push(power);
   /** Moves the clock in ticks, as the 5-second timer would (a single big step is a resume). */
   const pass = (ms: number) => { for (let left = ms; left > 0; left -= 5_000) { clock += Math.min(5_000, left); power.tick(); } };
   return { power, state, sent, dataDir, pass, jump: (ms: number) => { clock += ms; }, now: () => clock };
 }
+
+describe("telling the Admin it woke", () => {
+  it("a plain restart isn't a wake; a boot from a sleep it was stopped for, and each resume the tick or a request notices, are", () => {
+    let woke = 0;
+    const plain = home({}, () => { woke++; });
+    expect(woke).toBe(0);
+    expect(plain.power.sleptUntil()).toBeNull();
+    const fromSleep = home({}, () => { woke++; }, true);
+    expect(woke).toBe(1);
+    expect(fromSleep.power.sleptUntil()).toBe(START);
+    plain.jump(10 * 60_000);
+    plain.power.tick();
+    expect(woke).toBe(2);
+    expect(plain.power.sleptUntil()).toBe(plain.now());
+    plain.pass(10_000);
+    expect(woke).toBe(2);
+  });
+
+  it("times only the request that a boot from a stopped sleep was waiting for: never a plain boot's, a resume's or a second one", () => {
+    const requests: number[] = [];
+    const plain = home({}, undefined, false, (at) => requests.push(at));
+    plain.power.arrived("/api/events", {});
+    expect(requests).toEqual([]);
+    const fromSleep = home({}, undefined, true, (at) => requests.push(at));
+    fromSleep.jump(1_200);
+    fromSleep.power.arrived("/api/events", {});
+    fromSleep.power.arrived("/api/sync/changes", {});
+    expect(requests).toEqual([START + 1_200]);
+    fromSleep.pass(5 * 60_000);
+    fromSleep.jump(10 * 60_000);
+    fromSleep.power.arrived("/api/events", {});
+    expect(requests).toEqual([START + 1_200]);
+  });
+});
 
 describe("the home's idle verdict", () => {
   it("is busy just after it wakes, then idle with nothing going on", () => {
@@ -48,8 +82,8 @@ describe("the home's idle verdict", () => {
   it("names every kind of work that keeps it awake", () => {
     const h = home();
     h.pass(CLOUD_IDLE_AWAKE_MS);
-    Object.assign(h.state, { turn: true, run: true, liveCall: true, computer: true, maintenance: true });
-    expect(h.power.report().busy).toEqual(["turn", "run", "live-call", "computer", "maintenance"]);
+    Object.assign(h.state, { turn: true, run: true, handoff: true, liveCall: true, computer: true, maintenance: true });
+    expect(h.power.report().busy).toEqual(["turn", "run", "handoff", "live-call", "computer", "maintenance"]);
   });
 
   it("stays awake two minutes after work ends, ten after someone used it", () => {
@@ -276,19 +310,19 @@ describe("the Admin's signed power routes", () => {
   });
 });
 
-describe("a Team Cloud", () => {
-  it("never sleeps: the Admin's sleep request is refused as busy with the team, however idle it is", () => {
-    let clock = START;
-    const dataDir = mkdtempSync(join(tmpdir(), "omb-cloud-power-team-"));
-    dirs.push(dataDir);
-    const power = createCloudPower({ dataDir, team: true, now: () => clock, broadcast: () => {}, probes: {
-      turn: () => false, run: () => false, liveCall: () => false, computer: () => false, maintenance: () => false, nextDueAt: () => null,
-    } });
-    powers.push(power);
-    for (let left = CLOUD_IDLE_AWAKE_MS; left > 0; left -= 5_000) { clock += 5_000; power.tick(); }
-    expect(power.report()).toMatchObject({ idle: true, busy: [] });
-    expect(power.prepareSleep()).toEqual({ ok: false, busy: ["team"] });
-    expect(power.sleeping()).toBe(false);
-    expect(existsSync(join(dataDir, "cloud-sleep.json"))).toBe(false);
+describe("a hand-off between bots", () => {
+  it("keeps the home awake until it ends and its follow-ups get going, then the home sleeps like any other", () => {
+    const h = home();
+    h.pass(CLOUD_IDLE_AWAKE_MS);
+    h.state.handoff = true;
+    h.pass(5_000);
+    expect(h.power.report()).toMatchObject({ idle: false, busy: ["handoff"] });
+    expect(h.power.prepareSleep()).toEqual({ ok: false, busy: ["handoff"] });
+    expect(h.power.sleeping()).toBe(false);
+    h.state.handoff = false;
+    expect(h.power.prepareSleep()).toEqual({ ok: false, busy: ["recent-work"] });
+    h.pass(CLOUD_IDLE_WORK_MS);
+    expect(h.power.prepareSleep()).toEqual({ ok: true, nextDueAt: null });
+    expect(existsSync(join(h.dataDir, "cloud-sleep.json"))).toBe(true);
   });
 });

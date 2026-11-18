@@ -1,3 +1,4 @@
+import { type ServerText } from "../shared/server-text.ts";
 // Security invariants: only an "answer" may name an engine (a decline, or typed words matching no option, is "Not now"),
 // so a bot's own shell with decline-only service trust can never switch the engine or resend the person's message.
 // A request the job runtime still holds is never sent again: the runtime reruns its root itself.
@@ -37,7 +38,7 @@ export type SettledTurn = Parameters<TurnStops["failureCause"]>[0];
 
 export interface QuotaSwitchDeps {
   store: Store;
-  coordinator: Pick<Coordinator, "all" | "node">;
+  coordinator: Pick<Coordinator, "newestRoot" | "inThread" | "node">;
   registry: { instances(): QuotaSwitchEngine[] };
   turnStops: Pick<TurnStops, "failureCause"> & Partial<Pick<TurnStops, "read">>;
   /** Which AIs carry on while one is limited or signed out, and the one notice for each stretch of either. */
@@ -70,8 +71,15 @@ export const NOT_NOW = "Not now";
 
 const ENDED: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
 
-/** On unless OMB_QUOTA_SWITCH=0: a limited AI's work carries on with another AI by itself. Off, only the backups
- * Automatic recovery names take over, as before. */
+/** Why a failed turn stopped, when it was its AI's usage limit or a sign-out. A tool call's failure names the tool,
+ * never the engine's own limit, whatever its words. */
+export function turnLimitScope(event: SettledTurn, flags: { limit?: TakeoverScope } | undefined, cause: string | undefined): TakeoverScope | undefined {
+  return signedOutStop(event.stopReason, cause) ? "signed-out"
+    : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
+}
+
+/** On unless OMB_QUOTA_SWITCH=0: a limited AI's work carries on by itself with a backup the person chose (the bot's own,
+ * then Automatic recovery's); with none usable the bot waits for the reset. Off, only Automatic recovery's backups take over. */
 export function quotaSwitchEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.OMB_QUOTA_SWITCH?.trim() !== "0";
 }
@@ -100,9 +108,9 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
   /** A second press while the engine is read is the same answer, never another. */
   const answering = new Map<string, Promise<QuotaAnswer>>();
 
-  const notice = (threadId: string, text: string, ok: boolean, setup = false): void => {
+  const notice = (threadId: string, text: string, ok: boolean, setup = false, words?: ServerText): void => {
     // `notice:` makes it a status row every client shows, never a folded tool step; `setup`: signing in fixes it.
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ok, ...(setup ? { setup: true } : {}) } });
+    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ...(words ? { nameCode: words.key, nameParams: words.params } : {}), ok, ...(setup ? { setup: true } : {}) } });
   };
 
   const openCard = (threadId: string): Message | undefined => store.messagesFor(threadId)
@@ -143,9 +151,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
   };
 
   /** The newest root: a backup engine's retry or a change of computer begins another root for the same request. */
-  const rootOf = (threadId: string, request: QuotaRequest): string | undefined => coordinator.all()
-    .filter((node) => !node.parentId && node.threadId === threadId && request.generations.has(node.id))
-    .sort((a, b) => a.createdAt - b.createdAt).at(-1)?.id;
+  const rootOf = (threadId: string, request: QuotaRequest): string | undefined => coordinator.newestRoot(threadId, request.generations)?.id;
 
   /** Moves the thread to `selection` and sends the person's message that hit the limit (or met a signed-out AI) again
    * there; false when that AI cannot take it now. No await from the readiness check to the resend: the gate, the switch
@@ -172,19 +178,19 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     const why = scope === "signed-out" ? `while ${nameOf(current)} is signed out` : "after hitting the usage limit";
     const held = heldBy(botId, threadId, rootOf(threadId, request));
     const original = held ? undefined : resendable(store, threadId, request.messageId);
-    if (held === "card") notice(threadId, `switched to ${name}. Your request waits on a card above and continues on ${name} once you act on it.`, true);
-    else if (held === "runtime") notice(threadId, `switched to ${name}. Your request is still under way here and continues on ${name}.`, true);
-    else if (held === "busy") notice(threadId, `switched to ${name}. This conversation is working, so your message was not sent again.`, true);
+    if (held === "card") notice(threadId, `switched to ${name}. Your request waits on a card above and continues on ${name} once you act on it.`, true, false, { key: "chat.notice.backupCardWaiting", params: { name } });
+    else if (held === "runtime") notice(threadId, `switched to ${name}. Your request is still under way here and continues on ${name}.`, true, false, { key: "chat.notice.backupRequestUnderWay", params: { name } });
+    else if (held === "busy") notice(threadId, `switched to ${name}. This conversation is working, so your message was not sent again.`, true, false, { key: "chat.notice.backupConversationBusy", params: { name } });
     else if (held === "question") {
-      notice(threadId, `switched to ${name}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again. Answer it, then send your message again.`, false);
+      notice(threadId, `switched to ${name}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again. Answer it, then send your message again.`, false, false, { key: "chat.notice.backupQuestionWaiting", params: { name } });
     } else if (!original) {
-      notice(threadId, `switched to ${name}, but your message could not be found to send again. Send it again.`, false);
+      notice(threadId, `switched to ${name}, but your message could not be found to send again. Send it again.`, false, false, { key: "chat.notice.backupMessageMissing", params: { name } });
     } else {
-      notice(threadId, `continuing on ${name} ${why}`, true);
+      notice(threadId, `continuing on ${name} ${why}`, true, false, { key: scope === "signed-out" ? "chat.notice.backupContinuingSignedOut" : "chat.notice.backupContinuingLimit", params: { name, engine: nameOf(current) } });
       try {
         await deps.resend(botId, threadId, original, original.replyToId ? store.messagesFor(threadId).find((message) => message.id === original.replyToId) : undefined, spokenLineFields(original.via, original.callId));
       } catch (error) {
-        if (store.taskByThread(botId, threadId)) notice(threadId, `could not continue on ${name}: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false);
+        if (store.taskByThread(botId, threadId)) notice(threadId, `could not continue on ${name}: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`, false, false, { key: "chat.notice.backupCouldNotContinue", params: { name, error: (error instanceof Error ? error.message : String(error)).slice(0, 200) } });
       }
     }
     return true;
@@ -200,10 +206,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
       // Read before any await: the record is this turn's only now.
       const request = deps.request(threadId);
       const flags = deps.turnStops.read?.(threadId, event.turnId)?.flags;
-      const cause = deps.turnStops.failureCause(event);
-      // A tool call's failure names the tool, never the engine's own limit, whatever its words.
-      const scope: TakeoverScope | undefined = signedOutStop(event.stopReason, cause) ? "signed-out"
-        : flags?.limit ?? (event.stopReason !== "tool_error" && classifyError({ text: cause ?? "" }).reason === "quota" ? "engine" : undefined);
+      const scope = turnLimitScope(event, flags, deps.turnStops.failureCause(event));
       if (!scope) return null;
       const thread = store.projectBotForTask(bot.id, threadId) ?? bot;
       const from = thread.modelSelection;
@@ -262,7 +265,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     const root = rootId ? coordinator.node(rootId) : undefined;
     if (root && !ENDED.has(root.status)) return root.cards?.length ? "card" : "runtime";
     if (deps.busy(botId, threadId)) return "busy";
-    const asked = coordinator.all().some((node) => node.parentId !== undefined && node.threadId === threadId
+    const asked = coordinator.inThread(threadId, { open: true }).some((node) => node.parentId !== undefined
       && node.status === "waiting" && node.question !== undefined && !node.cards?.length);
     return asked ? "question" : null;
   };

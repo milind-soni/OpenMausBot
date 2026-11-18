@@ -13,17 +13,20 @@ are partial overlays that fall back to English for missing keys.
 3. Register a new pack in `src/locales/index.ts`.
 4. Run `pnpm i18n:check` and test the language from **Settings → General**.
 
+Follow the language's style guide and glossary when one exists: [Brazilian Portuguese](localization-pt-br.md).
+
 `pnpm i18n:check` is deterministic. It validates JSON structure, unknown or
 empty entries, locale filename casing, placeholder parity, and the English
 source hash recorded for each translated value. If English copy changes after
 its hash was recorded, the old translation fails the check instead of silently
-looking current. Missing translations remain allowed because the runtime has
-an English fallback.
+looking current. Missing translations are allowed in every language, because the
+runtime falls back to English; no pack is held to being complete.
 
 ## Source hashes are recorded at release
 
 `src/locales/source-hashes.json` holds, per language, the sha256 of the
-English each translation was made from. A pull request does not edit it:
+English each translation was made from. A pull request normally does not edit it. A hand-reviewed refresh can use
+`node scripts/generate-locale.mjs pt-br --accept` to record the reviewed source:
 
 - a new translated key has no hash yet and counts as current;
 - a removed key's hash is left in place and ignored;

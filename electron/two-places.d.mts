@@ -13,6 +13,7 @@ export function createTwoPlaces(deps: {
   /** What the person's other places call this computer, and telling it where their other bots live. */
   here?: { name(): Promise<string | null>; tell(payload: unknown): Promise<unknown> } | null;
   places(): TwoPlacesPlace[];
+  t?(key: string, params?: Record<string, string | number>): string;
   settled(): boolean;
   /** A move is under way: nothing is read or told until it is done. */
   quiet?(): boolean;

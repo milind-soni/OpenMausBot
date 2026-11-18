@@ -106,8 +106,8 @@ describe("the domain filter", () => {
     expect(filterAppDomains(["http://localhost:5173"], connect).kept).toEqual([]);
   });
 
-  it("keeps at most 16, refuses the rest, dedupes, and drops non-strings without a trace", () => {
-    const many = Array.from({ length: 20 }, (_, index) => `https://h${index}.example.com`);
+  it("keeps at most 64, refuses the rest, dedupes, and drops non-strings without a trace", () => {
+    const many = Array.from({ length: APP_DOMAIN_LIMIT + 4 }, (_, index) => `https://h${index}.example.com`);
     const { kept, refused } = filterAppDomains([...many, "https://h0.example.com", 7, null, { url: "https://x.example.com" }], strict);
     expect(kept).toHaveLength(APP_DOMAIN_LIMIT);
     expect(refused).toEqual(many.slice(APP_DOMAIN_LIMIT));

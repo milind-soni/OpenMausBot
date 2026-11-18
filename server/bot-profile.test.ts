@@ -105,10 +105,10 @@ describe("mascotBody", () => {
     });
   });
 
-  it("accepts a Halloween body", () => {
-    expect(parseBotProfilePatch({ mascotBody: "pumpkin" } as never, true)).toEqual({
+  it.each(["pumpkin", "laddu"])("accepts the festival body %s", (mascotBody) => {
+    expect(parseBotProfilePatch({ mascotBody } as never, true)).toEqual({
       ok: true,
-      patch: { mascotBody: "pumpkin" },
+      patch: { mascotBody },
     });
   });
 
@@ -117,7 +117,8 @@ describe("mascotBody", () => {
       ok: false,
       error:
         "mascotBody must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, star, " +
-        "pumpkin, ghost, witch, bat, cat, skull, monster, mummy, vampire, or spider",
+        "pumpkin, ghost, witch, bat, cat, skull, monster, mummy, vampire, spider, " +
+        "rocket, anaar, chakri, sparkler, bomb, laddu, chakli, jalebi, katli, or karanji",
     });
   });
 });

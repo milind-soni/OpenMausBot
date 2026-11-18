@@ -28,6 +28,8 @@ it("lists an OpenAI-compatible server with its provider's mark, and a stored ico
   writeFileSync(join(home, "config.json"), JSON.stringify({
     instances: {
       deepseekServer: server("https://api.deepseek.com/v1", { displayName: "DeepSeek" }),
+      qwenWorkspace: server("https://workspace-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", { displayName: "Qwen" }),
+      qwenLookalike: server("https://workspace-123.cn-beijing.maas.aliyuncs.com.evil.test/compatible-mode/v1"),
       lookalike: server("https://api.openai.com.evil.test/v1"),
       ownIcon: server("https://api.x.ai/v1", { icon: { kind: "preset", preset: "cohere" } }),
     },
@@ -51,6 +53,8 @@ it("lists an OpenAI-compatible server with its provider's mark, and a stored ico
   const { instances } = await response.json() as { instances: Array<{ instanceId: string; icon?: unknown }> };
   const icon = (id: string) => instances.find((instance) => instance.instanceId === id)!.icon;
   expect(icon("deepseekServer")).toEqual({ kind: "preset", preset: "deepseek" });
+  expect(icon("qwenWorkspace")).toEqual({ kind: "preset", preset: "qwen" });
+  expect(icon("qwenLookalike")).toBeUndefined();
   expect(icon("lookalike")).toBeUndefined();
   expect(icon("ownIcon")).toEqual({ kind: "preset", preset: "cohere" });
 }, 60_000);

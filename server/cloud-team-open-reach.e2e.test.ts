@@ -37,7 +37,7 @@ const messages = async (token: string, threadId: string) => {
   return { status: read.status, messages: (read.body.messages ?? []) as Message[] };
 };
 const create = async (body: Record<string, unknown>) => {
-  const created = await team.as(olive, "POST", "/api/bots", body);
+  const created = await team.as(olive, "POST", "/api/bots", { visibility: "everyone", ...body });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   return created.body.bot as Bot;
 };
@@ -126,7 +126,7 @@ it("keeps Bob's Chief supervising only Bob's bots, while it can reach Bolt too",
   expect(mine).toContain("Quill");
   expect(mine).not.toContain("Bolt");
   expect(others).toContain("Bolt");
-  expect(system).toContain("Reaching a bot gives you no authority over it");
+  expect(system).toContain("Reaching a bot outside your team gives you no authority over it");
 }, hostTimeout(90_000));
 
 it("never carries Bob's private chat into a room, by a hand-off or a post", async () => {

@@ -49,6 +49,12 @@ export function gatedLocalComputer(
   };
 }
 
+/** This computer's bridge also answers file tools (host-file-tools.ts); the person's approval level gates each call. */
+export function withHostFiles<T extends { env: Record<string, string>; scope?: "local-computer"; platform?: LocalComputerConnection["platform"] }>(connection: T): T {
+  if (connection.scope !== "local-computer" || !connection.env.OMB_CUA_COMMAND || !connection.platform) return connection;
+  return { ...connection, env: { ...connection.env, OMB_HOST_FILES: "1" } };
+}
+
 type LegacyConnectionDescriptor = {
   mode?: string;
   socketPath?: unknown;
@@ -130,13 +136,30 @@ function decodeLegacyDescriptor(
   };
 }
 
+const CERTIFIED_LINUX_DRIVER = "0.41.3";
+
+/** The certified build from any source; on Omarchy also the package-owned system driver of the same minor line at or
+ * above it (electron/cua-linux.cjs `compatibleSystemDriverVersion`). */
+function acceptedDriverVersion(version: unknown, source: unknown, hyprland: boolean): boolean {
+  if (["bundled", "environment", "user-local", "path"].includes(String(source))) return version === CERTIFIED_LINUX_DRIVER;
+  if (source !== "system-package" || !hyprland || typeof version !== "string") return false;
+  const [major, minor, patch] = CERTIFIED_LINUX_DRIVER.split(".").map(Number);
+  const found = /^(\d+)\.(\d+)\.(\d+)$/.exec(version)?.slice(1).map(Number);
+  return Boolean(found && found[0] === major && found[1] === minor && found[2]! >= patch!);
+}
+
 export function decodeLinuxDescriptor(value: LinuxConnectionDescriptor): LocalComputerConnection | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const x11 = value.mode === "linux-x11-supervised" && value.session === "x11";
-  const wayland =
-    value.mode === "linux-wayland-gnome-supervised" &&
+  const hyprland =
+    value.mode === "linux-wayland-hyprland-supervised" &&
     value.session === "wayland" &&
-    value.compositor === "gnome-mutter";
+    value.compositor === "hyprland";
+  const wayland =
+    hyprland ||
+    (value.mode === "linux-wayland-gnome-supervised" &&
+      value.session === "wayland" &&
+      value.compositor === "gnome-mutter");
   const descriptorKeys = [
     "schemaVersion",
     "mode",
@@ -194,15 +217,14 @@ export function decodeLinuxDescriptor(value: LinuxConnectionDescriptor): LocalCo
   if (
     typeof driver.path !== "string" ||
     !isAbsolute(driver.path) ||
-    driver.version !== "0.19.3" ||
-    !["bundled", "environment", "user-local", "path"].includes(String(driver.source)) ||
+    !acceptedDriverVersion(driver.version, driver.source, hyprland) ||
     driver.manifestSchema !== "1" ||
     !validDriverFileIdentity(driver.fileIdentity) ||
     typeof daemon.socketPath !== "string" ||
     !isAbsolute(daemon.socketPath) ||
     !Number.isInteger(daemon.pid) ||
     (daemon.pid as number) <= 0 ||
-    daemon.contractVersion !== "0.6.0" ||
+    daemon.contractVersion !== "0.8.0" ||
     daemon.toolsListSchemaVersion !== "1" ||
     daemon.capabilityVersion !== "1" ||
     daemon.mcpProtocolVersion !== "2025-06-18" ||

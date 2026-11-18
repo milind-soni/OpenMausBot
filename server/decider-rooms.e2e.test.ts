@@ -98,7 +98,6 @@ beforeAll(async () => {
   writeFileSync(titleFile, "Safari footer fix");
   writeFileSync(join(data, "config.json"), JSON.stringify({
     // a room task's first message is titled by the engine of whoever answers it
-    features: { llmThreadTitles: true },
     instances: {
       quick: {
         driver: "claudeAgent", displayName: "Quick fixture", config: { cli: FAKE_CLAUDE },
@@ -441,7 +440,8 @@ describe("Auto rooms ask the decision model who answers", { timeout: 90_000 }, (
 
       const keyed = await api("PUT", "/api/config", { openrouter: { key: SHARED } });
       expect(keyed.status).toBe(200);
-      expect(keyed.body.decider).toEqual({ provider: "jev", configured: false, enabled: false, jobs: { roomRouting: true } });
+      // OpenRouter stays the chosen provider in Settings, still with no key of its own.
+      expect(keyed.body.decider).toEqual({ provider: "openrouter", model: MODEL, api: "chat", configured: false, enabled: false, jobs: { roomRouting: true } });
       expect((await api("PUT", "/api/config", { decider: { enabled: true } })).status).toBe(400);
       expect(await api("POST", "/api/decider/test", {})).toMatchObject({ body: { ok: false, reason: "no_key" } });
 

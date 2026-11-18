@@ -86,6 +86,42 @@ export async function makeHome(id: string): Promise<true | string> {
  * list main gave it (two places or more). */
 export const railShown = (state: RailState): boolean => state.beside === true || state.places.length > 0;
 
+/** This computer's circle: This computer, or a workspace of its own (a profile) under its own name. */
+export function computerName(place: Pick<RailPlace, "profile"> & Partial<Pick<RailPlace, "named" | "name">>): string {
+  return place.profile && place.named && place.name ? place.name : t("rail.thisComputer");
+}
+
+/** A new workspace's first name: Work, then Personal, then Workspace 2, 3 and on, whichever no place here has yet. */
+export function suggestedLocalName(taken: readonly string[]): string {
+  const used = new Set(taken.map((name) => name.toLocaleLowerCase()));
+  const free = (name: string) => !used.has(name.toLocaleLowerCase());
+  for (const name of [t("rail.localWork"), t("rail.localPersonal")]) if (free(name)) return name;
+  for (let count = 2; ; count++) { const name = t("rail.localNumbered", { count }); if (free(name)) return name; }
+}
+
+/** A new workspace of this computer's own, from ＋: main makes it and opens it next. */
+export async function createLocal(name: string, color: CloudSwatch | null): Promise<"made" | "name" | "taken" | "failed"> {
+  const answer = await bridge()?.local?.create(name, color).catch(() => null);
+  if (!answer) return "failed";
+  if (answer.outcome === "made") void refreshPlaces();
+  return answer.outcome;
+}
+
+/** A workspace's new name or colour, from its circle's menu. */
+export async function editLocal(id: string, changes: { name: string } | { color: CloudSwatch | null }): Promise<"saved" | "name" | "taken" | "failed"> {
+  const answer = await bridge()?.local?.edit(id, changes).catch(() => null);
+  if (!answer) return "failed";
+  if (answer.outcome === "saved") void refreshPlaces();
+  return answer.outcome === "saved" || answer.outcome === "name" || answer.outcome === "taken" ? answer.outcome : "failed";
+}
+
+/** Removes a workspace from this computer, once the person said yes in its circle's menu. */
+export async function removeLocal(id: string): Promise<"removed" | "failed"> {
+  const answer = await bridge()?.local?.remove(id).catch(() => null);
+  if (answer?.outcome === "removed" || answer?.outcome === "gone") { void refreshPlaces(); return "removed"; }
+  return "failed";
+}
+
 /** A circle's letters: the first of up to two words, so "Client A" is CA and "Acme" is A. */
 export function placeInitials(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);

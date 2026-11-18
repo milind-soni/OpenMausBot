@@ -109,8 +109,8 @@ With no configuration, the MCP process probes OpenMausBot's three desktop ports 
 and accepts only a health response that identifies itself as OpenMausBot. This handles the desktop's normal
 fallback when another local process already owns port 8799.
 
-Set `OMB_PORT` to force one local port, or `OPENMAUSBOT_URL` to use an explicit HTTP(S) origin. Cleartext remote
-HTTP is rejected unless `ALLOW_INSECURE_HTTP=true`; HTTPS should be used outside loopback. An optional
+Set `OMB_PORT` to force one local port, or `OPENMAUSBOT_URL` to use an explicit HTTP(S) origin. Plain HTTP is
+accepted only for loopback and private networks (LAN addresses, Tailscale, `*.local`); anything else needs HTTPS. An optional
 `OPENMAUSBOT_TOKEN` is sent as a bearer token for authenticated reverse proxies. When a token is set, an
 explicit `OPENMAUSBOT_URL` or `OMB_PORT` is required so the credential is never sent while probing unrelated
 local ports. `OPENMAUSBOT_MCP_TIMEOUT_MS` can set an HTTP timeout between 1,000 and 120,000 milliseconds.

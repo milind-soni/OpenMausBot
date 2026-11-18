@@ -163,7 +163,13 @@ off. It keeps the notes in shape without the bot having to decide to:
   the person's name, where they live, their company, diet, allergies and
   health needs, how they like replies — always stay; a line about diet,
   allergies or health is never even offered for moving (a fixed rule, not the
-  model's choice), and a line judged core is not asked about again. At most 20 lines move in one pass; each file's change
+  model's choice), and a line judged core is not asked about again. It also
+  files a work log that is finished or stale (a status line about one task,
+  pull request, release or errand that is done, or that was noted more than
+  two weeks ago and has not changed) under its project's topic or
+  `work-log`. A rule the person gave (a line opening with "always", "never",
+  "don't", "from now on", "every time" or "whenever") is never offered for
+  moving. At most 20 lines move in one pass; each file's change
   is a journal row (*filed into topics*) that can be undone.
 - **About me.** A lasting fact about the person, taken from their own words,
   is added to **Settings → General → About me**, which every bot reads, as a
@@ -183,6 +189,12 @@ off. It keeps the notes in shape without the bot having to decide to:
   pass in core memory, and none in a core file of fewer than five. Topic files
   may reconcile one pair even with two entries; writes recheck for concurrent edits. The archive is written before
   the file it came from, so undoing the newest change never loses a line.
+- **A heavy bot.** When the person's own text a bot loads every turn (memory,
+  its instructions, About me, rules for every bot, a department's shared
+  context) passes 24 KB, and at least 8 KB of it is memory, the bot's
+  settings show one line, *This bot loads a lot every turn.*, with **Tidy
+  memory**, which runs this tidy-up. With Memory or its upkeep off the line
+  never shows.
 
 "Exactly the same fact" is narrow on purpose: spacing, a bullet and a final
 full stop are ignored, nothing else — `Balance is -10` and `Balance is 10`,
@@ -462,3 +474,13 @@ Every panel edit, delete or acceptance carries the revision it was based on.
 Stale writes return 409; writes without a revision return 428. Reloading after a
 conflict retains the unsaved draft for comparison. Pending replacement cards
 also refuse approval if the accepted fact changed since the proposal.
+
+### Checks before a dream saves a fact
+
+A dream must quote the person's statements, one per cited conversation, and
+each quote must really be something they said. Every number, path and URL in
+the entry has to come from those quotes. These checks don't depend on the
+language of the chat. Unsupported entries are skipped. An outdated note stays
+unchanged when its replacement fails the check. Entries that look like secrets
+are rejected with the existing secret detector. These checks also apply before
+a dream adds a fact to About me. They do not merge notes into summaries.

@@ -116,9 +116,9 @@ const en: BriefWords = {
 
 const ptBr: BriefWords = {
   title: "Seu resumo",
-  intro: "Fico de olho na sua agenda e no seu e-mail e coloco aqui o que precisa da sua atenção, uma vez por dia e quando você volta. Me diga para parar ou o que observar.",
+  intro: "Fico de olho na sua agenda e no seu e-mail e coloco aqui o que precisa da sua atenção, uma vez por dia e quando você volta. Peça para eu parar ou diga o que observar.",
   needsYou: "Precisa da sua atenção",
-  nothingNeedsYou: "Nada precisa de você agora.",
+  nothingNeedsYou: "Nada precisa da sua atenção agora.",
   yourDay: "Seu dia",
   noMoreMeetings: "Não há mais reuniões hoje.",
   importantEmails: "E-mails importantes",
@@ -126,17 +126,17 @@ const ptBr: BriefWords = {
   open: "Abrir",
   join: "Participar",
   openInGmail: "Abrir no Gmail",
-  draftReply: (who) => `Rascunhar resposta para ${who}`,
+  draftReply: (who) => `Criar rascunho de resposta para ${who}`,
   dismiss: (who) => `Dispensar o e-mail de ${who}`,
   waitingOnReply: "Aguardando sua resposta",
   important: "Importante",
   noSender: "(sem remetente)",
   noSubject: "(sem assunto)",
   more: (n) => `e mais ${n}`,
-  waitingMany: "Há mais e-mails novos do que consigo ler de uma vez; vou organizar o restante em seguida.",
+  waitingMany: "Há mais e-mails novos do que consigo ler em uma só verificação. Vou organizar o restante na próxima.",
   waitingCount: (n) => (n === 1
-    ? `Mais ${n} e-mail novo desde que você saiu; vou organizá-lo em seguida.`
-    : `Mais ${n} e-mails novos desde que você saiu; vou organizá-los em seguida.`),
+    ? `Chegou mais ${n} e-mail novo enquanto você estava fora. Vou organizar na próxima verificação.`
+    : `Chegaram mais ${n} e-mails novos enquanto você estava fora. Vou organizar na próxima verificação.`),
   summary: {
     needs: (n) => `${n} ${n === 1 ? "precisa" : "precisam"} de você`,
     meetings: (n) => `${n} ${n === 1 ? "reunião" : "reuniões"}`,
@@ -150,7 +150,7 @@ const ptBr: BriefWords = {
   missed: (name) => `${name} não foi executada`,
   didNotFinish: "Não terminou",
   signedOut: (engine) => `Sessão encerrada em ${engine}`,
-  signInAgain: "Entre novamente em Configurações, Provedores de modelos.",
+  signInAgain: "Faça login novamente em Configurações → Provedores de modelos.",
   usageLimit: "Uma IA atingiu o limite de uso",
   outOfCredit: "O crédito de teste não cobre isso",
   ownAccount: "Entre com sua própria conta de IA ou adicione uma chave.",
@@ -159,19 +159,19 @@ const ptBr: BriefWords = {
   chooseAnother: "Abra-o para escolher outro local.",
   asked: (bot) => `${bot} tem uma pergunta para você`,
   aBot: "Um bot",
-  overlap: (a, b) => `${a} e ${b} se sobrepõem`,
+  overlap: (a, b) => `Conflito de horário entre ${a} e ${b}`,
   both: (a, b) => `${a} e ${b}`,
-  couldNotRead: (app) => `Não consegui ler ${app}`,
+  couldNotRead: (app) => `Não foi possível ler os dados do ${app}`,
   reconnect: (app) => `Reconecte ${app} em Apps conectados.`,
-  tryAgainSoon: "Vou tentar de novo em breve.",
+  tryAgainSoon: "Vou tentar novamente em breve.",
   unsorted: "Não organizei os e-mails nem preparei as reuniões",
-  unsortedNote: (name) => `Para isso, a IA de ${name} precisa ser um modelo Claude. Seu dia, lembretes e conflitos continuam aparecendo aqui.`,
+  unsortedNote: (name) => `Para isso, a IA de ${name} precisa ser um modelo Claude. Seu dia, os lembretes e os conflitos de horário continuam aparecendo aqui.`,
   openPage: "Abrir página",
   unpreparedMeetings: "Não preparei as reuniões",
-  unpreparedNote: (name) => `Para isso, a IA de ${name} precisa ser um modelo Claude. Seus e-mails continuam organizados, e seu dia, lembretes e conflitos aparecem aqui.`,
+  unpreparedNote: (name) => `Para isso, a IA de ${name} precisa ser um modelo Claude. Seus e-mails continuam organizados, e a agenda do dia, os lembretes e os conflitos de horário aparecem aqui.`,
   isAsking: (bot) => `${bot} está perguntando a você`,
   ideas: "Ideias",
-  noticedAcross: (n) => `Percebido em ${n} conversas`,
+  noticedAcross: (n) => `Conversas em que isso foi percebido: ${n}`,
 };
 
 const es: BriefWords = {

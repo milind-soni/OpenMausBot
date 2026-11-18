@@ -7,6 +7,7 @@ export function installTwoPlacesMain(deps: {
   localRequest(route: string, init?: RequestInit): Promise<Response>;
   fetch: typeof fetch;
   environments(): any[];
+  t?(key: string, params?: Record<string, string | number>): string;
   /** My Cloud's address while it is ready, and whether it sleeps now. */
   cloud(): { origin: string | null; asleep: boolean };
   oneHome: { journal(): unknown; keep: { state(): { shown: boolean; on: boolean; moved: boolean }; set(on: boolean): Promise<unknown> } };

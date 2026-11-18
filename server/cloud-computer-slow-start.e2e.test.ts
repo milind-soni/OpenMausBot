@@ -32,8 +32,9 @@ describe("a slow cloud computer start", () => {
   const requests: string[] = [];
   /** The relay keeps a new computer "provisioning" while this is set, never
    * answers a desktop link request while `desktop` is set, and cuts off this
-   * many computer listings before answering, as a dropped connection does. */
-  const hold = { provisioning: false, desktop: false, dropLists: 0 };
+   * many computer listings before answering, as a dropped connection does, and refuses every create while `refuseCreate` is set,
+   * or with the Admin's `limit` answer while that is set. */
+  const hold = { provisioning: false, desktop: false, dropLists: 0, refuseCreate: false, limit: null as Record<string, unknown> | null };
   const held: ServerResponse[] = [];
 
   const api = async (method: string, path: string, body?: unknown) => {
@@ -98,6 +99,8 @@ describe("a slow cloud computer start", () => {
         if (req.headers.authorization !== `Bearer ${INCLUDED}`) return send(401, { ok: false, code: "unauthorized" });
         if (path === "/boxes" && req.method === "GET" && hold.dropLists > 0) { hold.dropLists--; return void req.socket.destroy(); }
         if (path === "/boxes" && req.method === "GET") return send(200, { ok: true, boxes: rows, pageInfo: { nextCursor: null } });
+        if (path === "/boxes" && req.method === "POST" && hold.refuseCreate) return send(422, { ok: false, message: "the sandbox image is unavailable" });
+        if (path === "/boxes" && req.method === "POST" && hold.limit) return send(429, hold.limit);
         if (path === "/boxes" && req.method === "POST") {
           const row = { id: `bx_${"23456789abcdefgh"[rows.length]}3456789`, state: "provisioning" };
           rows.push(row);
@@ -242,4 +245,39 @@ describe("a slow cloud computer start", () => {
       hold.desktop = false;
     }
   }, 60_000);
+
+  it("a start the Cloud's own limit turns away tells the bot which limit in one sentence, and the person the plan's card", async () => {
+    const message = "Your Pro plan's 200 cloud computer hours for November are used up. They reset on 1 December.";
+    const fields = { reason: "hours_used", plan: "Pro", limit: 200, used: 200.4, resetsAt: "2026-12-01T00:00:00.000Z" };
+    hold.limit = { ok: false, type: "sandbox.error", status: 429, code: "limit_reached", message, ...fields, error: { code: "limit_reached", message, status: 429, ...fields } };
+    try {
+      const bot = await cloudBot("Hours spent");
+      const answer = await screenshot(await startTurn(bot.id, "Open the cloud desktop"));
+      expect(answer).toEqual({ isError: true, content: [{ type: "text", text: "The cloud computer could not be started. This Cloud's cloud computer hours for this month are used up; "
+        + "they reset on 1 December. This call was not performed. Do not retry computer work in this turn; tell the person what you could not do." }] });
+      const [row] = await until(() => failedRows(bot.id), found => found.length > 0);
+      expect(row.tool.place).toEqual({ state: "cc-no-hours", params: { bot: "Hours spent", plan: "Pro", hours: 200, month: "December" }, source: "works-on" });
+      await until(() => task(bot.id), current => current?.busy === false, 20_000);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    } finally {
+      hold.limit = null;
+    }
+  }, 45_000);
+
+  it("a start that fails while a call waits on it answers that call with the reason, not a refusal for an ended turn", async () => {
+    hold.refuseCreate = true;
+    try {
+      const bot = await cloudBot("Refused starter");
+      const sent = await startTurn(bot.id, "Open the cloud desktop");
+      const answer = await screenshot(sent);
+      expect(answer.isError).toBe(true);
+      expect(answer.content[0]?.text).toMatch(/^The cloud computer could not be started: .*the sandbox image is unavailable.*\. This call was not performed\./);
+      const [row] = await until(() => failedRows(bot.id), found => found.length > 0);
+      expect(row.tool.place).toMatchObject({ params: { bot: "Refused starter" } });
+      await until(() => task(bot.id), current => current?.busy === false, 20_000);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    } finally {
+      hold.refuseCreate = false;
+    }
+  }, 45_000);
 });

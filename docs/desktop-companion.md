@@ -1,88 +1,79 @@
-# Desktop-to-desktop companion mode
+# Open one computer's bots from another computer
 
-Every OpenMausBot desktop build can play either role:
+A desktop app can share itself with your other computers over Tailscale. The computer that has the bots is the
+**host**. The computer you sit at is the **client**: it opens the host's bots in its own window, from **Connect to a
+server**. The bots, their conversations, keys and routines stay on the host.
 
-- **Host mode** is the normal app. It owns the agents, conversations, credentials, routines, and computers.
-- **Client mode** controls a paired host through the same authenticated, default-deny companion API used by the phone app.
+Any desktop build can be the host or the client: Windows, macOS or Ubuntu. Both computers need Tailscale, signed in to
+the same Tailscale account, with MagicDNS on. Nothing here is reachable from outside your Tailscale network.
 
-The roles are platform-independent. A Windows, macOS, or Ubuntu build can host, and any other desktop build can be its client. One app installation uses one role at a time; disconnecting a client returns that installation to host mode without deleting its local host data.
+A phone uses a different path: **Settings → Phone & devices → Pair a phone**. A phone's code has six digits and only
+the phone app can use it. The link a phone pairing creates is phone-only too: a desktop client that refuses it is
+behaving as expected. A computer needs the link below.
 
-This mode is separate from **Self-hosted server** in **Settings → Remote
-access → Connect to another computer** (also available through the **Server**
-menu). Self-hosted server connections load the remote server's web UI directly
-using that server's browser session. Use that option for a custom HTTPS domain
-or Cloudflare tunnel to a self-hosted server and its 12-character pairing link.
-Desktop companion mode instead keeps the bundled UI and native integrations on
-the client, sends API traffic through the default-deny companion boundary, and
-provides the per-device VPS viewer and client-local Mac voice behavior described
-below. The two connection types intentionally do not share credentials.
+## Share the host
 
-## Pair over secure HTTPS
+1. On the host, open **Settings → Phone & devices**. Settings search finds the row too: type "other computers" or
+   "tailscale".
+2. Turn on **Your other computers**. This turns Tailscale on in the app first, if it is off, and turning the share off
+   turns it off again unless you turned Tailscale on yourself or a phone is paired. The app never installs, starts or
+   signs in Tailscale itself: if Tailscale is not installed, not running, signed out or waiting for approval on your
+   Tailscale network, the row says so.
+3. Wait for the line under the row: `Ready at https://<name>.ts.net` when Tailscale's HTTPS Certificates are on, or
+   `Ready at http://<name>.ts.net:8799` when they are off. Both are private to your Tailscale network.
+4. Choose **Pair a computer**. The dialog shows the address and a 12-character code, with **Copy link**. The code works
+   once, and the dialog says until when.
 
-1. On the host, open **Settings → Remote access** and finish **Secure HTTPS pairing**.
-2. Open a pairing window so the host displays a six-digit code.
-3. On the client, open **Settings → Remote access → Connect to another computer**
-   and choose **Desktop companion**.
-4. Enter the host's managed companion address (`https://c-….openmausbot.com` or `https://c-….mausbot.si`) and the six-digit code.
-5. Choose **Pair and switch to client mode**. The client restarts and opens the host's bot UI.
+In Advanced mode the same page also has **More ways in → Tailscale**, the switch step 2 turns on for you.
 
-The HTTPS address uses the host's managed outbound tunnel. TLS is verified by the operating system, and the client does not need Tailscale. HTTPS is intentionally restricted to the names OpenMausBot issues (`c-` and 32 hexadecimal characters under `openmausbot.com` or `mausbot.si`) so a typo, or any other host in those domains, cannot receive the pairing code or a paired-device token. Desktop releases up to 0.1.103 accept only `openmausbot.com` names; update the client to pair with a host whose address is on `mausbot.si`, or pair over Tailscale.
+## Connect the client
 
-## Pair over Tailscale
+1. On the client, choose **＋** at the end of the rail, then **Connect to a server**.
+2. Paste the link. Or type the address and the code in their two boxes.
+3. The sheet names the host it found and says it is on Tailscale. Choose **Connect to** and the host's name.
 
-1. Install Tailscale on both computers, sign into the same tailnet, and leave MagicDNS enabled.
-2. On the host, open **Settings → Remote access**, turn on Remote access, and open **Pair over Tailscale** to display a six-digit code.
-3. On the client, open **Settings → Remote access → Connect to another computer**
-   and choose **Desktop companion**.
-4. Enter the host's full `.ts.net` MagicDNS name and the six-digit code.
-5. Choose **Pair and switch to client mode**. The client restarts and opens the host's bot UI.
+The host now sits on the client's rail beside This computer. To end a connection from the host's side, remove that
+device under **Paired** on the host's Phone & devices page. Turning **Your other computers** off stops the host
+answering every other computer at once.
 
-To switch that installation back, open **Settings → Remote access** and choose **Disconnect and use this computer**.
+## Keep the host reachable
 
-## Control a VPS desktop remotely
+The host must be on, awake and connected to Tailscale. **Keep this computer awake** on the host's Phone & devices page
+holds it awake while a way in is on, and that includes **Your other computers**.
 
-A desktop client can open an agent's self-hosted VPS display through either paired transport. On the host, enable **Cloud desktop access** for that paired desktop in **Settings → Remote access**. On the client, open the bot's **Computer** panel and choose **Take control**.
+## What the client says when it can't connect
 
-The Computer panel also shows a periodically refreshed VPS screenshot. Preview and live control share the same per-device permission, which defaults off. The VPS still publishes no VNC port. The host opens its existing loopback-only SSH tunnel, the companion creates a random device-scoped viewer path, and the client relays noVNC HTTP and WebSocket traffic through its loopback Electron service. Closing the viewer removes the companion session, closes the SSH tunnel, and hands control back to the agent.
+| It says | Do this |
+|---|---|
+| "…is a MausBot desktop app. To open it from here, turn on Tailscale and Your other computers…" | The address reached the host's phone link or an app that is not shared. Share the host as above and use its link. |
+| "That code is for the phone app…" | A six-digit code was typed. Use **Pair a computer** on the host. |
+| "Tailscale isn't connected on this computer." | Open Tailscale on the client and sign in. |
+| "…isn't on this computer's tailnet." | The two computers are signed in to different Tailscale accounts. |
+| "…is on your tailnet but didn't answer." | The host is asleep, offline, or **Your other computers** is off. |
+| "macOS blocked the connection…" | On the client, allow the app in System Settings → Privacy & Security → Local Network. |
 
-Remote clients can preview, open, and close the viewer only. VPS provisioning, replacement, sleep, removal, SSH aliases, Local VM controls, and host browser surfaces remain available only on the host.
+## Security
 
-The client Calendar supports scheduled routines end to end: create, edit, move, resize, pause, delete, run now, cancel an active run, and acknowledge failures. Scheduled calls and webhooks remain host-only and are omitted from client mode.
+- The share is off until you turn it on, and an organization's policy that turns remote access off disables it.
+- With HTTPS Certificates on, `tailscale serve` fronts the host's server on port 443 of its `.ts.net` name. With them
+  off, the server listens on the host's own Tailscale addresses on port 8799. It never listens on every interface, so
+  a device on the same Wi-Fi that is not on your Tailscale network gets no answer.
+- A request that names another host is refused, and so is one that names the loopback address from outside.
+- Being on the Tailscale network is not enough: every client pairs with a one-time code and gets its own session,
+  which the host lists and can sign out.
 
-The remote Computer panel includes the host panel's per-agent **Scheduled tasks** card. It lists that agent's next routines and active run, opens the full schedule view, and creates a new schedule already assigned to the agent.
+[docs/verification/tailscale.md](verification/tailscale.md) has the script that proves this on two real computers.
 
-A Mac remote client supports dictation and live calls against any host: Apple Speech runs locally on the Mac, and only the transcript crosses the paired connection. When a Mac client selects a built-in system voice, reply speech is synthesized and played locally on that Mac; ElevenLabs and Fish Audio reply audio is synthesized by the host and relayed byte for byte. A Windows remote client still needs a future Windows speech-to-text implementation for microphone input.
+## Without Tailscale
 
-Voice-note attachments stream through the same relay: the mp3 serving route is on the companion allowlist, the audio crosses byte for byte, and `Range` requests are forwarded so a player can seek inside a clip without re-downloading it.
+Share the computer with **My Cloud** from its own app, and open My Cloud from the other computer. A server of
+your own (`openmausbot serve`) is the other choice: see [self-hosting](self-hosting.md).
 
-The host must be running and awake. Cleartext HTTP is accepted only for a `.ts.net` MagicDNS hostname because that connection is encrypted inside Tailscale's WireGuard tunnel. Raw IP addresses, LAN hostnames, URL credentials, paths, queries, and fragments are rejected.
+## The earlier desktop companion connection
 
-## Security model
-
-Pairing creates an independent device identity on the host. The resulting bearer token is:
-
-- stored only in Electron's OS-encrypted credential document on the client;
-- never returned through the preload bridge, inserted into the page, placed in a URL, or written to browser storage;
-- injected by a loopback-only Electron relay after browser `Origin` headers are removed;
-- sent only to the exact saved managed HTTPS or `.ts.net` origin; absolute-form request targets cannot redirect it elsewhere.
-
-The host companion remains the authorization boundary. Its route list defaults to deny, strips sensitive response fields, and can revoke the desktop client from **Settings → Remote access** like any other paired device. Interactive desktop access is a separate per-device capability that defaults off. Client mode does not expose host-only settings, local browser surfaces, Local VM controls, plugin credentials, destructive account revocation, or the event inspector. Connected Apps may be viewed and authorized remotely while their tokens and execution remain on the host.
-
-The desktop client matches the reviewed companion feature surface: chats, rooms, streamed responses, approvals, inline Connected Apps authorization, search, routines, attachments, and a narrowly scoped cloud/VPS viewer the host explicitly grants to that paired device. Expanding the desktop client must be done by explicitly reviewing and adding companion routes; it must not bypass the companion API or proxy the full harness.
-
-## Runtime shape
-
-```text
-desktop renderer
-      │ same-origin HTTP/SSE, no bearer
-      ▼
-Electron relay 127.0.0.1:8798 (fallbacks: 18798, 28798)
-      │ bearer injection over verified managed HTTPS or Tailscale/WireGuard
-      ▼
-host companion :8810
-      │ authentication + route allowlist + response scrubbing
-      ▼
-host harness 127.0.0.1:8799
-```
-
-While client mode is active, Electron does not start its local harness, companion sidecar, computer-use daemon, or browser engine host. The renderer still uses ordinary same-origin API calls and `EventSource`, so the existing UI and streaming store do not learn or handle a second transport.
+Older versions paired one desktop app to another with a six-digit code and a managed `https://c-….` address, and the
+client restarted into a client mode. No new connection of that kind can be made. Desktop Companion mode is marked in
+the app for sunset on December 7, and the log line `the secure address ended (retired)` is that shutdown being
+reported, not a failure. An installation still connected that
+way sees a notice in **Settings → This app** (Advanced mode) with **Disconnect and use this computer**; after disconnecting, connect again
+with the steps above.

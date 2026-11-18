@@ -2,11 +2,12 @@ import { ChevronRight, MessagesSquare } from "lucide-react";
 import { openThread, useStore, type Message } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { t } from "@/lib/i18n";
+import { activityText } from "@/lib/activity-text";
 import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
 import { HandoffReply } from "./HandoffReply";
 
-export function ThreadChip({ message }: { message: Message }) {
+export function ThreadChip({ message, threadId }: { message: Message; threadId?: string }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const ref = message.threadRef;
@@ -14,10 +15,10 @@ export function ThreadChip({ message }: { message: Message }) {
   if (!ref || !tool) return null;
   const bot = state.bots.find((candidate) => candidate.id === ref.botId);
   const direct = message.sentDirectly;
-  const label = !direct ? tool.name
+  const label = !direct ? activityText(tool, tool.name)
     : direct.room ? t("chat.sentDirectlyNotInRoom", { name: direct.name, room: direct.room }) : t("chat.sentDirectly", { name: direct.name });
   return (
-    <HandoffReply message={message}>
+    <HandoffReply message={message} threadId={threadId}>
       <button
         type="button"
         data-thread-chip={ref.threadId}

@@ -5,6 +5,7 @@ export interface MapComposerBot {
   name: string;
   section?: string;
   hidden?: boolean;
+  chiefOfStaff?: boolean;
 }
 
 export interface MapComposerTeam {
@@ -23,6 +24,8 @@ export function mapMessageTargets(text: string, bots: readonly MapComposerBot[],
   botIds: string[];
   tags: MapTag[];
   unknown: string[];
+  /** The message without the tags that matched: what it says, with who it is for taken out. */
+  words: string;
 } {
   const visible = bots.filter((bot) => !bot.hidden && bot.name.trim());
   const names = [
@@ -35,6 +38,7 @@ export function mapMessageTargets(text: string, bots: readonly MapComposerBot[],
   ].sort((a, b) => b.name.length - a.name.length);
   const tags: MapTag[] = [];
   const unknown: string[] = [];
+  const spans: Array<[number, number]> = [];
   let at = -1;
   while ((at = text.indexOf("@", at + 1)) !== -1) {
     if (!isMentionBoundary(text, at)) continue;
@@ -43,13 +47,37 @@ export function mapMessageTargets(text: string, bots: readonly MapComposerBot[],
       && !isMentionNameContinuation(rest.slice(name.length)));
     if (match) {
       tags.push(match.tag);
+      spans.push([at, at + 1 + match.name.length]);
       at += match.name.length;
       continue;
     }
     const word = /^[\p{L}\p{N}\p{M}_.-]+/u.exec(rest)?.[0];
     if (word) unknown.push(word);
   }
-  return { botIds: [...new Set(tags.flatMap((tag) => tag.botIds))], tags, unknown };
+  const words = spans.reduceRight((rest, [from, to]) => rest.slice(0, from) + rest.slice(to), text).replace(/\s+/g, " ").trim();
+  return { botIds: [...new Set(tags.flatMap((tag) => tag.botIds))], tags, unknown, words };
+}
+
+/** Who a message from the Team map is delivered to. `@everyone` goes to the team's Chief alone, which hands it to the bots it
+ * concerns, so a bot it doesn't concern takes no turn. A stop goes to every bot, as its own words without the tags, so each
+ * bot's own send path stops it at once. A bot or team named directly always gets it. With no Chief, everyone gets it. */
+export function mapDelivery(targets: ReturnType<typeof mapMessageTargets>, bots: readonly MapComposerBot[], stop: boolean): {
+  botIds: string[];
+  text?: string;
+  chief?: MapComposerBot;
+} {
+  if (!targets.tags.some((tag) => tag.kind === "everyone")) return { botIds: targets.botIds };
+  if (stop) return { botIds: targets.botIds, text: targets.words };
+  const chief = everyoneChief(bots);
+  if (!chief) return { botIds: targets.botIds };
+  const named = targets.tags.filter((tag) => tag.kind !== "everyone").flatMap((tag) => tag.botIds);
+  return { botIds: [...new Set([chief.id, ...named])], chief };
+}
+
+/** The Chief an `@everyone` line goes to: the one over the whole team before a department's own. */
+export function everyoneChief<T extends MapComposerBot>(bots: readonly T[]): T | undefined {
+  const chiefs = bots.filter((bot) => bot.chiefOfStaff && !bot.hidden);
+  return chiefs.find((bot) => !bot.section?.trim()) ?? chiefs[0];
 }
 
 /** "Maya, Theo and 18 more": the first names, then a count. */

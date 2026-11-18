@@ -1,3 +1,4 @@
+import { type ServerText } from "../../../shared/server-text.ts";
 import type { ModelCatalog, ModelVariantOption, SendTurnInput } from "../../contracts.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { acpModelOption, acpVariantOption, offeredModels } from "./config-options.ts";
@@ -117,6 +118,7 @@ export interface SessionModelPick {
   staleProcess: boolean;
   /** Tell the person the session runs another model than the one picked; once per session for each such swap. */
   notice: string | null;
+  noticeText?: ServerText;
 }
 
 /** The model this turn asks the live session for, before the setter runs: a legacy id the driver maps
@@ -150,6 +152,7 @@ export function pickSessionModel(
   const staleProcess = Boolean(support.fallbackModel && wanted && !input.launchedThisTurn && offered.length
     && !offered.includes(wanted) && catalog.options.some((option) => option.id === wanted || option.id === requested.model));
   let notice: string | null = null;
+  let noticeText: ServerText | undefined;
   // A local injected model is never swapped for the account's fallback.
   if (support.fallbackModel && offered.length && !decodeInjectId(requested.model)
       && !staleProcess && (!wanted || !offered.includes(wanted))) {
@@ -158,6 +161,7 @@ export function pickSessionModel(
       const noticeKey = wanted ? `${wanted}\n${fallback}` : null;
       if (noticeKey && session.fallbackNotice !== noticeKey) {
         session.fallbackNotice = noticeKey;
+        noticeText = { key: "chat.notice.acpModelFallback", params: { displayName: support.displayName, wanted: wanted!, fallback } };
         notice = `${support.displayName} no longer offers ${wanted}, so this conversation uses ${fallback}. ` +
           "Choose another model for this bot to stop seeing this.";
       }
@@ -166,5 +170,5 @@ export function pickSessionModel(
       variant = undefined;
     }
   }
-  return { turn, variant, reportedModel, accountModels, staleProcess, notice };
+  return { turn, variant, reportedModel, accountModels, staleProcess, notice, ...(noticeText ? { noticeText } : {}) };
 }

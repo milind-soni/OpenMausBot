@@ -29,7 +29,7 @@ export type Explained = { where: string } | { hint: string } | null;
 /** Bots work together only within one place; said whenever a bot can't be found and the person's app never said where else
  * their bots live. */
 export const ONE_PLACE = "Bots work together only within one place, so a bot on another computer or server can't be reached from here. "
-  + "To bring them together, the person can make one place their bots' home: in the app, right-click their own server's circle at the window's left edge and choose \"Make … my home\".";
+  + "To bring them together, the person can make one place their bots' home: in the app, right-click their own server's icon on the left of the app and choose \"Make … my home\".";
 
 const fold = (value: string) => value.replace(/^@/u, "").replace(/[-_]+/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase();
 
@@ -40,11 +40,11 @@ function bringTogether(place: Place, self: Elsewhere["self"], to: "bot" | "perso
   if (place.kind === "team") return moveToTeam(place, self, to);
   const home = place.kind === "computer" ? self : self.kind === "computer" ? place : null;
   if (!home || home.kind === "computer") {
-    return `To bring ${to === "bot" ? "their" : "your"} bots together by hand, export a backup in Settings → Backups on one place and import it on the other.`;
+    return `To bring ${to === "bot" ? "their" : "your"} bots together by hand, export a backup in Settings → Import & export on one place and import it on the other.`;
   }
   const how = home.kind === "cloud"
-    ? `in the app, choose "Bring them together", or turn off "Keep this computer's bots on this computer" in Settings → MausBot Cloud`
-    : `in the app, right-click ${home.name}'s circle at the window's left edge and choose "Make ${home.name} my home"`;
+    ? `in the app, choose "Bring them together", or turn off "Keep this computer's bots on this computer" in Settings → Import & export → Move to My Cloud`
+    : `in the app, right-click ${home.name}'s icon on the left of the app and choose "Make ${home.name} my home"`;
   return to === "bot" ? `Offer to bring their bots together on ${home.name}: ${how}.` : `To bring your bots together on ${home.name}, ${how}.`;
 }
 

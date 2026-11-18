@@ -68,7 +68,8 @@ export function startDueTimer(options: DueTimerOptions): DueTimer {
     if (stopped) return;
     if (running) { pokedWhileRunning = true; return; }
     const wait = dueIn();
-    if (wait !== null && wait <= DUE_CLOCK_MS && now() + wait < firesAt) arm(wait);
+    // Past on the wall clock with the timer still pending: a wake moved the clock on and left the timer with its awake time to run.
+    if (wait !== null && wait <= DUE_CLOCK_MS && (now() + wait < firesAt || firesAt < now())) arm(wait);
   };
   const fire = () => {
     disarm();

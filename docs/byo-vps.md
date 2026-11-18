@@ -6,6 +6,17 @@ Cua container there — a Linux desktop it can see and control. SSH is the only 
 only surface exposed: OpenMausBot never opens a public port on the VPS, never stores your SSH key or
 passphrase, and never runs an agent remotely.
 
+## Choosing the backend
+
+The published [Your own VPS guide](https://docs.openmausbot.com/docs/computers/byo-vps)
+shows the setup steps and configuration fields. In 0.1.151 and 0.1.152, the Simple layout can
+hide the backend selector for an existing bot (#5225; selector fix #5228). The guide
+includes a stopped-app `bots.json` workaround for affected builds. Do not look for
+an Advanced-only Access page in that layout.
+
+Using a VPS only as a bot’s computer leaves MausBot and its agents on their current
+host. To move the whole server to a VPS, use [Deploy on a VPS](deploy-vps.md).
+
 ## What works
 
 - A per-bot Linux desktop in a managed container on your VPS, driven through the official Cua tools.
@@ -23,7 +34,8 @@ passphrase, and never runs an agent remotely.
 ## Prerequisites
 
 - **Locally:** a `docker` CLI, version 18.09 or newer (that is when `docker -H ssh://` shipped). The Docker
-  daemon does not need to run locally — only the CLI is used.
+  daemon does not need to run locally — only the CLI is used; install it with the one line for your platform
+  below.
 - **On the VPS:** a running Docker daemon (`dockerd`) on x86_64 Linux.
 - **The SSH user** must be in the `docker` group on the VPS, so `docker info` works without sudo.
 
@@ -31,6 +43,20 @@ Be clear-eyed about that last point: membership in the `docker` group is root-eq
 Anyone who can talk to the daemon can mount the host filesystem into a container. Using this feature means
 trusting the VPS — and whoever else can reach its Docker daemon — completely. Give bots a dedicated server,
 not one that also holds things you would not hand to the agent.
+
+## Install the Docker client
+
+Only the client belongs on your own computer; the daemon stays on the VPS. One line per platform:
+
+```sh
+brew install docker                     # macOS
+winget install -e --id Docker.DockerCLI # Windows 10 or 11
+sudo apt install docker-ce-cli          # Debian or Ubuntu, Docker's apt repository
+```
+
+Windows also needs its OpenSSH client (`ssh.exe`, included since Windows 10 1809), because Docker's SSH
+transport runs it. Podman cannot replace the Docker CLI here: this backend only ever runs
+`docker -H ssh://<alias>`.
 
 ## The required SSH config alias
 
@@ -40,6 +66,8 @@ supplies connection sharing and fail-fast timeouts itself: it runs each VPS comm
 `ssh_config` (under `~/.openmausbot/ssh/`) that includes your file first and fills in `ControlMaster`,
 `ControlPersist`, keepalives and a connect timeout wherever your alias leaves them unset. Anything your
 alias sets wins. Startup, previews, bot tools and their connection probes use the same settings.
+The live desktop's tunnel is the exception: it opens its own connection (`ControlPath=none`), so
+closing it never takes down a connection that docker commands share.
 For long data-directory paths, the app keeps its control socket in a private, user-owned directory
 under `/tmp` to stay within OpenSSH's socket-path limit; the config stays in the app data directory.
 Windows OpenSSH does not support connection sharing, so that platform keeps its normal SSH setup.
@@ -58,16 +86,18 @@ Host my-vps
   ConnectTimeout 10
 ```
 
-- `ControlMaster`/`ControlPath`/`ControlPersist` — every action is a docker-over-SSH exec; multiplexing turns
-  per-command connects into milliseconds over one persistent connection.
+- `ControlMaster`/`ControlPath`/`ControlPersist` — every bot action is a docker-over-SSH exec; multiplexing turns
+  per-command connects into milliseconds over one persistent connection. The live-desktop tunnel does not share it.
 - `ServerAliveInterval`/`ServerAliveCountMax`/`ConnectTimeout` — a dropped VPS must fail fast (under a
   minute, and ten seconds to connect), not hang a turn waiting on a dead TCP session.
 
 ### One server per bot
 
 The app-level alias (Settings → API keys) is the default server for every bot. A bot can also be pointed at
-its own alias: Bot Settings → Access → **Server (SSH alias)** appears whenever the **Self-hosted VPS**
-backend is chosen, and an empty field means "use the default". The bot's own server then wins for everything
+its own alias through the `vpsAlias` field in `bots.json`; omit the field to use the default.
+The older Advanced layout exposes this as Bot Settings → Access → **Server (SSH alias)**.
+If the selector is missing, follow the stopped-app workaround in the published guide.
+The bot's own server then wins for everything
 that matters to that bot — provisioning, status checks, previews, screenshots, watched desktop sessions, its
 computer tools, and deletion cleanup. The Settings inventory spans every server in play and tags each
 computer with the alias that holds it.
@@ -78,8 +108,23 @@ Self-hosted VPS computers (or by hand: `docker -H ssh://old-server rm -f openmau
 that cannot be reached never traps a bot: moving the bot to another server, switching its computer, or deleting
 it goes ahead, and the app says what may be left on that server and the command that removes it once the server
 is back. (Changing the default alias still waits until its server can be listed.) Any alias from your
-`~/.ssh/config`, host key already verified by hand, is all it takes. The field is in a saved bot's settings; a new
-bot starts on the default server.
+`~/.ssh/config`, host key already verified by hand, is all it takes. A new bot starts on the default server.
+
+### A server that pauses when idle
+
+Some cloud boxes pause after a while without traffic and refuse SSH until they are resumed. On macOS and Linux
+you can give the app a wake step: put an executable script named `wake` in the app's SSH folder
+(`~/.openmausbot/ssh/wake`, or `ssh/wake` in your data directory). When a server cannot be reached, the app
+runs it once with the alias as its only argument (`wake my-vps`), then tries the connection once more. Make the
+script resume the box with your provider's command or API and return once the server accepts SSH again; it gets
+up to two minutes. If it exits with an error, the app shows that error next to the SSH one. Without the file
+nothing changes. Only someone who can write to the data directory can add it; nothing in the app sets it.
+
+```sh
+#!/bin/sh
+# ~/.openmausbot/ssh/wake: $1 is the SSH alias the app could not reach.
+my-provider resume "$1" && my-provider wait-ready "$1"
+```
 
 **Host key first, by hand.** Connect once manually before pointing OpenMausBot at the alias:
 
@@ -89,6 +134,33 @@ ssh my-vps true
 
 That puts the host key in `known_hosts` on your terms. The app never auto-accepts a host key — an alias whose
 host is unknown simply fails until you have done this once.
+
+## A machine on your Tailscale network
+
+The server does not have to be a rented VPS. Any x86_64 Linux machine that runs Docker and that you can reach
+over SSH works the same way: a home server, a spare desktop, or a computer on your Tailscale network. The bot
+still gets its own managed desktop container on that machine; it does not take over the machine's own screen.
+
+1. On that machine: install Docker and Tailscale, sign in to Tailscale, and add the SSH user to the `docker`
+   group.
+2. On the computer running OpenMausBot: join the same tailnet and add an alias whose `HostName` is the
+   machine's Tailscale name (its MagicDNS name or `100.x` address):
+
+   ```
+   Host home-box
+     HostName home-box.your-tailnet.ts.net
+     User deploy
+     IdentityFile ~/.ssh/id_ed25519
+   ```
+
+3. Check it by hand as in [Troubleshooting](#troubleshooting): `ssh home-box true`, then
+   `docker -H ssh://home-box info`.
+4. Enter `home-box` as the alias in Settings → API keys (or as one bot's own server), then choose
+   **Self-hosted VPS** for the bot.
+
+The same trust rules apply: the bot gets full control of what Docker can reach on that machine, so prefer one
+that holds nothing you would not hand to the agent. Tailscale does not close ports that are already open to the
+internet, so firewall the machine: its SSH and Docker ports should accept connections only from the tailnet.
 
 ## Security
 

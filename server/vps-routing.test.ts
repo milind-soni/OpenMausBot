@@ -204,6 +204,7 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
     writeFileSync(join(fakeBin, "ssh"), `#!${process.execPath}
 import { createServer } from 'node:net';
 const args = process.argv.slice(2);
+if (!args.includes('-L')) process.exit(0);
 const forward = args[args.indexOf('-L') + 1];
 const port = Number(forward.split(':')[1]);
 createServer(socket => socket.end()).listen(port, '127.0.0.1');
@@ -434,6 +435,27 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
     } finally {
       rmSync(hold, { force: true });
       await preview;
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+    }
+  }, 30_000);
+
+  it("tells a Boat bot without Boat that the saved VPS is not chosen for it, instead of only asking for Boat", async () => {
+    await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } });
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      rmSync(gateFile, { force: true }); rmSync(`${acpDump}.mcp.json`, { force: true });
+      await api("PATCH", `/api/bots/${bot.id}`, { browser: false, computer: null, modelSelection: { instanceId: "vps", model: "fake-model" } });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Use the remote computer" })).status).toBe(202);
+      await until(async () => existsSync(`${acpDump}.mcp.json`), "the turn");
+      const agents = JSON.parse(readFileSync(`${acpDump}.mcp.json`, "utf8")).find((tool: { name: string }) => tool.name === "agents");
+      const token = agents.env.find((entry: { name: string }) => entry.name === "OMB_COMMS_TOKEN").value;
+      const availability = await (await fetch(`${BASE}/api/internal/computer/select`, { headers: { authorization: `Bearer ${token}` } })).json() as any;
+      const cloud = availability.options.find((option: any) => option.surface === "cloud");
+      expect(cloud.available).toBe(false);
+      expect(cloud.reason).toContain("production-vps");
+      expect(cloud.reason).toContain("Self-hosted VPS");
+    } finally {
+      writeFileSync(gateFile, "open");
       await api("POST", `/api/bots/${bot.id}/interrupt`, {});
     }
   }, 30_000);

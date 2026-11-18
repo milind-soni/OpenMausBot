@@ -1,4 +1,4 @@
-import type { LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
+import type { BitwardenCredentials, BitwardenStatus, LoginBots, LoginSummary, OnePasswordStatus } from "../../shared/logins";
 import type { ComputerHelpRef } from "../../shared/wire";
 import { api } from "@/state/store";
 
@@ -26,6 +26,18 @@ export async function disconnectOnePassword(): Promise<OnePasswordStatus> {
   return (await api<{ onePassword: OnePasswordStatus }>("/api/logins/1password", { method: "DELETE" })).onePassword;
 }
 
+export async function connectBitwarden(credentials: BitwardenCredentials): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden", { method: "POST", body: JSON.stringify(credentials) })).bitwarden;
+}
+
+export async function refreshBitwarden(): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden/refresh", { method: "POST", body: "{}" })).bitwarden;
+}
+
+export async function disconnectBitwarden(): Promise<BitwardenStatus> {
+  return (await api<{ bitwarden: BitwardenStatus }>("/api/logins/bitwarden", { method: "DELETE" })).bitwarden;
+}
+
 export async function addLogin(site: string, fields: LoginFieldsInput, bots: LoginBots, exactHost = false): Promise<LoginSummary> {
   return (await api<{ login: LoginSummary }>("/api/logins", {
     method: "POST",
@@ -33,10 +45,11 @@ export async function addLogin(site: string, fields: LoginFieldsInput, bots: Log
   })).login;
 }
 
-export async function changeLogin(id: string, change: { password?: string; totp?: string; removeTotp?: boolean; bots?: LoginBots; exactHost?: boolean }): Promise<LoginSummary> {
+export async function changeLogin(id: string, change: { site?: string; password?: string; totp?: string; removeTotp?: boolean; bots?: LoginBots; exactHost?: boolean }): Promise<LoginSummary> {
   return (await api<{ login: LoginSummary }>(`/api/logins/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify({
+      ...(change.site === undefined ? {} : { site: change.site }),
       ...(change.password ? { password: change.password } : {}),
       ...(change.removeTotp ? { totp: null } : change.totp?.trim() ? { totp: change.totp } : {}),
       ...(change.bots ? { bots: change.bots } : {}),
@@ -51,6 +64,15 @@ export async function grantVault(vaultId: string, bots: LoginBots): Promise<OneP
     method: "PATCH",
     body: JSON.stringify({ bots }),
   })).onePassword;
+}
+
+/** Bots for one 1Password item (`<vault id>:<item id>`) ahead of its vault's; null hands it back to the vault's choice. */
+export async function grantOnePasswordItem(item: string, bots: LoginBots | null): Promise<void> {
+  const [vaultId = "", itemId = ""] = item.split(":");
+  await api(`/api/logins/1password/items/${encodeURIComponent(vaultId)}/${encodeURIComponent(itemId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ bots }),
+  });
 }
 
 export async function deleteLogin(id: string): Promise<void> {

@@ -33,6 +33,20 @@ describe("ToolActivity in Simple mode", () => {
     }
   });
 
+  it("says which MCP server failed and why on the row itself, whole, in both modes, with the tool's name in the details", () => {
+    const problem = "mail needs you to sign in before its tools work. Open Apps → MCP servers and sign in to it.";
+    for (const advanced of [false, true]) {
+      mode.advanced = advanced;
+      const html = render({ name: "mcp__mail__search_threads", ok: false, problem, output: "Error dialing http://127.0.0.1:18080/b/REDACTED/mcp-mail" });
+      expect(html, `advanced ${advanced}`).toContain(`<span class="min-w-0 max-w-[30rem] leading-5 font-medium">${problem}</span>`);
+      expect(html, `advanced ${advanced}`).toMatch(/data-testid="tool-name">mcp__mail__search_threads</);
+    }
+  });
+
+  it("keeps the problem line off a step that did not fail", () => {
+    expect(render({ name: "mcp__mail__search_threads", ok: true, problem: "mail needs you to sign in." })).not.toContain("mail needs you to sign in.");
+  });
+
   it("keeps a command off the row, where it reads as a plain step", () => {
     const html = render({ name: "Bash", ok: false, summary: "pnpm test --filter api", input: "pnpm test --filter api" });
     expect(html).toContain("Run a command · Failed · Tool details");

@@ -104,7 +104,7 @@ describe("sidebar bot threads", () => {
     }
   });
 
-  it("folds open threads another bot opened into one collapsed group outside the six visible rows", () => {
+  it("folds idle threads another bot opened into one collapsed group outside the six visible rows, and keeps one at work in view", () => {
     const openedBy = { botId: "pepper", name: "Pepper", at: 1 };
     const own = Array.from({ length: 7 }, (_, index) => ({ threadId: `own-${index}`, title: `Own ${index}`, createdAt: 10 + index, busy: false, activity: "idle" as const }));
     const helpers = [
@@ -115,13 +115,12 @@ describe("sidebar bot threads", () => {
     const markup = renderToStaticMarkup(threadList({ ...bot, threadId: "own-6", tasks: [...own, ...helpers] }));
     const group = markup.slice(markup.indexOf("data-sidebar-helper-threads"));
     expect(group).toContain('aria-expanded="false" aria-label="Expand Opened by bots threads"');
-    expect(group).toContain('opacity-50">2</span>');
-    expect(group).toContain("animate-spin");
-    expect(markup).not.toContain('data-sidebar-thread-row="email"');
+    expect(group).toContain('opacity-50">1</span>');
+    expect(group).not.toContain("animate-spin");
+    expect(markup).toContain('data-sidebar-thread-row="email"');
     expect(markup).not.toContain('data-sidebar-thread-row="pricing"');
     expect(markup).toContain('data-sidebar-thread-row="review"');
-    for (let index = 1; index < 7; index += 1) expect(markup).toContain(`data-sidebar-thread-row="own-${index}"`);
-    expect(markup).toContain("Show all 8 threads");
+    expect(markup).toContain("Show all 9 threads");
     const searched = renderToStaticMarkup(threadList({ ...bot, threadId: "own-6", tasks: [...own, ...helpers] }, "pricing"));
     expect(searched).toContain('data-sidebar-thread-row="pricing"');
     expect(searched).not.toContain("data-sidebar-helper-threads");

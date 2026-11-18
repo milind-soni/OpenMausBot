@@ -3,6 +3,7 @@ import type { Bot, InstanceInfo } from "@/state/store";
 
 vi.hoisted(() => vi.stubGlobal("window", {}));
 const { activityPreview, botEngine, failedTurnCause, signedOutEngine } = await import("./failed-turn");
+const { setLocale } = await import("./i18n");
 
 const engine = (patch: Partial<InstanceInfo> = {}, snapshot: Partial<InstanceInfo["snapshot"]> = {}): InstanceInfo => ({
   instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude",
@@ -86,5 +87,18 @@ describe("failed turn text", () => {
     const bot = { modelSelection: { instanceId: "claude", model: "sonnet" } } as Bot;
     expect(botEngine(bot, [claude])).toBe(claude);
     expect(botEngine(undefined, [claude])).toBeUndefined();
+  });
+});
+
+describe("a failed turn the server words as a notice", () => {
+  const restarted = { name: "error: turn interrupted — OpenMausBot restarted", ok: false as const, nameCode: "chat.notice.restartInterrupted" };
+  it("previews in the person's language with its code, and in English without one", () => {
+    setLocale("pt-br");
+    try {
+      expect(activityPreview(restarted, undefined)).toBe("Sessão interrompida: o OpenMausBot reiniciou.");
+      expect(activityPreview({ name: restarted.name, ok: false }, undefined)).toBe("turn interrupted — OpenMausBot restarted");
+    } finally {
+      setLocale("en");
+    }
   });
 });

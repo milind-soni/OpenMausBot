@@ -11,14 +11,14 @@ differences with OpenCode 2.x.
 
 | Provider | OpenCode | Chat engine | Claude Code | Codex |
 |---|---|---|---|---|
-| OpenRouter | Yes | Yes | Only through Claude Code's own settings | Not yet |
-| Fireworks AI | Yes | Yes | Only through Claude Code's own settings | Not yet |
-| DeepSeek | Yes | Yes | Only through Claude Code's own settings | Not yet |
+| OpenRouter | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
+| Fireworks AI | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
+| DeepSeek | Yes | Yes | Custom endpoint, or Claude Code's own settings | Not yet |
 | Cline | Yes | Yes | No | No |
-| Your own OpenAI-compatible address | Yes, in OpenCode's config file | Yes | No | Not yet |
-| Your own Anthropic-compatible address | Not tested | No | Only through Claude Code's own settings | No |
+| Your own OpenAI-compatible address | Yes, in OpenCode's config file | Yes | No | Direct API endpoint, if it supports Responses |
+| Your own Anthropic-compatible address | Not tested | No | Custom endpoint, or Claude Code's own settings | No |
 
-"Chat engine" is OpenMausBot's built-in engine for OpenAI-compatible services.
+"Chat engine" is MausBot's built-in engine for OpenAI-compatible services.
 In a bot's model picker it is called **OpenAI-compatible (OpenRouter / Groq)**
 and, for now, sits in the Local group.
 
@@ -26,7 +26,8 @@ The Cline row lists its hosted model service. To run Cline's own coding agent,
 use the [Cline engine](#cline-engine).
 
 Other engines (Antigravity, Cursor, Gemini, Qwen, Grok, Droid, Kimi, Hermes,
-Pi and custom agents) use their own sign-in.
+Pi, OMP and custom agents) use their own sign-in. For an agent CLI with its own
+ACP entry point, see [Custom engines](./custom-acp.mdx).
 
 Keys you export in your shell (`~/.zshrc`, `~/.bashrc`) don't reach the
 desktop app when you open it from the Dock, Finder or an app menu: it copies
@@ -40,14 +41,14 @@ just needs your key.
 1. In a terminal, run `opencode auth login`.
 2. Pick **OpenRouter**, **Fireworks AI**, **DeepSeek** or **ClinePass** and
    paste your key.
-3. In OpenMausBot, open a bot's model picker, choose OpenCode and press the
+3. In MausBot, open a bot's model picker, choose OpenCode and press the
    refresh button (**Refresh models**). The provider's models appear in the
-   list. OpenMausBot reads the model list from an ACP session on both
+   list. MausBot reads the model list from an ACP session on both
    OpenCode 1.x and 2.x, and each model's effort levels the same way: a model
    that has them, such as GitHub Copilot's GPT and Claude models, shows them
    under **Reasoning** in the picker.
 
-OpenMausBot uses your normal OpenCode sign-ins and settings, so there is
+MausBot uses your normal OpenCode sign-ins and settings, so there is
 nothing to set up inside the app. Sign in with the same OpenCode version that
 your bots use (see [OpenCode 2.x](#opencode-2x)).
 
@@ -74,14 +75,14 @@ your bots use (see [OpenCode 2.x](#opencode-2x)).
    ```
 
    Keep this file plain JSON, with no comments or trailing commas.
-   OpenMausBot edits it when an OpenCode bot uses a model running on this
+   MausBot edits it when an OpenCode bot uses a model running on this
    computer.
 
-3. Refresh OpenCode's models in OpenMausBot.
+3. Refresh OpenCode's models in MausBot.
 
 [OpenCode's provider guide](https://opencode.ai/docs/providers/) has more
 examples. OpenCode can also use Anthropic-compatible addresses, but we haven't
-tested that with OpenMausBot.
+tested that with MausBot.
 
 On a self-hosted server that you start from a terminal, OpenCode also reads
 provider keys exported in that terminal, such as `OPENROUTER_API_KEY`,
@@ -119,6 +120,9 @@ To use more than one provider at once, add extra `openai-compat` engines to
 Give each one its own key. An engine without a key uses the key from
 Connections and sends it to that engine's address.
 
+With an OpenAI key or OpenRouter, a model that reasons gets a thinking control
+in the picker: Low, Medium or High. Leave it unset for the model's default.
+
 ### Free OpenRouter models
 
 A new OpenRouter account with no credit can only use free models. Paid models
@@ -142,24 +146,41 @@ stop with "This model needs OpenRouter credit".
 
 1. Install the standalone CLI with `npm install -g cline`.
 2. Run `cline auth` in a terminal to choose its provider, model and account.
-3. In OpenMausBot's bot model picker, select **Cline** and
+3. In MausBot's bot model picker, select **Cline** and
    **Cline default (configured)**.
 
-OpenMausBot uses Cline's selected provider and saved credentials. Change the
+MausBot uses Cline's selected provider and saved credentials. Change the
 provider or model through `cline auth`; the configured model is pinned before
 each prompt. An unconfigured account remains unavailable. **Set CLI** can
 select a wrapper with `--config` or `--data-dir` for a separate Cline home.
 
-Cline receives the bot's scoped MCP tools and uses OpenMausBot's approval
+Cline receives the bot's scoped MCP tools and uses MausBot's approval
 broker, including Full Access. Native Cline tool selection is not supported.
 
 ### Claude Code
 
-The app has no place yet to point Claude Code at another provider. The
-**Anthropic API key** in Connections is for Anthropic only.
+The **Anthropic API key** in Connections is for Anthropic only.
 
-You can point Claude Code itself at OpenRouter, Fireworks AI or DeepSeek,
-and your Claude bots follow it:
+To run Claude bots on DeepSeek, GLM or another host that speaks Claude
+Code's API, add a **custom endpoint** in Settings → Engines, in the Claude
+card:
+
+- **Add endpoint** takes a name, the host's base URL, its API key and,
+  optionally, a model. Leave **Model** empty and MausBot reads the host's
+  model list at `/v1/models`; type the model id (such as `deepseek-chat`)
+  when the host doesn't list its models.
+- Each endpoint is its own engine with its own directory, so a bot chooses
+  it like any other AI. It never reads or writes this computer's
+  `~/.claude`, and the Claude Code on this computer keeps its own sign-in.
+- Each bot can choose a different model from the endpoint's catalog.
+- Another gateway must support streaming Messages (`POST /v1/messages`) with
+  tool use. Enter its root URL without `/v1/messages`, such as
+  `https://gateway.example.com`.
+- The token is saved in MausBot's own `config.json` and sent only to the
+  base URL you enter. Removing an endpoint removes only that entry.
+
+You can also point Claude Code itself at OpenRouter, Fireworks AI or
+DeepSeek, and your Claude bots follow it:
 
 - Put `ANTHROPIC_BASE_URL` and your key in the `env` block of
   `~/.claude/settings.json`. Fireworks' FireConnect does this for you.
@@ -170,38 +191,100 @@ and your Claude bots follow it:
   `ANTHROPIC_CUSTOM_MODEL_OPTION` and each `ANTHROPIC_DEFAULT_*_MODEL` that
   isn't a Claude model. Otherwise bots ask for Claude models, which
   OpenRouter bills as Claude and DeepSeek replaces with its own model.
-  FireConnect's model list doesn't show up in OpenMausBot, so add
+  FireConnect's model list doesn't show up in MausBot, so add
   `ANTHROPIC_MODEL` yourself. A bot runs only the model you pick:
   `ANTHROPIC_DEFAULT_*_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL` aren't carried
   over.
 - It applies only while no Anthropic API key is saved in Connections.
 - It changes Claude Code everywhere on this computer, not just in
-  OpenMausBot.
+  MausBot.
 - On a server, use the `env` block too, not exports in the terminal that
   starts the server. Otherwise an Anthropic key saved in Connections can be
   sent to that provider.
 
 ### Codex
 
-Not yet. Codex bots use your ChatGPT sign-in, or your organisation's models.
+Codex bots can also run on an API key instead of a ChatGPT sign-in:
+
+1. Open **Settings → Engines** and expand the Codex/ChatGPT card.
+2. Under **Codex direct API**, choose **Add endpoint**.
+3. Leave the base URL empty for OpenAI, or enter another gateway's URL, such
+   as `https://gateway.example.com/v1`.
+4. Enter a name and API key. **Model** is optional; then save.
+5. Choose the new engine and a model in a bot's settings.
+
+- Usage is billed by the provider behind the URL. Saving an endpoint doesn't
+  start a sign-in or replace an existing account.
+- Each endpoint has its own Codex home in MausBot's data directory. The
+  key is saved in `config.json` and is never shown in the app or passed in
+  command arguments. Changing the URL asks for the key again.
+- A gateway must support streaming Responses (`POST /v1/responses`) with tool
+  calls. A gateway that only offers Chat Completions works with the chat
+  engine instead.
+- Each bot chooses its model. OpenAI uses the standard catalog; another
+  gateway's list is read from `/models` under its base URL, unless you typed
+  a model.
+- Remove an endpoint after moving its bots and the default model off it.
+
+### When an endpoint won't save
+
+Saving a custom gateway without a model reads its model list and says whether
+the network, the API key, the HTTP response or an empty model list failed.
+Saving with a typed model, or with the official Anthropic or OpenAI URL,
+doesn't check the key; a wrong key shows up on the bot's first turn.
+**Refresh models** reads a gateway's list again. The key is sent to read the
+list only over HTTPS or to this computer. Check that:
+
+- The URL is reachable from the computer or container running MausBot,
+  not just from the one showing the app. Inside a container, `localhost`
+  means the container itself.
+- Codex endpoints use HTTPS. Plain HTTP is accepted only on `localhost` or
+  `127.0.0.1`.
+- The gateway serves the right protocol for the agent and lists models for
+  your key.
+
+## Ollama
+
+To add Ollama, open **Settings → AI → API keys → Your own model servers** and find the
+**Ollama** row. MausBot looks for Ollama on this computer by itself. Press
+**Add Ollama** to use what it found, or enter another computer's address and
+press **Check again**.
+
+A chat engine whose address is Ollama shows up as **Ollama**, with Ollama's
+mark, in Settings and the model picker. MausBot treats an address as Ollama
+when it uses Ollama's port (11434), or when an address on this computer or your
+network answers Ollama's own API. An
+address you added before keeps its name, key and model.
+
+- Ollama needs no API key.
+- The picker lists the models you pulled, with their size, parameter count and
+  quantization. Embedding models are left out.
+- A model that can't call tools still chats, but its turns run without tools.
+  The picker marks it **No tools**. Pick a model with tool support, such as
+  `llama3.2` or `qwen3`, for work that needs tools.
+- A model that can think gets a thinking control in the picker: on or off, or
+  the levels Ollama lists for it. Turning it off is usually much faster on a
+  laptop.
+- When Ollama isn't running, can't be reached, or has no models yet, Settings
+  says so and how to fix it. To get a first model, run `ollama pull llama3.2`.
 
 ## Ollama's context window
 
 Below 23 GB of graphics memory, Ollama gives a model a 4,096-token context window
 unless told otherwise, and it drops whatever doesn't fit without an error. That is
-less than a bot's instructions and tools, so OpenMausBot sets a larger window the
+less than a bot's instructions and tools, so MausBot sets a larger window the
 first time a bot uses a model.
 
 You'll see the result in `ollama list` as a second name, such as
 `qwen3.5:4b-omb-64k`. It uses the same weights, so it takes no extra disk space.
-Removing it is safe: OpenMausBot makes it again when it needs it. To free the disk
+Removing it is safe: MausBot makes it again when it needs it. To free the disk
 space a model uses, remove both names.
 
 The window is 16K, 32K or 64K tokens, depending on your memory and the model's size.
 To choose your own, set `num_ctx` in a Modelfile or start Ollama with
 `OLLAMA_CONTEXT_LENGTH`. A `num_ctx` in a Modelfile is always left alone. With
 `OLLAMA_CONTEXT_LENGTH`, keep the model loaded before the first turn, because
-OpenMausBot can only see that setting on a running model.
+MausBot can only see that setting on a running model.
 
 ## Current limits
 
@@ -211,14 +294,14 @@ another engine's sign-in or model list.
 
 ## OpenCode 2.x
 
-OpenMausBot installs and tests OpenCode 1.x (the `opencode-ai` npm package).
-OpenCode 2.x is a separate package, `@opencode/cli`, and it also installs a
-command called `opencode`.
+MausBot installs and tests OpenCode 2.x (the `@opencode/cli` npm package).
+The older 1.x line shipped as `opencode-ai`; both packages install a command
+called `opencode`.
 
-- If you installed OpenCode from OpenMausBot's Settings, bots use that copy.
+- If you installed OpenCode from MausBot's Settings, bots use that copy.
   Otherwise they use the first `opencode` on your PATH, which is 2.x if you
   installed `@opencode/cli`. **Settings → Engines** shows the version in use.
-- 2.x works on a best-effort basis. Version-specific differences:
+- Differences from 1.x:
   - Some 2.x releases have reported missing configured providers in new
     ACP sessions ([upstream report #50236](https://github.com/anomalyco/opencode/issues/50236)).
     If a provider is missing, check the installed version and upstream

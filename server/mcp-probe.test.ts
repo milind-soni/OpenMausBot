@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MAX_REMOTE_MCP_BYTES } from "./mcp-http.ts";
-import { probeMcpServer, SIGN_IN_CHECK_TOOL } from "./mcp-probe.ts";
+import { probeEnvironment, probeMcpServer, SIGN_IN_CHECK_TOOL } from "./mcp-probe.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
@@ -49,6 +49,17 @@ function watch<T>(pending: Promise<T>): { done: boolean; value?: T } {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("custom MCP probe", () => {
+  it("keeps an npm cache that works and preserves a per-server override", () => {
+    const cache = mkdtempSync(join(tmpdir(), "omb-npm-cache-"));
+    try {
+      const inherited = { npm_config_cache: cache, PATH: "/bin" };
+      expect(probeEnvironment({ env: {} }, inherited).npm_config_cache).toBe(cache);
+      expect(probeEnvironment({ env: { npm_config_cache: "/tmp/custom-npm-cache" } }, inherited).npm_config_cache).toBe("/tmp/custom-npm-cache");
+    } finally {
+      rmSync(cache, { recursive: true, force: true });
+    }
+  });
+
   it("performs an MCP handshake and returns the bounded public tool list", async () => {
     await expect(probeMcpServer({
       command: process.execPath,
@@ -69,11 +80,11 @@ describe("custom MCP probe", () => {
       return spawned[0]!.opts;
     };
     const anyBot = await opts({ asBot: {} });
-    expect(anyBot.box).toEqual({ allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"] });
+    expect(anyBot.box).toEqual({ allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"], configured: true });
     expect(anyBot).not.toHaveProperty("cwd");
     const folder = mkdtempSync(join(tmpdir(), "omb-probe-bot-"));
     try {
-      expect(await opts({ asBot: { id: "ada", cwd: folder } })).toMatchObject({ cwd: folder, box: { botId: "ada", allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"] } });
+      expect(await opts({ asBot: { id: "ada", cwd: folder } })).toMatchObject({ cwd: folder, box: { botId: "ada", allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"], configured: true } });
     } finally { await removeTempDir(folder); }
     const plain = await opts({});
     expect(plain).not.toHaveProperty("box");
@@ -261,6 +272,69 @@ describe("remote MCP probe", () => {
         await fake.close();
         await oauth.close();
       }
+    });
+
+    describe("a server that answers an unknown tool before it asks who is calling, as Gmail's MCP server does", () => {
+      const read = { name: "get_thread", annotations: { readOnlyHint: true, destructiveHint: false }, inputSchema: { type: "object", required: ["threadId"] } };
+      const asked = { tryReadOnlyTool: true };
+
+      it("needs a sign-in, found with one read-only tool that has nothing to work on, and nothing runs", async () => {
+        const oauth = await startFakeOAuth();
+        const fake = await startFakeHttpMcp({ guard: "listed-tools", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, tools: [buy, read] });
+        try {
+          await expect(probeMcpServer(anonymous(fake.url), 8_000, undefined, asked))
+            .resolves.toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
+          expect(fake.refusedCalls).toEqual([{ name: "get_thread", arguments: {} }]);
+          expect(fake.calls).toEqual([]);
+        } finally {
+          await fake.close();
+          await oauth.close();
+        }
+      });
+
+      it("calls no real tool in a check nobody asked for", async () => {
+        const oauth = await startFakeOAuth();
+        const fake = await startFakeHttpMcp({ guard: "listed-tools", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, tools: [read] });
+        try {
+          await expect(probeMcpServer(anonymous(fake.url), 8_000)).resolves.toMatchObject({ ok: true });
+          expect(fake.refusedCalls).toEqual([]);
+        } finally {
+          await fake.close();
+          await oauth.close();
+        }
+      });
+
+      it.each([
+        ["not marked read-only", { name: "trash", inputSchema: { type: "object", required: ["id"] } }],
+        ["marked read-only and destructive", { name: "purge", annotations: { readOnlyHint: true, destructiveHint: true }, inputSchema: { type: "object", required: ["id"] } }],
+        ["read-only but able to run with no arguments", { name: "list_labels", annotations: { readOnlyHint: true }, inputSchema: { type: "object" } }],
+      ])("never calls a tool %s", async (_label, tool) => {
+        const oauth = await startFakeOAuth();
+        const fake = await startFakeHttpMcp({ guard: "listed-tools", acceptBearer: oauth.isValid, wwwAuthenticate: oauth.challenge, tools: [tool] });
+        try {
+          await expect(probeMcpServer(anonymous(fake.url), 8_000, undefined, asked)).resolves.toMatchObject({ ok: true });
+          expect(fake.refusedCalls).toEqual([]);
+          expect(fake.calls).toEqual([]);
+        } finally {
+          await fake.close();
+          await oauth.close();
+        }
+      });
+
+      it("stays connected when sign-in is optional and the read-only tool only complains about its arguments", async () => {
+        const oauth = await startFakeOAuth();
+        const fake = await startFakeHttpMcp({
+          tools: [read],
+          wellKnown: { "/.well-known/oauth-protected-resource/mcp": protectedResource(oauth.issuer) },
+          callError: (params) => ({ code: -32602, message: `Bad arguments for ${(params as { name: string }).name}` }),
+        });
+        try {
+          await expect(probeMcpServer(anonymous(fake.url), 8_000, undefined, asked)).resolves.toMatchObject({ ok: true });
+        } finally {
+          await fake.close();
+          await oauth.close();
+        }
+      });
     });
 
     it("finds the protected-resource document without a www-authenticate hint", async () => {
@@ -497,4 +571,41 @@ describe("remote MCP probe", () => {
       await fake.close();
     }
   });
+
+  it("redacts complete credentials when configured values contain one another", async () => {
+    const fake = await startFakeHttpMcp({ tools: [{
+      name: "read_prefix-sensitive-suffix",
+      description: "prefix-sensitive-suffix / prefix / a.b+c / acted",
+      inputSchema: { type: "object" },
+    }] });
+    try {
+      await expect(probeMcpServer({
+        type: "http", url: fake.url,
+        headers: { "X-Short": "prefix", "X-Long": "prefix-sensitive-suffix", "X-Symbols": "a.b+c", "X-Fragment": "acted" },
+        enabled: false,
+      }, 2_000)).resolves.toEqual({
+        ok: true,
+        tools: [{ name: "read_[redacted]", description: "[redacted] / [redacted] / [redacted] / [redacted]" }],
+      });
+    } finally {
+      await fake.close();
+    }
+  });
+
+  for (const { label, text, headers } of [
+    { label: "crossing configured values", text: "abcdefghi", headers: { "X-First": "abc", "X-Second": "bcdefghi" } },
+    { label: "overlapping occurrences of one value", text: "ababa", headers: { "X-First": "aba", "X-Second": "" } },
+  ]) {
+    it(`redacts the whole matched range for ${label}`, async () => {
+      const fake = await startFakeHttpMcp({ tools: [{
+        name: `read_${text}`, description: `before ${text} after`, inputSchema: { type: "object" },
+      }] });
+      try {
+        await expect(probeMcpServer({ type: "http", url: fake.url, headers, enabled: false }, 2_000))
+          .resolves.toEqual({ ok: true, tools: [{ name: "read_[redacted]", description: "before [redacted] after" }] });
+      } finally {
+        await fake.close();
+      }
+    });
+  }
 });

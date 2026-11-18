@@ -22,6 +22,8 @@ const personSchema = z.object({
 const fileSchema = z.object({ version: z.literal(1), people: z.array(personSchema).max(MAX_PEOPLE) });
 
 export type TeamPerson = z.infer<typeof personSchema>;
+/** What changed about the team's people: someone new, someone's role, someone gone. */
+export type TeamPeopleChange = "joined" | "role" | "left";
 
 export function createTeamPeople(dataDir: string, now: () => number = Date.now) {
   const file = join(dataDir, TEAM_PEOPLE_FILE);
@@ -33,6 +35,12 @@ export function createTeamPeople(dataDir: string, now: () => number = Date.now) 
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`team people: ${file} is unreadable; starting fresh`);
   }
+  const listeners = new Set<(email: string, change: TeamPeopleChange) => void>();
+  const changed = (email: string, change: TeamPeopleChange) => {
+    for (const listener of listeners) {
+      try { listener(email, change); } catch (error) { console.warn(`team people: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+  };
   const save = () => {
     try {
       writeFileAtomic(file, `${JSON.stringify({ version: 1, people })}\n`, { mode: 0o600 });
@@ -52,6 +60,8 @@ export function createTeamPeople(dataDir: string, now: () => number = Date.now) 
         ...people.filter((person) => person.email !== address),
       ].slice(0, MAX_PEOPLE);
       save();
+      if (!known || known.leftAt !== undefined) changed(address, "joined");
+      else if (known.role !== role) changed(address, "role");
     },
     /** The Admin said this member left: no bot reports to them any more, and the picker stops offering them. */
     left(email: string): void {
@@ -61,6 +71,11 @@ export function createTeamPeople(dataDir: string, now: () => number = Date.now) 
       people = [{ email: address, role: known?.role ?? "member", firstSeenAt: known?.firstSeenAt ?? at, lastSeenAt: known?.lastSeenAt ?? at, leftAt: at },
         ...people.filter((person) => person.email !== address)].slice(0, MAX_PEOPLE);
       save();
+      if (known?.leftAt === undefined) changed(address, "left");
+    },
+    onChange(listener: (email: string, change: TeamPeopleChange) => void): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
     gone(email: string): boolean {
       const address = ownerEmail(email);

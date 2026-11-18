@@ -10,7 +10,7 @@ import { audienceMember, type Audience } from "./audience.ts";
 /** The notifications that are a bot asking a person for something; "done", "mention" and the rest reach whoever sees
  * the conversation, unless one names its person (`forPerson`). */
 export const ASK_NOTIFICATIONS: ReadonlySet<NotifyKind> = new Set([
-  "approval", "question", "sign-in", "routine-failed", "routine-deferred", "turn-failed", "incident",
+  "approval", "question", "sign-in", "secret", "routine-failed", "routine-deferred", "turn-failed", "incident",
 ]);
 
 export interface AskViewer {

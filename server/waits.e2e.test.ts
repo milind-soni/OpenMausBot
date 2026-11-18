@@ -67,8 +67,9 @@ it("waits for a file with no AI, posts once in the asked chat, notifies, and con
     expect((await transcript()).find((m) => m.id === cards[1].id).card).toMatchObject({ undone: true, waitRequest: { settled: "cancelled" } });
     writeFileSync(gate, "finish"); await settledTurn();
     writeFileSync(report, "done"); writeFileSync(other, "x");
-    await expect.poll(async () => (await transcript()).filter((m) => m.wait?.status === "fired").map((m) => m.text), { timeout: 30_000 })
-      .toEqual([`the report: done. ${report} is there now.`]);
+    await expect.poll(async () => (await transcript()).filter((m) => m.wait?.status === "fired").map((m) => ({ text: m.text, textCode: m.textCode, textParams: m.textParams })), { timeout: 30_000 })
+      .toEqual([{ text: `the report: done. ${report} is there now.`, textCode: "chat.notice.waitDone.fileExists", textParams: { label: "the report", path: report } }]);
+    expect(await api("POST", `/api/threads/${bot.threadId}/undo`, { requestId: cards[0].card.requestId }, 409)).toEqual({ error: "This wait has already ended.", errorKey: "serverError.wait.alreadyEnded" });
     await expect.poll(async () => (await transcript()).some((m) => m.role === "user" && m.text?.includes("[Wait finished: the report] Say the report is ready.")), { timeout: 40_000 }).toBe(true);
     expect((await api("GET", "/api/notifications")).notifications.filter((n: any) => n.kind === "wait")).toMatchObject([{ title: "Scout's wait is over" }]);
     await new Promise((resolve) => setTimeout(resolve, 7_000));
@@ -78,9 +79,9 @@ it("waits for a file with no AI, posts once in the asked chat, notifies, and con
   }
 }, 120_000);
 
-it("refuses a new wait in the run a wait's follow-up started, so a wait never renews itself", async () => {
+it("continues successive waits in the same authorized chat after each completion", async () => {
   const { folder, gate, api, busy, settledTurn, transcript, send, turnPrompt, turnToken, close } = await scout("renew");
-  const build = join(folder, "build.txt");
+  const build = join(folder, "build.txt"), tests = join(folder, "tests.txt"), packageFile = join(folder, "package.txt");
   try {
     await send("Tell me when the build is done");
     const asked = await turnToken();
@@ -91,11 +92,21 @@ it("refuses a new wait in the run a wait's follow-up started, so a wait never re
     expect(await busy()).toBe(true);
     const followUp = await turnToken();
     expect(await api("GET", "/api/internal/waits", undefined, 200, followUp)).toEqual({ text: WAIT_MESSAGES.none });
-    const again = { label: "the build", kind: "file_changed", path: build, follow_up: "Wait for the build again." };
-    expect(await api("POST", "/api/internal/waits", again, 403, followUp)).toEqual({ error: WAIT_MESSAGES.notPerson });
+    expect((await api("POST", "/api/internal/waits", { label: "the completed build", kind: "file_exists", path: build, follow_up: "Read the build report." }, 200, followUp)).text)
+      .toContain("Carry out follow_up now in this turn: Read the build report.");
+    const next = { label: "the tests", kind: "file_exists", path: tests, follow_up: "Wait for the package." };
+    expect((await api("POST", "/api/internal/waits", next, 201, followUp)).text).toContain("Waiting for the tests");
     expect(await api("POST", "/api/internal/waits/cancel", { id: "any" }, 403, followUp)).toEqual({ error: WAIT_MESSAGES.notPerson });
     writeFileSync(gate, "finish"); await settledTurn();
-    expect((await transcript()).filter((m) => m.card?.waitRequest).map((m) => m.card.waitRequest)).toMatchObject([{ label: "the build", settled: "fired" }]);
+    unlinkSync(gate);
+    writeFileSync(tests, "passed");
+    await expect.poll(turnPrompt, { timeout: 40_000 }).toContain("[Wait finished: the tests] Wait for the package.");
+    const afterTests = await turnToken();
+    expect((await api("POST", "/api/internal/waits", { label: "the package", kind: "file_exists", path: packageFile }, 201, afterTests)).text).toContain("Waiting for the package");
+    writeFileSync(gate, "finish"); await settledTurn();
+    expect((await transcript()).filter((m) => m.card?.waitRequest).map((m) => m.card.waitRequest)).toMatchObject([
+      { label: "the build", settled: "fired" }, { label: "the tests", settled: "fired" },
+    ]);
   } finally {
     await close();
   }

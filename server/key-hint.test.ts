@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { keyHint, keyStatus, withoutKeyHints } from "./key-hint.ts";
+import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint.ts";
 
 describe("a saved key's hint", () => {
   it("is the last four characters of a key long enough to spare them, and nothing for a short one", () => {
@@ -8,6 +8,13 @@ describe("a saved key's hint", () => {
     expect(keyHint("short-key")).toEqual({});
     expect(keyStatus("")).toEqual({ configured: false });
     expect(keyStatus(undefined)).toEqual({ configured: false });
+  });
+
+  it("is given for every saved picture key, Gemini included", () => {
+    const saved = nestedKeyStatus({ imageGen: { key: "openai-image-1111", customApiKey: "gateway-key-2222", geminiKey: "gemini-image-3333" } });
+    expect([saved.openaiImageApiKey, saved.customImageApiKey, saved.geminiImageApiKey]).toEqual([
+      { configured: true, last4: "1111" }, { configured: true, last4: "2222" }, { configured: true, last4: "3333" },
+    ]);
   });
 
   it("comes off everything a client session is sent, at any depth", () => {

@@ -22,7 +22,7 @@ const OWN_SIGN_IN_WAIT_MS = 5 * 60_000;
 /** OpenMausBot's own mark for Postiz: no Postiz artwork is bundled. */
 export function PostizIcon() {
   return (
-    <svg viewBox="0 0 40 40" className="size-10 shrink-0 rounded-[10px]" aria-hidden="true">
+    <svg viewBox="0 0 40 40" className="size-10 shrink-0 rounded-[8px]" aria-hidden="true">
       <rect width="40" height="40" rx="10" fill="#612bd3" />
       <path d="M14 29V11h7.2c4.1 0 6.8 2.3 6.8 5.9s-2.7 5.9-6.8 5.9h-3.1V29zm4.1-9.7h2.8c1.9 0 3-0.9 3-2.4s-1.1-2.4-3-2.4h-2.8z" fill="#fff" fillRule="evenodd" />
     </svg>

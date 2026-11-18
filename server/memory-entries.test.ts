@@ -140,7 +140,7 @@ describe("memory with until dates and topics, on disk", () => {
     writeMemoryTopic(BOT, "dining.md", "---\ntitle: Dining\naliases: [food, lunch, restaurants]\n---\n- Loves pasta\n");
     writeFileSync(join(WORKSPACES_DIR, BOT, "memory", "notes.md"), "plain topic\n");
     const prompt = memorySystemPrompt(BOT, { managedWrites: true, fileTools: true });
-    expect(prompt).toContain("Your topic notes (not loaded; when a request touches one of these topics, read that file with your file tools before you answer):");
+    expect(prompt).toContain(`Your topic notes (not loaded; paths are relative to ${JSON.stringify(join(WORKSPACES_DIR, BOT))}, not your working folder; when a request touches one of these topics, read that file with your file tools before you answer):`);
     expect(prompt).toContain("- memory/dining.md — Dining (also: food, lunch, restaurants)");
     expect(prompt).toContain("- memory/notes.md");
     expect(memorySystemPrompt(BOT, { fileTools: false })).toContain("look it up with session_search before you answer");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { pickComputer, type ComputerOption } from "./computer-selection.ts";
+import { chosenPlace, pickComputer, type ComputerOption } from "./computer-selection.ts";
 
 const option = (surface: ComputerOption["surface"], state: "ready" | "asleep" | "missing" | "off"): ComputerOption => ({
   surface,
@@ -47,5 +47,32 @@ describe("which computer select_computer picks", () => {
     expect(pickComputer([option("cloud", "missing"), option("vm", "asleep")], "auto", "off", false).option?.surface).toBe("vm");
     expect(pickComputer([option("cloud", "missing"), option("vm", "missing")], "auto", "off", false).option?.surface).toBe("vm");
     expect(pickComputer([option("cloud", "off")], "auto", "off", false).option).toBeUndefined();
+  });
+
+  it("on Auto starts a stopped private desktop before waking or creating a cloud computer", () => {
+    // A stopped or recreatable private desktop reads as canCreate; a sleeping cloud computer as canStart.
+    expect(pickComputer([option("cloud", "asleep"), option("vm", "missing")], "auto", "off", false).option?.surface).toBe("vm");
+    expect(pickComputer([option("cloud", "asleep"), option("vm", "off")], "auto", "off", false).option?.surface).toBe("cloud");
+  });
+
+  it("on Auto keeps the place the person chose while it can be had, even when another computer is up, and moves only when asked", () => {
+    const options = [option("cloud", "ready"), option("vm", "missing"), option("browser", "ready")];
+    expect(pickComputer(options, "auto", "off", false, "vm")).toMatchObject({ option: { surface: "vm" }, current: false });
+    expect(pickComputer([option("cloud", "asleep"), option("vm", "ready")], "auto", "off", false, "cloud").option?.surface).toBe("cloud");
+    expect(pickComputer(options, "cloud", "off", false, "vm").option?.surface).toBe("cloud");
+    // A chosen place that cannot be had at all leaves Auto its usual pick.
+    expect(pickComputer([option("cloud", "missing"), option("browser", "off")], "auto", "off", false, "browser").option?.surface).toBe("cloud");
+    expect(pickComputer(options, "auto", "vm", true, "vm")).toMatchObject({ option: { surface: "vm" }, current: true });
+  });
+});
+
+describe("the place a person chose", () => {
+  it("is their pin in the conversation, else the bot's Works on, and never a pin a turn made or Auto/Off", () => {
+    expect(chosenPlace({ surface: "vm", surfaceSource: "user" }, "cloud")).toBe("vm");
+    expect(chosenPlace({ surface: "vm" }, undefined)).toBe("vm");
+    expect(chosenPlace({ surface: "cloud", surfaceSource: "auto" }, "vm")).toBe("vm");
+    expect(chosenPlace({ surface: "cloud", surfaceSource: "auto" }, undefined)).toBeUndefined();
+    expect(chosenPlace(undefined, "off")).toBeUndefined();
+    expect(chosenPlace(undefined, "browser")).toBe("browser");
   });
 });

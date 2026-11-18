@@ -13,8 +13,8 @@ export function GroupThreadList({ group, selected, query = "" }: { group: Group;
     const speakerId = roomThreadSpeakerId(group, task.threadId);
     const waiting = Boolean(speakerId) && state.bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
     return {
-      ...task, busy: roomThreadWorking(group, task.threadId), unread: task.threadId === group.threadId && group.unread,
-      activity: waiting ? "waiting-on-you" as const : undefined,
+      ...task, busy: roomThreadWorking(group, task.threadId), unread: task.unread ?? (task.threadId === group.threadId && group.unread),
+      activity: waiting || task.activity === "waiting-on-you" ? "waiting-on-you" as const : undefined,
     };
   });
   const bulk = useBulkSelect();

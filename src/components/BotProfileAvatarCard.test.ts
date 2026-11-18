@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { StoreProvider, type Bot } from "@/state/store";
 import { MASCOT_BODY_IDS, MASCOT_BODIES } from "../../shared/mascot-bodies";
-import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
+import { CARVED_BODIES, DIWALI_BODY_IDS, HALLOWEEN_BODY_IDS } from "../../shared/carved-bodies";
 import { BotProfileAvatarCard } from "./BotProfileAvatarCard";
 
 function makeBot(overrides: Partial<Bot> = {}): Bot {
@@ -48,14 +48,16 @@ describe("BotProfileAvatarCard body picker", () => {
     }
   });
 
-  it("offers the Halloween bodies in their own row", () => {
-    const markup = renderCard(makeBot({ mascotBody: "witch" }));
+  it("offers each festival's bodies in their own row", () => {
+    const markup = renderCard(makeBot({ mascotBody: "jalebi" }));
 
     expect(markup).toContain(">Halloween<");
-    for (const id of HALLOWEEN_BODY_IDS) {
-      expect(markup).toContain(`aria-label="Use the ${HALLOWEEN_BODIES[id].name} body"`);
+    expect(markup).toContain(">Diwali<");
+    for (const id of [...HALLOWEEN_BODY_IDS, ...DIWALI_BODY_IDS]) {
+      expect(markup).toContain(`aria-label="Use the ${CARVED_BODIES[id].name} body"`);
     }
-    expect(markup).toContain(`aria-pressed="true" aria-label="Use the ${HALLOWEEN_BODIES.witch.name} body"`);
+    expect(markup).toContain(`aria-pressed="true" aria-label="Use the ${CARVED_BODIES.jalebi.name} body"`);
+    expect(markup).toContain(`aria-pressed="false" aria-label="Use the ${CARVED_BODIES.witch.name} body"`);
   });
 
   it("marks the current body pressed and the rest unpressed, defaulting to cursor", () => {
@@ -102,5 +104,32 @@ describe("BotProfileAvatarCard body picker", () => {
 
       expect(markup).not.toContain(">Body<");
     }
+  });
+});
+
+function colorButton(markup: string, color: string): string {
+  const tag = markup.match(new RegExp(`<button[^>]*aria-label="Use ${color} mascot color"[^>]*>`))?.[0];
+  expect(tag, `${color} color button`).toBeDefined();
+  return tag ?? "";
+}
+
+describe("BotProfileAvatarCard color picker", () => {
+  it("keeps the color picker for a custom photo in every flat crop", () => {
+    for (const crop of ["circle", "rounded", "square"] as const) {
+      const markup = renderCard(makeBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: crop, color: "blue" }));
+
+      expect(markup).toContain(">Color<");
+      expect(colorButton(markup, "blue")).toContain('aria-pressed="true"');
+      expect(colorButton(markup, "green")).toContain('aria-pressed="false"');
+      expect(markup).not.toContain(">Expression<");
+    }
+  });
+
+  it("shows the color picker for the mascot too", () => {
+    const markup = renderCard(makeBot());
+
+    expect(markup).toContain(">Expression<");
+    expect(markup).toContain(">Color<");
+    expect(markup).toContain('aria-label="Use green mascot color"');
   });
 });

@@ -2,9 +2,11 @@
 // sessions) and the turn running in it.
 import type { RequestOutcome, SendTurnInput } from "../../contracts.ts";
 import type { spawnCli } from "../../procs.ts";
+import { noticeFailure } from "../../chat-notices.ts";
 import { errorReplyFailure, type ErrorReplyFailure } from "../engine-errors.ts";
 import type { AcpConfig } from "./core.ts";
 import type { AcpHost, AcpLink } from "./host.ts";
+import type { AcpTurnSteering } from "./steer.ts";
 
 export type AcpAskFinish = (
   behavior: string,
@@ -36,6 +38,7 @@ export interface AcpTurn {
   stopQuietWatch: (() => void) | null;
   flushAssistantText: () => void;
   receiveModelVariants: (result: any) => void;
+  steering?: AcpTurnSteering;
 }
 
 export interface AcpSession {
@@ -60,6 +63,8 @@ export interface AcpSession {
   dead: boolean;
   readonly stderr: string;
   current: AcpTurn | null;
+  /** The slash commands the agent last advertised for this session. */
+  commands?: ReadonlySet<string>;
   fallbackNotice?: string;
   launchModel?: string;
 }
@@ -90,6 +95,6 @@ export function endTurn(current: AcpTurn, ok: boolean, stopReason: string | null
     const { stopReason: failed, ...error } = errorReply;
     return { ok: false, stopReason: failed, error };
   }
-  if (ended && !current.state.producedItem) return { ok: false, stopReason: "empty_turn", error: { message: `${ai} finished without replying.` } };
+  if (ended && !current.state.producedItem) return { ok: false, stopReason: "empty_turn", error: noticeFailure("chat.notice.acpEmpty", { provider: ai }) };
   return { ok, stopReason };
 }

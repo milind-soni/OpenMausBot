@@ -1,6 +1,6 @@
 // The verified session's `clouds` (contract v1, additive): every Cloud this person owns and every team's Cloud they are
 // in, the account's primary Cloud first. Only the Admin lists a Cloud; a page never names one.
-import { CLOUD_SETUP_STEPS, homeOrigin, parseCloudPower } from "./cloud-home.mjs";
+import { CLOUD_SETUP_STEPS, homeOrigin, parseCloudPower, parseFormerOrigins } from "./cloud-home.mjs";
 import environments from "./environments.cjs";
 
 export const MAX_CLOUDS = 20;
@@ -63,9 +63,10 @@ function parseCloudEntry(input) {
   // list (an Admin with Remove from list says so only for one of their own, in no team, that ended or was never paid for).
   const deleteAfter = DEAD.includes(input.status) && Number.isSafeInteger(input.deleteAfter) && input.deleteAfter > 0 ? input.deleteAfter : null;
   const removable = input.removable === true && DEAD.includes(input.status) && managed && input.role === "owner" && teamId === null;
+  const formerOrigins = parseFormerOrigins(input.formerOrigins, origin);
   return { id: input.id, name, color: Object.hasOwn(CLOUD_SWATCH_COLORS, input.color) ? input.color : null, role: input.role,
     tier: typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : null, runsOn: input.runsOn, status: input.status, origin, teamId,
-    primary: input.primary, managed, ...(setup ? { setup } : {}), ...(lastSeenAt ? { lastSeenAt } : {}), ...(version ? { version } : {}), ...(power ? { power } : {}),
+    primary: input.primary, managed, ...(formerOrigins.length ? { formerOrigins } : {}), ...(setup ? { setup } : {}), ...(lastSeenAt ? { lastSeenAt } : {}), ...(version ? { version } : {}), ...(power ? { power } : {}),
     ...(deleteAfter ? { deleteAfter } : {}), ...(removable ? { removable: true } : {}) };
 }
 
@@ -149,6 +150,17 @@ export function parseCloudRenewal(clouds) {
     renewsAt: Number.isSafeInteger(own.renewsAt) && own.renewsAt > 0 ? own.renewsAt : null, endsAt, keptDays: kept, ...(team ? { team } : {}) };
 }
 
+/** My Cloud as the verified session names it, for knowing it again after it moved to another provider: its address, its id
+ * (the person's own Cloud the list has at that address; null without one), and every address it had before
+ * (`formerOrigins`, the summary's and the list's). Null while the session names no My Cloud. */
+export function myCloudOf(state) {
+  const machine = state?.status === "connected" ? state.machine : null;
+  if (!machine) return null;
+  const origin = machine.origin ?? null;
+  const listed = origin && Array.isArray(state.clouds) ? state.clouds.find(cloud => ownCloud(cloud) && cloud.origin === origin) ?? null : null;
+  return { origin, id: listed?.id ?? null, formerOrigins: [...new Set([...(machine.formerOrigins ?? []), ...(listed?.formerOrigins ?? [])])] };
+}
+
 /** Every Cloud of the person's own besides the primary (My Cloud): each a place of its own, as a team's Cloud is. */
 export function otherOwnClouds(clouds) {
   return Array.isArray(clouds) ? clouds.filter(cloud => ownCloud(cloud) && !cloud.primary) : [];
@@ -188,15 +200,21 @@ export function ownCloudPlaces(clouds) {
 }
 
 /** The saved places once the session says where the account's own machine is: the place listed as home at another
- * address was My Cloud before this one. It leaves the list when the session's list has it as ended, or not at all;
- * otherwise (still one of the person's Clouds, or an Admin without the list) it stays, as a place of its own. */
+ * address was My Cloud before this one, unless that address is one My Cloud had before it moved to another provider: then
+ * the place moves to My Cloud's address with it, keeping its id, name and colour (while none is saved there yet). Another
+ * Cloud's leaves the list when the session's list has it as ended, or not at all; otherwise (still one of the person's
+ * Clouds, or an Admin without the list) it stays, as a place of its own. */
 export function withoutOldCloudHome(saved, state) {
   const machine = state?.status === "connected" ? state.machine : null;
   if (!machine?.origin || machine.status === "provisioning") return saved;
-  const clouds = state.clouds;
+  const clouds = state.clouds, former = myCloudOf(state)?.formerOrigins ?? [];
   let next = saved;
   for (const entry of saved.environments) {
     if (entry.home !== true || entry.origin === machine.origin) continue;
+    if (former.includes(entry.origin) && !next.environments.some(other => other.origin === machine.origin)) {
+      next = { ...next, environments: next.environments.map(candidate => (candidate.id === entry.id ? { ...candidate, origin: machine.origin } : candidate)) };
+      continue;
+    }
     const listed = Array.isArray(clouds) ? clouds.find(cloud => cloud.origin === entry.origin) ?? null : null;
     if (Array.isArray(clouds) && (!listed || cloudState(listed) === "ended")) { next = environments.withoutEnvironment(next, entry.id); continue; }
     const { home: _home, ...rest } = entry;

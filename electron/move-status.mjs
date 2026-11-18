@@ -62,10 +62,12 @@ function reasonOf({ journal, phase, state, cloud, kept, facts, now }) {
   return null;
 }
 
-/** The journal's last failure, its sentence made safe to send; a journal from before failures had codes reads as `error`. */
+/** The journal's last failure, its sentence made safe to send; a journal from before failures had codes reads as `error`.
+ * A check's failure leads with what it found missing, by kind and count (move-gaps.mjs), which the Admin keeps whole. */
 function failureIn(journal) {
   const failure = record(journal?.failure) ? journal.failure : null;
-  const message = safeSentence(journal?.error);
+  const gaps = typeof journal?.gaps === "string" && journal.gaps ? journal.gaps : null;
+  const message = safeSentence(gaps ? `Missing: ${gaps}. ${journal?.error ?? ""}` : journal?.error);
   if (!failure && !message) return null;
   const count = Number.isSafeInteger(failure?.count) && failure.count > 0 ? failure.count : Number.isSafeInteger(journal?.tries) && journal.tries > 0 ? journal.tries : 1;
   return {

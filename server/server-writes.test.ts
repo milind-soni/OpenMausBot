@@ -1,5 +1,6 @@
 // Whole-file saves of bots.json and routines.json: fewer writes, and at every point the server yields to the event loop
-// (where a crash or an exit can land) the files hold what one write per change would have left.
+// (where a crash or an exit can land) the files hold what one write per change would have left, except a routine run's
+// progress, which may lag by one window (server/routine-progress-save.ts).
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -13,6 +14,7 @@ const { DATA_DIR } = await import("./config.ts");
 const { batchSaves } = await import("./save-batch.ts");
 const { Store } = await import("./store.ts");
 const { RoutineManager } = await import("./routines.ts");
+const { RUN_PROGRESS_WINDOW_MS } = await import("./routine-progress-save.ts");
 type RuntimeEvent = import("./contracts.ts").RuntimeEvent;
 
 const selection = () => ({ instanceId: "claude", model: "claude-sonnet-5" });
@@ -94,7 +96,7 @@ describe("routines.json saves", () => {
   const event = (threadId: string, rest: Record<string, unknown>) =>
     ({ eventId: `e-${Math.random()}`, provider: "claudeAgent", threadId, turnId: "turn-1", createdAt: new Date().toISOString(), ...rest }) as unknown as RuntimeEvent;
 
-  it("write a manual run four times, and a restart after any step reads what that step saved", async () => {
+  const setup = () => {
     const file = join(dir, "routines.json");
     const options = {
       file,
@@ -106,23 +108,103 @@ describe("routines.json saves", () => {
     const routine = manager.create({ name: "Morning", prompt: "Summarise.", botId: "bot-1", enabled: false, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
     vi.mocked(fs.renameSync).mockClear();
     const restart = () => new RoutineManager({ ...options, startTurn: async () => {} }).listRuns()[0];
+    const onDisk = () => JSON.parse(readFileSync(file, "utf8")).runs[0];
+    const deliver = (rest: Record<string, unknown>) => batchSaves(() => manager.handleRuntimeEvent(event("thread-1", rest)));
+    return { file, manager, routine, restart, onDisk, deliver };
+  };
+
+  afterEach(() => vi.useRealTimers());
+
+  it("write a manual run three times, and a restart after any step reads the status that step left", async () => {
+    const { file, manager, routine, restart, onDisk, deliver } = setup();
 
     const run = manager.runNow(routine.id)!;
     expect(restart()).toMatchObject({ id: run.id, status: "queued" });
     await manager.tick();
-    expect(JSON.parse(readFileSync(file, "utf8")).runs[0]).toMatchObject({ status: "running", threadId: "thread-1" });
+    expect(onDisk()).toMatchObject({ status: "running", threadId: "thread-1" });
 
-    const deliver = (rest: Record<string, unknown>) => batchSaves(() => manager.handleRuntimeEvent(event("thread-1", rest)));
     deliver({ type: "turn.started" });
     deliver({ type: "item.completed", itemType: "assistant_text", text: "Calendar clear." });
-    expect(JSON.parse(readFileSync(file, "utf8")).runs[0]).toMatchObject({ status: "running", output: "Calendar clear." });
+    // Progress waits for its window; the status a restart acts on is already there.
+    expect(onDisk()).toMatchObject({ status: "running" });
+    expect(onDisk().output).toBeUndefined();
     batchSaves(() => {
       manager.handleRuntimeEvent(event("thread-1", { type: "turn.completed", ok: true }));
       manager.noteReport(run.id, { state: "pending" });
       manager.noteReport(run.id, { state: "quiet" });
     });
-    expect(JSON.parse(readFileSync(file, "utf8")).runs[0]).toMatchObject({ status: "completed", output: "Calendar clear.", report: { state: "quiet" } });
-    expect(writesOf("routines.json")).toBe(4);
+    expect(onDisk()).toMatchObject({ status: "completed", output: "Calendar clear.", report: { state: "quiet" } });
+    expect(writesOf("routines.json")).toBe(3);
     expect(readFileSync(file, "utf8")).not.toContain("\n");
+    manager.close();
+  });
+
+  it("save a long run's progress once per window, so a crash loses at most that window", async () => {
+    const { manager, routine, restart, onDisk, deliver } = setup();
+    manager.runNow(routine.id);
+    await manager.tick();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const started = writesOf("routines.json");
+
+    // Ten replies a second apart, with a question asked and answered between them.
+    for (let step = 1; step <= 10; step++) {
+      deliver({ type: "item.completed", itemType: "assistant_text", text: `Step ${step} done.` });
+      if (step === 4) deliver({ type: "request.opened", requestId: "r1", requestType: "permission", tool: "shell", summary: "ls" });
+      if (step === 4) deliver({ type: "request.resolved", requestId: "r1", behavior: "allow", source: "user" });
+      vi.advanceTimersByTime(1_000);
+    }
+    expect(writesOf("routines.json") - started).toBe(10_000 / RUN_PROGRESS_WINDOW_MS);
+    expect(onDisk()).toMatchObject({ status: "running", output: "Step 10 done." });
+
+    // A crash inside the next window: the newest reply is lost, the run restarts as a running one always has.
+    deliver({ type: "item.completed", itemType: "assistant_text", text: "Step 11 done." });
+    expect(onDisk().output).toBe("Step 10 done.");
+    const restarted = restart();
+    expect(restarted).toMatchObject({ status: "queued", retried: "restarted", output: "Step 10 done." });
+
+    const before = writesOf("routines.json");
+    deliver({ type: "turn.completed", ok: true });
+    expect(onDisk()).toMatchObject({ status: "completed", output: "Step 11 done." });
+    // The end took the waiting progress with it and cancelled the window: nothing writes again.
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(RUN_PROGRESS_WINDOW_MS);
+    expect(writesOf("routines.json")).toBe(before + 1);
+    manager.close();
+  });
+
+  it("write waiting progress when the scheduler stops for a backup or a move, and at once from shutdown on", async () => {
+    const { manager, routine, onDisk, deliver } = setup();
+    manager.runNow(routine.id);
+    await manager.tick();
+    deliver({ type: "item.completed", itemType: "assistant_text", text: "Half way." });
+    expect(onDisk().output).toBeUndefined();
+    manager.stop();
+    expect(onDisk().output).toBe("Half way.");
+
+    manager.start();
+    manager.close();
+    deliver({ type: "item.completed", itemType: "assistant_text", text: "Nearly there." });
+    expect(onDisk().output).toBe("Nearly there.");
+  });
+
+  it("retry failed progress writes before stopping for a backup or shutdown", async () => {
+    const { manager, routine, onDisk, deliver } = setup();
+    manager.runNow(routine.id);
+    await manager.tick();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      deliver({ type: "item.completed", itemType: "assistant_text", text: "Keep this completed step." });
+      vi.mocked(fs.renameSync).mockImplementationOnce(() => { throw Object.assign(new Error("disk full"), { code: "ENOSPC" }); });
+      vi.advanceTimersByTime(RUN_PROGRESS_WINDOW_MS);
+      expect(error).toHaveBeenCalled();
+      expect(onDisk().output).toBeUndefined();
+      manager.stop();
+      expect(onDisk().output).toBe("Keep this completed step.");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      error.mockRestore();
+      manager.close();
+    }
   });
 });

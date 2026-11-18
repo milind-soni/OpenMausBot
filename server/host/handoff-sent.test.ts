@@ -7,6 +7,13 @@ const recipient = { id: "buyer", name: "Buyer Research", color: "green" };
 const sales = { id: "sales", name: "Sales", here: true };
 
 describe("sentRow", () => {
+  it("carries the files passed with the hand-off, for the line's chips", () => {
+    const report = { kind: "file" as const, path: "/data/attachments/1f0c.pdf", mime: "application/pdf", name: "report.pdf" };
+    expect(sentRow({ sender, recipient, threadId: "buyer-work", via: "direct", attachments: [report] }).attachments).toEqual([report]);
+    expect(sentRow({ sender, recipient, threadId: "buyer-work", via: "direct", attachments: [] })).not.toHaveProperty("attachments");
+    expect(sentRow({ sender, recipient, threadId: "buyer-work", via: "direct" })).not.toHaveProperty("attachments");
+  });
+
   it("says a bot outside the addressed room got the work directly, and links to its thread", () => {
     const row = sentRow({ sender, recipient, threadId: "buyer-work", title: "@Chief · work", room: sales, via: "direct" });
     expect(row).toMatchObject({
@@ -29,6 +36,12 @@ describe("sentRow", () => {
     expect([lane.tool?.name, lane.threadRef?.threadId, lane.sentDirectly]).toEqual(["Sent to Buyer Research", "lane", undefined]);
     const direct = sentRow({ sender, recipient, threadId: "buyer-work", via: "direct" });
     expect([direct.tool?.name, direct.threadRef?.title, direct.sentDirectly]).toEqual(["Sent to Buyer Research", "Teammate work", undefined]);
+  });
+
+  it("names a bot's own new thread by its title, linked like a teammate's", () => {
+    const own = sentRow({ sender, recipient: sender, threadId: "chief-review", title: "Review: GPT", via: "direct", doneWhen: "every finding has a line" });
+    expect(own).toMatchObject({ tool: { name: "Opened thread #Review: GPT", ok: true }, doneWhen: "every finding has a line",
+      threadRef: { botId: "chief", threadId: "chief-review", title: "Review: GPT" } });
   });
 });
 

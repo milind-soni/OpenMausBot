@@ -1,5 +1,5 @@
-// The trap is module scope: SECTIONS is built once at import time, and a label resolved there would keep the boot
-// language.
+// The trap is module scope: the page list is built once at import time, so it holds keys, and a label resolved there
+// would keep the boot language.
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -16,8 +16,7 @@ beforeAll(() => {
   (globalThis as { document?: unknown }).document ??= { documentElement: { dataset: {} } };
 });
 
-// Pinned to Advanced: these cover the Advanced rail. Analytics (mocked below) boots PostHog on import, which wants a
-// real browser.
+// Analytics (mocked below) boots PostHog on import, which wants a real browser.
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 vi.mock("@/lib/analytics", () => ({
   analyticsEnabled: () => false,
@@ -33,45 +32,33 @@ afterEach(() => {
   setLocale("en");
 });
 
-describe("Settings → General", () => {
-  it("renders in the language the picker selected, and re-renders in the next one", async () => {
-    setLocale("pt-br");
-    const pt = await renderSettings();
-    expect(pt).toContain("Configurações");
-    expect(pt).toContain("Provedores de modelos");
-    expect(pt).toContain("Idioma do app");
-    expect(pt).toContain("Parar sem progresso após");
+describe("Settings in another language", () => {
+  const NAV = ["settings.page.bots", "settings.page.desktops", "settings.page.spending", "settings.page.data", "settings.page.account",
+    "settings.page.browser", "settings.section.general", "settings.section.appearance", "settings.section.phoneDevices",
+    "settings.advancedMode.title"] as const;
 
-    // Same module instance, no reload: a frozen label would still say "Provedores de modelos" here.
-    setLocale("ja");
-    const ja = await renderSettings();
-    expect(ja).toContain("設定");
-    expect(ja).toContain("モデルプロバイダー");
-    for (const key of [
-      "settings.group.you", "settings.group.computers", "settings.group.account",
-      "settings.section.appearance", "settings.section.backups", "settings.section.people",
-      "settings.advancedMode.title",
-    ] as const) {
-      expect(locales.ja[key], key).toBeTruthy();
-      expect(locales.ja[key], key).not.toBe(en[key]);
-      expect(ja, key).toContain(locales.ja[key]!);
+  it("renders in the language the picker selected, and re-renders in the next one", async () => {
+    for (const locale of ["pt-br", "ja"] as const) {
+      setLocale(locale);
+      const html = await renderSettings();
+      for (const key of NAV) {
+        expect(locales[locale][key], `${locale} ${key}`).toBeTruthy();
+        expect(html, `${locale} ${key}`).toContain(locales[locale][key]!.replaceAll("&", "&amp;"));
+      }
     }
-    expect(ja).not.toContain("Provedores de modelos");
+    expect(await renderSettings()).not.toContain(locales["pt-br"]["settings.page.bots"]!);
   });
 
   it("stays English when no language is picked", async () => {
     setLocale("en");
-    const en = await renderSettings();
-    expect(en).toContain("Settings");
-    expect(en).toContain("Model providers");
-    expect(en).toContain("Stop after no progress for");
+    const html = await renderSettings();
+    for (const key of NAV) expect(html, key).toContain(en[key].replaceAll("&", "&amp;"));
   });
 
-  it("offers a labeled compact section picker without removing desktop navigation", async () => {
+  it("has no page picker of its own: the nav is the list, and the dialog keeps its name", async () => {
     const html = await renderSettings();
-    expect(html).toMatch(/<div class="[^"]*sm:hidden[^"]*"><select[^>]*aria-label="Settings"/);
-    expect(html).toContain('<option value="companion">Remote access</option>');
-    expect(html).toMatch(/<nav[^>]*hidden[^>]*sm:flex/);
+    expect(html).not.toContain("<select");
+    expect(html).toMatch(/<nav[^>]*aria-label="Settings"/);
     expect(html).toContain('id="app-settings-title" class="sr-only"');
   });
 });

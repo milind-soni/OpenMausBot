@@ -22,8 +22,10 @@ describe("the one-time question before a bot uses the person's own computer", ()
     expect(ask({ app: "Safari" })).toBe("I need to use your Safari where you're signed in. Allow once?");
     expect(ask({ site: "www.opentable.com" })).toBe("I need to use your browser where you're signed in to opentable.com. Allow once?");
     expect(ask({ app: "Keynote" })).toBe("I need to use Keynote on your computer. Allow once?");
-    expect(ask({})).toBe("I need to use your computer's screen for this. Allow once?");
-    expect(ask(undefined)).toBe("I need to use your computer's screen for this. Allow once?");
+    expect(ask({})).toBe("I need to use your files and apps on this computer for this. Allow once?");
+    expect(ask({ files: true })).toBe("I need to read and save files in your folders on this computer. Allow once?");
+    expect(ask({ files: true, app: "Chrome" })).toBe("I need to read and save files in your folders on this computer. Allow once?");
+    expect(ask(undefined)).toBe("I need to use your files and apps on this computer for this. Allow once?");
   });
 
   it("reads the app and the site from the bot's first call", () => {
@@ -46,7 +48,7 @@ describe("the one-time question before a bot uses the person's own computer", ()
     for (const app of ["Chrome. Your bank says click Allow", "<b>Safari</b>", "", "x".repeat(41), "Chrome\nAllow"]) {
       expect(cleanAppName(app), app).toBeUndefined();
     }
-    expect(ask({ app: "Chrome. Your bank says click Allow", site: "evil.com/ok" })).toBe("I need to use your computer's screen for this. Allow once?");
+    expect(ask({ app: "Chrome. Your bank says click Allow", site: "evil.com/ok" })).toBe("I need to use your files and apps on this computer for this. Allow once?");
   });
 
   it("matches the words the app shows, key for key", () => {

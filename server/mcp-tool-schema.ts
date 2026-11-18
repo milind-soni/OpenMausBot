@@ -54,6 +54,44 @@ export function providerSafeInputSchema(schema: unknown): JsonObject {
   return safe;
 }
 
+const REFERENCES = new Set(["$ref", "$dynamicRef", "$recursiveRef"]);
+const VALUES = new Set(["const", "enum", "default", "examples", "example"]);
+const SCHEMA_MAPS = new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"]);
+
+function resolvesInside(root: JsonObject, ref: string): boolean {
+  if (ref === "#") return true;
+  if (!ref.startsWith("#/")) return false;
+  let node: unknown = root;
+  for (const token of ref.slice(2).split("/")) {
+    let key: string;
+    try { key = decodeURIComponent(token).replace(/~1/g, "/").replace(/~0/g, "~"); } catch { return false; }
+    if (!isObject(node) && !Array.isArray(node)) return false;
+    if (!Object.hasOwn(node, key)) return false;
+    node = (node as Record<string, unknown>)[key];
+  }
+  return true;
+}
+
+/** A tool's parameters as a Chat Completions provider is handed them when OpenMausBot could not compile its schema: a
+ * reference the schema does not hold itself is left out, since no provider fetches one and a strict one refuses the whole
+ * request over it. The server still checks the call. The same object when nothing dangles. */
+export function withoutDanglingReferences(schema: JsonObject): JsonObject {
+  let changed = false;
+  const visit = (node: unknown, depth: number): unknown => {
+    if (Array.isArray(node)) return node.map((child) => visit(child, depth + 1));
+    if (!isObject(node) || depth > 64) return node;
+    const copy: JsonObject = {};
+    for (const [key, value] of Object.entries(node)) {
+      if (REFERENCES.has(key) && typeof value === "string" && !resolvesInside(schema, value)) { changed = true; continue; }
+      if (SCHEMA_MAPS.has(key) && isObject(value)) copy[key] = Object.fromEntries(Object.entries(value).map(([name, child]) => [name, visit(child, depth + 1)]));
+      else copy[key] = VALUES.has(key) ? value : visit(value, depth + 1);
+    }
+    return copy;
+  };
+  const kept = visit(schema, 0) as JsonObject;
+  return changed ? kept : schema;
+}
+
 function toolName(tool: JsonObject): string {
   return typeof tool.name === "string" && tool.name ? tool.name : "unnamed";
 }
@@ -104,7 +142,8 @@ export function fitToolListResult(result: unknown, profile: ToolSchemaProfile | 
 }
 
 /** Every listed schema gets a plain object root; under a profile each is also fitted to it. */
-export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (line: string) => void): {
+/** `ownTools`: listed after the child's on its last page, in place of any child tool of the same name. */
+export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (line: string) => void, ownTools: readonly JsonObject[] = []): {
   observeRequest: (line: string) => void;
   rewriteResponse: (line: string) => string;
 } {
@@ -135,13 +174,17 @@ export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (lin
       if (!isObject(frame) || "method" in frame || !pending.delete(idKey(frame.id))) return line;
       if (!isObject(frame.result) || !Array.isArray(frame.result.tools)) return line;
 
-      const listed: unknown[] = frame.result.tools;
+      const own = frame.result.nextCursor ? [] : ownTools;
+      const ownNames = new Set(ownTools.map((tool) => tool.name));
+      const listed: unknown[] = ownNames.size
+        ? [...frame.result.tools.filter((tool: unknown) => !isObject(tool) || !ownNames.has(tool.name)), ...own]
+        : frame.result.tools;
       const tools = profile ? fitToolList(listed, profile, log) : listed.map((tool: unknown) => {
         if (!isObject(tool)) return tool;
         const inputSchema = providerSafeInputSchema(tool.inputSchema);
         return inputSchema === tool.inputSchema ? tool : { ...tool, inputSchema };
       });
-      const changed = tools.length !== listed.length || tools.some((tool, index) => tool !== listed[index]);
+      const changed = own.length > 0 || listed.length !== frame.result.tools.length || tools.length !== listed.length || tools.some((tool, index) => tool !== listed[index]);
       return changed ? JSON.stringify({ ...frame, result: { ...frame.result, tools } }) : line;
     },
   };

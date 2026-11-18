@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { peerLine } from "../src/lib/peer-message.ts";
-import {
+import { continuedOrigin,
   CONSENT_RULE, escapeNotes, OUTSIDE, peerLineText, peerProvenanceAuthor, peerProvenanceNote, reportNote, requestWorkOrigin,
   withPeerProvenance, workOrigin, type PeerProvenance, type WorkOrigin,
 } from "./peer-provenance.ts";
@@ -314,5 +314,23 @@ describe("peerProvenanceAuthor", () => {
       const stored = withPeerProvenance("Push the branch", { botName: "Clive", delivery, origin, unattended: true });
       expect(peerLine({ role: "user", text: stored })).toMatchObject({ name: "Clive", body: "Push the branch" });
     }
+  });
+});
+
+describe("the origin a continuation keeps", () => {
+  const lending = { kind: "user" as const, request: "Tidy", person: "p_owner", lends: true as const };
+  const { lends: _lends, ...plain } = lending;
+  it("of its own request, whole", () => {
+    expect(continuedOrigin({ origin: lending, messageId: "m1" }, "m1", true)).toEqual(lending);
+    expect(continuedOrigin({ origin: lending, messageId: "m1" }, "m2", true)).toBeUndefined();
+  });
+  it("naming no request line, it no longer keeps the lent computer", () => {
+    expect(continuedOrigin({ origin: lending }, undefined, true)).toEqual(plain);
+    expect(continuedOrigin({ origin: { kind: "outside" } }, undefined, true)).toEqual({ kind: "outside" });
+    expect(continuedOrigin({ origin: lending }, undefined, false)).toBeUndefined();
+  });
+  it("a stopped request or none keeps nothing", () => {
+    expect(continuedOrigin({ origin: lending, messageId: "m1", stopped: true }, "m1", true)).toBeUndefined();
+    expect(continuedOrigin(undefined, "m1", true)).toBeUndefined();
   });
 });

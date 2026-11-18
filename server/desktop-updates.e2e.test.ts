@@ -30,6 +30,14 @@ case "$*" in
   *) echo "unexpected docker invocation: $*" >&2; exit 64 ;;
 esac
 `;
+const FAKE_SSH = `#!/bin/sh
+if [ "$1" = "-F" ]; then shift 2; fi
+case "$*" in
+  "-O check -- old-vps"|"-O check -- new-vps") exit 255 ;;
+  "-o BatchMode=yes -o PermitLocalCommand=no -T -- old-vps true"|"-o BatchMode=yes -o PermitLocalCommand=no -T -- new-vps true") exit 0 ;;
+  *) echo "unexpected fixture SSH command: $*" >&2; exit 64 ;;
+esac
+`;
 const OLD_VPS_CONTAINER = JSON.stringify([{
   Id: "c".repeat(64), Name: "/__NAME__", Image: `sha256:${"d".repeat(64)}`,
   Config: { Image: "localhost/openmausbot/cua-local-vm:driver-0.20.0-v5", Env: ["VNC_PW=fixture"],
@@ -147,6 +155,7 @@ describe.skipIf(process.platform === "win32")("a bot's old desktop after an app 
     writeFileSync(join(home, "static", "assets", "test.css"), "body{}");
     writeFileSync(join(fakeBin, "docker"), FAKE_DOCKER, { mode: 0o755 });
     chmodSync(join(fakeBin, "docker"), 0o755);
+    writeFileSync(join(fakeBin, "ssh"), FAKE_SSH, { mode: 0o755 });
     writeFileSync(join(fakeBin, "vps-container.json"), OLD_VPS_CONTAINER);
     // This computer's own desktop is on offer, as on a Mac with computer control turned on.
     mkdirSync(join(home, "user-data"), { recursive: true });

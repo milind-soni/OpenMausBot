@@ -18,7 +18,7 @@ import { openCredentialBroker } from "./broker.ts";
 import { openBoxEgressGate } from "./egress-gate.ts";
 import { openHarnessGate } from "./harness-gate.ts";
 import type { BoxBridge, BoxMutation } from "./plan.ts";
-import { PROBE_SPEC_ENV, type ProbeResult, type ProbeSpec } from "./box-probe.ts";
+import { PROBE_SPEC_ENV, processStart, type ProbeResult, type ProbeSpec } from "./box-probe.ts";
 
 export interface SelfCheckOptions {
   bwrap: string;
@@ -130,16 +130,19 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   const spec: ProbeSpec = {
     dataDir: data, cwd, botFolder, messagesDb: join(data, "messages.db"), configJson: join(data, "config.json"), serverFiles,
     otherWorkspace, otherTaskWorkspace: otherTask, engine: { bin: engineBin, name: engineName, says: engineSays }, marker, canaryPid: canary.pid ?? 0, serverPid: process.pid, hostTmpFile,
+    canaryStart: canary.pid ? processStart(canary.pid) : null, serverStart: processStart("self"),
     harnessPort: serverPort, egressPort: BOX_EGRESS_PORT, privatePort, publicTarget, isolatedNet,
     // Checked whenever a filter is in the setup: the no-seccomp mutation leaves it out of the box, so the check must fail.
     seccomp: Boolean(options.seccompFile),
+    cpuList: existsSync("/sys/devices/system/cpu/possible"),
   };
   const wrapped = runner.wrap({
     command: process.execPath, args: [options.probeScript ?? BOX_PROBE_SCRIPT], cwd, botId: "probe",
     env: {
       PATH: [engineBin, process.env.PATH].filter(Boolean).join(delimiter), HOME: home, LANG: process.env.LANG, TMPDIR: "/tmp",
-      // What must not get in: a control-plane secret, a workspace credential and an unlisted name, each holding the marker.
-      OMB_CLOUD_BOOTSTRAP_SECRET: marker, COMPOSIO_API_KEY: marker, SOME_OTHER_SECRET: marker,
+      // What must not get in: a control-plane secret, a workspace credential, an operator's own setting, the CLI's
+      // session token and an unlisted name, each holding the marker.
+      OMB_CLOUD_BOOTSTRAP_SECRET: marker, COMPOSIO_API_KEY: marker, OMB_SIGNIN_SMTP_URL: `smtp://user:${marker}@mail.invalid`, OPENMAUSBOT_TOKEN: marker, SOME_OTHER_SECRET: marker,
       // The real-looking key the broker takes over; its upstream is the fixture server, which answers 200 only to the real key.
       ...(credentials ? { ANTHROPIC_API_KEY: brokerKey, ANTHROPIC_BASE_URL: `http://127.0.0.1:${serverPort}/v1` } : {}),
     },

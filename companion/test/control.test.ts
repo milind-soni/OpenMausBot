@@ -10,8 +10,7 @@ let devices: DeviceRegistry;
 let connectedDeviceIds: string[] = [];
 let disconnectedDeviceIds: string[] = [];
 let revokedDeviceIds: string[] = [];
-let tailscaleRefreshes = 0;
-let completedTailscaleRefreshes = 0;
+const routeBodies: unknown[] = [];
 const CONTROL_TOKEN = "c".repeat(43);
 let controlToken: string | null = CONTROL_TOKEN;
 const withToken = { "x-openmausbot-control-token": CONTROL_TOKEN };
@@ -53,10 +52,9 @@ beforeAll(async () => {
     revoked: (deviceId) => {
       revokedDeviceIds.push(deviceId);
     },
-    refreshTailscale: async () => {
-      tailscaleRefreshes += 1;
-      await Promise.resolve();
-      completedTailscaleRefreshes += 1;
+    setDirectRoutes: (body) => {
+      routeBodies.push(body);
+      return typeof (body as { wifi?: unknown })?.wifi === "boolean";
     },
   });
   port = await new Promise<number>((resolve) =>
@@ -70,7 +68,7 @@ afterAll(async () => {
 
 describe("the per-launch control token", () => {
   it("refuses every route without it, so a page served from the control port cannot pair a device", async () => {
-    for (const [method, path] of [["POST", "/pairing"], ["GET", "/state"], ["DELETE", "/pairing"], ["POST", "/tailscale/refresh"], ["POST", "/devices/x/browser-control"], ["DELETE", "/devices/x"]]) {
+    for (const [method, path] of [["POST", "/pairing"], ["GET", "/state"], ["DELETE", "/pairing"], ["PUT", "/routes"], ["POST", "/devices/x/browser-control"], ["DELETE", "/devices/x"]]) {
       const tokenless = await ask(method, path, { origin: `http://127.0.0.1:${port}` }, undefined, {});
       expect(tokenless.status, `${method} ${path}`).toBe(403);
       expect(JSON.stringify(tokenless.body)).not.toMatch(/omb_pair_|"code"/);
@@ -193,20 +191,18 @@ describe("origins the control server will change state for", () => {
     await ask("DELETE", "/pairing");
   });
 
-  it("refreshes Tailscale before returning state without opening pairing", async () => {
-    const before = tailscaleRefreshes;
-    const refreshed = await ask("POST", "/tailscale/refresh");
-
-    expect(refreshed.status).toBe(200);
-    expect(tailscaleRefreshes).toBe(before + 1);
-    expect(completedTailscaleRefreshes).toBe(tailscaleRefreshes);
-    expect(refreshed.body.pairing).toBeNull();
+  it("takes the desktop app's direct ways in, and runs no Tailscale route of its own", async () => {
+    const put = await ask("PUT", "/routes", { "content-type": "application/json" }, JSON.stringify({ wifi: false, tailscale: true, tailnetName: "mac.tail1.ts.net" }));
+    expect(put.status).toBe(200);
+    expect(routeBodies.at(-1)).toEqual({ wifi: false, tailscale: true, tailnetName: "mac.tail1.ts.net" });
+    expect((await ask("PUT", "/routes", { "content-type": "application/json" }, JSON.stringify({ wifi: "yes" }))).status).toBe(400);
+    expect((await ask("POST", "/tailscale/refresh")).status).toBe(404);
   });
 
-  it("refuses a Tailscale refresh from a foreign page", async () => {
-    const before = tailscaleRefreshes;
-    expect((await ask("POST", "/tailscale/refresh", { origin: "https://evil.example" })).status).toBe(403);
-    expect(tailscaleRefreshes).toBe(before);
+  it("refuses a routes change from a foreign page", async () => {
+    const before = routeBodies.length;
+    expect((await ask("PUT", "/routes", { origin: "https://evil.example", "content-type": "application/json" }, JSON.stringify({ wifi: true, tailscale: true }))).status).toBe(403);
+    expect(routeBodies.length).toBe(before);
   });
 
   it("does not let a stale conditional close cancel a replacement code", async () => {

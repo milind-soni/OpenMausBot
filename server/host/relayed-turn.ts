@@ -29,7 +29,7 @@ export function relayedTurn(deps: RelayedTurnDeps) {
     }
     const userMessage = deps.store.appendMessage(threadId, { role: "user", kind: "text", text, peerAsk, relay });
     void deps.startTurn(botId, prompt, { threadId, peerAsk, origin: OUTSIDE, userMessage }).catch((error: unknown) => {
-      deps.store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedTurnTool(`this conversation could not carry on — ${error instanceof Error ? error.message : String(error)}`) });
+      deps.store.appendMessage(threadId, { role: "bot", kind: "activity", tool: failedTurnTool(`this conversation could not carry on — ${error instanceof Error ? error.message : String(error)}`, { text: { key: "chat.notice.relayCouldNotContinue", params: { error: error instanceof Error ? error.message : String(error) } } }) });
     });
   };
 }

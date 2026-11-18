@@ -31,7 +31,7 @@ vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.owne
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { FailedTurnRow } = await import("./ChatView");
-const { placeRowViewFor } = await import("@/lib/place-view");
+const { panelCloudRefusal, placeRowViewFor } = await import("@/lib/place-view");
 
 
 const stored = (place: PlaceRow): NonNullable<Message["tool"]> => failedTurnTool(placeRowText(place), { place });
@@ -106,7 +106,7 @@ describe("the phone row", () => {
       [{ state: "cc-unavailable", params: { bot: "Scout" }, source: "routine" },
         "Cloud desktops can't start right now. It isn't anything you did. Change where this routine runs."],
       [{ state: "cc-at-once", params: { bot: "Bo", plan: "Personal", max: 1, holders: ["Ada"] }, source: "works-on" },
-        "Your Personal plan includes 1 cloud desktop, and Ada has it. Manage your cloud desktops in Settings → Bot desktops."],
+        "Your Personal plan includes 1 cloud desktop, and Ada has it. Manage your cloud desktops in Settings → Desktops & browser → Desktops."],
     ];
     for (const [place, words] of rows) {
       const tool = stored(place);
@@ -114,5 +114,17 @@ describe("the phone row", () => {
       expect(phoneCause(onPhone.name)).toBe(words);
       expect(failedTurnCause(onPhone.name)).toBe(words);
     }
+  });
+});
+
+describe("the computer panel's refused cloud desktop", () => {
+  const TRIAL = "Your Pro free trial's 20 cloud computer hours are used up. Your full allowance starts with your first payment on 14 Nov.";
+  it("reads the Admin's limit from the home's error body, and a free trial's words from an Admin that sends none", () => {
+    const answered = (body: Record<string, unknown>) => Object.assign(new Error(String(body.error)), { status: 500, body });
+    expect(panelCloudRefusal(answered({ error: "Words this app doesn't know.", cloudLimit: { reason: "at_once", plan: "Max", limit: 4, used: 4 } }), "Words this app doesn't know.", true))
+      .toEqual({ state: "cc-at-once", params: { plan: "Max", max: 4 } });
+    expect(panelCloudRefusal(answered({ error: TRIAL }), TRIAL, true)).toEqual({ state: "cc-no-hours", params: { trial: true } });
+    expect(panelCloudRefusal(answered({ error: "Cloud computers are busy right now. Try again in a few minutes." }), "Cloud computers are busy right now. Try again in a few minutes.", true).state)
+      .toBe("cc-unavailable");
   });
 });

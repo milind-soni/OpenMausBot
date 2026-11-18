@@ -1,3 +1,5 @@
+import { openExternalLink } from "./app-links";
+
 export interface PendingAuthorization {
   url: string;
   createdAt: number;
@@ -12,11 +14,11 @@ export function reusableConnectionUrl(page: PendingAuthorization | null | undefi
 
 /** Reserve the tab during the click, before an authorization request consumes the browser's user activation. */
 export function reserveConnectionPage() {
-  const openExternal = window.ogb?.openExternal;
+  const appOpensLinks = Boolean(window.ogb);
   let page: Window | null = null;
   let navigated = false;
   let cancelled = false;
-  if (!openExternal) {
+  if (!appOpensLinks) {
     try {
       page = window.open("", "_blank");
       if (page) page.opener = null;
@@ -28,8 +30,12 @@ export function reserveConnectionPage() {
   return {
     async open(url: string): Promise<boolean> {
       if (cancelled) return false;
-      if (openExternal) {
-        await openExternal(url);
+      if (appOpensLinks) {
+        try {
+          await openExternalLink(url);
+        } catch {
+          return false;
+        }
         return !cancelled;
       }
       if (!page || page.closed) return false;

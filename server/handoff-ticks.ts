@@ -14,18 +14,20 @@ export interface HandoffTicks {
 export function createHandoffTicks(): HandoffTicks {
   let options: { tick(): void; pace(): HandoffPace } | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  let firesAt = Infinity;
+  /** The timer fires within one busy tick. Not worked out from the clock: waking a suspended machine moves the clock on, and its
+   * pending timers keep the awake time they had left (measured on Fly, Node 22). */
+  let near = false;
   let ticking = false;
 
   const arm = (delay: number) => {
     if (timer) clearTimeout(timer);
-    firesAt = Date.now() + delay;
+    near = delay <= HANDOFF_TICK_MS.busy;
     timer = setTimeout(fire, delay);
     timer.unref();
   };
   const fire = () => {
     timer = null;
-    firesAt = Infinity;
+    near = false;
     if (!options) return;
     ticking = true;
     let pace: HandoffPace = "busy";
@@ -42,7 +44,7 @@ export function createHandoffTicks(): HandoffTicks {
 
   return {
     kick() {
-      if (!options || ticking || firesAt - Date.now() <= HANDOFF_TICK_MS.busy) return;
+      if (!options || ticking || near) return;
       arm(0);
     },
     start(next) {
@@ -53,7 +55,7 @@ export function createHandoffTicks(): HandoffTicks {
       options = null;
       if (timer) clearTimeout(timer);
       timer = null;
-      firesAt = Infinity;
+      near = false;
     },
   };
 }

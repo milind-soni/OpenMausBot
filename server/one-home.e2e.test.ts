@@ -150,9 +150,10 @@ it("a new buyer: every phase, the app killed at each one, ends with home on My C
   expect(cloudBots.find((bot) => bot.id === cloudy.id)?.name).toBe("Cloudy");
   expect(cloudBots.some((bot) => bot.id === old.id)).toBe(false);
 
-  // This computer is lent with Scout's project folder, its phone link stops, and the window opens My Cloud: once each.
+  // This computer is lent with Scout's project folder and the window opens My Cloud, once each; its phone link stays on,
+  // so a paired phone hears where the bots went.
   expect(fx.spies.lent).toEqual([[project]]);
-  expect(fx.spies.phoneStops).toBe(1);
+  expect(fx.spies.phoneStops).toBe(0);
   expect(fx.spies.opened).toEqual(["cloud"]);
 
   // The schedules on both servers: the one that runs at every start ran here only before the freeze, never on My Cloud,

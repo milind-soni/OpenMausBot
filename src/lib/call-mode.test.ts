@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { CALL_MODE_KEY, CALL_MODES, callModeHint, effectiveCallMode, liveDisclosure, parseCallMode } from "./call-mode";
+import { CALL_MODE_KEY, CALL_MODES, callModeHint, effectiveCallMode, liveDisclosure, liveKeyFormKey, parseCallMode } from "./call-mode";
 import { t } from "./i18n";
 import { localeChoices, locales } from "@/locales";
 
@@ -60,5 +60,12 @@ describe("call mode", () => {
     expect(blocked.callMode()).toBe("turns");
     blocked.setCallMode("live");
     expect(blocked.callMode()).toBe("live");
+  });
+  it("ties a Live key form to the provider and, for Azure or a custom endpoint, to its address", () => {
+    expect(liveKeyFormKey(undefined)).toBe("openai");
+    expect(liveKeyFormKey({ provider: "fish" })).toBe("fish");
+    expect(liveKeyFormKey({ provider: "custom", customEndpoint: "https://a.example.com/v1" })).toBe("custom|https://a.example.com/v1");
+    expect(liveKeyFormKey({ provider: "azure", azureEndpoint: "https://r.openai.azure.com", customEndpoint: "https://a.example.com/v1" })).toBe("azure|https://r.openai.azure.com");
+    expect(liveKeyFormKey({ provider: "custom" })).toBe("custom");
   });
 });

@@ -16,14 +16,25 @@ export function teamPrivateChatsLineDue(teamId: string, storage: Pick<Storage, "
   }
 }
 
+/** The team's welcome said it: the first private chat doesn't say it again. */
+export function markTeamPrivateChatsLineSaid(teamId: string, storage: Pick<Storage, "getItem" | "setItem"> | null = typeof localStorage === "undefined" ? null : localStorage): void {
+  try { if (storage && !storage.getItem(SEEN_KEY(teamId))) storage.setItem(SEEN_KEY(teamId), String(Date.now())); } catch {}
+}
+
 /** In every private chat with a team's bot, beside its name: who can see it. */
 export function TeamPrivateHeader() {
   return <ChatHeadAudience icon={<Lock size={12} aria-hidden="true" className="shrink-0" />} label={t("team.privateHeader")} data-chathead-private="" />;
 }
 
-/** In a team bot's shared chats (its main chat, a routine's report): everyone in the team can read them. */
-export function TeamSharedHeader({ team }: { team: { name: string } }) {
-  return <ChatHeadAudience icon={<Users size={12} aria-hidden="true" className="shrink-0" />} label={t("team.sharedHeader", { team: team.name })} data-chathead-shared="" />;
+/** Who can read a team bot's shared chats (its main chat, a routine's report, a conversation its person shared); `sharedWith`
+ * the one other person a conversation shared with one person is read by. */
+export function sharedChatAudience(team: string, onlyPeopleAdded?: boolean, sharedWith?: string): string {
+  if (sharedWith !== undefined) return t("teamSide.sharedWith", { name: sharedWith });
+  return onlyPeopleAdded ? t("team.sharedHeaderPeople") : t("team.sharedHeader", { team });
+}
+
+export function TeamSharedHeader({ team, onlyPeopleAdded, sharedWith }: { team: { name: string }; onlyPeopleAdded?: boolean; sharedWith?: string }) {
+  return <ChatHeadAudience icon={<Users size={12} aria-hidden="true" className="shrink-0" />} label={sharedChatAudience(team.name, onlyPeopleAdded, sharedWith)} data-chathead-shared="" />;
 }
 
 /** On a narrow header only the icon shows, so the bot's name keeps its room. */

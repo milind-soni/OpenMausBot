@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import test from "node:test";
 
-import { cleanWorkspaceConfig, cleanWorkspaceDir, createCleanWorkspace } from "./clean-workspace.mjs";
+import { cleanWorkspaceConfig, cleanWorkspaceDir, createCleanWorkspace, DEFAULT_PROFILE, profileDir, profilesDir } from "./clean-workspace.mjs";
 import { cloudLendingVerdict } from "./computer-sharing.mjs";
 import { createLendingTarget } from "./lending-target.mjs";
 import { installOneHome } from "./one-home-main.mjs";
@@ -97,6 +97,16 @@ test("one swap at a time: open, leave and open again at once end where the last 
   assert.deepEqual(seen, [true, true, true]);
   assert.deepEqual(w.swaps, [w.cleanDir, w.dataDir, w.cleanDir]);
   assert.equal(w.clean.active(), true);
+});
+
+test("settled() waits for the swaps asked for so far, and is already done with none", async (t) => {
+  const w = computer(t);
+  await w.clean.settled();
+  assert.deepEqual(w.swaps, []);
+  const entering = w.clean.enter();
+  await w.clean.settled();
+  assert.deepEqual(w.swaps, [w.cleanDir], "after the swap under way");
+  await entering;
 });
 
 test("the marker is the frozen copy's own, read from its folder whichever server runs", async (t) => {
@@ -275,7 +285,7 @@ test("no lending from the clean workspace: nothing is lent or asked while it run
   const w = computer(t);
   const env = { id: "c", origin: CLOUD, cloud: { id: "c" } };
   const state = { status: "connected", account: owner, machine: { status: "ready", origin: CLOUD } };
-  const target = createLendingTarget({ account: () => (w.clean.active() ? null : { state: () => state, isOwnCloud: () => true, ownClouds: () => [] }), environments: () => [env] });
+  const target = createLendingTarget({ account: () => ({ state: () => state, isOwnCloud: () => true, ownClouds: () => [] }), clean: w.clean, environments: () => [env] });
   const grant = { accountId: owner.id, origin: CLOUD };
   assert.deepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { allow: true });
   await w.clean.enter();
@@ -284,4 +294,119 @@ test("no lending from the clean workspace: nothing is lent or asked while it run
   assert.deepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { pause: "unverified" });
   await w.clean.leave();
   assert.deepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { allow: true });
+});
+
+test("a profile sits in a folder of its own, by its stable id, under one folder beside the data folder: never in the frozen copy's", () => {
+  assert.equal(profilesDir("/Users/a/.openmausbot"), "/Users/a/.openmausbot-profiles");
+  assert.equal(profileDir("/Users/a/.openmausbot", DEFAULT_PROFILE), join("/Users/a/.openmausbot-profiles", "default"));
+});
+
+test("This Mac's profile opens fresh on its own folder, and the frozen copy stays frozen: its marker, its bots and its config untouched", async (t) => {
+  const w = computer(t);
+  w.write("config.json", JSON.stringify({ language: "pt-BR", providers: { key: "secret-of-the-frozen-copy" } }));
+  w.write("bots.json", JSON.stringify([{ id: "nova" }]));
+  const dir = profileDir(w.dataDir, DEFAULT_PROFILE);
+  assert.equal(await w.clean.open(), true);
+  assert.deepEqual(w.swaps, [dir]);
+  assert.deepEqual([w.clean.active(), w.clean.profile(), w.clean.stranded(), w.clean.ownCopy()], [true, DEFAULT_PROFILE, false, false]);
+  assert.equal(w.changes, 1, "lending looks again");
+  const config = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+  assert.deepEqual(Object.keys(config).sort(), ["language", "onboarding"], "fresh: nothing of the frozen copy's but its language");
+  assert.equal(existsSync(join(dir, "bots.json")), false);
+  assert.deepEqual(JSON.parse(readFileSync(join(w.dataDir, "moved.json"), "utf8")), { v: 1, at: 1, cloud: CLOUD }, "never unfrozen");
+  assert.equal(readFileSync(join(w.dataDir, "bots.json"), "utf8"), JSON.stringify([{ id: "nova" }]));
+  assert.equal(JSON.parse(readFileSync(join(w.dataDir, "config.json"), "utf8")).providers.key, "secret-of-the-frozen-copy");
+  assert.equal(existsSync(w.cleanDir), false, "the workspace for nobody signed in is another folder");
+  assert.equal(await w.clean.open(DEFAULT_PROFILE), true);
+  assert.deepEqual(w.swaps, [dir], "open already: no second start");
+  writeFileSync(join(dir, "config.json"), JSON.stringify({ theirs: true }));
+  assert.equal(await w.clean.leave(), true);
+  assert.equal(w.running, w.dataDir);
+  assert.equal(await w.clean.open(), true);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, "config.json"), "utf8")), { theirs: true }, "what they made there stays");
+});
+
+test("a profile id is a folder name and nothing else, and the move's code never reaches a profile", async (t) => {
+  const w = computer(t);
+  for (const id of ["../.openmausbot", "", "Work", "a/b", "."]) assert.equal(await w.clean.open(id), false, id);
+  assert.deepEqual(w.swaps, []);
+  await w.clean.open();
+  const request = w.clean.realCopy(w.request);
+  assert.deepEqual(await (await request("/api/move/freeze")).json(), { frozen: true, cloud: CLOUD }, "the frozen copy's own marker");
+  await assert.rejects(request("/api/move/freeze", { method: "DELETE" }), (error) => error.code === "clean-workspace");
+  await assert.rejects(request("/api/bots"), (error) => error.code === "clean-workspace");
+  assert.deepEqual(w.requests, []);
+});
+
+test("lending goes on from a profile: the sign-in alone decides, and only the workspace for nobody who can reach the bots stops it", async (t) => {
+  const w = computer(t);
+  const env = { id: "c", origin: CLOUD, cloud: { id: "c" } };
+  let state = { status: "connected", account: owner, machine: { status: "ready", origin: CLOUD } };
+  const target = createLendingTarget({ account: () => ({ state: () => state, isOwnCloud: () => true }), clean: w.clean, environments: () => [env] });
+  const grant = { accountId: owner.id, origin: CLOUD };
+  await w.clean.open();
+  assert.equal(target.environment(), env);
+  assert.deepEqual(target.places(), [env]);
+  assert.deepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { allow: true });
+  state = { status: "signed-out", account: null, machine: null };
+  assert.notDeepEqual(cloudLendingVerdict(grant, target.cloud(env), env), { allow: true }, "signed out: nothing is lent, profile or not");
+});
+
+/** A named local environment's folder: anywhere the person chose, neither the clean workspace nor under the profiles' folder. */
+const workFolder = (w) => join(dirname(w.dataDir), "work-environment");
+const onWork = (w) => w.requests.filter(([folder]) => folder === workFolder(w));
+
+test("a named local environment is not this computer's own copy: the move gets the copy's own marker and identity, nothing else", async (t) => {
+  const w = computer(t);
+  const request = w.clean.realCopy(w.request);
+  w.running = workFolder(w);
+  assert.deepEqual([w.clean.active(), w.clean.profile(), w.clean.ownCopy()], [false, null, false]);
+  assert.deepEqual(await (await request("/api/move/freeze")).json(), { frozen: true, cloud: CLOUD });
+  assert.deepEqual(await (await request("/.well-known/openmausbot/environment")).json(), { environmentId: "own-copy-id" }, "the Admin never hears the environment's identity as this computer's");
+  for (const [route, init] of [["/api/bots?messages=0"], ["/api/cloud-send?move=1"], ["/api/move/freeze", { method: "POST" }], ["/api/move/freeze", { method: "DELETE" }], ["/api/move/forget", { method: "POST" }]]) {
+    await assert.rejects(request(route, init), { code: "clean-workspace" }, `${init?.method ?? "GET"} ${route}`);
+  }
+  await assert.rejects(w.clean.holding(() => request("/api/move/forget", { method: "POST" })), { code: "clean-workspace" });
+  assert.deepEqual(w.swaps, [], "the environment the person chose stays open");
+  assert.deepEqual(w.requests, [], "nothing reached its server");
+});
+
+test("only the data folder itself is this computer's own copy: however it is spelled, and never with no server at all", (t) => {
+  const w = computer(t);
+  w.running = `${w.dataDir}${sep}`;
+  assert.equal(w.clean.ownCopy(), true, "a trailing separator is the same folder");
+  w.running = join(w.dataDir, "..", ".openmausbot");
+  assert.equal(w.clean.ownCopy(), true);
+  w.running = null;
+  assert.equal(w.clean.ownCopy(), false);
+  w.running = `${w.dataDir}-work`;
+  assert.equal(w.clean.ownCopy(), false, "a folder beside it is another folder");
+});
+
+test("no first move from a named local environment: nothing is carried or frozen, the Admin hears why, and it starts from the data folder", async (t) => {
+  const w = moved(t, { state: ready(), journal: null, marker: null });
+  w.running = workFolder(w);
+  await w.main.kick();
+  assert.equal(w.journal, null, "no move started");
+  assert.deepEqual(onWork(w), []);
+  assert.equal(w.main.oneHome.facts().noted, "local_unavailable");
+  assert.deepEqual([w.main.moveStatus.read().phase, w.main.moveStatus.read().reason], ["none", "local_unavailable"]);
+  assert.equal(w.main.view(), null, "no line says the bots are moving");
+  w.running = w.dataDir;
+  await w.main.kick();
+  assert.equal(w.journal?.v, 1, "this computer's own copy running, the move starts");
+  assert.deepEqual(w.requests.find(([, , route]) => route.startsWith("/api/cloud-send")), [w.dataDir, "GET", "/api/cloud-send?move=1"]);
+  assert.deepEqual(onWork(w), []);
+});
+
+test("a named local environment is never forgotten in place of this computer's copy, nor topped up from", async (t) => {
+  const w = moved(t, { state: ready(), journal: done({ doneAt: 2 }) });
+  w.running = workFolder(w);
+  await w.main.kick();
+  assert.deepEqual(onWork(w), []);
+  assert.equal(w.journal.forgot, undefined, "deleted later, from the copy itself");
+  assert.equal(w.journal.version, "0.1.140", "the top-up waits too");
+  w.running = w.dataDir;
+  await w.main.kick();
+  assert.deepEqual(w.requests.filter(([, , route]) => route === "/api/move/forget"), [[w.dataDir, "POST", "/api/move/forget"]]);
 });

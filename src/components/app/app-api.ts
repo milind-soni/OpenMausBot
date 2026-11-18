@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import { api, ApiError } from "@/state/store";
 import type { AppBlockedReason, AppDocument } from "../../../shared/app";
 import type { PublishedPageCard } from "../../../shared/published-page";
@@ -6,6 +7,10 @@ import { randomUuid } from "@/lib/random-uuid";
 
 export function appDocumentPath(threadId: string, messageId: string): string {
   return `/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}/app`;
+}
+
+export function appDownloadPath(threadId: string, messageId: string, rev: number): string {
+  return `${appDocumentPath(threadId, messageId)}/download?rev=${rev}`;
 }
 
 function appActionPath(botId: string, messageId: string, action: "rpc" | "context"): string {
@@ -38,7 +43,7 @@ export async function fetchAppDocument(threadId: string, messageId: string, sign
   const query = new URLSearchParams({ origin: window.location.origin, ...(rev === undefined ? {} : { rev: String(rev) }) });
   try {
     const doc = await api<AppDocument>(`${appDocumentPath(threadId, messageId)}?${query}`, { signal });
-    if (!isRecord(doc) || typeof doc.srcdoc !== "string" || !isRecord(doc.can)) throw new AppDocumentError({ offline: false, status: 500, error: "The app's page did not arrive whole." });
+    if (!isRecord(doc) || typeof doc.srcdoc !== "string" || !isRecord(doc.can)) throw new AppDocumentError({ offline: false, status: 500, error: t("app.strip.incomplete") });
     return doc;
   } catch (error) {
     if (error instanceof AppDocumentError) throw error;

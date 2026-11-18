@@ -7,12 +7,14 @@
 // alias such as "vps" out of `cloudBackend: "vps"` and the user's messages.
 const WITHHELD_KEYS = new Set(["resumeCursors", "sshAlias", "vpsAlias", "vpsAliases"]);
 
+export const isWithheldKey = (key: string): boolean => WITHHELD_KEYS.has(key);
+
 export function scrub<T>(value: T): T {
   if (Array.isArray(value)) return value.map(scrub) as unknown as T;
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
-      if (WITHHELD_KEYS.has(key)) continue;
+      if (isWithheldKey(key)) continue;
       out[key] = scrub(inner);
     }
     return out as T;

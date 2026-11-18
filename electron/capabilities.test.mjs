@@ -126,6 +126,20 @@ describe("desktop capabilities", () => {
     expect(reasonOf("desktop-host-stopped")).toBe("cua-driver-unavailable");
   });
 
+  it.each(["win32", "linux"])("listens through Fish Audio on %s, but not from a server's page", (platform) => {
+    expect(desktopCapabilities({ platform, env: { DISPLAY: ":0" } }).dictation).toEqual({
+      available: true,
+      engine: "fish-audio",
+      onDevice: false,
+    });
+    expect(desktopCapabilities({ platform, remote: true }).dictation).toEqual({
+      available: false,
+      engine: "none",
+      onDevice: false,
+      reasonCode: "remote-server",
+    });
+  });
+
   it.each(["freebsd"])("fails closed on %s", (platform) => {
     const capabilities = desktopCapabilities({
       platform,
@@ -203,6 +217,82 @@ describe("desktop capabilities", () => {
     });
   });
 
+  describe("Omarchy (Hyprland) detection matrix", () => {
+    const hyprland = {
+      XDG_SESSION_TYPE: "wayland",
+      WAYLAND_DISPLAY: "wayland-1",
+      XDG_CURRENT_DESKTOP: "Hyprland",
+      HYPRLAND_INSTANCE_SIGNATURE: "6f2a0c1e_1762560000_123456789",
+    };
+
+    it("allows This computer on Hyprland only while Cua's plugin is active", () => {
+      expect(linuxLocalControlSupport("linux", hyprland, { hyprlandPlugin: "active" })).toEqual({
+        available: true,
+        session: "wayland",
+        compositor: "hyprland",
+      });
+    });
+
+    it("gives one plain sentence on how to turn the plugin on when it is off", () => {
+      for (const hyprlandPlugin of ["inactive", undefined, "anything"]) {
+        const support = linuxLocalControlSupport("linux", hyprland, { hyprlandPlugin });
+        expect(support).toMatchObject({
+          available: false,
+          session: "wayland",
+          compositor: "hyprland",
+          reasonCode: "linux-hyprland-plugin-required",
+        });
+        expect(support.message).toMatch(/install and enable cua-hyprland-plugin.*cua\.ai\/docs\/cua-sdk\/guides\/omarchy/);
+      }
+    });
+
+    it("keeps every other Wayland desktop blocked, whatever a plugin probe said", () => {
+      for (const env of [
+        { ...hyprland, XDG_CURRENT_DESKTOP: "ubuntu:GNOME", HYPRLAND_INSTANCE_SIGNATURE: undefined },
+        { ...hyprland, XDG_CURRENT_DESKTOP: "KDE", HYPRLAND_INSTANCE_SIGNATURE: undefined },
+        { ...hyprland, XDG_CURRENT_DESKTOP: "sway", HYPRLAND_INSTANCE_SIGNATURE: undefined },
+        { ...hyprland, XDG_CURRENT_DESKTOP: "ubuntu:GNOME" },
+        { ...hyprland, HYPRLAND_INSTANCE_SIGNATURE: "" },
+      ]) {
+        expect(linuxLocalControlSupport("linux", env, { hyprlandPlugin: "active" }), JSON.stringify(env)).toMatchObject({
+          available: false,
+          session: "wayland",
+          reasonCode: "linux-wayland-seat-safety-blocked",
+        });
+      }
+    });
+
+    it("leaves X11 unchanged, even with Hyprland variables around", () => {
+      const x11 = { XDG_SESSION_TYPE: "x11", DISPLAY: ":0" };
+      expect(linuxLocalControlSupport("linux", x11)).toEqual({ available: true, session: "x11" });
+      expect(linuxLocalControlSupport("linux", { ...x11, HYPRLAND_INSTANCE_SIGNATURE: "a", XDG_CURRENT_DESKTOP: "Hyprland" }, { hyprlandPlugin: "inactive" }))
+        .toEqual({ available: true, session: "x11" });
+    });
+
+    it("reports a ready Omarchy runtime only with the full Hyprland contract", () => {
+      const connection = {
+        schemaVersion: 1,
+        mode: "linux-wayland-hyprland-supervised",
+        platform: "linux",
+        session: "wayland",
+        compositor: "hyprland",
+        enabled: true,
+        status: "ready",
+        driver: { path: "/usr/bin/cua-driver", version: "0.41.3", source: "system-package" },
+      };
+      expect(localComputerReady("linux", connection)).toBe(true);
+      expect(localComputerReady("linux", { ...connection, compositor: "gnome-mutter" })).toBe(false);
+      expect(localComputerReady("linux", { ...connection, session: "x11" })).toBe(false);
+      expect(localComputerReady("linux", { ...connection, status: "starting" })).toBe(false);
+      expect(desktopCapabilities({ platform: "linux", env: hyprland, localConnection: connection }).localComputer).toMatchObject({
+        available: true,
+        support: "limited",
+        compositor: "hyprland",
+        driverSource: "system-package",
+      });
+    });
+  });
+
   it("never treats an embedded-looking Linux connection as local control", () => {
     expect(localComputerReady("linux", { mode: "embedded" })).toBe(false);
     expect(localComputerReady("darwin", { mode: "unavailable" })).toBe(false);
@@ -222,7 +312,7 @@ describe("desktop capabilities", () => {
       status: "ready",
       driver: {
         path: "/home/test/.local/bin/cua-driver",
-        version: "0.19.3",
+        version: "0.41.3",
         source: "user-local",
       },
     };
@@ -237,7 +327,7 @@ describe("desktop capabilities", () => {
       support: "limited",
       enabled: true,
       status: "ready",
-      driverVersion: "0.19.3",
+      driverVersion: "0.41.3",
       driverSource: "user-local",
     });
     expect(localComputerReady("linux", { ...connection, session: "wayland" })).toBe(false);

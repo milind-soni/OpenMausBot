@@ -39,7 +39,7 @@ describe("the server and the credential", () => {
     expect(request).toHaveBeenCalledWith("/api/bots?messages=0", expect.objectContaining({ headers: expect.any(Headers) }), "http://127.0.0.1:19990");
     expect((request.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toEqual(new Headers({ Authorization: "Bearer omb_sess_abc" }));
     await expect(openClient({}, { env: { OPENMAUSBOT_TOKEN: "omb_sess_abc" } }, false)).rejects.toMatchObject({ exitCode: 2, message: expect.stringContaining("never sent while looking") });
-    await expect(openClient({ url: "http://10.0.0.5:8799" }, { env: {} }, false)).rejects.toMatchObject({ exitCode: 2, message: expect.stringContaining("Insecure cleartext HTTP") });
+    await expect(openClient({ url: "http://203.0.113.9:8799" }, { env: {} }, false)).rejects.toMatchObject({ exitCode: 2, message: expect.stringContaining("open internet") });
     await expect(openClient({ port: "70000" }, { env: {} }, false)).rejects.toMatchObject({ exitCode: 2 });
   });
 

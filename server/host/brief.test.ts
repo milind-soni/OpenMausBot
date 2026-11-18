@@ -168,7 +168,7 @@ describe("the brief", () => {
     expect(shown).toContain("Aguardando sua resposta · Ada precisa dos números.");
     expect(shown).toContain("Sessão encerrada em Claude");
     expect(shown).not.toMatch(/Needs you|Waiting on your reply|Thursday/);
-    expect(widgetActions(root).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Rascunhar resposta para Ada", "Abrir no Gmail", "Dispensar o e-mail de Ada"]));
+    expect(widgetActions(root).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Criar rascunho de resposta para Ada", "Abrir no Gmail", "Dispensar o e-mail de Ada"]));
     expect(s.notified).toEqual(["Seu resumo: 2 precisam de você"]);
   });
 
@@ -213,6 +213,19 @@ describe("the brief", () => {
     const actions = widgetActions(s.card()!.widget!.root as WidgetRoot).map((entry) => [entry.label, entry.action.type, entry.action.payload]);
     expect(actions.filter(([, type]) => type === "open_url")).toEqual([["Open page", "open_url", { url: PAGE }]]);
     expect(actions.filter(([, type]) => type === "open_thread")).toHaveLength(3);
+  });
+
+  it("takes a routine's real run for its latest, not a row that only counts occurrences skipped behind it", async () => {
+    const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
+    const base = { routineId: "tidy", routineName: "Tidy my inbox", target: "bot" as const, botId: s.chief.id, runOn: "maus" as const, manual: false };
+    const done: RoutineRun = { ...base, id: "done", scheduledFor: s.now(), status: "completed", createdAt: s.now(), finishedAt: s.now() + 1_000, output: "Filed twelve emails." };
+    const counted: RoutineRun = { ...base, id: "counted", scheduledFor: s.now() + 500, status: "missed", createdAt: s.now() + 500, finishedAt: s.now() + 2_000, seenAt: s.now() + 500,
+      error: "Skipped because the previous run of this routine is still running", skipped: { count: 1, firstAt: s.now() + 500, lastAt: s.now() + 500, behind: "done" } };
+    s.runs.push(done, counted);
+    await s.brief.active("desktop", "UTC");
+    expect(s.shown()).toContain("Filed twelve emails.");
+    expect(s.shown()).not.toContain("Skipped because");
+    expect(s.shown()).not.toContain("missed");
   });
 
   it("a watch run's answer becomes rows and a prep card, and tells the person once", async () => {
@@ -290,6 +303,14 @@ describe("the brief", () => {
     expect(s.shown()).toContain("Reconnect Gmail in Connected apps.");
     expect(s.shown()).toContain("Claude is signed out");
     expect(s.shown()).toContain("8:09 AM · Standup");
+  });
+
+  it("points to Connected apps when one of several accounts was read and refused", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    await s.brief.report({ routine: {} as never, at: s.now(), trouble: [{ app: "gmail", signedOut: false, severalAccounts: true }] });
+    expect(s.shown()).toContain("Reconnect Gmail in Connected apps.");
+    expect(s.shown()).not.toContain("I'll try again soon.");
   });
 
   it("waits for a busy chat instead of writing into a turn", async () => {

@@ -27,32 +27,43 @@ export interface ControlLeaseReleaseResult {
 
 const NO_CONTROL: ControlSnapshot = { held: false, helpReason: null, heldSinceMs: null };
 const MAX_REASON_CHARS = 280;
+const LEASE_GRACE_MS = 60_000;
 
 interface Entry {
   heldSinceMs: number | null;
-  /** Open pleas, oldest first; the newest is the one shown. */
+  /** Open pleas, oldest first; the newest whose card still waits is the one shown. */
   pleas: Array<{ reason: string; ref: ComputerHelpRef }>;
   /** Opaque workspace lease. It is deliberately absent from every snapshot. */
   controlLeaseId: string | null;
+  expiry?: ReturnType<typeof setTimeout>;
 }
 
 export class ComputerControl {
   private entries = new Map<string, Entry>();
   private onChange: (botId: string, snapshot: ControlSnapshot) => void;
   private now: () => number;
+  private waits: (ref: ComputerHelpRef) => boolean;
 
   constructor(
     onChange: (botId: string, snapshot: ControlSnapshot) => void = () => {},
     now: () => number = Date.now,
+    /** Whether a plea's sign-in card still waits for the person. A plea whose card stopped, left the active branch or lost its
+     * conversation is kept but neither shown nor counted, and counts again if its card waits again. */
+    waits: (ref: ComputerHelpRef) => boolean = () => true,
   ) {
     this.onChange = onChange;
     this.now = now;
+    this.waits = waits;
+  }
+
+  private waiting(entry: Entry): Entry["pleas"] {
+    return entry.pleas.filter((plea) => this.waits(plea.ref));
   }
 
   snapshot(botId: string): ControlSnapshot {
     const entry = this.entries.get(botId);
     if (!entry) return NO_CONTROL;
-    const plea = entry.pleas.at(-1);
+    const plea = this.waiting(entry).at(-1);
     return {
       held: entry.heldSinceMs !== null,
       helpReason: plea?.reason ?? null,
@@ -69,23 +80,44 @@ export class ComputerControl {
     return this.changed(botId);
   }
 
-  /** The opaque lease is never returned in a snapshot, broadcast or API response. */
-  acquireLease(botId: string, controlLeaseId: string): ControlLeaseResult {
+  /**
+   * The opaque lease is never returned in a snapshot, broadcast or API response.
+   * `armed` starts the expiry clock at once, as a beat would, when the lease owns the hold.
+   */
+  acquireLease(botId: string, controlLeaseId: string, options: { armed?: boolean } = {}): ControlLeaseResult {
     const entry = this.entries.get(botId);
     if (entry?.heldSinceMs != null) {
-      return {
-        snapshot: this.snapshot(botId),
-        owned: entry.controlLeaseId === controlLeaseId,
-        acquired: false,
-      };
+      const owned = entry.controlLeaseId === controlLeaseId;
+      if (owned && options.armed) this.beat(botId, controlLeaseId);
+      return { snapshot: this.snapshot(botId), owned, acquired: false };
     }
     this.entries.set(botId, { heldSinceMs: this.now(), pleas: entry?.pleas ?? [], controlLeaseId });
+    if (options.armed) this.beat(botId, controlLeaseId);
     return { snapshot: this.changed(botId), owned: true, acquired: true };
+  }
+
+  /** The key whose hold this lease owns: the first, should a client reuse one lease for several takes. */
+  heldBy(controlLeaseId: string): string | undefined {
+    for (const [key, entry] of this.entries) if (entry.heldSinceMs !== null && entry.controlLeaseId === controlLeaseId) return key;
+    return undefined;
   }
 
   ownsLease(botId: string, controlLeaseId: string): boolean {
     const entry = this.entries.get(botId);
     return entry?.heldSinceMs != null && entry.controlLeaseId === controlLeaseId;
+  }
+
+  /**
+   * Answers as `ownsLease`; when owned, the hold is released 60 s after the latest beat.
+   * A hold that never beats never expires.
+   */
+  beat(botId: string, controlLeaseId: string): boolean {
+    const entry = this.entries.get(botId);
+    if (!entry || !this.ownsLease(botId, controlLeaseId)) return false;
+    clearTimeout(entry.expiry);
+    entry.expiry = setTimeout(() => this.releaseLease(botId, controlLeaseId), LEASE_GRACE_MS);
+    entry.expiry.unref?.();
+    return true;
   }
 
   /** An open plea stays: handing back is not answering the card that asked. */
@@ -104,6 +136,12 @@ export class ComputerControl {
     }
     this.drop(botId, entry);
     return { snapshot: this.changed(botId), released: true };
+  }
+
+  /** Open pleas on this key whose cards still wait, oldest first. */
+  pleas(botId: string): ComputerHelpRef[] {
+    const entry = this.entries.get(botId);
+    return entry ? this.waiting(entry).map((plea) => plea.ref) : [];
   }
 
   /** Never grants anything by itself; the same card asking again replaces its own plea. */
@@ -128,11 +166,43 @@ export class ComputerControl {
     return settled;
   }
 
-  forget(botId: string): void {
-    if (this.entries.delete(botId)) this.onChange(botId, NO_CONTROL);
+  /** Removes the deleted bot's pleas from every key; holds stay. */
+  forgetBot(botId: string): void {
+    this.forgetPleas((ref) => ref.botId === botId);
+  }
+
+  /** Removes the pleas of a deleted conversation's sign-in cards from every key, and returns the bots that asked; holds stay. */
+  forgetThread(threadId: string): string[] {
+    return this.forgetPleas((ref) => ref.threadId === threadId);
+  }
+
+  /** Tells every key with a plea from these conversations that its cards may have stopped or started waiting, and returns the
+   * bots that asked. */
+  recheck(threadIds: Iterable<string>): string[] {
+    const threads = new Set(threadIds), askers = new Set<string>();
+    for (const [key, entry] of this.entries) {
+      const asked = entry.pleas.filter((plea) => threads.has(plea.ref.threadId));
+      for (const plea of asked) askers.add(plea.ref.botId);
+      if (asked.length) this.changed(key);
+    }
+    return [...askers];
+  }
+
+  private forgetPleas(gone: (ref: ComputerHelpRef) => boolean): string[] {
+    const askers = new Set<string>();
+    for (const [key, entry] of this.entries) {
+      const pleas = entry.pleas.filter((plea) => !gone(plea.ref));
+      if (pleas.length === entry.pleas.length) continue;
+      for (const plea of entry.pleas) if (gone(plea.ref)) askers.add(plea.ref.botId);
+      entry.pleas = pleas;
+      if (entry.heldSinceMs === null && !pleas.length) this.entries.delete(key);
+      this.changed(key);
+    }
+    return [...askers];
   }
 
   private drop(botId: string, entry: Entry): void {
+    clearTimeout(entry.expiry);
     if (entry.pleas.length) this.entries.set(botId, { heldSinceMs: null, pleas: entry.pleas, controlLeaseId: null });
     else this.entries.delete(botId);
   }

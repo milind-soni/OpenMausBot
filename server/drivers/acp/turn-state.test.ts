@@ -25,6 +25,27 @@ function turnWith(text: string, state: { stopped?: boolean; replied?: string } =
 }
 
 describe("endTurn on a reply that is a provider's error body", () => {
+  it("keeps an empty reply's existing notice key and provider", () => {
+    const { current } = turnWith("");
+    expect(endTurn(current, true, null, "Grok")).toEqual({
+      ok: false, stopReason: "empty_turn", error: {
+        message: "Grok finished without replying.",
+        text: { key: "chat.notice.acpEmpty", params: { provider: "Grok" } },
+      },
+    });
+  });
+
+  it("keeps the semantic reset facts when a provider's error body ends the turn", () => {
+    const { current, replies } = turnWith('429 {"error":{"message":"usage limit"}} retry-after-ms=300000');
+    expect(endTurn(current, true, null, "Grok")).toMatchObject({
+      ok: false, stopReason: "quota", error: {
+        text: { key: "chat.notice.usageLimitResets", params: { provider: "Grok", resetsAt: expect.any(Number), timeZone: expect.any(String) } },
+        limit: "engine", limitResetsAt: expect.any(Number),
+      },
+    });
+    expect(replies).toEqual([]);
+  });
+
   it("after the person's Stop, ends the turn as stopped and keeps what was said", () => {
     const { current, replies } = turnWith(ERROR_BODY, { stopped: true });
     expect(endTurn(current, true, null, "omp")).toEqual({ ok: true, stopReason: "cancelled" });

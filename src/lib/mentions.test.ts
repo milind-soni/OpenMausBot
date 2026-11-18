@@ -1,8 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { mentionChoicesForQuery, mentionClassName, mentionRanges, mentionRowDescription } from "./mentions";
+import { mentionChoicesForQuery, mentionClassName, mentionQueryAt, mentionRanges, mentionRowDescription } from "./mentions";
 
 const peers = [{ name: "Atlas" }, { name: "New Bot" }, { name: "New Bot 2" }, { name: "調査担当" }, { name: "Hidden", hidden: true }];
 const matches = (text: string, everyone = false) => mentionRanges(text, peers, everyone).map(({ start, end }) => text.slice(start, end));
+
+describe("mention query at the caret", () => {
+  it.each(["（", "【", "“", "「", "《", "(", "**"])("opens after the shared opening boundary %s", (opening) => {
+    const text = `请${opening}@调`;
+    expect(mentionQueryAt(text, text.length)).toEqual({ start: text.indexOf("@"), query: "调" });
+  });
+
+  it("keeps start, whitespace, multiword names and text after the caret", () => {
+    expect(mentionQueryAt("@", 1)).toEqual({ start: 0, query: "" });
+    expect(mentionQueryAt("ask @New Bot later", 12)).toEqual({ start: 4, query: "New Bot" });
+    expect(mentionQueryAt("请\n@調査", 5)).toEqual({ start: 2, query: "調査" });
+  });
+
+  it.each(["me@调", "https://host/@调", "`@调`", "请）@调"])("keeps non-boundaries out of suggestions: %s", (text) => {
+    expect(mentionQueryAt(text, text.indexOf("@") + 2)).toBeNull();
+  });
+
+  it.each(["`（@调`", "```\n【@调\n```", "    （@调"])("leaves the shared opening boundary inside code alone: %s", (text) => {
+    expect(mentionQueryAt(text, text.indexOf("@") + 2)).toBeNull();
+  });
+
+  it("retains the query length and newline limits", () => {
+    expect(mentionQueryAt(`@${"调".repeat(24)}`, 25)).toEqual({ start: 0, query: "调".repeat(24) });
+    expect(mentionQueryAt(`@${"调".repeat(25)}`, 26)).toBeNull();
+    expect(mentionQueryAt("@调\n后", 4)).toBeNull();
+  });
+});
 
 describe("mention display ranges", () => {
   it("keeps original casing, duplicate occurrences and longest names", () => {

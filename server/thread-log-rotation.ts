@@ -1,6 +1,13 @@
 // Opt-in size cap for per-thread NDJSON logs: keep the newest half, cut on a line boundary, same filename.
 import { closeSync, fstatSync, openSync, readSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 
+/** Where no limit is set, each conversation's event log is still trimmed (to its newest half) past this: one runaway
+ * conversation, or hundreds of long ones across many bots, cannot fill the disk. Transcripts are never trimmed. */
+export const DEFAULT_THREAD_EVENT_LOG_MAX_BYTES = 256 * 1024 * 1024;
+
+/** The cap the logs are trimmed to: the person's limit (config's threadEventLogMaxBytes), or the default ceiling. */
+export const threadLogCapOrDefault = (cap: number | null): number => cap ?? DEFAULT_THREAD_EVENT_LOG_MAX_BYTES;
+
 let capProvider: () => number | null = () => null;
 
 export function bindThreadLogCapProvider(provider: () => number | null): void {

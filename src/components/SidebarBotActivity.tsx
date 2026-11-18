@@ -7,6 +7,7 @@ import { t } from "@/lib/i18n";
 import { isArchived, orderedSidebarThreads, orderedThreadList, threadRecency, threadUpdatedLabel } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { localizedTaskTitle } from "@/lib/task-title";
+import { endedOnFailure } from "@/lib/mascot";
 
 export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
   const tasks = bot.tasks ?? [{
@@ -29,12 +30,15 @@ export function runningRoutineRuns(bot: Bot): Array<Task & { queued: boolean }> 
   return orderedThreadList((bot.tasks ?? []).filter(runningRoutineRun).map((task) => ({ ...task, queued: false })));
 }
 
-export function sidebarBotStatus(bot: Bot, queued: Record<string, unknown[]>) {
+/** `visible` is the bot's shown conversation: when it ended on an error (a turn that failed, or an engine that could not
+ * start, both end on the failed-turn row), the bot is `failed` (red), kept apart from `waiting` (orange, it needs your answer). */
+export function sidebarBotStatus(bot: Bot, queued: Record<string, unknown[]>, visible?: Bot["messages"]) {
   const tasks = sidebarBotActivityTasks(bot, queued);
   const waiting = bot.activity === "waiting-on-you" || tasks.some((task) => task.activity === "waiting-on-you");
   const working = !waiting && (Boolean(bot.busy) || tasks.some((task) => task.busy || task.activity === "working"));
-  const teammateWait = !waiting && !working && (Boolean(bot.waitingForTeammates) || tasks.some((task) => Boolean(task.waitingForTeammates)));
-  return { waiting, working, teammateWait, queued: tasks.some((task) => task.queued) };
+  const failed = !waiting && !working && endedOnFailure(visible);
+  const teammateWait = !waiting && !working && !failed && (Boolean(bot.waitingForTeammates) || tasks.some((task) => Boolean(task.waitingForTeammates)));
+  return { waiting, working, failed, teammateWait, queued: tasks.some((task) => task.queued) };
 }
 
 export function threadsWhenTreeHidden(bot: Bot, queued: Record<string, unknown[]>) {
@@ -60,8 +64,8 @@ export function sidebarGroupActivityTasks(group: Group, bots: Bot[], queued: Rec
     const speakerId = roomThreadSpeakerId(group, task.threadId);
     const waiting = Boolean(speakerId) && bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
     return {
-      ...task, busy: roomThreadWorking(group, task.threadId), unread: task.threadId === group.threadId && Boolean(group.unread),
-      activity: waiting ? "waiting-on-you" as const : undefined,
+      ...task, busy: roomThreadWorking(group, task.threadId), unread: task.unread ?? (task.threadId === group.threadId && Boolean(group.unread)),
+      activity: waiting || task.activity === "waiting-on-you" ? "waiting-on-you" as const : undefined,
     };
   });
   return tasks.map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length) }))
@@ -216,15 +220,17 @@ export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, d
       const waiting = task.activity === "waiting-on-you";
       const teammateWait = !waiting && task.waitingForTeammates === true;
       const working = !waiting && !teammateWait && (task.busy || task.activity === "working");
-      const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : task.queued ? t("task.queued") : t("task.unread");
+      // A collapsed bot keeps its pinned threads listed here; one with nothing going on is shown as pinned, not unread.
+      const pinnedOnly = !waiting && !working && !teammateWait && !task.queued && !task.unread && task.pinned === true;
+      const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : task.queued ? t("task.queued") : pinnedOnly ? t("task.pinned") : t("task.unread");
       const title = localizedTaskTitle(task.title);
       const label = `${bot.name}: ${title} · ${status}${task.unread && (waiting || working || teammateWait || task.queued) ? ` · ${t("task.unread")}` : ""}`;
-      const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : BellDot;
+      const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : pinnedOnly ? Pin : BellDot;
       return <button key={task.threadId} type="button" data-sidebar-activity-row={task.threadId} aria-label={label} title={label}
         onClick={() => dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId })}
         className={cn("flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11px] outline-none hover:bg-raised/50 focus-visible:ring-1 focus-visible:ring-accent/60", iconOnly && "justify-center", waiting ? "text-warning" : "text-ink-secondary")}>
         <Icon size={12} aria-hidden="true" className={cn("shrink-0", working && "animate-spin text-success", teammateWait && "text-warning", task.unread && !waiting && !working && !teammateWait && "text-accent")} />
-        {!iconOnly && <><span className="min-w-0 flex-1 truncate">{title}</span><span className="shrink-0 text-[10px]">{waiting ? t("task.waiting") : status}</span>
+        {!iconOnly && <><span className="min-w-0 flex-1 truncate">{title}</span>{!pinnedOnly && <span className="shrink-0 text-[10px]">{waiting ? t("task.waiting") : status}</span>}
           {task.unread && (waiting || working || teammateWait || task.queued) && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}</>}
       </button>;
     })}

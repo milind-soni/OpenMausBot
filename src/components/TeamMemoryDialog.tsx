@@ -4,7 +4,7 @@ import { Brain, Check, Loader2, Pin, Plus, Trash2, X } from "lucide-react";
 
 
 import { api } from "@/state/store";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { cn } from "@/lib/cn";
 import { Select } from "./Select";
@@ -136,7 +136,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:p-6"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
       <div
@@ -239,13 +239,13 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
                           onKeyDown={(event) => {
                             if (event.key === "Enter") (event.target as HTMLInputElement).blur();
                           }}
-                          aria-label={`${entry.name} detail`}
+                          aria-label={t("teamMemory.entryDetailLabel", { name: entry.name })}
                           className="mt-0.5 block w-full rounded bg-transparent px-1 py-0.5 text-[13px] text-ink outline-none hover:bg-card focus:bg-card"
                         />
                         <span className="block px-1 text-[11px] text-ink-secondary">
-                          {entry.source.botName || t("teamMemory.you")} · {new Date(entry.updatedAt).toLocaleDateString()} · {loadedIds.includes(entry.id) ? t("teamMemory.loaded") : t("teamMemory.searchable")}
+                          {entry.source.botName || t("teamMemory.you")} · {new Date(entry.updatedAt).toLocaleDateString(intlLocale())} · {loadedIds.includes(entry.id) ? t("teamMemory.loaded") : t("teamMemory.searchable")}
                         </span>
-                        {!!entry.history?.length && <details className="mt-1 text-[11px] text-ink-secondary"><summary>{t("teamMemory.history")}</summary>{entry.history.map((version, index) => <div key={index} className="mt-1">{new Date(version.at).toLocaleDateString()}: {version.name} — {version.detail} <button disabled={busyId !== null} onClick={() => editDetail(entry, version.detail, version.name)} className="underline">{t("teamMemory.restore")}</button></div>)}</details>}
+                        {!!entry.history?.length && <details className="mt-1 text-[11px] text-ink-secondary"><summary>{t("teamMemory.history")}</summary>{entry.history.map((version, index) => <div key={index} className="mt-1">{new Date(version.at).toLocaleDateString(intlLocale())}: {version.name} — {version.detail} <button disabled={busyId !== null} onClick={() => editDetail(entry, version.detail, version.name)} className="underline">{t("teamMemory.restore")}</button></div>)}</details>}
                       </span>
                       <button aria-label={t(entry.pinned ? "teamMemory.unpin" : "teamMemory.pin", { name: entry.name })} aria-pressed={entry.pinned ?? false} disabled={busyId !== null} className="p-1 text-ink-secondary hover:text-accent" onClick={() => void run(entry.id, () => api(`/api/team-memory/${entry.id}?${query}`, { method: "PATCH", body: JSON.stringify({ pinned: !entry.pinned, expectedRevision: entry.revision }) }))}><Pin size={13} /></button>
                       <button

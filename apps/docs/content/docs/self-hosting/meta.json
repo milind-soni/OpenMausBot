@@ -5,6 +5,7 @@
     "index",
     "deploy-vps",
     "networking",
-    "data-and-backups"
+    "data-and-backups",
+    "connected-servers"
   ]
 }

@@ -1,7 +1,9 @@
+import { instructionsUpdateRefusal } from "./automation-instructions.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-
-import { cronScheduleLabel } from "../shared/cron-label.ts";
+import { ROUTINE_RUN_LIMIT_MINUTES } from "../shared/routines.ts";
+import { formatInstant, routineCronText } from "./routine-cron-text.ts";
+import { conversationLanguage, serverLine } from "./server-lines.ts";
 import { plainClock, plainTimeZone, plainWeekdays } from "../shared/plain-time-zone.ts";
 import { normalizeCronSchedule, nextCronRuns } from "../shared/routine-schedule.ts";
 import { newId } from "./contracts.ts";
@@ -14,7 +16,7 @@ import {
   type RoutineToolScheduleInput,
 } from "./routine-request-schemas.ts";
 import { runsOnce } from "../shared/limit-reset.ts";
-import { limitResetOccurrence } from "./routine-schedules.ts";
+import { limitResetOccurrence, noFutureResumeMessage } from "./routine-schedules.ts";
 import {
   intervalHasRestrictions,
   nextOccurrence,
@@ -213,8 +215,8 @@ function duration(value: number | undefined): number {
 
 function timeout(value: number | null | undefined): number | null | undefined {
   if (value == null) return value;
-  if (!Number.isInteger(value) || value < 5 || value > 240) {
-    throw new RoutineRequestError("timeoutMinutes must be a whole number from 5 to 240");
+  if (!Number.isInteger(value) || value < 5 || value > 1_440) {
+    throw new RoutineRequestError("timeoutMinutes must be a whole number from 5 to 1440");
   }
   return value;
 }
@@ -368,7 +370,7 @@ function normalizeDefinition(input: RoutineToolDefinitionInput, now: number, own
     runOn: runOn(input.runOn),
     durationMinutes: duration(input.durationMinutes),
     ...(timeoutMinutes == null ? {} : { timeoutMinutes }),
-    ...(input.continuity === true ? { continuity: true } : {}),
+    ...(input.continuity === true ? { continuity: true } : {}), ...(input.sameConversation === true ? { sameConversation: true } : {}),
     ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(input.runOnStartup === true ? { runOnStartup: true } : {}),
   };
@@ -382,7 +384,7 @@ function normalizeChanges(input: RoutineToolChangesInput, now: number, ownEngine
   if (input.runOn !== undefined) changes.runOn = runOn(input.runOn);
   if (input.durationMinutes !== undefined) changes.durationMinutes = duration(input.durationMinutes);
   if (input.timeoutMinutes !== undefined) changes.timeoutMinutes = timeout(input.timeoutMinutes);
-  if (input.continuity !== undefined) changes.continuity = input.continuity === true;
+  if (input.continuity !== undefined) changes.continuity = input.continuity === true; if (input.sameConversation !== undefined) changes.sameConversation = input.sameConversation === true;
   if (input.overlap !== undefined) changes.overlap = input.overlap;
   if (input.runOnStartup !== undefined) changes.runOnStartup = input.runOnStartup === true;
   return changes;
@@ -395,16 +397,6 @@ function routineId(value: string): string {
 
 function ownedRoutine(manager: RoutineManager, id: string, botId: string): Routine | null {
   return manager.listRoutines().find((routine) => routine.id === id && routine.botId === botId) ?? null;
-}
-
-function noFutureResumeMessage(schedule: RoutineSchedule): string {
-  if (schedule.type === "interval") {
-    return "That interval routine has no future runs. Choose a later end time or remove the end restriction before resuming.";
-  }
-  if (schedule.type === "once") {
-    return "That one-time routine's scheduled time has passed. Update it to a new future time before resuming.";
-  }
-  return "That routine has no future runs. Update its schedule before resuming.";
 }
 
 function normalizedOperation(
@@ -429,11 +421,14 @@ function normalizedOperation(
   const current = ownedRoutine(manager, id, ownerBotId);
   if (!current) throw new RoutineRequestError("That routine does not exist", 404);
   if (validated.action === "update") {
+    const changes = normalizeChanges(validated.changes, now, ownEngine);
+    const refusal = instructionsUpdateRefusal(current.prompt, changes.instructions);
+    if (refusal) throw new RoutineRequestError(refusal, 409);
     return {
       action: "update",
       routineId: id,
       expectedUpdatedAt: current.updatedAt,
-      changes: normalizeChanges(validated.changes, now, ownEngine),
+      changes,
       ...(validated.forBot ? { forBot: validated.forBot } : {}),
     };
   }
@@ -552,20 +547,8 @@ function nextForOperation(operation: RoutineRequestOperation, manager: RoutineMa
   return nextOccurrence(schedule, now);
 }
 
-function formatInstant(at: number, timeZone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(at));
-  } catch {
-    return new Date(at).toISOString();
-  }
-}
-
-export function scheduleText(schedule: RoutineRequestSchedule, timeZone: string, engines?: LimitResetEngines): string {
-  if (schedule.type === "cron") return `${cronScheduleLabel(schedule)} · Cron: ${schedule.expression}`;
+export function scheduleText(schedule: RoutineRequestSchedule, timeZone: string, engines?: LimitResetEngines, language?: string): string {
+  if (schedule.type === "cron") return `${routineCronText(schedule, language)} · Cron: ${schedule.expression}`;
   if (schedule.type === "limit_reset") {
     const name = engines?.name(schedule.engine) ?? schedule.engine;
     return schedule.repeat === "every_reset" ? `Each time ${name}'s usage limit resets` : `When ${name}'s usage limit resets`;
@@ -591,10 +574,10 @@ export function scheduleText(schedule: RoutineRequestSchedule, timeZone: string,
   return `${plainWeekdays(schedule.weekdays)} at ${plainClock(schedule.time)} ${zone}`;
 }
 
-export function consequenceLine(schedule: RoutineRequestSchedule, continuity = false): string {
-  const session = continuity ? "each run starts a fresh session with the previous run's report" : "each run starts a fresh session";
+export function consequenceLine(schedule: RoutineRequestSchedule, continuity = false, sameConversation = false, language?: string): string {
+  const session = sameConversation ? serverLine(language, "server.routines.card.sessionContinues") : continuity ? "each run starts a fresh session with the previous run's report" : "each run starts a fresh session";
   if (schedule.type === "cron") return `Will run at matching calendar times, ${plainTimeZone(schedule.timeZone)}; ${session}.`;
-  if (schedule.type === "once") return "Will run once; that run starts a fresh session.";
+  if (schedule.type === "once") return sameConversation ? serverLine(language, "server.routines.card.onceContinues") : "Will run once; that run starts a fresh session.";
   if (schedule.type === "limit_reset") {
     return schedule.repeat === "every_reset"
       ? "Will run a minute after each time that usage limit resets, in this conversation."
@@ -624,7 +607,7 @@ function effectiveDefinition(operation: RoutineRequestOperation, manager: Routin
     runOn: existing.runOn,
     durationMinutes: existing.durationMinutes,
     ...(existing.timeoutMinutes === undefined ? {} : { timeoutMinutes: existing.timeoutMinutes }),
-    ...(existing.continuity ? { continuity: true } : {}),
+    ...(existing.continuity ? { continuity: true } : {}), ...(existing.sameConversation ? { sameConversation: true } : {}),
     ...(existing.overlap ? { overlap: existing.overlap } : {}),
     ...(existing.runOnStartup ? { runOnStartup: true } : {}),
   };
@@ -647,6 +630,7 @@ function cardCopy(
   timeZone: string,
   now: number,
   engines?: LimitResetEngines,
+  language?: string,
 ): RoutineCardCopy {
   const definition = effectiveDefinition(operation, manager);
   const actionCopy = ACTION_COPY[operation.action];
@@ -666,7 +650,7 @@ function cardCopy(
   }
   const nextRunAt = nextForOperation(operation, manager, now, engines);
   const scheduleTimeZone = definition.schedule.type === "cron" ? definition.schedule.timeZone : timeZone;
-  const when = operation.action === "run_now" ? "Now" : scheduleText(definition.schedule, timeZone, engines);
+  const when = operation.action === "run_now" ? "Now" : scheduleText(definition.schedule, timeZone, engines, language);
   const destination = definition.runOn === "cloud" ? "Bot’s current model on its cloud desktop" : "Bot’s current model, where it usually works";
   const current = operation.action === "create"
     ? null
@@ -693,7 +677,7 @@ function cardCopy(
   // Credential-shaped values never travel back through the bot's MCP response or into the transcript.
   const visibleInstructions = redactSecretsInText(definition.instructions);
   const runLimit = definition.timeoutMinutes === undefined
-    ? "no run limit"
+    ? `default run limit (${ROUTINE_RUN_LIMIT_MINUTES / 60} hours of work)`
     : `${definition.timeoutMinutes} min limit`;
   return {
     title,
@@ -709,13 +693,13 @@ function cardCopy(
         : []),
       `Runs on: ${destination}`,
       `Run limit: ${definition.timeoutMinutes === undefined ? "No limit" : `${definition.timeoutMinutes} minutes`}`,
-      `Continuity: ${definition.continuity ? "Carries the previous run's report into the next run" : "Each run starts fresh"}`,
+      `Continuity: ${definition.sameConversation ? serverLine(language, "server.routines.card.conversationKept") : definition.continuity ? "Carries the previous run's report into the next run" : "Each run starts fresh"}`,
       `While busy: ${definition.overlap === "queue" ? "Queue one scheduled run; skip further occurrences until it starts" : "Skip overlapping scheduled occurrences"}`,
       ...(definition.runOnStartup || (operation.action === "update" && operation.changes.runOnStartup !== undefined)
         ? [`On startup: ${definition.runOnStartup ? "Also runs once each time OpenMausBot starts" : "Runs only on its schedule"}`]
         : []),
       ...(operation.action === "create" || operation.action === "update"
-        ? [consequenceLine(definition.schedule, Boolean(definition.continuity))]
+        ? [consequenceLine(definition.schedule, Boolean(definition.continuity), Boolean(definition.sameConversation), language)]
         : []),
       "",
       "Instructions:",
@@ -736,7 +720,7 @@ function inputFromDefinition(definition: RoutineRequestDefinition, botId: string
     schedule: asSchedule(definition.schedule, now),
     durationMinutes: definition.durationMinutes,
     ...(definition.timeoutMinutes === undefined ? {} : { timeoutMinutes: definition.timeoutMinutes }),
-    ...(definition.continuity ? { continuity: true } : {}),
+    ...(definition.continuity ? { continuity: true } : {}), ...(definition.sameConversation ? { sameConversation: true } : {}),
     ...(definition.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(definition.runOnStartup ? { runOnStartup: true } : {}),
   };
@@ -754,7 +738,7 @@ function updateFromChanges(
   if (changes.runOn !== undefined) patch.runOn = changes.runOn;
   if (changes.durationMinutes !== undefined) patch.durationMinutes = changes.durationMinutes;
   if (changes.timeoutMinutes !== undefined) patch.timeoutMinutes = changes.timeoutMinutes;
-  if (changes.continuity !== undefined) patch.continuity = changes.continuity;
+  if (changes.continuity !== undefined) patch.continuity = changes.continuity; if (changes.sameConversation !== undefined) patch.sameConversation = changes.sameConversation;
   if (changes.overlap !== undefined) patch.overlap = changes.overlap;
   if (changes.runOnStartup !== undefined) patch.runOnStartup = changes.runOnStartup;
   return patch;
@@ -828,7 +812,7 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
         || routine.runOn !== definition.runOn || routine.prompt !== definition.instructions
         || routine.durationMinutes !== definition.durationMinutes
         || routine.timeoutMinutes !== definition.timeoutMinutes
-        || Boolean(routine.continuity) !== Boolean(definition.continuity)
+        || Boolean(routine.continuity) !== Boolean(definition.continuity) || Boolean(routine.sameConversation) !== Boolean(definition.sameConversation)
         || (routine.overlap ?? "skip") !== (definition.overlap ?? "skip")
         || Boolean(routine.runOnStartup) !== Boolean(definition.runOnStartup)
         || (routine.attachments?.length ?? 0) > 0) return false;
@@ -913,7 +897,7 @@ function routineSnapshot(routine: Routine): RoutineRequestSnapshot | undefined {
     runOn: routine.runOn,
     durationMinutes: routine.durationMinutes,
     ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
-    ...(routine.continuity ? { continuity: true } : {}),
+    ...(routine.continuity ? { continuity: true } : {}), ...(routine.sameConversation ? { sameConversation: true } : {}),
     ...(routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
     ...(routine.runOnStartup ? { runOnStartup: true } : {}),
     enabled: routine.enabled,
@@ -935,7 +919,7 @@ function restorePatch(before: RoutineRequestSnapshot, now: number): Partial<Rout
       : schedule,
     durationMinutes: before.durationMinutes,
     timeoutMinutes: before.timeoutMinutes ?? null,
-    continuity: before.continuity === true,
+    continuity: before.continuity === true, sameConversation: before.sameConversation === true,
     overlap: before.overlap ?? "skip",
     runOnStartup: before.runOnStartup === true,
   };
@@ -1006,7 +990,7 @@ export class RoutineRequestService {
     };
     const definition = effectiveDefinition(operation, this.routines);
     const timeZone = definition?.schedule.type === "cron" ? definition.schedule.timeZone : this.timeZone();
-    const copy = cardCopy(operation, this.routines, timeZone, cardAt, this.engines);
+    const copy = cardCopy(operation, this.routines, timeZone, cardAt, this.engines, conversationLanguage(threadId));
     const messageInput: Parameters<RoutineRequestStore["appendMessage"]>[1] = {
       role: "bot",
       kind: "options",
@@ -1167,7 +1151,7 @@ export class RoutineRequestService {
             schedule: asSchedule(before.schedule, now),
             durationMinutes: before.durationMinutes,
             ...(before.timeoutMinutes === undefined ? {} : { timeoutMinutes: before.timeoutMinutes }),
-            ...(before.continuity ? { continuity: true } : {}),
+            ...(before.continuity ? { continuity: true } : {}), ...(before.sameConversation ? { sameConversation: true } : {}),
             ...(before.overlap === "queue" ? { overlap: "queue" as const } : {}),
             ...(before.runOnStartup ? { runOnStartup: true } : {}),
             ...(before.resultsThreadId ? { resultsThreadId: before.resultsThreadId } : {}),

@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDown, ArrowDownToLine, Loader2, PackageOpen, RefreshCw, X } from "lucide-react";
 
-import { useUpdaterState, type UpdaterState } from "@/lib/updater";
+import { updaterMessage, useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { releaseHighlights } from "@/lib/release-highlights";
-import { RELEASES_URL, appVersion, openExternalLink } from "@/lib/app-links";
+import { RELEASES_URL, desktopAppVersion, openExternalLink } from "@/lib/app-links";
 import { productName } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -170,7 +170,7 @@ export function UpdateCard({
       : handoff ? <PackageOpen size={14} aria-hidden /> : <RefreshCw size={14} aria-hidden />;
 
   const note = failed
-    ? state.message?.split("\n")[0]?.slice(0, 160) || t("update.card.failed")
+    ? updaterMessage(state)?.split("\n")[0]?.slice(0, 160) || t("update.card.failed")
     : downloading
       ? t("update.card.downloadingNote")
       : handoff
@@ -210,7 +210,7 @@ export function UpdateCard({
               {t("update.card.title")}
             </h2>
             <p className="text-[13px] leading-5 text-ink-secondary">
-              {[state.version ? `${productName()} ${state.version}` : productName(), appVersion() ? t("update.card.current", { version: appVersion() }) : ""].filter(Boolean).join(" · ")}
+              {[state.version ? `${productName()} ${state.version}` : productName(), t("update.card.current", { version: desktopAppVersion() })].join(" · ")}
             </p>
           </div>
         </div>

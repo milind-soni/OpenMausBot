@@ -1,3 +1,4 @@
+import { userError } from "../user-errors.ts";
 // "Not now" on the add-a-key suggestion (server/host/helper-suggestion.ts). Add key opens Settings on the device and
 // never comes here. Only the owner or an admin answers, and only a card the suggestion posted.
 import type { RequestAuth } from "../request-auth.ts";
@@ -17,8 +18,8 @@ export function createHelperSuggestionRoutes(deps: HelperSuggestionRouteDeps): R
     const messageId = typeof body?.messageId === "string" ? body.messageId : "";
     if (!ID.test(threadId) || !ID.test(messageId)) return json(res, 400, { error: "threadId and messageId are required" });
     const outcome = deps.notNow(threadId, messageId, auth);
-    if (outcome === "refused") return json(res, 403, { error: "Only the owner can answer this." });
-    if (outcome === "unknown") return json(res, 404, { error: "There is no such suggestion." });
+    if (outcome === "refused") return json(res, 403, userError("serverError.helper.ownerOnly"));
+    if (outcome === "unknown") return json(res, 404, userError("serverError.helper.missing"));
     return json(res, 200, { ok: true });
   };
 }

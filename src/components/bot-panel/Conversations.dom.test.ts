@@ -94,6 +94,35 @@ afterEach(() => {
 });
 
 describe("a bot's conversations in its panel", () => {
+  it("offers the public web conversation link alongside the app link and copies its exact address", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const previous = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation((path: string) => path === "/api/settings/custom-domain"
+      ? Promise.resolve({ publicUrl: "https://chat.example/" }) : previous(path));
+    try {
+      render(research());
+      click(host.querySelector('[aria-label="Actions for Translate the launch post"]'));
+      await vi.waitFor(() => expect(document.querySelector("[data-thread-overlay]")?.textContent).toContain("Copy link (HTTPS)"));
+      const buttons = [...document.querySelector("[data-thread-overlay]")!.querySelectorAll("button")];
+      expect(buttons.some((button) => button.textContent === "Copy link")).toBe(true);
+      click(buttons.find((button) => button.textContent === "Copy link (HTTPS)")!);
+      expect(writeText).toHaveBeenCalledWith("https://chat.example/?thread=launch&bot=research");
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("keeps the app link available when the public-address request fails", async () => {
+    const previous = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation((path: string) => path === "/api/settings/custom-domain"
+      ? Promise.reject(new Error("not permitted")) : previous(path));
+    render(research());
+    click(host.querySelector('[aria-label="Actions for Translate the launch post"]'));
+    await Promise.resolve();
+    const menu = document.querySelector("[data-thread-overlay]")!;
+    expect([...menu.querySelectorAll("button")].some((button) => button.textContent === "Copy link")).toBe(true);
+    expect(menu.textContent).not.toContain("Copy link (HTTPS)");
+  });
+
   it("lists three, newest first, with the open one marked, and Show N more opens the rest", () => {
     render(research());
     expect(CONVERSATIONS_SHOWN).toBe(3);
@@ -131,12 +160,12 @@ describe("a bot's conversations in its panel", () => {
     expect(list).toEqual(expect.arrayContaining(["[&_.font-semibold]:font-medium", "[&_time]:text-[12px]", "[&_time]:text-ink-tertiary", "[&_span.bg-accent]:size-2"]));
   });
 
-  it("puts New conversation first, as a labelled button beside search", () => {
+  it("puts New conversation first, as a labelled button, with search on the section's label line", () => {
     render(research());
     const add = host.querySelector("[data-conversations-new]")!;
     expect(add.textContent).toBe("New conversation");
     expect(add.compareDocumentPosition(host.querySelector("[data-conversation]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(add.nextElementSibling).toBe(host.querySelector("[data-conversations-search]"));
+    expect(host.querySelector("[data-conversations-search]")!.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows no Show more when every conversation fits", () => {

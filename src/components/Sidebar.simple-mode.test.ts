@@ -1,4 +1,4 @@
-import { Children, createElement, isValidElement, type KeyboardEvent, type MemoExoticComponent, type MouseEvent, type ReactElement, type ReactNode } from "react";
+import { Children, createElement, isValidElement, type ComponentProps, type KeyboardEvent, type MemoExoticComponent, type MouseEvent, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initialState, type AppState, type Bot, type Group } from "@/state/store";
@@ -38,6 +38,7 @@ const bot: Bot = {
     { threadId: "unread", title: "Finished reply", createdAt: 6, unread: true },
   ],
 };
+const quiet: Bot = { ...bot, unread: false, tasks: bot.tasks!.filter((task) => !task.busy && !task.unread && !task.activity) };
 const densities: SidebarDensity[] = ["comfortable", "icons"];
 const botRow = (BotListItem as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type;
 const pinnedCircle = (PinnedBotCircle as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type;
@@ -88,7 +89,7 @@ describe("bot-first sidebar", () => {
     { advanced: true, enabled: true, density: "comfortable", size: 32, spacing: ["gap-2", "py-2", "pl-6"] },
     { advanced: true, enabled: true, density: "icons", size: 44, spacing: ["justify-center", "px-1", "py-1.5"] },
     { advanced: true, enabled: false, density: "comfortable", size: 44, spacing: ["gap-3", "py-2", "pl-2.5", "pr-9"] },
-    { advanced: false, enabled: false, density: "comfortable", size: 42, spacing: ["gap-2", "rounded-[10px]", "pl-2", "pr-2", "md:h-[54px]"] },
+    { advanced: false, enabled: false, density: "comfortable", size: 42, spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"] },
     { advanced: false, enabled: false, density: "icons", size: 36, spacing: ["h-[54px]", "justify-center"] },
   ] as const)("sizes bot portraits and row spacing in $density density with threads $enabled (advanced $advanced)", ({ advanced, enabled, density, size, spacing }) => {
     fixture.advanced = advanced;
@@ -111,12 +112,12 @@ describe("bot-first sidebar", () => {
     it.each(densities)(`opens the last selected conversation on mouse or keyboard, %s density, threads ${enabled ? "on" : "off"}`, (density) => {
       fixture.showThreads = enabled;
       let tree: ReactNode;
-      function Capture() { tree = botRow(rowProps(density)); return tree; }
+      function Capture() { tree = botRow(rowProps(density, quiet)); return tree; }
       renderToStaticMarkup(createElement(Capture));
       const row = findElement(tree, "data-sidebar-bot-row", bot.id)!;
       row.props.onClick!({ type: "click", target: {} } as MouseEvent);
       expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "select", id: bot.id });
-      expect(bot.threadId).toBe("last-selected");
+      expect(quiet.threadId).toBe("last-selected");
       for (const key of ["Enter", " "]) {
         fixture.dispatch.mockClear();
         const preventDefault = vi.fn();
@@ -156,14 +157,14 @@ describe("bot-first sidebar", () => {
     const line = markup.slice(markup.indexOf(">Done.<"));
     expect(line).toMatch(/^>Done\.<\/span><\/span><span data-testid="model-badge" role="img" aria-label="Model: [^"]+ \(Claude\)" class="[^"]*\bms-auto\b[^"]*"><span data-provider-mark="brand" class="[^"]*\bopacity-60\b/);
     expect(line).toMatch(/^>Done\.<\/span><\/span><span data-testid="model-badge"[^>]*><span data-provider-mark="brand"[^>]*><svg[\s\S]*?<\/svg><\/span><\/span><\/div><span class="sr-only">Unread<\/span>/);
-    const name = markup.slice(markup.indexOf('class="flex items-baseline justify-between gap-2 pr-7"'), markup.indexOf(">Done.<"));
-    expect(name).toMatch(/<span aria-hidden="true" data-row-dot="" class="pointer-events-none absolute right-2 top-1 flex size-7 items-center justify-center transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0 max-md:hidden"><span data-testid="unread-dot" title="Unread" class="size-2 shrink-0 rounded-full bg-accent"><\/span><\/span>/);
+    const name = markup.slice(markup.indexOf('class="flex items-baseline justify-between gap-2 pe-7 group-hover:pe-[3.25rem] group-focus-within:pe-[3.25rem] touch:pe-[3.25rem] max-md:touch:pe-7"'), markup.indexOf(">Done.<"));
+    expect(name).toMatch(/<span aria-hidden="true" data-row-dot="" class="pointer-events-none absolute right-\[3px\] top-1\.5 flex size-6 items-center justify-center transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0 max-md:hidden"><span data-testid="unread-dot" title="Unread" class="size-2 shrink-0 rounded-full bg-accent"><\/span><\/span>/);
     expect(name).toContain('<span aria-hidden="true" title="Unread" class="size-2 shrink-0 rounded-full bg-accent hidden self-center max-md:block touch:block"></span>');
     expect(markup.match(/data-provider-mark=/g)).toHaveLength(1);
     expect(line.slice(0, line.indexOf("data-provider-mark"))).not.toContain("title=");
     expect(String(findElement(tree, "data-sidebar-bot-row", bot.id)!.props.className)).not.toContain("group-hover:pr-9");
-    expect(markup).not.toContain("group-hover:pr-7");
-    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bright-2 top-1 translate-y-0\b/);
+    expect(markup).not.toContain("group-hover:pe-7");
+    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*end-\[3px\] top-1\.5 size-6 translate-y-0\b/);
   });
 
   it("fades the collapsed rail's engine badge in both modes", () => {
@@ -202,7 +203,8 @@ describe("bot-first sidebar", () => {
     noteTurnEvent({ eventId: "e1", provider: "claudeAgent", threadId: "leads", createdAt: "2026-10-28T12:00:00.000Z", turnId: "t1",
       type: "turn.progress", activity: "command", itemId: "c1", target: "scrape.py", quiet: { kind: "busy" } } as RuntimeEvent);
     const working = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
-    expect(working).toContain('<span dir="auto" data-sidebar-working-phrase="" class="truncate">Running scrape.py</span>');
+    expect(working).toContain('<span dir="auto" data-sidebar-working-phrase="" class="truncate">Running a command</span>');
+    expect(working, "the sidebar names the kind of step, never the command").not.toContain("scrape.py");
     expect(working, "the row's second line keeps its height: no taller dots").not.toContain("h-[1.5em]");
     expect(working).not.toContain("Monday");
     expect(working, "the row says the step alone, not how it is doing").not.toContain("busy, no output yet");
@@ -220,7 +222,7 @@ describe("bot-first sidebar", () => {
       tasks: [{ threadId: "open", title: "Open", createdAt: 1 }, { threadId: "leads", title: "Leads", createdAt: 2, busy: true, activity: "working" }] };
     noteTurnEvent({ eventId: "e2", provider: "codex", threadId: "leads", createdAt: "2026-10-28T12:00:00.000Z", turnId: "t1",
       type: "turn.progress", activity: "web", itemId: "w1", target: "Acme construction leads" } as RuntimeEvent);
-    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toContain(">Searching the web for “Acme construction leads”</span>");
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toContain(">Searching the web</span>");
     resetTurnLive();
   });
 
@@ -243,9 +245,21 @@ describe("bot-first sidebar", () => {
     const simple = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
     expect(simple).toContain("[--row:var(--color-raised)]");
     expect(simple).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-none opacity-0 group-hover:pointer-events-auto/);
-    expect(simple).toContain('class="flex items-baseline justify-between gap-2 pr-7"');
+    expect(simple).toContain('class="flex items-baseline justify-between gap-2 pe-7 group-hover:pe-[3.25rem] group-focus-within:pe-[3.25rem] touch:pe-[3.25rem] max-md:touch:pe-7"');
     fixture.advanced = true;
     expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-auto opacity-100/);
+  });
+
+  it.each(densities)("marks a room as one place instead of its members' faces, where a two-bot channel keeps both faces (%s)", (density) => {
+    const pip: Bot = { ...quiet, id: "pip", name: "Pip", color: "blue" };
+    fixture.state = { ...fixture.state, bots: [bot, pip] };
+    const room: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id, pip.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
+    const roomMarkup = renderToStaticMarkup(createElement(GroupListItem, { group: room, density, onMenu: vi.fn() }));
+    expect(roomMarkup).toContain("data-room-mark");
+    expect(roomMarkup).not.toContain("data-avatar-kind=\"bot\"");
+    const channel = renderToStaticMarkup(createElement(GroupListItem, { group: { ...room, dm: true }, density, onMenu: vi.fn() }));
+    expect(channel).not.toContain("data-room-mark");
+    expect(channel.match(/data-avatar-kind="bot"/g)).toHaveLength(2);
   });
 
   it("marks an unread Simple group chat with the same top-right dot as a bot row, said once for a screen reader", () => {
@@ -288,19 +302,19 @@ describe("bot-first sidebar", () => {
   });
 
   it.each([
-    { advanced: false, density: "comfortable", face: 36, spacing: ["gap-2", "rounded-[10px]", "pl-2", "pr-2", "md:h-[54px]"], name: "font-medium", preview: "text-[13px]" },
-    { advanced: false, density: "icons", face: 36, spacing: ["h-[54px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
-    { advanced: true, density: "icons", face: 44, spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
-    { advanced: true, density: "comfortable", face: 32, spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
-  ] as const)("sizes group chat rows in $density density (advanced $advanced)", ({ advanced, density, face, spacing, name, preview }) => {
+    { advanced: false, density: "comfortable", slot: "size-9", spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"], name: "font-medium", preview: "text-[13px]" },
+    { advanced: false, density: "icons", slot: "size-9", spacing: ["h-[54px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: true, density: "icons", slot: "size-12", spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: true, density: "comfortable", slot: "size-8", spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
+  ] as const)("sizes group chat rows in $density density (advanced $advanced)", ({ advanced, density, slot, spacing, name, preview }) => {
     fixture.advanced = advanced;
     const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
     let tree: ReactNode;
-    function Capture() { tree = GroupListItem({ group, density, onMenu: vi.fn() }); return tree; }
+    function Capture() { tree = (GroupListItem as unknown as { type: (props: ComponentProps<typeof GroupListItem>) => ReactElement }).type({ group, density, onMenu: vi.fn() }); return tree; }
     const markup = renderToStaticMarkup(createElement(Capture));
     const row = findElement(tree, "data-sidebar-group-row", group.id)!;
     expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining([...spacing]));
-    expect(markup).toContain(`width="${face}px" height="${face}px"`);
+    expect(markup).toMatch(new RegExp(`data-room-mark="" class="[^"]*\\b${slot}\\b[^"]*"><svg[^>]*width="16" height="16"`));
     expect(markup).toMatch(new RegExp(`truncate text-\\[14px\\] text-ink ${name}`));
     expect(markup).toContain(`truncate text-ink-secondary ${preview}`);
   });
@@ -318,13 +332,30 @@ describe("bot-first sidebar", () => {
     expect(queuedDot).toContain("bg-ink-secondary");
     expect(queuedDot).not.toContain("size-4");
     expect(queuedDot).not.toContain("size-5");
-    expect(markup).toContain('class="truncate">Queued</span>');
+    expect(markup).toContain('class="min-w-0 overflow-hidden whitespace-nowrap">Queued</span>');
     expect(markup).not.toContain("font-semibold text-warning");
     expect(markup).not.toContain("waiting-dot");
   });
 
+  it.each(densities)("opens the thread a row or circle is marked for, on mouse or keyboard, %s density", (density) => {
+    fixture.showThreads = false;
+    const trees: ReactNode[] = [];
+    function Capture() { const tree = [botRow(rowProps(density)), pinnedCircle(rowProps(density))]; trees.push(...tree); return tree; }
+    renderToStaticMarkup(createElement(Capture));
+    for (const tree of trees) {
+      const row = findElement(tree, "data-sidebar-bot-row", bot.id)!;
+      fixture.dispatch.mockClear();
+      row.props.onClick!({ type: "click", target: {} } as MouseEvent);
+      expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: bot.id, threadId: "approval" });
+      if (!row.props.onKeyDown) continue;
+      fixture.dispatch.mockClear();
+      row.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() } as unknown as KeyboardEvent);
+      expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: bot.id, threadId: "approval" });
+    }
+  });
+
   it.each(densities)("opens the thread the person last wrote in when threads are hidden, %s density", (density) => {
-    const used = { ...bot, mainThreadId: "idle-history" };
+    const used = { ...quiet, mainThreadId: "idle-history" };
     for (const enabled of [false, true]) {
       fixture.showThreads = enabled;
       const opened = enabled ? { type: "select", id: bot.id } : { type: "switchTask", botId: bot.id, threadId: "idle-history" };

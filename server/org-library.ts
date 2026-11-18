@@ -871,7 +871,7 @@ export class OrgLibrary {
       try {
         this.save();
       } catch {}
-      if (error instanceof PackageImportError) return fail(refusal(422, error.code, error.message), "invalid_package");
+      if (error instanceof PackageImportError) return error.status === 409 ? refusal(409, error.code, error.message) : fail(refusal(422, error.code, error.message), "invalid_package");
       console.error(`[org-library] could not add ${entry.ref}: ${error instanceof Error ? error.message : String(error)}`);
       return fail(refusal(500, "import_failed", ADD_FAILED), "import_failed");
     }

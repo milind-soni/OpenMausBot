@@ -12,7 +12,7 @@ import { agentsMcp } from "./agents-mcp.ts";
 
 const EVERYTHING = {
   OMB_BOT_ID: "bot-alias", OMB_CHIEF_OF_STAFF: "1", OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1",
-  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_ESCALATIONS: "1", OMB_TEAM_PEOPLE: "1", OMB_MAUSBOT: "1",
+  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_MAUSBOT: "1",
 };
 const LISTED = new Set(availableTools(catalogProfileFromEnv(EVERYTHING)).map((tool) => tool.name));
 
@@ -36,7 +36,7 @@ async function run(name: string, args: Json) {
   const sent: Array<{ path: string; body?: unknown }> = [];
   const answer = { ok: true, status: 201, body: { messageId: "m1", resultId: "t-1", now: "2026-10-29T09:00:00Z", timeZone: "UTC", triggers: [], ok: true, file: "memory/log/2026-10-29.md", line: "- 09:00 · Deployed the site.", text: "Saved." } };
   const context: ToolCallContext = {
-    botId: "bot-alias", threadId: "thread-alias", depth: 0, externalRuntime: false, sharedComputers: true,
+    botId: "bot-alias", threadId: "thread-alias", externalRuntime: false, sharedComputers: true,
     client: {
       api: async (path, init) => { sent.push({ path, body: init?.body }); return answer.body; },
       apiResponse: async (path, init) => { sent.push({ path, body: init?.body }); return answer; },

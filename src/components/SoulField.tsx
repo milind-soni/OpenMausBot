@@ -6,7 +6,7 @@ import { firstSentence, soulPatchFor, utf8Bytes } from "@/lib/soul";
 import { useStore, type Bot } from "@/state/store";
 import { useBotEditor } from "./bot-settings/BotEditorContext";
 import { inputCls } from "./bot-settings/field";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 
 type SoulRead = { soul: string; revision: string; bytes: number; limit: number; file: string; drift: boolean; fileText?: string };
 
@@ -116,7 +116,7 @@ export function SoulField({
           {!simple && <>{t("botIdentity.soul.contextHelp")}{info?.file ? <> {t("botIdentity.soul.mirroredTo")} <span className="break-all">{info.file}</span>.</> : null}</>}
         </span>
         <span className={cn("shrink-0 tabular-nums", over && "font-medium text-red-500")}>
-          {bytes.toLocaleString()} / {limit.toLocaleString()} bytes{over ? " — not saved" : ""}
+          {t(over ? "botIdentity.soul.bytesOver" : "botIdentity.soul.bytes", { bytes: bytes.toLocaleString(intlLocale()), limit: limit.toLocaleString(intlLocale()) })}
         </span>
       </div>}
     </div>

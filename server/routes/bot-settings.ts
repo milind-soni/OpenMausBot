@@ -3,6 +3,7 @@ import { botAvatarUrlFromStoredPath } from "../../shared/bot-avatar.ts";
 import type { CommandAllowlistResponse } from "../../shared/command-allowlist.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { deleteAttachment, saveImage } from "../attachments.ts";
+import { MAX_ALWAYS_ALLOW, withAlwaysAllowKey } from "../always-allow.ts";
 import { avatarGenerationRequestSchema, avatarGenerationStateMatches, generateAvatarImage, snapshotAvatarGenerationState } from "../avatar-image.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
 import { commandAllowlistCandidate, type CommandAllowlistStore } from "../command-allowlist.ts";
@@ -19,7 +20,8 @@ import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { sawThread } from "../thread-presence.ts";
-import { readThreadNotifications } from "./notifications.ts";
+import { refusalBody, refusalText, userError } from "../user-errors.ts";
+import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
 
 export interface BotSettingsRouteDeps {
   store: Store;
@@ -33,6 +35,7 @@ export interface BotSettingsRouteDeps {
   supportsApprovalMode: ReturnType<typeof createApprovalModeSupport>;
   directTurnBots: { get(threadId: string): BotRecord | undefined };
   broadcast(payload: Record<string, unknown>): void;
+  notificationListed: NotificationListed;
   wireBot(bot: BotRecord): WireBot;
   cloudOwnerSession(auth: RequestAuth): boolean;
   /** On a Team Cloud a member who can edit the bot changes its profile as its owner would. */
@@ -49,13 +52,16 @@ export interface BotSettingsRouteDeps {
   cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null;
   /** A person opened this conversation (a Team Cloud's Needs you lines for them there are done). */
   threadRead?(auth: RequestAuth, threadId: string): void;
+  /** A Team Cloud: marks a bot's shared conversation read or unread for this person alone (host/room-reads.ts); false
+   * for a private chat, which keeps its one mark. */
+  personMarkThread?(auth: RequestAuth, threadId: string, unread: boolean): boolean;
 }
 
 export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandler {
   const {
     store, cfg, registry, commandAllowlist,
     commandAllowlistDrivers: COMMAND_ALLOWLIST_DRIVERS, cloudHome: CLOUD_HOME, cloudOwnerProfileFields: CLOUD_OWNER_PROFILE_FIELDS,
-    hostedModels, supportsApprovalMode, directTurnBots, broadcast, wireBot, cloudOwnerSession, storedAvatarExists,
+    hostedModels, supportsApprovalMode, directTurnBots, broadcast, notificationListed, wireBot, cloudOwnerSession, storedAvatarExists,
     requestedTaskBot, threadBusy, activeGroupTurnForBot, checkedModelSelection, engineSwitchNeedsAsk, readCursor,
     canManageCommandAllowlist, commandAllowlistResponse, cardAnswerRefusal,
   } = deps;
@@ -138,10 +144,10 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
         { selection: selected.modelSelection, busy: threadBusy(selected.id, selected.threadId) },
         true,
       );
-      if (!checked.ok) return json(res, checked.status, { error: checked.error });
+      if (!checked.ok) return json(res, checked.status, refusalBody(checked));
       if (activeGroupTurnForBot(existing.id)) {
         const groupChecked = checkedModelSelection(checked.selection, { selection: existing.modelSelection, busy: true });
-        if (!groupChecked.ok) return json(res, groupChecked.status, { error: groupChecked.error });
+        if (!groupChecked.ok) return json(res, groupChecked.status, refusalBody(groupChecked));
       }
       if ([existing, selected].some((owner) => {
         const mode = approvalModeFor(owner);
@@ -165,10 +171,14 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       const current = requestedTaskBot(m[1], body?.threadId);
       sawThread(current.threadId);
       deps.threadRead?.(auth, current.threadId);
+      if (deps.personMarkThread?.(auth, current.threadId, false)) {
+        readThreadNotifications(current.threadId, broadcast, notificationListed(auth));
+        return json(res, 200, { bot: wireBot(store.bot(current.id)!) });
+      }
       const task = store.taskByThread(current.id, current.threadId), cursor = readCursor(current.threadId);
       const changed = Boolean(task?.unread) || (cursor.lastReadMessageId !== undefined && task?.lastReadMessageId !== cursor.lastReadMessageId);
       if (changed) store.patchTask(current.id, current.threadId, { unread: false, ...cursor });
-      readThreadNotifications(current.threadId, broadcast, auth);
+      readThreadNotifications(current.threadId, broadcast, notificationListed(auth));
       const visible = wireBot(store.bot(current.id)!);
       if (changed) broadcast({ kind: "bot", bot: visible });
       return json(res, 200, { bot: visible });
@@ -212,16 +222,17 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       }
       // A standing grant is an approval: only those who may approve the card may remember it.
       const refusal = cardAnswerRefusal(auth, bot.threadId, pending.card!.requestId!, "allow");
-      if (refusal) return json(res, 403, { error: refusal });
-      const savedBot = store.bot(bot.id)!;
-      store.patchBot(bot.id, {
-        alwaysAllow: [...new Set([...(savedBot.alwaysAllow ?? []), allowKey])].slice(0, 200),
-      });
-      store.patchTask(bot.id, bot.threadId, {
-        alwaysAllow: [...new Set([...(bot.alwaysAllow ?? []), allowKey])].slice(0, 200),
-      });
+      if (refusal) return json(res, 403, refusalText(refusal));
       const live = directTurnBots.get(bot.threadId);
-      if (live) live.alwaysAllow = [...new Set([...(live.alwaysAllow ?? []), allowKey])].slice(0, 200);
+      const botAllow = withAlwaysAllowKey(store.bot(bot.id)!.alwaysAllow, allowKey);
+      const taskAllow = withAlwaysAllowKey(bot.alwaysAllow, allowKey);
+      const liveAllow = live ? withAlwaysAllowKey(live.alwaysAllow, allowKey) : null;
+      if (!botAllow || !taskAllow || (live && !liveAllow)) {
+        return json(res, 400, userError("serverError.bot.alwaysAllowFull", { max: MAX_ALWAYS_ALLOW }));
+      }
+      store.patchBot(bot.id, { alwaysAllow: botAllow });
+      store.patchTask(bot.id, bot.threadId, { alwaysAllow: taskAllow });
+      if (live && liveAllow) live.alwaysAllow = liveAllow;
       const updated = store.bot(bot.id)!;
       const visible = wireBot(updated);
       broadcast({ kind: "bot", bot: visible });

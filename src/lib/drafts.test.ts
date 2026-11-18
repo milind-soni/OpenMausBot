@@ -107,6 +107,14 @@ describe("channel draft delivery mode", () => {
     expect(failedComposerSends(draftId)[0]?.requestText).toBe(requestText);
   });
 
+  it("keeps a failed outbox send's choice of how it meets the running turn", () => {
+    const draftId = "bot:follow-up-outbox:task";
+    const revision = draftRevision(draftId);
+    markDraftEdited(draftId);
+    expect(recoverFailedComposerSend({ draftId, revision, sendId: "follow-up-outbox-send", threadId: "task", text: "later", requestText: "later", attachments: [], followUp: "queue" })).toBe("outbox");
+    expect(failedComposerSends(draftId)[0]?.followUp).toBe("queue");
+  });
+
   it("restores goal intent on remount and from persisted storage after restart", () => {
     const store = memoryStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });

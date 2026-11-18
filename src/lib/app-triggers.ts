@@ -78,6 +78,7 @@ export interface AppTriggerDraft {
   account?: string;
   filter?: AppTriggerFilter;
   config?: Record<string, unknown>;
+  sameConversation?: boolean;
 }
 
 const put = (trigger: AppTrigger) => applyAppTriggerFrame({ kind: "app-trigger", botId: trigger.botId, trigger });
@@ -89,7 +90,7 @@ export const appTriggerApi = {
     put(trigger);
     return trigger;
   },
-  async update(id: string, patch: Partial<Pick<AppTrigger, "name" | "prompt" | "enabled" | "config">> & { filter?: AppTriggerFilter | null }) {
+  async update(id: string, patch: Partial<Pick<AppTrigger, "name" | "prompt" | "enabled" | "config" | "sameConversation">> & { filter?: AppTriggerFilter | null }) {
     const { trigger } = await api<{ trigger: AppTrigger }>(`/api/app-triggers/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
     put(trigger);
     return trigger;

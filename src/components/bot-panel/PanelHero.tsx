@@ -3,6 +3,7 @@ import { Crown, Pencil } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { imeComposing } from "@/lib/send-key";
 import type { MausState } from "@/lib/mascot";
 import type { Bot } from "@/state/store";
 import { BOT_PROFILE_LIMITS } from "../../../shared/bot-profile";
@@ -33,6 +34,8 @@ function useInlineEdit(save: (value: string) => void) {
     setDraft(null);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    // Enter and Escape that pick or cancel an input-method candidate belong to the IME, not to this field or the panel.
+    if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; }
     if (event.key === "Enter") {
       event.preventDefault();
       settled.current = true;
@@ -78,12 +81,12 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
         aria-label={t("botPanel.avatar.edit")}
         aria-expanded={editorOpen}
         onClick={onToggleEditor}
-        className="group relative rounded-[24px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-border"
+        className="group relative rounded-[18px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-border"
       >
-        <BotAvatar bot={bot} size={80} state={activeState} />
+        <BotAvatar bot={bot} size={64} state={activeState} />
         <span
           aria-hidden="true"
-          className="absolute inset-0 flex items-center justify-center rounded-[24px] bg-black/0 text-white opacity-0 transition-[opacity,background-color] group-hover:bg-black/40 group-hover:opacity-100 group-focus-visible:bg-black/40 group-focus-visible:opacity-100 group-focus-within:opacity-100 touch:opacity-100 motion-reduce:transition-none"
+          className="absolute inset-0 flex items-center justify-center rounded-[18px] bg-black/0 text-white opacity-0 transition-[opacity,background-color] group-hover:bg-black/40 group-hover:opacity-100 group-focus-visible:bg-black/40 group-focus-visible:opacity-100 group-focus-within:opacity-100 touch:opacity-100 motion-reduce:transition-none"
         >
           <Pencil size={20} />
         </span>
@@ -122,7 +125,7 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
               data-panel-rename
               title={t("botPanel.rename")}
               onClick={() => name.start(bot.name)}
-              className="group/name relative inline-flex max-w-full items-center rounded-[7px] px-1.5 text-[17px] font-medium leading-6 text-ink hover:bg-ink/[0.04]"
+              className="group/name relative inline-flex max-w-full items-center rounded-[8px] px-1.5 text-[17px] font-medium leading-6 text-ink hover:bg-ink/[0.04]"
             >
               <span className="min-w-0 truncate">{bot.name}</span>
               <Pencil size={13} aria-hidden="true" className="absolute -right-4 shrink-0 text-ink-tertiary opacity-0 transition-opacity group-hover/name:opacity-100 group-focus-visible/name:opacity-100 group-focus-within/name:opacity-100 touch:opacity-100" />

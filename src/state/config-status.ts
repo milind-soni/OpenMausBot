@@ -1,12 +1,16 @@
 // What GET /api/config tells the app about the server and its settings (re-exported by store.tsx).
 import type { EffortLevel, LiveSettings } from "../../shared/wire";
+import type { ImageComplexity, ImageProvider } from "../../shared/image-generation";
+import type { ToolGroup } from "../../shared/tool-groups";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { ModelSelection } from "./store";
 
 /** A saved credential: whether it is set and, for admins, its last four characters. The key itself never comes back. */
 export interface SavedKey { configured: boolean; last4?: string }
 
-export type NestedKeyName = "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey";
+export type NestedKeyName = "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "customDeciderKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "geminiImageApiKey";
+
+export interface ImageSlotStatus { provider: ImageProvider; model: string; configured: boolean }
 
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
@@ -17,11 +21,14 @@ export interface ConfigStatus {
   cerebras?: SavedKey;
   groq?: SavedKey;
   greenference?: SavedKey;
+  modelgo?: SavedKey;
   deepseek?: SavedKey;
   meta?: SavedKey;
   /** X research comes with MausBot Cloud plans: `included` while this server holds the plan's relay credential;
    * `unavailable` when the Admin said no to this desktop's paid sign-in. */
   xResearch?: { included: boolean; unavailable?: boolean };
+  /** The built-in tool groups this workspace has, the ones a bot's Settings offer to turn off. */
+  toolGroups?: ToolGroup[];
   /** The person's own treg key for research: configured or not, never the key. */
   treg?: SavedKey;
   /** The Postiz organisation API key, and the Postiz server it belongs to when it is not Postiz Cloud. */
@@ -55,6 +62,22 @@ export interface ConfigStatus {
   newBots?: { effort?: EffortLevel };
   /** This Cloud is on the Starter plan, as the Admin last said; absent or false otherwise. */
   cloudStarter?: boolean;
+  /** The most bots this Cloud's plan makes, its MausBot aside. Sent only by servers that capped Starter's bots; absent otherwise. */
+  botLimit?: number;
+  /** A task on this Cloud is waiting for memory right now. */
+  waitingForRoom?: boolean;
+  /** On Starter: the turns it runs at once and the hand-offs it holds waiting, and when work was last refused for a limit. */
+  planTurns?: { running: number; waiting: number; refusedAt?: number; refused?: "tasks" | "paused" };
+  /** On Starter: how many bots stay awake; absent when every bot does. */
+  awakeLimit?: number;
+  /** Bots paused for the plan's limit: kept, but taking no turns. */
+  pausedBots?: string[];
+  /** What the person paused (Pause in the sidebar menus): bots by id and departments by name. Absent from older servers. */
+  pausedByPerson?: { bots: string[]; departments: string[]; all?: true };
+  /** Every bot taking no new work because the person paused it or its department. */
+  heldBots?: string[];
+  /** The server cannot read its saved routines, so none runs until it can. */
+  routinesUnreadable?: true;
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
@@ -64,16 +87,18 @@ export interface ConfigStatus {
    * providers, never the keys. */
   opencodeGo?: SavedKey & { providerKeys?: string[] };
   /** Voice. `configured` = the engine has what it needs (an ElevenLabs or
-   * Fish Audio key, or a Chatterbox server address); `ready` = that AND a voice, which is
+   * Fish Audio, Gemini or xAI key, or a Chatterbox server address); `ready` = that AND a voice, which is
    * what it takes to actually speak. The key itself is never echoed back;
-   * `baseUrl`/`model` are Chatterbox settings, not credentials. */
+   * `baseUrl` is the Chatterbox address; `model` selects Chatterbox or Gemini speech. */
   tts?: {
     configured: boolean;
     ready: boolean;
     voice: string;
-    provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai";
+    provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek";
     baseUrl?: string;
     model?: string;
+    /** Voice note with every reply, for every bot without its own choice. Absent from older servers. */
+    everyReply?: boolean;
     /** Fish Audio speech model; present only while Fish is the provider. */
     fishModel?: "s2.1-pro" | "s2.1-pro-free";
     /** ElevenLabs voice comes with Cloud Pro; no key is saved. */
@@ -85,9 +110,16 @@ export interface ConfigStatus {
    * saved. OpenRouter only: `keySource` says which key is in use (its own, or
    * the one under Settings → API keys); `sharedKey`: that one is on file. */
   decider?: {
-    provider: "jev" | "workersai" | "openrouter";
-    /** The OpenRouter model in use; present only while OpenRouter is the provider. */
+    provider: "jev" | "workersai" | "openrouter" | "custom" | "gemini";
+    /** Jev, when the person picked it but the shared OpenRouter key decides until a Jev key is saved; OpenRouter, when
+     * it was picked but a saved Gemini key decides until an OpenRouter key is saved. */
+    chosen?: "jev" | "openrouter";
+    /** The OpenRouter or custom model in use; present only while that is the provider. */
     model?: string;
+    /** The custom endpoint's protocol, or the OpenRouter API. */
+    api?: "chat" | "decisions" | "systemone";
+    /** The custom endpoint's base URL (the person's own setting, not a secret); custom only. */
+    baseUrl?: string;
     configured: boolean;
     keySource?: "own" | "shared";
     sharedKey?: boolean;
@@ -106,25 +138,33 @@ export interface ConfigStatus {
   live?: LiveSettings;
   /** Keys kept inside another setting (voice, decisions, pictures, live calls), by their desktop credential name. */
   savedKeys?: Partial<Record<NestedKeyName, SavedKey>>;
-  /** Shared write-only credential for on-demand GPT Image avatars. */
   imageGen?: {
     configured: boolean;
-    provider?: "openai" | "xai" | "custom";
+    provider?: ImageProvider;
     model?: string;
+    primary?: ImageSlotStatus;
+    fallback?: ImageSlotStatus | null;
+    ready?: boolean;
+    maxPerTurn?: number;
+    complexity?: ImageComplexity;
     customUrl?: string;
     customModel?: string;
     openaiConfigured?: boolean;
     xaiConfigured?: boolean;
     customKeyConfigured?: boolean;
+    geminiConfigured?: boolean;
+    openrouterConfigured?: boolean;
   };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string; aboutMe?: string; avatarUrl?: string };
+  /** Rules every bot follows, ahead of its department's context and its own instructions; sent to admins only. */
+  everyBotRules?: string;
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** What a paired phone calls this computer; "" uses the default. */
   computerName?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean };
+  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;
@@ -180,6 +220,12 @@ export interface BrowserEngineSummary {
   /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
    * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
   serverSites?: boolean;
+  /** Whether an owner-configured SOCKS5 upstream is active; the endpoint is never exposed in config status. */
+  proxyConfigured?: boolean;
+  /** Whether an owner-configured SOCKS5 upstream is saved, even if the current browser engine cannot use it. */
+  proxySaved?: boolean;
+  /** Team Cloud only: whether this caller may change the shared SOCKS5 upstream. */
+  proxyEditable?: boolean;
 }
 
 export interface BrowserProfile {

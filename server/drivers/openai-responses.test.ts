@@ -95,14 +95,14 @@ afterEach(async () => {
   forgetKey(KEY);
 });
 
-async function fixture(script: Script, apiUrl = OPENAI) {
+async function fixture(script: Script, apiUrl = OPENAI, models: unknown[] = []) {
   vi.spyOn(console, "warn").mockImplementation(() => {});
   const directory = mkdtempSync(join(tmpdir(), "omb-responses-"));
   const calls: Call[] = [];
   const server = createServer(async (request, response) => {
     if (request.url === "/v1/models") {
       response.setHeader("content-type", "application/json");
-      response.end('{"data":[]}');
+      response.end(JSON.stringify({ data: models }));
       return;
     }
     let data = "";
@@ -245,6 +245,20 @@ describe("a model that refuses tools over Chat Completions, at OpenAI's address"
 
     expect(await f.turn()).toMatchObject({ end: { ok: true } });
     expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/responses", "/v1/responses"]);
+  });
+
+  it("keeps the reasoning level the person picked when it moves to Responses", async () => {
+    const f = await fixture((call, response) => {
+      if (call.path.endsWith("/chat/completions")) reject(response, 400, refusalOf(MODEL));
+      else answer(response, "Hello there.");
+    }, OPENAI, [{ id: MODEL, created: 1 }]);
+    await f.instance.refreshModels?.();
+    expect(await f.turn({ variant: "low" })).toMatchObject({ end: { ok: true } });
+    expect(await f.turn()).toMatchObject({ end: { ok: true } });
+    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/responses", "/v1/responses"]);
+    expect(f.calls[0]!.body).toMatchObject({ reasoning_effort: "low" });
+    expect(f.calls[1]!.body.reasoning).toEqual({ effort: "low", summary: "auto" });
+    expect(f.calls[2]!.body.reasoning).toEqual({ summary: "auto" });
   });
 
   it("leaves a model that accepts tools on Chat Completions", async () => {

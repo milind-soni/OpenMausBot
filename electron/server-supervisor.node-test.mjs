@@ -7,11 +7,12 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import test from "node:test";
 import vm from "node:vm";
-import { switchLocalEnvironment } from "./environment-switch.mjs";
+import { reviveAfterFailedSwitch, switchLocalEnvironment } from "./environment-switch.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 
 const require = createRequire(import.meta.url);
 const env = require("./environments.cjs");
+const { englishText } = require("./native-text.cjs");
 const MAIN_SOURCE = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
 // vm realms have their own Object/Array prototypes: bring results home before strict-comparing.
 const plain = (value) => (value === undefined || value === null ? value : Array.isArray(value) ? value.map(plain) : typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, plain(v)])) : value);
@@ -202,7 +203,9 @@ test("local switching in main rejects dev mode and overlaps, and adopts the roll
   const pause = body.indexOf("serverSupervisor.pause();");
   assert.ok(busyCheck < flagSet && flagSet < pause, "a rejected switch must not pause the supervisor");
   const finallyBlock = body.slice(body.lastIndexOf("} finally {"));
-  assert.match(finallyBlock, /localSwitchInFlight = false;\s*serverSupervisor\.resume\(\);/);
+  // The flag stays set through the safety-net revive, so a second switch cannot race it for the previous folder's lease.
+  assert.ok(finallyBlock.indexOf("serverSupervisor.resume();") < finallyBlock.indexOf("reviveAfterFailedSwitch("));
+  assert.ok(finallyBlock.indexOf("reviveAfterFailedSwitch(") < finallyBlock.indexOf("localSwitchInFlight = false;"));
   assert.match(source, /function createLocalEnvironment\(name, dataDir\) \{\s*if \(!app\.isPackaged\) return \{ ok: false, error: "dev", state: environmentsState \};/);
 });
 
@@ -253,6 +256,7 @@ function runForget(state) {
     desktopDataDir: () => "/Users/me/.openmausbot",
     slog: () => {},
     session: { defaultSession: { fetch: async () => ({ ok: true }), clearStorageData: async () => {} } },
+    nativeT: englishText.t,
   };
   const context = vm.createContext(ctx);
   vm.runInContext(`${MAIN_SOURCE.slice(start, end)}; this.forgetEnvironment = forgetEnvironment;`, context);
@@ -293,7 +297,8 @@ test("forgetting a remote environment keeps its sign-out confirmation and answer
   const { calls, context } = runForget({ environments: [remote], activeId: "r1" });
   assert.deepEqual(plain(await context.forgetEnvironment("r1")), { ok: true });
   assert.equal(calls.dialogs.length, 1, "the remote dialog stays");
-  assert.match(calls.dialogs[0].detail, /signs out of that server/);
+  assert.equal(calls.dialogs[0].message, "Remove Office from this app?");
+  assert.match(calls.dialogs[0].detail, /The server keeps running and your bots stay there/);
   assert.deepEqual(plain(calls.persisted[0].environments), []);
 });
 
@@ -321,11 +326,12 @@ test("a purge of a missing folder still removes the entry (rm runs with force)",
   assert.deepEqual(plain(rmOptions), [{ recursive: true, force: true }]);
 });
 
-function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopUtilityServer = async () => true } = {}) {
+function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopUtilityServer = async () => true, acquireThrowsOn = [] } = {}) {
   const targetDir = mkdtempSync(join(tmpdir(), "omb-switch-fixture-"));
   t.after(() => rmSync(targetDir, { recursive: true, force: true }));
   const forks = [];
   let forkIndex = 0;
+  let acquires = 0;
   const context = vm.createContext({
     app: { isPackaged: true },
     localSwitchInFlight: false,
@@ -340,10 +346,14 @@ function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopU
       isCurrent: (proc) => proc !== null && proc === context.serverProc,
     },
     switchLocalEnvironment,
+    reviveAfterFailedSwitch,
     stopUtilityServer,
     desktopDataDirLease: { release: () => { if (releaseLeaseThrows) throw new Error("lease release exploded"); } },
     acquireDataDirLease: () => ({ release: () => {} }),
-    acquireDataDirLeaseFor: () => ({ release: () => {} }),
+    acquireDataDirLeaseFor: (dir) => {
+      if (acquireThrowsOn.includes(++acquires)) throw new Error(`lease for ${dir} is held`);
+      return { release: () => {} };
+    },
     fs: { promises: { mkdir: async () => {} } },
     startServerOn: async (...args) => {
       forks.push(args);
@@ -356,9 +366,11 @@ function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopU
     withActive: env.withActive,
     persistEnvironments: (next) => { context.environmentsState = next; },
     navigateMainWindow: () => {},
+    placeSwitch: { turn: () => 0 },
     rendererOrigin: () => "http://127.0.0.1:8799",
     dialog: { showErrorBox: () => {} },
     slog: () => {},
+    nativeT: englishText.t,
   });
   const start = MAIN_SOURCE.indexOf("async function switchLocalEnvironmentTo(");
   const body = MAIN_SOURCE.slice(start, MAIN_SOURCE.indexOf("\nasync function switchEnvironment", start));
@@ -372,8 +384,20 @@ test("a failed switch with no live child reforks the active environment once and
   const { context, forks, targetDir } = switchFixture(t, { releaseLeaseThrows: true });
   const result = await context.switchLocalEnvironmentTo(targetDir, "l1");
   assert.deepEqual(plain(result), { ok: false, error: "switch-failed" });
-  assert.deepEqual(plain(forks), [[8799]], "exactly one safety-net re-fork on the active port");
+  assert.deepEqual(plain(forks), [[8799, "/Users/me/.openmausbot"]], "exactly one safety-net re-fork, on the active port and folder");
   assert.equal(context.serverProc?.pid, 4001, "the re-forked child is adopted as ready");
+});
+
+test("a rollback that could not take the previous folder's lease back is revived by taking it then", async (t) => {
+  // The target child never starts; the rollback releases the target lease, then fails to re-acquire the previous one.
+  const { context, forks, targetDir } = switchFixture(t, { startResults: [{ proc: null }], acquireThrowsOn: [2] });
+  const result = await context.switchLocalEnvironmentTo(targetDir, "l1");
+  assert.deepEqual(plain(result), { ok: false, error: "switch-failed" });
+  assert.ok(context.desktopDataDirLease, "the previous folder's lease is held again");
+  assert.equal(context.runningDataDir, "/Users/me/.openmausbot");
+  assert.deepEqual(plain(forks.at(-1)), [8799, "/Users/me/.openmausbot"]);
+  assert.equal(context.serverProc?.pid, 4002, "the revived child is adopted as ready");
+  assert.equal(context.localSwitchInFlight, false);
 });
 
 test("a failed switch whose rollback restored a child does not re-fork", async (t) => {
@@ -406,5 +430,5 @@ test("boot reads the environment decision before the boot lease and never create
   const lease = boot.indexOf("acquireDataDirLease(");
   assert.ok(decision > 0 && decision < lease, "the missing-dir decision must precede the boot lease");
   assert.match(boot, /activeId: LOCAL_ID/);
-  assert.match(boot, /showErrorBox\(\s*"[^"]*missing[^"]*"/i);
+  assert.match(boot, /showErrorBox\(nativeT\("native\.boot\.folderMissing\.title"\)/);
 });

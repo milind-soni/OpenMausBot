@@ -5,7 +5,7 @@ export const VPS_ALIAS_RESOURCES_ERROR =
   "remove this installation's VPS computers before changing or clearing the SSH config alias";
 
 export const VPS_BOT_ALIAS_RESOURCES_ERROR =
-  "remove this bot's VPS computer before changing its SSH config alias (Settings → Local VM → Self-hosted VPS computers)";
+  "remove this bot's VPS computer before changing its SSH config alias (Settings → Desktops & browser → Desktops)";
 export const VPS_BOT_ALIAS_CHANGE_ERROR = "stop the active turn before changing this bot's VPS SSH alias";
 export const VPS_BOT_ALIAS_LIFECYCLE_ERROR = "wait for VPS computer actions to finish before changing this bot's SSH alias";
 
@@ -13,6 +13,13 @@ export const VPS_BOT_ALIAS_LIFECYCLE_ERROR = "wait for VPS computer actions to f
 export function vpsLeftBehindNotice(done: "Moved" | "Deleted", alias: string, containerName: string): string {
   return `${done}. ${alias} could not be reached, so this bot's computer there, if it is still there, was left as it is. ` +
     `When ${alias} is back, remove it with: docker -H ssh://${alias} rm -f ${containerName}`;
+}
+
+/** Why a bot that gets its cloud computer from Boat can't have one while a self-hosted VPS is saved but not chosen for it. */
+export function vpsNotChosenReason(botName: string, vpsAlias: string | null): string | null {
+  return vpsAlias ? `${botName}'s cloud computer comes from Boat, which is not available here. The self-hosted VPS ${vpsAlias} is set up ` +
+    `but not chosen for ${botName}: ask the person to choose Self-hosted VPS as the cloud backend in ${botName}'s Bot settings, ` +
+    `Access section, then select cloud again.` : null;
 }
 
 export function cloudBackendChangeError(botBusy: boolean, activeVpsThread: boolean): string | null {

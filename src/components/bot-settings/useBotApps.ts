@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 
 import { botAppScope } from "@/lib/bot-app-access";
-import { HIGHLEVEL_SLUG, type HighLevelStatus } from "@/lib/highlevel-sign-in";
-import { highLevelConnected, preloadHighLevelStatus } from "@/lib/highlevel-status";
 import { t } from "@/lib/i18n";
 import { api, type Bot } from "@/state/store";
 import type { ConnectorScope } from "../../../shared/connector-scopes";
+import { EMAIL_SLUG, type EmailStatus } from "../../../shared/email";
 import { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
+import type { ConnectorAccount } from "@/lib/connector-status";
 import type { ToolkitCard } from "../ServiceIcon";
 
 export interface BotApp {
@@ -15,6 +15,8 @@ export interface BotApp {
   blurb: string;
   card: Pick<ToolkitCard, "logo" | "domain" | "label">;
   scope: ConnectorScope | null;
+  /** the app's connected accounts, when the inventory lists them */
+  accounts?: ConnectorAccount[];
 }
 
 export interface BotApps {
@@ -38,27 +40,27 @@ function slugLabel(slug: string): string {
   return slug.charAt(0).toUpperCase() + slug.slice(1).replace(/[_-]+/g, " ");
 }
 
-/** HighLevel is connected natively, not through the Composio inventory, so it brings its own card. */
-export function highLevelAppCard(): Pick<ToolkitCard, "logo" | "domain" | "label"> & { blurb: string } {
-  return { logo: null, domain: "gohighlevel.com", label: t("highlevel.title"), blurb: t("highlevel.description") };
+/** Email is connected natively, not through the Composio inventory, so it brings its own card. */
+export function emailAppCard(): Pick<ToolkitCard, "logo" | "domain" | "label"> & { blurb: string } {
+  return { logo: null, domain: null, label: t("email.title"), blurb: t("email.description") };
 }
 
 export function botAppsFrom(
   bot: Pick<Bot, "composio" | "connectorScopes" | "connectorTools">,
   inventory: ConnectorInventory | null,
   cards: ReadonlyMap<string, ToolkitCard>,
-  highlevel: HighLevelStatus | null = null,
+  email: EmailStatus | null = null,
 ): BotApps {
   if (!inventory) return { phase: "loading", apps: [], connectedSlugs: [] };
   if (!inventory.authoritative) return { phase: "unknown", apps: [], connectedSlugs: [] };
   const connectedSlugs = Object.entries(inventory.services)
     .filter(([, status]) => status.connected)
     .map(([slug]) => slug);
-  if (highLevelConnected(highlevel) && !connectedSlugs.includes(HIGHLEVEL_SLUG)) connectedSlugs.push(HIGHLEVEL_SLUG);
+  if (email?.state === "connected" && !connectedSlugs.includes(EMAIL_SLUG)) connectedSlugs.push(EMAIL_SLUG);
   connectedSlugs.sort((a, b) => a.localeCompare(b));
   const apps = connectedSlugs.map((slug) => {
-    if (slug === HIGHLEVEL_SLUG && highLevelConnected(highlevel)) {
-      const { blurb, ...card } = highLevelAppCard();
+    if (slug === EMAIL_SLUG && email?.state === "connected") {
+      const { blurb, ...card } = emailAppCard();
       return { slug, label: card.label, blurb, card, scope: botAppScope(bot, slug) };
     }
     const card = cards.get(slug);
@@ -69,31 +71,53 @@ export function botAppsFrom(
       blurb: card?.blurb ?? "",
       card: { logo: card?.logo ?? null, domain: card?.domain ?? null, label },
       scope: botAppScope(bot, slug),
+      accounts: inventory.services[slug]?.accounts ?? [],
     };
   });
   return { phase: "ready", apps, connectedSlugs };
 }
 
-export function useBotApps(bot: Bot): BotApps {
+/** The apps plus whether this lookup's inventory, app catalog and Email requests have answered (or failed); the values alone
+ * can't tell pending from failed, and an inventory kept from an earlier lookup is not this lookup's answer. */
+export interface BotAppsState extends BotApps {
+  inventorySettled: boolean;
+  cardsSettled: boolean;
+  emailSettled: boolean;
+}
+
+/** `load` false skips the requests until it turns true (the settings search loads apps only once someone searches). */
+export function useBotApps(bot: Bot, load = true): BotAppsState {
   const [inventory, setInventory] = useState<ConnectorInventory | null>(null);
   const [cards, setCards] = useState<ReadonlyMap<string, ToolkitCard>>(() => new Map());
-  const [highlevel, setHighlevel] = useState<HighLevelStatus | null>(null);
+  const [email, setEmail] = useState<EmailStatus | null>(null);
+  const [inventorySettled, setInventorySettled] = useState(false);
+  const [cardsSettled, setCardsSettled] = useState(false);
+  const [emailSettled, setEmailSettled] = useState(false);
 
   useEffect(() => {
+    if (!load) return;
     let cancelled = false;
+    setInventorySettled(false);
+    setCardsSettled(false);
+    setEmailSettled(false);
     void preloadConnectedApps().then((result) => {
-      if (!cancelled) setInventory(result);
+      if (cancelled) return;
+      setInventory(result);
+      setInventorySettled(true);
     });
     void loadAppCards().then((result) => {
-      if (!cancelled) setCards(result);
+      if (cancelled) return;
+      setCards(result);
+      setCardsSettled(true);
     });
-    void preloadHighLevelStatus().then((result) => {
-      if (!cancelled) setHighlevel(result);
-    });
+    void api("/api/email")
+      .then((result: EmailStatus) => { if (!cancelled) setEmail(result); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setEmailSettled(true); });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [load]);
 
-  return botAppsFrom(bot, inventory, cards, highlevel);
+  return { ...botAppsFrom(bot, inventory, cards, email), inventorySettled, cardsSettled, emailSettled };
 }

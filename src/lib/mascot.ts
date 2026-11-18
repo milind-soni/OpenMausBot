@@ -150,13 +150,20 @@ export type MascotBotProfile = {
   messages?: MascotMessage[];
 };
 
+const isFailedStep = (message: MascotMessage | undefined) => message?.kind === "activity" && message.tool?.ok === false;
+
+/** The conversation ended on a failed step: the turn's error row, or a tool that failed with nothing after it. */
+export function endedOnFailure(messages: readonly MascotMessage[] | undefined): boolean {
+  return isFailedStep(lastNonReceipt(messages));
+}
+
 export function stateForBot(bot: MascotBotProfile): MausState {
   const pinned = normalizeState(bot.mascotExpression);
   if (pinned) return pinned;
 
   const last = lastNonReceipt(bot.messages);
 
-  if (last?.kind === "activity" && last.tool?.ok === false) return "alerting";
+  if (isFailedStep(last)) return "alerting";
   if (bot.busy) return "working";
   if (botShowsUnread(bot)) return "notifying";
   if (last?.kind === "options") return "curious";

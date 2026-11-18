@@ -8,7 +8,7 @@ import {
 const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`./testing/fixtures/${name}.json`, import.meta.url), "utf8"));
 
 /** One relay that answers like Composio's multi-execute tool, from `answers` by tool slug. */
-function relay(answers: Record<string, (args: Record<string, unknown>) => { successful: boolean; data?: unknown; error?: string }>) {
+function relay(answers: Record<string, (args: Record<string, unknown>) => { successful: boolean; data?: unknown; data_preview?: unknown; error?: string }>) {
   const frames: Array<{ method: string; session?: string; slug?: string; args?: Record<string, unknown>; item?: Record<string, unknown> }> = [];
   let sessions = 0;
   const deps = {
@@ -35,6 +35,13 @@ describe("reading Composio's answers", () => {
     expect(events[0]!.attendees.map((one) => one.email)).toEqual(["me@example.test", "jake@pin.example"]);
     expect(events[1]).toMatchObject({ seriesId: "weekly-2", selfDeclined: true, joinUrl: "https://zoom.us/j/1" });
     expect(events[2]).toMatchObject({ allDay: true });
+  });
+
+  it("takes a Teams link from an invite's description when the event has no conference link", () => {
+    const teams = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=x";
+    const [event] = eventsFromData({ items: [{ id: "teams-1", summary: "Vendor call", status: "confirmed", start: { dateTime: "2026-11-09T10:00:00Z" }, end: { dateTime: "2026-11-09T10:30:00Z" },
+      description: `Microsoft Teams meeting. Join: <${teams}> Meeting ID: 123` }] }, { id: "primary", owned: true });
+    expect(event).toMatchObject({ id: "teams-1", joinUrl: teams });
   });
 
   it("reads mail headers, profiles, single messages, threads and the calendar list", () => {
@@ -89,6 +96,49 @@ describe("a check's reads", () => {
     expect(read.emails.map((email) => email.id)).toEqual(["m4", "m3", "m2"]);
   });
 
+  it("reads mail in smaller pages when the connected-apps service sends a page back shortened", async () => {
+    const messages = Array.from({ length: 30 }, (_, index) => ({ messageId: `m${index}`, threadId: `t${index}`, messageTimestamp: new Date(Date.UTC(2026, 9, 22, 0, index)).toISOString(), sender: "x@y.test", subject: "s" }));
+    // Like the real service: an answer past its size limit comes back as a short preview with no data.
+    const { deps, frames } = relay({
+      GMAIL_FETCH_EMAILS: (args) => {
+        const size = Number(args.max_results);
+        const start = Number(args.page_token ?? 0);
+        const page = messages.slice(start, start + size);
+        if (size > 10) return { successful: true, data_preview: { messages: [...page.slice(0, 2), `...${page.length - 2} more items`] } };
+        return { successful: true, data: { messages: page, ...(start + size < messages.length ? { nextPageToken: String(start + size) } : {}) } };
+      },
+    });
+    const read = await createConnectedReads(deps).session().emails(0, 100);
+    expect(read).toMatchObject({ more: false });
+    expect(read.emails).toHaveLength(30);
+    expect(frames.filter((frame) => frame.slug === "GMAIL_FETCH_EMAILS").every((frame) => Number(frame.args!.max_results) <= 50)).toBe(true);
+  });
+
+  it("asking again at a smaller size does not use up the pages a read may take", async () => {
+    const messages = Array.from({ length: 90 }, (_, index) => ({ messageId: `m${index}`, threadId: `t${index}`, messageTimestamp: new Date(Date.UTC(2026, 9, 22, 0, index)).toISOString(), sender: "x@y.test", subject: "s" }));
+    // Four whole pages of 20, then the next page comes back shortened at 20 and at 10, and whole at 5.
+    const { deps, frames } = relay({
+      GMAIL_FETCH_EMAILS: (args) => {
+        const size = Number(args.max_results);
+        const start = Number(args.page_token ?? 0);
+        const page = messages.slice(start, start + size);
+        if (start >= 80 && size > 5) return { successful: true, data_preview: { messages: [...page.slice(0, 2), `...${page.length - 2} more items`] } };
+        return { successful: true, data: { messages: page, ...(start + size < messages.length ? { nextPageToken: String(start + size) } : {}) } };
+      },
+    });
+    const read = await createConnectedReads(deps).session().emails(0, 100);
+    expect(frames.filter((frame) => frame.slug === "GMAIL_FETCH_EMAILS").map((frame) => Number(frame.args!.max_results))).toEqual([20, 20, 20, 20, 20, 10, 5, 5]);
+    expect(read).toMatchObject({ more: false });
+    expect(read.emails).toHaveLength(90);
+  });
+
+  it("a shortened answer is an error that says so, never an empty list", async () => {
+    const { deps } = relay({ GMAIL_FETCH_EMAILS: () => ({ successful: true, data_preview: { messages: ["...50 more items"] } }) });
+    const mail = await createConnectedReads(deps).session().emails(0, 5).catch((error: unknown) => error);
+    expect(mail).toMatchObject({ app: "gmail", signedOut: false });
+    expect((mail as Error).message).toMatch(/too large/);
+  });
+
   it("names the app that failed, and whether reconnecting fixes it", async () => {
     const { deps } = relay({
       GMAIL_FETCH_EMAILS: () => ({ successful: false, error: "Connected account is not ACTIVE: token expired" }),
@@ -100,5 +150,103 @@ describe("a check's reads", () => {
     expect(mail).toMatchObject({ app: "gmail", signedOut: true });
     const calendar = await session.events(0, 1).catch((error: unknown) => error);
     expect(calendar).toMatchObject({ app: "googlecalendar", signedOut: false });
+  });
+
+  it("names the account the host chose for an app with several, asking once per session, and says so when it fails", async () => {
+    const { deps, frames } = relay({
+      GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }),
+      GMAIL_FETCH_EMAILS: () => ({ successful: false, error: "Backend error 500" }),
+      GOOGLECALENDAR_LIST_CALENDARS: () => ({ successful: true, data: { items: [] } }),
+      GOOGLECALENDAR_EVENTS_LIST: () => ({ successful: true, data: { items: [] } }),
+    });
+    let asked = 0;
+    const session = createConnectedReads({ ...deps, accounts: async () => { asked += 1; return { gmail: "ca_newest" }; } }).session();
+    expect(await session.address()).toBe("new@x.test");
+    const mail = await session.emails(0, 5).catch((error: unknown) => error);
+    expect(mail).toMatchObject({ app: "gmail", signedOut: false, severalAccounts: true });
+    await session.events(0, 1);
+    expect(asked).toBe(1);
+    for (const frame of frames.filter((one) => one.slug?.startsWith("GMAIL_"))) expect(frame.item!.account).toBe("ca_newest");
+    for (const frame of frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_"))) expect(frame.item).not.toHaveProperty("account");
+  });
+
+  it("asks again for the account after a failed lookup, and a relay error is not blamed on the named account", async () => {
+    const { deps, frames } = relay({ GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }) });
+    let asked = 0;
+    const accounts = async () => {
+      asked += 1;
+      if (asked === 1) throw new Error("inventory down");
+      return { gmail: "ca_newest" };
+    };
+    let broken = false;
+    const session = createConnectedReads({ ...deps, accounts, relay: async (payload, transport) =>
+      broken ? { status: 502, bytes: new Uint8Array() } : deps.relay(payload, transport) }).session();
+    expect(await session.address()).toBe("new@x.test");
+    expect(await session.address()).toBe("new@x.test");
+    expect(asked).toBe(2);
+    expect(frames.filter((one) => one.slug === "GMAIL_GET_PROFILE").map((one) => one.item!.account)).toEqual([undefined, "ca_newest"]);
+    broken = true;
+    const error = await session.address().catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ app: "gmail", severalAccounts: false });
+  });
+
+  it("names the fallback account while the lookup fails, and still asks again on the next read", async () => {
+    const { deps, frames } = relay({
+      GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "old@x.test" } }),
+      GOOGLECALENDAR_LIST_CALENDARS: () => ({ successful: true, data: { items: [] } }),
+      GOOGLECALENDAR_EVENTS_LIST: () => ({ successful: true, data: { items: [] } }),
+    });
+    let asked = 0;
+    const accounts = async () => {
+      asked += 1;
+      if (asked === 1) throw new Error("inventory down");
+      return { gmail: "ca_older", googlecalendar: "ca_cal_newest" };
+    };
+    const session = createConnectedReads({ ...deps, accounts, fallbackAccounts: () => ({ gmail: "ca_older" }) }).session("bot-1");
+    expect(await session.address()).toBe("old@x.test");
+    await session.events(0, 1);
+    expect(asked).toBe(2);
+    expect(frames.filter((one) => one.slug === "GMAIL_GET_PROFILE").map((one) => one.item!.account)).toEqual(["ca_older"]);
+    for (const frame of frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_"))) expect(frame.item!.account).toBe("ca_cal_newest");
+  });
+
+  it("names one account for every request of a calendar or mail read, even when the lookup recovers part-way", async () => {
+    const { deps, frames } = relay({
+      GOOGLECALENDAR_LIST_CALENDARS: () => ({ successful: true, data: { items: [{ id: "team@group.calendar.google.com", selected: true, accessRole: "reader" }] } }),
+      GOOGLECALENDAR_EVENTS_LIST: () => ({ successful: true, data: { items: [] } }),
+      GMAIL_FETCH_EMAILS: (args) => ({ successful: true, data: { messages: [], ...(args.page_token ? {} : { nextPageToken: "page-2" }) } }),
+    });
+    let asked = 0;
+    const accounts = async () => {
+      asked += 1;
+      if (asked === 1 || asked === 3) throw new Error("inventory down");
+      return { gmail: "ca_mail_new", googlecalendar: "ca_cal_new" };
+    };
+    const session = createConnectedReads({ ...deps, accounts, fallbackAccounts: () => ({ gmail: "ca_mail_old", googlecalendar: "ca_cal_old" }) }).session("bot-1");
+    await session.events(0, 1);
+    const calendar = frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_"));
+    expect(calendar.map((one) => one.slug)).toEqual(["GOOGLECALENDAR_LIST_CALENDARS", "GOOGLECALENDAR_EVENTS_LIST", "GOOGLECALENDAR_EVENTS_LIST"]);
+    for (const frame of calendar) expect(frame.item!.account).toBe("ca_cal_old");
+    await session.events(0, 1);
+    expect(frames.filter((one) => one.slug?.startsWith("GOOGLECALENDAR_")).slice(3).map((one) => one.item!.account)).toEqual(["ca_cal_new", "ca_cal_new", "ca_cal_new"]);
+    asked = 2;
+    const fresh = createConnectedReads({ ...deps, accounts, fallbackAccounts: () => ({ gmail: "ca_mail_old", googlecalendar: "ca_cal_old" }) }).session("bot-1");
+    await fresh.emails(0, 5);
+    expect(frames.filter((one) => one.slug === "GMAIL_FETCH_EMAILS").map((one) => one.item!.account)).toEqual(["ca_mail_old", "ca_mail_old"]);
+  });
+
+  it("gives up on an account lookup that outlasts the read's time limit, and asks again on the next read", async () => {
+    const { deps, frames } = relay({ GMAIL_GET_PROFILE: () => ({ successful: true, data: { emailAddress: "new@x.test" } }) });
+    let asked = 0;
+    const accounts = () => {
+      asked += 1;
+      return asked === 1 ? new Promise<never>(() => {}) : Promise.resolve({ gmail: "ca_newest" });
+    };
+    const session = createConnectedReads({ ...deps, accounts, readTimeoutMs: 50 }).session();
+    const error = await session.address().catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ app: "gmail", message: expect.stringMatching(/did not answer within/) });
+    expect(await session.address()).toBe("new@x.test");
+    expect(asked).toBe(2);
+    expect(frames.filter((one) => one.slug === "GMAIL_GET_PROFILE").map((one) => one.item!.account)).toEqual(["ca_newest"]);
   });
 });

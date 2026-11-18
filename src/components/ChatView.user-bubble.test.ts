@@ -65,3 +65,14 @@ describe("bot-colored user bubbles", () => {
     expect(html.slice(reply - 80, reply)).not.toContain(tone.background);
   });
 });
+
+it("marks a steered message as sent mid-turn without claiming the bot read it", () => {
+  const steered: Bot = {
+    ...bot,
+    messages: [{ ...bot.messages[0]!, steered: true }, bot.messages[1]!],
+  };
+  const html = renderToStaticMarkup(createElement(ChatView, { bot: steered }));
+
+  expect(html).toContain(">sent mid-turn</div>");
+  expect(html).not.toContain("It saw this before its next step");
+});

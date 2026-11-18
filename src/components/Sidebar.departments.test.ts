@@ -38,6 +38,7 @@ vi.mock("./DesktopCapabilities", async () => {
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) };
@@ -45,8 +46,10 @@ vi.mock("@/state/store", async (importOriginal) => {
 
 import { initialState } from "@/state/store";
 import { BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId } from "@/lib/sidebar-layout";
+import { SIDEBAR_DENSITY_KEY } from "@/lib/sidebar-preferences";
 import { PHONE_LAYOUT } from "@/lib/use-media-query";
 import { BotContextMenu, BotListItem, Sidebar, TeamMenuItems } from "./Sidebar";
+const drawSidebar = (Sidebar as unknown as { type: (props: import("react").ComponentProps<typeof Sidebar>) => import("react").ReactNode }).type;
 import { NEW_DEPARTMENT } from "./SidebarBotDrag";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -72,7 +75,7 @@ function nodes(value: ReactNode): ReactElement<Props>[] {
 }
 function render() {
   fixture.index = 0;
-  const root = Sidebar({ open: false, onClose: () => {} }) as ReactElement<Props>;
+  const root = drawSidebar({ open: false, onClose: () => {} }) as ReactElement<Props>;
   return [root, ...nodes(root.props.children)];
 }
 const rows = () => render().filter((node) => node.type === BotListItem).map((node) => node.props as unknown as RowProps);
@@ -154,6 +157,55 @@ describe("Simple's sidebar before anyone drags", () => {
   it("leaves rows still on a phone, where the menu moves them", () => {
     fixture.phone = true;
     expect(rows().every((props) => props.botDrag === undefined)).toBe(true);
+  });
+
+  it("keeps every row draggable in the icons-only rail, where the whole tile is the drag source", () => {
+    // The rail (density "icons") collapses the sidebar to bot tiles. sections.interactive is false there, so the
+    // arrange used to answer with no drag handles at all and the rail could not be reordered.
+    fixture.storage.set(SIDEBAR_DENSITY_KEY, "avatars");
+    const icons = rows();
+    expect(icons.length).toBeGreaterThan(0);
+    for (const props of icons) {
+      expect(props.density).toBe("icons");
+      expect(props.botDragging).toBe(false);
+      expect(props.botDrag!.row(props.bot.id).draggable).toBe(true);
+    }
+  });
+
+  it("leaves the rail alone on a phone, where the row menu moves bots", () => {
+    fixture.storage.set(SIDEBAR_DENSITY_KEY, "avatars");
+    fixture.phone = true;
+    const icons = rows();
+    expect(icons.length).toBeGreaterThan(0);
+    for (const props of icons) expect(props.botDrag).toBeUndefined();
+  });
+
+  it("reorders inside the rail's own list, and nothing else: no department is created or left unseen", () => {
+    fixture.storage.set(SIDEBAR_DENSITY_KEY, "avatars");
+    drag("cleo");
+    row("atlas").botDrag!.row("atlas").onDrop(at(5) as never);
+    expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["cleo", "atlas", "bea"] }]);
+    expect(sections()).not.toContain(userSectionId(NEW_DEPARTMENT));
+    fixture.dispatch.mockClear();
+
+    drag("cleo");
+    row("atlas").botDrag!.row("atlas").onDragOver(at() as never);
+    expect(row("atlas").botDrop).toBe("after");
+    row("atlas").botDrag!.row("atlas").onDrop(at() as never);
+    expect(actions()).toEqual([{ type: "botsOrdered", botIds: ["atlas", "cleo", "bea"] }]);
+    expect(sections()).not.toContain(userSectionId(NEW_DEPARTMENT));
+  });
+
+  it("refuses in the rail a drop that would change department, which the person cannot see there", () => {
+    fixture.storage.set(SIDEBAR_DENSITY_KEY, "avatars");
+    drag("dodo");
+    expect(section(userSectionId("Work")).onDragOver).toBeInstanceOf(Function);
+    const over = at();
+    section(BOTS_SECTION_ID).onDragOver(over as never);
+    expect(over.preventDefault).not.toHaveBeenCalled();
+    section(BOTS_SECTION_ID).onDrop(over as never);
+    expect(actions()).toEqual([]);
+    expect(rows().every((props) => !props.botDragging)).toBe(true);
   });
 });
 

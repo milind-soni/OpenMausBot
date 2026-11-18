@@ -212,7 +212,7 @@ describe("quota switch", () => {
       expect(message).toMatchObject({ id: messageId, text: "how's the weather", dataContext: { cardId: "sales" } });
       expect(replyTo).toMatchObject({ id: quoted });
       expect(spoken).toEqual({});
-      expect(notices()).toContainEqual({ name: "notice: continuing on Codex after hitting the usage limit", ok: true });
+      expect(notices()).toContainEqual({ name: "notice: continuing on Codex after hitting the usage limit", nameCode: "chat.notice.backupContinuingLimit", nameParams: { name: "Codex", engine: "Claude" }, ok: true });
       expect(told).toEqual([{ botId: bot.id, from: defaultSelection(), facts: { scope: "engine", backup: CODEX } }]);
       expect(moves, "so it goes back once the limit resets").toEqual([{ threadId: bot.threadId, from: defaultSelection(), to: CODEX }]);
     });
@@ -242,7 +242,7 @@ describe("quota switch", () => {
       await limited({ messageId: said("hi") });
       expect(thread().modelSelection).toEqual({ instanceId: "claude", model: "claude-plan" });
       expect(resend).toHaveBeenCalledTimes(1);
-      expect(notices()).toContainEqual({ name: "notice: continuing on Claude claude-plan after hitting the usage limit", ok: true });
+      expect(notices()).toContainEqual({ name: "notice: continuing on Claude claude-plan after hitting the usage limit", nameCode: "chat.notice.backupContinuingLimit", nameParams: { name: "Claude claude-plan", engine: "Claude" }, ok: true });
       expect(told[0]!.facts).toEqual({ scope: "credits", backup: { instanceId: "claude", model: "claude-plan" } });
     });
 
@@ -343,7 +343,7 @@ describe("quota switch", () => {
       await ranOut(turn);
       expect(thread().modelSelection).toEqual(CODEX);
       expect(resend).not.toHaveBeenCalled();
-      expect(notices()).toEqual([{ name: "notice: switched to Codex. Your request is still under way here and continues on Codex.", ok: true }]);
+      expect(notices()).toEqual([{ name: "notice: switched to Codex. Your request is still under way here and continues on Codex.", nameCode: "chat.notice.backupRequestUnderWay", nameParams: { name: "Codex" }, ok: true }]);
     });
 
     describe("an AI that is signed out", () => {
@@ -373,7 +373,7 @@ describe("quota switch", () => {
         await signedOut({ messageId });
         expect(notices()).toEqual([
           { name: `notice: ${NOTICE}`, ok: true, setup: true },
-          { name: "notice: continuing on Codex while Claude is signed out", ok: true },
+          { name: "notice: continuing on Codex while Claude is signed out", nameCode: "chat.notice.backupContinuingSignedOut", nameParams: { name: "Codex", engine: "Claude" }, ok: true },
         ]);
         expect(scopes).toEqual(["signed-out"]);
         expect(thread().modelSelection).toEqual(CODEX);

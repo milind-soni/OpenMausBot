@@ -5,11 +5,14 @@ import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../data/instructions.ts";
-import type { ProviderInstance, SendTurnInput } from "../contracts.ts";
+import type { ProviderDriver, ProviderInstance, SendTurnInput } from "../contracts.ts";
+import { replyProblems } from "../harness/text-items.testkit.ts";
+import { caseTokens, LIVE_REPLY_CASES } from "../testing/live-reply-cases.ts";
+import type { StreamStep } from "../testing/stream-script.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
@@ -17,6 +20,11 @@ import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { toolBudgetOf } from "../tool-budgets.ts";
 import { GrokDriver } from "./grok.ts";
+import { GreenferenceDriver } from "./greenference.ts";
+import { GroqDriver } from "./groq.ts";
+import { MetaDriver } from "./meta.ts";
+import { MistralDriver } from "./mistral.ts";
+import { ModelgoDriver } from "./modelgo.ts";
 import { CerebrasDriver } from "./cerebras.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
@@ -34,7 +42,15 @@ interface ChatRequest {
 }
 
 type Script = (body: ChatRequest, response: ServerResponse, round: number) => void;
-type Provider = "openai-compat" | "grok" | "minimax" | "cerebras";
+type Provider = "openai-compat" | "grok" | "minimax" | "cerebras" | keyof typeof KEYED_DRIVERS;
+/** OpenAI-compatible providers configured by a URL and their own key variable. */
+const KEYED_DRIVERS = {
+  greenference: [GreenferenceDriver, "GREENFERENCE_API_KEY"],
+  groq: [GroqDriver, "GROQ_API_KEY"],
+  meta: [MetaDriver, "META_API_KEY"],
+  mistral: [MistralDriver, "MISTRAL_API_KEY"],
+  modelgo: [ModelgoDriver, "MODELGO_API_KEY"],
+} as const;
 const API_KEY_CANARY = "fixture-credential-cda00ee8d8384f54";
 
 function deferred<T = void>() {
@@ -87,8 +103,31 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 });
 `;
 
+/** What the turn's own tool session has in hand: each server that has listed its tools (or failed) and can be taken in,
+ * also written as a file named after the server in `gates` when set. */
+const mountSettled = vi.hoisted(() => ({ servers: new Set<string>(), gates: undefined as string | undefined }));
+vi.mock("./chat-mcp-tools.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./chat-mcp-tools.ts")>();
+  return { ...actual, mountChatTools: (...args: Parameters<typeof actual.mountChatTools>) => {
+    const call: Parameters<typeof actual.mountChatTools> = [...args];
+    call[9] = { ...call[9], onSettled: (server) => {
+      mountSettled.servers.add(server);
+      if (mountSettled.gates) writeFileSync(join(mountSettled.gates, server), "");
+    } };
+    return actual.mountChatTools(...call);
+  } };
+});
+/** Waits until the turn's tool session has `server` in hand; fails if it has not within 30 s. */
+async function settledServer(server: string) {
+  for (const since = Date.now(); !mountSettled.servers.has(server);) {
+    if (Date.now() - since > 30_000) throw new Error(`the turn's tool session never had ${server} in hand`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
+  mountSettled.servers.clear();
+  mountSettled.gates = undefined;
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
@@ -122,7 +161,10 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
   const helper = join(directory, "mcp.mjs");
   writeFileSync(helper, MCP_SCRIPT);
   const common = { instanceId: randomUUID(), displayName: "Tool contract fixture", enabled: true };
-  const instance: ProviderInstance = provider === "minimax"
+  const keyed = provider in KEYED_DRIVERS ? KEYED_DRIVERS[provider as keyof typeof KEYED_DRIVERS] : null;
+  const instance: ProviderInstance = keyed
+    ? await (keyed[0] as ProviderDriver<unknown>).create({ ...common, config: keyed[0].decodeConfig({ url: `${origin}/v1` }), environment: { [keyed[1]]: apiKey } })
+    : provider === "minimax"
     ? await MinimaxDriver.create({ ...common, config: { url: `${origin}/v1` }, environment: { MINIMAX_API_KEY: apiKey } })
     : provider === "cerebras"
     ? await CerebrasDriver.create({ ...common, config: CerebrasDriver.decodeConfig({ url: `${origin}/v1` }), environment: { CEREBRAS_API_KEY: apiKey } })
@@ -161,8 +203,72 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
   };
 }
 
+describe("streamed reply messages from an OpenAI-compatible API", () => {
+  /** A case's steps as the API's rounds: words and reasoning streamed in pieces, each tool ending its round. */
+  const rounds = (steps: StreamStep[]) => {
+    const out: Array<{ chunks: unknown[]; fail?: string }> = [{ chunks: [] }];
+    let calls = 0;
+    for (const step of steps) {
+      const round = out.at(-1)!;
+      if ("fail" in step) round.fail = step.fail;
+      else if ("tool" in step) {
+        round.chunks.push(chunk({ tool_calls: [toolCall("audit_write", JSON.stringify({ name: `step-${++calls}`, value: step.tool }), `call-${calls}`)] }, "tool_calls"));
+        out.push({ chunks: [] });
+      } else {
+        const text = "say" in step ? step.say : step.think;
+        for (let at = 0; at < text.length; at += 7) round.chunks.push(chunk("say" in step ? { content: text.slice(at, at + 7) } : { reasoning_content: text.slice(at, at + 7) }));
+      }
+    }
+    return out;
+  };
+
+  const PROVIDERS: Provider[] = ["openai-compat", "grok", "minimax", "cerebras", "greenference", "groq", "meta", "mistral", "modelgo"];
+  it.each(PROVIDERS.flatMap((provider) => LIVE_REPLY_CASES.filter((entry) => entry.action === undefined).map((entry) => ({ provider, entry, name: entry.name }))))(
+    "$provider streams the $name reply with one id per message and nothing doubled, lost or glued", async ({ provider, entry }) => {
+      const script = rounds(entry.steps);
+      const f = await fixture((_body, response, round) => {
+        const step = script[round - 1];
+        if (!step) return answer(response, "ok");
+        if (step.fail) {
+          sse(response, step.chunks, false);
+          response.destroy();
+          return;
+        }
+        sse(response, round === script.length ? [...step.chunks, chunk({}, "stop")] : step.chunks);
+      }, provider);
+      const { turnId } = await f.start({ approvalMode: "full", text: `Please answer ${entry.marker}` });
+      await f.recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId, 30_000);
+      const events = f.recorder.events.filter((event) => event.turnId === turnId);
+      expect(replyProblems(events, caseTokens(entry))).toEqual([]);
+    }, 60_000);
+});
+
 describe("bounded action announcement recovery", () => {
   const later = `${"The terminal output is absent; the launch receipt only confirms the process. ".repeat(7)}\n\nLet me execute the commands to create the file and read it back.`;
+
+  it.each(["我会先运行命令，保存并核对回执。", "我會先執行命令，保存並核對回執。"])("continues a Chinese announcement into one real tool effect: %s", async (announcement) => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) answer(response, announcement);
+      else if (round === 2) sse(response, [chunk({ tool_calls: [toolCall()] }, "tool_calls")]);
+      else answer(response, "回执已保存并核对。");
+    });
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(3);
+    expect(f.effects()).toHaveLength(1);
+  });
+
+  it.each([
+    "我会先执行命令，你确认吗？…",
+    "我会在收到你的许可后发送邮件。",
+    "我先检查了文件，确认没有问题。",
+  ])("does not continue a Chinese clarification, approval wait, or completed report: %s", async (reply) => {
+    const f = await fixture((_body, response) => answer(response, reply));
+    await f.start({ approvalMode: "ask" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(1);
+    expect(f.effects()).toEqual([]);
+  });
 
   it("recovers a later long announcement after the first nudge and preserves earlier results", async () => {
     const f = await fixture((_body, response, round) => {
@@ -474,11 +580,11 @@ describe("optional built-in question compatibility", () => {
     });
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: false });
-    expect(f.requests).toHaveLength(1);
-    expect(f.requests[0].tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
+    expect(f.requests).toHaveLength(status === 429 || status === 500 ? 3 : 1);
+    for (const request of f.requests) expect(request.tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
   });
 
-  it("does not retry network failures or strip tools mounted by the person", async () => {
+  it("retries a network failure as the same request, and never strips tools mounted by the person", async () => {
     for (const network of [false, true]) {
       const f = await fixture((_body, response) => {
         if (network) return response.destroy(new Error("tools are not supported"));
@@ -487,8 +593,8 @@ describe("optional built-in question compatibility", () => {
       });
       await f.start(network ? { integrations: undefined } : {});
       expect(await f.completed()).toMatchObject({ ok: false });
-      expect(f.requests).toHaveLength(1);
-      if (!network) expect(f.requests[0].tools?.some(tool => tool.function.name === "audit_write")).toBe(true);
+      expect(f.requests).toHaveLength(network ? 3 : 1);
+      for (const request of f.requests) expect(request.tools?.some(tool => tool.function.name === (network ? "ask_user" : "audit_write"))).toBe(true);
       expect(f.effects()).toEqual([]);
     }
   });
@@ -853,6 +959,20 @@ describe("structured tool execution boundaries", () => {
     expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
   });
 
+  it("finishes a turn whose streamed reasoning details pass 256 KB of JSON", async () => {
+    // OpenRouter streams reasoning a few characters per delta, each wrapped in a full block.
+    const deltas = Array.from({ length: 8_000 }, () => chunk({ reasoning_details: [{ type: "reasoning.text", text: "think", format: "unknown", index: 0 }] }));
+    const f = await fixture((_request, response, round) => {
+      if (round > 1) return answer(response);
+      sse(response, [...deltas, chunk({ content: null, tool_calls: [toolCall()] }, "tool_calls")]);
+    });
+    await f.start();
+    await f.decide();
+    expect(await f.recorder.until((event) => event.type === "turn.completed", 19_000)).toMatchObject({ ok: true });
+    const assistant = f.requests[1].messages.find((message) => message.role === "assistant");
+    expect(assistant?.reasoning_details).toHaveLength(8_000);
+  }, 20_000);
+
   // Groq's wording, truncated in the runtime error but not in the body.
   const reasoningRejection = { error: {
     message: "'messages.2' : for 'role:assistant' the following must be satisfied[('messages.2' : property 'reasoning_content' is unsupported)]",
@@ -1000,20 +1120,37 @@ describe("structured tool execution boundaries", () => {
 
   it.each([
     // Letters outside hex and the usual id alphabets, so a random id in the events can never contain the credential.
-    { scenario: "one chunk", pieces: ["zqxzqx"] },
-    { scenario: "split chunks", pieces: ["zqx", "zqx"] },
+    { scenario: "one chunk", pieces: ["zqxzqxzqx"] },
+    { scenario: "split chunks", pieces: ["zqxzqx", "zqx"] },
   ])("redacts an overlapping-prefix credential received in $scenario", async ({ pieces }) => {
     const f = await fixture((_request, response) => sse(response, [
       chunk({ content: "Before " }),
       ...pieces.map((piece) => chunk({ content: piece })),
       chunk({ content: " after." }, "stop"),
-    ]), "openai-compat", "zqxzqx");
+    ]), "openai-compat", "zqxzqxzqx");
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: true });
     const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
     expect(combined).toBe("Before [redacted] after.");
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: combined }));
-    expect(JSON.stringify(f.recorder.events)).not.toContain("zqxzqx");
+    expect(JSON.stringify(f.recorder.events)).not.toContain("zqxzqxzqx");
+  });
+
+  it.each([
+    { scenario: "the provider key", apiKey: "1", token: undefined },
+    { scenario: "an integration token", apiKey: undefined, token: "1" },
+  ])("leaves the reply alone when $scenario is a short placeholder like \"1\"", async ({ apiKey, token }) => {
+    const text = "1 12:00–13:00 123 8901 10 11 ID: 1A2B3C";
+    const f = await fixture((_request, response) => sse(response, [
+      ...text.match(/.{1,5}/gs)!.map((piece) => chunk({ content: piece })),
+      chunk({}, "stop"),
+    ]), "openai-compat", apiKey);
+    const audit = f.integrations!.custom!.audit as { command: string; args: string[]; env: Record<string, string> };
+    await f.start({ integrations: token ? { custom: { audit: { ...audit, env: { ...audit.env, AUDIT_TOKEN: token } } } } : undefined });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
+    expect(combined).toBe(text);
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text }));
   });
 
   it("redacts a configured credential echoed by a tool from events, diagnostics, and the returned tool result", async () => {
@@ -1227,7 +1364,7 @@ describe("structured tool execution boundaries", () => {
     expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
-  it("stops a model that keeps requesting tools after 64 steps, with one next action that does not repeat the steps that ran", async () => {
+  it("stops a model that keeps requesting one tool per step at 200 tool calls, with one next action that does not repeat the steps that ran", async () => {
     const f = await fixture((_body, response, round) => sse(response, [
       chunk({ tool_calls: [toolCall("audit_write", '{"name":"receipt","value":"done"}', `call_${round}`)] }, "tool_calls"),
     ]), "grok");
@@ -1237,37 +1374,58 @@ describe("structured tool execution boundaries", () => {
     await f.start();
     expect(await f.completed()).toMatchObject({ ok: false, stopReason: "error" });
     stop();
-    expect(f.requests).toHaveLength(64);
-    expect(f.effects()).toHaveLength(64);
+    expect(f.requests).toHaveLength(201);
+    expect(f.effects()).toHaveLength(200);
     expect(f.recorder.events.filter((event) => event.type === "runtime.error")).toEqual([expect.objectContaining({
-      message: "Stopped after 64 steps without a final answer. The steps so far already ran, so ask only for what's left.",
+      message: "Stopped after 200 tool calls without a final answer. The steps so far already ran, so ask only for what's left.",
       terminal: true,
     })]);
   });
 
-  it("answers in the last allowed step and leaves a message steered during it for the next turn", async () => {
-    const last = deferred<ServerResponse>();
-    const f = await fixture((_body, response, round) => round < 64
-      ? sse(response, [chunk({ tool_calls: [toolCall("audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
-      : last.resolve(response));
-    await f.start({ approvalMode: "full" });
-    const response = await last.promise;
-    await expect(f.instance.adapter.steer!(f.threadId, "One more thing.")).resolves.toBe("refused");
-    answer(response);
-    expect(await f.completed()).toMatchObject({ ok: true });
-    expect(f.requests).toHaveLength(64);
+  it.each([1, 25])("preserves the active task and delivered steering in a cap handoff (%i calls per reply)", async callsPerReply => {
+    const first = deferred<ServerResponse>();
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) first.resolve(response);
+      else reply(response, round);
+    });
+    function reply(response: ServerResponse, round: number) {
+      sse(response, [chunk({ tool_calls: Array.from({ length: callsPerReply }, (_, index) => ({
+        ...toolCall("audit_write", `{"name":"step","value":"${round}-${index}"}`, `call_${round}_${index}`), index,
+      })) }, "tool_calls")]);
+    }
+    const task = "Prepare the release draft";
+    const updates = ["Do not publish it", "Use version 2"];
+    await f.start({ approvalMode: "full", text: task, transcript: [
+      { role: "user", text: "List repository files" },
+      { role: "assistant", text: "Listed the files" },
+    ] });
+    const response = await first.promise;
+    for (const update of updates) await expect(f.instance.adapter.steer!(f.threadId, update)).resolves.toBe("steered");
+    reply(response, 1);
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason: "error" });
+    const cap = f.recorder.events.find(event => event.type === "cap.exhausted");
+    expect(cap?.type).toBe("cap.exhausted");
+    if (cap?.type !== "cap.exhausted") throw new Error("missing cap handoff");
+    const handoff = readFileSync(cap.handoffPath, "utf8");
+    expect(handoff).toContain(task);
+    expect(handoff).not.toContain("List repository files");
+    expect(handoff).not.toContain("Listed the files");
+    for (const update of updates) expect(handoff).toContain(update);
+    expect(handoff.indexOf(updates[0]!)).toBeLessThan(handoff.indexOf(updates[1]!));
+    expect(JSON.stringify(f.requests[1]!.messages)).toContain(updates.join("\\n\\n"));
+    expect(f.requests).toHaveLength(callsPerReply === 1 ? 201 : 9);
+    expect(f.effects()).toHaveLength(200);
   });
 
-  it.each([
-    ["a failed tool call", "audit_fail", "The operation is complete.", "tool_error"],
-    ["an announced action", "audit_write", "I'll write the next receipt.", "incomplete_action"],
-  ])("ends on %s in the last allowed step without asking for another step", async (_, lastTool, text, stopReason) => {
-    const f = await fixture((_body, response, round) => round < 64
-      ? sse(response, [chunk({ tool_calls: [toolCall(round === 63 ? lastTool : "audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
-      : answer(response, text));
-    await f.start({ approvalMode: "full", toolErrorCorrectiveRounds: 1 });
-    expect(await f.completed()).toMatchObject({ ok: false, stopReason });
-    expect(f.requests).toHaveLength(64);
+  it("finishes a turn that needs more than 64 steps", async () => {
+    const f = await fixture((_body, response, round) => round < 100
+      ? sse(response, [chunk({ tool_calls: [toolCall("audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
+      : answer(response));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(100);
+    expect(f.effects()).toHaveLength(99);
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
   it("stops at 200 tool calls in one turn without running the batch that crosses it", async () => {
@@ -1356,18 +1514,67 @@ describe("a configured MCP server that cannot mount", () => {
 });
 
 describe("a turn with the person's Windows computer, the built-in browser and the agents server", () => {
-  function catalog(names: readonly string[]) {
-    const { dir, server } = catalogServer(names);
+  function catalog(names: readonly string[], options: Parameters<typeof catalogServer>[1] = {}) {
+    const { dir, server } = catalogServer(names, options);
     cleanups.push(() => removeTempDir(dir));
     return server;
   }
-  const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => ({
-    localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" },
-    browser: catalog(syntheticToolNames("agent_browser", 32)),
-    agents: catalog(syntheticToolNames("agent", agents)),
-    composio: catalog(syntheticToolNames("router", 7)),
-    data: catalog(syntheticToolNames("table", 5)),
-    ...more,
+  const integrations = (agents: number, more: SendTurnInput["integrations"] = {}): SendTurnInput["integrations"] => {
+    const others = { localComputer: { ...catalog(CUA_DRIVER_WINDOWS_TOOLS), scope: "local-computer" as const }, browser: catalog(syntheticToolNames("agent_browser", 32)),
+      composio: catalog(syntheticToolNames("router", 7)), data: catalog(syntheticToolNames("table", 5)), ...more };
+    const names = Object.entries(others).flatMap(([key, server]) => key === "localComputer" ? ["computer"] : key === "custom" ? Object.keys(server as object) : [key]);
+    // Started once the turn's tool session has every other server in hand, so the ones that start in the background are listed from the first request.
+    const gates = mkdtempSync(join(tmpdir(), "omb-chat-tools-settled-"));
+    cleanups.push(() => removeTempDir(gates));
+    mountSettled.gates = gates;
+    return { ...others, agents: catalog(syntheticToolNames("agent", agents), { after: names.map((name) => join(gates, name)) }) };
+  };
+
+  it("sends the first request without waiting for a slow server, and lists its tools from the next round", async () => {
+    let firstAt = 0;
+    const notes = catalog(["note"], { startMs: 1_500 });
+    const f = await fixture(async (_body, response, round) => {
+      if (round > 1) return answer(response);
+      firstAt = Date.now();
+      // The turn has the slow server's tools in hand before the next round.
+      await settledServer("notes");
+      sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
+    });
+    const startedAt = Date.now();
+    await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(firstAt - startedAt).toBeLessThan(1_000);
+    expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([["agents_agent_1", "ask_user"], ["agents_agent_1", "notes_note", "ask_user"]]);
+  });
+
+  it("lists fewer tools when servers that joined after a tool call go past the provider's limit", async () => {
+    const gate = mkdtempSync(join(tmpdir(), "omb-chat-tools-gate-"));
+    cleanups.push(() => removeTempDir(gate));
+    const go = join(gate, "go");
+    const notes = catalog(syntheticToolNames("note", 5), { after: [go] });
+    const f = await fixture(async (body, response) => {
+      if (!body.messages.some((message) => message.role === "tool")) {
+        // The slow server starts, and the turn has its tools in hand, before the next round.
+        writeFileSync(go, "");
+        await settledServer("notes");
+        return sse(response, [chunk({ tool_calls: [toolCall("agents_agent_1", "{}")] }, "tool_calls")]);
+      }
+      if ((body.tools?.length ?? 0) <= 6) return answer(response);
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: `Invalid 'tools': array too long. Expected an array with maximum length 6, but got an array with length ${body.tools!.length} instead.`, type: "invalid_request_error" } }));
+    });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ integrations: { agents: catalog(syntheticToolNames("agent", 1)), custom: { notes } } });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    expect(f.requests.map((request) => request.tools!.map((tool) => tool.function.name))).toEqual([
+      ["agents_agent_1", "ask_user"],
+      ["agents_agent_1", ...syntheticToolNames("notes_note", 5), "ask_user"],
+      ["agents_agent_1", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool", "ask_user"],
+    ]);
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
   });
 
   it("sends at most 128 tools, ask_user and every agents tool among them", async () => {
@@ -1410,9 +1617,50 @@ describe("a turn with the person's Windows computer, the built-in browser and th
       .toEqual([`To fit the model's 128-tool limit, the tools of "notes" are reached through the tool search this turn.`]);
     expect(toolBudgetOf("mira")).toEqual({ limit: 128, listed: 117, servers: [{ name: "notes", tools: 14, direct: false }] });
   });
+
+  it("lists fewer tools once when the provider names a lower limit, learns it for the next turn, and runs the turn", async () => {
+    const f = await fixture((body, response) => {
+      if ((body.tools?.length ?? 0) <= 110) return answer(response);
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: `Invalid 'tools': array too long. Expected an array with maximum length 110, but got an array with length ${body.tools!.length} instead.`, type: "invalid_request_error" } }));
+    });
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      await f.start({ botId: "ines", integrations: integrations(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }) });
+      expect(await f.completed()).toMatchObject({ ok: true });
+    } finally { console.warn = warn; }
+    expect(f.requests.map((request) => request.tools!.length)).toEqual([118, 110]);
+    expect(f.requests[1].tools!.map((tool) => tool.function.name).slice(-4)).toEqual(["mcp_search_tools", "mcp_describe_tool", "mcp_call_tool", "ask_user"]);
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.notice",
+      message: `To fit the model's 110-tool limit, the tools of "notes" are reached through the tool search this turn.` }));
+    expect(f.recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+    expect(toolBudgetOf("ines")).toMatchObject({ limit: 110, servers: [{ name: "notes", tools: 14, direct: false }] });
+
+    await f.start({ botId: "ines", integrations: integrations(42, { custom: { notes: catalog(syntheticToolNames("note", 14)) } }) });
+    await f.recorder.until((event) => event.type === "turn.completed" && f.requests.length === 3);
+    expect(f.requests[2].tools).toHaveLength(110);
+  });
 });
 
 describe("a provider that streams whole tool calls without an index", () => {
+  it("sends Gemini's thought signature back with its call on the next round", async () => {
+    const signed = { google: { thought_signature: "c2lnbmF0dXJl" } };
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [
+        { id: "function-call-1", type: "function", function: { name: "audit_write", arguments: '{"name":"first","value":"done"}' }, extra_content: signed },
+      ] }, "stop")]);
+      else answer(response);
+    });
+    await f.start();
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    const replayed = f.requests[1].messages.find((message) => message.role === "assistant");
+    expect(replayed?.tool_calls).toEqual([
+      { id: "function-call-1", type: "function", function: { name: "audit_write", arguments: '{"name":"first","value":"done"}' }, extra_content: signed },
+    ]);
+  });
+
   it("runs both of Gemini's calls from one chunk and answers each by its id", async () => {
     const f = await fixture((_body, response, round) => {
       if (round === 1) sse(response, [chunk({ tool_calls: [

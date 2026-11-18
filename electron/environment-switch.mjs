@@ -82,3 +82,24 @@ export async function switchLocalEnvironment({ targetDir, targetId, port = DEFAU
   }
   return { ok: true };
 }
+
+/** After a failed switch left no server child: take the previous folder's lease back when none is held (a rollback
+ * can fail between releasing one lease and taking the other), then start the server there. A lease that stays held
+ * elsewhere is never forced: after the retries the server stays stopped and the reason is logged. */
+export async function reviveAfterFailedSwitch({ previousDir, hasLease, acquireLease, startChild, log, delays = [1_000, 2_000, 4_000], sleep = (ms) => new Promise((done) => setTimeout(done, ms)) }) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      if (!hasLease()) await acquireLease(previousDir);
+      if (await startChild(previousDir)) return true;
+      log(`could not restart the server on ${previousDir} after the failed environment switch`);
+      return false;
+    } catch (error) {
+      if (attempt >= delays.length) {
+        log(`gave up restarting the server on ${previousDir} after the failed environment switch (${error?.message ?? error})`);
+        return false;
+      }
+      log(`restart on ${previousDir} after the failed environment switch failed (${error?.message ?? error}); retrying`);
+      await sleep(delays[attempt]);
+    }
+  }
+}

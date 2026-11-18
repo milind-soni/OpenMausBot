@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { api } from "@/state/store";
-import { BulkSelectBar, BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
+import { BulkSelectBar, BulkSelectFilters, ThreadListFooter, bulkRetitleOutcome, deleteThreadsInBulk, retitleThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
@@ -103,5 +103,26 @@ describe("deleting in chunks", () => {
     expect(result.error).toBe("offline");
     expect(result.responses).toHaveLength(1);
     expect(dispatch).toHaveBeenCalledWith({ type: "error", message: "offline" });
+  });
+});
+
+describe("naming threads by content", () => {
+  it("offers the button only where the list can name threads", () => {
+    const bar = (onRetitle?: () => Promise<never>) => renderToStaticMarkup(createElement(BulkSelectBar, { rows, selected: new Set(["b"]), freshConversation: false, onChange: noop, onDelete: noop, onRetitle }));
+    expect(bar(vi.fn())).toContain("Name by content");
+    expect(bar()).not.toContain("Name by content");
+  });
+  it("asks for each selected thread in turn and keeps going past one that fails", async () => {
+    const post = vi.mocked(api);
+    post.mockReset();
+    post.mockResolvedValueOnce({ title: "One" });
+    post.mockRejectedValueOnce(new Error("no model"));
+    post.mockResolvedValueOnce({ title: "Three" });
+    const outcome = await retitleThreadsInBulk("bot", ["a", "b", "c"]);
+    expect(post.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot/tasks/a/title", "/api/bots/bot/tasks/b/title", "/api/bots/bot/tasks/c/title"]);
+    expect(post.mock.calls.every(([, init]) => init?.method === "POST")).toBe(true);
+    expect(outcome).toEqual({ named: 2, failed: 1, error: "no model" });
+    expect(bulkRetitleOutcome(outcome)).toBe("Named by content: 2. Couldn't name 1: no model");
+    expect(bulkRetitleOutcome({ named: 3, failed: 0 })).toBe("Named by content: 3.");
   });
 });

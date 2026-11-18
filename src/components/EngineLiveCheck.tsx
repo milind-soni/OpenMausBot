@@ -3,9 +3,11 @@ import { Check, CircleAlert, LoaderCircle, RefreshCw } from "lucide-react";
 import { engineReady } from "@/components/EngineLibrary";
 import { t } from "@/lib/i18n";
 import { api, type InstanceInfo } from "@/state/store";
+import { serverErrorText } from "@/lib/server-error";
+import type { ServerErrorBody } from "../../shared/server-text";
 
-export type EngineLiveCheck = { state: "checking" } | { state: "working" } | { state: "failed"; error: string };
-type Answer = { ok: true } | { ok: false; error: string } | { ok: null };
+export type EngineLiveCheck = { state: "checking" } | { state: "working" } | ({ state: "failed" } & ServerErrorBody);
+type Answer = { ok: true } | ({ ok: false } & ServerErrorBody) | { ok: null };
 
 /** Right after one of these engines is connected here, one tiny real message checks that it answers. An engine already
  * connected when this first renders is left alone. */
@@ -17,7 +19,7 @@ export function useEngineLiveCheck(engines: readonly InstanceInfo[]) {
     let next: EngineLiveCheck | null;
     try {
       const answer = await api<Answer>(`/api/instances/${encodeURIComponent(instanceId)}/check`, { method: "POST", body: "{}", timeoutMs: 120_000 });
-      next = answer.ok === true ? { state: "working" } : answer.ok === false ? { state: "failed", error: answer.error } : null;
+      next = answer.ok === true ? { state: "working" } : answer.ok === false ? { state: "failed", error: answer.error, errorKey: answer.errorKey, errorParams: answer.errorParams } : null;
     } catch (error) {
       next = { state: "failed", error: error instanceof Error ? error.message : String(error) };
     }
@@ -43,7 +45,7 @@ export function EngineCheckLine({ name, check, onRetry }: { name: string; check:
   return <div role="alert" data-engine-check="failed" className="mt-3 rounded-xl bg-warning/10 px-3.5 py-3 text-[13px] leading-relaxed text-ink">
     <p className="flex items-start gap-2">
       <CircleAlert size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-warning" />
-      <span><span className="font-medium">{t("engineCheck.failed", { name })}</span> {check.error}</span>
+      <span><span className="font-medium">{t("engineCheck.failed", { name })}</span> {serverErrorText(check, check.error)}</span>
     </p>
     <button type="button" onClick={onRetry} className="mt-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium text-ink transition-colors hover:bg-raised">
       <RefreshCw size={12} aria-hidden="true" />{t("engineCheck.retry")}

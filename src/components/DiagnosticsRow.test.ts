@@ -32,11 +32,11 @@ it("opens this computer's logs folder and says where it is; export still removes
   const openLogsFolder = vi.fn().mockResolvedValue({ folder: FOLDER, opened: true });
   (window as { ogb?: unknown }).ogb = { openLogsFolder, exportDiagnostics: vi.fn() };
   await render();
-  expect(host.querySelector("[data-logs-help]")!.textContent).toBe("Logs stay on this computer. Export Diagnostics saves their most recent part with keys, passwords and sign-ins removed, ready to send to support.");
+  expect(host.querySelector("[data-logs-help]"), "one short line; Open logs folder is its link").toBeNull();
   await click("Open logs folder");
   expect(openLogsFolder).toHaveBeenCalledExactlyOnceWith();
   expect(host.querySelector("[data-logs-folder]")!.textContent).toBe(`Logs are in ${FOLDER}.`);
-  expect(button("Export Diagnostics…")).toBeDefined();
+  expect(button("Export diagnostics…")).toBeDefined();
 });
 
 it("when the folder cannot be opened, says where it is instead", async () => {

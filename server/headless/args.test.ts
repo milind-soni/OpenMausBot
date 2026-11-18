@@ -40,10 +40,10 @@ describe("parseCommand", () => {
   });
 
   it("knows which verbs change something", () => {
-    for (const verb of ["send", "run", "interrupt", "team apply", "engine set"]) expect(MUTATING_VERBS.has(verb), verb).toBe(true);
+    for (const verb of ["send", "run", "interrupt", "team apply", "engine set", "token create", "token revoke"]) expect(MUTATING_VERBS.has(verb), verb).toBe(true);
     for (const verb of ["doctor", "bots", "wait", "messages", "export", "events", "team export", "engine list"]) expect(MUTATING_VERBS.has(verb), verb).toBe(false);
     expect([...HEADLESS_VERBS].sort()).toEqual(["bots", "channels", "connect", "doctor", "edit", "engine", "events", "export", "interrupt", "mcp",
-      "messages", "models", "new-bot", "new-channel", "run", "send", "send-channel", "set-model", "team", "wait"]);
+      "messages", "models", "new-bot", "new-channel", "run", "send", "send-channel", "set-model", "team", "token", "wait"]);
   });
 });
 
@@ -55,6 +55,9 @@ describe("durations, sizes, counts and choices", () => {
     expect(parseDuration("2h", "--timeout")).toBe(7_200_000);
     expect(parseDuration("0", "--wait-idle", { min: 0 })).toBe(0);
     for (const bad of ["0", "25h", "soon", "-5", "5d"]) expect(usage(() => parseDuration(bad, "--timeout")).message).toBe("--timeout must be a duration from 1s to 24h, such as 90, 90s, 5m or 2h");
+    expect(parseDuration("90d", "--expires", { max: 3_650 * 86_400_000 })).toBe(90 * 86_400_000);
+    expect(usage(() => parseDuration("30m", "--expires", { min: 3_600_000, max: 3_650 * 86_400_000 })).message)
+      .toBe("--expires must be a duration from 1h to 3650d, such as 12h, 30d or 90d");
   });
 
   it("reads sizes, counts and one-of choices", () => {

@@ -1,4 +1,4 @@
-import { redactSecretsInText } from "./redact.ts";
+import { redactParams, redactSecretsInText } from "./redact.ts";
 import { scrubbedSkillRequest } from "./skill-request-card.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { OptionCardData, WireMessage } from "../shared/wire.ts";
@@ -13,10 +13,12 @@ export function redactBotAuthored<T extends Omit<WireMessage, "id" | "at"> & { a
     ...(out.dataResult.sql === undefined ? {} : { sql: redactSecretsInText(out.dataResult.sql) }),
   };
   if (typeof out.text === "string") out.text = redactSecretsInText(out.text);
+  if (out.textParams) out.textParams = redactParams(out.textParams);
   if (out.compaction) out.compaction = { ...out.compaction, summary: redactSecretsInText(out.compaction.summary) };
   if (out.tool?.name) {
-    out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name) };
+    out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name), ...(out.tool.nameParams ? { nameParams: redactParams(out.tool.nameParams) } : {}) };
     if (out.tool.summary) out.tool.summary = redactSecretsInText(out.tool.summary);
+    if (out.tool.summaryParams) out.tool.summaryParams = redactParams(out.tool.summaryParams);
   }
   if (out.routineRun) {
     const routineRun = { ...out.routineRun };
@@ -31,6 +33,7 @@ export function redactBotAuthored<T extends Omit<WireMessage, "id" | "at"> & { a
       goal: redactSecretsInText(out.goalRun.goal),
       coordinatorName: redactSecretsInText(out.goalRun.coordinatorName),
       detail: out.goalRun.detail ? redactSecretsInText(out.goalRun.detail) : undefined,
+      ...(out.goalRun.detailParams ? { detailParams: redactParams(out.goalRun.detailParams) } : {}),
     };
   }
   if (out.call?.title) out.call = { ...out.call, title: redactSecretsInText(out.call.title) };
@@ -38,6 +41,7 @@ export function redactBotAuthored<T extends Omit<WireMessage, "id" | "at"> & { a
     const card = { ...out.card } as OptionCardData & { summary?: string };
     card.title = redactSecretsInText(card.title);
     if (typeof card.subtitle === "string") card.subtitle = redactSecretsInText(card.subtitle);
+    if (card.summaryParams) card.summaryParams = redactParams(card.summaryParams);
     if (typeof card.summary === "string") card.summary = redactSecretsInText(card.summary);
     if (typeof card.held === "string") card.held = redactSecretsInText(card.held);
     if (typeof card.answeredText === "string") card.answeredText = redactSecretsInText(card.answeredText);
@@ -121,6 +125,11 @@ export function redactBotAuthored<T extends Omit<WireMessage, "id" | "at"> & { a
       ...out.secret,
       label: redactSecretsInText(out.secret.label),
       description: redactSecretsInText(out.secret.description),
+      ...(out.secret.descriptionParts ? { descriptionParts: {
+        ...out.secret.descriptionParts,
+        reason: redactSecretsInText(out.secret.descriptionParts.reason),
+        bot: redactSecretsInText(out.secret.descriptionParts.bot),
+      } } : {}),
       ...(out.secret.reason !== undefined ? { reason: redactSecretsInText(out.secret.reason) } : {}),
       error: out.secret.error ? redactSecretsInText(out.secret.error) : undefined,
     };

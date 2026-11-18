@@ -384,10 +384,13 @@ export function browserIdleMs(cfg: { browserEngine?: { idleTimeoutMinutes?: numb
   return (cfg.browserEngine?.idleTimeoutMinutes ?? (cloudHome ? CLOUD_HOME_BROWSER_IDLE_MINUTES : DEFAULT_BROWSER_IDLE_MINUTES)) * 60_000;
 }
 
-/** agent-browser writes one `<session>.pid` per daemon, so with none there is nothing to ask about. */
-function daemonsMayRun(env: NodeJS.ProcessEnv): boolean {
-  try { return readdirSync(dirname(browserDaemonFile({ ...env, AGENT_BROWSER_SESSION: "" }, ".pid"))).some((name) => name.endsWith(".pid") && name !== "dashboard.pid"); }
-  catch { return false; }
+/** The sessions agent-browser has written a `<session>.pid` for (one per daemon, removed when it exits). */
+function daemonPidFiles(env: NodeJS.ProcessEnv): string[] {
+  try {
+    return readdirSync(dirname(browserDaemonFile({ ...env, AGENT_BROWSER_SESSION: "" }, ".pid")))
+      .filter((name) => name.endsWith(".pid") && name !== "dashboard.pid").map((name) => name.slice(0, -".pid".length))
+      .filter((session) => /^[A-Za-z0-9_.-]{1,96}$/.test(session));
+  } catch { return []; }
 }
 
 /** agent-browser detaches each daemon and its Chrome, so they outlive a crashed or killed server. A browser attached to the
@@ -433,10 +436,13 @@ export class BrowserSweep {
     return this.#pass;
   }
 
+  /** Null when no daemon runs. When agent-browser cannot list them (it cannot start once the box is out of processes),
+   * the sessions with a pid file: closing one then stops its daemon by that file (closeBrowserSession). */
   async #owned(binaryPath: string, timeoutMs?: number): Promise<string[] | null> {
     const env = browserRuntimeEnv({});
-    if (!daemonsMayRun(env)) return null;
-    return (await runningBrowserSessionNames(binaryPath, env, timeoutMs))?.filter((session) => this.#owns(session)) ?? null;
+    const files = daemonPidFiles(env);
+    if (!files.length) return null;
+    return ((await runningBrowserSessionNames(binaryPath, env, timeoutMs)) ?? files).filter((session) => this.#owns(session));
   }
 
   async #sweep(boot: boolean): Promise<void> {

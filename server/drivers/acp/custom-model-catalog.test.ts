@@ -24,14 +24,21 @@ import { createInterface } from 'node:readline';
 let current='deep';
 const mode=process.env.CATALOG_MODE;
 const modelOptions=[{value:'deep',name:'Deep'},{value:'flash',name:'Flash'},{value:'silent',name:'Silent'},{value:'rejected',name:'Rejected'}];
-function result(){return {sessionId:'fake-session',configOptions:[{id:'model',type:'select',category:'model',currentValue:current,options:modelOptions},...(current==='silent'?[]:[{id:current==='flash'?'thought_level':'reasoning_effort',type:'select',category:'thought_level',currentValue:current==='flash'?'low':'max',options:[{value:current==='flash'?'low':'max',name:current==='flash'?'Low':'Max'}]}])]};}
+function result(){if(mode==='hostile'||mode==='hostile-default'||mode==='hostile-labels'||mode==='hostile-all'){const options=mode==='hostile-labels'
+ ?[{value:'plain-model',name:'Plain'+String.fromCharCode(0x202e)+'Reversed'},{value:'good-model',name:'Good Model'}]
+ :mode==='hostile-all'
+ ?[{value:'../../.openmausbot',name:'Traversal'},{value:'bad'+String.fromCharCode(0)+'id',name:'Control'},{value:'x'.repeat(500),name:'Long'}]
+ :[{value:'../../.openmausbot',name:'Traversal'},{value:'bad'+String.fromCharCode(0)+'id',name:'Control'},{value:'x'.repeat(500),name:'Long'},{value:'ok-model',name:'Fine'+String.fromCharCode(7)+'Name'},{value:'good-model',name:'Good Model'}];
+ return {sessionId:'fake-session',configOptions:[{id:'model',type:'select',category:'model',currentValue:mode==='hostile-default'?String.fromCharCode(46,46,92)+String.fromCharCode(46,46,92)+'private':mode==='hostile-all'?'../../.openmausbot':'good-model',options}]};}
+ return {sessionId:'fake-session',configOptions:[{id:'model',type:'select',category:'model',currentValue:current,options:modelOptions},...(current==='silent'?[]:[{id:current==='flash'?'thought_level':'reasoning_effort',type:'select',category:'thought_level',currentValue:current==='flash'?'low':'max',options:[{value:current==='flash'?'low':'max',name:current==='flash'?'Low':'Max'}]}])]};}
 function emit(value){process.stdout.write(JSON.stringify(value)+'\\n');}
 function legacyResult(){const r=result();return {...r,models:{currentModelId:current,availableModels:modelOptions.map(x=>({modelId:x.value,name:x.name}))},configOptions:r.configOptions.filter(x=>x.id!=='model')}}
 appendFileSync(process.env.CATALOG_DUMP,JSON.stringify({cwd:process.cwd(),pid:process.pid})+'\\n');
 for await(const line of createInterface({input:process.stdin})){
  const msg=JSON.parse(line); appendFileSync(process.env.CATALOG_DUMP,JSON.stringify({cwd:process.cwd(),...msg})+'\\n');
  if(!msg.method)continue;
- if(msg.method==='initialize'){emit({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1}});continue;}
+ if(msg.method==='initialize'){emit({jsonrpc:'2.0',id:msg.id,result:{protocolVersion:1,...(mode==='deletes'?{agentCapabilities:{sessionCapabilities:{delete:{}}}}:{})}});continue;}
+ if(msg.method==='session/delete'){emit({jsonrpc:'2.0',id:msg.id,result:{}});continue;}
  if(msg.method==='session/new'){
   if(mode==='exit'){process.exit(3);}
   if(mode==='legacy'){emit({jsonrpc:'2.0',id:msg.id,result:legacyResult()});continue;}
@@ -135,6 +142,19 @@ describe("custom ACP catalog discovery (isolated fake CLI)", () => {
     expect(stuck).not.toHaveBeenCalled();
   });
 
+  it("deletes its session over ACP when the agent offers session/delete, and then skips forgetSession", async () => {
+    const fixture = await fake("deletes");
+    const forgetSession = vi.fn(async () => {});
+    await discoverAcpModels(fixture.env, fixture.config.cli, [], { forgetSession });
+    const deletes = (await fixture.requests()).filter((request) => request.method === "session/delete");
+    expect(deletes.map((request) => request.params.sessionId)).toEqual(["fake-session"]);
+    expect(forgetSession).not.toHaveBeenCalled();
+
+    const plain = await fake();
+    await discoverAcpModels(plain.env, plain.config.cli, []);
+    expect((await plain.requests()).some((request) => request.method === "session/delete")).toBe(false);
+  });
+
   it("stops a custom agent at once, and lets an agent asked to exit gracefully read EOF first", async () => {
     const custom = await fake();
     await resolveCustomAcpModels(custom.env, custom.config);
@@ -158,5 +178,40 @@ describe("custom ACP catalog discovery (isolated fake CLI)", () => {
     await expect(resolveCustomAcpModels(fixture.env, fixture.config)).rejects.toThrow("line limit");
     const requests = await fixture.requests();
     await expect(readFile(requests[0].cwd)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("skips discovered entries whose id or label is not a usable slug, and never sends them back to the agent", async () => {
+    const fixture = await fake("hostile");
+    const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, []);
+    expect(catalog.options).toEqual([
+      { id: "ok-model", label: "ok-model" },
+      { id: "good-model", label: "Good Model" },
+    ]);
+    expect(catalog.default).toBe("good-model");
+    const sent = JSON.stringify(await fixture.requests());
+    expect(sent).not.toContain("../.openmausbot");
+    expect(sent).not.toContain("bad\u0000id");
+    expect(sent).not.toContain("x".repeat(500));
+  });
+
+  it("never lets an unusable session model become the catalog default", async () => {
+    const fixture = await fake("hostile-default");
+    const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, []);
+    expect(catalog.default).toBe("ok-model");
+    expect(catalog.options.map((option) => option.id)).toEqual(["ok-model", "good-model"]);
+  });
+
+  it("rejects a custom catalog whose every discovered id was unusable instead of leaving only the default", async () => {
+    const fixture = await fake("hostile-all");
+    await expect(resolveCustomAcpModels(fixture.env, fixture.config)).rejects.toThrow("did not advertise any usable models");
+  });
+
+  it("rejects bidirectional controls and control characters in labels, and falls back to the id", async () => {
+    const fixture = await fake("hostile-labels");
+    const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, []);
+    expect(catalog.options).toEqual([
+      { id: "plain-model", label: "plain-model" },
+      { id: "good-model", label: "Good Model" },
+    ]);
   });
 });

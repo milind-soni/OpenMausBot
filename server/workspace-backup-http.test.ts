@@ -9,6 +9,7 @@ import type { WorkspaceBackupSummary } from "../shared/workspace-backup.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
+import { userError, userErrorThrown } from "./user-errors.ts";
 
 const archive = vi.hoisted(() => ({ create: vi.fn(), stage: vi.fn(), commit: vi.fn(), remove: vi.fn() }));
 vi.mock("./workspace-backup.ts", async (original) => ({
@@ -46,6 +47,11 @@ beforeEach(async () => {
   archive.stage.mockImplementation(async () => fakeArchive());
   archive.commit.mockImplementation((_dataDir: string, id: string) => ({ id, restartRequired: true }));
   archive.remove.mockImplementation((_dataDir: string, id: string) => rmSync(join(dataDir, ".backups", id), { recursive: true, force: true }));
+  await listen();
+});
+
+/** Serves the backup routes; `extra` adds options such as a launcher restart. */
+async function listen(extra: Partial<Parameters<typeof createWorkspaceBackupRoutes>[0]> = {}) {
   const authenticate = (req: IncomingMessage) => resolveRequestAuth(req, { sessions, cookieName: "fixture", streamPath: "/api/events", url: new URL(req.url!, url) });
   const routes = createWorkspaceBackupRoutes({
     dataDir, appVersion: "0.1.71", restored: {},
@@ -66,6 +72,7 @@ beforeEach(async () => {
     },
     status: () => ({ busy: maintenance.active, pendingRestore: maintenance.pendingRestore }),
     exclusive: (work, keepLocked) => maintenance.run(work, { idle: () => true, pause: () => {}, resume: () => {}, flush: async () => {} }, keepLocked),
+    ...extra,
   });
   server = createServer(async (req, res) => {
     const path = new URL(req.url!, url).pathname;
@@ -91,7 +98,7 @@ beforeEach(async () => {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Fixture did not listen");
   url = `http://127.0.0.1:${address.port}`;
-});
+}
 
 afterEach(async () => {
   server?.closeAllConnections();
@@ -102,6 +109,14 @@ afterEach(async () => {
 function post(path: string, body: unknown, token = admin.token) {
   return fetch(`${url}${path}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
 }
+
+it("carries a fixed backup refusal and its redacted string path to the client", async () => {
+  const params = { path: "workspaces/ws/project/loop" };
+  archive.create.mockRejectedValueOnce(userErrorThrown("serverError.backup.recursiveLink", params));
+  const response = await post("/api/workspace-backup/export", { password: PASSWORD });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual(userError("serverError.backup.recursiveLink", params));
+});
 
 it.each(["revoke", "logout"])("keeps session controls authenticated and usable during a held export (%s)", async (action) => {
   let started!: () => void;
@@ -161,4 +176,37 @@ it("accepts drafts between 1 and 2 MiB and enforces the preference cap in UTF-8 
   expect((await rejected.json() as { error: string }).error).toContain("2 MB backup preference limit");
   expect(archive.create).toHaveBeenCalledOnce();
   expect(readdirSync(join(dataDir, ".backups"))).toHaveLength(1);
+});
+
+async function stagedRestore() {
+  const uploaded = await fetch(`${url}/api/workspace-backup/upload`, { method: "POST", headers: { authorization: `Bearer ${admin.token}` }, body: "fixture bytes" }).then((response) => response.json()) as { id: string };
+  return await post("/api/workspace-backup/preview", { id: uploaded.id, password: PASSWORD }).then((response) => response.json()) as { id: string };
+}
+
+function status() {
+  return fetch(`${url}/api/workspace-backup/status`, { headers: { authorization: `Bearer ${admin.token}` } }).then((response) => response.json()) as Promise<Record<string, unknown>>;
+}
+
+it("restarts a server its launcher starts again (My Cloud) once a restore commits, after answering", async () => {
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  const restart = vi.fn();
+  await listen({ restart });
+  expect(await status()).toMatchObject({ restarts: true, pendingRestore: false });
+  const preview = await stagedRestore();
+  expect(restart).not.toHaveBeenCalled();
+  const restored = await post("/api/workspace-backup/restore", { id: preview.id, confirmation: "REPLACE" });
+  expect(restored.status).toBe(200);
+  expect(await restored.json()).toMatchObject({ restarting: true, restoreId: preview.id });
+  await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+  expect(await status()).toMatchObject({ restarts: true, pendingRestore: true });
+});
+
+it("leaves the restart to the person where no launcher restarts the server", async () => {
+  expect(await status()).not.toHaveProperty("restarts");
+  const preview = await stagedRestore();
+  const restored = await post("/api/workspace-backup/restore", { id: preview.id, confirmation: "REPLACE" });
+  expect(restored.status).toBe(200);
+  expect(await restored.json()).not.toHaveProperty("restarting");
+  expect(await status()).toMatchObject({ pendingRestore: true });
 });

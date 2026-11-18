@@ -26,10 +26,7 @@ interface PlaceOption {
   disabled?: boolean;
 }
 
-const EXTRA_PLACE_LABEL: Record<Exclude<PlaceChoice, "auto" | "local" | "cloud" | "browser">, () => string> = {
-  vm: () => t("place.vm"),
-  off: () => t("place.off"),
-};
+const OFF_LABEL = () => t("place.off");
 
 export function useOpenComputer(bot: Pick<Bot, "id">) {
   const { dispatch } = useStore();
@@ -72,12 +69,14 @@ function usePlaceChoices(bot: Bot) {
     ...(placeViews.local.policy ? [choice("local")] : []),
     ...(placeViews.browser.policy || current === "browser" ? [choice("browser")] : []),
     ...(placeViews.cloud.policy ? [choice("cloud")] : []),
-    ...(current === "vm" || current === "off" ? [{ value: current, label: EXTRA_PLACE_LABEL[current](), disabled: true }] : []),
+    // Offered as in the Screen panel and the composer, so a bot can be kept on the private desktop from here too.
+    ...(placeViews.vm.policy || current === "vm" ? [choice("vm")] : []),
+    ...(current === "off" ? [{ value: current, label: OFF_LABEL(), disabled: true }] : []),
   ];
   const liveSurface = bot.tasks?.find((task) => task.threadId === bot.threadId)?.surface;
   const usingNow = liveSurface && liveSurface !== current ? placeLabel(liveSurface) : null;
   const currentLabel = options.find((option) => option.value === current)?.label
-    ?? (current === "auto" || current === "vm" || current === "off" ? undefined : placeLabel(current));
+    ?? (current === "auto" || current === "off" ? undefined : placeLabel(current));
   return { options, current, currentLabel, usingNow };
 }
 
@@ -87,7 +86,7 @@ export function WherePage({ bot, derived }: { bot: Bot; derived: Derived }) {
   const [localAutoWarning, setLocalAutoWarning] = useState<{ botId: string; patch: BotPatch } | null>(null);
   const { patch, approvalMode } = derived;
   const choosePlace = (value: PlaceChoice) => {
-    if (value === current || value === "vm" || value === "off") return;
+    if (value === current || value === "off") return;
     if (value === "local" && approvalMode === "auto") {
       setLocalAutoWarning({ botId: bot.id, patch: { computer: "local", acknowledgeLocalAuto: true } });
       return;

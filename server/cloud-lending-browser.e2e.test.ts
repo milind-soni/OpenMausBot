@@ -270,7 +270,7 @@ it("while the person uses the PC, background calls run and a call that would tak
   expect(listing.isError, said(listing)).toBeFalsy();
   expect((await screenCall("launch_app", { name: "Google Chrome", urls: [pageUrl] })).isError).toBeFalsy();
   expect(said(await screenCall("get_window_state", { pid: 4242, window_id: 7 }))).toContain("Total: 42.00 EUR");
-  expect((await screenCall("click", { pid: 4242, window_id: 7, element_index: 3 })).isError).toBeFalsy();
+  expect((await screenCall("click", { pid: 4242, window_id: 7, element_token: "s1-e3" })).isError).toBeFalsy();
   const front = await screenCall("click", { x: 10, y: 10 });
   expect(front.isError).toBe(true);
   expect(said(front)).toBe(personActiveText("click"));
@@ -291,7 +291,7 @@ it("a locked screen says to unlock it, and works once unlocked", async () => {
 it("a quarantined driver says how to restore it; restored, the next action works without a restart", async () => {
   screen.set("exit");
   const stopped = await screenCall("get_desktop_state");
-  expect(said(stopped)).toMatch(/^Computer control stopped on this computer: its helper, cua-driver, exited\. Try the action once more/);
+  expect(said(stopped)).toMatch(/^Computer control stopped on this computer because its helper exited and OpenMausBot is restarting it by itself, so try the action once more\b.*Protection history/);
   const working = driver;
   driver = { mcpCommand: join(home, "Program Files", "OpenMausBot", "resources", "cua-driver.exe"), mcpArgs: ["mcp"], mcpEnv: {} };
   const missing = await screenCall("get_desktop_state");

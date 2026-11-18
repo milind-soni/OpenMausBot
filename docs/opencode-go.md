@@ -64,6 +64,21 @@ OpenMausBot retries it once with each MCP server listing only its share of
 what OpenCode's own tools leave, keeps doing so for that model until it
 restarts, and logs how many tools each server left out.
 
+## Usage limits
+
+Zen's free models have an allowance of their own, apart from any Go
+subscription on the same login. A free model that reaches it ("Free usage
+limit reached…") holds that login's free models, never the account: new turns
+can still run on its paid models, Go's included. A limit on the account's own
+allowance (a Go limit, or a monthly one) holds the whole account until its
+window resets, as with the other engines.
+
+The limit card and the plan panel read Go's rolling, weekly and monthly
+windows from `opencode.ai/zen/go/v1/usage` with the key saved under Settings →
+API keys, or the login `opencode auth login` keeps in `auth.json`. An OpenCode
+2 install keeps its logins in its own database instead, so saving the key in
+OpenMausBot is what makes those windows readable there.
+
 ## Testing
 
 Normal unit and ACP protocol tests do not require a subscription. Live tests

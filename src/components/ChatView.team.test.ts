@@ -18,6 +18,7 @@ const { ChatView } = await import("./ChatView");
 const { setColorUserBubbles } = await import("@/lib/user-bubble-preference");
 const { BotEditorStore, initialState } = await import("@/state/store");
 const { t } = await import("@/lib/i18n");
+const { setAdvancedMode } = await import("@/lib/interface-mode");
 
 let root: Root;
 let container: HTMLDivElement;
@@ -42,8 +43,8 @@ const luna = (messages: Message[], extra: Partial<Bot> = {}): Bot => ({
   tasks: [{ threadId: "main", title: "Main", createdAt: 1, busy: false, activity: "idle", modelSelection: { instanceId: "test", model: "m" }, approvalMode: "ask" }],
   ...extra,
 });
-const draw = (bot: Bot) => {
-  const state: AppState = { ...initialState, connected: true, selectedId: bot.id, bots: [bot], instances, config: { team } as AppState["config"] };
+const draw = (bot: Bot, config: Partial<NonNullable<AppState["config"]>> = { team }) => {
+  const state: AppState = { ...initialState, connected: true, selectedId: bot.id, bots: [bot], instances, config: config as AppState["config"] };
   const value = { state, dispatch: () => {}, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ChatView, { bot }) })));
 };
@@ -60,8 +61,32 @@ it("shows a teammate's line in a shared chat as theirs, with their name, and onl
   expect(own.querySelector("[data-chat-bubble]")!.className).toContain("user-bubble-colored");
 });
 
+it("names a teammate's line on a shared server without a team, and not the viewer's own", () => {
+  draw(luna([line("o1", { name: "Olive", id: "p_olive" }, "plant is memory-Fernando"), line("a1", { name: "Ada", id: "p_ada" }, "noted")]), {});
+  expect(row("plant is memory-Fernando").textContent).toContain("Olive");
+  expect(row("noted").textContent).not.toContain("Ada");
+});
+
+it("sets a person's name in the same type as a bot's name", () => {
+  draw(luna([line("o1", { name: "Olive", id: "p_olive" }, "plant is memory-Fernando")]), {});
+  const name = [...row("plant is memory-Fernando").querySelectorAll("div")].find((element) => element.textContent === "Olive")!;
+  expect(name.className).toContain("text-[13px]");
+  expect(name.className).toContain("font-semibold");
+  expect(name.className).toContain("text-ink-secondary");
+});
+
 it("says a member's own MausBot is theirs, not everyone's", () => {
   draw(luna([], { defaultBot: { person: "ada@acme.test" } } as Partial<Bot>));
   expect(container.textContent).not.toContain(t("team.sharedHeader", { team: "Acme" }));
   expect(container.textContent).toContain(t("team.ownHelperHeader"));
+});
+
+it.each([[false, "[data-chathead-privacy='shared']"], [true, "[data-chathead-shared]"]])("names who can read a bot's shared chat from the bot's own sharing (Advanced: %s)", (advanced, shown) => {
+  setAdvancedMode(advanced);
+  const said = () => container.querySelector(shown)?.getAttribute("title");
+  draw(luna([]));
+  expect(said()).toBe(t("team.sharedHeader", { team: "Acme" }));
+  draw(luna([], { onlyPeopleAdded: true }));
+  expect(said()).toBe(t("team.sharedHeaderPeople"));
+  setAdvancedMode(false);
 });

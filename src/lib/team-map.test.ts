@@ -31,6 +31,9 @@ describe("team map projection", () => {
       { key: "", name: "General" },
       { key: "General", name: "General" },
     ]);
+    setLocale("pt-br");
+    expect(buildTeamMapSections([{ id: "none", name: "Unsectioned" }])[0]!.name, "the fallback in the app language").toBe("Geral");
+    setLocale("en");
   });
 
   it("keeps one edge per pair and gives live work priority", () => {

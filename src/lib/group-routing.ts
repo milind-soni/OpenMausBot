@@ -1,5 +1,6 @@
 import type { Bot, ConfigStatus, Group, GroupDefaultResponder } from "@/state/store";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
+import { resolveMentions } from "../../shared/room-mentions";
 import { t } from "./i18n";
 
 export function jevRoomRoutingOn(config: ConfigStatus | null | undefined): boolean {
@@ -52,11 +53,14 @@ export function openTaskWorking(group: Pick<Group, "threadId" | "working" | "tas
   return task ? Boolean(task.working) : Boolean(group.working);
 }
 
-export function roomRespondersForComposer<T extends { id: string; name: string; hidden?: boolean }>(
+/** Who answers this line, as the room reads it. `ambiguous`: it @-tags a name several members share and none of them
+ * was picked from the @ list, so the room refuses it and nobody answers. */
+export function roomRouteForComposer<T extends { id: string; name: string; hidden?: boolean }>(
   text: string,
   members: T[],
   group: Pick<Group, "defaultResponder">,
-): T[] {
+  picked: readonly string[] = [],
+): { responders: T[]; ambiguous: boolean } {
   const available = members.filter((member) => !member.hidden);
   const everyone = "everyone";
   let everyoneAt = -1;
@@ -66,19 +70,25 @@ export function roomRespondersForComposer<T extends { id: string; name: string; 
       && text.slice(everyoneAt + 1, everyoneAt + 1 + everyone.length).toLowerCase() === everyone
       && !isMentionNameContinuation(text.slice(everyoneAt + 1 + everyone.length))
     ) {
-      return available;
+      return { responders: available, ambiguous: false };
     }
   }
-  const mentioned = mentionedMembers(text, available);
-  if (mentioned.length) return mentioned;
+  const mentioned = resolveMentions(text, available, picked);
+  if (mentioned.ambiguous.length) return { responders: [], ambiguous: true };
+  if (mentioned.bots.length) return { responders: mentioned.bots, ambiguous: false };
   const fallback = effectiveDefaultResponder(group, available);
-  if (fallback.kind === "everyone") return available;
-  if (fallback.kind === "auto") return available;
-  if (fallback.kind === "member") {
-    const lead = available.find((member) => member.id === fallback.botId);
-    return lead ? [lead] : [];
-  }
-  return [];
+  if (fallback.kind === "everyone" || fallback.kind === "auto") return { responders: available, ambiguous: false };
+  const lead = fallback.kind === "member" ? available.find((member) => member.id === fallback.botId) : undefined;
+  return { responders: lead ? [lead] : [], ambiguous: false };
+}
+
+export function roomRespondersForComposer<T extends { id: string; name: string; hidden?: boolean }>(
+  text: string,
+  members: T[],
+  group: Pick<Group, "defaultResponder">,
+  picked: readonly string[] = [],
+): T[] {
+  return roomRouteForComposer(text, members, group, picked).responders;
 }
 
 export function goalCoordinatorForComposer<
@@ -87,12 +97,14 @@ export function goalCoordinatorForComposer<
   text: string,
   members: T[],
   group: Pick<Group, "defaultResponder">,
+  picked: readonly string[] = [],
 ): T | null {
   const available = members.filter((member) => !member.hidden);
   const explicitlyMentioned = roomRespondersForComposer(
     text,
     available,
     { defaultResponder: { kind: "mentions" } },
+    picked,
   )[0];
   if (explicitlyMentioned) return explicitlyMentioned;
   const configuredResponder = group.defaultResponder;
@@ -103,22 +115,4 @@ export function goalCoordinatorForComposer<
     if (configured) return configured;
   }
   return available.find((member) => member.chiefOfStaff) ?? available[0] ?? null;
-}
-
-function mentionedMembers<T extends { name: string; hidden?: boolean }>(text: string, peers: T[]): T[] {
-  const candidates = peers
-    .filter((p) => !p.hidden && p.name.trim())
-    .sort((a, b) => b.name.length - a.name.length);
-  const found: T[] = [];
-  let at = -1;
-  while ((at = text.indexOf("@", at + 1)) !== -1) {
-    if (!isMentionBoundary(text, at)) continue;
-    const hit = candidates.find((p) => {
-      const name = p.name.toLowerCase();
-      if (text.slice(at + 1, at + 1 + p.name.length).toLowerCase() !== name) return false;
-      return !isMentionNameContinuation(text.slice(at + 1 + p.name.length));
-    });
-    if (hit && !found.includes(hit)) found.push(hit);
-  }
-  return found;
 }

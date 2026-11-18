@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DataDirLeaseError } from "./data-dir-lease.mjs";
-import { switchLocalEnvironment, validateTargetDir } from "./environment-switch.mjs";
+import { reviveAfterFailedSwitch, switchLocalEnvironment, validateTargetDir } from "./environment-switch.mjs";
 
 function realDir() {
   const dir = mkdtempSync(join(tmpdir(), "omb-switch-"));
@@ -221,4 +221,53 @@ test("stopChild throwing aborts the switch before release or acquire", async (t)
   };
   await assert.rejects(() => switchLocalEnvironment({ targetDir: dir, targetId: "env-7", deps }), /did not stop/);
   assert.deepEqual(calls, ["stop"]);
+});
+
+function reviveDeps({ held = false, acquireFailures = 0, startResult = { pid: 1 } } = {}) {
+  const calls = [];
+  let lease = held;
+  let failures = acquireFailures;
+  return {
+    calls,
+    deps: {
+      previousDir: "/data/previous",
+      hasLease: () => lease,
+      acquireLease: async (dir) => {
+        calls.push(`acquire ${dir}`);
+        if (failures-- > 0) throw new DataDirLeaseError("held elsewhere");
+        lease = true;
+      },
+      startChild: async (dir) => { calls.push(`start ${dir}`); return startResult; },
+      log: () => {},
+      sleep: async (ms) => { calls.push(`sleep ${ms}`); },
+    },
+  };
+}
+
+test("revive takes the previous folder's lease back before starting when a rollback left none", async () => {
+  const { calls, deps } = reviveDeps();
+  assert.equal(await reviveAfterFailedSwitch(deps), true);
+  assert.deepEqual(calls, ["acquire /data/previous", "start /data/previous"]);
+});
+
+test("revive starts on the previous folder without a new lease when one is still held", async () => {
+  const { calls, deps } = reviveDeps({ held: true });
+  assert.equal(await reviveAfterFailedSwitch(deps), true);
+  assert.deepEqual(calls, ["start /data/previous"]);
+});
+
+test("revive retries a lease that is briefly unavailable, then gives up without forcing it", async () => {
+  const brief = reviveDeps({ acquireFailures: 2 });
+  assert.equal(await reviveAfterFailedSwitch(brief.deps), true);
+  assert.deepEqual(brief.calls, ["acquire /data/previous", "sleep 1000", "acquire /data/previous", "sleep 2000", "acquire /data/previous", "start /data/previous"]);
+  const held = reviveDeps({ acquireFailures: 99 });
+  assert.equal(await reviveAfterFailedSwitch(held.deps), false);
+  assert.equal(held.calls.filter((call) => call.startsWith("acquire")).length, 4);
+  assert.equal(held.calls.some((call) => call.startsWith("start")), false);
+});
+
+test("revive does not retry a start that returned no child", async () => {
+  const { calls, deps } = reviveDeps({ held: true, startResult: null });
+  assert.equal(await reviveAfterFailedSwitch(deps), false);
+  assert.deepEqual(calls, ["start /data/previous"]);
 });

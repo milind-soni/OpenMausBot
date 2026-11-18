@@ -17,7 +17,6 @@ import {
   LocalVmInventoryCard,
   cloudComputerActionPlan,
   cloudComputerInventoryState,
-  computerInventoryRequest,
   confirmComputerAction,
   localVmInventoryState,
   parseLocalVmIdleTimeoutMinutes,
@@ -31,6 +30,7 @@ import {
   type LocalVmInventoryInstance,
   type VpsComputerInventoryInstance,
 } from "./LocalComputerSection";
+import { computerInventoryRequest } from "@/lib/computer-requests";
 import { VpsComputersCard } from "./VpsComputersCard";
 
 const cloudVm: LocalVmInventoryInstance = {
@@ -575,6 +575,20 @@ describe("Settings → Computers on an OMB Cloud home", () => {
     expect(titles).toContain("Cloud desktops");
     expect(titles).not.toContain("Private desktops");
     expect(titles).not.toContain("Setup");
+  });
+
+  it("disables the isolation choice until the computer's status has loaded", () => {
+    const markup = renderToStaticMarkup(createElement(LocalComputerSection));
+    const isolation = markup.match(/<div role="radiogroup" aria-label="Isolation"[^>]*>(.*?)<\/div>/)?.[1] ?? "";
+    expect([...isolation.matchAll(/<button[^>]*>/g)].map(([button]) => button.includes('disabled=""'))).toEqual([true, true]);
+  });
+
+  it("shows only the private desktop cards inside the private desktop setup's Details", () => {
+    const markup = renderToStaticMarkup(createElement(LocalComputerSection, { privateOnly: true }));
+    const titles = [...markup.matchAll(/<div class="text-\[16px\] font-semibold text-ink[^"]*">([^<]+)<\/div>/g)].map((match) => match[1]);
+    expect(titles).toEqual(expect.arrayContaining(["Private desktops", "Setup"]));
+    expect(titles).not.toContain("Cloud desktops");
+    expect(markup).not.toContain("Self-hosted VPS computers");
   });
 });
 
