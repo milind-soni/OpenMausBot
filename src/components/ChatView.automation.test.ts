@@ -80,23 +80,36 @@ describe("an automation's line in the chat", () => {
     try {
       await draw(transcript([
         { id: "routine", parentId: "m2", role: "bot", kind: "text", text: "No new calls.", at: at(3), automation: line("run-1") },
-        { id: "approval", parentId: "routine", role: "bot", kind: "text", text: "Please confirm.", at: at(4), automation: line("run-2", { needsYou: true }) },
+        { id: "resolved-tool", parentId: "routine", role: "bot", kind: "options", at: at(4), automation: line("run-1", { copyOf: "tool-1" }), card: { title: "Tool call", subtitle: "Read fixture", options: ["Allow", "Deny"], requestId: "tool-1", tool: "Bash", answered: "allow" } },
+        { id: "pending-tool", parentId: "resolved-tool", role: "bot", kind: "options", at: at(5), automation: line("run-1", { copyOf: "tool-2", needsYou: true }), card: { title: "Pending tool call", subtitle: "Read fixture", options: ["Allow", "Deny"], requestId: "tool-2", tool: "Bash" } },
+        { id: "approval", parentId: "pending-tool", role: "bot", kind: "text", text: "Please confirm.", at: at(6), automation: line("run-2", { needsYou: true }) },
       ]));
       const button = (name: string) => [...document.querySelectorAll("button")].find((item) => item.textContent?.trim() === name)!;
-      flushSync(() => button(t("routines.logs")).click());
-      flushSync(() => button(t("chat.automation.showInChat")).click());
+      flushSync(() => button(t("chat.automation.activity")).click());
+      flushSync(() => document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="' + t("chat.automation.showInChat") + '"]')!.click());
       expect(document.querySelector('[data-mid="routine"]')).toBeNull();
       expect(document.querySelector('[data-mid="approval"]')?.textContent).toContain("Please confirm.");
       expect(document.querySelector('[data-mid="m2"]')?.textContent).toContain("Here is the draft.");
       expect(localStorage.getItem("omb-advanced-chat-automation")).toBe("hide");
+      const tools = document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="' + t("chat.automation.showTools") + '"]')!;
+      expect(tools.getAttribute("aria-checked")).toBe("true");
+      expect(document.querySelector('[data-mid="resolved-tool"]')).not.toBeNull();
+      flushSync(() => tools.click());
+      expect(tools.getAttribute("aria-checked")).toBe("false");
+      expect(document.querySelector('[data-mid="resolved-tool"]')).toBeNull();
+      expect(document.querySelector('[data-mid="pending-tool"]')).not.toBeNull();
+      expect(document.querySelector('[data-mid="approval"]')?.textContent).toContain("Please confirm.");
+      flushSync(() => tools.click());
+
       dispatch.mockClear();
       flushSync(() => button(t("chat.automation.openLogs")).click());
       expect(dispatch).toHaveBeenCalledWith({ type: "showRoutines", section: "logs", botId: "pepper" });
-      flushSync(() => button(t("chat.automation.showInChat")).click());
+      flushSync(() => document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="' + t("chat.automation.showInChat") + '"]')!.click());
       expect(document.querySelector('[data-mid="routine"]')?.textContent).toContain("No new calls.");
     } finally {
       localStorage.removeItem("omb-advanced-mode");
       localStorage.removeItem("omb-advanced-chat-automation");
+      localStorage.removeItem("omb-advanced-chat-tools");
     }
   });
 
