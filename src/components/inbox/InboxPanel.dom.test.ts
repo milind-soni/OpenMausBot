@@ -19,7 +19,7 @@ import { initialState, StoreContext, type AppState, type Bot } from "@/state/sto
 import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 import { closeInbox, currentInbox, currentInboxPanel, inboxVersion, openInbox, setInboxView, useInboxLoader } from "@/state/inbox";
 import { approvalRow, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
-import type { InboxView } from "../../../shared/inbox";
+import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { InboxCardSlot } from "./InboxCard";
 import { InboxPanel } from "./InboxPanel";
 
@@ -103,6 +103,17 @@ describe("the inbox panel", () => {
     await mount(createElement(InboxPanel));
     expect(document.querySelector("[data-inbox-row]")).not.toBeNull();
     expect(document.querySelector("[data-inbox-mark-all]")).toBeNull();
+  });
+
+  it("opens the conversation a finished notice came from when the person clicks it", async () => {
+    const notice: InboxRow = { ...reportRow, id: "line-notice", origin: { botId: "reporter", threadId: "rep-daily", title: "Daily digest", messageId: "m-report" } };
+    shown(inboxView([notice]));
+    openInbox();
+    await mount(createElement(InboxPanel), [{ id: "reporter", name: "Reporter", color: "orange" } as Bot]);
+    await click(`[data-inbox-row="${notice.id}"] button`);
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "revealThread", threadId: "rep-daily" }));
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "focusMessage", threadId: "rep-daily", messageId: "m-report" }));
+    expect(document.querySelector(`[data-inbox-reading="${notice.id}"]`), "it is not read in the panel").toBeNull();
   });
 
   it("is a sheet at phone width", async () => {

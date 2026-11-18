@@ -67,8 +67,9 @@ function actionTokens(name: string): string[] {
     const [, server = "", ...rest] = name.split("__");
     action = rest.join("_");
     if (isConnectedAppsServer(server)) return actionTokens(action);
-  } else if (/^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(name)) {
-    action = name.slice(name.indexOf("_") + 1);
+  } else if (/^(?:[A-Z][A-Z0-9]*|_[A-Z0-9]+)_[A-Z0-9_]+$/.test(name)) {
+    const start = name.startsWith("_") ? 1 : 0;
+    action = name.slice(name.indexOf("_", start) + 1);
   }
   return action
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")

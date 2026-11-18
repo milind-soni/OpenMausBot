@@ -91,6 +91,8 @@ describe("isReadOnlyTool", () => {
       "mcp__linear__get_issue",
       "GMAIL_SEARCH_MESSAGES",
       "mcp__agents__check_app_hosting",
+      "_1PASSWORD_GET_ITEM",
+      "_1PASSWORD_LIST_ITEMS",
     ]) expect(isReadOnlyTool(name), name).toBe(true);
 
     for (const name of [
@@ -99,6 +101,7 @@ describe("isReadOnlyTool", () => {
       "mcp__linear__create_comment",
       "mcp__computer__click",
       "Bash",
+      "_1PASSWORD_CREATE_ITEM",
     ]) expect(isReadOnlyTool(name), name).toBe(false);
   });
 });
