@@ -1,7 +1,6 @@
 // The before and after pictures a UI PR carries (CONTRIBUTING.md): one page of the running `pnpm dev` app at a phone, a
 // tablet and a desktop width, in Midnight and Daylight, with a headless Chrome in a throwaway profile (OMB_CDP_CHROME,
 // else the installed Google Chrome).
-// Checked-against: scripts/verify-cloud-rail.ts, which photographs only the rail preview's own views at one size.
 //
 //   pnpm shots [PATH] [--name before|after] [--url http://127.0.0.1:5199] [--out shots] [--wait SELECTOR]
 //

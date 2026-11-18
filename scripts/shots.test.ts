@@ -1,4 +1,3 @@
-// Checked-against: scripts/shots.ts, the one script these cases cover.
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
