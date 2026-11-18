@@ -1,4 +1,3 @@
-// Checked-against: server/fresh-start.test.ts (same Store fixture; covers Start fresh, not the hand-off note).
 import { afterEach, describe, expect, it } from "vitest";
 
 import { selectReplay } from "./context-rebuild.ts";

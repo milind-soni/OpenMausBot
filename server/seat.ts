@@ -1,4 +1,3 @@
-// Checked-against: server/fresh-start.ts (Start fresh, no note, no engine close) and compactConversation in server/index.ts (side-model summary, engine kept).
 // Closing a bot's seat: the bot writes a hand-off note in its own conversation, the note becomes the summary its next turn
 // starts from in a new engine session, and the engine kept for the conversation closes now instead of at its idle time.
 import { openPersonWait } from "../shared/person-wait.ts";
