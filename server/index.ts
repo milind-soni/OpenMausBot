@@ -12385,26 +12385,7 @@ ROUTES.push(createBrowserViewerRoutes({
   restartRefusal: (session) => browserRestartRefusal(browserRuntime.interrupted(session), store.bots.filter((candidate) => candidate.busy
     && browserSessionsOf(candidate.id, candidate.browserProfile).includes(session)).map((candidate) => ({ waitingOnBrowser: computerControl.snapshot(candidate.id).help?.place === "browser" }))),
 }));
-const internalToolRoutes = createInternalToolRoutes({ botUsage: {
-  dataDir: DATA_DIR, guestDriven: cloudGuestDriven, caps: () => cfg.usageCaps, onPlan: (id) => registry.lastSnapshot(id)?.billing === "subscription",
-  readableFrom: (threadId, botId) => {
-    const readable = threadReadableFrom(threadId);
-    const bot = store.bot(botId);
-    const known = new Map<string, Map<string, boolean>>();
-    const sharedWithoutAudiences = !CLOUD_HOME && !ownHome.ownServer();
-    return (row) => {
-      let byThread = known.get(row.botId);
-      if (!byThread) known.set(row.botId, byThread = new Map());
-      const cached = byThread.get(row.threadId);
-      if (cached !== undefined) return cached;
-      const source = connectorThread(row.botId, row.threadId);
-      const visible = Boolean(bot && source && (row.botId === botId || canReach(bot, source.bot))
-        && (row.threadId === threadId || !sharedWithoutAudiences) && readable(row.threadId) && !cloudGuestDriven(row.threadId));
-      byThread.set(row.threadId, visible);
-      return visible;
-    };
-  },
-}, engineLimits: { instances: () => registry.instances(), configs: () => instanceConfigs(cfg), status: (instanceId) => registry.knownSnapshot(instanceId), load: (accounts) => loadPlanUsage({ accounts }), audienceOf: (threadId) => teamHost.audienceOf(threadId), guestDriven: cloudGuestDriven, dataDir: DATA_DIR }, helpers: { decider, extractor }, notifications: { bot: (id) => store.bot(id), team: sharedMembership, broadcast }, xResearch: { credential: () => researchCredential(cfg.treg?.key), botEnabled: (botId) => store.bot(botId)?.xResearch !== false, cloudHome: CLOUD_HOME !== null, researchOff: () => researchAvailability.refused() }, appPublisher }); const waitRoutes = createWaitRoutes({ waits: botWaits, cloudHome: Boolean(CLOUD_HOME), sleeps: Boolean(CLOUD_HOME) && CLOUD_TEAM === null }); ROUTES.push(createXConnectorRoutes({ credential: () => researchCredential(cfg.treg?.key), included: () => xCredential(), unavailable: () => xResearchStatus().unavailable === true }));
+const internalToolRoutes = createInternalToolRoutes({ botUsage: { dataDir: DATA_DIR, guestDriven: cloudGuestDriven, caps: () => cfg.usageCaps, onPlan: (id) => registry.lastSnapshot(id)?.billing === "subscription", bot: (id) => store.bot(id), readableFrom: threadReadableFrom, crossThreadReads: () => Boolean(CLOUD_HOME || ownHome.ownServer()), knownThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)) }, engineLimits: { instances: () => registry.instances(), configs: () => instanceConfigs(cfg), status: (instanceId) => registry.knownSnapshot(instanceId), load: (accounts) => loadPlanUsage({ accounts }), audienceOf: (threadId) => teamHost.audienceOf(threadId), guestDriven: cloudGuestDriven, dataDir: DATA_DIR }, helpers: { decider, extractor }, notifications: { bot: (id) => store.bot(id), team: sharedMembership, broadcast }, xResearch: { credential: () => researchCredential(cfg.treg?.key), botEnabled: (botId) => store.bot(botId)?.xResearch !== false, cloudHome: CLOUD_HOME !== null, researchOff: () => researchAvailability.refused() }, appPublisher }); const waitRoutes = createWaitRoutes({ waits: botWaits, cloudHome: Boolean(CLOUD_HOME), sleeps: Boolean(CLOUD_HOME) && CLOUD_TEAM === null }); ROUTES.push(createXConnectorRoutes({ credential: () => researchCredential(cfg.treg?.key), included: () => xCredential(), unavailable: () => xResearchStatus().unavailable === true }));
 
 // Live calls: the client holds the WebRTC audio; the key never leaves the harness, which creates the session.
 function liveBotFor(botId: string): LiveBot {

@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 
 import type { json as sendJson } from "../harness/http.ts";
+import { canReach, type RosterMember } from "../peer-roster.ts";
 import { capStates, capTokens, dayKey, effectiveCaps, type CapState, type UsageCapsConfig } from "../usage-caps.ts";
 import { flushUsageLedger, parseUsageRange, readUsage, summarizeUsage, type UsageRow } from "../usage-ledger.ts";
 import { PASS } from "./table.ts";
@@ -9,13 +10,35 @@ import { notBilledShare } from "./usage.ts";
 interface BotUsageDeps {
   dataDir: string;
   guestDriven(threadId: string): boolean;
-  readableFrom(threadId: string, botId: string): (row: UsageRow) => boolean;
+  readableFrom(threadId: string): (otherThreadId: string) => boolean;
+  crossThreadReads(): boolean;
+  knownThread(botId: string, threadId: string): boolean;
+  bot(botId: string): RosterMember | undefined;
   caps(): UsageCapsConfig | undefined;
   onPlan(instanceId: string): boolean;
   now?(): Date;
 }
 
 const GUEST_REFUSAL = "Bot usage belongs to this workspace, and this conversation was started by someone else.";
+
+function visibleUsageRows(rows: UsageRow[], deps: BotUsageDeps, botId: string, threadId: string): Set<UsageRow> {
+  const caller = deps.bot(botId);
+  const canReadThread = deps.readableFrom(threadId);
+  const crossThread = deps.crossThreadReads();
+  const checked = new Map<string, Map<string, boolean>>();
+  return new Set(rows.filter((row) => {
+    if (typeof row.threadId !== "string" || !row.threadId || (!crossThread && row.threadId !== threadId)) return false;
+    let threads = checked.get(row.botId);
+    if (!threads) checked.set(row.botId, threads = new Map());
+    const cached = threads.get(row.threadId);
+    if (cached !== undefined) return cached;
+    const source = deps.bot(row.botId);
+    const visible = Boolean(caller && source && (source.id === caller.id || canReach(caller, source))
+      && deps.knownThread(row.botId, row.threadId) && canReadThread(row.threadId) && !deps.guestDriven(row.threadId));
+    threads.set(row.threadId, visible);
+    return visible;
+  }));
+}
 
 function capUsedBy(row: UsageRow, cap: CapState): number {
   if (cap.unit === "tokens") return capTokens(row);
@@ -51,8 +74,7 @@ export function createBotUsageRoute(deps: BotUsageDeps) {
     const now = deps.now?.() ?? new Date();
     const month = parseUsageRange(null, null, now)!;
     const ledger = readUsage(deps.dataDir, month);
-    const readable = deps.readableFrom(ctx.threadId, ctx.botId);
-    const visible = new Set(ledger.filter((row) => typeof row.threadId === "string" && row.threadId && readable(row)));
+    const visible = visibleUsageRows(ledger, deps, ctx.botId, ctx.threadId);
     const today = dayKey(now);
     const rows = [...visible].filter((row) => row.botId === ctx.botId
       && (period === "month" || row.at.startsWith(today)) && (thread === null || row.threadId === ctx.threadId));

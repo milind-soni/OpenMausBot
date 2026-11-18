@@ -21,8 +21,8 @@ const row = (fields: Partial<UsageRow> = {}): UsageRow => ({
 });
 
 const audiences = new Map<string, Audience>([["here", "team"], ["older", "team"], ["private", "member:other"], ["peer", "team"]]);
-const readableFrom = (threadId: string) => (entry: UsageRow) => {
-  const audience = audiences.get(entry.threadId);
+const readableFrom = (threadId: string) => (otherThreadId: string) => {
+  const audience = audiences.get(otherThreadId);
   return audience !== undefined && mayRead(audience, audiences.get(threadId)!);
 };
 
@@ -30,7 +30,8 @@ async function query(args: string, deps: Partial<Parameters<typeof createBotUsag
   const path = "/api/internal/usage";
   const json = vi.fn();
   const route = createBotUsageRoute({ dataDir, now: () => now, guestDriven: () => false, caps: () => undefined,
-    readableFrom, onPlan: () => false, ...deps });
+    readableFrom, crossThreadReads: () => true, knownThread: (_botId, threadId) => audiences.has(threadId),
+    bot: (id) => ({ id, name: id }), onPlan: () => false, ...deps });
   await route({ method: "GET", path, url: new URL(`http://localhost${path}${args}`), res: {} as ServerResponse, json, botId, threadId: "here", requireActive() {} });
   const [, status, body] = json.mock.calls[0]!;
   return { status, body, result: body.text ? JSON.parse(body.text) : null };
