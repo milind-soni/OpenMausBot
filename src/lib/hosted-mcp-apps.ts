@@ -1,6 +1,7 @@
 import { CreditCard, Mail, PhoneCall, RadioTower, Smartphone, type LucideIcon } from "lucide-react";
 
 import bubblavLogo from "@/assets/bubblav/logo.png";
+import joinbotLogo from "@/assets/joinbot/logo.png";
 import whopLogo from "@/assets/whop/logo.png";
 import type { LocaleKey } from "@/locales";
 import { POSTIZ_SERVER } from "../../shared/postiz";
@@ -93,6 +94,16 @@ export const HOSTED_MCP_APPS = [
     description: "bubblav.description",
     notice: "bubblav.notice",
     keywords: "bubblav chatbot chat widget website customer support service knowledge base conversations leads analytics",
+  },
+  {
+    id: "joinbot",
+    label: "JoinBot",
+    url: "https://usejoinbot.com/api/mcp",
+    key: { url: "https://usejoinbot.com/app/bots" },
+    icon: { image: joinbotLogo },
+    description: "joinbot.description",
+    notice: "joinbot.notice",
+    keywords: "joinbot meeting meetings zoom google meet teams call calls voice speak transcript",
   },
 ] as const satisfies readonly HostedMcpApp[];
 
