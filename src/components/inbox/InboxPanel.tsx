@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
+import { Check, Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
 import type { InboxRow } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
@@ -15,7 +15,7 @@ import { InboxRowItem } from "./InboxRow";
 import { FinishedThreads } from "./FinishedThreads";
 import { PinnedThreads, pinnedThreadRows } from "./PinnedThreads";
 import { matchesSearch, nextAfter } from "./inbox-answer";
-import { listedRows, waitingCount } from "./inbox-view";
+import { listedRows, rowsIn, waitingCount } from "./inbox-view";
 import { useInboxActions } from "./use-inbox-actions";
 import { roundButtonCls } from "../bot-panel/rows";
 
@@ -30,6 +30,7 @@ export function InboxPanel() {
   const { run, openInChat } = useInboxActions(view);
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
+  const [showDone, setShowDone] = useState(false);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -48,10 +49,10 @@ export function InboxPanel() {
     if (row.tab === "needs-you" || row.replies) { readInboxLine(row.id); return; }
     openInChat(row);
   };
-  // The notice list is upstream's: a read line stays until the person marks it done. Reading a conversation moves the
-  // conversation to Finished; it does not remove the notice it came from.
+  // Finished work the person has read leaves the list for the Done line at the foot; its conversation moves to Finished.
   const listed = listedRows(view);
   const rows = listed.filter((row) => matchesSearch(row, query));
+  const done = rowsIn(view, "done").filter((row) => matchesSearch(row, query)).sort((a, b) => b.at - a.at);
   const ids = rows.map((row) => row.id);
   const at = reading ? ids.indexOf(reading.id) : -1;
 
@@ -71,7 +72,7 @@ export function InboxPanel() {
 
   const step = (by: -1 | 1) => {
     const row = rows[at + by];
-    if (row) { readInboxRow(row); readInboxLine(row.id); }
+    if (row) open(row);
   };
   const pinnedThreads = new Set(pinnedThreadRows(state.bots, state.groups, state.pendingQueued).map((row) => row.task.threadId));
   const count = waitingCount(view) + unreadConversations(inboxAttentionEntries(state, view), view);
@@ -129,6 +130,17 @@ export function InboxPanel() {
               {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} />}
               {/* The finished, already-read conversations. */}
               {!query.trim() && <FinishedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} readThreads={readNewsThreads(view)} exclude={pinnedThreads} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} />}
+              {done.length > 0 && (
+                <section data-inbox-done className="px-1.5 pb-1.5">
+                  <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}
+                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-ink-tertiary hover:bg-raised/70 hover:text-ink-secondary">
+                    <Check size={13} aria-hidden="true" className="shrink-0" />
+                    <span className="font-medium">{t("common.done")}</span>
+                    <span className="tabular-nums">{done.length}</span>
+                  </button>
+                  {showDone && done.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
+                </section>
+              )}
             </div>
           </>
         )}

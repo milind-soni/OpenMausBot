@@ -35,13 +35,14 @@ export function inboxOpenThread(state: Pick<AppState, "activeView" | "selectedId
   return group ? { kind: "group", groupId: group.id, threadId: group.threadId } : undefined;
 }
 
-/** The conversations whose news lines have all been read: reading in the Inbox counts as reading them. */
+/** The conversations whose news lines have all been read: reading in the Inbox counts as reading them. Finished work
+ * the person has read moves to the Done line, and still counts. */
 export function readNewsThreads(view: InboxView | null): Set<string> {
   const read = new Set<string>();
   const unread = new Set<string>();
   for (const row of view?.rows ?? []) {
     const threadId = row.origin?.threadId;
-    if (!threadId || row.tab !== "info") continue;
+    if (!threadId || !(row.tab === "info" || (row.tab === "done" && row.kind === "result"))) continue;
     (row.unread ? unread : read).add(threadId);
   }
   for (const threadId of unread) read.delete(threadId);

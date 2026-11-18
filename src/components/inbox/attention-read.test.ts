@@ -37,6 +37,15 @@ describe("inboxAttentionEntries", () => {
     expect([...readNewsThreads(view(line(false)))]).toEqual(["eli-a"]);
     expect([...readNewsThreads(view(line(true)))]).toEqual([]);
   });
+
+  it("still counts it read once its read result has moved to the Done line, so Mark all as read empties the active list", () => {
+    const moved = [{ id: "l1", kind: "result", tab: "done", origin: { threadId: "eli-a" }, unread: false }];
+    expect([...readNewsThreads(view(moved))]).toEqual(["eli-a"]);
+    expect(inboxAttentionEntries(state(bots), view(moved))).toEqual([]);
+    expect(unreadConversations(inboxAttentionEntries(state(bots), view(moved)), view(moved))).toBe(0);
+    // A line the person only marked done is no reading of the conversation.
+    expect([...readNewsThreads(view([{ id: "l2", kind: "message", tab: "done", origin: { threadId: "eli-a" }, unread: false }]))]).toEqual([]);
+  });
 });
 
 const open = (selectedId: string, activeView = "chat") =>
