@@ -8,6 +8,7 @@ export interface BotOptions { endpoint?: string; baseUrl?: string; botId?: strin
 export interface WaitOptions { timeout?: number; pollInterval?: number }
 type SendOptions = { thread?: string; wait?: number };
 
+const NO_ADDRESS = "No bot address: pass `endpoint` (the address on the bot's Bot API card) or set MAUSBOT_BOT_URL.";
 const env = (name: string) => (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[name]?.trim() || undefined;
 const sleep = (seconds: number) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 
@@ -28,8 +29,14 @@ export class Bot {
   constructor(options: BotOptions = {}) {
     const key = (options.key ?? env("MAUSBOT_BOT_KEY"))?.trim();
     if (!key) throw new MausBotError("No key: pass `key` or set MAUSBOT_BOT_KEY.");
+    if (!/^[\x21-\x7e]+$/.test(key)) throw new MausBotError("The key has characters a MausBot key never has.");
+    const maxRetries = options.maxRetries ?? 2;
+    const retryDelay = options.retryDelay ?? 0.5;
+    if (!Number.isInteger(maxRetries) || maxRetries < 0) throw new MausBotError("`max_retries` must be a whole number, 0 or more.");
+    if (typeof retryDelay !== "number" || !(retryDelay >= 0)) throw new MausBotError("`retry_delay` must be a number of seconds, 0 or more.");
     let baseUrl = options.baseUrl?.trim().replace(/\/+$/, "");
     let botId = options.botId;
+    if (baseUrl && !/^https?:\/\/[^/?#\s]/i.test(baseUrl)) throw new MausBotError("`base_url` must be an http or https address.");
     if (!baseUrl || !botId) {
       const endpoint = (options.endpoint ?? env("MAUSBOT_BOT_URL"))?.trim();
       let match: RegExpMatchArray | null = null;
@@ -39,12 +46,17 @@ export class Bot {
         origin = url.origin;
         match = url.pathname.match(/^(.*)\/hooks\/api\/(?:v1\/)?bots\/([^/]+)\/messages\/?$/);
       } catch { /* falls through to the refusal below */ }
-      if (!match) throw new MausBotError("No bot address: pass `endpoint` (the address on the bot's Bot API card) or set MAUSBOT_BOT_URL.");
+      if (!match) throw new MausBotError(NO_ADDRESS);
       baseUrl = origin + match[1];
-      botId = decodeURIComponent(match[2]);
+      try {
+        botId = decodeURIComponent(match[2]);
+      } catch {
+        throw new MausBotError(NO_ADDRESS);
+      }
     }
+    if (!/^[\w-]{1,128}$/.test(botId)) throw new MausBotError(NO_ADDRESS);
     this.#path = `/hooks/api/v1/bots/${encodeURIComponent(botId)}/messages`;
-    this.#http = { baseUrl, key, maxRetries: options.maxRetries ?? 2, retryDelay: options.retryDelay ?? 0.5, fetch: options.fetch ?? globalThis.fetch.bind(globalThis) };
+    this.#http = { baseUrl, key, maxRetries, retryDelay, fetch: options.fetch ?? globalThis.fetch.bind(globalThis) };
   }
 
   async send(message: string, options: SendOptions = {}): Promise<ThreadState> {

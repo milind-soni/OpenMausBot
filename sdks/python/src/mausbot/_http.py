@@ -15,6 +15,11 @@ from ._types import Failed, NeedsApproval, Replied, ThreadState, Working
 NO_ADDRESS = "No bot address: pass `endpoint` (the address on the bot's Bot API card) or set MAUSBOT_BOT_URL."
 NO_KEY = "No key: pass `key` or set MAUSBOT_BOT_KEY."
 _CARD = re.compile(r"^(.*)/hooks/api/(?:v1/)?bots/([^/]+)/messages/?$")
+_BOT_ID = re.compile(r"[\w-]{1,128}", re.ASCII)
+DROPPED = ("The connection to the MausBot server dropped before it answered. "
+           "The message may have been sent; sending it again could start a second turn.")
+# The server holds a send for up to `wait` (at most 300 s); the read limit adds margin.
+_TIMEOUT = httpx.Timeout(330, connect=10)
 
 
 class Expired(Exception):
@@ -53,8 +58,16 @@ def _origin(url: str) -> Optional[Tuple[str, str]]:
     return f"{parts.scheme}://{host}{port}", parts.path
 
 
+def _check_retry(max_retries: Any, retry_delay: Any) -> None:
+    if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
+        raise MausBotError("`max_retries` must be a whole number, 0 or more.")
+    if isinstance(retry_delay, bool) or not isinstance(retry_delay, (int, float)) or not retry_delay >= 0:
+        raise MausBotError("`retry_delay` must be a number of seconds, 0 or more.")
+
+
 def make_config(endpoint: Optional[str], key: Optional[str], base_url: Optional[str], bot_id: Optional[str],
                 max_retries: int, retry_delay: float, env: Dict[str, str]) -> Config:
+    _check_retry(max_retries, retry_delay)
     key = (key if key is not None else env.get("MAUSBOT_BOT_KEY", "")).strip()
     if not key:
         raise MausBotError(NO_KEY)
@@ -76,6 +89,8 @@ def make_config(endpoint: Optional[str], key: Optional[str], base_url: Optional[
             bot_id = unquote(match.group(2), errors="strict")
         except UnicodeDecodeError:
             raise MausBotError(NO_ADDRESS) from None
+    if not _BOT_ID.fullmatch(bot_id):
+        raise MausBotError(NO_ADDRESS)
     return Config(base, bot_id, key, max_retries, retry_delay)
 
 
@@ -111,8 +126,7 @@ def request_kwargs(config: Config, method: str, query: Optional[Dict[str, str]],
         kwargs["params"] = query
     if method == "POST":
         kwargs["json"] = body
-    if deadline is not None:
-        kwargs["timeout"] = max(deadline - time.monotonic(), 0.001)
+    kwargs["timeout"] = _TIMEOUT if deadline is None else max(deadline - time.monotonic(), 0.001)
     return kwargs
 
 
@@ -126,8 +140,10 @@ def parse(config: Config, res: httpx.Response) -> Any:
     return body
 
 
-def unreachable(config: Config) -> APIConnectionError:
+def unreachable(config: Config, method: str, error: httpx.HTTPError) -> APIConnectionError:
     # The cause can echo the request, so it is not chained.
+    if method == "POST" and not isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout)):
+        return APIConnectionError(DROPPED)
     return APIConnectionError(f"Could not reach the MausBot server at {_origin(config.base_url)[0]}")  # type: ignore[index]
 
 
@@ -142,12 +158,10 @@ def request(client: httpx.Client, config: Config, method: str, query: Optional[D
         try:
             try:
                 res = client.request(**request_kwargs(config, method, query, body, deadline))
-            except httpx.TimeoutException:
-                if deadline is not None:
+            except httpx.HTTPError as caught:
+                if deadline is not None and isinstance(caught, httpx.TimeoutException):
                     raise Expired() from None
-                raise unreachable(config) from None
-            except httpx.HTTPError:
-                raise unreachable(config) from None
+                raise unreachable(config, method, caught) from None
             return parse(config, res)
         except (APIConnectionError, ServerError) as error:
             if not retryable(method, error, attempt, config):
@@ -162,12 +176,10 @@ async def arequest(client: httpx.AsyncClient, config: Config, method: str, query
         try:
             try:
                 res = await client.request(**request_kwargs(config, method, query, body, deadline))
-            except httpx.TimeoutException:
-                if deadline is not None:
+            except httpx.HTTPError as caught:
+                if deadline is not None and isinstance(caught, httpx.TimeoutException):
                     raise Expired() from None
-                raise unreachable(config) from None
-            except httpx.HTTPError:
-                raise unreachable(config) from None
+                raise unreachable(config, method, caught) from None
             return parse(config, res)
         except (APIConnectionError, ServerError) as error:
             if not retryable(method, error, attempt, config):

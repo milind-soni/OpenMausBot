@@ -98,3 +98,83 @@ def test_wait_on_a_server_that_never_answers_stops_at_the_timeout():
             assert time.monotonic() - started < 1
     finally:
         listener.close()
+
+
+@pytest.mark.parametrize("bad", [dict(max_retries=-1), dict(max_retries=1.5), dict(max_retries=True), dict(retry_delay=-1), dict(retry_delay="1")])
+def test_refuses_bad_retry_settings_at_construction(bad):
+    with pytest.raises(MausBotError):
+        Bot(CARD, "k", **bad)
+
+
+@pytest.mark.parametrize("endpoint", ["https://x.example/hooks/api/bots/a.b/messages", "https://x.example/hooks/api/bots/%20/messages"])
+def test_refuses_a_bot_id_outside_the_allowed_characters(endpoint):
+    with pytest.raises(MausBotError):
+        Bot(endpoint, "k")
+    with pytest.raises(MausBotError):
+        Bot(base_url="https://x.example", bot_id="a" * 129, key="k")
+
+
+def test_a_post_that_dropped_after_connecting_may_have_been_sent_but_a_refused_connection_was_not():
+    def drop(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError("boom", request=request)
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("boom", request=request)
+
+    with Bot(CARD, "k", http_client=httpx.Client(transport=httpx.MockTransport(drop))) as bot, pytest.raises(MausBotError, match="may have been sent"):
+        bot.send("x")
+    with Bot(CARD, "k", http_client=httpx.Client(transport=httpx.MockTransport(refuse))) as bot, pytest.raises(MausBotError, match="Could not reach"):
+        bot.send("x")
+
+
+def _slow_server(delay):
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        timeout = 2
+
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("content-length") or 0))
+            time.sleep(delay)
+            data = json.dumps({"reply": "hi", "thread": "t1"}).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def test_a_callers_own_short_timeout_does_not_cut_a_post_short():
+    server = _slow_server(1)
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        with httpx.Client(timeout=0.5) as client:
+            bot = Bot(base_url=url, bot_id="b1", key="k", http_client=client)
+            assert bot.send("x").reply == "hi"
+            assert bot.ask("x").reply == "hi"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.anyio
+async def test_a_callers_own_short_timeout_does_not_cut_an_async_post_short():
+    server = _slow_server(1)
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}"
+        async with httpx.AsyncClient(timeout=0.5) as client:
+            bot = AsyncBot(base_url=url, bot_id="b1", key="k", http_client=client)
+            assert (await bot.send("x")).reply == "hi"
+            assert (await bot.ask("x")).reply == "hi"
+    finally:
+        server.shutdown()
+        server.server_close()

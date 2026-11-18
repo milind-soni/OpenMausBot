@@ -30,6 +30,8 @@ class Stub:
         stub = self
 
         class Handler(BaseHTTPRequestHandler):
+            timeout = 2  # a handler waiting for a request line that never comes would hang server_close()
+
             def log_message(self, *args):
                 pass
 

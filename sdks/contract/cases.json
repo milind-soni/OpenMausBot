@@ -631,7 +631,8 @@
     }
    ],
    "error": {
-    "type": "APIConnectionError"
+    "type": "APIConnectionError",
+    "messageContains": "may have been sent"
    }
   },
   {

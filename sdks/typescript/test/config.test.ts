@@ -2,6 +2,7 @@ import { inspect } from "node:util";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
+import * as sdk from "../src/index.js";
 import { AuthenticationError, Bot, MausBotError, WaitTimeoutError } from "../src/index.js";
 
 const replied = () => new Response(JSON.stringify({ reply: "hi", thread: "t1" }), { status: 200, headers: { "content-type": "application/json" } });
@@ -79,5 +80,40 @@ describe("Bot config", () => {
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  it("refuses bad construction input with a MausBotError, never the key", () => {
+    const card = "https://x.example/hooks/api/bots/b1/messages";
+    const bad: [string, () => Bot][] = [
+      ["bad escape", () => new Bot({ endpoint: "https://x.example/hooks/api/bots/b%ZZ/messages", key: "k" })],
+      ["bot id with a dot", () => new Bot({ endpoint: "https://x.example/hooks/api/bots/a.b/messages", key: "k" })],
+      ["bot id too long", () => new Bot({ baseUrl: "https://x.example", botId: "a".repeat(129), key: "k" })],
+      ["baseUrl", () => new Bot({ baseUrl: "not a url", botId: "b1", key: "k" })],
+      ["key with a space", () => new Bot({ endpoint: card, key: "k_secret 123" })],
+      ["key not ascii", () => new Bot({ endpoint: card, key: "k_secret_é" })],
+      ["maxRetries", () => new Bot({ endpoint: card, key: "k", maxRetries: -1 })],
+      ["retryDelay", () => new Bot({ endpoint: card, key: "k", retryDelay: -1 })],
+    ];
+    for (const [, make] of bad) {
+      expect(make).toThrow(MausBotError);
+      expect(make).not.toThrow(/k_secret/);
+    }
+    expect(() => new Bot({ endpoint: card, key: "k_secret 123" })).toThrow("The key has characters a MausBot key never has.");
+  });
+
+  it("exports the public names only", () => {
+    expect(Object.keys(sdk).sort()).toEqual([
+      "APIConnectionError", "APIStatusError", "AuthenticationError", "BadRequestError", "Bot", "ConflictError", "JobFailedError", "MausBotError",
+      "NotFoundError", "NotSentError", "PermissionDeniedError", "RateLimitError", "ServerError", "ServerTooOldError", "WaitTimeoutError",
+    ]);
+  });
+
+  it("says a POST that dropped after connecting may have been sent, but a refused connection was not", async () => {
+    const make = (cause: unknown) => (async () => { throw Object.assign(new TypeError("fetch failed"), { cause }); }) as unknown as typeof globalThis.fetch;
+    const card = "https://x.example/hooks/api/bots/b1/messages";
+    const dropped = await new Bot({ endpoint: card, key: "k", fetch: make({ code: "UND_ERR_SOCKET" }) }).send("x").catch((e: unknown) => e);
+    expect(String(dropped)).toContain("may have been sent");
+    const refused = await new Bot({ endpoint: card, key: "k", fetch: make({ code: "ECONNREFUSED" }) }).send("x").catch((e: unknown) => e);
+    expect(String(refused)).toContain("Could not reach");
   });
 });

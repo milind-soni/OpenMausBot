@@ -14,8 +14,6 @@ from ._types import Answer, ThreadState
 WAIT_RAN_OUT = "Still working when the wait ran out. Call wait again with this thread."
 STILL_BUSY = "The message was not sent: the thread was still busy when the wait ran out."
 ON_APPROVAL = "The message was not sent: the thread is waiting for an approval in the app."
-# A client we make has no read limit (the server holds a send for up to `wait` seconds); only connecting is bounded.
-_TIMEOUT = httpx.Timeout(None, connect=10)
 
 
 def _post_body(message: str, thread: Optional[str], wait: Optional[float]) -> Dict[str, Any]:
@@ -35,7 +33,7 @@ class Bot:
                  http_client: Optional[httpx.Client] = None) -> None:
         self._config: Config = make_config(endpoint, key, base_url, bot_id, max_retries, retry_delay, dict(os.environ))
         self._owns_client = http_client is None
-        self._client = http_client or httpx.Client(timeout=_TIMEOUT)
+        self._client = http_client or httpx.Client()
 
     def __repr__(self) -> str:
         return f"Bot(base_url={self._config.base_url!r})"
@@ -109,7 +107,7 @@ class AsyncBot:
                  http_client: Optional[httpx.AsyncClient] = None) -> None:
         self._config: Config = make_config(endpoint, key, base_url, bot_id, max_retries, retry_delay, dict(os.environ))
         self._owns_client = http_client is None
-        self._client = http_client or httpx.AsyncClient(timeout=_TIMEOUT)
+        self._client = http_client or httpx.AsyncClient()
 
     def __repr__(self) -> str:
         return f"AsyncBot(base_url={self._config.base_url!r})"
