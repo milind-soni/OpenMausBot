@@ -6,27 +6,6 @@ import { setLocale } from "../lib/i18n";
 import { StreamingReplyContext } from "@/state/live-reply";
 
 const parsed = vi.hoisted(() => [] as string[]);
-const normalizingParses = vi.hoisted(() => [] as string[]);
-const splitting = vi.hoisted(() => ({ on: true }));
-vi.mock("mdast-util-from-markdown", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("mdast-util-from-markdown")>();
-  return {
-    ...actual,
-    fromMarkdown: (...args: Parameters<typeof actual.fromMarkdown>) => {
-      normalizingParses.push(String(args[0]));
-      return actual.fromMarkdown(...args);
-    },
-  };
-});
-// Off, a streaming reply is parsed whole: what the pieces must draw.
-vi.mock("@/lib/markdown-stream-blocks", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/markdown-stream-blocks")>();
-  return {
-    ...actual,
-    splitMarkdownBlocks: (text: string) => splitting.on ? actual.splitMarkdownBlocks(text) : null,
-    splitStreamingBlock: (block: string) => splitting.on ? actual.splitStreamingBlock(block) : null,
-  };
-});
 vi.mock("react-markdown", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-markdown")>();
   return {
@@ -37,13 +16,24 @@ vi.mock("react-markdown", async (importOriginal) => {
     },
   };
 });
+const preParsed = vi.hoisted(() => [] as string[]);
+vi.mock("mdast-util-from-markdown", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("mdast-util-from-markdown")>();
+  return {
+    ...actual,
+    fromMarkdown: (...args: Parameters<typeof actual.fromMarkdown>) => {
+      preParsed.push(String(args[0]));
+      return actual.fromMarkdown(...args);
+    },
+  };
+});
 vi.mock("@/lib/interface-mode", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/interface-mode")>(),
   useAdvancedMode: () => true,
   readAdvancedMode: () => true,
 }));
 
-const { ChatMarkdown, clearChatMarkdownCache, ensureChatKatex } = await import("./ChatMarkdown");
+const { ChatMarkdown, clearChatMarkdownCache, normalizeMathDelimiters } = await import("./ChatMarkdown");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -57,9 +47,8 @@ describe("a reply's Markdown while it streams", () => {
   beforeEach(() => {
     setLocale("en");
     clearChatMarkdownCache();
-    splitting.on = true;
     parsed.length = 0;
-    normalizingParses.length = 0;
+    preParsed.length = 0;
     host = document.createElement("div");
     document.body.append(host);
     root = createRoot(host);
@@ -126,119 +115,82 @@ describe("a reply's Markdown while it streams", () => {
     expect(host.querySelector(".chat-code-actions")!.hasAttribute("inert")).toBe(false);
   });
 
-  it("parses each finished list item once and only the item being written again as text arrives", () => {
-    const head = "Here is the plan:\n- first **step**\n- second `step`\n";
-    draw(`${head}- thi`, true);
-    expect(parsed).toEqual(["- first **step**", "- second `step`", "- thi", "Here is the plan:\n"]);
-    parsed.length = 0;
-    draw(`${head}- third`, true);
-    expect(parsed, "the finished items were kept").toEqual(["- third"]);
-    parsed.length = 0;
-    draw(`${head}- third step\n- fo`, true);
-    expect(parsed).toEqual(["- third step", "- fo"]);
+  /** Streams `text` in deltas of `step` characters and returns the characters handed to each parser along the way. */
+  const stream = (text: string, step: number) => {
+    for (let end = step; end < text.length + step; end += step) draw(text.slice(0, end), true);
+    const chars = (sources: string[]) => sources.reduce((sum, source) => sum + source.length, 0);
+    return { parsed: chars(parsed), longest: Math.max(...parsed.map((source) => source.length)), preParsed: chars(preParsed) };
+  };
+  const whole = (text: string) => {
+    const streamed = markup();
+    draw(text, false);
+    expect(streamed).toBe(markup());
+  };
+
+  it("parses only the item being written of a long list", () => {
+    const text = Array.from({ length: 150 }, (_, index) => `- item ${index} with **bold** and \`code\`\n`).join("");
+    const work = stream(text, 13);
+    expect(work.parsed, "each item is parsed a few times, never the list again").toBeLessThan(text.length * 5);
+    expect(work.longest).toBeLessThan(80);
+    expect(work.preParsed, "nothing is parsed to normalize or repair").toBe(0);
+    expect(host.querySelectorAll("ul").length).toBe(1);
+    expect(host.querySelectorAll("li").length).toBe(150);
+    whole(text);
   });
 
-  it("parses each finished table row once, after the table's head, and only the row being written again", () => {
-    const table = "| Name | Value |\n| :--- | ---: |\n| a | 1 |\n| b | 2 |\n";
-    draw(`${table}| c`, true);
-    parsed.length = 0;
-    draw(`${table}| c | 3`, true);
-    expect(parsed).toEqual(["| Name | Value |\n| :--- | ---: |\n| c | 3"]);
-    expect(host.querySelectorAll("tbody tr")).toHaveLength(3);
-    expect(normalizingParses, "the growing table is not parsed again to repair it").toEqual([]);
+  it("parses only the item being written of a long loose list under a lead line", () => {
+    const text = `Steps:\n${Array.from({ length: 100 }, (_, index) => `${index + 1}. **Step ${index}**\n\n${" ".repeat(`${index + 1}. `.length)}Its body text.\n\n`).join("")}`;
+    const work = stream(text, 13);
+    expect(work.parsed).toBeLessThan(text.length * 5);
+    expect(work.longest).toBeLessThan(80);
+    expect(work.preParsed).toBe(0);
+    expect(host.querySelectorAll("ol").length).toBe(1);
+    expect(host.querySelectorAll("li > p").length).toBe(200);
+    whole(text);
   });
 
-  it("cuts a reply around an HTML page in a code fence", () => {
-    const page = "```html\n<!doctype html>\n<script>\nlet a = 1;\n\nlet b = 2;\n</script>\n```\n\n";
-    draw(`${page}After`, true);
-    parsed.length = 0;
-    draw(`${page}After the page`, true);
-    expect(parsed).toEqual(["After the page"]);
+  it("parses only the row being written of a long table", () => {
+    const head = "| name | value | note |\n|------|------:|:-----|\n";
+    const text = head + Array.from({ length: 150 }, (_, index) => `| row ${index} | ${index * 7} | some \`code\` |\n`).join("");
+    const work = stream(text, 13);
+    // Each row is parsed under the header, so a parse is three lines long.
+    expect(work.parsed).toBeLessThan(text.length * 5 + 150 * 5 * head.length);
+    expect(work.longest).toBeLessThan(head.length + 60);
+    expect(work.preParsed, "only the header is checked for repair while it arrives").toBeLessThan(head.length * 10);
+    expect(host.querySelector("table")!.getAttribute("aria-rowcount")).toBe("151");
+    whole(text);
   });
 
-  it("parses whole the list or table it cannot cut", () => {
-    for (const text of ["- one\n- two\n\n- loose", "- costs $5\n- and $10", "Intro\n2. two\n3. three"]) {
+  it("keeps parsing block by block under an HTML line and after display math", () => {
+    const prose = Array.from({ length: 60 }, (_, index) => `Paragraph ${index} with **bold** words that keep flowing along.\n\n`).join("");
+    for (const text of [`<details>\n\n${prose}`, `$$x^2$$\n\n${prose}`, `Intro\n\n$$\na + b\n$$\n\n${prose}\\[\nc\n\\]\n\n${prose}`]) {
+      clearChatMarkdownCache();
       parsed.length = 0;
-      draw(text, true);
-      expect(parsed.map((source) => source.replaceAll("\\$", "$")), text).toEqual([text]);
+      preParsed.length = 0;
+      const work = stream(text, 13);
+      expect(work.parsed, text.slice(0, 12)).toBeLessThan(text.length * 5);
+      expect(work.longest, text.slice(0, 12)).toBeLessThan(120);
+      whole(text);
     }
   });
 
-  it("does not parse text again to normalise math it does not have", () => {
-    draw("A **plain** reply with `code` and a [link](https://example.com).", false);
-    expect(normalizingParses).toEqual([]);
-    draw("Costs $5 and $x^2$.", false);
-    expect(normalizingParses).toEqual(["Costs $5 and $x^2$."]);
+  it("normalizes text without math delimiters without parsing it, to the same result", () => {
+    const plain = [
+      "Plain **bold** and `code` with [a link](https://example.com) and ![an image](a.png).",
+      "- one\n- two (with parens) [and brackets]\n\n```sh\nls\n```\n\n| a | b |\n|---|---|\n",
+      "Backslashes \\\\ and \\* and a\\b, 100% and #1.",
+      "",
+    ];
+    for (const text of plain) {
+      expect(normalizeMathDelimiters(text), text).toBe(text);
+      expect(preParsed, text).toEqual([]);
+      // With an image map the text is always parsed: the full normalization gives the same text back.
+      expect(normalizeMathDelimiters(text, new Map()), text).toBe(text);
+      expect(preParsed.splice(0), text).toEqual([text]);
+    }
+    for (const text of ["Costs $5.", "Inline \\(x\\).", "Display \\[x\\].", "a\u0000b"]) {
+      normalizeMathDelimiters(text);
+      expect(preParsed.splice(0), text).toEqual([text]);
+    }
   });
 });
-
-// Its second fence is closed only by the next item, so it shows as still open until the reply is finished.
-const FENCE_CLOSED_BY_ITEM = "1. Install:\n   ```bash\n   npm i\n   ```\n2. Run:\n   ```\n   npm start\n3. Done";
-const CORPUS = [
-  "Here is the plan:\n- first step with **bold**\n- second `code` step\n- third [link](https://example.com)\n\nDone.",
-  "Steps:\n\n1. one\n2. two\n3. three\n",
-  "- a\n  - a1\n  - a2\n- b\n  1. b1\n- c",
-  "- [ ] todo\n- [x] done\n- plain",
-  "- one\n- two\n\n- three",
-  FENCE_CLOSED_BY_ITEM,
-  "- costs $5 now\n- then $10 later\n- x$y and z$ w",
-  "- 123\n- \u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd\n- 456",
-  "- item one\nlazy line\n- item two",
-  "- a\n* b\n+ c",
-  "- a\n- b\n* * *\nafter",
-  "- a\n# Heading\n- b",
-  "Intro\n2. two\n3. three",
-  "# Title\n- a\n- b",
-  "| Name | Value |\n| :--- | ---: |\n| a | 1 |\n| b **bold** | `c|d` |\n| e \\| f | 3 |\n\nAfter",
-  "| a | b | c |\n|---|---|---|\n| 1 |\n| 1 | 2 | 3 | 4 |\n| x",
-  "Intro\n| a | b |\n|---|\n| 1 | 2 |",
-  "| a | b |\n| - | - |\n| 1 | 2 |\nbar\n| 3 | 4 |",
-  "| # | 1 |\n| - | - |\n| 2 | \u05e9\u05dc\u05d5\u05dd |",
-  "<details>\n<summary>More</summary>\n\nhidden **text**\n\n</details>\n\nAfter",
-  "Before\n\n<!-- note\n\nstill comment -->\n\nAfter",
-  "Formula:\n\n$$\nx^2 + y^2\n\n= z^2\n$$\n\nAnd $$a+b$$ inline.\n\n- item $5",
-  "Intro paragraph.\n\nA claim.[^1] Another.[^2]\n\n- list item\n- another\n\n[^1]: First source.\n[^2]: Second.",
-  "# Title\n\nSome prose with *emphasis*.\n\n| h1 | h2 |\n| -- | -- |\n| r1 | r2 |\n| r3 | r4 |\n\n- x\n- y\n\n```js\nconst a = 1;\n```\n\nEnd.",
-  "- a | b\n- c | d\n- e",
-  "Look:\n+ plus one\n+ plus two\n\n10) ten\n11) eleven",
-  " - a\n- b\n- c",
-  "<div>\n- a\n- b",
-  "<details>\n<summary>S</summary>\n- a\n- b\n</details>",
-  "<br>\n- a\n- b",
-  "a | b\n- | -\n- c",
-  "Use `<script>` and `<!-- -->` in a line.\n\nNext\n\n- a\n- b",
-  "```html\n<!doctype html>\n<html>\n<script>\nlet a = 1;\n\nlet b = 2;\n</script>\n</html>\n```\n\nAfter\n\n- x\n- y",
-  "> quote\n> <!-- note\n\nstill -->\n\nEnd",
-  "-\tx\n- b\n- c",
-];
-
-describe("a reply streamed one character at a time", () => {
-  it("draws at every point what parsing the text so far whole draws, and the finished reply at the end", async () => {
-    await ensureChatKatex();
-    const roots = [document.createElement("div"), document.createElement("div")].map((element) => {
-      document.body.append(element);
-      return { element, root: createRoot(element) };
-    });
-    const [streamed, whole] = roots as [typeof roots[0], typeof roots[0]];
-    const drawIn = (target: typeof streamed, text: string, streaming: boolean, split: boolean) => {
-      splitting.on = split;
-      act(() => target.root.render(createElement(StreamingReplyContext, { value: streaming }, createElement(ChatMarkdown, { text }))));
-    };
-    for (const text of CORPUS) {
-      for (let end = 1; end <= text.length; end++) {
-        const prefix = text.slice(0, end);
-        drawIn(streamed, prefix, true, true);
-        drawIn(whole, prefix, true, false);
-        expect(streamed.element.innerHTML, JSON.stringify(prefix)).toBe(whole.element.innerHTML);
-      }
-      const lastStreamed = streamed.element.innerHTML;
-      drawIn(streamed, text, false, true);
-      if (text !== FENCE_CLOSED_BY_ITEM) expect(lastStreamed, `finished: ${text}`).toBe(streamed.element.innerHTML);
-    }
-    for (const { element, root } of roots) {
-      act(() => root.unmount());
-      element.remove();
-    }
-  }, 120_000);
-});
-

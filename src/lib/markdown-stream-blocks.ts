@@ -1,18 +1,30 @@
-// Definitions, container directives and bracketed display math can tie blocks together; so can "$$$", whose pairing is
-// unclear.
-const DOCUMENT_WIDE_SYNTAX = /^ {0,3}(?:\[(?!\^)[^\]\n]+\]:|:::|\\\[)|\$\$\$/m;
-// Raw HTML that runs past blank lines: a comment, declaration, <script>, <pre>, <style> or <textarea> starting a line,
-// in or out of a quote or list item.
-const SPANNING_HTML = /^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t>]))*[ \t]*(?:<[!?]|<(?:script|pre|style|textarea)(?:[\s>]|$))/i;
+// Reference definitions and footnotes are resolved across the whole text.
+const DOCUMENT_WIDE_SYNTAX = /^ {0,3}\[[^\]\n]+\]:|\[\^/m;
 const FENCE_OPENER = /^ {0,3}(`{3,}|~{3,})/;
-const MATH_FENCE = /^\$\$[ \t]*$/;
-// After a blank line these still continue the previous block: a list item or indented content.
-const CONTINUATION = /^(?:[ \t]|(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$))/;
+const LIST_MARKER = /^(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)/;
+const BLANK = /^[ \t]*$/;
+// CommonMark 0.31 HTML blocks of kinds 1 to 5 run past blank lines until their own end marker.
+const LONG_HTML = /^ {0,3}<(?:(script|pre|style|textarea)(?=[\s>]|$)|(!--)|(\?)|(!\[CDATA\[)|(![A-Za-z]))/i;
+const LONG_HTML_ENDS = [/<\/(?:script|pre|style|textarea)>/i, /-->/, /\?>/, /\]\]>/, />/];
+const SHORT_HTML = /^ {0,3}<[A-Za-z/]/;
+const MATH_DELIMITER = /\$\$|\\[[\]()]/;
+const MATH_UNSAFE = /\$\$|\\[[\]()]|`|~~~|\]\(/;
+const ONE_LINE_MATH = /^(?:\$\$(?!\$)(.+)(?<!\$)\$\$|\\\[(.+)\\\])$/;
+
+/** Whether math normalization could change `text`: without these it is returned as it came. */
+export function mayHoldMath(text: string): boolean {
+  return text.includes("$") || text.includes("\\(") || text.includes("\\[") || text.includes("\u0000");
+}
+
+/** A line whose only math delimiters are `\(…\)` pairs that open and close on it. */
+function inlineMathOnly(line: string): boolean {
+  return !/\$\$|\\[[\]]|`|\]\(/.test(line) && !/\\[()]/.test(line.replace(/\\\(.*?\\\)/g, ""));
+}
 
 /**
  * Cuts Markdown at blank lines that close every open block, so each piece renders exactly as it would inside the whole
- * text. Footnotes number and collect across the text, so the first block that uses one runs to the end. Null when the
- * text uses syntax that spans blocks.
+ * text. Null when the text uses syntax that spans blocks. Display math is cut around only when it stands alone from
+ * column one (`$$` or `\[` lines, or one line holding both ends); after any other display delimiter nothing is cut.
  */
 export function splitMarkdownBlocks(text: string): string[] | null {
   if (text.includes("\r") || DOCUMENT_WIDE_SYNTAX.test(text)) return null;
@@ -21,117 +33,173 @@ export function splitMarkdownBlocks(text: string): string[] | null {
   let lineStart = 0;
   let fence: string | null = null;
   let fenceIndent = 0;
-  let math = false;
-  let afterBlankLine = false;
+  let htmlEnd: RegExp | null = null;
+  let mathEnd: string | null = null;
+  let afterBlankLine = true;
+  let listLike = false;
+  let maybeHtml = false;
+  let afterCode = false;
   for (const line of text.split("\n")) {
     const opener = FENCE_OPENER.exec(line)?.[1];
     if (fence !== null) {
       // A line left of an indented fence may end the list item holding it, which is not tracked.
       if (/\S/.test(line.slice(0, fenceIndent))) break;
       if (opener && opener[0] === fence[0] && opener.length >= fence.length && line.trim() === opener) fence = null;
-    } else if (math) {
-      if (MATH_FENCE.test(line)) math = false;
-      else if (line.includes("$$")) return null;
-    } else if (line.trim() === "") {
+    } else if (mathEnd !== null) {
+      if (line === mathEnd) mathEnd = null;
+      else if (MATH_UNSAFE.test(line)) break;
+    } else if (htmlEnd !== null) {
+      if (MATH_DELIMITER.test(line)) break;
+      if (htmlEnd.test(line)) htmlEnd = null;
+    } else if (BLANK.test(line)) {
       afterBlankLine = true;
+      maybeHtml = false;
     } else {
-      if (SPANNING_HTML.test(line)) return null;
-      if (afterBlankLine && lineStart > blockStart && !CONTINUATION.test(line)) {
+      // Up to its blank line an HTML block holds fence lines as text, and whether a tag opens one is not tracked.
+      // A tag line inside an HTML block is its text, not the start of one that runs past blank lines.
+      if (maybeHtml && LONG_HTML.test(line)) break;
+      maybeHtml ||= SHORT_HTML.test(line);
+      if (maybeHtml && opener) break;
+      const marker = LIST_MARKER.test(line);
+      // micromark 4 reads the line after indented code as interrupting it, which changes what a quote, a tag or a
+      // table row there opens.
+      const continues = marker ? listLike : /^[ \t]/.test(line) || (afterCode && /^>|[<|]/.test(line));
+      if (afterBlankLine && lineStart > blockStart && !continues) {
         blocks.push(text.slice(blockStart, lineStart));
         blockStart = lineStart;
+        listLike = false;
       }
+      if (MATH_DELIMITER.test(line)) {
+        const opensBlock = afterBlankLine && lineStart === blockStart;
+        if (opensBlock && (line === "$$" || line === "\\[")) mathEnd = line === "$$" ? "$$" : "\\]";
+        else if (opensBlock && ONE_LINE_MATH.test(line)) {
+          const inner = ONE_LINE_MATH.exec(line)!;
+          if (MATH_UNSAFE.test(inner[1] ?? inner[2]!)) break;
+        } else if (!inlineMathOnly(line)) break;
+      }
+      listLike ||= marker || /^[ \t]/.test(line);
+      afterCode = /^(?: {4}|\t)/.test(line);
       afterBlankLine = false;
       fence = opener ?? null;
       if (opener) fenceIndent = line.indexOf(opener);
-      // "$$" pairs in the order they come, so a line either opens display math alone or closes every pair it opens.
-      else if (MATH_FENCE.test(line)) math = true;
-      else if (line.split("$$").length % 2 === 0) return null;
+      const html = fence === null && mathEnd === null ? LONG_HTML.exec(line) : null;
+      if (html) {
+        const end = LONG_HTML_ENDS[html.slice(1).findIndex((kind) => kind !== undefined)]!;
+        if (!end.test(line.slice(html[0].length))) htmlEnd = end;
+      }
     }
     lineStart += line.length + 1;
   }
   blocks.push(text.slice(blockStart));
-  const footnoted = blocks.findIndex((block) => block.includes("[^"));
-  if (footnoted >= 0) blocks.splice(footnoted, blocks.length, blocks.slice(footnoted).join(""));
   return blocks;
 }
 
-// Pieces are drawn from their own text: math, images and line ends that normalising rewrites across lines, and
-// footnotes, which number across the text, stay whole.
-const PIECE_UNSAFE = /[$\r]|\\[([]|!\[|\[\^/;
-const TABLE_DELIMITER = /^\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*$/;
-const LIST_ITEM = /^(?:([-*+])|\d{1,9}([.)])) +\S/;
-const BARE_ITEM = /^(?:([-*+])|\d{1,9}([.)])) *$/;
-const THEMATIC_BREAK = /^([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+/** A streamed block that is one list or one table, cut so that only its last piece is still being written. */
+export type StreamPieces =
+  | { kind: "list"; lead: string; items: string[]; loose: boolean }
+  | { kind: "table"; head: string; rows: string[] };
 
-/** The last block of a streaming reply as a list's items or a table's rows, the last one still being written. */
-export interface StreamPieces {
-  kind: "list" | "table";
-  /** Finished text above the list, drawn on its own. */
-  head: string;
-  /** Parsed before each piece: a table's header and delimiter rows. */
-  lead: string;
-  pieces: string[];
+const TABLE_HEADER = /^\|[^`\\]*\| *$/;
+const TABLE_DELIMITER = /^\|(?: *:?-+:? *\|)+ *$/;
+const pipes = (line: string) => line.split("|").length - 1;
+
+function tablePieces(lines: string[]): StreamPieces | null {
+  const [header, delimiter] = lines;
+  if (delimiter === undefined || !TABLE_HEADER.test(header!) || !TABLE_DELIMITER.test(delimiter)) return null;
+  // One column is left whole: table repair rewrites some of its rows.
+  if (pipes(header!) < 3 || pipes(header!) !== pipes(delimiter)) return null;
+  const rows: string[] = [];
+  for (let index = 2; index < lines.length; index++) {
+    const line = lines[index]!;
+    if (line.startsWith("|")) rows.push(index < lines.length - 1 ? `${line}\n` : line);
+    else if (BLANK.test(line) && lines.slice(index).every((rest) => BLANK.test(rest))) {
+      const tail = lines.slice(index).join("\n");
+      if (rows.length === 0) return null;
+      rows[rows.length - 1] += tail;
+      break;
+    } else return null;
+  }
+  return { kind: "table", head: lines.length > 2 ? `${header}\n${delimiter}\n` : `${header}\n${delimiter}`, rows };
+}
+
+const ITEM = /^([-*+]|\d{1,9}([.)]))(?:( +)(.*))?$/;
+const THEMATIC_BREAK = /^([-*_])(?: *\1){2,} *$/;
+const ANY_FENCE = /^( *)(`{3,}|~{3,})/;
+const LEAD_UNSAFE = /^[ <>|`~]|\|/;
+const LEAD_ITEM = /^[\p{L}\p{N}*_`[("']/u;
+
+function listPieces(text: string, lines: string[]): StreamPieces | null {
+  const first = lines.findIndex((line) => ITEM.test(line));
+  if (first < 0) return null;
+  const opening = ITEM.exec(lines[first]!)!;
+  const kind = opening[2] ?? opening[1]!;
+  if (first > 0) {
+    // Below a paragraph only a bullet with text, or "1" with text, starts a list, and what that text may open differs.
+    if (lines.slice(0, first).some((line) => BLANK.test(line) || LEAD_UNSAFE.test(line))) return null;
+    if (opening[2] !== undefined && opening[1] !== `1${opening[2]}`) return null;
+    if ((opening[3] ?? "").length > 4 || !LEAD_ITEM.test(opening[4] ?? "") || ITEM.test(opening[4]!)) return null;
+  }
+  const starts: number[] = [];
+  let offset = 0;
+  let at = 0;
+  let fence: { mark: string; indent: number } | null = null;
+  let blank = false;
+  let blankInside = false;
+  let blankBetween = false;
+  for (const [index, line] of lines.entries()) {
+    const lineStart = at;
+    at += line.length + 1;
+    if (index < first) continue;
+    if (fence) {
+      if (/\S/.test(line.slice(0, fence.indent))) return null;
+      const closer = ANY_FENCE.exec(line)?.[2];
+      if (closer && closer[0] === fence.mark[0] && closer.length >= fence.mark.length && line.trim() === closer) fence = null;
+      continue;
+    }
+    if (BLANK.test(line)) {
+      blank = true;
+      continue;
+    }
+    let body = line;
+    if (line[0] !== " ") {
+      const item = ITEM.exec(line);
+      if (item && (item[2] ?? item[1]) === kind && !THEMATIC_BREAK.test(line)) {
+        if (blank) blankBetween = true;
+        starts.push(lineStart);
+        const content = item[4] ?? "";
+        const gap = item[3]?.length ?? 0;
+        const code = content !== "" && gap > 4;
+        offset = item[1]!.length + (content === "" || code ? 1 : gap);
+        body = code ? "" : " ".repeat(offset) + content;
+        // An item that opens with an empty line holds only what follows that line directly.
+        if (content === "" && BLANK.test(lines[index + 1] ?? "x") && lines.slice(index + 2).find((rest) => !BLANK.test(rest))?.[0] === " ") return null;
+      } else if (!(index === lines.length - 1 && !blank && opening[2] !== undefined && /^\d{1,9}$/.test(line))) {
+        // Only digits that may yet become this list's next marker are let through as a last line.
+        return null;
+      }
+    } else {
+      if (line.length - line.trimStart().length < offset) return null;
+      if (blank) blankInside = true;
+    }
+    blank = false;
+    // An HTML block inside an item holds fence lines as text, which the fence tracking here would misread.
+    if (body.trimStart().startsWith("<")) return null;
+    const opener = ANY_FENCE.exec(body);
+    if (opener) fence = { mark: opener[2]!, indent: opener[1]!.length };
+  }
+  if (blankInside && !blankBetween) return null;
+  return { kind: "list", lead: text.slice(0, starts[0]), items: starts.map((start, index) => text.slice(start, starts[index + 1])), loose: blankBetween };
 }
 
 /**
- * Cuts a growing list between its items, or a growing table between its rows, so the finished ones parse once. Only a
- * tight list is cut (one blank line would make every item loose), only at column-0 items with the first one's marker,
- * and a table only at rows that start with "|". Null for any other shape.
+ * Cuts a block that is one list into its top-level items, or one table into its header and rows, when each piece
+ * parsed alone gives what it gives inside the block. Null for anything else, and for text that normalization or table
+ * repair could rewrite.
  */
-export function splitStreamingBlock(block: string): StreamPieces | null {
-  if (PIECE_UNSAFE.test(block)) return null;
+export function splitStreamPieces(block: string): StreamPieces | null {
+  if (mayHoldMath(block) || /[\t\r]/.test(block)) return null;
   const lines = block.split("\n");
-  if (lines.at(-1) === "") lines.pop();
-  if (lines.some((line) => line.trim() === "" && line !== "")) return null;
-  return tableRows(lines) ?? listItems(lines);
-}
-
-function tableRows(lines: string[]): StreamPieces | null {
-  const [header, delimiter, ...rows] = lines;
-  if (!header?.startsWith("|") || !delimiter || !TABLE_DELIMITER.test(delimiter) || !rows.length) return null;
-  if (rows.some((row) => !row.startsWith("|"))) return null;
-  return { kind: "table", head: "", lead: `${header}\n${delimiter}\n`, pieces: rows };
-}
-
-const sameMarker = (a: RegExpExecArray, b: RegExpExecArray) => a[1] === b[1] && a[2] === b[2];
-
-function listItems(lines: string[]): StreamPieces | null {
-  const start = lines.findIndex((line) => LIST_ITEM.test(line));
-  if (start < 0) return null;
-  const head = lines.slice(0, start);
-  const first = LIST_ITEM.exec(lines[start]!)!;
-  // Above the list: blocks a blank line closes, or a paragraph the first item may interrupt.
-  if (head.some((line) => line !== "" && (CONTINUATION.test(line) || FENCE_OPENER.test(line)))) return null;
-  const last = head.at(-1);
-  if (last !== undefined && last !== "" && (last.includes("|") || (first[2] && !/^1[.)]/.test(lines[start]!)))) return null;
-  // An HTML block runs on to a blank line or further, and may take the list with it.
-  if (head.some((line) => /^ {0,3}</.test(line))) return null;
-  const pieces: string[] = [];
-  let piece = lines[start]!;
-  for (const [index, line] of lines.entries()) {
-    if (index <= start) continue;
-    if (line.startsWith(" ")) {
-      piece += `\n${line}`;
-      continue;
-    }
-    if (THEMATIC_BREAK.test(line)) return null;
-    const item = LIST_ITEM.exec(line);
-    if (item && sameMarker(item, first)) {
-      pieces.push(piece);
-      piece = line;
-      continue;
-    }
-    const bare = BARE_ITEM.exec(line);
-    // A marker just typed, with its words still to come.
-    if (bare && sameMarker(bare, first) && index === lines.length - 1) {
-      piece += `\n${line}`;
-      continue;
-    }
-    return null;
-  }
-  pieces.push(piece);
-  if (pieces.length < 2 && !head.length) return null;
-  return { kind: "list", head: head.length ? `${head.join("\n")}\n` : "", lead: "", pieces };
+  return block.startsWith("|") ? tablePieces(lines) : listPieces(block, lines);
 }
 
 /** A block that is one code fence still being written, from its first column: its info string and code so far. */
