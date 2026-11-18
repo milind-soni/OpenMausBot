@@ -116,6 +116,51 @@ describe("a room job in a thread of its own", () => {
   });
 });
 
+describe("a local bot whose id is shaped like a linked address", () => {
+  const legacy = { id: "link-0a1b2c3d-legacy", name: "Legacy", threadId: "legacy-main", visibility: { people: ["ada@acme.test"] } };
+  const writer = { id: "writer", name: "Writer", threadId: "writer-main", visibility: { people: ["ada@acme.test"] } };
+  const narrow = { id: "link-0a1b2c3d-narrow", name: "Narrow", threadId: "narrow-main", visibility: { people: ["bob@acme.test"] } };
+  const far = { id: "link-9f8e7d6c-atlas", name: "Atlas", threadId: "", home: { place: "9f8e7d6c", placeName: "My Cloud", botId: "atlas" } };
+  const bots = { [legacy.id]: legacy, writer, [narrow.id]: narrow, [far.id]: far } as unknown as Record<string, BotRecord>;
+  const rooms: Record<string, Record<string, unknown>> = {
+    room: { id: "room", threadId: "room-thread", dm: false, memberIds: [writer.id], name: "Room" },
+    home: { id: "home", threadId: "home-thread", dm: false, memberIds: [legacy.id, writer.id], name: "Home" },
+  };
+  const store = {
+    bot: (id: string) => bots[id],
+    group: (id: string) => rooms[id],
+    groupByThread: (threadId: string) => Object.values(rooms).find(room => room.threadId === threadId),
+    groupTaskByThread: (groupId: string, threadId: string) => rooms[groupId]?.threadId === threadId ? { threadId } : undefined,
+    taskByThread: (botId: string, threadId: string) => bots[botId]?.threadId === threadId ? { threadId } : undefined,
+    messagesFor: () => [],
+  } as unknown as Store;
+  const { roomHandoffProblem } = createRoomAccess({ store, privateTo: (threadId) => threadId === "private-thread" ? "ada" : null });
+
+  it("cannot be the recipient of work addressed into a room it is not a member of", () => {
+    expect(roomHandoffProblem({ groupId: "room", threadId: "room-thread", botId: legacy.id }))
+      .toBe("The addressed agent isn't a member of this room; work sent to it again goes to it directly, in a thread of its own");
+    expect(roomHandoffProblem({ groupId: "home", threadId: "home-thread", botId: legacy.id })).toBeUndefined();
+  });
+
+  it("cannot be the sender from a room it is not a member of", () => {
+    expect(roomHandoffProblem({ botId: writer.id, threadId: "writer-main" }, { groupId: "room", threadId: "room-thread", botId: legacy.id }))
+      .toBe("Source membership or task was removed");
+    expect(roomHandoffProblem({ groupId: "home", threadId: "home-thread", botId: writer.id }, { groupId: "home", threadId: "home-thread", botId: legacy.id })).toBeUndefined();
+  });
+
+  it("keeps the private-chat boundary and the reach rule for it, as for any bot of this place", () => {
+    expect(roomHandoffProblem({ groupId: "room", threadId: "room-thread", botId: legacy.id }, { threadId: "private-thread", botId: writer.id }))
+      .toBe(PRIVATE_CHAT_ROOM_WRITE);
+    expect(roomHandoffProblem({ botId: narrow.id, threadId: "narrow-main" }, { threadId: "legacy-main", botId: legacy.id }))
+      .toMatch(/shared with different people/);
+  });
+
+  it("does not weaken the link: a stand-in of another place answers to the link alone", () => {
+    expect(roomHandoffProblem({ groupId: "room", threadId: "room-thread", botId: far.id })).toBeUndefined();
+    expect(roomHandoffProblem({ botId: writer.id, threadId: "writer-main" }, { groupId: "room", threadId: "room-thread", botId: far.id })).toBeUndefined();
+  });
+});
+
 describe("roomHandoffProblem", () => {
   const bots = {
     coder: { id: "coder", name: "Coder", visibility: { people: ["ada@acme.test"] } },

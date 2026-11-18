@@ -29,6 +29,11 @@ const NOT_A_MEMBER = "The addressed agent isn't a member of this room; work sent
 const LEFT_THE_ROOM = "The addressed agent is no longer a member of this room, so its room job stopped; work sent to it again goes to it directly, in a thread of its own";
 
 export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy, personalReach }: RoomAccessDeps) {
+  /** Security: an id's shape is not where a bot lives. Only a stand-in — the record this store keeps for a bot of the
+   *  person's other place — carries a `home`; a bot of this place answers to its own id whatever that id looks like. */
+  function isFarBot(botId: string | undefined): boolean {
+    return isLinkedId(botId) && store.bot(botId)?.home !== undefined;
+  }
   function reachProblem(from: BotRecord, bot: BotRecord, parent: Pick<HandoffView, "threadId">, node: Pick<HandoffView, "threadId"> & Partial<Pick<HandoffView, "id" | "origin">>): string | undefined {
     if (peerAllowed(from, bot)) return undefined;
     const personal = personalReach?.();
@@ -44,9 +49,8 @@ export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy,
     return undefined;
   }
   function roomHandoffProblem(node: Pick<HandoffView, "groupId" | "threadId" | "botId"> & Partial<Pick<HandoffView, "kind" | "id" | "origin">>, parent?: Pick<HandoffView, "groupId" | "threadId" | "botId">): string | undefined {
-    // A bot of the person's other place is no record here: whether it can be reached is the link's to say. In this store
-    // only a stand-in is an address; a bot of this place answers to its own id, whatever it is shaped like.
-    if (isLinkedId(node.botId) && store.bot(node.botId)?.home === undefined) return undefined;
+    // Whether a bot of the person's other place can be reached is the link's to say: it is no record here.
+    if (isFarBot(node.botId)) return undefined;
     const group = node.groupId ? store.group(node.groupId) : undefined;
     const bot = store.bot(node.botId);
     if (!bot || bot.hidden) return "The addressed agent no longer exists";
@@ -60,7 +64,7 @@ export function createRoomAccess({ store, privateTo = () => null, lookedAfterBy,
     const laneRoom = laneThread ? store.groupByThread(laneThread) : undefined;
     if (laneRoom && !laneRoom.dm && !laneRoom.memberIds.includes(bot.id)) return LEFT_THE_ROOM;
     // Work the person's other place handed over the link has no sender here to check: the link itself admits it.
-    if (parent && !isLinkedId(parent.botId)) {
+    if (parent && !isFarBot(parent.botId)) {
       const from = store.bot(parent.botId);
       const source = parent.groupId ? store.group(parent.groupId) : undefined;
       if (!from || from.hidden || (parent.groupId ? !source || !source.memberIds.includes(from.id) || !store.groupTaskByThread(source.id, parent.threadId) : !store.taskByThread(from.id, parent.threadId))) return "Source membership or task was removed";
