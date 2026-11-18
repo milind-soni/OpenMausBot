@@ -252,9 +252,7 @@ export interface ConnectorToolGrant {
 
 /** Lowercased Composio service slug, e.g. `gmail`. */
 export const CONNECTOR_SLUG_PATTERN = /^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,80}$/;
-/** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`. A toolkit
- * whose slug starts with `_` (such as `_1password`) names its tools the same
- * way: `_1PASSWORD_GET_ITEM`. */
+/** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`, or `_1PASSWORD_GET_ITEM` for a `_`-led toolkit. */
 export const CONNECTOR_TOOL_NAME_PATTERN = /^(?:[A-Z][A-Z0-9_]{0,127}|_[A-Z0-9][A-Z0-9_]{0,126})$/;
 
 /** Fails closed: only an absent switch or a strict true allows the helper model; a hand-edited "false" or 0 reads as never. */
