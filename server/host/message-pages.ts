@@ -1,4 +1,5 @@
 import type { Message, Store } from "../store.ts";
+import { messagesAround } from "../thread-history.ts";
 import { toolResultPrefix } from "../tool-results.ts";
 
 const MESSAGE_PAGE_MAX = 200;
@@ -48,13 +49,8 @@ export function messagePages(store: Pick<Store, "messagesFor" | "messagesTail" |
   }
 
   function messageWindow(threadId: string, messageId: string, limit: number) {
-    const all = store.messagesFor(threadId);
-    const index = all.findIndex((message) => message.id === messageId);
-    if (index < 0) return null;
-    const before = Math.floor((limit - 1) / 2);
-    const start = Math.max(0, Math.min(index - before, all.length - limit));
-    const stop = Math.min(all.length, start + limit);
-    return { messages: all.slice(start, stop).map(pageMessage), hasMore: start > 0 };
+    const page = messagesAround(threadId, messageId, limit, () => ({ messages: store.messagesFor(threadId), activeLeafId: store.activeLeaf(threadId) }));
+    return page ? { ...page, messages: page.messages.map(pageMessage) } : null;
   }
 
   return { messagePage, messagePageBefore, messageWindow };

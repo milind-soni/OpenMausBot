@@ -112,6 +112,45 @@ describe("GET /api/threads/:threadId/messages", () => {
     }
   }
 
+  for (const [name, build] of Object.entries(conversations)) {
+    for (const warm of [false, true]) {
+      it(`gives the page around a message as the whole conversation would: ${name}${warm ? ", already in memory" : ""}`, async () => {
+        const builder = new Store(() => sonnet);
+        const threadId = build(builder);
+        if (warm) builder.messagesFor(threadId);
+        const whole = new Store(() => sonnet);
+        const all = whole.messagesFor(threadId);
+        const leaf = whole.activeLeaf(threadId);
+        const get = await serve(warm ? builder : new Store(() => sonnet));
+        expect((await get(`/api/threads/${threadId}/messages?around=no-such-message&limit=3`)).status).toBe(404);
+        for (const limit of [0, 1, 2, 3, 4, 5, 11, 12, 13, 50]) {
+          for (const [index, target] of all.entries()) {
+            const before = Math.floor((limit - 1) / 2);
+            const start = Math.max(0, Math.min(index - before, all.length - limit));
+            const page = await get(`/api/threads/${threadId}/messages?around=${target.id}&limit=${limit}`);
+            expect(page.status).toBe(200);
+            expect(page.body, `limit ${limit}, message ${index}`).toEqual({ messages: all.slice(start, Math.min(all.length, start + limit)), hasMore: start > 0, activeLeafId: leaf });
+          }
+        }
+      });
+    }
+  }
+
+  it("answers the page around a message without reading the rest of the conversation", async () => {
+    const builder = new Store(() => sonnet);
+    const threadId = conversations["an edited message whose older branch is the one shown"]!(builder);
+    const target = builder.messagesFor(threadId)[7]!;
+    const read = vi.spyOn(mdb, "readThread");
+    try {
+      const get = await serve(new Store(() => sonnet));
+      const page = await get(`/api/threads/${threadId}/messages?around=${target.id}&limit=3`);
+      expect(page.body.messages.map((message) => message.id)).toEqual(builder.messagesFor(threadId).slice(6, 9).map((message) => message.id));
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+    }
+  });
+
   it("answers the newest page of a long conversation without reading the rest of it", async () => {
     const builder = new Store(() => sonnet);
     const threadId = conversations["an edited message whose older branch is the one shown"]!(builder);
