@@ -1,0 +1,990 @@
+{
+ "bot": "b1",
+ "key": "k_test",
+ "cases": [
+  {
+   "name": "replies",
+   "call": {
+    "method": "ask",
+    "message": "Héllo 👋",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Héllo 👋"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "reply": "Bonjour 👋",
+       "thread": "t1"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "replied",
+    "reply": "Bonjour 👋",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "polls-until-reply",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 202,
+      "body": {
+       "thread": "t1",
+       "status": "working"
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 202,
+      "body": {
+       "thread": "t1",
+       "status": "working"
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "reply": "Done",
+       "thread": "t1"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "replied",
+    "reply": "Done",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "needs-approval",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 202,
+      "body": {
+       "thread": "t1",
+       "status": "needs_approval"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "needs_approval",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "failed-after-working",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 202,
+      "body": {
+       "thread": "t1",
+       "status": "working"
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "thread": "t1",
+       "status": "failed",
+       "error": "The bot could not answer. Open this thread in the app to see why."
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "JobFailedError",
+    "thread": "t1",
+    "message": "The bot could not answer. Open this thread in the app to see why."
+   }
+  },
+  {
+   "name": "failed-in-wait",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "thread": "t1",
+       "status": "failed",
+       "error": "Someone stopped this in the app."
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "JobFailedError",
+    "thread": "t1",
+    "message": "Someone stopped this in the app."
+   }
+  },
+  {
+   "name": "send-as-is",
+   "call": {
+    "method": "send",
+    "message": "Hi",
+    "options": {
+     "wait": 0
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi",
+       "wait": 0
+      }
+     },
+     "response": {
+      "status": 202,
+      "body": {
+       "thread": "t1",
+       "status": "working"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "working",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "thread-once",
+   "call": {
+    "method": "thread",
+    "thread": "t1",
+    "options": {}
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "reply": "Hello",
+       "thread": "t1"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "replied",
+    "reply": "Hello",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "continues",
+   "call": {
+    "method": "ask",
+    "message": "And then?",
+    "options": {
+     "thread": "t1",
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "And then?",
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "reply": "Then this",
+       "thread": "t1"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "replied",
+    "reply": "Then this",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "busy-then-send",
+   "call": {
+    "method": "ask",
+    "message": "Next",
+    "options": {
+     "thread": "t1",
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Next",
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 409,
+      "body": {
+       "thread": "t1",
+       "status": "working"
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "reply": "Earlier",
+       "thread": "t1"
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Next",
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "reply": "Later",
+       "thread": "t1"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "replied",
+    "reply": "Later",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "busy-on-approval",
+   "call": {
+    "method": "ask",
+    "message": "Next",
+    "options": {
+     "thread": "t1",
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Next",
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 409,
+      "body": {
+       "thread": "t1",
+       "status": "working"
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 202,
+      "body": {
+       "thread": "t1",
+       "status": "needs_approval"
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "NotSentError",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "wait-on-approval",
+   "call": {
+    "method": "wait",
+    "thread": "t1",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 202,
+      "body": {
+       "thread": "t1",
+       "status": "needs_approval"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "needs_approval",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "times-out",
+   "call": {
+    "method": "wait",
+    "thread": "t1",
+    "options": {
+     "timeout": 0.1,
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 202,
+      "body": {
+       "thread": "t1",
+       "status": "working"
+      }
+     },
+     "repeat": true
+    }
+   ],
+   "error": {
+    "type": "WaitTimeoutError",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "post-429",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 429,
+      "body": {
+       "error": "Too many calls: this key takes 10 a minute"
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "RateLimitError",
+    "status": 429,
+    "message": "Too many calls: this key takes 10 a minute"
+   }
+  },
+  {
+   "name": "post-429-retry-after",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 429,
+      "body": {
+       "error": "Too many calls: this key takes 10 a minute"
+      },
+      "headers": {
+       "retry-after": "3600"
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "RateLimitError",
+    "status": 429,
+    "retryAfter": 3600
+   }
+  },
+  {
+   "name": "post-409-busy",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 409,
+      "body": {
+       "error": "The bot is busy. Try again soon."
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "ConflictError",
+    "status": 409,
+    "message": "The bot is busy. Try again soon."
+   }
+  },
+  {
+   "name": "post-502",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 502,
+      "body": {
+       "error": "Bad gateway"
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "ServerError",
+    "status": 502
+   }
+  },
+  {
+   "name": "post-dropped",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "drop": true
+     }
+    }
+   ],
+   "error": {
+    "type": "APIConnectionError"
+   }
+  },
+  {
+   "name": "get-503-retried",
+   "call": {
+    "method": "thread",
+    "thread": "t1",
+    "options": {}
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 503,
+      "body": {
+       "error": "A workspace backup is in progress. Try again when it finishes."
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "reply": "Hello",
+       "thread": "t1"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "replied",
+    "reply": "Hello",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "get-gives-up",
+   "call": {
+    "method": "thread",
+    "thread": "t1",
+    "options": {}
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 503,
+      "body": {
+       "error": "A workspace backup is in progress. Try again when it finishes."
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 503,
+      "body": {
+       "error": "A workspace backup is in progress. Try again when it finishes."
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 503,
+      "body": {
+       "error": "A workspace backup is in progress. Try again when it finishes."
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "ServerError",
+    "status": 503,
+    "message": "A workspace backup is in progress. Try again when it finishes."
+   }
+  },
+  {
+   "name": "get-dropped-retried",
+   "call": {
+    "method": "thread",
+    "thread": "t1",
+    "options": {}
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "drop": true
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "reply": "Hello",
+       "thread": "t1"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "replied",
+    "reply": "Hello",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "proxy-html-502",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 502,
+      "rawBody": "<html>Bad gateway</html>",
+      "contentType": "text/html"
+     }
+    }
+   ],
+   "error": {
+    "type": "ServerError",
+    "status": 502,
+    "message": "HTTP 502"
+   }
+  },
+  {
+   "name": "bad-key",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 401,
+      "body": {
+       "error": "Invalid key"
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "AuthenticationError",
+    "status": 401,
+    "message": "Invalid key"
+   }
+  },
+  {
+   "name": "api-off",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 403,
+      "body": {
+       "error": "The Bot API is off for this bot"
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "PermissionDeniedError",
+    "status": 403,
+    "message": "The Bot API is off for this bot"
+   }
+  },
+  {
+   "name": "no-thread",
+   "call": {
+    "method": "thread",
+    "thread": "tX",
+    "options": {}
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "tX"
+      }
+     },
+     "response": {
+      "status": 404,
+      "body": {
+       "error": "no such thread"
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "NotFoundError",
+    "status": 404,
+    "message": "no such thread"
+   }
+  },
+  {
+   "name": "old-server",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 404,
+      "body": {
+       "error": "Unknown webhook endpoint"
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "ServerTooOldError",
+    "status": 404
+   }
+  },
+  {
+   "name": "bad-body",
+   "call": {
+    "method": "ask",
+    "message": "Hi",
+    "options": {
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Hi"
+      }
+     },
+     "response": {
+      "status": 400,
+      "body": {
+       "error": "Send {\"message\": \"text\"}"
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "BadRequestError",
+    "status": 400,
+    "message": "Send {\"message\": \"text\"}"
+   }
+  },
+  {
+   "name": "unknown-status",
+   "call": {
+    "method": "thread",
+    "thread": "t1",
+    "options": {}
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 202,
+      "body": {
+       "thread": "t1",
+       "status": "queued"
+      }
+     }
+    }
+   ],
+   "error": {
+    "type": "MausBotError",
+    "messageContains": "queued"
+   }
+  }
+ ]
+}
