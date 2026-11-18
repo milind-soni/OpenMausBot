@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   GeminiCredentialsWatcher,
+  REQUIRED_ACP_SCOPE,
+  resolveAcpScopes,
   type GlobalOAuthCreds,
   type OmAcpToken,
 } from "./antigravity-credentials-watcher.ts";
@@ -51,7 +53,11 @@ describe("GeminiCredentialsWatcher", () => {
     expect(tokenContent.client_id).toBe("1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com");
     expect(tokenContent.token_uri).toBe("https://oauth2.googleapis.com/token");
     expect(tokenContent.project_id).toBe("aicode-consumers");
-    expect(tokenContent.scopes).toEqual(["openid", "https://www.googleapis.com/auth/userinfo.email"]);
+    expect(tokenContent.scopes).toEqual([
+      "openid",
+      "https://www.googleapis.com/auth/userinfo.email",
+      REQUIRED_ACP_SCOPE,
+    ]);
 
     expect(switched).toHaveBeenCalledWith({
       refreshToken: "1//refresh_token_1",
@@ -80,30 +86,159 @@ describe("GeminiCredentialsWatcher", () => {
     expect(switched).toHaveBeenCalledTimes(1);
   });
 
-  it("preserves existing client_id and client_secret if present in target token file", async () => {
+  it("preserves existing client_id, client_secret, and aicode scope after verifying refresh token", async () => {
     const existing: Partial<OmAcpToken> = {
       client_id: "custom-client-id",
       client_secret: "custom-secret",
       project_id: "custom-project",
+      scopes: [
+        "https://www.googleapis.com/auth/cloud-platform",
+        "https://www.googleapis.com/auth/userinfo.email",
+        REQUIRED_ACP_SCOPE,
+      ],
     };
     await writeFile(targetTokenPath, JSON.stringify(existing));
 
     const globalCreds: GlobalOAuthCreds = {
       refresh_token: "1//new_token",
+      scope: "https://www.googleapis.com/auth/userinfo.email openid https://www.googleapis.com/auth/cloud-platform",
     };
     await writeFile(join(geminiDir, "oauth_creds.json"), JSON.stringify(globalCreds));
+
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const body = init?.body as URLSearchParams;
+      expect(body.get("client_id")).toBe("custom-client-id");
+      expect(body.get("client_secret")).toBe("custom-secret");
+      expect(body.get("refresh_token")).toBe("1//new_token");
+      expect(body.get("scope")).toContain(REQUIRED_ACP_SCOPE);
+      return new Response(JSON.stringify({ access_token: "ya29.verified" }), { status: 200 });
+    });
 
     const watcher = new GeminiCredentialsWatcher("test-instance", undefined, {
       geminiDir,
       targetTokenPath,
+      fetchImpl: fetchMock as unknown as typeof fetch,
     });
-    await watcher.syncCredentials();
+    const synced = await watcher.syncCredentials();
+    expect(synced).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     const tokenContent = JSON.parse(await readFile(targetTokenPath, "utf8")) as OmAcpToken;
     expect(tokenContent.refresh_token).toBe("1//new_token");
     expect(tokenContent.client_id).toBe("custom-client-id");
     expect(tokenContent.client_secret).toBe("custom-secret");
     expect(tokenContent.project_id).toBe("custom-project");
+    expect(tokenContent.scopes).toContain(REQUIRED_ACP_SCOPE);
+  });
+
+  it("refuses to overwrite existing ACP token when Google rejects refresh token with invalid_scope", async () => {
+    const existing: OmAcpToken = {
+      client_id: "custom-client-id",
+      client_secret: "custom-secret",
+      refresh_token: "1//working_aicode_token",
+      token_uri: "https://oauth2.googleapis.com/token",
+      scopes: [
+        "https://www.googleapis.com/auth/cloud-platform",
+        "https://www.googleapis.com/auth/userinfo.email",
+        REQUIRED_ACP_SCOPE,
+      ],
+      project_id: "aicode-consumers",
+    };
+    await writeFile(targetTokenPath, JSON.stringify(existing));
+    await writeFile(join(geminiDir, "google_accounts.json"), JSON.stringify({ active: "missing-scope@example.com" }));
+    await writeFile(
+      join(geminiDir, "oauth_creds.json"),
+      JSON.stringify({ refresh_token: "1//token_without_aicode_scope" }),
+    );
+
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ error: "invalid_scope", error_description: "Bad Request" }), { status: 400 }),
+    );
+    const switched = vi.fn();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const watcher = new GeminiCredentialsWatcher("test-instance", switched, {
+        geminiDir,
+        targetTokenPath,
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      });
+
+      // First attempt rejects and leaves existing token intact
+      expect(await watcher.syncCredentials()).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(switched).not.toHaveBeenCalled();
+
+      const stillWorking = JSON.parse(await readFile(targetTokenPath, "utf8")) as OmAcpToken;
+      expect(stillWorking.refresh_token).toBe("1//working_aicode_token");
+
+      // Repeated sync of the same permanently rejected token does not re-hit Google
+      expect(await watcher.syncCredentials()).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Switching next to a valid aicode-scoped token succeeds
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: "ya29.valid_next" }), { status: 200 }),
+      );
+      await writeFile(
+        join(geminiDir, "oauth_creds.json"),
+        JSON.stringify({ refresh_token: "1//valid_aicode_token_2" }),
+      );
+      expect(await watcher.syncCredentials()).toBe(true);
+      expect(switched).toHaveBeenCalledTimes(1);
+
+      const updated = JSON.parse(await readFile(targetTokenPath, "utf8")) as OmAcpToken;
+      expect(updated.refresh_token).toBe("1//valid_aicode_token_2");
+      expect(updated.scopes).toContain(REQUIRED_ACP_SCOPE);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("keeps existing ACP token on transient network error and retries on subsequent sync", async () => {
+    const existing: OmAcpToken = {
+      client_id: "custom-client-id",
+      client_secret: "custom-secret",
+      refresh_token: "1//working_token",
+      token_uri: "https://oauth2.googleapis.com/token",
+      scopes: [REQUIRED_ACP_SCOPE],
+      project_id: "aicode-consumers",
+    };
+    await writeFile(targetTokenPath, JSON.stringify(existing));
+    await writeFile(join(geminiDir, "oauth_creds.json"), JSON.stringify({ refresh_token: "1//transient_token" }));
+
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "ya29.recovered" }), { status: 200 }));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const watcher = new GeminiCredentialsWatcher("test-instance", undefined, {
+        geminiDir,
+        targetTokenPath,
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      });
+
+      // Transient error does not overwrite and does not permanently cache rejection
+      expect(await watcher.syncCredentials()).toBe(false);
+      expect((JSON.parse(await readFile(targetTokenPath, "utf8")) as OmAcpToken).refresh_token).toBe("1//working_token");
+
+      // Next sync retries and succeeds
+      expect(await watcher.syncCredentials()).toBe(true);
+      expect((JSON.parse(await readFile(targetTokenPath, "utf8")) as OmAcpToken).refresh_token).toBe("1//transient_token");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("resolveAcpScopes always guarantees required aicode scope", () => {
+    expect(resolveAcpScopes(undefined, "openid email")).toEqual(["openid", "email", REQUIRED_ACP_SCOPE]);
+    expect(resolveAcpScopes(["https://www.googleapis.com/auth/cloud-platform"], "openid")).toEqual([
+      "https://www.googleapis.com/auth/cloud-platform",
+      REQUIRED_ACP_SCOPE,
+    ]);
+    expect(resolveAcpScopes(undefined, undefined)).toContain(REQUIRED_ACP_SCOPE);
   });
 
   it("waitForNewToken resolves true when token changes and false on timeout", async () => {

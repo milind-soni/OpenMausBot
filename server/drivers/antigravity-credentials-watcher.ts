@@ -28,17 +28,86 @@ export interface AccountSwitchedInfo {
   email?: string;
 }
 
+export interface TokenVerificationResult {
+  ok: boolean;
+  reason?: string;
+  permanent?: boolean;
+}
+
 export interface GeminiCredentialsWatcherOptions {
   geminiDir?: string;
   baseDir?: string;
   targetTokenPath?: string;
   debounceMs?: number;
+  verifyToken?: (token: OmAcpToken) => Promise<TokenVerificationResult>;
+  fetchImpl?: typeof fetch;
+  verifyTimeoutMs?: number;
 }
 
 const DEFAULT_DEBOUNCE_MS = 150;
+const DEFAULT_VERIFY_TIMEOUT_MS = 10_000;
 const DEFAULT_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com";
 const DEFAULT_TOKEN_URI = "https://oauth2.googleapis.com/token";
 const DEFAULT_PROJECT_ID = "aicode-consumers";
+export const REQUIRED_ACP_SCOPE = "https://www.googleapis.com/auth/aicode";
+export const DEFAULT_ACP_SCOPES = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/userinfo.email",
+  REQUIRED_ACP_SCOPE,
+] as const;
+
+export function resolveAcpScopes(existingScopes?: string[], globalScope?: string): string[] {
+  const base = Array.isArray(existingScopes) && existingScopes.length > 0
+    ? existingScopes.filter((s) => typeof s === "string" && s.trim().length > 0)
+    : globalScope
+      ? globalScope.split(/\s+/u).filter(Boolean)
+      : [...DEFAULT_ACP_SCOPES];
+  const deduped = Array.from(new Set(base));
+  if (!deduped.includes(REQUIRED_ACP_SCOPE)) {
+    deduped.push(REQUIRED_ACP_SCOPE);
+  }
+  return deduped;
+}
+
+export async function verifyAcpRefreshTokenScope(
+  token: Pick<OmAcpToken, "client_id" | "client_secret" | "refresh_token" | "token_uri" | "scopes">,
+  options?: { fetchImpl?: typeof fetch; timeoutMs?: number },
+): Promise<TokenVerificationResult> {
+  const fetchImpl = options?.fetchImpl ?? fetch;
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_VERIFY_TIMEOUT_MS;
+  const params = new URLSearchParams({
+    grant_type: "refresh_token",
+    client_id: token.client_id,
+    client_secret: token.client_secret,
+    refresh_token: token.refresh_token,
+  });
+  const scopeStr = token.scopes.filter(Boolean).join(" ");
+  if (scopeStr) {
+    params.set("scope", scopeStr);
+  }
+  try {
+    const res = await fetchImpl(token.token_uri || DEFAULT_TOKEN_URI, {
+      method: "POST",
+      body: params,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({})) as { error?: string };
+      const reason = typeof errBody.error === "string" && errBody.error
+        ? errBody.error
+        : `HTTP ${res.status}`;
+      return { ok: false, reason, permanent: res.status >= 400 && res.status < 500 };
+    }
+    const body = await res.json().catch(() => ({})) as { access_token?: unknown };
+    if (typeof body.access_token !== "string" || !body.access_token) {
+      return { ok: false, reason: "missing_access_token", permanent: false };
+    }
+    return { ok: true };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    return { ok: false, reason, permanent: false };
+  }
+}
 
 export class GeminiCredentialsWatcher {
   private readonly instanceId: string;
@@ -46,9 +115,13 @@ export class GeminiCredentialsWatcher {
   private watcher: FSWatcher | null = null;
   private debounceTimer: NodeJS.Timeout | null = null;
   private lastRefreshToken: string | null = null;
+  private lastRejectedRefreshToken: string | null = null;
   private readonly geminiDir: string;
   private readonly targetTokenPath: string;
   private readonly debounceMs: number;
+  private readonly verifyToken?: (token: OmAcpToken) => Promise<TokenVerificationResult>;
+  private readonly fetchImpl?: typeof fetch;
+  private readonly verifyTimeoutMs?: number;
   private readonly waiters = new Set<(synced: boolean) => void>();
   private syncQueue: Promise<boolean> = Promise.resolve(false);
   private syncGeneration = 0;
@@ -64,10 +137,14 @@ export class GeminiCredentialsWatcher {
     this.geminiDir = options?.geminiDir ?? join(homedir(), ".gemini");
     this.targetTokenPath = options?.targetTokenPath ?? antigravityTokenPath(this.instanceId, options?.baseDir);
     this.debounceMs = options?.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.verifyToken = options?.verifyToken;
+    this.fetchImpl = options?.fetchImpl;
+    this.verifyTimeoutMs = options?.verifyTimeoutMs;
   }
 
   public clearCachedRefreshToken(): void {
     this.lastRefreshToken = null;
+    this.lastRejectedRefreshToken = null;
   }
 
   public start(): void {
@@ -156,7 +233,11 @@ export class GeminiCredentialsWatcher {
       return false;
     }
 
-    if (!globalCreds.refresh_token || globalCreds.refresh_token === this.lastRefreshToken) {
+    if (
+      !globalCreds.refresh_token
+      || globalCreds.refresh_token === this.lastRefreshToken
+      || globalCreds.refresh_token === this.lastRejectedRefreshToken
+    ) {
       return false;
     }
 
@@ -179,9 +260,30 @@ export class GeminiCredentialsWatcher {
       client_secret: existingToken.client_secret || "",
       refresh_token: globalCreds.refresh_token,
       token_uri: existingToken.token_uri || DEFAULT_TOKEN_URI,
-      scopes: globalCreds.scope ? globalCreds.scope.split(" ") : (existingToken.scopes || []),
+      scopes: resolveAcpScopes(existingToken.scopes, globalCreds.scope),
       project_id: existingToken.project_id || DEFAULT_PROJECT_ID,
     };
+
+    const shouldVerify = Boolean(this.verifyToken) || Boolean(updatedToken.client_id && updatedToken.client_secret);
+    if (shouldVerify) {
+      const verify = this.verifyToken
+        ? await this.verifyToken(updatedToken)
+        : await verifyAcpRefreshTokenScope(updatedToken, {
+            fetchImpl: this.fetchImpl,
+            timeoutMs: this.verifyTimeoutMs,
+          });
+      if (this.isStopped || this.syncGeneration !== currentGeneration) return false;
+      if (!verify.ok) {
+        if (verify.permanent) {
+          this.lastRejectedRefreshToken = globalCreds.refresh_token;
+        }
+        const who = activeEmail ? ` for ${activeEmail}` : "";
+        console.warn(
+          `[GeminiCredentialsWatcher] Refusing to sync incompatible token${who} (${verify.reason ?? "verification_failed"}); keeping existing ACP token.`,
+        );
+        return false;
+      }
+    }
 
     try {
       await mkdir(dirname(this.targetTokenPath), { recursive: true });
@@ -194,6 +296,7 @@ export class GeminiCredentialsWatcher {
     if (this.isStopped || this.syncGeneration !== currentGeneration) return false;
 
     this.lastRefreshToken = globalCreds.refresh_token;
+    this.lastRejectedRefreshToken = null;
 
     if (this.onAccountSwitched) {
       try {
