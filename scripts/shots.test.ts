@@ -17,6 +17,8 @@ describe("pnpm shots", () => {
     expect(() => parseShotsArgs(["room-card-preview.html"])).toThrow(/starts with "\/"/);
     expect(() => parseShotsArgs(["/", "/rail"])).toThrow(/usage/);
     expect(() => parseShotsArgs(["--name", "../before"])).toThrow(/--name/);
+    for (const elsewhere of ["//other.test/room-card-preview.html", "/\\other.test/room-card-preview.html"]) expect(() => parseShotsArgs([elsewhere])).toThrow(/not another site/);
+    expect(parseShotsArgs(["/rail.html", "--url", "http://localhost:6000"]).path).toBe("/rail.html");
   });
 
   it("covers phone, tablet and desktop in Midnight and Daylight, each with its own file and skin in the address", () => {
