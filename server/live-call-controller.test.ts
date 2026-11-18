@@ -1767,7 +1767,23 @@ describe("LiveCallController record", () => {
     t.socket().drop();
     const record = recorded(t)[0]!.record;
     expect(record.spoken).toEqual([{ at: expect.any(Number), text: `Your code is ${HELD_SECRET_MASK}.` }]);
-    expect(JSON.stringify(record.spoken)).not.toMatch(/73|19|42/);
+    expect(record.spoken?.map((line) => line.text).join(" ")).not.toMatch(/73|19|42/);
+  });
+
+  it("masks a held code split at a pause when the line after it is long", async () => {
+    const code = "731942";
+    const forget = addHeldSecretScrubber((text) => text.replaceAll(code, HELD_SECRET_MASK));
+    const t = setup({ recordCall: vi.fn() });
+    try {
+      await t.start();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Your code is 73", start_ms: 1_000, end_ms: 1_500 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: `1942${".".repeat(508)}`, start_ms: 3_000, end_ms: 3_500 });
+    } finally {
+      forget();
+    }
+    t.socket().drop();
+    const record = recorded(t)[0]!.record;
+    expect(record.spoken).toEqual([{ at: expect.any(Number), text: `Your code is ${HELD_SECRET_MASK}${".".repeat(508)}` }]);
   });
 
   it("stores the call row with a held code masked after the code stops being held", async () => {

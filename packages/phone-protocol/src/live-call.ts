@@ -113,12 +113,15 @@ export class SpokenLines {
   }
 
   /** A value said across pauses is split over several lines, none of which holds all of it: when the scrub
-   * masks something in the last lines joined, they become one line. Looks back while the text after the line
-   * it adds is shorter than SPOKEN_JOIN_WINDOW, so any held value up to that length is caught. */
+   * masks something in the last lines joined, they become one line. Looks back while the earlier lines it has
+   * joined are shorter than SPOKEN_JOIN_WINDOW, however long the newest line is, so any held value up to that
+   * length is caught. */
   private joinAcrossPauses(): void {
     let joined = this.lines.at(-1)?.text ?? "";
-    for (let start = this.lines.length - 2; start >= 0 && joined.length < SPOKEN_JOIN_WINDOW; start--) {
+    let earlier = 0;
+    for (let start = this.lines.length - 2; start >= 0 && earlier < SPOKEN_JOIN_WINDOW; start--) {
       joined = this.lines[start]!.text + joined;
+      earlier += this.lines[start]!.text.length;
       const scrubbed = this.scrub(joined);
       if (scrubbed === joined) continue;
       const merged = this.lines.splice(start);
