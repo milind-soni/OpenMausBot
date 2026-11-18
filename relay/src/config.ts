@@ -91,7 +91,8 @@ const MIN_METRICS_TOKEN = 32;
 const MAX_PHONE_ORIGINS = 8;
 const PHONE_ORIGINS_RULE = `RELAY_PHONE_ORIGINS must list exact https:// origins, comma-separated, at most ${MAX_PHONE_ORIGINS}`;
 
-const HOSTNAME = /^[a-z0-9-]+(\.[a-z0-9-]+)*$/;
+/** A DNS name or IPv4 address, or a bracketed IPv6 address, as the URL parser serializes them. */
+const HOSTNAME = /^([a-z0-9-]+(\.[a-z0-9-]+)*|\[[0-9a-f:]+\])$/;
 
 /** Exactly what a browser sends as Origin: `https://host[:port]`, lower case, no default port, path or credentials. No wildcards. */
 function isExactHttpsOrigin(value: string): boolean {

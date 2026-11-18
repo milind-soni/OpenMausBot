@@ -18,6 +18,11 @@ describe("RELAY_PHONE_ORIGINS", () => {
     assert.deepEqual([...phoneOrigins], [APP, "https://web.example.org:8443"]);
   });
 
+  test("accepts IP literal hosts as browsers send them", () => {
+    const value = "https://[::1]:8443,https://[fd00::a:1],https://192.168.1.20:8443";
+    assert.deepEqual([...loadConfig({ ...base, RELAY_PHONE_ORIGINS: value }).phoneOrigins], value.split(","));
+  });
+
   test("refuses anything that is not an exact https:// origin, and never repeats it", () => {
     const bad = [
       "http://app.example.com",
@@ -29,6 +34,9 @@ describe("RELAY_PHONE_ORIGINS", () => {
       "https://App.example.com",
       "https://app.example.com:443",
       "https://*.example.com",
+      "https://*",
+      "https://[0:0::1]",
+      "https://[::1]:443",
       "app.example.com",
       "null",
       `${APP},ftp://files.example.com`,
@@ -46,6 +54,19 @@ describe("RELAY_PHONE_ORIGINS", () => {
     const nine = Array.from({ length: 9 }, (_, i) => `https://app${i}.example.com`).join(",");
     assert.throws(() => loadConfig({ ...base, RELAY_PHONE_ORIGINS: nine }), /RELAY_PHONE_ORIGINS/);
     assert.equal(loadConfig({ ...base, RELAY_PHONE_ORIGINS: nine.split(",").slice(0, 8).join(",") }).phoneOrigins.size, 8);
+  });
+});
+
+describe("a relay without RELAY_PHONE_ORIGINS", () => {
+  let relay: TestRelay;
+  before(async () => {
+    relay = await startTestRelay();
+  });
+  after(() => relay.stop());
+
+  test("refuses every browser page on /v1/phone", async () => {
+    assert.equal(await Client.refusal(relay.url, "/v1/phone", { headers: { origin: APP } }), 403);
+    assert.equal(await Client.refusal(relay.url, "/v1/phone"), 101);
   });
 });
 
