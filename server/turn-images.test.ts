@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { extractReplayImages, extractSteerImages, extractTurnImages, nativeClips, REPLAYED_IMAGE_NOTE } from "./turn-images.ts";
+import { extractReplayImages, extractSteerImages, extractTurnImages, nativeClips, REPLAYED_IMAGE_NOTE, turnMedia } from "./turn-images.ts";
 
 const IDS = [
   "123e4567-e89b-42d3-a456-426614174000",
@@ -272,10 +272,26 @@ describe("turn image admission", () => {
 describe("native video clips", () => {
   const clip = (bytes: number) => ({ path: `/attachments/${bytes}.mp4`, mime: "video/mp4" as const, bytes });
 
-  it("gives an engine that takes video the clips that fit its limit, counting clips already chosen", () => {
+  it("gives an engine that takes video the clips that fit its limit", () => {
     const engine = { nativeImageInput: true, nativeVideoBytes: 100 };
     expect(nativeClips([clip(60), clip(50), clip(40)], engine)).toEqual([clip(60), clip(40)]);
-    expect(nativeClips([clip(50), clip(30)], engine, [clip(60)])).toEqual([clip(30)]);
+  });
+
+  const MiB = 1024 * 1024;
+  const gemini = { nativeImageInput: true, nativeVideoBytes: 12 * MiB };
+  const image = (bytes: number) => ({ path: `/attachments/${bytes}.png`, mime: "image/png" as const, bytes });
+
+  it("leaves a clip to frames when the turn's pictures and clips would pass the request's media budget", () => {
+    const engine = gemini;
+    expect(nativeClips([clip(10 * MiB)], engine, [image(8 * MiB), image(8 * MiB)])).toEqual([]);
+    expect(nativeClips([clip(10 * MiB), clip(2 * MiB)], engine, [image(8 * MiB)])).toEqual([clip(10 * MiB), clip(2 * MiB)]);
+  });
+
+  it("chooses a burst's clips against the pictures of every line, not only the lines before", async () => {
+    const media = await turnMedia([{ images: [], videos: [clip(10 * MiB)] }, { images: [image(8 * MiB), image(8 * MiB)], videos: [] }], gemini);
+    expect(media.videos).toEqual([]);
+    expect(media.images.slice(-2)).toEqual([image(8 * MiB), image(8 * MiB)]);
+    expect((await turnMedia([{ images: [image(MiB)], videos: [clip(10 * MiB)] }], gemini)).videos).toEqual([clip(10 * MiB)]);
   });
 
   it("gives no clip to an engine without a video limit, so it keeps getting frames", () => {

@@ -1,5 +1,4 @@
-// Only an engine with `nativeVideoBytes` takes a clip as it is (OpenAI's chat-completions content parts are otherwise only
-// "text" and "image_url", and a local vision model takes the same two); for every other one, ffmpeg on PATH samples stills.
+// Samples stills from a clip with ffprobe and ffmpeg on PATH.
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

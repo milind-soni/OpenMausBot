@@ -330,7 +330,7 @@ import { turnStartLogLine } from "./turn-log.ts";
 import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
-import { extractReplayImages, extractTurnImages, nativeClips, videoFramesWithin } from "./turn-images.ts";
+import { extractReplayImages, extractTurnImages, nativeClips, turnMedia, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
 import { generateThreadTitle } from "./thread-title-generate.ts";
 import { engineCommandCpuMs, engineProcessExited, engineProcessGone, ENGINE_EXIT_STALL_MS, stallLimitMs, stallNotice, TurnWatchdog } from "./turn-watchdog.ts"; import { createIdleThreads } from "./host/idle-threads.ts";
@@ -7590,7 +7590,7 @@ async function beginTurn(
   const resolvedImages = extractTurnImages(text);
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
   let providerText = promptWithDataContext(usesNativeImageInput ? resolvedImages.text : text, opts?.dataContext);
-  const turnImages = usesNativeImageInput ? resolvedImages.images : [], turnVideos = opts?.compactOnly ? [] : nativeClips(resolvedImages.videos, instance.adapter.capabilities);
+  const turnImages = usesNativeImageInput ? resolvedImages.images : [], turnVideos = opts?.compactOnly ? [] : nativeClips(resolvedImages.videos, instance.adapter.capabilities, turnImages);
   const commsDepth = opts?.commsDepth ?? 0;
   if (commsDepth > 0) markInternalTurn(threadId);
   else { clearInternalTurn(threadId); doneNotice.personTurnStarted(threadId); }
@@ -9711,14 +9711,14 @@ async function runClaimedGroupMemberTurn(
   // A drained burst runs as one turn: recover its lines by queueId, not position.
   const burstIds = new Set(operation?.queuedQueueIds ?? []);
   const burstOverrides: Array<{ messageId: string; text: string }> = [];
-  const burstImages: ReturnType<typeof extractTurnImages>["images"] = [], burstVideos: ReturnType<typeof extractTurnImages>["videos"] = [];
+  const burstLines: Array<ReturnType<typeof extractTurnImages>> = [];
   if (usesNativeImageInput && !cardContinuation) {
     for (const message of store.activePath(threadId)) {
       if (message.role !== "user" || message.kind !== "text" || !message.text) continue;
       if (!message.queueId || !burstIds.has(message.queueId)) continue;
       const resolved = extractTurnImages(message.text);
       burstOverrides.push({ messageId: message.id, text: resolved.text });
-      burstVideos.push(...nativeClips(resolved.videos, instance.adapter.capabilities, burstVideos)); burstImages.push(...resolved.images, ...await videoFramesWithin(burstImages.length + resolved.images.length, resolved.videos, burstVideos));
+      burstLines.push(resolved);
     }
   }
   // The latest line is usually the burst's last: extracting it again would double-count its attachments.
@@ -9737,7 +9737,7 @@ async function runClaimedGroupMemberTurn(
     bot.id,
   );
   const roomContext = roomWindow.text;
-  const turnVideos = [...burstVideos, ...nativeClips(resolvedLatestImages.videos, instance.adapter.capabilities, burstVideos)], turnImages = usesNativeImageInput ? [...burstImages, ...resolvedLatestImages.images, ...await videoFramesWithin(burstImages.length + resolvedLatestImages.images.length, resolvedLatestImages.videos, turnVideos)] : [];
+  const { images: turnImages, videos: turnVideos } = usesNativeImageInput ? await turnMedia([...burstLines, resolvedLatestImages], instance.adapter.capabilities) : { images: [], videos: [] };
   const skills = availableSkills(), phoneOffered = HAS_USB_PORT && usbPhoneOffered(instance, skills);
   const selectedSkills = mergeSkills(
     selectBundledSkills(

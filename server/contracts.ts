@@ -93,7 +93,7 @@ export interface TurnImageInput {
   source?: "video-frame";
 }
 
-/** A video already admitted to the private attachment store; a driver gets it as the clip only within its `nativeVideoBytes`, otherwise as TurnImageInput frames. */
+/** A video already admitted to the private attachment store; a driver with `nativeImageInput` gets it as the clip within its `nativeVideoBytes`, otherwise as TurnImageInput frames while the turn has image slots left. */
 export interface TurnVideoInput {
   path: string;
   mime: "video/mp4" | "video/webm" | "video/quicktime";
@@ -277,7 +277,7 @@ export interface ProviderAdapter {
     images?: boolean;
     /** sendTurn consumes `images` as structured input, so dispatch strips the attachment path from `text`. */
     nativeImageInput?: boolean;
-    /** sendTurn also takes `videos` as the clips themselves, up to this many bytes per turn; any other clip arrives as frames. */
+    /** With `nativeImageInput`, sendTurn also takes `videos` as the clips themselves, up to this many bytes per turn; any other clip arrives as frames only while the turn has image slots left. */
     nativeVideoBytes?: number;
     /** Effort levels the driver can pass to its CLI, ascending; absent hides the control. */
     effortLevels?: readonly EffortLevel[];

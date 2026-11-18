@@ -46,19 +46,28 @@ export function chatImage(item: { mimeType?: unknown; data?: unknown }): ChatIma
 // Gemini, the one engine sent clips, names QuickTime video/mov.
 const VIDEO_MIME: Readonly<Record<TurnVideoInput["mime"], string>> = { "video/mp4": "video/mp4", "video/webm": "video/webm", "video/quicktime": "video/mov" };
 
+/** Stands in for a clip removed from disk after it was attached, so the rest of the turn still goes. */
+export const UNREADABLE_CLIP_NOTE = "[An attached video could no longer be read and was left out. Tell the person to attach it again.]";
+
 export function chatUserContent(turn: SendTurnInput): string | ChatContentPart[] {
   if (!turn.images?.length && !turn.videos?.length) return turn.text;
   const budget = chatImageBudget();
-  const parts = [...(turn.images ?? []).map(image => {
+  const parts: ChatContentPart[] = (turn.images ?? []).map(image => {
     if (statSync(image.path).size > IMAGE_BYTES) throw new Error("Image exceeds 20 MB");
     const part = chatImage({ mimeType: image.mime, data: readFileSync(image.path).toString("base64") });
     budget([part]);
     return part;
-  }), ...(turn.videos ?? []).map((video): ChatImagePart => {
-    const part: ChatImagePart = { type: "image_url", image_url: { url: `data:${VIDEO_MIME[video.mime]};base64,${readFileSync(video.path).toString("base64")}` } };
+  });
+  for (const video of turn.videos ?? []) {
+    let data: string;
+    try { data = readFileSync(video.path).toString("base64"); } catch {
+      parts.push({ type: "text", text: UNREADABLE_CLIP_NOTE });
+      continue;
+    }
+    const part: ChatImagePart = { type: "image_url", image_url: { url: `data:${VIDEO_MIME[video.mime]};base64,${data}` } };
     budget([part]);
-    return part;
-  })];
+    parts.push(part);
+  }
   return [{ type: "text", text: turn.text }, ...parts];
 }
 
