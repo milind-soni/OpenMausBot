@@ -108,7 +108,8 @@ describe("which AI carries on while one is limited", () => {
     const { instance } = takeover({ chosen: () => [on("codex", "gpt-6")] });
     expect(instance.backups("kai", on("claude", "claude-sonnet-5"), "model")).toEqual([on("claude", "claude-opus-5-5"), on("codex", "gpt-6")]);
     expect(instance.backups("kai", on("claude", "claude-opus-5-5"), "credits")).toEqual([on("codex", "gpt-6")]);
-    expect(takeover().instance.backups("kai", on("claude", "claude-sonnet-5"), "model"), "the same AI's default model, with no backup chosen").toEqual([on("claude", "claude-opus-5-5")]);
+    expect(takeover().instance.backups("kai", on("claude", "claude-sonnet-5"), "model"), "no backup chosen: no other model is picked").toEqual([]);
+    expect(takeover().instance.backups("kai", on("claude", "claude-sonnet-5"), "credits"), "no backup chosen: none for credits either").toEqual([]);
   });
 
   it("leaves out an AI that is signed out, held by its own limit, short of this AI's tools, or another sign-in to the same plan", () => {
@@ -137,6 +138,16 @@ describe("a model's own limit", () => {
     eventId: "e", provider: "claudeAgent", createdAt: new Date(NOW).toISOString(), threadId: "t1",
     type: "runtime.error", message: "limit", limit, ...(limitResetsAt ? { limitResetsAt } : {}),
   }) as RuntimeEvent;
+
+  it("starts a no-backup bot's turn on its own model while that model is held, and a bot with a backup on the same AI's default", () => {
+    const opus = on("claude", "claude-sonnet-5");
+    const none = takeover();
+    none.instance.noteRuntimeEvent("kai", opus, error("model", NOW + 2 * HOUR));
+    expect(none.instance.heldAtStart(KAI, opus), "no backup chosen: the turn is tried as usual and the limit shows").toBeNull();
+    const chosen = takeover({ chosen: () => [on("codex", "gpt-6")] });
+    chosen.instance.noteRuntimeEvent("kai", opus, error("model", NOW + 2 * HOUR));
+    expect(chosen.instance.heldAtStart(KAI, opus), "a backup chosen: it carries on as before").toMatchObject({ scope: "model" });
+  });
 
   it("holds that model alone until the reset it named, at most six hours, an hour when it named none, and not once it works", () => {
     const { instance, now } = takeover({ chosen: () => [on("claude", "claude-opus-5-5"), on("opencode", "go-default")] });
