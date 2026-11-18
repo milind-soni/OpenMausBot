@@ -45,6 +45,7 @@ it("uses native textarea rendering during composition and restores mention rende
   expect(editor.hasAttribute("data-composing")).toBe(false);
   expect(onCompositionEnd).toHaveBeenCalledOnce();
   act(() => input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+  expect(editor.hasAttribute("data-composing")).toBe(true);
   act(() => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
   expect(editor.hasAttribute("data-composing")).toBe(false);
   act(() => root.unmount());
