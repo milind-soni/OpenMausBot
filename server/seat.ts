@@ -12,11 +12,15 @@ export const HANDOFF_REQUEST =
 
 type SeatStore = Pick<Store, "activePath" | "appendMessage" | "patchTask" | "taskByThread">;
 
-/** The bot's answer to the newest hand-off request, while no one has written in the conversation since. */
+/** The bot's answer to the newest hand-off request, while no one has written in the conversation since: the last words of
+ * a turn that request started and that settled well. Other bot lines after it (a webhook post, a notice, a step of the same
+ * turn) are not the note. */
 export function handoffNote(path: readonly Message[]): Message | null {
   const asked = path.findLast((message) => message.role === "user");
   if (asked?.kind !== "text" || asked.text !== HANDOFF_REQUEST) return null;
-  return path.slice(path.indexOf(asked) + 1).findLast((message) => message.role === "bot" && message.kind === "text" && Boolean(message.text?.trim())) ?? null;
+  return path.slice(path.indexOf(asked) + 1).findLast((message) => message.role === "bot" && message.kind === "text"
+    && message.requestMessageId === asked.id && message.turnTerminal === true && message.turnSucceeded !== false
+    && Boolean(message.text?.trim())) ?? null;
 }
 
 /** Why the seat cannot close now, in the words the person is shown; null when it can. */
@@ -35,8 +39,9 @@ export function closeSeat(store: SeatStore, botId: string, threadId: string): Me
   const path = sinceFreshStart(store.activePath(threadId));
   const note = handoffNote(path);
   if (!note?.text || !store.taskByThread(botId, threadId)) return null;
-  const newest = path.at(-1);
-  let saved = newest?.kind === "compaction" && newest.compaction?.foldedThroughId === note.id ? newest : null;
+  // Only this note's own summary counts as saved: a /compact folded through the note holds the whole conversation.
+  const newest = path.slice(path.indexOf(note) + 1).findLast((message) => message.kind === "compaction" && message.compaction);
+  let saved = newest?.compaction?.foldedThroughId === note.id && newest.compaction.summary === note.text.trim() ? newest : null;
   if (!saved) {
     store.patchTask(botId, threadId, { resumeCursors: {} });
     saved = store.appendMessage(threadId, {
