@@ -46,6 +46,8 @@ export function createRefusedHandoffs(deps: RefusedHandoffDeps) {
       // The run must still hold this conversation: another run's answer is not this one's.
       if (deps.runOf(threadId)?.id !== run.id) return;
       const byRun = refused.get(threadId) ?? new Map<string, Map<string, Refused>>();
+      // No other run can ever say a refusal here, so none of theirs is worth keeping once one is recorded.
+      for (const id of byRun.keys()) if (id !== run.id) byRun.delete(id);
       const mine = byRun.get(run.id) ?? new Map<string, Refused>();
       for (const raw of named) {
         const target = status >= 400 ? unreachableTeammate(deps.bots(), from, raw, (bot) => deps.hides?.(from, bot) === true) : null;
@@ -59,7 +61,9 @@ export function createRefusedHandoffs(deps: RefusedHandoffDeps) {
     },
     /** The run in this conversation is ending well: what it must say instead, once; null when nothing was refused, or another run was. */
     take(threadId: string): string | null {
-      const run = deps.runOf(threadId), byRun = refused.get(threadId), seen = [...(run ? byRun?.get(run.id)?.values() ?? [] : [])];
+      const run = deps.runOf(threadId), byRun = refused.get(threadId);
+      if (byRun) for (const id of byRun.keys()) if (id !== run?.id) byRun.delete(id);
+      const seen = [...(run ? byRun?.get(run.id)?.values() ?? [] : [])];
       // Another run's records here belong to a run that no longer holds the thread, so they can never be said.
       refused.delete(threadId);
       if (!seen.length) return null;

@@ -8,8 +8,9 @@ const B = { people: ["mara@acme.test"] };
 const rooms: RosterMember = { id: "rooms", name: "Rooms", visibility: B };
 const hours: RosterMember = { id: "hours", name: "Staff Hours", visibility: B };
 const books: RosterMember = { id: "books", name: "Bookkeeping", visibility: "admins" };
+const ledger: RosterMember = { id: "ledger", name: "Ledger", visibility: "admins" };
 const mausbot: RosterMember = { id: "maus", name: "MausBot", visibility: { people: ["olive@acme.test"] }, defaultBot: { person: "olive@acme.test" } };
-const bots = [rooms, hours, books, mausbot];
+const bots = [rooms, hours, books, ledger, mausbot];
 
 const SAID = "Rooms couldn't hand this to Bookkeeping, because they're shared with different people. Nothing was sent.";
 const r1 = { id: "run_1", routineId: "r1", botId: "rooms" }, r2 = { id: "run_2", routineId: "r2", botId: "rooms" };
@@ -70,6 +71,25 @@ describe("a routine's refused hand-off", () => {
     refused.settled("t", rooms, ["Bookkeeping"], 403, undefined);
     expect(lines, "the run that started since wrote no routine that was refused").toEqual([]);
     expect(refused.take("t"), "the run that started since never made that call").toBeNull();
+  });
+
+  it("keeps nothing for a run that recorded a refusal and never took it, once another run holds the conversation", () => {
+    const { refused, now } = fixture({ writer: "p_olive", asked: "p_mara" });
+    refused.settled("t", rooms, ["Ledger"], 403, r1);
+    now(r2);
+    refused.settled("t", rooms, ["Bookkeeping"], 403, r2);
+    now(r1);
+    expect(refused.take("t"), "the run that failed or was cancelled before saying it kept nothing to say").toBeNull();
+  });
+
+  it("says only the refusal of the run that holds the conversation after an abandoned run's is dropped", () => {
+    const { refused, lines, now } = fixture({ writer: "p_olive", asked: "p_mara" });
+    refused.settled("t", rooms, ["Ledger"], 403, r1);
+    now(r2);
+    refused.settled("t", rooms, ["Bookkeeping"], 403, r2);
+    expect(refused.take("t")).toBe(SAID);
+    expect(refused.take("t")).toBeNull();
+    expect(lines.map((line) => line.to), "and its writer heard it once").toEqual(["p_olive"]);
   });
 
   it("still makes the run that made the call say so before the conversation moves on", () => {
