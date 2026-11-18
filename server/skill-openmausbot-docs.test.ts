@@ -43,6 +43,11 @@ describe("openmausbot-docs skill guide", () => {
     }
   });
 
+  it("sends questions about more than one device to the multi-device page", () => {
+    expect(guide).toContain("`multi-device.md`");
+    expect(existsSync(join(process.cwd(), "docs", "multi-device.md"))).toBe(true);
+  });
+
   it("sends the reader to the app before the docs, and never asks for a key to be quoted", () => {
     expect(guide).toContain("the app wins");
     expect(guide).toContain("never quote a key back");
