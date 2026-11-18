@@ -135,6 +135,7 @@
   "html.loading": "Abrindo a página…",
   "html.tooLarge": "Esta página é grande demais para a prévia no app (2 MB). Baixe o original para vê-la.",
   "html.loadFailed": "Não foi possível abrir esta página. Verifique sua conexão e tente novamente. São aceitos arquivos HTML em UTF-8.",
+  "html.refused": "Não foi possível abrir esta página: {reason}",
   "html.source": "Ver código-fonte",
   "html.rendered": "Ver página",
   "html.reload": "Recarregar",
