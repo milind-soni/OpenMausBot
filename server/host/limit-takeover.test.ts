@@ -1,3 +1,4 @@
+import { chosenBackups } from "../automatic-recovery.ts";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,6 +111,16 @@ describe("which AI carries on while one is limited", () => {
     expect(instance.backups("kai", on("claude", "claude-opus-5-5"), "credits")).toEqual([on("codex", "gpt-6")]);
     expect(takeover().instance.backups("kai", on("claude", "claude-sonnet-5"), "model"), "no backup chosen: no other model is picked").toEqual([]);
     expect(takeover().instance.backups("kai", on("claude", "claude-sonnet-5"), "credits"), "no backup chosen: none for credits either").toEqual([]);
+  });
+
+  it("counts the installation's saved backup only while Automatic recovery is on", () => {
+    const backup = on("codex", "gpt-6");
+    const off = takeover({ chosen: () => chosenBackups(undefined, { enabled: false, backup }) }).instance;
+    for (const scope of ["model", "credits", "engine"] as const) {
+      expect(off.backups("kai", on("claude", "claude-sonnet-5"), scope), `recovery off, backup saved: none for ${scope}`).toEqual([]);
+    }
+    expect(chosenBackups({ fallback: [] }, { enabled: true, backup })).toEqual([backup]);
+    expect(chosenBackups({ fallback: [on("claude", "claude-opus-5-5")] }, { enabled: false, backup }), "the bot's own list always counts").toEqual([on("claude", "claude-opus-5-5")]);
   });
 
   it("leaves out an AI that is signed out, held by its own limit, short of this AI's tools, or another sign-in to the same plan", () => {
