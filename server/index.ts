@@ -12391,7 +12391,7 @@ const internalToolRoutes = createInternalToolRoutes({ engineLimits: { instances:
 function liveBotFor(botId: string): LiveBot {
   const bot = store.bot(botId);
   if (!bot) throw new LiveSessionError("That bot no longer exists.", 404);
-  return { name: bot.name, title: bot.title, description: bot.description };
+  return { name: bot.name, title: bot.title, description: bot.description, voice: bot.voice };
 }
 function liveHistoryFor(threadId: string): LiveHistoryMessage[] {
   return liveHistoryFrom(sinceFreshStart(store.activePath(threadId)));
