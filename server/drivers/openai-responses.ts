@@ -193,7 +193,9 @@ export async function readResponsesStream(body: ReadableStream<Uint8Array> | nul
       for (const [position, item] of response.output.entries()) if (object(item)) finishItem(item as ResponseItem, position);
     }
     const used = object(response?.usage);
-    if (used) usage = { input: Number(used.input_tokens) || 0, output: Number(used.output_tokens) || 0 };
+    const cachedInput = object(used?.input_tokens_details)?.cached_tokens;
+    if (used) usage = { input: Number(used.input_tokens) || 0, output: Number(used.output_tokens) || 0,
+      ...(typeof cachedInput === "number" && Number.isFinite(cachedInput) && cachedInput >= 0 ? { cachedInput } : {}) };
   };
   const failure = (error: Record<string, unknown> | undefined) => {
     const code = typeof error?.code === "string" ? error.code : "";

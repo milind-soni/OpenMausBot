@@ -61,7 +61,7 @@ export async function verifyKey(key: string): Promise<VerifyResult> {
  * @param model Gemini model identifier.
  * @returns Synthesized Audio object containing bytes and MIME type.
  */
-export async function synthesize(text: string, voiceId: string, key: string, model = DEFAULT_GEMINI_MODEL): Promise<Audio> {
+export async function synthesize(text: string, voiceId: string, key: string, model = DEFAULT_GEMINI_MODEL, signal?: AbortSignal): Promise<Audio> {
   if (!isSupportedVoice(voiceId)) throw new Error("Pick a Gemini voice from the voice list.");
   let response: Response;
   try {
@@ -72,7 +72,7 @@ export async function synthesize(text: string, voiceId: string, key: string, mod
         input: [{ type: "user_input", content: [{ type: "text", text }] }],
         response_format: { type: "audio" }, generation_config: { speech_config: [{ voice: voiceId }] },
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),
     });
   } catch {
     throw new Error("Could not reach Gemini speech generation. Check your connection and try again.");

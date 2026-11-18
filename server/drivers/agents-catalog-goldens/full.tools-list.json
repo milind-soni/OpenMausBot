@@ -293,7 +293,12 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "page": {
+            "type": "integer",
+            "description": "100 per page; default 1."
+          }
+        }
       },
       "annotations": {
         "readOnlyHint": true,

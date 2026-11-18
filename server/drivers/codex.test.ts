@@ -1732,6 +1732,36 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(refuse).not.toHaveBeenCalled();
     });
 
+    it("rebuilds a ChatGPT plan thread whose saved session holds audio the plan refuses, once, from the chat", async () => {
+      plan();
+      await create({ mode: "plan-unsupported-input", authMode: "chatgpt-plan" });
+      const dump = join(scratch, "plan-unsupported-input.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+      const recoveryText = "History\nUser: check the voice\nUser: go on";
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-plan-audio", text: "go on", resumeCursor: "audio-thread", recoveryText, model: "gpt-6.1-sol" });
+      await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).resolves.toMatchObject({ ok: true });
+      const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+      expect(calls.map((call: { method: string }) => call.method)).not.toContain("thread/resume");
+      expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: recoveryText }]);
+      expect(recorder.events.filter((e) => e.type === "turn.retrying")).toMatchObject([{ reason: "unsupported_input" }]);
+      expect(recorder.events.filter((e) => e.type === "runtime.error" && e.turnId === turnId)).toEqual([]);
+      expect(recorder.events.filter((e) => e.type === "session.started").at(-1)).toMatchObject({ sessionId: "codex-thread-1", rebuilt: true });
+      expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([expect.objectContaining({ message: rebuiltSessionNotice("Codex") })]);
+    });
+
+    it("leaves the same refusal a plain failure off a ChatGPT plan, keeping the saved session", async () => {
+      await create({ mode: "plan-unsupported-input" });
+      const dump = join(scratch, "unsupported-input-own.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      process.env.FAKE_CODEX_RETRY_SCALE = "0.001";
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-own-audio", text: "go on", resumeCursor: "audio-thread", recoveryText: "History\nUser: go on" });
+      await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).resolves.toMatchObject({ ok: false });
+      expect(JSON.parse(readFileSync(dump, "utf8")).calls.map((call: { method: string }) => call.method)).toContain("thread/resume");
+      expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+      expect(recorder.events.filter((e) => e.type === "runtime.error" && e.turnId === turnId)).toHaveLength(1);
+    });
+
     it("passes the person's proxy settings to the proxy, which Codex would otherwise drop", async () => {
       plan();
       await create({ authMode: "chatgpt-plan", environment: { HTTPS_PROXY: "http://proxy.example.test:3128", NODE_EXTRA_CA_CERTS: "/etc/corp-ca.pem" } });

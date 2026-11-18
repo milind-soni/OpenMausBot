@@ -3056,6 +3056,8 @@
   "voice.yourVoice": "Deine {provider}-Stimme",
   "voice.usesYours": "Dieser Bot spricht mit deiner {provider}-Stimme. Wähl oben eine andere, um ihm eine eigene zu geben.",
   "voice.usesOwn": "Dieser Bot spricht mit seiner eigenen Stimme.",
+  "voice.liveCall.title": "Stimme für Live-Anrufe",
+  "voice.liveCall.help": "Live-Anrufe nutzen eigene Stimmen, getrennt von der Vorlesestimme oben.",
   "server.voice.noNoteNoVoice": "Keine Sprachnachricht zu dieser Antwort: Für diesen Bot ist noch keine Stimme eingerichtet.",
   "server.voice.noNoteFailed": "Keine Sprachnachricht zu dieser Antwort: Die Stimme konnte nicht erzeugt werden ({reason}).",
   "server.voice.turnEnded": "Ich habe aufgehört, bevor ich fertig war: {reason}",
@@ -4039,5 +4041,10 @@
   "imageGen.higgsfield.connected": "Mit deinem Higgsfield-Konto verbunden",
   "imageGen.higgsfield.notConnected": "Nicht verbunden oder die Anmeldung ist abgelaufen",
   "imageGen.higgsfield.help": "{app} erstellt Bilder mit dem Higgsfield-Konto, bei dem du dich unter Plugins anmeldest. Jedes Bild verbraucht Guthaben dieses Kontos.",
-  "imageGen.higgsfield.open": "Plugins öffnen"
+  "imageGen.higgsfield.open": "Plugins öffnen",
+  "geminiServer.title": "Google AI Studio",
+  "geminiServer.desc": "Nutze Gemini-Modelle mit einem API-Schlüssel aus Google AI Studio. Die Modelle werden erkannt, nachdem du ihn hinzugefügt hast.",
+  "geminiServer.getKey": "Schlüssel in Google AI Studio holen",
+  "geminiServer.key": "Gemini-API-Schlüssel",
+  "geminiServer.add": "Google AI Studio hinzufügen"
 }

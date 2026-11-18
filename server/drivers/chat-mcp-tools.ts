@@ -79,6 +79,8 @@ const STARTUP_MS = 8_000;
 const CLOUD_STARTUP_MS = 30_000;
 /** Windows starts each of the app's built-ins as its own Electron process, all at once, and scans each new executable first. */
 const WINDOWS_BUILT_IN_STARTUP_MS = 20_000;
+/** A turn can't run without the agents server, so a slow computer (an older Intel Mac) gets this long for it everywhere. */
+const AGENTS_STARTUP_MS = 20_000;
 const STARTUP_TIMED_OUT = "MCP startup timed out";
 const REQUEST_TIMED_OUT = "MCP request timed out; execution outcome may be uncertain";
 /** How much of a server's stderr is kept, and how much of its last line is ever shown. */
@@ -92,7 +94,12 @@ export function mcpStartupMs(env: Record<string, string | undefined> = process.e
   return cloudRole(env) ? CLOUD_STARTUP_MS : builtIn && platform === "win32" ? WINDOWS_BUILT_IN_STARTUP_MS : STARTUP_MS;
 }
 
-/** `startupMs` replaces both mcpStartupMs budgets, `hostComputerMs` hostComputerStartupMs. `notice` hears, for the person,
+/** How long the agents server gets to start: never less than the app's other servers. */
+export function agentsStartupMs(env: Record<string, string | undefined> = process.env, platform: NodeJS.Platform = process.platform): number {
+  return Math.max(mcpStartupMs(env, platform), AGENTS_STARTUP_MS);
+}
+
+/** `startupMs` replaces every command server's startup budget (mcpStartupMs, agentsStartupMs), `hostComputerMs` hostComputerStartupMs. `notice` hears, for the person,
  * that this computer's tools did not start, worded once per `conversation`. With `background` and the agents server, setup
  * waits only for the built-ins a turn acts through (agents, a computer, the browser); the rest are listed by `join` once
  * started. `onSettled` hears each server's name once it has listed its tools or failed. */
@@ -558,6 +565,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const mustHave = (descriptor: Server) => descriptor === agentsServer || (descriptor === integrations?.localComputer && integrations?.localComputer?.scope !== "local-computer");
   const startupMs = options.startupMs ?? mcpStartupMs();
   const configuredStartupMs = options.startupMs ?? mcpStartupMs(process.env, process.platform, false);
+  const agentsMs = options.startupMs ?? agentsStartupMs();
   const hostComputerMs = Math.max(startupMs, options.hostComputerMs ?? hostComputerStartupMs());
   let standIn: { definition: ChatToolDefinition; origin: ToolOrigin; ready?: Promise<unknown[]>; reason?: string } | undefined;
   const builtIns = servers.length;
@@ -771,7 +779,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       const host: HostComputerStart | undefined = hostComputer
         ? await startHostComputer(hostComputerKey(descriptor), (record) => client.tools(signal, record, hostComputerMs), include, { quickMs: Math.min(startupMs, HOST_COMPUTER_QUICK_MS), firstMs: startupMs }, signal)
         : undefined;
-      const budgetMs = searchable.has(name) ? REMOTE_MCP_STARTUP_MS : index < builtIns ? startupMs : configuredStartupMs;
+      const budgetMs = searchable.has(name) ? REMOTE_MCP_STARTUP_MS : index < builtIns ? (descriptor === agentsServer ? agentsMs : startupMs) : configuredStartupMs;
       const tools = host ? (host.state === "listed" || host.state === "pending" ? host.tools : []) : await client.tools(signal, include, budgetMs, observers.get(name));
       if (!tools.length && scope === undefined && descriptor === integrations?.localComputer && (!host || host.state === "listed")) throw new Error("The Local VM listed no tools");
       // Harness mounts are known by descriptor, never by a name a configured server could claim. A grant

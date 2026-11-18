@@ -7,7 +7,7 @@ import { attachmentBasename, PREVIEW_MAX_BYTES, type TranscriptFileAttachment, t
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
-import { localFilePath } from "./ChatMarkdown";
+import { decodedLinkPath, localFilePath } from "./ChatMarkdown";
 import {
   AttachedFileChip,
   AttachmentPreviewDialog,
@@ -34,8 +34,7 @@ type MarkdownNode = {
 export function fileIdentity(path: string): string {
   // Presentation deduplication only, never an authorization check.
   if (/^file:\/\//i.test(path)) return localFilePath(path) ?? path;
-  try { return decodeURIComponent(path.split(/[?#]/, 1)[0]!); }
-  catch { return path; }
+  return decodedLinkPath(path);
 }
 
 export function collectMessageFiles(text: string, existingPaths: readonly string[] = []): GalleryFile[] {

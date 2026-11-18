@@ -26,6 +26,11 @@ describe("openmausbot-docs skill guide", () => {
       "summarize this email",
       "chart our signups by month",
       "Build a bot settings form for my Discord bot",
+      "send this photo to my phone",
+      "compare prices on more than one site",
+      "Send this photo to my other computer",
+      "copy the report to my second computer",
+      "run this script on more than one computer",
     ]) {
       expect(ids(text), text).not.toContain("openmausbot-docs");
     }
@@ -41,6 +46,21 @@ describe("openmausbot-docs skill guide", () => {
     for (const page of new Set(pages)) {
       expect(existsSync(join(process.cwd(), "docs", page)), page).toBe(true);
     }
+  });
+
+  it("sends questions about more than one device to the multi-device page", () => {
+    for (const text of [
+      "Why can't I see my bots on my second computer?",
+      "what syncs between devices",
+      "using it on multiple devices",
+      "How can I use the same bots on more than one computer?",
+      "How can I use my bots on my phone?",
+      "Can I use my bots on my other computer too?",
+    ]) {
+      expect(ids(text), text).toContain("openmausbot-docs");
+    }
+    expect(guide).toContain("`multi-device.md`");
+    expect(existsSync(join(process.cwd(), "docs", "multi-device.md"))).toBe(true);
   });
 
   it("sends the reader to the app before the docs, and never asks for a key to be quoted", () => {
