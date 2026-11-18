@@ -10919,7 +10919,6 @@
   "activity.dates": "Datas",
   "settings.threadCleanup.retention.plain": "Remove os logs de eventos de conversas encerradas há muito tempo. As conversas ficam.",
   "settings.threadCleanup.cap.plain": "Mantém pequeno o log de eventos de cada conversa. As conversas ficam.",
-  "settings.import.grokLine": "Traga um bot com suas skills, rotinas, memórias e apps.",
   "settings.import.choose": "Escolher…",
   "settings.experimental.skillAuthoringShort": "Salve uma verificação como skill ou peça a um bot para criar uma. Cada mudança aparece no chat com Desfazer.",
   "settings.experimental.newBrowserShort": "Os navegadores dos bots usam o driver de navegador do {app}: páginas mais nítidas, uploads, downloads e pop-ups.",

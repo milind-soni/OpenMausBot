@@ -7858,7 +7858,6 @@
   "activity.dates": "日付",
   "settings.threadCleanup.retention.plain": "ずっと前に終わったスレッドのイベントログを削除します。スレッドは残ります。",
   "settings.threadCleanup.cap.plain": "各スレッドのイベントログを小さく保ちます。スレッドは残ります。",
-  "settings.import.grokLine": "スキル、ルーティン、記憶、アプリと一緒にボットを移します。",
   "settings.import.choose": "選択…",
   "settings.experimental.skillAuthoringShort": "検証の実行をスキルとして保存するか、ボットに作成を頼みます。変更はチャットに「元に戻す」付きで表示されます。",
   "settings.experimental.newBrowserShort": "ボットのブラウザは {app} 独自のブラウザドライバーを使います。ページが鮮明になり、アップロード、ダウンロード、ポップアップも扱えます。",

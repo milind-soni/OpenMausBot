@@ -3603,7 +3603,6 @@
   "activity.dates": "Dates",
   "settings.threadCleanup.retention.plain": "Supprimer les journaux d'événements des fils terminés depuis longtemps. Les fils restent.",
   "settings.threadCleanup.cap.plain": "Garder le journal d'événements de chaque fil petit. Les fils restent.",
-  "settings.import.grokLine": "Faites venir un bot avec ses skills, routines, souvenirs et apps.",
   "settings.import.choose": "Choisir…",
   "settings.experimental.skillAuthoringShort": "Enregistrez une vérification comme skill, ou demandez à un bot d'en créer un. Chaque changement apparaît dans le chat avec Annuler.",
   "settings.experimental.newBrowserShort": "Les navigateurs des bots utilisent le pilote de navigateur de {app} : pages plus nettes, envois, téléchargements et fenêtres.",

@@ -10989,7 +10989,7 @@
   "activity.dates": "Dates",
   "settings.threadCleanup.retention.plain": "Remove event logs of threads finished long ago. Threads stay.",
   "settings.threadCleanup.cap.plain": "Keep each thread's event log small. Threads stay.",
-  "settings.import.grokLine": "Bring a bot over with its skills, routines, memories and apps.",
+  "settings.import.grokLineChats": "Bring a bot over with its skills, routines, memories, apps and chats.",
   "settings.import.choose": "Choose…",
   "settings.experimental.skillAuthoringShort": "Save a verification run as a skill, or ask a bot to make one. Each change shows in the chat with Undo.",
   "settings.experimental.newBrowserShort": "Bots' browsers use {app}'s own browser driver, with sharper pages, uploads, downloads and pop-ups.",

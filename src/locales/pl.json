@@ -6956,7 +6956,6 @@
   "activity.dates": "Daty",
   "settings.threadCleanup.retention.plain": "Usuwaj dzienniki zdarzeń dawno zakończonych wątków. Wątki zostają.",
   "settings.threadCleanup.cap.plain": "Utrzymuj mały dziennik zdarzeń każdego wątku. Wątki zostają.",
-  "settings.import.grokLine": "Przenieś bota z jego umiejętnościami, rutynami, wspomnieniami i aplikacjami.",
   "settings.import.choose": "Wybierz…",
   "settings.experimental.skillAuthoringShort": "Zapisz przebieg weryfikacji jako umiejętność albo poproś bota o jej utworzenie. Każda zmiana pojawia się w czacie z Cofnij.",
   "settings.experimental.newBrowserShort": "Przeglądarki botów używają własnego sterownika {app}: ostrzejsze strony, wysyłanie, pobieranie i okna podręczne.",
