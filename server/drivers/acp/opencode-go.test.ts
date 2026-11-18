@@ -298,7 +298,7 @@ describe("OpenCode catalog", () => {
     }
   });
 
-  it("ends a turn whose shell command moved to the background, and keeps the turn that command later wakes out of the next one", async () => {
+  it("ends a turn whose shell command moved to the background, and drops the turn that command wakes between turns", async () => {
     // OpenCode 2.3.1+ moves a shell command still running at its timeout to the background instead of killing it; the
     // prompt ends, and the command's finish wakes a turn that 2.3.1's ACP streams with no session/prompt behind it.
     const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-background-wake-"));
@@ -306,7 +306,7 @@ describe("OpenCode catalog", () => {
     mkdirSync(authDir, { recursive: true });
     writeFileSync(join(authDir, "auth.json"), JSON.stringify({ opencode: { type: "api", key: "zen-secret" } }));
     const woken = join(scratch, "woken");
-    const dump = join(scratch, "dump.json");
+    const rpcLog = join(scratch, "rpc.jsonl");
     const driver = createOpenCodeDriver(async () => catalog("opencode/big-pickle"));
     const instance = await driver.create({
       instanceId: "opencode-background-wake",
@@ -317,7 +317,7 @@ describe("OpenCode catalog", () => {
         FAKE_ACP_MODELS: "opencode/big-pickle",
         FAKE_ACP_MODE: "background-wake",
         FAKE_ACP_WOKEN_FILE: woken,
-        FAKE_ACP_DUMP: dump,
+        FAKE_ACP_RPC_APPEND_FILE: rpcLog,
       },
       enabled: true,
       config: { cli: FAKE_CLI, fullAuto: true },
@@ -328,7 +328,8 @@ describe("OpenCode catalog", () => {
       const first = await instance.adapter.sendTurn({ threadId: "t-opencode-background-wake", text: "build it", model: "opencode/big-pickle" });
       expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId)).toMatchObject({ ok: true });
       expect(JSON.stringify(recorder.events)).toContain("build started");
-      pid = (JSON.parse(readFileSync(dump, "utf8")) as { pid: number }).pid;
+      pid = (readFileSync(rpcLog, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { pid: number; method: string })
+        .find((line) => line.method === "session/prompt"))?.pid ?? 0;
       for (let i = 0; i < 200 && !existsSync(woken); i++) await new Promise((resolve) => setTimeout(resolve, 25));
       expect(existsSync(woken)).toBe(true);
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -340,6 +341,8 @@ describe("OpenCode catalog", () => {
       const secondEvents = JSON.stringify(recorder.events.filter((event) => "turnId" in event && event.turnId === second.turnId));
       expect(secondEvents).toContain("second answer");
       expect(JSON.stringify(recorder.events)).not.toContain("WOKEN");
+      // The process that ran both turns, still alive before dispose.
+      expect(() => process.kill(pid, 0)).not.toThrow();
     } finally {
       recorder.stop();
       await instance.dispose();
