@@ -1,5 +1,3 @@
-// What the phone side derives from its device or pairing token, on WebCrypto. Wire spec: companion/src/e2e/README.md,
-// "Identities and derived secrets".
 import { concat, utf8, type Bytes } from "./bytes.ts";
 
 const KEY_ID_BYTES = 16;

@@ -1,6 +1,3 @@
-// Byte helpers for the browser side of the end-to-end wire (spec: companion/src/e2e/README.md), on plain typed arrays
-// so the same code runs in a page and under Node.
-
 /** Backed by a plain ArrayBuffer, which is what WebCrypto takes. */
 export type Bytes = Uint8Array<ArrayBuffer>;
 

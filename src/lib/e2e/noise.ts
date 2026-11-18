@@ -1,6 +1,3 @@
-// The phone (initiator) side of Noise_NKpsk0_P256_AESGCM_SHA256 and the transport records after it, on WebCrypto so
-// a browser can run it. Wire spec: companion/src/e2e/README.md, "Handshake" and "Transport messages"; the Node
-// reference is companion/src/e2e/noise.ts, and both must give the bytes in vectors/v1.json.
 import { b64u, concat, utf8, type Bytes } from "./bytes.ts";
 import { hmacSha256, sha256 } from "./credentials.ts";
 
@@ -12,6 +9,7 @@ const MAX_RECORD_PLAINTEXT = MAX_RECORD_BYTES - TAG_BYTES;
 export const MAX_HANDSHAKE_PAYLOAD = 512;
 const MAX_HANDSHAKE_MESSAGE = PUBLIC_KEY_BYTES + MAX_HANDSHAKE_PAYLOAD + TAG_BYTES;
 export const CONN_BYTES = 16;
+const MAX_APP_CHARS = 40;
 /** A sender closes the session (1000) before a direction's counter reaches this. */
 const NONCE_LIMIT = 2 ** 32;
 
@@ -189,6 +187,7 @@ class SymmetricState {
 export class RecordCipher {
   readonly #state: CipherState;
   #failed = false;
+  #opening: Promise<unknown> = Promise.resolve();
 
   constructor(state: CipherState) {
     this.#state = state;
@@ -203,8 +202,15 @@ export class RecordCipher {
     return this.#state.encryptWithAd(EMPTY, plaintext);
   }
 
-  /** Any failure is a hard stop: after one, every later record is refused too. */
-  async open(record: Bytes): Promise<Bytes> {
+  /** Any failure is a hard stop: after one, every later record is refused too. Opens run one at a time in call
+   * order, so a record never opens while an earlier one could still fail. */
+  open(record: Bytes): Promise<Bytes> {
+    const opened = this.#opening.then(() => this.#openNext(record));
+    this.#opening = opened.catch(() => undefined);
+    return opened;
+  }
+
+  async #openNext(record: Bytes): Promise<Bytes> {
     if (this.#failed) throw new NoiseError("failed");
     try {
       if (record.length > MAX_RECORD_BYTES) throw new NoiseError("record_too_large");
@@ -227,18 +233,31 @@ export interface SessionKeys {
 
 export const newConn = (): Bytes => crypto.getRandomValues(new Uint8Array(CONN_BYTES));
 
-export const encodePayload1 = (conn: Bytes, app: string): Bytes => utf8(JSON.stringify({ v: 1, conn: b64u(conn), app }));
+export function encodePayload1(conn: Bytes, app: string): Bytes {
+  if (conn.length !== CONN_BYTES) throw new NoiseError("bad_conn");
+  if (app.length > MAX_APP_CHARS) throw new NoiseError("app_too_long");
+  return utf8(JSON.stringify({ v: 1, conn: b64u(conn), app }));
+}
+
+const parseJson = (bytes: Bytes): unknown => {
+  try {
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    return null;
+  }
+};
+
+/** The `conn` that message 2 must echo, read from the payload 1 bytes actually sent. */
+function payload1Conn(bytes: Bytes): string {
+  const value = parseJson(bytes);
+  const conn = value && typeof value === "object" ? (value as { conn?: unknown }).conn : undefined;
+  if (typeof conn !== "string") throw new NoiseError("bad_payload1");
+  return conn;
+}
 
 /** Key order and whitespace are free; `v` and `conn` are not. */
 function checkPayload2(bytes: Bytes, conn: string): "ok" | "version" | "conn" {
-  let value: unknown = null;
-  if (bytes.length <= MAX_HANDSHAKE_PAYLOAD) {
-    try {
-      value = JSON.parse(new TextDecoder().decode(bytes));
-    } catch {
-      value = null;
-    }
-  }
+  const value = bytes.length <= MAX_HANDSHAKE_PAYLOAD ? parseJson(bytes) : null;
   if (!value || typeof value !== "object" || Array.isArray(value) || (value as { v?: unknown }).v !== 1) return "version";
   return (value as { conn?: unknown }).conn === conn ? "ok" : "conn";
 }
@@ -259,11 +278,12 @@ export interface PhoneHello {
   finish(message2: Bytes): Promise<SessionKeys>;
 }
 
-/** `payload1` is exact bytes so vectors can pin them; `conn` (b64u) is what message 2 must echo. */
-export async function phoneHello(options: PhoneHandshakeOptions, payload1: Bytes, conn: string): Promise<PhoneHello> {
+/** `payload1` is exact bytes so vectors can pin them; message 2 must echo its `conn`. */
+export async function phoneHello(options: PhoneHandshakeOptions, payload1: Bytes): Promise<PhoneHello> {
   const remoteStatic = await publicKey(options.remoteStatic);
   if (options.psk.length !== 32) throw new NoiseError("bad_psk");
   if (payload1.length > MAX_HANDSHAKE_PAYLOAD) throw new NoiseError("payload_too_large");
+  const conn = payload1Conn(payload1);
   const state = new SymmetricState(options.trace ?? null);
   state.mark("init");
   await state.mixHash(prologue(options.transport));
@@ -283,9 +303,10 @@ export async function phoneHello(options: PhoneHandshakeOptions, payload1: Bytes
   let done = false;
   return {
     message1,
-    async finish(message2) {
+    async finish(reply) {
       if (done) throw new NoiseError("finished");
       done = true;
+      const message2 = reply.slice();
       if (message2.length < PUBLIC_KEY_BYTES + TAG_BYTES || message2.length > MAX_HANDSHAKE_MESSAGE) throw new NoiseError("message2_size");
       const re = message2.subarray(0, PUBLIC_KEY_BYTES);
       const ee = await dh(e.privateKey, await publicKey(re));
@@ -299,7 +320,13 @@ export async function phoneHello(options: PhoneHandshakeOptions, payload1: Bytes
       const check = checkPayload2(payload2, conn);
       if (check !== "ok") throw new NoiseError(`payload2_${check}`);
       const [kPc, kCp] = await hkdf(state.ck, EMPTY, 2);
-      return { send: new RecordCipher(new CipherState(kPc)), receive: new RecordCipher(new CipherState(kCp)), handshakeHash: state.h, kPc, kCp };
+      return {
+        send: new RecordCipher(new CipherState(kPc)),
+        receive: new RecordCipher(new CipherState(kCp)),
+        handshakeHash: state.h,
+        kPc: kPc.slice(),
+        kCp: kCp.slice(),
+      };
     },
   };
 }

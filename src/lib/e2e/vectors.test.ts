@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { b64u, fromB64u, utf8, type Bytes } from "./bytes.ts";
 import { admission, credentialHash, keyId, psk } from "./credentials.ts";
-import { importKeyPair, isPublicKey, phoneHello, prologue, type SessionKeys, type TraceStep, type TransportByte } from "./noise.ts";
+import { CONN_BYTES, encodePayload1, importKeyPair, isPublicKey, phoneHello, prologue, type SessionKeys, type TraceStep, type TransportByte } from "./noise.ts";
 
 const VECTORS = new URL("../../../companion/src/e2e/vectors/", import.meta.url);
 const text = readFileSync(new URL("v1.json", VECTORS), "utf8");
@@ -20,7 +20,7 @@ const PAYLOAD1 = utf8(v.inputs.payload1);
 const phoneEphemeral = () => importKeyPair(bytes(v.inputs.phoneEphemeralPrivate), bytes(v.V1.phoneEphemeralPublic));
 
 async function phone(transport: TransportByte, pskName: string, trace?: TraceStep[]) {
-  return phoneHello({ remoteStatic: T_PUB, psk: PSKS[pskName], transport, ephemeral: await phoneEphemeral(), trace }, PAYLOAD1, v.inputs.connB64u);
+  return phoneHello({ remoteStatic: T_PUB, psk: PSKS[pskName], transport, ephemeral: await phoneEphemeral(), trace }, PAYLOAD1);
 }
 
 async function v2Session(): Promise<SessionKeys> {
@@ -150,5 +150,38 @@ describe("V6 must fail, phone side", () => {
     const hello = await phone(1, "device");
     await hello.finish(bytes(v.V2.message2));
     await expect(hello.finish(bytes(v.V2.message2))).rejects.toThrow("e2e: finished");
+  });
+
+  it("refuses a genuine record opened before an earlier failed one settled", async () => {
+    const keys = await v2Session();
+    const [first, second] = v.V4.records.filter((r: { direction: string }) => r.direction === "cp");
+    const forged = bytes(first.record);
+    forged[0] ^= 1;
+    const results = await Promise.allSettled([keys.receive.open(forged), keys.receive.open(bytes(second.record))]);
+    expect(results.map((r) => (r.status === "rejected" ? (r.reason as Error).message : "opened"))).toEqual(["e2e: aead", "e2e: failed"]);
+  });
+});
+
+describe("payload 1, phone side", () => {
+  it("is refused with a connection ID that is not 16 bytes", () => {
+    expect(() => encodePayload1(new Uint8Array(CONN_BYTES - 1), "web/1")).toThrow("e2e: bad_conn");
+  });
+
+  it("takes an app of up to 40 characters", () => {
+    expect(() => encodePayload1(new Uint8Array(CONN_BYTES), "a".repeat(40))).not.toThrow();
+    expect(() => encodePayload1(new Uint8Array(CONN_BYTES), "a".repeat(41))).toThrow("e2e: app_too_long");
+  });
+
+  it("is refused when it carries no connection ID for message 2 to echo", async () => {
+    await expect(phoneHello({ remoteStatic: T_PUB, psk: PSKS.device, transport: 1 }, utf8('{"v":1,"app":"web/1"}'))).rejects.toThrow("e2e: bad_payload1");
+  });
+});
+
+describe("the session keys", () => {
+  it("are copies: clearing the returned key bytes leaves the cipher working", async () => {
+    const keys = await v2Session();
+    keys.kPc.fill(0);
+    const record = v.V4.records.find((r: { direction: string }) => r.direction === "pc");
+    expect(hex(await keys.send.seal(bytes(record.frame)))).toBe(record.record);
   });
 });

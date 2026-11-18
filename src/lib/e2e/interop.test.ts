@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { decodeFrame, encodeFrame, FLAG, OPEN_WINDOW_DELTA, TYPE } from "../../../companion/src/e2e/yamux.ts";
-import { b64u, concat, fromB64u, utf8, type Bytes } from "./bytes.ts";
+import { concat, fromB64u, utf8, type Bytes } from "./bytes.ts";
 import { credentialHash, keyId, psk } from "./credentials.ts";
 import { encodePayload1, newConn, phoneHello, TRANSPORT_DIRECT, TRANSPORT_RELAY, type SessionKeys, type TransportByte } from "./noise.ts";
 
@@ -23,7 +23,7 @@ let child: ChildProcess;
 let ready: Ready;
 
 beforeAll(async () => {
-  child = spawn(process.execPath, [SERVER, "--port", "0"], { stdio: ["ignore", "pipe", "ignore"] });
+  child = spawn(process.execPath, [SERVER, "--port", "0", "--exit-with-stdin"], { stdio: ["pipe", "pipe", "ignore"] });
   ready = await new Promise<Ready>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("interop server did not say ready in 10 s")), BOUND_MS);
     let out = "";
@@ -49,31 +49,36 @@ function open(url: string) {
   const socket = new WebSocket(url, "omb-e2e.v1");
   socket.binaryType = "arraybuffer";
   const queue: Bytes[] = [];
-  const waiting: Array<(message: Bytes) => void> = [];
+  const waiting: Array<{ resolve: (message: Bytes) => void; reject: (error: Error) => void }> = [];
   let closed: number | null = null;
   const closeWaiters: Array<(code: number) => void> = [];
   socket.addEventListener("message", (event) => {
     const message = new Uint8Array(event.data as ArrayBuffer);
     const next = waiting.shift();
-    if (next) next(message);
+    if (next) next.resolve(message);
     else queue.push(message);
   });
   socket.addEventListener("close", (event) => {
     closed = event.code;
     for (const waiter of closeWaiters.splice(0)) waiter(event.code);
+    for (const reader of waiting.splice(0)) reader.reject(new Error(`socket closed with ${event.code}`));
   });
-  const bounded = <T>(what: string, start: (resolve: (value: T) => void) => void) =>
-    new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`no ${what} in 10 s`)), BOUND_MS);
-      start((value) => {
-        clearTimeout(timer);
-        resolve(value);
-      });
-    });
+  const bounded = <T>(what: string, start: (resolve: (value: T) => void, reject: (error: Error) => void) => void) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return new Promise<T>((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`no ${what} in 10 s`)), BOUND_MS);
+      start(resolve, reject);
+    }).finally(() => clearTimeout(timer));
+  };
   return {
     opened: bounded<void>("open", (resolve) => socket.addEventListener("open", () => resolve())),
     send: (bytes: Bytes) => socket.send(bytes),
-    next: () => bounded<Bytes>("message", (resolve) => (queue.length ? resolve(queue.shift()!) : waiting.push(resolve))),
+    next: () =>
+      bounded<Bytes>("message", (resolve, reject) => {
+        if (queue.length) resolve(queue.shift()!);
+        else if (closed !== null) reject(new Error(`socket closed with ${closed}`));
+        else waiting.push({ resolve, reject });
+      }),
     closedWith: () => bounded<number>("close", (resolve) => (closed !== null ? resolve(closed) : closeWaiters.push(resolve))),
     close: () => socket.close(),
   };
@@ -81,8 +86,7 @@ function open(url: string) {
 
 async function handshake(url: string, token: string, transport: TransportByte) {
   const remoteStatic = fromB64u(ready.k)!;
-  const conn = newConn();
-  const hello = await phoneHello({ remoteStatic, psk: await psk(await credentialHash(token), await keyId(remoteStatic)), transport }, encodePayload1(conn, "web-test/1"), b64u(conn));
+  const hello = await phoneHello({ remoteStatic, psk: await psk(await credentialHash(token), await keyId(remoteStatic)), transport }, encodePayload1(newConn(), "web-test/1"));
   const ws = open(url);
   await ws.opened;
   ws.send(hello.message1);
@@ -102,7 +106,8 @@ async function get(ws: ReturnType<typeof open>, keys: SessionKeys, path: string)
     const frame = decodeFrame(await keys.receive.open(await ws.next()));
     if (frame.streamId !== 1) continue;
     if (frame.type === TYPE.data && frame.data) body.push(frame.data);
-    if (frame.flags & (FLAG.fin | FLAG.rst)) return new TextDecoder().decode(concat(...body));
+    if (frame.flags & FLAG.rst) throw new Error("stream 1 was reset");
+    if (frame.flags & FLAG.fin) return new TextDecoder().decode(concat(...body));
   }
 }
 
@@ -131,7 +136,7 @@ describe("the browser phone side against the Node computer", () => {
 
   it("stops hard on a message 2 from a party without the key", async () => {
     const { ws, finish } = await handshake(ready.wrongKey, ready.deviceToken, TRANSPORT_DIRECT);
-    await expect(finish()).rejects.toThrow(/^e2e: /);
+    await expect(finish()).rejects.toThrow("e2e: aead");
     ws.close();
   });
 });
