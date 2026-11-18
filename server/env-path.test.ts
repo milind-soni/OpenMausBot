@@ -268,9 +268,17 @@ describe("augmentedPath", () => {
     const shell = join(homedir(), "fake-login-shell");
     const rcOnlyBin = join(homedir(), "rc-only", "bin");
     const jobStatus = join(homedir(), "late-job.status");
+    const jobError = join(homedir(), "late-job.stderr");
+    const go = join(homedir(), "late-job.go");
     writeFileSync(
       shell,
-      `#!/bin/sh\nprintf '__OMB_PATH__%s__OMB_END__' '${rcOnlyBin}'\n(head -c 200000 /dev/zero; echo $? > '${jobStatus}') &\n`,
+      [
+        "#!/bin/sh",
+        `printf '__OMB_PATH__%s__OMB_END__' '${rcOnlyBin}'`,
+        `(i=0; while [ ! -e '${go}' ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done;`,
+        ` LC_ALL=C head -c 200000 /dev/zero 2> '${jobError}'; echo $? > '${jobStatus}') &`,
+        "",
+      ].join("\n"),
     );
     chmodSync(shell, 0o755);
 
@@ -282,10 +290,13 @@ describe("augmentedPath", () => {
 
       augmentedPath();
       await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin));
-      // 141 = 128 + SIGPIPE: the job's write hit a pipe nobody reads any more (0 would mean it was all read).
-      await vi.waitFor(() => expect(existsSync(jobStatus) && readFileSync(jobStatus, "utf8").trim()).toBe("141"), {
-        timeout: 5000,
-      });
+      writeFileSync(go, "");
+      await vi.waitFor(() => {
+        const status = existsSync(jobStatus) ? readFileSync(jobStatus, "utf8").trim() : "";
+        // A closed stdout can deliver SIGPIPE or a write error, depending on how the socket closes.
+        if (status === "1") expect(readFileSync(jobError, "utf8")).toMatch(/Broken pipe|Connection reset by peer/);
+        else expect(status).toBe("141");
+      }, { timeout: 5000 });
       expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin);
     } finally {
       if (saved.SHELL === undefined) delete process.env.SHELL;
