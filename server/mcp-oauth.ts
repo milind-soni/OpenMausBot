@@ -221,6 +221,10 @@ export class McpOAuthManager {
   private readonly starting = new Map<string, StartingFlow>();
   private readonly refreshing = new Map<string, Promise<{ token: string | null; outcome: McpRefreshOutcome | null }>>();
   private readonly renewedAfterRefusal = new Map<string, number>();
+  /** Refresh tokens already sent to a token endpoint, per server name. A server that rotates refresh tokens revokes
+   * the whole grant when it sees one of them again, so a token is never presented twice, not even after a lost
+   * answer: the sign-in ends instead of being refreshed a second time with the same token. */
+  private readonly spentRefreshTokens = new Map<string, Set<string>>();
   private readonly clients: (name: string, url: string) => McpOAuthClientConfig | undefined;
   private readonly onSettled: (name: string, phase: McpSignInPhase, owner: string) => void;
   private readonly onRefresh: (name: string, outcome: McpRefreshOutcome) => void;
@@ -456,6 +460,15 @@ export class McpOAuthManager {
       this.markNeedsSignIn(name, record.url);
       return { token: null, outcome: "expired" };
     }
+    // A refresh token the server may already have rotated must never be presented again: such a server revokes the
+    // whole grant when it sees one of them a second time. A token this server already sent is therefore spent, whatever
+    // the answer was, and the sign-in ends rather than being refreshed a second time with it.
+    const spent = this.spentRefreshTokens.get(name);
+    if (spent?.has(tokens.refresh)) {
+      this.markNeedsSignIn(name, record.url);
+      return { token: null, outcome: "expired" };
+    }
+    this.spentRefreshTokens.set(name, new Set([...(spent ?? []), tokens.refresh]));
     let answer: Awaited<ReturnType<typeof postForm>>;
     try {
       answer = await postForm(record.tokenEndpoint, {

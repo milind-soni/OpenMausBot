@@ -129,6 +129,23 @@ it("never shares an old refresh with a replacement entry at another resource URL
   expect(await nextPending).toBe("other-access");
 });
 
+it("never presents a refresh token it already sent, so a rotating server does not revoke the grant", async () => {
+  // The server rotates the token but its answer is lost. The client must not present that token again: a server
+  // that rotates refresh tokens revokes the whole grant when it sees one of them a second time.
+  const first = manager.accessToken("docs", resource);
+  const request = await nextRequest();
+  expect(request.form.get("refresh_token")).toBe("old-refresh");
+  request.response.destroy();
+  await first.catch(() => undefined);
+  expect(requests).toHaveLength(0);
+
+  // The next attempt must not send the same refresh token again.
+  const second = manager.accessToken("docs", resource);
+  await second.catch(() => undefined);
+  expect(requests).toHaveLength(0);
+  expect(manager.authState("docs", resource)).toBe("needs-sign-in");
+});
+
 it("signs out immediately and keeps a later sign-in when revocation completes", async () => {
   const signingOut = manager.signOut("docs", resource);
   const revocation = await nextRequest();
