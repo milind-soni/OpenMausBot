@@ -921,8 +921,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (!s) return;
       if (s.idleTimer) clearTimeout(s.idleTimer);
       const held = (warmHolds.get(threadId) ?? 0) - Date.now();
-      s.idleTimer = armIdleClose(`${instanceId}\0${threadId}`, Math.min(2_147_483_647, Math.max(engineIdleMs(threadId, sessionIdle), held)), { close: () => closeSession(threadId, "idle"),
-        idle: () => sessions.get(threadId) === s && !s.closing && !s.turn && !active.has(threadId) && (warmHolds.get(threadId) ?? 0) <= Date.now() });
+      s.idleTimer = armIdleClose(`${instanceId}\0${threadId}`, Math.min(2_147_483_647, Math.max(engineIdleMs(threadId, sessionIdle), held)), { close: () => closeSession(threadId, "idle"), threadId, policy: sessionIdle, // per-chat
+        idle: () => sessions.get(threadId) === s && !s.closing && !s.turn && !active.has(threadId), held: () => (warmHolds.get(threadId) ?? 0) > Date.now() });
     };
     // Keep-warm pings and warm summaries fork a thread's session with its live launch contract (claude-warm-summary.ts).
     const forks = claudeForks({ cli: config.cli, contracts: warmContracts, holds: warmHolds, armIdle, supports: (flag) => cliVersion === null || claudeCliSupports(cliVersion, flag),
@@ -1193,7 +1193,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
       const live = sessions.get(threadId);
       if (!turn.sessionReset && live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
-        if (live.idleTimer) clearTimeout(live.idleTimer);
+        stopIdleClose(`${instanceId}\0${threadId}`, live.idleTimer); // busy again: no longer idle
         live.turn = { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, awaitingInit: true, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null };
         active.set(threadId, { stop: () => {
           if (live.turn) live.turn.stopRequested = true;
@@ -1823,7 +1823,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           });
           settle(false, "exit_before_result");
         }
-        if (session.idleTimer) clearTimeout(session.idleTimer);
+        stopIdleClose(`${instanceId}\0${threadId}`, session.idleTimer);
         session.broker?.close();
         session.elicit.close();
         session.context.close();

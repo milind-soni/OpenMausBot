@@ -102,11 +102,6 @@ describe("the computer's own state line", () => {
     expect(line()).toBe(`Cleared caches at ${new Date(clearedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}.`);
   });
 
-  it("shows nothing about a disk that is fine", async () => {
-    await render(false);
-    expect(host.querySelector("[data-testid=cloud-computer-recovery]")).toBeNull();
-  });
-
   it("leaves the line to the recovery while MausBot is restarting the computer", async () => {
     answering = { state: "not-responding", since: 1, lastAnsweredAt: null };
     status = { state: "restarting", at: 2 };

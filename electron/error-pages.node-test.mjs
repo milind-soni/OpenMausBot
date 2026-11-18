@@ -3,7 +3,7 @@ import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { buildErrorPage } from "./error-pages.mjs";
+import { buildErrorPage, showBootFailure } from "./error-pages.mjs";
 import nativeText from "./native-text.cjs";
 
 const page = (url) => decodeURIComponent(url.slice("data:text/html;charset=utf-8,".length));
@@ -26,4 +26,27 @@ test("the page speaks the app's language, with the log's link where the sentence
   assert.equal(html.slice(html.indexOf("<p "), html.indexOf("</p>") + 4),
     '<p style="color:#fcfcfc99;line-height:1.5">Outro processo respondeu às verificações de integridade em todas as portas do OpenMausBot — provavelmente uma segunda cópia do app ou outro programa nas portas 8799–28799. Feche esse programa. Depois, saia do OpenMausBot e abra novamente. '
     + `Se isso continuar acontecendo, confira ${logLink}.</p>`);
+});
+
+test("on an always-on home the page says, in one more line, that it keeps trying; without it the page is as before", () => {
+  const plainPage = page(buildErrorPage({ allPortsOccupied: true, logDir }));
+  const home = page(buildErrorPage({ allPortsOccupied: true, logDir, keepTrying: true }));
+  assert.equal(page(buildErrorPage({ allPortsOccupied: true, logDir, keepTrying: false })), plainPage);
+  assert.equal(home, plainPage.replace("</p></div>", "</p><p style=\"color:#fcfcfc99;line-height:1.5\">This computer is an always-on home, so it keeps trying to start the server every 5 minutes.</p></div>"));
+  const text = nativeText.createNativeText({ saved: "pt-br" });
+  assert.ok(page(buildErrorPage({ allPortsOccupied: false, logDir, keepTrying: true }, text)).includes("continua tentando iniciar o servidor a cada 5 minutos"));
+});
+
+test("the launch failure box: a server that stopped answering keeps the app open, one that never started quits it", () => {
+  const shown = [];
+  const dialog = { showErrorBox: (title, body) => shown.push([title, body]) };
+  const t = nativeText.englishText.t;
+  assert.equal(showBootFailure(dialog, t, { retried: true, folder: "/data" }), false);
+  assert.equal(showBootFailure(dialog, t, { retried: false, folder: "/data" }), true);
+  assert.deepEqual(shown, [
+    [t("native.boot.unhealthy.title"), t("native.boot.unhealthy.body", { folder: "/data" })],
+    [t("native.boot.failed.title"), t("native.boot.failed.body", { folder: "/data" })],
+  ]);
+  assert.notEqual(shown[0][0], shown[1][0]);
+  assert.ok(shown[1][1].includes("/data"));
 });

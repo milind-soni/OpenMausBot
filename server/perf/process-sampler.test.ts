@@ -41,7 +41,7 @@ describe("process buckets, from the executable's name and parent only", () => {
   });
 
   it("parses /proc stat lines (a comm with spaces and parentheses), ps lines and CPU counters", () => {
-    expect(parseProcStat(42, statLine(42, "Web Content (x)", 7, 150, 50))).toEqual({ pid: 42, ppid: 7, name: "web content (x)", cpuMs: 2_000, rssBytes: 256 * 4096, start: "5555", threads: 1, state: "S" });
+    expect(parseProcStat(42, statLine(42, "Web Content (x)", 7, 150, 50))).toEqual({ pid: 42, ppid: 7, name: "web content (x)", cpuMs: 2_000, rssBytes: 256 * 4096, start: "5555", threads: 1, state: "S", pgid: 42, sid: 42 });
     expect(parseProcStat(1, "garbage")).toBeNull();
     expect(parseReapedChildrenMs(statLine(1, "node", 0, 0, 0, 1, 300, 200))).toBe(5_000);
     expect(parsePsTime("1:02.50")).toBe(62_500);
@@ -49,6 +49,8 @@ describe("process buckets, from the executable's name and parent only", () => {
     expect(parsePsTime("nope")).toBeNull();
     expect(parsePsLine("  812     1  20480   0:03.10 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome Helper (Renderer)"))
       .toEqual({ pid: 812, ppid: 1, name: "google chrome helper (renderer)", cpuMs: 3_100, rssBytes: 20480 * 1024, start: "ps:812" });
+    expect(parsePsLine("  812     1   640  20480   0:03.10 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome Helper (Renderer)"))
+      .toEqual({ pid: 812, ppid: 1, name: "google chrome helper (renderer)", cpuMs: 3_100, rssBytes: 20480 * 1024, start: "ps:812", pgid: 640 });
     expect(parseCgroupCpuMs("usage_usec 2500000\nuser_usec 1\n", null)).toBe(2_500);
     expect(parseCgroupCpuMs(null, "7000000000\n")).toBe(7_000);
     expect(parseCgroupCpuMs(null, null)).toBeNull();
