@@ -3,6 +3,7 @@
 // or Codex tool title can be the command itself), a stop reason's words, a prompt or a path.
 import { traceToolLook, type TraceToolIcon } from "../../shared/usage-trace.ts";
 import { PHASES, type PhaseMs } from "./phases.ts";
+import { parseSetupMs, type SetupMs } from "./setup-steps.ts";
 
 export type ToolKind = TraceToolIcon;
 const TOOL_KINDS: ReadonlySet<string> = new Set<ToolKind>(["search", "web", "browser", "computer", "phone", "files", "terminal", "memory",
@@ -42,6 +43,8 @@ export interface TurnTiming {
   ok: boolean;
   stop: string;
   ms: PhaseMs;
+  /** A direct turn's setup, by step: part of its `queue`. */
+  setup?: SetupMs;
   queueWhy?: QueueWhy;
   retries: number;
   /** What the engine said its retry delays would be, summed. */
@@ -83,10 +86,11 @@ export function parseTurnTiming(value: unknown): TurnTiming | null {
       ? [{ kind: tool.kind as ToolKind, n: count(tool.n), ms: count(tool.ms), max: count(tool.max), errors: count(tool.errors), open: count(tool.open) }]
       : []).slice(0, TOOL_KINDS_KEPT);
   const retryWhy = Array.isArray(raw.retryWhy) ? raw.retryWhy.map(retryCode).slice(0, RETRY_WHY_KEPT) : [];
+  const setup = parseSetupMs(raw.setup);
   return {
     turnId: matchOr(ID, raw.turnId, null), threadId: matchOr(ID, raw.threadId, null), botId: matchOr(ID, raw.botId, null),
     engine: matchOr(KIND, raw.engine, null), startedAt: count(raw.startedAt, 1e14), endedAt: count(raw.endedAt, 1e14), ok: raw.ok === true,
-    stop: stopCode(raw.ok === true, raw.stop), ms,
+    stop: stopCode(raw.ok === true, raw.stop), ms, ...(setup ? { setup } : {}),
     ...(QUEUE_WHY.has(raw.queueWhy as string) ? { queueWhy: raw.queueWhy as QueueWhy } : {}),
     retries: count(raw.retries, 1e6), backoffMs: count(raw.backoffMs), ...(retryWhy.length ? { retryWhy } : {}),
     ...(LIMIT_SCOPES.has(raw.limit as string) ? { limit: raw.limit as LimitScope } : {}),

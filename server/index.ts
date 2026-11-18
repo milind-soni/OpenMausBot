@@ -7737,23 +7737,23 @@ async function beginTurn(
   turnContext.delete(threadId);
 
   void (async () => {
-    try {
+    try { const setup = perf.setupClock();
       const engineRead = registry.engineRead(instance.instanceId);
       if (engineRead) {
-        await engineRead;
+        await engineRead; setup.lap("engineRead");
         if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped while the engine was read");
       }
       if (opts?.runOn === "cloud") {
-        const readiness = await cloudRoutineReadiness(botId, threadId);
+        const readiness = await cloudRoutineReadiness(botId, threadId); setup.lap("cloudReady");
         if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
           throw new DirectTurnSetupCancelled("turn stopped during cloud readiness");
         }
         if (!readiness.ready) throw new Error(readiness.reason ?? "The cloud computer is not ready");
       }
-      await warmSummaries.beforeTurn(threadId, () => directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId));
-      if (usesNativeImageInput && !opts?.compactOnly) turnImages.push(...await videoFramesWithin(turnImages.length, resolvedImages.videos));
+      await warmSummaries.beforeTurn(threadId, () => directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)); setup.lap("summaries");
+      if (usesNativeImageInput && !opts?.compactOnly) turnImages.push(...await videoFramesWithin(turnImages.length, resolvedImages.videos)); setup.lap("videoFrames");
       await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model,
-        excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true });
+        excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true }); setup.lap("compact");
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during context setup");
       if (opts?.compactOnly) {
         clearDirectTurnDispatch(threadId, dispatchClaimId);
@@ -7877,13 +7877,13 @@ async function beginTurn(
         ],
         skills,
       );
-      if (phoneOffered) integrations.phone = phoneIntegration(bot.id, threadId, dispatchClaimId);
+      setup.lap("context"); if (phoneOffered) integrations.phone = phoneIntegration(bot.id, threadId, dispatchClaimId);
       if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
-        Object.assign(integrations, await teamConnections.appsIntegrations(bot, threadId, dispatchClaimId, instance.adapter.capabilities.mcpToolsFoundByName ? "dotted" : "plain"));
+        Object.assign(integrations, await teamConnections.appsIntegrations(bot, threadId, dispatchClaimId, instance.adapter.capabilities.mcpToolsFoundByName ? "dotted" : "plain")); setup.lap("apps");
       }
       // User MCP servers' tools are never pre-allowed: every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true && !proactive.fence.confines(threadId) && !botApiThread(threadId)) {
-        const custom = await mcpServersHost.prepare(bot).then(() => teamConnections.turnMcp(bot, threadId, dispatchClaimId));
+        const custom = await mcpServersHost.prepare(bot).then(() => teamConnections.turnMcp(bot, threadId, dispatchClaimId)); setup.lap("mcp");
         attachCustomMcp(integrations, { ...custom, ...lentMcp.mounts(bot, { botId: bot.id, threadId, generation: dispatchClaimId }) }, cfg, { botId: bot.id, threadId }, teamConnections.mcpServerApps(bot, { servers: custom, bridged: Boolean(integrations.composio), blocked: (slug) => managedPolicy.appsConnectRefusal([slug]) }));
         if (Object.keys(custom).length) Object.assign(integrations, chatAppsMcp.turnMounts(custom, bot.toolScope));
       }
@@ -7912,8 +7912,8 @@ async function beginTurn(
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;
       const dispatchTask = store.taskByThread(bot.id, threadId);
       const handoffMayUseCloud = !computerSkipped && plan.computer === undefined && isHandedWork(opts?.coordination ? coordinator.node(opts.coordination.id) : undefined) && !teamComputer && cloudBackend === "box" && boat.boatConfigured(cfg)
-        && canWorkOnCloud(cloudEngine(instance)) && !computerPlaceRefusal("box") && !cloudPlaceRefusal(cloudEngine(instance, bot.modelSelection.model), "works-on", bot.name) && !computerToolsRefusal(toolScope, "works-on", bot.name);
-      const ownCloud = handoffMayUseCloud ? await ownCloudStateWithin(boat.boatStatus(cfg, bot.id)) : undefined, handoffOwnCloud = handoffUsesOwnCloud({ plan, handoffWork: Boolean(ownCloud), ownCloudState: ownCloud?.state });
+        && canWorkOnCloud(cloudEngine(instance)) && !computerPlaceRefusal("box") && !cloudPlaceRefusal(cloudEngine(instance, bot.modelSelection.model), "works-on", bot.name) && !computerToolsRefusal(toolScope, "works-on", bot.name); setup.lap("workspace");
+      const ownCloud = handoffMayUseCloud ? await ownCloudStateWithin(boat.boatStatus(cfg, bot.id)) : undefined, handoffOwnCloud = handoffUsesOwnCloud({ plan, handoffWork: Boolean(ownCloud), ownCloudState: ownCloud?.state }); if (handoffMayUseCloud) setup.lap("ownCloud");
       let wants: ComputerWant = computerSkipped ? "off" : handoffOwnCloud ? "cloud" : plan.computer;
       const skipComputer = (error: unknown) => {
         if (!answer.incident || error instanceof DirectTurnSetupCancelled || error instanceof ComputerWaitParked) throw error;
@@ -8183,10 +8183,10 @@ async function beginTurn(
         }
       } catch (error) {
         skipComputer(!namedPlace || !placeSource ? error : await asPlaceFailure(error, namedPlace, placeSource, bot, cloudBackend));
-      }
+      } setup.lap("computer");
 
       // Electron owns cua-driver and its TCC attribution; the harness only reads its running connection descriptor.
-      if (wants === undefined && !integrations.localComputer && !computerPlaceRefusal("localVm") && await attachLocalVm(false)) computerKind = "vm";
+      if (wants === undefined && !integrations.localComputer && !computerPlaceRefusal("localVm") && await attachLocalVm(false)) computerKind = "vm"; setup.lap("localVm");
       // An unattended run with a VPS configured never lands on the host's own desktop, nor does a bot whose own desktop awaits an update.
       const hostBarred = (cloudBackend === "vps" && Boolean(opts?.automationSource)) || autoVpsOutdated || Boolean(vmUpdateNote);
       if (
@@ -8253,8 +8253,8 @@ async function beginTurn(
       const learnPrompt = skillAuthoring ? profilePrompt ? LEARN_RULES_PROMPT : LEARN_PROMPT : "";
 
       // Wait for the snapshot right before dispatch: the engine must not edit the project until it settles.
-      if (checkpointCwd) {
-        const before = await checkpoints.snapshot(bot.id, checkpointCwd, `turn ${threadId.slice(0, 8)}`, undefined, { pin: dispatchClaimId });
+      if (checkpointCwd) { setup.lap("sync");
+        const before = await checkpoints.snapshot(bot.id, checkpointCwd, `turn ${threadId.slice(0, 8)}`, undefined, { pin: dispatchClaimId }); setup.lap("checkpoint");
         if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
           if (before) void checkpoints.release(bot.id, checkpointCwd, dispatchClaimId);
           throw new DirectTurnSetupCancelled("turn stopped during checkpoint");
@@ -8287,8 +8287,8 @@ async function beginTurn(
         instance.adapter.capabilities.browserMcp === true
       ) {
         const selectedProfile = liveBot.browserProfile;
-        browser = await openBrowserBeside(() => browserIntegration(bot.id, selectedProfile, { threadId, generation: dispatchClaimId }),
-          mountedComputer, (error) => console.warn(`[browser] thread ${threadId}: left out beside ${mountedComputer} (${redactSecretsInText(String(error))})`));
+        setup.lap("sync"); browser = await openBrowserBeside(() => browserIntegration(bot.id, selectedProfile, { threadId, generation: dispatchClaimId }),
+          mountedComputer, (error) => console.warn(`[browser] thread ${threadId}: left out beside ${mountedComputer} (${redactSecretsInText(String(error))})`)); setup.lap("browser");
         if (browser) integrations.browser = browser.integration;
         if (browser) {
           const spec = browser.spec;
@@ -8311,7 +8311,7 @@ async function beginTurn(
       if (computerSelection) computerSelection.mounted = mountedComputer ?? (integrations.browser ? "browser" : undefined);
       recordTurnPlace(bot.id, threadId, plan.computer === undefined && mountedComputer === "local" && integrations.browser ? "browser" : mountedComputer ?? (integrations.browser ? "browser" : null));
       // Never overlap a replacement with a cancelled adapter's pre-id window: wait for it, then revalidate this exact claim.
-      await pendingCancelledProviderHandshakes.waitForClear(threadId);
+      setup.lap("sync"); await pendingCancelledProviderHandshakes.waitForClear(threadId); setup.lap("handshakeClear");
       if (!markDirectTurnDispatching(bot.id, dispatchClaimId, threadId)) {
         throw new DirectTurnSetupCancelled("turn stopped before dispatch");
       }
@@ -8328,7 +8328,7 @@ async function beginTurn(
       applyAgentsBridge(threadId, integrations, cfg, bot, turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), cwd));
       const confined = proactive.fence.confines(threadId), apiFenced = botApiThread(threadId); if (confined || apiFenced) for (const key of Object.keys(integrations) as Array<keyof typeof integrations>) if (!(apiFenced ? BOT_API_TOOLS : READ_AND_DRAFT_TOOLS).has(key)) delete integrations[key];
       const selectionRulesStable = Boolean(integrations.agents) && bot.computer !== "off" && !inheritedTeamComputer(bot), memoryOpts = { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace && !apiFenced, enabled: bot.memoryEnabled !== false, writesRefused: notesRefused };
-      const prompt = buildSystemPrompt(persona, liveBot?.soul ?? bot.soul ?? "", [
+      setup.lap("sync"); const prompt = buildSystemPrompt(persona, liveBot?.soul ?? bot.soul ?? "", [
         { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(teamHost.profileFor(threadId, cfg.profile)) }, { id: "people", label: "People", text: teamMessages.prompt(bot.id, threadId, Boolean(integrations.agents)) }, { id: "long-waits", label: "Waiting on the person", text: teammatePrompts.personBehind(bot.id, threadId) ? teamMessages.longWaits(threadId) : "" },
         { id: "setup", label: "Setup", text: setupSystemPrompt(setupMode, {
           skills: skillAuthoring, chief: Boolean((liveBot ?? bot).chiefOfStaff),
@@ -8378,7 +8378,7 @@ async function beginTurn(
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : opts?.automationSource === "api" ? (botApiThread(threadId) ? BOT_API_PROMPT : BOT_API_OWNER_PROMPT) : "" },
         { id: "automation-reply", label: "Automation reply", text: opts?.automationSource && automationReports.reportsElsewhere(threadId) ? AUTOMATION_REPLY_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: (tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : "") + placesElsewhere.mentioned(providerText, store.bots) },
-      ].filter((part) => (apiFenced ? BOT_API_PARTS.has(part.id) : !confined || READ_AND_DRAFT_PARTS.has(part.id))), integrations.agents, { replyStyle: liveBot?.replyStyle ?? bot.replyStyle, rules: cfg.everyBotRules });
+      ].filter((part) => (apiFenced ? BOT_API_PARTS.has(part.id) : !confined || READ_AND_DRAFT_PARTS.has(part.id))), integrations.agents, { replyStyle: liveBot?.replyStyle ?? bot.replyStyle, rules: cfg.everyBotRules }); setup.lap("prompt");
       turnPromptBytes.set(threadId, { stable: Buffer.byteLength(prompt.stable), volatile: Buffer.byteLength(prompt.volatile) });
       // Recall rides in front of this turn's message, never the system prompt, whose volatile half is re-sent whole on any change.
       const recalled = autoRecallPrompt(bot, threadId, resolvedImages.text, {
@@ -8399,7 +8399,7 @@ async function beginTurn(
       const shareNote = skillsHost.shareNote(bot, threadId, Boolean(privateWorkspace));
       const startupRecovery = (opts?.automaticRecoveryIndex ?? 0) < startupBackups(liveBot ?? bot, cfg.automaticRecovery).length; const posted = unreadThreadPosts(store.activePath(threadId)); // post_to_thread messages left here since its last run
       const held = limitTakeover.heldAtStart(bot, { instanceId, model }, startupRecovery); // a limit or a sign-out already known: straight to an AI that can carry on, with the reset only when one was named
-      if (held) throw held.scope === "signed-out" ? Object.assign(new TurnAuthenticationRefusedError(`signed-out-${randomUUID()}`, `${engineName(instanceId)} is signed out.`, true), userErrorFields(userError("serverError.engine.signedOut", { name: engineName(instanceId) }))) : new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, held.resetsAt, held.scope, true);
+      if (held) throw held.scope === "signed-out" ? Object.assign(new TurnAuthenticationRefusedError(`signed-out-${randomUUID()}`, `${engineName(instanceId)} is signed out.`, true), userErrorFields(userError("serverError.engine.signedOut", { name: engineName(instanceId) }))) : new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, held.resetsAt, held.scope, true); perf.noteSetup(threadId, setup.done());
       const dispatch = await guardTurnDispatch(shareNote.after(savedSteps.dispatch.sendTurn(instance, personLine && !opts?.unattended && !opts?.app?.context && !guestConfined ? { botId: bot.id, message: userMessage, turnText: text, placePicked: wants === "local" && placeSource !== "auto-pin" } : null, {
         threadId,
         botId: bot.id,

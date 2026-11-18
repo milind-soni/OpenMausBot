@@ -70,7 +70,7 @@ describe("the loop stall recorder", () => {
   it("fits the health report's budget with the rest of the timings, and holds numbers only", () => {
     const stalls = createLoopStalls();
     const report = stalls.report();
-    const body = perfHealth({ hour: { turns: 0, failed: 0, phases: {}, slow: [], partial: false }, day: { turns: 0, failed: 0, slow: [], phases: {}, tools: [], retries: { n: 0, turns: 0, backoffMs: 0, why: {} }, limits: {}, failovers: 0 } as never,
+    const body = perfHealth({ hour: { turns: 0, failed: 0, phases: {}, setup: {}, slow: [], partial: false }, day: { turns: 0, failed: 0, slow: [], phases: {}, setup: {}, tools: [], retries: { n: 0, turns: 0, backoffMs: 0, why: {} }, limits: {}, failovers: 0 } as never,
       live: [], limits: null, process: null, stalls: report });
     expect(JSON.stringify(body).length).toBeLessThanOrEqual(PERF_HEALTH_MAX_BYTES);
     expect(body.stalls).toEqual(report);
