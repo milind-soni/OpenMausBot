@@ -1,6 +1,6 @@
 # mausbot
 
-Talk to a MausBot bot from your own code, through its Bot API. No dependencies; Node 18+, Bun, Deno. Server-side only: the key acts as you.
+Talk to a MausBot bot from your own code, through its Bot API. No dependencies; Node 18+, Bun, Deno. Server-side only: the key reads whatever the bot can read; only an "Acts as me" key acts as the owner.
 
 ```sh
 npm install mausbot
@@ -29,7 +29,7 @@ Paste the card's address as it is. With no options, `Bot` reads `MAUSBOT_BOT_URL
 
 ## Errors
 
-All errors extend `MausBotError`. HTTP errors extend `APIStatusError` (`status`, `body`, the server's `error` text as the message): `BadRequestError` (400, 413, 415), `AuthenticationError` (401), `PermissionDeniedError` (403), `NotFoundError` (404), `ConflictError` (409), `RateLimitError` (429, with `retryAfter` in seconds when sent), `ServerError` (5xx), and `ServerTooOldError` (this MausBot server has no `/v1` address; update MausBot). Others: `APIConnectionError`, `WaitTimeoutError`, `JobFailedError` and `NotSentError`, each carrying the `thread` id where there is one. The key is never put in an error.
+All errors extend `MausBotError`. HTTP errors extend `APIStatusError` (`status`, `body`, the server's `error` text as the message): `BadRequestError` (400, 413, 415), `AuthenticationError` (401), `PermissionDeniedError` (403), `NotFoundError` (404), `ConflictError` (409), `RateLimitError` (429, with `retryAfter` in seconds when sent), `ServerError` (5xx), and `ServerTooOldError` (a subclass of `NotFoundError`: this MausBot server has no `/v1` address; update MausBot). The message is `HTTP <status>` when the body isn't JSON or has no string `error`. Others: `APIConnectionError` ("Could not reach…" means it never connected; on a `POST`, "dropped before it answered" means the message may have been sent), `WaitTimeoutError`, `JobFailedError` and `NotSentError`, each carrying the `thread` id where there is one. The key is never put in an error.
 
 ## Retries
 

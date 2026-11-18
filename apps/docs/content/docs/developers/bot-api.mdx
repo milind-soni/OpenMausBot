@@ -50,7 +50,7 @@ The JSON body takes:
 | `202 {"thread": "<id>", "status": "needs_approval"}` | The bot asked for an approval. Nobody outside can give it: the person opens the thread in the app and answers there. A later `GET` returns the reply. |
 | `200 {"thread": "<id>", "status": "failed", "error": "…"}` | The job failed, or someone stopped it in the app. Sent to the call itself or to a later `GET`. |
 
-`error` is one of two fixed sentences, never the engine's own words: "The bot could not answer. Open this thread in the app to see why." or "Someone stopped this in the app." If the person retries in the app and the bot then replies, the thread reads as that reply. The cause stays on the card.
+`error` is one of two fixed sentences, never the engine's own words: "The bot could not answer. Open this thread in the app to see why." or "Someone stopped this in the app." A `failed` thread stays `failed` for the API. To try again, send the message again, or open the thread in the app. The cause stays on the card.
 
 The errors:
 
@@ -61,10 +61,10 @@ The errors:
 | `403` | The API is off for this bot (or there is no such bot), or the bot's AI can't run confined. |
 | `404` | No such thread. |
 | `405` | Not `POST` or `GET`. |
-| `409` | That thread is still working, the bot is at its limit of conversations at once, 50 API calls are being answered, or the workspace has moved. |
+| `409` | That thread is still working, the bot is at its limit of conversations at once, 50 API calls are being answered, or the workspace has moved. A `409` for a thread that is still working carries `{thread, status}` instead of `{error}`. |
 | `413` | Body over 256 KB. |
 | `415` | Not JSON. |
-| `429` | More than ten calls in a minute for this key, or the spend cap. |
+| `429` | More than ten calls in a minute for this key, or the spend cap. It may carry `Retry-After`, in seconds. |
 | `500` | An unexpected error. |
 | `502` | The turn never started. |
 | `503` | A backup or restore is in progress: try again soon. |

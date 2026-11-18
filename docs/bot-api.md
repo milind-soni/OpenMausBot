@@ -62,7 +62,8 @@ Answers:
   no such bot), `404` no such thread, `405` not POST or GET, `409` that thread is
   still working, the bot is at its limit of conversations at once, 50 API calls are
   being answered, or the workspace has moved, `413` body over 256 KB, `415` not
-  JSON, `429` more than ten calls in a minute for this key, `502` the bot could
+  JSON, `429` more than ten calls in a minute for this key, or the spend cap (it
+  may carry `Retry-After`, in seconds), `500` an unexpected error, `502` the bot could
   not answer (the reason is on the card, not in the response; on `/v1` see
   `failed` below), `503` a backup or restore is in progress: try again soon.
 
@@ -70,8 +71,9 @@ On `/v1`, a job that failed or that someone stopped in the app answers `200`
 with `{"thread": "<id>", "status": "failed", "error": "…"}`, to the call itself
 or to a later `GET`. `error` is one of two fixed sentences, never the engine's
 own words: "The bot could not answer. Open this thread in the app to see why."
-or "Someone stopped this in the app." If the person retries in the app and the
-bot then replies, the thread reads as that reply. The cause stays on the card.
+or "Someone stopped this in the app." A `failed` thread stays `failed` for the
+API. To try again, send the message again, or open the thread in the app. The
+cause stays on the card.
 
 ## What a call may do
 

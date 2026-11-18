@@ -310,7 +310,7 @@ describe("the Bot API door on the webhook receiver", () => {
     expect(h.manager.listAttempts("b1").at(-1)).toMatchObject({ outcome: "rejected", statusCode: 502, reason: "the engine is gone" });
   });
 
-  it("on /v1 a failure the person retried, which then replied, reads as the reply", async () => {
+  it("on /v1 a failure followed by a bot reply in the same thread reads as the reply", async () => {
     const h = await harness(endsWith([failure, { role: "bot", kind: "text", text: "Second go" }]));
     const answer = await h.call("b1", await v1Key(h), { message: "Hi" }, { v1: true });
     expect(answer).toEqual({ status: 200, body: { reply: "Second go", thread: expect.any(String) } });

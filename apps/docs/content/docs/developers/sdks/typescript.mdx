@@ -73,7 +73,9 @@ const done = await bot.wait(sent.thread, { timeout: 600 });         // until it 
 
 `ask` and `wait` return `replied` or `needs_approval`. A `needs_approval` is a result, not an error: a person answers in the app, and you can `wait` on the thread again later. `ask` and `wait` throw `JobFailedError` when the job failed, where `send` and `thread` hand you `status: "failed"` to look at.
 
-`ask` has one overall `timeout` (default 600 seconds) that covers everything it waits for. When it runs out, `WaitTimeoutError` carries the thread, so you can pick it up with `wait`.
+`ask` has one overall `timeout` (default 600 seconds) that covers the waiting after the send. The send itself is not covered: the server holds it for up to `wait` seconds (50 by default). When it runs out, `WaitTimeoutError` carries the thread, so you can pick it up with `wait`.
+
+`send` on a thread that is still working throws `ConflictError` (409). Its `body` is `{thread, status: "working"}`, with no `error`, and its message is `HTTP 409`.
 
 If the thread you continue is still busy, `ask` waits for it, then sends once. If that thread is waiting for an approval in the app, or is still busy when the wait ran out, `ask` throws `NotSentError`: your message was not sent.
 
@@ -83,7 +85,7 @@ All errors extend `MausBotError`. The key is never put in an error.
 
 | Class | When |
 |---|---|
-| `APIStatusError` | Base of the HTTP errors. Has `status`, `body` (the parsed JSON, or `undefined`) and the server's `error` text as its message, or `HTTP <status>` when the body isn't JSON. Any other 4xx raises this class itself. |
+| `APIStatusError` | Base of the HTTP errors. Has `status`, `body` (the parsed JSON, or `undefined`) and the server's `error` text as its message, or `HTTP <status>` when the body isn't JSON or has no string `error`. Any other 4xx raises this class itself. |
 | `BadRequestError` | 400, 413, 415 |
 | `AuthenticationError` | 401 |
 | `PermissionDeniedError` | 403 |
@@ -91,8 +93,8 @@ All errors extend `MausBotError`. The key is never put in an error.
 | `ConflictError` | 409 |
 | `RateLimitError` | 429, with `retryAfter` in seconds when the server sent it |
 | `ServerError` | 5xx, including a proxy's HTML error page |
-| `ServerTooOldError` | This MausBot server predates `/v1`. Update MausBot. |
-| `APIConnectionError` | The request never got an answer. |
+| `ServerTooOldError` | This MausBot server predates `/v1`. Update MausBot. A subclass of `NotFoundError`. |
+| `APIConnectionError` | The request never got an answer. "Could not reach the MausBot server" means it never connected. On a `POST`, "The connection to the MausBot server dropped before it answered" means the message may have been sent, and sending it again could start a second turn. |
 | `WaitTimeoutError` | A wait ran out. Has `thread`. |
 | `JobFailedError` | The job failed or was stopped. Has `thread`; the message is the server's `error`. |
 | `NotSentError` | Your message was not sent. Has `thread`. |

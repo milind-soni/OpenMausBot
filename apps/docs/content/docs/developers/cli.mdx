@@ -34,7 +34,7 @@ Make the pairing code on the server with `openmausbot pair`. The token goes to a
 For CI, make an access token that ends on a date you choose:
 
 ```sh
-openmausbot token create "Nightly CI" --scope client --expires 90d --out ci-token
+openmausbot token create "Nightly CI" --scope client --expires 90d --out ci-token   # on the server, or with an admin token
 openmausbot token list      # name, scope, end date, last used (never the token)
 openmausbot token revoke ID # it stops working at once
 ```
