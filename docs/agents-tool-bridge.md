@@ -88,7 +88,7 @@ name can be read by OpenMausBot too:
 | API models: OpenAI-compatible, Cerebras, Greenference, ModelGo, Grok API, Groq, Meta, MiniMax, Mistral | Yes | The chat runtime never asks for the agents server (`server/drivers/chat-mcp-tools.ts:371`) and reads no configuration of the person's about a tool. |
 | Codex, including the ChatGPT plan | No | Codex reads a layered configuration of its own: `config.toml` under `CODEX_HOME` or `~/.codex`, a Company engine's own home under OpenMausBot's data, a trusted project's `.codex/config.toml`, `/etc/codex/config.toml` and `/etc/codex/managed_config.toml`; and it has `PreToolUse` and `PermissionRequest` hooks of its own. Any of these can take a rule about a tool by name, and this version does not examine them. |
 | Pi | No | pi is launched with `-e` for OpenMausBot's extension and nothing that keeps the person's own extensions out (`server/drivers/pi.ts`, `PI_ARGS`), in the person's home. Pi loads the extensions it finds there, and an extension's `tool_call` handler can block a call by the name it sees, as OpenMausBot's own does (`server/drivers/pi-mcp-extension.ts`). This version does not examine them. |
-| ACP agents: Grok, Kimi, Droid, Cursor, Antigravity, OpenCode, Qwen, Hermes, Cline, Gemini, custom | No | They keep their own permissions. "Always allow this session" hands the agent its own remembered approval ([approval levels](approval-levels.md)); given once for a harmless `use_tool` call it would cover every hidden tool. A reviewer would also lose the read-only marks the hidden reads carry, and Grok has native tools named `use_tool` and `search_tool`. |
+| ACP agents: Grok, Kimi, Droid, Cursor, Antigravity, OpenCode, Qwen, Hermes, Cline, Gemini, custom | No | They keep their own permissions. "Allow for this session" hands the agent its own remembered approval ([approval levels](approval-levels.md)); given once for a harmless `use_tool` call it would cover every hidden tool. A reviewer would also lose the read-only marks the hidden reads carry, and Grok has native tools named `use_tool` and `search_tool`. |
 | Muse Code, and any engine not named above | No | Not shown to qualify. |
 
 If the decision itself fails (a file it reads throws, a record it is handed
@@ -99,6 +99,10 @@ one line is logged naming the kind of error and nothing of what was read.
 
 Claude Code is not bridged when any of these holds:
 
+- Its tool search is on (the default): the agents server then sends a few tools
+  whole and the rest as names, which costs less than the bridge. For a proxy or
+  model without tool search, set `ENABLE_TOOL_SEARCH=false` in the instance's
+  environment to get the bridge back.
 - The bot inherits this machine's own Claude Code setup
   (`OMB_CLAUDE_INHERIT_USER_CONFIG=1`, or **Also use my Claude Code MCP
   servers**).
@@ -113,8 +117,8 @@ Claude Code is not bridged when any of these holds:
   whatever it matches: an empty or wildcard matcher sees every call, and a
   hook's own script can test the tool's name. OpenMausBot's own hooks are none
   of these and are in none of these files: it registers `PostToolUse`,
-  `PreCompact`, `SessionStart` and `Stop` through a private settings file
-  written for each launch.
+  `PostToolUseFailure`, `PreCompact` and `SessionStart` through a private
+  settings file written for each launch.
 - A settings file's `permissions.deny` or `permissions.ask` list (keys in any
   case) holds a rule with a wildcard in a tool's name, even one about another
   server (`mcp__github__*`, `*exec*`). Claude Code matches a deny or ask

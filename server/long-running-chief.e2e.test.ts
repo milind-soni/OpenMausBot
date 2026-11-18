@@ -217,12 +217,12 @@ it("carries a consult-and-implement job over several teammate turns, through a s
   expect(f.root(job).status).toBe("completed");
   const review = f.prompt(f.turn("A1"));
   expect(review).toContain("IMPLEMENT-FINISHED");
-  expect(review).not.toContain("Stopped after 64 steps");
+  expect(review).not.toContain("Stopped after 200 tool calls");
   expect(review).not.toContain("assign what is left");
   expect(review).not.toContain('"result":"error"');
   expect((await f.tasks(f.eli.id)).map((task: any) => task.title).filter((title: string) => title.startsWith("Continue:"))).toEqual([]);
   expect(f.model.requests.filter((sent: ModelRequest) => sent.lastUser.includes("[Auto-continuation]"))).toEqual([]);
-  expect(f.model.requests.filter((sent: ModelRequest) => sent.lastUser.includes("IMPLEMENT-CAP") && !sent.lastUser.includes(STEP_CAP_CONTINUES))).toHaveLength(64);
+  expect(f.model.requests.filter((sent: ModelRequest) => sent.lastUser.includes("IMPLEMENT-CAP") && !sent.lastUser.includes(STEP_CAP_CONTINUES))).toHaveLength(201);
   const continued = f.model.requests.filter((sent: ModelRequest) => sent.lastUser.includes(STEP_CAP_CONTINUES));
   expect(continued).toHaveLength(1);
   expect(continued[0]!.lastUser).toMatch(/Every step so far is listed in \S*handoffs\S*; read it before going on\./);

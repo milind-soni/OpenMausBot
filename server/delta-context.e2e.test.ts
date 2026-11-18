@@ -16,6 +16,7 @@ import { readHandoffs } from "./testing/handoff-rows.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { openSse } from "./testing/sse.ts";
 import { withoutTurnClock } from "./testing/turn-clock-text.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const count = (text: string, needle: string) => text.split(needle).length - 1;
 
@@ -27,11 +28,11 @@ const OUTSIDE_LINEAGE = "This work started with a chat line nothing proves the u
 const jsonl = (path: string) => existsSync(path)
   ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
-async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.ProcessEnv; codex?: Record<string, string> } = {}) {
+async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.ProcessEnv; codex?: Record<string, string>; acp?: boolean } = {}) {
   // The fixture's Claude is new enough to refresh a resumed session's recorded system prompt; a test may override it.
   const parentEnv = { ...process.env, FAKE_CLAUDE_VERSION: "2.1.270", ...options.env };
   const session = await launchVerificationServer(parentEnv, undefined, undefined, undefined, undefined,
-    { scripted: true }, options.codex ? ["codex"] : []);
+    { scripted: true }, [...(options.codex ? ["codex" as const] : []), ...(options.acp ? ["customAcp" as const] : [])]);
   const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") =>
     request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
@@ -91,6 +92,9 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
       await api("/api/instances/codex", { cli: wrap("codex", "fake-codex-app-server.ts",
         { FAKE_CODEX_MODE: "resume", FAKE_CODEX_ROOM_PLAN: planPath, FAKE_CODEX_DUMP: codexDumpPath, ...options.codex }) }, "PATCH");
     }
+    const acpRpcPath = join(dataDir, "acp-rpc.jsonl");
+    if (options.acp) await api("/api/instances/myAgent", { cli: wrap("acp", "fake-acp-cli.ts", { FAKE_ACP_RPC_APPEND_FILE: acpRpcPath }) }, "PATCH");
+    const acpCalls = () => jsonl(acpRpcPath);
     const bot = async (name: string, section: string) => (await cli("new-bot", "--name", name, "--section", section)).bot;
     const chief = await bot("Clive", "Leadership");
     const lead = await bot("Engineering lead", "Engineering");
@@ -109,7 +113,7 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
     const messages = async (threadId = thread) => (await api(`/api/threads/${threadId}/messages`)).messages;
     const nodes = () => readHandoffs(dataDir);
     const root = () => nodes().filter((node: any) => !node.parentId && node.threadId === thread).at(-1);
-    const task = (threadId = thread) => JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"))
+    const task = (threadId = thread) => readRegistry(dataDir).bots
       .find((b: any) => b.id === chief.id).tasks.find((stored: any) => stored.threadId === threadId);
     const handed = (threadId = thread) => task(threadId).handedMessages;
     // A person-stopped or failed turn does not settle as "settled" for `wait`.
@@ -151,9 +155,9 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
     const open = (path: string) => writeFileSync(path, "open");
     const restart = async (edit: (bots: any[]) => void, signal: NodeJS.Signals = "SIGTERM", extraEnv: NodeJS.ProcessEnv = {}) => {
       await waitForExit(restarted ?? session.child, { signal });
-      const bots = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"));
+      const bots = readRegistry(dataDir).bots;
       edit(bots);
-      writeFileSync(join(dataDir, "bots.json"), JSON.stringify(bots, null, 2));
+      writeRegistry(dataDir, { bots });
       const env = { ...verificationServerEnvironment(parentEnv, dataDir, Number(new URL(session.info.url).port)), ...extraEnv };
       const log = openSync(session.info.logPath, "a", 0o600);
       restarted = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))],
@@ -164,7 +168,7 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
       }, { timeout: 20_000 }).toBe(true);
     };
     await test({ session, dataDir, cli, api, chief, lead, qa, ops, plan, save, send, wait, idle, turns, prompt, messages, nodes, root, task, handed,
-      launches, nativeSession, consumed, codexLaunches, codexCalls, codexModels, selectModel, setMode, delegate, gate, holdDelegation, open, thread, useModel, restart });
+      launches, nativeSession, consumed, codexLaunches, codexCalls, codexModels, acpCalls, selectModel, setMode, delegate, gate, holdDelegation, open, thread, useModel, restart });
   } finally {
     if (restarted) await waitForExit(restarted, { signal: "SIGTERM" });
     await session.close();
@@ -189,8 +193,7 @@ it("resumes the source session and gives it each of three results exactly once, 
   const returned = f.turns().at(-1);
   const text = f.prompt(returned);
   expect(returned.resumed).toBe(true);
-  const launches = f.launches();
-  expect(launches.at(-1).resume).toBe(launches[0].sessionId);
+  expect(f.nativeSession()).toBe(f.launches()[0].sessionId);
   for (const tag of ["LEAD", "QA", "OPS"]) {
     expect(count(text, `RESULT_${tag}_START`)).toBe(1);
     expect(count(text, `RESULT_${tag}_END`)).toBe(1);
@@ -198,6 +201,39 @@ it("resumes the source session and gives it each of three results exactly once, 
   expect(text).not.toContain("ORCHID_7Q");
   expect(text).not.toMatch(/^Assistant: @/m);
 }), hostTimeout(60_000));
+
+it("keeps the source's and the teammate's engines through reports and the person's next messages", () => fixture(async (f) => {
+  await warmUp(f);
+  for (const round of [1, 2]) {
+    f.plan[f.lead.id] = { reply: `ROUND_${round}_RESULT` };
+    f.plan[f.chief.id] = f.delegate(`round-${round}`, [f.lead], `Check round ${round}`);
+    await f.send(`Have Engineering check round ${round}.`);
+    await f.wait();
+    expect(count(f.prompt(f.turns().at(-1)), `ROUND_${round}_RESULT`)).toBe(1);
+  }
+  f.plan[f.chief.id] = { reply: "Plain answer." };
+  await f.send("Just a plain question now.");
+  await f.wait();
+
+  expect(f.launches()).toHaveLength(1);
+  expect(f.launches(f.lead.id)).toHaveLength(1);
+  expect(f.consumed()).toBe(6);
+  expect(f.consumed(f.lead.id)).toBe(2);
+  expect(f.prompt(f.turns().at(-1))).not.toMatch(/ROUND_\d_RESULT/);
+}), hostTimeout(90_000));
+
+it("keeps an ACP teammate's session through two hand-offs", () => fixture(async (f) => {
+  await f.api(`/api/bots/${f.lead.id}`, { modelSelection: { instanceId: "myAgent", model: "fixture-fast" } }, "PATCH");
+  await warmUp(f);
+  for (const round of [1, 2]) {
+    f.plan[f.chief.id] = f.delegate(`round-${round}`, [f.lead], `Check round ${round}`);
+    await f.send(`Have Engineering check round ${round}.`);
+    await f.wait();
+  }
+  const sessions = f.acpCalls().filter((call: any) => ["session/new", "session/load", "session/prompt"].includes(call.method));
+  expect(sessions.map((call: any) => call.method)).toEqual(["session/new", "session/prompt", "session/prompt"]);
+  expect(new Set(sessions.map((call: any) => call.pid)).size).toBe(1);
+}, { acp: true }), hostTimeout(90_000));
 
 it("gives the return turn a result that landed while a newer message was running, exactly once", () => fixture(async (f) => {
   await warmUp(f);
@@ -214,7 +250,7 @@ it("gives the return turn a result that landed while a newer message was running
   const returned = f.turns().at(-1);
   expect(returned.resumed).toBe(true);
   expect(count(f.prompt(returned), "LEAD_RESULT_TOKEN")).toBe(1);
-  expect(f.launches().at(-1).resume).not.toBeNull();
+  expect(f.nativeSession()).toBe(f.launches()[0].sessionId);
 }), hostTimeout(60_000));
 
 it("stops the teammate with the source it worked for, so no result of it lands later or reaches a later turn", () => fixture(async (f) => {
@@ -300,16 +336,21 @@ it("offers the results again when the person stops the return turn before the pr
 
 it("rebuilds a rejected resume with each result exactly once", () => fixture(async (f) => {
   await warmUp(f);
-  f.plan[f.lead.id] = { reply: `RECOVERY_RESULT_START ${"r".repeat(900)} RECOVERY_RESULT_END` };
+  f.plan[f.lead.id] = { reply: `RECOVERY_RESULT_START ${"r".repeat(900)} RECOVERY_RESULT_END`, gateFile: f.gate("lead") };
   f.plan[f.chief.id] = f.delegate("build", [f.lead], "Build the export");
   await f.send("Please have Engineering build the export.");
+  await leadRunning(f);
+  await sourceWaiting(f);
+  await f.setMode("resume=dead-session");
+  f.open(f.gate("lead"));
   await f.wait();
+  expect(f.launches().map((launch: any) => launch.resume)).toContain(f.launches()[0].sessionId);
   const recovered = f.prompt(f.turns().at(-1));
   expect(recovered).toContain("received an update outside your provider session");
   expect(recovered).toContain("ORCHID_7Q");
   expect(count(recovered, "RECOVERY_RESULT_START")).toBe(1);
   expect(count(recovered, "RECOVERY_RESULT_END")).toBe(1);
-}, { env: { FAKE_CLAUDE_MODE: "dead-session" } }), hostTimeout(60_000));
+}), hostTimeout(60_000));
 
 it("keeps provenance and exactly-once delivery across rework rounds to the same teammate", () => fixture(async (f) => {
   await warmUp(f);
@@ -328,7 +369,7 @@ it("keeps provenance and exactly-once delivery across rework rounds to the same 
   expect(count(f.prompt(roundOne), "ROUND_ONE_RESULT")).toBe(1);
   expect(count(f.prompt(roundTwo), "ROUND_TWO_RESULT")).toBe(1);
   expect(count(f.prompt(roundTwo), "ROUND_ONE_RESULT")).toBe(1);
-  expect(f.launches().at(-1).resume).not.toBeNull();
+  expect(f.nativeSession()).toBe(f.launches()[0].sessionId);
 
   const second = f.prompt(f.turns(f.lead.id)[1]);
   expect(count(second, "REQUEST_TWO")).toBe(1);
@@ -818,7 +859,7 @@ it("gives a replacement session an earlier round's result that its rebuild could
   await expect.poll(() => f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.status).join(","), { timeout: 30_000 }).toBe("completed,running");
   await expect.poll(() => f.turns().length, { timeout: 10_000 }).toBe(3);
   await expect.poll(() => count(f.prompt(f.turns()[2]), "ROUND_ONE_RESULT_TOKEN"), { timeout: 10_000 }).toBe(1);
-  await expect.poll(() => f.launches(f.lead.id).length, { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => f.consumed(f.lead.id), { timeout: 15_000 }).toBe(2);
   for (let i = 0; i < chat; i++) {
     await sourceWaiting(f);
     expect((await f.send(`chat ${i}`)).steered).toBeUndefined();
@@ -1075,6 +1116,7 @@ it("gives a delegated return the fresh session and replay it always had when the
 
   const returned = f.turns().at(-1);
   expect(f.launches().at(-1).resume).toBeNull();
+  const replacement = f.nativeSession();
   expect(returned.system).toContain("NEW_SOUL_MARK");
   expect(f.prompt(returned)).toContain("received an update outside your provider session");
   expect(f.prompt(returned)).toContain("ORCHID_7Q");
@@ -1082,7 +1124,7 @@ it("gives a delegated return the fresh session and replay it always had when the
 
   await f.send("And now?");
   await f.wait();
-  expect(f.launches().at(-1).resume).not.toBeNull();
+  expect(f.nativeSession()).toBe(replacement);
   expect(count(f.prompt(f.turns().at(-1)), "SOUL_CHANGE_RESULT")).toBe(0);
 }), hostTimeout(90_000));
 
@@ -1233,7 +1275,7 @@ it.skipIf(process.platform === "win32")("gives a delegated return today's fresh 
   f.plan[f.chief.id] = { reply: "Nothing new" };
   await f.send("And now?");
   await f.wait();
-  expect(f.launches().at(-1).resume).toBe(Object.values(f.task().resumeCursors)[0]);
+  expect(f.nativeSession()).toBe(Object.values(f.task().resumeCursors)[0]);
   expect(count(f.prompt(f.turns().at(-1)), "SETUP_SOUL_RESULT")).toBe(0);
 }), hostTimeout(90_000));
 

@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
 
 describe("organizational folders through an isolated HTTP fixture", () => {
   let fixture: VerificationServer;
@@ -58,7 +59,8 @@ describe("organizational folders through an isolated HTTP fixture", () => {
     expect((await api("PATCH", `/api/bots/${bot.id}/tasks/${first.threadId}`, { modelSelection: selection(models[1]) })).status).toBe(200);
     expect(first.cwd).toBeUndefined();
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { threadId: first.threadId, text: "Keep this project's conversation" })).status).toBe(202);
-    await expect.poll(() => existsSync(join(fixture.info.dataDir, "fake-claude-dump.json"))).toBe(true);
+    // A cold engine start on a loaded Windows runner takes longer than expect.poll's default second.
+    await expect.poll(() => existsSync(join(fixture.info.dataDir, "fake-claude-dump.json")), { timeout: hostTimeout(15_000) }).toBe(true);
     expect((await getBot(bot.id)).tasks.find((task: any) => task.threadId === first.threadId).busy).toBe(true);
     expect((await api("PATCH", `/api/bots/${bot.id}/projects/${projectId}`, { name: "Site" })).status).toBe(200);
     const moved = await api("PATCH", `/api/bots/${bot.id}/tasks/${first.threadId}`, { projectId: other.id });
@@ -78,7 +80,7 @@ describe("organizational folders through an isolated HTTP fixture", () => {
     expect(next.cwd).toBeUndefined();
     expect((await api("PATCH", `/api/bots/${bot.id}/projects/${projectId}`, { modelSelection: null })).status).toBe(400);
     expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: first.threadId })).status).toBe(200);
-    await expect.poll(async () => (await getBot(bot.id)).busy).toBe(false);
+    await expect.poll(async () => (await getBot(bot.id)).busy, { timeout: hostTimeout(15_000) }).toBe(false);
     expect((await getBot(bot.id)).tasks.some((task: any) => task.threadId === originalThread)).toBe(true);
   });
 

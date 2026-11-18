@@ -25,6 +25,10 @@ export const loopGuardConfigSchema = z.object({
   steerAt: count.optional(),
   /** Identical failures in a row before the turn is stopped; unset never stops. OMB_LOOP_GUARD_STOP_AT wins; null clears. */
   stopAt: count.nullable().optional(),
+  /** For a turn nobody is watching the guard is on whatever `enabled` says, unless this is false. */
+  unattended: z.boolean().optional(),
+  /** Identical failures in a row before such a turn is stopped; 20 when unset. OMB_LOOP_GUARD_UNATTENDED_STOP_AT wins. */
+  unattendedStopAt: count.optional(),
   /** For bots on API models: times a turn that answers after a failed tool call is sent back to re-run it; 0 when unset. */
   correctiveRounds: z.number().int().min(0).max(MAX_CORRECTIVE_ROUNDS).optional(),
 }).strict();
@@ -39,11 +43,24 @@ export interface LoopGuardSettings {
 
 export const DEFAULT_STEER_AT = 5;
 
-/** Off by default: it speaks into a running turn. OMB_LOOP_GUARD_STOP_AT never switches the guard on by itself. */
-export function loopGuardSettings(cfg: { loopGuard?: LoopGuardConfig }, env: NodeJS.ProcessEnv = process.env): LoopGuardSettings {
-  const fromEnv = env.OMB_LOOP_GUARD_STOP_AT?.trim();
-  const parsed = fromEnv ? Number(fromEnv) : NaN;
-  const stopAt = Number.isInteger(parsed) && parsed >= COUNT_MIN && parsed <= COUNT_MAX ? parsed : cfg.loopGuard?.stopAt ?? undefined;
+export const DEFAULT_UNATTENDED_STOP_AT = 20;
+
+const countFrom = (raw: string | undefined): number | undefined => {
+  const parsed = raw?.trim() ? Number(raw.trim()) : NaN;
+  return Number.isInteger(parsed) && parsed >= COUNT_MIN && parsed <= COUNT_MAX ? parsed : undefined;
+};
+
+/** For a turn a person is waiting on, off by default: it speaks into a running turn, and OMB_LOOP_GUARD_STOP_AT never
+ * switches it on by itself. For a turn nobody is watching (`unattended`) it is on and stops the turn at
+ * `unattendedStopAt`, or at `stopAt` when that is the lower; `off` in OMB_LOOP_GUARD_UNATTENDED_STOP_AT, or
+ * `unattended: false` in config.json, leaves such a turn to the same settings as any other. */
+export function loopGuardSettings(cfg: { loopGuard?: LoopGuardConfig }, env: NodeJS.ProcessEnv = process.env, unattended = false): LoopGuardSettings {
+  const stopAt = countFrom(env.OMB_LOOP_GUARD_STOP_AT) ?? cfg.loopGuard?.stopAt ?? undefined;
+  const envUnattended = env.OMB_LOOP_GUARD_UNATTENDED_STOP_AT?.trim().toLowerCase();
+  const own = countFrom(envUnattended) ?? cfg.loopGuard?.unattendedStopAt ?? DEFAULT_UNATTENDED_STOP_AT;
+  if (unattended && envUnattended !== "off" && cfg.loopGuard?.unattended !== false) {
+    return { enabled: true, steerAt: cfg.loopGuard?.steerAt ?? DEFAULT_STEER_AT, stopAt: Math.min(own, stopAt ?? own) };
+  }
   return {
     enabled: env.OMB_LOOP_GUARD === "1" || cfg.loopGuard?.enabled === true,
     steerAt: cfg.loopGuard?.steerAt ?? DEFAULT_STEER_AT,
@@ -60,7 +77,7 @@ type ActivityTool = { name: string; ok: false };
 
 export interface LoopGuardDeps {
   /** Read on every tool start and completion, so a change reaches a running turn. */
-  settings(): LoopGuardSettings;
+  settings(threadId: string): LoopGuardSettings;
   append(threadId: string, tool: ActivityTool): void;
   /** Necessary for any action: the guard must never speak into or stop a conversation that is not working. */
   live(threadId: string): boolean;
@@ -220,7 +237,7 @@ export function createLoopGuard(deps: LoopGuardDeps): LoopGuard {
     }
 
     if ((event.type !== "item.started" && event.type !== "item.completed") || event.itemType !== "tool") return;
-    const settings = deps.settings();
+    const settings = deps.settings(threadId);
     // Nothing is tracked while off, so a streak never spans commands the guard did not see.
     if (!settings.enabled) return streaks.settle(threadId);
     if (event.turnId !== undefined && turnOf.get(threadId) !== event.turnId) {

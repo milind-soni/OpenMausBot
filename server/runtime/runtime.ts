@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { redactSecretsInText } from "../../shared/redact.ts";
 
+import { hostFaultOf, retryCannotFix } from "../host-fault.ts";
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
@@ -17,7 +18,19 @@ export interface RuntimeOptions {
   limits?: Partial<Limits>;
   level?: typeof assignmentLevel;
   log?: (line: string) => void;
+  /** Turns a restart cut start again at most one per this many ms (default RERUN_GAP_MS). */
+  rerunGapMs?: number;
 }
+
+/** After a restart, the first RERUN_BURST turns it cut start again at once and the rest one at a time this far apart: a
+ * server that fell under the load of many turns does not meet it again in its first second, and a fall during the
+ * reruns cuts only those already started (a turn cut twice fails; one still waiting here was not cut again). Of 34 cut
+ * turns, the last starts 15 s after the first. */
+export const RERUN_GAP_MS = 500;
+export const RERUN_BURST = 4;
+export const RERUN_HELD = "waiting its turn to start again after the restart";
+/** A cut turn is not run again once newer work in its conversation started first: it would answer out of order. */
+export const RERUN_SUPERSEDED = "cut by a restart; newer work in this conversation started before it could run again, so it was not run again";
 
 export interface BeginRequest {
   /** The host's own id for the requesting turn (its generation); default a fresh uuid. */
@@ -39,6 +52,8 @@ const BRIEF_MAX = 12_000;
 const RESULT_MAX = 12_000;
 const STOPPED_WITH_REQUEST = "Stopped with the request it was for";
 const DETAIL_MAX = 400;
+/** progress() runs once per runtime event; lastActivityAt catches up at this cadence, not per event. */
+export const PROGRESS_WRITE_MS = 10_000;
 
 const defaultClock: Clock = { now: () => Date.now(), monotonic: () => performance.now() };
 
@@ -47,6 +62,10 @@ const defaultClock: Clock = { now: () => Date.now(), monotonic: () => performanc
 interface LiveTurn { controller: AbortController; rootId: string; activeAt: number; interruption: boolean; carried: ReadonlySet<string> }
 
 type TerminalStatus = "completed" | "failed" | "cancelled";
+
+/** Work nobody is waiting on (a routine's, a webhook's): the caps that only failures in a row or a total can end apply to
+ * it alone. A person's request always gets its requester's turn to react. */
+const unattendedRoot = (root: Assignment | undefined): boolean => root !== undefined && root.origin.kind !== "person";
 
 export class Runtime {
   readonly limits: Limits;
@@ -65,6 +84,10 @@ export class Runtime {
   private readonly reportDue = new Set<string>();
   private batch: Map<string, Assignment> | null = null;
   private lastThrew = false;
+  private readonly rerunGapMs: number;
+  /** Monotonic: no turn a restart cut starts before this. */
+  private nextRerunAt = Number.NEGATIVE_INFINITY;
+  private rerunsStarted = 0;
 
   constructor(store: RuntimeStore, runner: TurnRunner, options: RuntimeOptions = {}) {
     this.store = store;
@@ -74,6 +97,7 @@ export class Runtime {
     this.level = options.level ?? assignmentLevel;
     this.log = options.log ?? (line => console.error("runtime:", line));
     this.bootAt = this.clock.now();
+    this.rerunGapMs = options.rerunGapMs ?? RERUN_GAP_MS;
   }
 
   /** Restart reconciliation and re-park of needs_input, from stored data only. Idempotent; runs before the first tick. */
@@ -133,7 +157,7 @@ export class Runtime {
       id, rootId: id, depth: 0, origin: req.origin, requester: req.requester, assignee: req.assignee,
       mode: "work", reply: req.reply ?? "resume", brief: clip(req.brief, BRIEF_MAX), status: "running",
       level: req.level, levelSource: "own", executions: 1, restarts: 0, createdAt: now, startedAt: now, lastActivityAt: now,
-      result: "", rework: false, budgets: { since: now, requests: 0, executions: 1, wakes: 0 }, version: 1,
+      result: "", rework: false, budgets: { since: now, requests: 0, executions: 1, wakes: 0, total: 1 }, version: 1,
       ...(req.goalRunId ? { goalRunId: req.goalRunId } : {}),
     };
     this.store.transaction(() => {
@@ -206,6 +230,10 @@ export class Runtime {
       if (existing && !(req.rework && isTerminal(existing))) return { ok: true, assignment: existing, duplicate: true };
       if (parent.depth + 1 > this.limits.depth) return refuse(`Assignment depth limit reached (${this.limits.depth})`);
       sameCall = req.fanOut !== undefined && siblings.some(c => c.fanOut === req.fanOut);
+      if (!sameCall && unattendedRoot(root) && root?.budgets && (root.budgets.total ?? 0) >= this.limits.totalExecutions) {
+        this.store.update(root, { kind: "budget", at: now, detail: `turns: ${root.budgets.total} in all` });
+        return refuse(`Request budget exhausted: ${this.limits.totalExecutions} turns in all`, "budget");
+      }
       if (!sameCall && root?.budgets && root.budgets.requests + 1 > this.limits.requests) {
         this.store.update(root, { kind: "budget", at: now, detail: `requests: ${root.budgets.requests} since last progress` });
         return refuse(`Request budget exhausted: ${this.limits.requests} requests without progress`, "budget");
@@ -238,9 +266,10 @@ export class Runtime {
    * assignment, a report to send); "parked" while live assignments only wait on a person, a teammate or a time limit. */
   pace(): "busy" | "parked" | "idle" {
     if (!this.opened) this.open();
-    if (this.turns.size > 0 || this.reportDue.size > 0) return "busy";
+    if (this.reportDue.size > 0) return "busy";
     const live = this.store.all({ nonTerminal: true });
-    if (live.some(n => n.status === "queued" || n.status === "resume" || n.status === "running")) return "busy";
+    if (live.some(n => n.status === "resume" || ((n.status === "queued" || n.status === "running") && !this.away(n)))) return "busy";
+    if ([...this.turns.keys()].some(id => !live.some(n => n.id === id))) return "busy";
     return live.length > 0 ? "parked" : "idle";
   }
 
@@ -256,21 +285,42 @@ export class Runtime {
     }
   }
 
+  /** When each node was last seen held for a place that could not be reached, queued for it or running there, or first
+   * seen with that place back: no window counts time up to then. */
+  private readonly heldAway = new Map<string, number>();
+  /** The nodes whose place was away when last asked. */
+  private readonly awayNow = new Set<string>();
+
+  private away(n: Assignment): boolean {
+    if ((n.status !== "queued" && n.status !== "running") || this.runner.away === undefined) return false;
+    if (this.safe("away", () => this.runner.away!(n)) !== true) {
+      // The place is back: its windows start when that is first seen, not when it was last seen away. However long this
+      // look took to come (a slow disk, a busy host), the node is not expired by the look that finds its place again.
+      if (this.awayNow.delete(n.id)) this.heldAway.set(n.id, this.clock.now());
+      return false;
+    }
+    this.heldAway.set(n.id, this.clock.now());
+    this.awayNow.add(n.id);
+    return true;
+  }
+
   private tickBody(): void {
     const now = this.clock.now();
     const mono = this.clock.monotonic();
     const live = this.store.all({ nonTerminal: true });
+    if (this.heldAway.size > 0) { const ids = new Set(live.map(n => n.id)); for (const id of this.heldAway.keys()) if (!ids.has(id)) { this.heldAway.delete(id); this.awayNow.delete(id); } }
     // Deepest first, so each node fails with its own reason.
     for (const snapshot of [...live].sort((a, b) => b.depth - a.depth)) {
       const n = this.store.get(snapshot.id);
       if (!n || isTerminal(n)) continue;
-      if (n.status === "queued" && !n.continuation && now - this.since(n.lastActivityAt) > this.limits.queueMs) {
+      if (n.status === "queued" && !n.continuation && !this.away(n) && now - Math.max(this.since(n.lastActivityAt), this.heldAway.get(n.id) ?? 0) > this.limits.queueMs) {
         this.cancelTree(n, n.executions > 0 ? "not resumed" : "never started", "failed", "expired");
       } else if (n.status === "needs_input" && this.inputExpires(n)) {
         this.chaseParked(n, now);
       } else if (n.status === "running") {
         const turn = this.turns.get(n.id);
-        if (turn && mono - turn.activeAt > this.limits.turnStallMs) {
+        if (turn && this.away(n)) turn.activeAt = mono;
+        else if (turn && mono - turn.activeAt > this.limits.turnStallMs) {
           this.cancelTree(n, `no activity for ${duration(this.limits.turnStallMs)}`, "failed", "stalled");
         }
       }
@@ -290,7 +340,8 @@ export class Runtime {
       const anchor = Math.max(this.since(root.lastActivityAt), this.rootActivity.get(rootId) ?? 0);
       if (now - anchor <= this.limits.stallMs) continue;
       const tree = this.store.all({ rootId });
-      if (tree.some(n => n.status === "needs_input" || (n.status === "queued" && n.continuation !== undefined))) continue;
+      if (tree.some(n => n.status === "needs_input" || (n.status === "queued" && (n.continuation !== undefined || this.away(n))) || (n.status === "running" && this.away(n)))) continue;
+      if (now - Math.max(anchor, ...tree.map(n => this.heldAway.get(n.id) ?? 0)) <= this.limits.stallMs) continue;
       this.store.update(root, { kind: "stalled", at: now, detail: `no progress for ${duration(now - anchor)}` });
       this.cancelTree(root, `no progress for ${duration(this.limits.stallMs)}`, "failed", "stalled");
     }
@@ -330,14 +381,22 @@ export class Runtime {
         continue;
       }
       const thread = n.assignee.destination.threadId;
+      if (n.restart === "rerun" && this.newerWorkIn(thread, n)) { this.cancelTree(n, RERUN_SUPERSEDED, "failed", "interrupted"); continue; }
       // Same-conversation turns never overlap; same-room speakers take turns.
       if (busyThreads.has(thread)) { this.heldBehindTurn(n, "an earlier turn in its conversation is running"); continue; }
       const parent = n.parentId ? this.store.get(n.parentId) : undefined;
       const group = n.assignee.destination.groupId;
       if (parent?.status === "running" && group !== undefined && parent.assignee.destination.groupId === group) { this.heldBehindTurn(n, "its requester's turn in the room is running"); continue; }
+      const rerun = n.restart === "rerun";
+      if (rerun && this.clock.monotonic() < this.nextRerunAt) { this.held(n.id, RERUN_HELD); busyThreads.add(thread); continue; }
       const resumed = n.status === "resume";
+      const root = n.parentId ? this.store.get(n.rootId) : n;
+      // The root's own resume is let through: it wraps up what came back, and can start nothing more.
+      if (unattendedRoot(root) && !(resumed && root?.id === n.id) && root?.budgets && (root.budgets.total ?? 0) + 1 > this.limits.totalExecutions) {
+        this.cancelTree(root, `${this.limits.totalExecutions} turns in all, the most one request may take`, "failed", "budget");
+        continue;
+      }
       if (!resumed) {
-        const root = n.parentId ? this.store.get(n.rootId) : n;
         if (root?.budgets && root.budgets.executions + 1 > this.limits.executions) {
           this.cancelTree(n, `${this.limits.executions} turns without progress`, "failed", "budget");
           continue;
@@ -351,8 +410,15 @@ export class Runtime {
         if (typeof can === "string") this.held(n.id, can);
         continue;
       }
-      if (this.dispatch(n, parent, resumed)) busyThreads.add(thread);
+      if (!this.dispatch(n, parent, resumed)) continue;
+      busyThreads.add(thread);
+      if (rerun && ++this.rerunsStarted >= RERUN_BURST) this.nextRerunAt = this.clock.monotonic() + this.rerunGapMs;
     }
+  }
+
+  /** Work in this conversation from another request, begun since this start. */
+  private newerWorkIn(threadId: string, n: Assignment): boolean {
+    return this.store.all({ assigneeThreadId: threadId }).some(other => other.rootId !== n.rootId && other.createdAt >= this.bootAt);
   }
 
   private dispatch(n: Assignment, parent: Assignment | undefined, resumed: boolean): boolean {
@@ -399,7 +465,7 @@ export class Runtime {
     delete n.continuation; delete n.cards;
     if (carrying.length) n.carrying = carrying; else delete n.carrying;
     if (root.id !== n.id) root.lastActivityAt = now;
-    if (root.budgets) root.budgets.executions += 1;
+    if (root.budgets) { root.budgets.executions += 1; root.budgets.total = (root.budgets.total ?? 0) + 1; }
     try {
       this.store.transaction(() => {
         this.store.update(n, { kind: "admitted", at: now, detail: "admitted" });
@@ -427,7 +493,7 @@ export class Runtime {
       result => this.turnEnded(n.id, live, result),
       error => {
         this.log(`run(${n.id}) threw: ${String(error)}`);
-        this.turnEnded(n.id, live, { kind: "failed", outcome: "provider_error", text: clip(String(error), 1000) });
+        this.turnEnded(n.id, live, { kind: "failed", outcome: "provider_error", text: clip(String(error), 1000), failure: { text: clip(String(error), 1000) } });
       },
     ).finally(() => { if (this.turns.get(n.id) === live) this.turns.delete(n.id); });
     return true;
@@ -506,7 +572,8 @@ export class Runtime {
     const outstanding = unseen || kids.some(c => !isTerminal(c)) || awaited(childrenSince(this.store, n)).length > 0;
     if (outstanding) {
       n.status = "waiting"; n.lastActivityAt = now;
-      if (root) this.renew(root, now);
+      if (root && unattendedRoot(root)) root.lastActivityAt = now;
+      else if (root) this.renew(root, now);
       this.store.transaction(() => {
         this.store.update(n, { kind: "waiting", at: now, detail: result.kind === "failed" ? `waiting: turn ${result.outcome}` : "waiting" });
         if (root && root.id !== n.id) this.store.update(root);
@@ -515,6 +582,8 @@ export class Runtime {
       return;
     }
     const ownTurn = !n.parentId;
+    const fault = result.kind === "failed" && result.failure ? hostFaultOf(result.failure.text, result.failure.stopReason) : null;
+    if (fault && retryCannotFix(fault)) n.fault = fault;
     if (result.kind === "completed") this.settle(n, "completed", "done", undefined, ownTurn);
     else this.settle(n, "failed", result.outcome, undefined, ownTurn);
   }
@@ -533,16 +602,32 @@ export class Runtime {
     this.store.update(n, { kind: "held", at: this.clock.now(), detail: clip(why, DETAIL_MAX) });
   }
 
-  /** The host saw activity on this running turn: its stall window restarts. */
+  /** The host saw activity on this running turn: its stall window restarts, and lastActivityAt
+   * catches up on the PROGRESS_WRITE_MS cadence so the stored row reads as live, not frozen at dispatch. */
   progress(id: string): void {
+    const now = this.clock.now();
     const turn = this.turns.get(id);
     if (turn) {
       turn.activeAt = this.clock.monotonic();
-      this.rootActivity.set(turn.rootId, this.clock.now());
-      return;
+      this.rootActivity.set(turn.rootId, now);
     }
-    const n = this.store.get(id);
-    if (n?.status === "running") this.rootActivity.set(n.rootId, this.clock.now());
+    try {
+      const n = this.store.get(id);
+      if (!turn && n?.status === "running") this.rootActivity.set(n.rootId, now);
+      if (!n || n.status !== "running" || now - n.lastActivityAt < PROGRESS_WRITE_MS) return;
+      n.lastActivityAt = now;
+      const root = n.rootId === n.id ? undefined : this.store.get(n.rootId);
+      this.store.transaction(() => {
+        this.store.update(n);
+        if (root && !isTerminal(root) && now - root.lastActivityAt >= PROGRESS_WRITE_MS) {
+          root.lastActivityAt = now;
+          this.store.update(root);
+        }
+      });
+    } catch (error) {
+      // Bookkeeping only: a failed read or stamp never ends the turn or the caller that reported progress.
+      this.log(`progress(${id}) failed: ${String(error)}`);
+    }
   }
 
   /** A parked question is answered, by the person unless `by` says otherwise; the next turn carries it. */
@@ -665,12 +750,20 @@ export class Runtime {
     if (detail !== undefined) n.outcomeDetail = clip(detail, DETAIL_MAX); else delete n.outcomeDetail;
     if (status !== "completed" && detail !== undefined && n.result === "") n.result = clip(detail, RESULT_MAX);
     if (outcome === "refused" && detail !== undefined) { n.result = clip(detail, RESULT_MAX); delete n.evidence; }
+    if (outcome === "budget" && detail !== undefined && detail !== STOPPED_WITH_REQUEST) n.result = clip(detail, RESULT_MAX);
     delete n.question; delete n.decide; delete n.answer; delete n.answeredBy; delete n.restart; delete n.carrying;
     const kind: EventKind = status === "cancelled" ? "cancelled" : outcome === "refused" ? "refused" : "settled";
     const root = n.parentId ? this.store.get(n.rootId) : n;
     this.store.transaction(() => {
       this.store.update(n, { kind, at: now, detail: `${status}: ${outcome}${detail ? ` — ${clip(detail, DETAIL_MAX)}` : ""}` });
-      if (root && root.id !== n.id && !isTerminal(root)) { this.renew(root, now); this.store.update(root); }
+      if (root && root.id !== n.id && !isTerminal(root)) {
+        if (status === "completed" || !unattendedRoot(root)) this.renew(root, now);
+        else {
+          root.lastActivityAt = now;
+          if (status === "failed" && outcome !== "budget" && outcome !== "stopped" && detail !== STOPPED_WITH_REQUEST && root.budgets) root.budgets.failed = (root.budgets.failed ?? 0) + 1;
+        }
+        this.store.update(root);
+      }
     });
     this.turns.get(n.id)?.controller.abort();
     this.turns.delete(n.id);
@@ -678,6 +771,11 @@ export class Runtime {
     if (root?.id === n.id) this.rootActivity.delete(n.id);
     this.touch(n, ...root && root.id !== n.id ? [root] : []);
     this.report(n, ownTurn);
+    const failed = root && root.id !== n.id ? this.store.get(root.id)?.budgets?.failed ?? 0 : 0;
+    if (failed >= this.limits.failedInARow) {
+      const last = n.outcomeDetail ?? n.result;
+      this.cancelTree(this.store.get(root!.id)!, `${failed} hand-offs in a row failed, so this request was stopped${last ? `. The last one: ${clip(last, DETAIL_MAX / 2)}` : ""}`, "failed", "budget");
+    }
   }
 
   private report(n: Assignment, ownTurn: boolean): void {
@@ -721,7 +819,7 @@ export class Runtime {
 
   private renew(root: Assignment, now: number): void {
     root.lastActivityAt = now;
-    if (root.budgets) root.budgets = { since: now, requests: 0, executions: 0, wakes: 0 };
+    if (root.budgets) root.budgets = { since: now, requests: 0, executions: 0, wakes: 0, ...(root.budgets.total === undefined ? {} : { total: root.budgets.total }) };
   }
 
   private since(at: number): number {

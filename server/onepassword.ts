@@ -5,6 +5,7 @@
 import type { LoginBots, LoginPlace, LoginSummary, OnePasswordItemRef, OnePasswordStatus, OnePasswordVault } from "../shared/logins.ts";
 import { loginSite, normalizeLoginHost } from "../shared/logins.ts";
 import { parseTotpKey } from "./totp.ts";
+import type { LinkedSecret } from "../shared/vault.ts";
 import type { LinkedItem, LinkedValue, VaultProvider } from "./vault/providers.ts";
 
 export interface OnePasswordItemFields {
@@ -57,10 +58,9 @@ const FIELDS_MAX = 20;
  * password, a Secure Note's text, or else its first concealed field, or else its first field. */
 export function secretFields(category: string, content: OnePasswordItemContent): Map<string, string> {
   const values = new Map<string, string>();
-  const usable = content.fields.filter((field) => field.value && (field.fieldType === "Concealed" || field.fieldType === "Text"));
+  const usable = usableFields(content);
   const note = category === "SecureNote" ? content.notes : undefined;
-  const main = note ? undefined
-    : usable.find((field) => field.id === MAIN_FIELD[category]) ?? usable.find((field) => field.fieldType === "Concealed") ?? usable[0];
+  const main = secretMain(category, content);
   const mainValue = note || main?.value;
   if (mainValue) values.set("", mainValue);
   for (const field of usable) {
@@ -70,14 +70,28 @@ export function secretFields(category: string, content: OnePasswordItemContent):
   return values;
 }
 
+const usableFields = (content: OnePasswordItemContent) =>
+  content.fields.filter((field) => field.value && (field.fieldType === "Concealed" || field.fieldType === "Text"));
+
+/** The field a secret item's name alone reads: none for a Secure Note with text, which its text is. */
+function secretMain(category: string, content: OnePasswordItemContent): SdkField | undefined {
+  if (category === "SecureNote" && content.notes) return undefined;
+  const usable = usableFields(content);
+  return usable.find((field) => field.id === MAIN_FIELD[category]) ?? usable.find((field) => field.fieldType === "Concealed") ?? usable[0];
+}
+
+/** Security: a Login's username and password are never among these, so no name or reference reaches them as a secret. */
+function loginExtras(content: OnePasswordItemContent): { extra: SdkField[]; main: SdkField | undefined } {
+  const { username, password } = loginFieldsOf(content.fields);
+  const extra = usableFields(content).filter((field) => field !== username && field !== password && field.title.trim());
+  return { extra, main: extra.find((field) => field.fieldType === "Concealed") ?? extra[0] };
+}
+
 /** A Login item's own extra fields, such as a client ID and secret, by title, never its username, password or one-time
  * code; "" is the first concealed one, or else the first, so the item's name alone reads it too. */
 export function loginExtraFields(content: OnePasswordItemContent): Map<string, string> {
-  const { username, password } = loginFieldsOf(content.fields);
-  const extra = content.fields.filter((field) => field !== username && field !== password
-    && field.value && field.title.trim() && (field.fieldType === "Concealed" || field.fieldType === "Text"));
+  const { extra, main } = loginExtras(content);
   const values = new Map<string, string>();
-  const main = extra.find((field) => field.fieldType === "Concealed") ?? extra[0];
   if (main) values.set("", main.value);
   for (const field of extra) if (!values.has(field.title.trim()) && values.size <= FIELDS_MAX) values.set(field.title.trim(), field.value);
   return values;
@@ -86,6 +100,19 @@ export function loginExtraFields(content: OnePasswordItemContent): Map<string, s
 /** What a bot may read from an item as a secret: a Login's extra fields, or a secret item's fields. */
 function secretValues(category: string, content: OnePasswordItemContent): Map<string, string> {
   return category === "Login" ? loginExtraFields(content) : secretFields(category, content);
+}
+
+/** The title of the field an item's name alone reads, which a reference may also name. */
+function mainTitle(category: string, content: OnePasswordItemContent): string | undefined {
+  return (category === "Login" ? loginExtras(content).main : secretMain(category, content))?.title.trim() || undefined;
+}
+
+/** A 1Password secret reference, `op://<vault>/<item>[/<section>]/<field>`, by name or id; null for anything else,
+ * such as one with a query (`?attribute=otp`). */
+export function parseOnePasswordReference(reference: string): { vault: string; item: string; field?: string } | null {
+  const match = /^op:\/\/([^/?]+)\/([^/?]+)(?:\/(?:[^/?]+\/)?([^/?]+))?$/u.exec(reference.trim());
+  if (!match) return null;
+  return { vault: match[1]!, item: match[2]!, ...(match[3] ? { field: match[3] } : {}) };
 }
 
 /** The SDK did not load: a fault in this installation, never in the person's token, which was not even checked. */
@@ -133,10 +160,12 @@ interface Entry extends LoginPlace {
 interface SecretEntry {
   id: string;
   vaultId: string;
+  vault: string;
   itemId: string;
   category: string;
   name: string;
   fields: string[];
+  main?: string;
 }
 
 const isLogin = (item: { category: string; urls: string[] }) => item.category === "Login" && item.urls.length > 0;
@@ -167,16 +196,31 @@ function bySite(hosts: Iterable<string>): Map<string, string[]> {
 export const ONE_PASSWORD_MALFORMED = "That is not a whole 1Password service account token. Copy all of it (it starts with ops_ and is very long), or make a new one in 1Password under Developer → Service accounts.";
 export const ONE_PASSWORD_REFUSED = "1Password did not accept the token: it may have been revoked, expired, or lost access to its vault. Make a new service account token in 1Password and paste it here.";
 
+const ONE_PASSWORD_LIMITED = "1Password is limiting requests right now. Try again in a few minutes.";
+const ONE_PASSWORD_UNREACHABLE = "Could not reach 1Password. Check the internet connection and try again.";
+const ONE_PASSWORD_UNREADABLE = "1Password could not be read. Try again, or connect it again with a new token.";
+
 /** Words for the person, never the token. A fault of this installation is never blamed on the token. */
 export function onePasswordProblem(error: unknown): string {
   if (error instanceof OnePasswordUnavailableError) return error.message;
   const name = error instanceof Error ? error.name : "";
   const text = error instanceof Error ? error.message : String(error);
-  if (name === "RateLimitExceededError" || /rate limit/iu.test(text)) return "1Password is limiting requests right now. Try again in a few minutes.";
+  if (name === "RateLimitExceededError" || /rate limit/iu.test(text)) return ONE_PASSWORD_LIMITED;
   if (/invalid format|deserializ/iu.test(text)) return ONE_PASSWORD_MALFORMED;
   if (name === "AuthExpiredError" || /invalid|unauthori[sz]ed|authenticat|service account token|forbidden|\b40[13]\b/iu.test(text)) return ONE_PASSWORD_REFUSED;
-  if (/fetch|network|ENOTFOUND|ECONN|timed? ?out|dns/iu.test(text)) return "Could not reach 1Password. Check the internet connection and try again.";
-  return "1Password could not be read. Try again, or connect it again with a new token.";
+  if (/fetch|network|ENOTFOUND|ECONN|timed? ?out|dns/iu.test(text)) return ONE_PASSWORD_UNREACHABLE;
+  return ONE_PASSWORD_UNREADABLE;
+}
+
+/** Why 1Password is not working, as a fixed class for the Admin's report: never the words, which may grow. */
+export type VaultProviderFailure = "refused" | "rate-limited" | "cant-connect" | "unavailable" | "unreadable";
+
+export function onePasswordFailure(problem: string): VaultProviderFailure {
+  if (problem === ONE_PASSWORD_REFUSED || problem === ONE_PASSWORD_MALFORMED) return "refused";
+  if (problem === ONE_PASSWORD_LIMITED) return "rate-limited";
+  if (problem === ONE_PASSWORD_UNREACHABLE) return "cant-connect";
+  if (problem === new OnePasswordUnavailableError().message) return "unavailable";
+  return "unreadable";
 }
 
 export class OnePasswordLogins implements VaultProvider {
@@ -288,8 +332,9 @@ export class OnePasswordLogins implements VaultProvider {
             if (content === null) unreadable.add(onePasswordItemKey(vault.id, item.id));
             if (!content) continue;
             const fields = secretValues(item.category, content);
-            if (fields.has("")) secrets.push({ id: `${ID_PREFIX}${vault.id}:${item.id}`, vaultId: vault.id, itemId: item.id, category: item.category, name: item.title.trim() || item.category,
-              fields: [...fields.keys()].filter(Boolean) });
+            const main = mainTitle(item.category, content);
+            if (fields.has("")) secrets.push({ id: `${ID_PREFIX}${vault.id}:${item.id}`, vaultId: vault.id, vault: vault.title, itemId: item.id, category: item.category,
+              name: item.title.trim() || item.category, fields: [...fields.keys()].filter(Boolean), ...(main ? { main } : {}) });
             if (!isLogin(item)) continue;
             const found = loginFields(content.fields);
             if (!found.password) continue;
@@ -383,6 +428,23 @@ export class OnePasswordLogins implements VaultProvider {
     if (!secret || !content) return {};
     const value = secretValues(secret.category, content).get(field ?? "");
     return value ? { value } : {};
+  }
+
+  /** The secret an `op://` reference names, by vault and item title or id: null for one that names no secret, or more
+   * than one (two items of the same title), or a field the secret does not offer. */
+  resolve(reference: string): { secret: LinkedSecret; field?: string } | null {
+    const ref = this.token() ? parseOnePasswordReference(reference) : null;
+    if (!ref) return null;
+    const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+    const found = this.secrets.filter((entry) => (entry.vaultId === ref.vault || same(entry.vault, ref.vault)) && (entry.itemId === ref.item || same(entry.name, ref.item)));
+    if (found.length !== 1) return null;
+    const entry = found[0]!;
+    const secret = this.items().find((item): item is { kind: "secret" } & LinkedSecret => item.kind === "secret" && item.id === entry.id);
+    if (!secret) return null;
+    const { kind: _kind, ...listed } = secret;
+    if (!ref.field || (entry.main && same(entry.main, ref.field))) return { secret: listed };
+    const field = entry.fields.find((one) => same(one, ref.field!));
+    return field ? { secret: listed, field } : null;
   }
 
   markUsed(id: string): void {

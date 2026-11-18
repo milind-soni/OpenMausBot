@@ -6,12 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls: Array<{ path: string; init?: { method?: string; body?: string } }> = [];
 let status: unknown = null;
+let answering: unknown = null;
+let disk: unknown = null;
 let answer: unknown = { answers: true };
 vi.mock("@/state/store", async (original) => ({
   ...await original<typeof import("@/state/store")>(),
   api: vi.fn(async (path: string, init?: { method?: string; body?: string }) => {
     calls.push({ path, init });
-    return init?.method === "POST" ? answer : { recovery: status };
+    return init?.method === "POST" ? answer : { recovery: status, answering, disk };
   }),
 }));
 
@@ -23,6 +25,8 @@ let root: Root;
 beforeEach(() => {
   calls.length = 0;
   status = null;
+  answering = null;
+  disk = null;
   answer = { answers: true };
   host = document.createElement("div");
   document.body.append(host);
@@ -38,6 +42,79 @@ const render = async (always = true) => {
   await act(async () => { root.render(createElement(CloudComputerRecoveryRow, { botId: "bot-1", name: "Ada", always })); });
 };
 const button = (label: string) => [...host.querySelectorAll("button")].find((candidate) => candidate.textContent?.includes(label))!;
+
+describe("the computer's own state line", () => {
+  const line = () => host.querySelector("[data-testid=cloud-computer-answering]")?.textContent ?? null;
+
+  it("says a silent computer is not responding and since when, in Simple mode too, without asking anything", async () => {
+    const since = new Date(2026, 10, 14, 14, 5).getTime();
+    answering = { state: "not-responding", since, lastAnsweredAt: since - 60_000 };
+    await render(false);
+    expect(line()).toContain("Not responding since");
+    expect(line()).toContain(new Date(since).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }));
+    expect(host.querySelector("[role=dialog]")).toBeNull();
+  });
+
+  it("says when it is waking or restoring its disk", async () => {
+    answering = { state: "restoring", since: 1, lastAnsweredAt: null };
+    await render(false);
+    expect(line()).toBe("Restoring its disk after waking. This can take a few minutes.");
+  });
+
+  it("stays quiet about an awake computer in Simple mode, and shows its last answer in Advanced", async () => {
+    answering = { state: "awake", lastAnsweredAt: new Date(2026, 10, 14, 14, 2).getTime() };
+    await render(false);
+    expect(host.querySelector("[data-testid=cloud-computer-recovery]")).toBeNull();
+    await render(true);
+    expect(line()).toContain("Awake. It last answered at");
+  });
+
+  it("adds how full the disk is and when its caches were cleared, in Simple mode too, with nothing to press or dismiss", async () => {
+    const clearedAt = new Date(2026, 10, 14, 14, 5).getTime();
+    const time = new Date(clearedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    disk = { percent: 91, clearedAt };
+    await render(false);
+    expect(line()).toBe(`Disk 91% full. Cleared caches at ${time}.`);
+    expect(host.querySelector("[role=dialog], [role=alert], [role=alertdialog]")).toBeNull();
+    expect(host.querySelectorAll("button")).toHaveLength(2);
+  });
+
+  it("puts the disk after whether the computer answers, on the same line", async () => {
+    answering = { state: "awake", lastAnsweredAt: new Date(2026, 10, 14, 14, 2).getTime() };
+    disk = { percent: 97 };
+    await render(true);
+    expect(line()).toMatch(/^Awake\. It last answered at .+\. Disk 97% full\.$/);
+    expect(host.querySelectorAll("[data-testid=cloud-computer-answering]")).toHaveLength(1);
+  });
+
+  it("says space was cleared, in place of caches, after more than caches was removed", async () => {
+    const at = new Date(2026, 10, 14, 14, 5).getTime();
+    disk = { percent: 96, spaceClearedAt: at, clearedAt: at - 60_000 };
+    await render(false);
+    expect(line()).toBe(`Disk 96% full. Cleared space at ${new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}.`);
+    expect(host.querySelector("[role=dialog], [role=alert], [role=alertdialog]")).toBeNull();
+  });
+
+  it("shows only the cleanup once the disk has room again", async () => {
+    const clearedAt = new Date(2026, 10, 14, 14, 5).getTime();
+    disk = { percent: 62, clearedAt };
+    await render(false);
+    expect(line()).toBe(`Cleared caches at ${new Date(clearedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}.`);
+  });
+
+  it("shows nothing about a disk that is fine", async () => {
+    await render(false);
+    expect(host.querySelector("[data-testid=cloud-computer-recovery]")).toBeNull();
+  });
+
+  it("leaves the line to the recovery while MausBot is restarting the computer", async () => {
+    answering = { state: "not-responding", since: 1, lastAnsweredAt: null };
+    status = { state: "restarting", at: 2 };
+    await render(false);
+    expect(line()).toBeNull();
+    expect(host.textContent).toContain("MausBot is restarting it");
+  });
+});
 
 describe("the computer panel's recovery row", () => {
   it("shows nothing in Simple mode while the computer is fine", async () => {

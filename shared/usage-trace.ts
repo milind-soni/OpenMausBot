@@ -165,7 +165,7 @@ const BUILT_IN_ICONS: ReadonlyArray<[RegExp, TraceToolIcon]> = [
   [/^(?:(?:open|start|list|close|retry)_threads?|list_bots|list_rooms|list_room_targets|post_to_room|create_room|manage_room)$/, "bots"],
   [/^(?:phone|android|adb)(?:_[a-z_]+)?$/, "phone"],
   [/^(?:todowrite|update_plan|plan|think)$/, "plan"],
-  [/^(?:generate_image|image_generation|imagegen|create_image)$/, "image"],
+  [/^(?:generate_image|edit_image|image_generation|imagegen|create_image)$/, "image"],
 ];
 
 /** What a tool call should look like in a trace: an icon, and the app or MCP server it belongs to. */

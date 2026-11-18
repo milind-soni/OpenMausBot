@@ -1,3 +1,4 @@
+import type { SkillFile } from "../shared/skill-files.ts";
 import { parseBotPackage, type BotPackageDefinition, type BotPackagePlaybook, type BotPackageSkill, type ParsedBotPackage } from "./bot-package.ts";
 import type { DefaultsPreset, PublishedLibrary } from "./presets.ts";
 import type { PublishedTeam } from "./published-teams.ts";
@@ -10,7 +11,7 @@ import {
   decodeBase64,
   PACKAGE_FORMAT,
   PACKAGE_MAX_SKILLS,
-  PACKAGE_VERSION,
+  packageVersionFor,
   PackageFormatError,
   parsePackageDocument,
   pictureMatchesMime,
@@ -70,11 +71,14 @@ export interface ExportablePackageSkill extends Omit<BotPackageSkill, "name" | "
   name: string;
   description: string;
   enabled?: boolean;
+  /** The text files beside SKILL.md that travel with it. */
+  files?: SkillFile[];
 }
 
 function sameSkill(a: ExportablePackageSkill, b: ExportablePackageSkill): boolean {
   return a.instructions === b.instructions && a.description === b.description &&
-    a.source === b.source && a.license === b.license && a.compatibility === b.compatibility;
+    a.source === b.source && a.license === b.license && a.compatibility === b.compatibility &&
+    JSON.stringify(a.files ?? []) === JSON.stringify(b.files ?? []);
 }
 
 function assignPlaybooks(bots: readonly BotRecord[], idToKey: ReadonlyMap<string, string>) {
@@ -688,7 +692,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
   if (connections.length) definition.connections = connections;
 
   const { document: redactedDocument, redacted } = redactPackageSecrets({
-    format: PACKAGE_FORMAT, version: PACKAGE_VERSION, package: definition,
+    format: PACKAGE_FORMAT, version: packageVersionFor(definition), package: definition,
   } as PackageDocument);
   let document: PackageDocument;
   try {
@@ -797,7 +801,7 @@ export function createLibraryPackageExport(input: LibraryExportInput): LibraryEx
   };
   if (packageSkills.size) definition.skills = { version: 1, entries: [...packageSkills.values()].map((skill) => ({ ...skill })) };
   const { document: redactedDocument, redacted } = redactPackageSecrets({
-    format: PACKAGE_FORMAT, version: PACKAGE_VERSION, package: definition,
+    format: PACKAGE_FORMAT, version: packageVersionFor(definition), package: definition,
   } as PackageDocument);
   let document: PackageDocument;
   try {

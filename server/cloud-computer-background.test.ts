@@ -403,8 +403,11 @@ describe.each([
     expect(background.EXEC_LATE).toMatch(/may still be running.*do not run it again blindly.*background: true.*exec_status/s);
     server.closeAllConnections();
     hold = false;
-    syncReply = { exitCode: null, stdout: "", stderr: "", timedOut: true };
-    expect(await call("exec", { command: "sleep 600" }).done).toEqual({ isError: true, content: [{ type: "text", text: background.EXEC_LATE }] });
+    // A relay that does not forward the detached flag runs the command itself, and the provider stops it at its limit.
+    startReply = { status: 200, body: { exitCode: 143, signal: "SIGTERM", stdout: "", stderr: "", timedOut: true } };
+    const stopped = await call("exec", { command: "sleep 600" }).done;
+    expect(stopped).toEqual({ isError: true, content: [{ type: "text", text: (await import("./cloud-computer-tools.ts")).EXEC_STOPPED_AT_LIMIT }] });
+    expect((stopped as { content: Array<{ text: string }> }).content[0]!.text).toMatch(/stopped this command after 30 seconds.*no longer running.*background: true/s);
     expect(calls.filter(entry => entry.method === "POST")).toHaveLength(2);
   });
 

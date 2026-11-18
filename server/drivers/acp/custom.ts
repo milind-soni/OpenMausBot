@@ -13,7 +13,7 @@ import { hermesSteerAnswer } from "./hermes.ts";
 import { resolveCustomAcpModels } from "./custom-model-catalog.ts";
 
 const CONFIGURE_HINT =
-  'a custom ACP engine needs its command — add "config": { "cli": "<your-agent> acp" } to this instance in config.json, or use Settings → Engines → Set CLI…';
+  'a custom ACP engine needs its command — add "config": { "cli": "<your-agent> acp" } to this instance in config.json, or use Set CLI… under Settings → AI → Providers';
 
 const support: AcpSupport = {
   driverKind: "customAcp",

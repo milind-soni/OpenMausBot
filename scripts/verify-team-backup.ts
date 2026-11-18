@@ -5,6 +5,7 @@ import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
 import { request } from "./mcp-server.ts";
 import { parseTeamBackup } from "../shared/team-backup.ts";
 import { inChargeOfEvery } from "../server/peer-roster.ts";
+import { createTeamManifest } from "../server/team-manifest.ts";
 
 export async function verifyTeamBackup(report: (event: unknown) => void = () => {}) {
   const fixture = await launchVerificationServer();
@@ -61,20 +62,19 @@ export async function verifyTeamBackup(report: (event: unknown) => void = () => 
     assert.deepEqual(await request("/api/bots", {}, url), after);
     // Setup-only files must preserve the same persona, without importing
     // conversations or permissions. Exercise the real manifest import too.
-    const manifest = await post("/api/teams/export", { name: "Fixture manifest" });
-    assert.equal(manifest.team.members.find((member: { name: string }) => member.name === "Backup probe").soul, soul);
+    const listed = await request("/api/bots", {}, url) as { bots: Array<{ id: string; hidden?: boolean }> };
+    const manifest = createTeamManifest({ name: "Fixture manifest", memberIds: listed.bots.filter((each) => !each.hidden).map((each) => each.id) }, listed.bots as never);
+    await assert.rejects(post("/api/teams/export", { format: "package" }));
+    assert.equal(manifest.team.members.find((member: { name: string }) => member.name === "Backup probe")?.soul, soul);
     const fromManifest = await post("/api/teams/import?mode=add", manifest);
     assert.equal(fromManifest.bots.find((candidate: { name: string }) => candidate.name === "Backup probe 3").soul, soul);
     assert.ok(fromManifest.bots.every((candidate: { section?: string }) => candidate.section === "Fixture manifest"));
-    const packageExport = await post("/api/teams/export", { format: "package", name: "Fixture manifest" });
-    // Older library files, repeated imports, project rooms and Markdown all
+    // Older library files, repeated imports and project rooms all
     // use the same additive path. Compare EVERY existing record each time,
     // including previous imports, section Chiefs and room membership.
     for (const [index, example] of [
       { format: "legacy v1", path: "/api/teams/import?mode=add", body: { ...manifest, version: 1, team: { ...manifest.team, room: { name: "Ignored legacy room", defaultResponder: { kind: "everyone" } } } } },
       { format: "legacy v2 project", path: "/api/teams/import?mode=project&room=Template%20room", body: manifest },
-      { format: "Markdown package", path: "/api/teams/import?mode=add", body: packageExport.markdown },
-      { format: "repeated Markdown package", path: "/api/teams/import?mode=add", body: packageExport.markdown },
     ].entries()) {
       const existing = await request("/api/bots", {}, url);
       const existingDepartments = await departments();

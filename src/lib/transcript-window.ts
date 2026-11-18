@@ -63,3 +63,10 @@ export function resolveTranscriptWindow<T>(
     endIndex: end,
   };
 }
+
+/** The window's rows, with the newest card that `rests` on put back on top when the window has left it behind: work rests
+ * on that card until the person answers it, so its answer and its Not now stay on screen however long the chat grows. */
+export function withRestingCard<T>(messages: readonly T[], visible: T[], startIndex: number, rests?: (row: T) => boolean): T[] {
+  const index = rests ? messages.findLastIndex(rests) : -1;
+  return index >= 0 && index < startIndex ? [messages[index]!, ...visible] : visible;
+}

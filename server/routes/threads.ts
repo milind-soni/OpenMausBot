@@ -1,7 +1,7 @@
 import { userError } from "../user-errors.ts";
 import { basename, join } from "node:path";
 
-import type { BotsResponse, WireBot, WireGroup } from "../../shared/wire.ts";
+import type { BotsResponse, SearchResponse, WireBot, WireGroup } from "../../shared/wire.ts";
 import { NO_SUCH_BOT } from "../../shared/bot-read.ts";
 import {
   ATTACHMENTS_DIR, attachmentStorageUsage, clearAttachments, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES,
@@ -16,7 +16,7 @@ import type { Coordinator } from "../coordinator.ts";
 import type { WorkspaceAccess } from "../enterprise.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
 import { readMessage, searchMessagesAsync } from "../message-db.ts";
-import { MessageMediaLinks } from "../message-media-links.ts";
+import { cappedMediaRange, MessageMediaLinks, STREAMABLE_MEDIA_MIMES } from "../message-media-links.ts";
 import {
   listMessageFolder, MESSAGE_FILE_DOWNLOAD_MAX_BYTES, MESSAGE_FILE_MAX_BYTES, messageAttachmentName, messageFileDisposition, messageFileDownloadName, messageFolderEntryName,
   messageImageTargetAt, messageReferencesFile, openMessageFile, openMessageFolderEntry, referencedFileName,
@@ -24,6 +24,7 @@ import {
 import { resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../request-auth.ts";
 import type { queuedSteerSnapshot } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
+import { answerAsleep, backgroundWhileAsleep } from "../cloud-power.ts";
 import { createJobRoutes } from "./jobs.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
@@ -73,9 +74,6 @@ export interface ThreadRouteDeps {
   keptAttachments?(): ReadonlySet<string> | null;
 }
 
-/** The types the chat's video player accepts; anything else is never streamed inline. */
-const STREAMABLE_VIDEO_MIMES = new Set(["video/mp4", "video/webm", "video/quicktime", "video/x-m4v"]);
-
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
   const {
     store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
@@ -102,6 +100,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     const companionMutationToken = deps.companionMutationToken();
     const cliOwnerToken = deps.cliOwnerToken();
     if (method === "GET" && path === "/api/bots") {
+      if (backgroundWhileAsleep(path, req.headers)) return answerAsleep(res, json);
       try { groupUsageReader.refresh(); } catch { }
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
@@ -124,6 +123,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
             return [bot.id, { held: snapshot.held, helpReason: snapshot.helpReason, ...(snapshot.help ? { help: snapshot.help } : {}) }];
           }),
         ),
+        together: { newBot: true },
       } satisfies BotsResponse<MessagePage["messages"][number]>);
     }
 
@@ -269,7 +269,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         const name = message.role === "bot" && !botAttachment && !folderEntry && (code === "outside_workspace" || status === 404)
           ? referencedFileName(href)
           : null;
-        const copy = name ? deliveredCopy(store.messagesFor(threadId), message, name) : null;
+        const copy = name ? deliveredCopy(store.messagesFor(threadId), message, name, href) : null;
         if (copy) {
           file = await openMessageFile(copy.path, [ATTACHMENTS_DIR], maxBytes);
           downloadName = copy.name;
@@ -286,9 +286,9 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         await file.handle.close();
         return json(res, 415, { error: "only images can be previewed here" });
       }
-      if ((asksMediaLink || mediaGrant) && !STREAMABLE_VIDEO_MIMES.has(file.mime)) {
+      if ((asksMediaLink || mediaGrant) && !STREAMABLE_MEDIA_MIMES.has(file.mime)) {
         await file.handle.close();
-        return json(res, 415, { error: "only videos can be played here" });
+        return json(res, 415, { error: "only videos and audio can be played here" });
       }
       if (asksMediaLink) {
         await file.handle.close();
@@ -299,7 +299,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       }
       const inline = streamsMessageImage || Boolean(mediaGrant);
       const rawRange = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
-      const range = mediaGrant ? parseAudioRange(rawRange, file.bytes) : { kind: "none" as const };
+      // Without a Range header (Save As) the whole file streams; a player's range never ties up more than one chunk.
+      const range = mediaGrant ? cappedMediaRange(parseAudioRange(rawRange, file.bytes)) : { kind: "none" as const };
       if (range.kind === "unsatisfiable") {
         await file.handle.close();
         res.writeHead(416, { "content-range": `bytes */${file.bytes}`, "cache-control": "private, no-store", "x-content-type-options": "nosniff" });
@@ -311,9 +312,9 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         "content-length": String(end - start + 1),
         ...(range.kind === "range" ? { "content-range": `bytes ${start}-${end}/${file.bytes}` } : {}),
         ...(mediaGrant ? { "accept-ranges": "bytes" } : {}),
-        ...(inline
-          ? { "content-disposition": "inline" }
-          : { "content-disposition": messageFileDisposition(messageFileDownloadName(downloadName, file.name)) }),
+        "content-disposition": mediaGrant
+          ? messageFileDisposition(messageFileDownloadName(downloadName, file.name), "inline")
+          : inline ? "inline" : messageFileDisposition(messageFileDownloadName(downloadName, file.name)),
         "cache-control": "private, no-store",
         "cdn-cache-control": "no-store",
         "cloudflare-cdn-cache-control": "no-store",
@@ -535,7 +536,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
           return null;
         })
         .filter((hit): hit is NonNullable<typeof hit> => hit !== null);
-      return json(res, 200, { hits });
+      return json(res, 200, { hits } satisfies SearchResponse);
     }
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/export$/);

@@ -14,7 +14,7 @@ pnpm exec vitest run server/question-cards.e2e.test.ts
 
 It starts a Team Cloud on the two-server fixture (`scripts/testing/cloud-send-fixture.ts`) with the scripted fake engine
 (`server/testing/room-handoff-agent.ts`): Cleo asks Scout, her Chief, whose chat is her inbox, to have Ledger fix
-something, and Scout hands it on with `coordinate_bots`. Both bots are on "Ask me first", so the questions are the
+something, and Scout hands it on with `coordinate_bots`. Both bots are on "Ask for approval", so the questions are the
 person's. Expected:
 
 - Ledger's envelope offers its card tool for set answers (`ask it with ask_user`), and Ledger's turn calls the real
@@ -29,13 +29,13 @@ person's. Expected:
   turn as `The person answered: "…"`.
 - Stopping Ledger's thread closes an open question as stopped, in the thread and in the inbox.
 
-## Who answers: Just do it and Ask me first
+## Who answers: Full access and Ask for approval
 
 ```sh
 pnpm exec vitest run server/question-routing.e2e.test.ts
 ```
 
-The same Team Cloud with Fuchs, Dachs and Otter on their default Full access ("Just do it"), then on "Ask me first".
+The same Team Cloud with Fuchs, Dachs and Otter on their default Full access, then on "Ask for approval".
 Expected:
 
 - Dachs's `NEEDS INPUT:` question with `Default: CSV` reaches Fuchs, not Marco ("yours to answer"); Fuchs sends no
@@ -45,7 +45,7 @@ Expected:
   (`@Fuchs answered: "…"`); no new thread is opened.
 - Dachs's sign-in reaches Marco once while Otter finishes and Fuchs carries on with Otter's result; Marco's line in
   Dachs's chat carries Dachs on.
-- On "Ask me first" Marco's answer, passed on by Fuchs with `answers`, settles Dachs's question: the card, its inbox copy
+- On "Ask for approval" Marco's answer, passed on by Fuchs with `answers`, settles Dachs's question: the card, its inbox copy
   and Needs you follow, and no new task is made. A restart posts nothing again and the answer after it still reaches
   Dachs. A question whose asking turn a restart cut closes once Dachs's work goes on, and leaves Needs you and the inbox.
 
@@ -58,7 +58,7 @@ pnpm exec vitest run server/teammate-follow-ups.e2e.test.ts
 One server of the person's own (no Team Cloud, so no inbox copies) with the scripted fake engine: Clive, a Chief of
 Staff, hands Mira work. Expected:
 
-- On "Ask me first", Mira's `NEEDS INPUT:` question resumes Clive with it. Clive's reply to her thread in a later turn,
+- On "Ask for approval", Mira's `NEEDS INPUT:` question resumes Clive with it. Clive's reply to her thread in a later turn,
   without `answers`, answers it: Mira's next turn reads `@Clive answered: "…"`, her card says Clive answered, no second
   job starts, and her one result resumes Clive.
 - The card Mira's ask tool waits on is answered the same way by Clive's later reply; her turn carries on with it.

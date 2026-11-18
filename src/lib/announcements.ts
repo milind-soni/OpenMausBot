@@ -36,6 +36,7 @@ export const sponsorDayKey = (day: string) => `${SPONSOR_DAY_PREFIX}${day}`;
 // ---- The cards this server hands over: asked at launch, then about hourly while the app is in use.
 
 let cards: AnnouncementCard[] = [];
+let updatedAt: number | null = null;
 let askedAt: number | null = null;
 let answered = false;
 let asking = false;
@@ -54,7 +55,11 @@ function ask(now: number): void {
   if (asking || (askedAt !== null && now >= askedAt && now - askedAt < (answered ? ANNOUNCEMENT_REFRESH_MS : RETRY_MS))) return;
   asking = true;
   askedAt = now;
-  void api("/api/announcements").then((answer) => { cards = readCards(answer); answered = true; }, () => {})
+  void api("/api/announcements").then((answer) => {
+    cards = readCards(answer); answered = true;
+    const date = Date.parse(String((answer as { updatedAt?: unknown } | null)?.updatedAt ?? ""));
+    updatedAt = Number.isFinite(date) ? date : null;
+  }, () => {})
     .finally(() => { asking = false; for (const listener of listeners) listener(); });
 }
 
@@ -69,9 +74,14 @@ export function useAnnouncementCards(enabled: boolean, now: () => number = Date.
   return enabled ? current : [];
 }
 
+/** When the cards' file last changed (epoch ms), as the server said; null before it answers or from an older server. */
+export function announcementFeedUpdatedAt(): number | null {
+  return updatedAt;
+}
+
 /** Tests: start from a page that has asked nothing. */
 export function forgetAnnouncementCards(): void {
-  cards = []; askedAt = null; answered = false; asking = false;
+  cards = []; updatedAt = null; askedAt = null; answered = false; asking = false;
 }
 
 // ---- What this page knows.
@@ -234,6 +244,15 @@ export function pickAnnouncement(list: readonly AnnouncementCard[], context: Pic
     if (matches) return card;
   }
   return null;
+}
+
+/** Every card that is for this person here, whether or not they saw it: what Announcements lists. */
+export function cardsForPerson(list: readonly AnnouncementCard[], context: Omit<PickContext, "seen">): AnnouncementCard[] {
+  if (context.branded) return [];
+  const now = context.facts.nowMs;
+  return list.filter((card) => !(card.starts && Date.parse(card.starts) > now) && Date.parse(card.ends) > now
+    && (card.kind !== "sponsor" || context.sponsors) && (context.admin || !cardPlaces(card).some((place) => ADMIN_PLACES.has(place)))
+    && audienceMatches(card.audience, context.facts) === true);
 }
 
 export type AnnouncementAction = "shown" | "primary" | "secondary" | "close";

@@ -391,7 +391,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/routine-requests.ts", "Runs only on its schedule"],
     ["server/webhook-requests.ts", "When another app sends something … ,  …   …"],
     ["server/webhook-requests.ts", "does what it is asked"],
-    ["shared/plain-time-zone.ts", "every day"],
+    ["packages/phone-protocol/src/plain-time-zone.ts", "every day"],
   ],
   "rooms and teammates": [
     ["server/host/delegated-level.ts", "…  — handed on by  … ,  … a Chief of Staff on  …"],
@@ -511,7 +511,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
   "moves to the Cloud": [
   ],
   "calls": [
-    ["shared/live-call.ts", "Call with  …  ·  …"],
+    ["packages/phone-protocol/src/live-call.ts", "Call with  …  ·  …"],
   ],
 };
 

@@ -42,6 +42,9 @@ where they belong instead of adding new places.
 
 - **No new header buttons.** The chat header shows the bot, its model and its
   screen. Anything else goes in the bot panel, a menu or the command palette.
+  A button that exists only while the conversation has what it shows (its
+  pinned message) is fine: it opens a menu and is gone when there is nothing
+  to show.
 - **No count badges and no "needs you" summaries** above the sidebar list or
   in the header. A status mark on the row it belongs to is fine.
 - **Settings for one bot live in its bot panel.** App-wide settings live in
@@ -110,6 +113,7 @@ and never add fonts.
 | Menu item (`MENU_ITEM`) | 14 / 18px | 400 | `ink` |
 | Body, rows, menu rows (`MENU_ROW`) | 13 / 18px | 400 | `ink` or `ink-secondary` |
 | Names in lists | 13 / 18px | 500 | `ink` |
+| Speaker names in transcripts (people and bots) | 13px | 600 | bot colour, else `ink-secondary` |
 | Meta, hints, group labels | 12 / 16px | 400 (group labels 500) | `ink-tertiary` |
 | Keycaps (`ShortcutHint`), tiny badges | 11px | 400 | `ink-secondary` or `ink-tertiary` |
 
@@ -118,8 +122,8 @@ Rules:
 - **Buttons size their own labels.** `.ui-button` and its variants set the
   size and weight; don't add text classes to them.
 - **Stick to the table.** No 16px or 18px body text, and no new text under 11px.
-- **Three weights:** 400 for text, 500 for names and labels, 600 for titles.
-  No 700.
+- **Three weights:** 400 for text, 500 for names and labels, 600 for titles
+  and for speaker names in transcripts. No 700.
 - **Sentence case everywhere.** Titles, buttons, menu items and labels.
   No ALL CAPS labels and no Title Case.
 - **One line for titles and rows.** Truncate with `truncate` and keep the
@@ -295,6 +299,10 @@ on. Simple is the default for new installs.
   Tokens, usage, inspectors, raw logs and developer tools belong in Advanced.
 - **Advanced adds; it doesn't rearrange.** The same thing sits in the same
   place in both modes. Advanced may show more rows or more detail.
+  One exception: where Advanced already shows something in place (a bot's
+  threads as a tree under its row), Simple may offer a shortcut to the same
+  thing there instead of a second copy of it: a menu that opens on a click
+  of a small chevron, never on hover.
 - **Switching modes never loses data.**
 
 ## 14. Accessibility

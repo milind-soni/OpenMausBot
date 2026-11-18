@@ -4,6 +4,7 @@ import { useCloudSendNotice } from "@/components/CloudSendStrip";
 import { countedList } from "@/lib/cloud-send";
 import { WindowDragStrip } from "@/components/DesktopCapabilities";
 import { track } from "@/lib/analytics";
+import { teamPeoplePage } from "@/lib/app-links";
 import { reopenCloudIntent } from "@/lib/cloud-intent";
 import {
   CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN, WELCOME_STEPS, welcomeStepFinished, welcomeStepHint, welcomeView, welcomeViewAfter,
@@ -18,7 +19,6 @@ import type { LocaleKey } from "@/locales";
 import type { CloudSendNotice } from "../../../electron/cloud-send.mjs";
 import { openBot, useStore } from "@/state/store";
 import { useCloudName } from "./parts";
-import { teamPeoplePage } from "@/components/SidebarPeople";
 import { useTeamPeople } from "@/state/team-people";
 import { WelcomeBring, type BringOutcome } from "./WelcomeBring";
 import { WelcomeDone, WelcomeEngine, WelcomeFiles } from "./WelcomeSteps";

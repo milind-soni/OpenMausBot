@@ -22,6 +22,7 @@ import { showTunnelRetiredNotice } from "../lib/phone-link";
 import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
 import { TailnetComputers } from "./TailnetComputers";
+import { RemoteAccessCheckRow } from "./RemoteAccessCheck";
 import { LearnMore, SettingRow, SettingsFoldRow, SettingsGroup, SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
 import { DialogTitle } from "./settings/SettingsDialog";
@@ -59,6 +60,7 @@ export function deriveTailscalePairingStatus(
   if (state.tailscaleProblem === "no-cli") return { kind: "signed-out", title: t("remote.tailscale.noCli"), detail: "" };
   if (state.tailscaleProblem === "not-running") return { kind: "signed-out", title: t("remote.tailscale.notRunning"), detail: "" };
   if (state.tailscaleProblem === "needs-permission") return { kind: "signed-out", title: t("remote.tailscale.needsPermission", { app: productName() }), detail: "" };
+  if (state.tailscaleProblem === "needs-approval") return { kind: "signed-out", title: t("remote.tailscale.needsApproval"), detail: "" };
   if (state.tailscaleProblem === "signed-out") return { kind: "signed-out", title: t("remote.tailscale.signIn"), detail: "" };
   if (state.error) return { kind: "error", title: t("remote.status.attention"), detail: state.error };
   const route = state.routes?.tailscale;
@@ -68,6 +70,12 @@ export function deriveTailscalePairingStatus(
   return state.enabled
     ? { kind: "ready", title, detail: t("remote.tailscale.readyDetail") }
     : { kind: "waiting", title, detail: t("remote.tailscale.linkOff") };
+}
+
+/** The control plane gives a build with the encrypted connection no free web address (`relay_capable`): there the row
+ * shows only while the route is on or the account still holds an address. `renewPairing` is what such a build's bridge adds. */
+export function showHttpsAddressRow(state: Pick<CompanionState, "routes">, account: Pick<CompanionAccountState, "endpoint"> | null, bridge: Pick<CompanionBridge, "renewPairing"> | null): boolean {
+  return state.routes?.https?.on === true || Boolean(account?.endpoint) || typeof bridge?.renewPairing !== "function";
 }
 
 /** Older app builds have no switch: on falls back to the check that turns it on, and off cannot be asked of them. */
@@ -480,6 +488,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
               <Switch checked={state.keepAwake} aria-label={t("remote.keepAwakeAria")} disabled={c.busy || !anyRoute}
                 onClick={() => void c.act((companion) => companion.keepAwake(!state.keepAwake))} />
             </SettingRow>
+            <RemoteAccessCheckRow account={c.account} state={state} />
             {moreWays && (
               <SettingsFoldRow id="more-ways" title={t("devices.moreWays")} open={moreOpen} onToggle={() => setMoreOpen(!moreOpen)}>
                 <SettingRow title="Tailscale" subtitle={<>{t("remote.tailscaleSwitch.short", { app: productName() })}{" "}<LearnMore href={TAILSCALE_HELP} /></>}
@@ -493,7 +502,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
                       onClick={() => void c.act((companion) => setCompanionTailscale(companion, !tailscaleOn))} />
                   </span>
                 </SettingRow>
-                <SettingRow title={t("devices.route.https")} subtitle={t("devices.route.httpsDetail", { app: productName() })}
+                {showHttpsAddressRow(state, c.account, companionBridge()) && <SettingRow title={t("devices.route.https")} subtitle={t("devices.route.httpsDetail", { app: productName() })}
                   message={(httpsOn && hosted) || c.account?.status === "ready" || accountActionError ? <>
                     {httpsOn && hosted ? t("devices.route.httpsOn", { address: endpointHost(hosted.url) }) : null}
                     {c.account?.status === "ready" && <span className="block">{t("devices.route.httpsAccount", { app: productName() })}</span>}
@@ -506,13 +515,13 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
                       <button type="button" className="ui-button" disabled={c.busy || c.accountBusy || Boolean(managedBy)} onClick={() => setPairing("https")}>{t("devices.route.setUp")}</button>
                     )}
                   </span>
-                </SettingRow>
+                </SettingRow>}
               </SettingsFoldRow>
             )}
           </SettingsRows>
-          {moreOpen && tailscaleOn && state.routes?.tailscale?.name && <TailnetComputers c={c} state={state} blocked={managedBy} simple={simple} />}
         </SettingsGroup>
       )}
+      <TailnetComputers c={c} state={state} blocked={managedBy} simple={simple} status={tailscaleStatus} />
       <PhonesList />
       {(c.error || state.error) && <div className="px-4 text-[12px] leading-4 text-danger">{c.error ?? state.error}</div>}
     </div>

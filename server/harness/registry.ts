@@ -8,6 +8,7 @@ import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { withLocalContext } from "../drivers/local-inject.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
+import { withTurnScope } from "../crash-guard.ts";
 import { withWslNotice } from "./wsl-launch.ts";
 import { modelManifest, startModelManifestRefresh } from "../model-manifest/manifest.ts";
 export { engineMemory } from "../engine-memory.ts";
@@ -193,13 +194,13 @@ export class ProviderRegistry {
       // The RAW config: decodeConfig fills in the driver default, which would flag every instance as overridden.
       const rawCli = cliOfRaw(entry.config);
       if (rawCli) this.cliByInstance.set(instanceId, rawCli);
-      const live = withLocalContext(withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
+      const live = withLocalContext(withUnaskedStops(withEngineHomes(withEngineMemory(withTurnScope(await driver.create({
         instanceId,
         displayName: entry.displayName ?? driver.metadata.displayName,
         environment: entry.environment ?? {},
         enabled: entry.enabled ?? true,
         config,
-      })))));
+      }))))));
       this.shareSnapshot(live);
       return { instanceId, live: decorate ? decorate(live) : live };
     } catch (e) {
@@ -561,7 +562,7 @@ export class ProviderRegistry {
                   ? "paste-code" as const // a link to open, then a code pasted back (Claude)
                   : inst.getAuthentication
                     ? "device-code" as const // a code to enter at the provider's page (Codex)
-                    : "browser" as const), // a link and a callback URL (managed engines)
+                    : "callback-url" as const), // a link and a callback URL (managed engines)
                 signOut: inst.signOut !== undefined,
               }
             : undefined,

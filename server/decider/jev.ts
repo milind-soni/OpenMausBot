@@ -3,7 +3,7 @@
 import type {
   BackendRequest, BackendResult, ChoiceAnswer, DeciderAnswer, DeciderBackend, DeciderQuestion, ScoreAnswer, YesNoAnswer,
 } from "./types.ts";
-import { isLoopback } from "../provider-key-check.ts";
+import { keySafeUrl } from "../provider-key-check.ts";
 
 export const JEV_DEFAULT_BASE_URL = "https://api.typesafe.ai";
 export const JEV_MODEL = "jev-latest";
@@ -14,18 +14,7 @@ export const JEV_MAX_LEVELS = 10;
 export const RELAY_SEAM_HEADER = "x-omb-seam";
 
 /** Null when the key must not be sent there: https anywhere, plain http only to this machine. */
-export function jevEndpoint(baseUrl?: string | null): URL | null {
-  const root = (baseUrl?.trim() || JEV_DEFAULT_BASE_URL).replace(/\/+$/, "");
-  let url: URL;
-  try {
-    url = new URL(`${root}/v1/systemone`);
-  } catch {
-    return null;
-  }
-  if (url.username || url.password) return null;
-  if (url.protocol === "https:") return url;
-  return url.protocol === "http:" && isLoopback(url.hostname) ? url : null;
-}
+export const jevEndpoint = (baseUrl?: string | null): URL | null => keySafeUrl(baseUrl?.trim() || JEV_DEFAULT_BASE_URL, "v1/systemone");
 
 /** Questions within the API's limits: 2–255 options, 2–10 levels. */
 export function questionsFit(questions: Record<string, DeciderQuestion>): boolean {

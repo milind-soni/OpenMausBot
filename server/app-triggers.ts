@@ -21,6 +21,7 @@ import { appLabel } from "./app-event-catalog.ts";
 import { eventBlock, eventPreview, eventPrompt, matchesFilter, mergeEventBlock } from "./app-events.ts";
 import { BrokerError, type AppTriggerBroker, type BrokerEvent, type BrokerInventory, type BrokerTriggerType } from "./app-trigger-broker.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { instructionsUpdateRefusal } from "./automation-instructions.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRunOn } from "./routines.ts";
 
@@ -273,9 +274,6 @@ export class AppTriggerManager {
     const account = await this.resolveAccount(app, input.account);
     const filter = cleanFilter(input.filter);
     const config = triggerConfig(type, input.config ?? {}, filter);
-    const duplicate = this.triggers.find((trigger) => trigger.enabled && trigger.botId === input.botId && trigger.event === type.slug &&
-      trigger.accountId === account.id && trigger.prompt === prompt && JSON.stringify(trigger.config) === JSON.stringify(config));
-    if (duplicate) throw new AppTriggerError(`The same automation already exists (${duplicate.id}). Use trigger_info to review it, then change that one instead.`, 409);
     const now = this.now();
     const trigger: StoredTrigger = {
       id: input.id ?? randomUUID(), name, prompt, botId: input.botId, runOn: input.runOn ?? "maus", enabled: input.enabled ?? true,
@@ -286,6 +284,9 @@ export class AppTriggerManager {
       received: 0, filtered: 0, createdAt: now, updatedAt: now,
     };
     await this.exclusive(async () => {
+      const duplicate = this.triggers.find((trigger) => trigger.enabled && trigger.botId === input.botId && trigger.event === type.slug &&
+        trigger.accountId === account.id && trigger.prompt === prompt && JSON.stringify(trigger.config) === JSON.stringify(config));
+      if (duplicate) throw new AppTriggerError(`The same automation already exists (${duplicate.id}). Use trigger_info to review it, then change that one instead.`, 409);
       try {
         await this.bind(trigger);
         if (!trigger.enabled) await this.applyEnabled(trigger.remote.triggerId);
@@ -315,7 +316,7 @@ export class AppTriggerManager {
       ...(record.sameConversation ? { sameConversation: true } : {}) });
   }
 
-  async update(id: string, patch: AppTriggerPatch): Promise<AppTrigger | null> {
+  async update(id: string, patch: AppTriggerPatch, options: { protectInstructions?: boolean } = {}): Promise<AppTrigger | null> {
     this.assertWritable();
     const trigger = this.triggers.find((candidate) => candidate.id === id);
     if (!trigger) return null;
@@ -333,6 +334,10 @@ export class AppTriggerManager {
       config = triggerConfig(type, Object.fromEntries(Object.entries(base).filter(([, value]) => value !== undefined)), filter);
     }
     await this.exclusive(async () => {
+      if (options.protectInstructions) {
+        const refusal = instructionsUpdateRefusal(trigger.prompt, patch.prompt);
+        if (refusal) throw new AppTriggerError(refusal, 409);
+      }
       const previous = trigger.remote.triggerId;
       const previousConfig = JSON.stringify(trigger.config);
       Object.assign(trigger, {

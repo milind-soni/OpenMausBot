@@ -31,6 +31,19 @@ describe("how a wait for memory reads", () => {
     expect(held).toEqual([["t", "memory: 1 running, 3 ahead, on Starter"], ["u", "plan: 2 at once, 1 ahead"]]);
   });
 
+  it("speaks of this server, not a Cloud or a plan, on a self-hosted one: room, or its number of tasks at once", () => {
+    expect(words(false).waits.text("t", { first: true, running: 6, ahead: 2, server: true }))
+      .toBe("Waiting for room on this server. Running now: 6. Ahead of this one: 2. It starts by itself when there's room.");
+    expect(words(false).waits.text("t", { first: false, running: 6, ahead: 0, server: true })).toBe("Still waiting for room on this server. Running now: 6. Ahead of this one: 0.");
+    expect(words(false).waits.text("t", { first: true, running: 7, ahead: 1, limit: 7, server: true }))
+      .toBe("Waiting for a turn: this server runs 7 tasks at once. Ahead of this one: 1. It starts by itself when one finishes.");
+    expect(words(false).waits.text("t", { first: false, running: 7, ahead: 0, limit: 7, server: true })).toBe("Still waiting: this server runs 7 tasks at once. Ahead of this one: 0.");
+    const { waits, held } = words(false);
+    waits.began("t", { running: 6, ahead: 2, server: true });
+    waits.began("u", { running: 7, ahead: 1, limit: 7, server: true });
+    expect(held).toEqual([["t", "room: 6 running, 2 ahead"], ["u", "server: 7 at once, 1 ahead"]]);
+  });
+
   it("names the plan's limit, not memory, when that is what the turn waits for", () => {
     expect(words(true).waits.text("t", { first: true, running: 2, ahead: 1, limit: 2 }))
       .toBe("Waiting for a turn: Starter runs 2 tasks at once on this Cloud. Ahead of this one: 1. It starts by itself when one finishes, and a bigger plan runs more at once.");

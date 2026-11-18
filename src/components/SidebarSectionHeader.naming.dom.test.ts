@@ -21,7 +21,7 @@ afterEach(() => {
 function mount(line: boolean, extra: Partial<Parameters<typeof SidebarSectionHeader>[0]> = {}) {
   const naming = { value: "New department", label: "New department name", onCommit: vi.fn(), onCancel: vi.fn() };
   flushSync(() => root.render(createElement(SidebarSectionHeader, {
-    name: "Work", collapsed: false, reorderable: true, dragging: false, line, count: 2, onToggle: () => {}, onMenu: () => {}, naming, ...extra,
+    name: "Work", collapsed: false, reorderable: true, dragging: false, line, onToggle: () => {}, onMenu: () => {}, naming, ...extra,
   })));
   return { naming, field: container.querySelector<HTMLInputElement>("[data-section-name-field]")! };
 }

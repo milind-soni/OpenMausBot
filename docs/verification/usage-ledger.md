@@ -123,8 +123,10 @@ scope on both routes.
 
 ## Gotchas
 
-- Rows are appended when `turn.completed` folds. A turn that fails before it
-  settles leaves no row, so a failed turn is not billed.
+- Rows are appended when `turn.completed` folds, whether the turn succeeded
+  or failed: a failed turn is booked with the tokens and cost it reported, and
+  its row carries the failed outcome. Only a turn that never settles (refused
+  before it started, or the server stopped first) leaves no row.
 - The cost column is what the engine reported (real on a metered key, an
   equivalent on a subscription) or, for engines that report none, an estimate
   from `server/model-prices.ts`, marked `~` in History and People and labelled

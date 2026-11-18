@@ -11,8 +11,10 @@ import {
   PAIRING_CODE_ALPHABET,
   PAIRING_CODE_LENGTH,
   PAIRING_CREDENTIAL_PREFIX,
+  PAIRING_INPUT_PROBLEM_CODE,
   PAIRING_INPUT_PROBLEM_KEY,
   readPairingInput,
+  type PairingErrorCode,
 } from "../shared/pairing-code.ts";
 import { userError, type UserError } from "./user-errors.ts";
 
@@ -105,6 +107,8 @@ export interface PublicSession {
   owner?: string;
   teamRole?: TeamRole;
   token?: true;
+  /** Who this device belongs to, when the server can tell and it is not just the device's own label. */
+  person?: string;
 }
 
 export interface PairingCode {
@@ -136,7 +140,7 @@ export interface PublicPairing {
 
 export type ExchangeResult =
   | { ok: true; token: string; session: PublicSession }
-  | ({ ok: false; status: 400 | 401 | 403 | 429 } & UserError);
+  | ({ ok: false; status: 400 | 401 | 403 | 429; code: PairingErrorCode } & UserError);
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 /** The English fallback's clock; a client words `until` in its own time zone. */
@@ -175,7 +179,7 @@ export function isPairingCredential(value: string): boolean {
   return value.startsWith(PAIRING_CREDENTIAL_PREFIX);
 }
 
-function publicSession(record: SessionRecord): PublicSession {
+function publicSession(record: SessionRecord, personName?: (record: SessionRecord) => string): PublicSession {
   const view: PublicSession = {
     id: record.id,
     label: record.label,
@@ -188,6 +192,8 @@ function publicSession(record: SessionRecord): PublicSession {
   if (record.owner) view.owner = record.owner;
   if (record.teamRole) view.teamRole = record.teamRole;
   if (record.token) view.token = true;
+  const person = personName?.(record).trim();
+  if (person && person !== record.label) view.person = person;
   return view;
 }
 
@@ -446,7 +452,7 @@ export class SessionRegistry {
     this.prune();
     const now = this.now();
     const read = readPairingInput(input.code);
-    if (read.kind === "wrong" && read.problem !== "notACode") return { ok: false, status: 400, ...userError(PAIRING_INPUT_PROBLEM_KEY[read.problem]) };
+    if (read.kind === "wrong" && read.problem !== "notACode") return { ok: false, status: 400, code: PAIRING_INPUT_PROBLEM_CODE[read.problem], ...userError(PAIRING_INPUT_PROBLEM_KEY[read.problem]) };
     // A credential is hashed as presented: normalizePairingCode folds 0 to O and 1 to I, which would merge distinct secrets.
     const presented = sha256(read.kind === "credential" ? read.credential : read.kind === "code" ? read.code : normalizePairingCode(input.code));
     const browser = input.browser === true;
@@ -457,18 +463,18 @@ export class SessionRegistry {
     const lock = unnamed ? { locked: false, retryAfterMs: 0 } : this.lockState(this.codeFailures, input.source);
     if (lock.locked) {
       const until = now + lock.retryAfterMs;
-      return { ok: false, status: 429, ...userError("serverError.pair.tooMany", { seconds: Math.ceil(lock.retryAfterMs / 1000), until, time: utcClock(until) }) };
+      return { ok: false, status: 429, code: "pairing_too_many", ...userError("serverError.pair.tooMany", { seconds: Math.ceil(lock.retryAfterMs / 1000), until, time: utcClock(until) }) };
     }
     const index = this.pairings.findIndex((p) => (p.browser === true) === browser &&
       (sameDigest(p.credentialHash, presented) || (!p.browser && sameDigest(p.codeHash, presented))));
     if (index < 0) {
       if (unnamed) this.wrongFromUnnamed();
       else this.recordFailure(this.codeFailures, PAIRING_LOCKOUT, input.source);
-      return { ok: false, status: 401, ...userError("serverError.pair.codeWrong") };
+      return { ok: false, status: 401, code: "pairing_code_wrong", ...userError("serverError.pair.codeWrong") };
     }
     const [pairing] = this.pairings.splice(index, 1);
     this.codeFailures.delete(input.source);
-    if (this.personal(pairing.scopes)) return { ok: false, status: 403, ...this.adminOnly! };
+    if (this.personal(pairing.scopes)) return { ok: false, status: 403, code: "cloud_personal", ...this.adminOnly! };
     const token = `omb_sess_${randomBytes(32).toString("base64url")}`;
     const checkedAt = pairing.memberCheckedAt ?? now;
     const record: SessionRecord = {
@@ -696,9 +702,16 @@ export class SessionRegistry {
     return this.sessions.some((s) => s.id === sessionId && !this.personal(s.scopes));
   }
 
-  list(): PublicSession[] {
+  /** A live session by id: what a paired phone with no stream open may still be shown (server/phone-push.ts). */
+  record(sessionId: string): SessionRecord | null {
     this.prune();
-    return this.sessions.map(publicSession);
+    return this.sessions.find((s) => s.id === sessionId && s.expiresAt > this.now() && !this.personal(s.scopes)) ?? null;
+  }
+
+  /** `personName` names each device's person (server/index.ts sessionPersonName), so the device list can lead with it. */
+  list(personName?: (record: SessionRecord) => string): PublicSession[] {
+    this.prune();
+    return this.sessions.map((record) => publicSession(record, personName));
   }
 
   /** The stored digest of each live bearer session among `ids`: the phone relay derives a phone's keys from it. */
@@ -716,7 +729,7 @@ export class SessionRegistry {
   /** The live sessions a Team Cloud member's own codes opened: their phones. Never an Admin-signed pairing (an app). */
   memberPhones(): PublicSession[] {
     this.prune();
-    return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map(publicSession);
+    return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map((record) => publicSession(record));
   }
 
   /** Every code a member made for a phone stops working, and every phone such a code opened signs out. Never an Admin-signed pairing (an app). */

@@ -15,12 +15,12 @@ import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { boundedAgentResult } from "./agents-result.ts";
-import { outOfBounds } from "./agents-schema.ts";
+import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
@@ -29,13 +29,13 @@ import { callHostingTool, HOSTING_TOOL_NAMES } from "./agents-hosting-tools.ts";
 import { callMeetingTool, MEETING_TOOL_NAMES } from "./agents-meeting-tools.ts";
 import { callMausBotTool, MAUSBOT_TOOL_NAMES } from "./agents-mausbot-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
+import { callShareTool, SHARE_TOOL_NAMES } from "./agents-share-tool.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
 import { callDevsTool, DEVS_TOOL_NAMES } from "./agents-devs-tools.ts";
 
 export interface ToolCallContext {
   botId: string;
   threadId: string;
-  depth: number;
   /** A standing external runtime: its capability cannot reach the result cache, so big results are cut. */
   externalRuntime: boolean;
   // Presentation only: the server still authenticates and scopes every call.
@@ -54,7 +54,6 @@ export function toolCallContextFromEnv(env: NodeJS.ProcessEnv): ToolCallContext 
   return {
     botId: profile.botId,
     threadId: env.OMB_THREAD_ID ?? "",
-    depth: Number(env.OMB_TURN_DEPTH ?? "0") || 0,
     externalRuntime: env.OMB_EXTERNAL_RUNTIME === "1",
     sharedComputers: profile.sharedComputers,
     client: harnessClientFromEnv(env),
@@ -104,7 +103,7 @@ function renderAssignmentStatus(r: Json, id: string): string {
   const children = Array.isArray(r.children) ? r.children.filter(jsonRecord) : [];
   if (children.length) lines.push("Its own hand-offs:", ...children.map((child) => `- ${assignmentLine(child)}`));
   const settled = a.status === "completed" || a.status === "failed" || a.status === "cancelled" || a.status === "done";
-  if (!settled) lines.push("It is not settled. Its result resumes you on its own; do not wait on it in this turn.");
+  if (!settled) lines.push(`It is not settled. ${r.sentElsewhere === true ? "It was sent from another of your chats, so its result returns there and does not resume you here" : "Its result resumes you on its own"}; do not wait on it in this turn.`);
   return lines.join("\n");
 }
 
@@ -219,7 +218,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   const refused = outOfBounds(name, fullInputSchema(name), args);
   if (refused) return { text: refused, isError: true };
   const member = agentsCallMember(name, args);
-  const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH } = context;
+  const { botId: BOT_ID, threadId: THREAD_ID } = context;
   const { api, apiResponse } = context.client;
   if (name === "vm_exec") {
     const { ok, body } = await apiResponse("/api/internal/vm-exec", {
@@ -233,7 +232,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const lines = [body.timedOut ? "The command was stopped: it ran past its time limit." : `exit code ${exitCode}`];
     if (stdout) lines.push("--- stdout ---", stdout.replace(/\s+$/, ""));
     if (stderr) lines.push("--- stderr ---", stderr.replace(/\s+$/, ""));
-    if (!stdout && !stderr && !body.timedOut) lines.push("(no output)");
+    if (!stdout && !stderr && !body.timedOut) lines.push("(no output)"); if (typeof body.note === "string" && body.note) lines.push("--- note ---", body.note);
     return { text: lines.join("\n"), ...(exitCode !== 0 || body.timedOut ? { isError: true } : {}) };
   }
   if (name === "attach_file") {
@@ -252,6 +251,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (MEETING_TOOL_NAMES.has(name)) return callMeetingTool(name, args, context);
   if (MAUSBOT_TOOL_NAMES.has(name)) return callMausBotTool(name, args, context);
   if (PAGE_TOOL_NAMES.has(name)) return callPageTool(name, args, context);
+  if (SHARE_TOOL_NAMES.has(name)) return callShareTool(args, context);
   if (PERSON_TOOL_NAMES.has(name)) return callPersonTool(name, args, context);
   if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
@@ -307,10 +307,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
       && optional("consult", "boolean") && optional("in_my_folder", "boolean")
       && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string")
-      && (canonical.group_id === undefined || canonical.group_id === null || typeof canonical.group_id === "string");
+      && (canonical.group_id === undefined || canonical.group_id === null || typeof canonical.group_id === "string") && (canonical.files === undefined || canonical.files === null || (Array.isArray(canonical.files) && canonical.files.every((path) => typeof path === "string") && canonical.files.filter((path) => path.trim()).length <= 5));
     if (!usable) {
       return {
-        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when and answers are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids) and message are required; group_id, reason, rework, title, thread ("standing", "new" or the id of a thread you opened on that teammate), reply ("resume" or "none"), consult (true or false), in_my_folder (true or false), done_when, answers and files (an array of at most 5 file paths) are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
         isError: true,
       };
     }
@@ -321,7 +321,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       thread: canonical.thread, reply: canonical.reply,
       title: typeof canonical.title === "string" && canonical.title.trim() ? canonical.title.trim() : undefined, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
-      answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined,
+      answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined, files: Array.isArray(canonical.files) && canonical.files.some((path) => path.trim()) ? canonical.files.filter((path) => path.trim()) : undefined,
     }) });
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
   }
@@ -340,7 +340,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const { ok, status, body: r } = await apiResponse(`/api/internal/assignment-status${query.size ? `?${query.toString()}` : ""}`);
     if (!ok) {
       const why = status === 404 ? `No assignment ${id || "(none given)"} is known here: check the id against your coordinate_bots receipt or list_threads.`
-        : status === 403 ? `Assignment ${id} is not this conversation's; only its requester can read it.`
+        : status === 403 ? `Assignment ${id} can't be read here: ${String(r.error ?? "only the conversation that sent it can read it")}.`
         : String(r.error ?? `HTTP ${status}`);
       return { text: why, isError: true };
     }
@@ -406,6 +406,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     };
   }
   if (name === THREAD_POST_TOOL) return callThreadPostTool(args, context);
+  if (name === RENAME_THREAD_TOOL) return callRenameThreadTool(args, context);
   if (name === "select_computer") {
     if (args.surface !== undefined && (typeof args.surface !== "string" || !["auto", "cloud", "vm", "local", "browser"].includes(args.surface))) {
       return { text: "Choose auto, cloud, vm, local or browser; omit surface to inspect connected choices.", isError: true };
@@ -453,7 +454,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!title || !message) return { text: "start_thread needs title (one short line) and message (the complete first message).", isError: true };
     const toBotId = typeof args.bot_id === "string" ? args.bot_id.trim() : "";
     const folder = typeof args.folder === "string" ? args.folder.trim() : "";
-    const body: Record<string, unknown> = { fromBotId: BOT_ID, fromThreadId: THREAD_ID, title, message, depth: DEPTH };
+    const body: Record<string, unknown> = { fromBotId: BOT_ID, fromThreadId: THREAD_ID, title, message };
     if (toBotId) body.toBotId = toBotId;
     if (folder) body.folder = folder;
     if (args.model_selection !== undefined) {
@@ -690,8 +691,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (typeof args.cwd === "string") changes.cwd = args.cwd.trim();
     if (typeof args.notifications === "boolean") changes.notifications = args.notifications;
     if (typeof args.speakReplies === "boolean") changes.speakReplies = args.speakReplies;
+    if (typeof args.browserProfile === "string") changes.browserProfile = args.browserProfile.trim();
     if (!Object.keys(changes).length) {
-      return { text: "propose_profile needs at least one of name, title, description, soul, cwd, notifications, or speakReplies.", isError: true };
+      return { text: "propose_profile needs at least one of name, title, description, soul, cwd, notifications, speakReplies, or browserProfile.", isError: true };
     }
     const forBotId = String(args.for_bot_id ?? "").trim();
     const r = await api("/api/internal/profile-requests", {
@@ -738,7 +740,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       || (!passageOnly && (typeof args.text !== "string" || !args.text.trim()))
       || (args.action !== "append" && args.action !== "prefer" && (typeof args.old_text !== "string" || !args.old_text.trim()))) {
       return { text: "Use memory_update action=append with text, replace or supersede with text and old_text, remove with old_text, forget with old_text naming what to forget, or prefer with text: one standing preference of the person.", isError: true };
-    }
+    } else if (args.action === "append" && args.old_text !== undefined) return { text: "memory_update was not run: old_text is not used with append. Leave it out to add a new note, or use replace or supersede to change the passage it names.", isError: true };
     const { body: r } = await apiResponse("/api/internal/memory", {
       method: "POST",
       body: JSON.stringify({
@@ -917,16 +919,16 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         text: `A confirmation card is now visible to the user to ${verb} skill “${skillName}”. Nothing changes until they approve it. End this turn and wait for the decision.`,
       };
     }
-    if (args.action !== "create" && args.action !== "update") {
-      return { text: 'skill_manage action must be "create", "update", "enable", "disable" or "delete".', isError: true };
+    if (args.action !== "create" && args.action !== "update" && args.action !== "import") {
+      return { text: `skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
-    if (!skillMd.trim()) {
-      return { text: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter.', isError: true };
+    if (!skillMd.trim() && args.action !== "import") {
+      return { text: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter, e.g. "---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n".', isError: true };
     }
     const source = typeof args.source === "string" ? args.source.trim() : "";
     if (!source) {
-      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill.', isError: true };
+      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill (for import, the GitHub or skills.sh link).', isError: true };
     }
     const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
     if (args.action === "update" && !skillName) {

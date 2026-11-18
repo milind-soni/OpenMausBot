@@ -1,4 +1,4 @@
-import { createContext, memo, use, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
+import { createContext, memo, use, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type ReactNode } from "react";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
@@ -72,7 +72,7 @@ import { useShowRunCard } from "@/lib/run-card-preferences";
 import { useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { userBubbleStyle } from "@/lib/user-bubble-tone";
 import { ToolActivity } from "./ToolActivity";
-import { DataResultChip } from "./DataResultChip"; import { PublishedPageCard } from "./PublishedPageCard";
+import { DataResultChip } from "./DataResultChip"; import { PublishedPageCard } from "./PublishedPageCard"; import { TemplateChatCard } from "./TemplateCard"; import { PublishedSiteCards } from "./published-apps/PublishedSiteCards";
 import { ThreadRefText } from "./ThreadRefs"; import { WatchScreenButton } from "./WatchScreenButton";
 import { optionsCardRow } from "./OptionsCardRow";
 import { MessageBoundary } from "./MessageBoundary";
@@ -94,11 +94,11 @@ import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle"; import { ChatHeadRole, chiefOfStaffBadge } from "./BotRole";
 import { BotActivityPicker } from "./TaskPicker"; import { ChatHeadPill } from "./ChatHeadPill"; import { HeaderShare } from "./bot-access/HeaderShare"; import { ThreadPresenceFaces } from "./TeamPresence"; import { useStoreRef } from "@/state/store-ref"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
-import { ModelPicker } from "./ModelPicker";
+import { ModelPicker } from "./ModelPicker"; import { useFailedTurnFix } from "./FailedTurnFix";
 import { ChatHeaderMenu, ChatMoreMenu } from "./ChatMoreMenu"; import { TeamOwnHelperHeader, TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine"; import { ownChatStarted } from "@/state/team-chats";
 import { useChatFindRequests, useChatFindShortcut } from "@/lib/chat-find";
 import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
-import { SpeakButton } from "./SpeakButton";
+import { SpeakButton, speakReady } from "./SpeakButton";
 import { CallOverlay } from "./CallView";
 import { LiveCallBar } from "./LiveCallBar";
 import { LiveCallChip } from "./LiveCallPill";
@@ -118,7 +118,7 @@ import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { PagePaneContext } from "./app/PageTools";
-import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
+import { useTranscriptViewport } from "@/hooks/use-transcript-viewport"; import { staysInView } from "../../shared/person-wait";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { NewMessagesDivider } from "./NewMessagesDivider";
 import { unreadMessageIds } from "@/lib/unread-divider";
@@ -126,7 +126,7 @@ import { appendComposerDraft, appendDraftAttachments, useReplyDraft } from "@/li
 import { botLineText, localDay, transcriptLookups, type TranscriptLookups } from "@/lib/transcript-derivations"; import { DaySeparator } from "./DaySeparator";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { EmptyChat } from "./ChatEmptyState";
-import { PinnedBanner } from "./ChatPinnedBanner";
+import { PinnedMessagesMenu, pinnedPreview } from "./PinnedMessagesMenu";
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { useCanWriteIn, useReactor } from "@/lib/cloud-guest";
 import { formattedReplyWidth, isFormattedReply, splitReplyBlocks } from "@/lib/formatted-reply";
@@ -145,7 +145,6 @@ interface ChatRows {
   tts: ConfigStatus["tts"]; localVoice: boolean;
   hasMore: boolean; bots: readonly Bot[];
   mentionPeers: readonly MentionPeer[]; mentionPerson: { profileName?: string };
-  /** On a Team Cloud, the viewer's person key: another person's line carries their name. */
   speakerViewer?: string | null;
   focus: AppState["focusMessage"];
   showToolCalls: boolean;
@@ -170,14 +169,14 @@ export function ErrorRow({
   message,
   headline: plainHeadline,
   onRetry,
-  action,
+  action, control,
   setupInstance,
   claudeUpdateInstance,
 }: {
   message: string;
   headline?: string;
   onRetry?: () => void;
-  action?: { label: string; onClick: () => void } | null;
+  action?: { label: string; onClick: () => void } | null; /** a setting's own control that fixes this failure, below the row's action */ control?: ReactNode;
   setupInstance?: InstanceInfo;
   claudeUpdateInstance?: InstanceInfo;
 }) {
@@ -233,7 +232,7 @@ export function ErrorRow({
               <RefreshCw size={12} /> {t("chat.retry")}
             </button>
           )
-        )}
+        )}{control}
       </div>
     </div>
   );
@@ -266,7 +265,7 @@ function TrialCreditFailedRow({ kind, onRetry }: { kind: TrialCreditRefusal; onR
 }
 
 export function FailedTurnRow({ tool, engine, onRetry, botId, threadId, messageAt }: { tool: NonNullable<Message["tool"]>; engine: InstanceInfo | undefined; onRetry?: () => void; botId?: string; threadId?: string; messageAt?: number }) {
-  const resume = useLimitResetContinue(botId, threadId, tool.limitResetsAt);
+  const resume = useLimitResetContinue(botId, threadId, tool.limitResetsAt), fix = useFailedTurnFix(tool, botId, threadId);
   const past = usePastLimitNotice(tool, messageAt);
   if (tool.place && botId) return <PlaceFailedRow place={tool.place} botId={botId} threadId={threadId} onRetry={onRetry} />;
   const credit = trialCreditKind(failedTurnCause(tool.name) ?? "");
@@ -280,7 +279,7 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId, messageA
       message={notice ?? cause}
       headline={signedOut ? t("chat.error.signedOut", { name: signedOut.displayName }) : notice ?? plainErrorLine(cause)}
       onRetry={onRetry}
-      action={resume}
+      action={resume ?? fix.action} control={fix.control}
       setupInstance={tool.setup ? engine : undefined}
       claudeUpdateInstance={tool.claudeUpdate ? claudeUpdateTarget(engine) : undefined}
     />
@@ -409,23 +408,23 @@ const Bubble = memo(function Bubble({
   const togglePin = () =>
     dispatch({ type: "updateTask", botId, threadId, patch: { pinnedMessageId: pinned ? "" : message.id } });
   const botActions = !user && (
-    <MessageActions side="bot" forceOpen={viewRaw || speaking} menu={simple ? [...replyAndCopy(() => onReply(message), text), ...botMenu, ...forkAction] : [...botMenu, ...forkAction]}>
+    <MessageActions side="bot" forceOpen={viewRaw || speaking} menu={simple ? [...replyAndCopy(() => onReply(message), text), ...botMenu, ...forkAction] : [...botMenu, ...forkAction]} contextItems={simple ? undefined : replyAndCopy(() => onReply(message), text)}>
       {!simple && <ReplyAction onReply={() => onReply(message)} />}
       {canReact && !peer && <ReactAction threadId={threadId} message={message} />}
       {!simple && text && <CopyButton text={text} className={messageActionClass} />}
       {text && viewRaw && <RawToggleAction active onToggle={() => setViewRaw(false)} className={messageActionClass} />}
-      {text && speaking && <SpeakButton text={text} botId={botId} messageId={message.id} voiceId={voiceId} tts={tts} localVoice={localVoice} className={cn(messageActionClass, "text-accent")} />}
+      {text && (speaking || (message.kind === "text" && !peer && speakReady(tts, voiceId, localVoice))) && <SpeakButton text={text} botId={botId} messageId={message.id} voiceId={voiceId} tts={tts} localVoice={localVoice} className={cn(messageActionClass, speaking && "text-accent")} />}
     </MessageActions>
   );
 
   return (
-    <div {...{ [MESSAGE_ROW]: "" }} className={cn("group flex w-full flex-col", user ? "animate-msg-in items-end" : "items-start", simple && join?.above && SIMPLE_STACKED)}>
+    <div {...{ [MESSAGE_ROW]: "" }} data-look={user ? "message-user" : "message-bot"} className={cn("group flex w-full flex-col", user ? "animate-msg-in items-end" : "items-start", simple && join?.above && SIMPLE_STACKED)}>
       {message.relay ? <RelayLabel message={message} /> : peer && <PeerLabel peer={peer} />}
-      {speaker && <div className="mb-0.5 px-1 text-[12px] font-medium text-ink-secondary">{speaker}</div>}
+      {speaker && <div className="mb-0.5 px-1 text-right text-[13px] [overflow-wrap:anywhere] font-semibold text-ink-secondary">{speaker}</div>}
       <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
         {user && (
           <MessageActions
-            side="user"
+            side="user" contextItems={simple ? undefined : replyAndCopy(() => onReply(message), visibleText)}
             menu={[
               ...(simple ? replyAndCopy(() => onReply(message), visibleText) : []),
               ...userMessageMenu({
@@ -442,7 +441,7 @@ const Bubble = memo(function Bubble({
           </MessageActions>
         )}
         <div
-          data-chat-bubble={simple ? "simple" : ""}
+          data-chat-bubble={simple ? "simple" : ""} data-look={user ? "user-bubble" : "bot-bubble"}
           className={cn(
             tabled ? "w-full" : "w-fit",
             simple ? !tabled && SIMPLE_BUBBLE_MAX : "max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl text-[15px] leading-relaxed",
@@ -510,7 +509,7 @@ const Bubble = memo(function Bubble({
                 }}
               />}
               {message.steered && (
-                <div className="mt-1 text-[11px] text-ink-tertiary" title={t("chat.sentMidTurnHint")}>
+                <div className="mt-1 text-[11px] text-ink-tertiary">
                   {t("chat.sentMidTurn")}
                 </div>
               )}
@@ -617,13 +616,13 @@ const ActivityChip = memo(function ActivityChip({ message, place = "auto" }: { m
   const { bots, dispatch, threadId } = useChatRows(), liveTools = use(LiveToolsContext);
   const tool = message.tool;
   if (!tool) return null;
-  if (message.threadRef) return <ThreadChip message={message} />; if (message.relay) return <TeammateChip message={message} />;
+  if (message.threadRef) return <ThreadChip message={message} threadId={threadId} />; if (message.relay) return <TeammateChip message={message} />;
   const comm = message.comm;
-  if (comm) return <RoomHandoffChip message={message} comm={comm} bots={bots} dispatch={dispatch} />;
+  if (comm) return <RoomHandoffChip message={message} comm={comm} bots={bots} dispatch={dispatch} threadId={threadId} />;
   return <ToolActivity tool={tool} live={liveTools.has(message.id)} place={toolPlace(tool.name, place)} source={{ threadId, messageId: message.id }} />;
 });
 
-const RoomHandoffChip = ({ message, comm, bots, dispatch }: { message: Message; comm: NonNullable<Message["comm"]>; bots: readonly Bot[]; dispatch: Dispatch<Action> }) => { const store = useStoreRef(); return <HandoffChip message={message} bots={bots} title={t("chat.openConversationWith", { name: comm.withName })} onClick={() => openRoomThread(dispatch, comm, store.state().groups)} />; };
+const RoomHandoffChip = ({ message, comm, bots, dispatch, threadId }: { message: Message; comm: NonNullable<Message["comm"]>; bots: readonly Bot[]; dispatch: Dispatch<Action>; threadId: string }) => { const store = useStoreRef(); return <HandoffChip message={message} bots={bots} threadId={threadId} title={t("chat.openConversationWith", { name: comm.withName })} onClick={() => openRoomThread(dispatch, comm, store.state().groups)} />; };
 const MessagesList = memo(function MessagesList({
   messages: saved,
   transcript,
@@ -663,7 +662,7 @@ const MessagesList = memo(function MessagesList({
   onRegenerate: () => void;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, botColor, bots, hasMore, focus, showToolCalls, locale, simple = false } = useChatRows(), busy = use(ChatBusyContext);
+  const { botId, threadId, botName, botColor, bots, hasMore, focus, showToolCalls, locale, dispatch, canReact, simple = false } = useChatRows(), busy = use(ChatBusyContext);
   const messages = useLiveTranscript(threadId, saved, transcript);
   // A finished turn keeps the bot's progress lines and folds only its tool steps under "Worked for", in both modes.
   const items = useMemo(() => groupTranscript(messages), [messages, locale]);
@@ -750,11 +749,11 @@ const MessagesList = memo(function MessagesList({
             case "digest":
               return showToolCalls ? <DigestChip message={m} /> : null;
             case "compaction":
-              return <CompactionChip message={m} />;
+              return <CompactionChip message={m} onNewChat={m.id === lookups.newChatHintId && canReact ? () => dispatch({ type: "newTask", botId }) : undefined} />;
             case "screen":
               return <ScreenFrame threadId={threadId} message={m} />;
             default: {
-              if (m.publishedPage) return <PublishedPageCard message={m} />;
+              if (m.publishedPage || m.template) return m.template ? <TemplateChatCard message={m} botId={botId} threadId={threadId} /> : <PublishedPageCard message={m} />;
               const peer = peerLine(m) ?? peerRequest(m, botId);
               const user = m.role === "user" && !peer;
               if (!user && isPureLeakedSystemHarnessMessage(m.text) && !m.attachments?.length) return null;
@@ -786,7 +785,7 @@ const MessagesList = memo(function MessagesList({
             {newDay && <DaySeparator at={m.at} today={today} simple={simple} />}
             {divider}
             {m.automation && <AutomationCaption message={m} line={m.automation} botId={botId} />}{m.inbox && <InboxCaption message={m} />}
-            {isLiveReply(m) ? <StreamingReplyContext value>{row}</StreamingReplyContext> : row}{m.inbox?.answers && <InboxAnswers message={m} />}{m.inbox && <InboxCardSlot threadId={threadId} messageId={m.id} />}{m.setupOffer && <SetupOffer botId={botId} threadId={threadId} message={m} transcript={transcript} />}{m.savedSteps && <SavedStepsChip botId={botId} message={m} />}
+            {isLiveReply(m) ? <StreamingReplyContext value>{row}</StreamingReplyContext> : row}<PublishedSiteCards message={m} />{m.inbox?.answers && <InboxAnswers message={m} />}{m.inbox && <InboxCardSlot threadId={threadId} messageId={m.id} />}{m.setupOffer && <SetupOffer botId={botId} threadId={threadId} message={m} transcript={transcript} />}{m.savedSteps && <SavedStepsChip botId={botId} message={m} />}
           </div>
         );
       })}
@@ -857,7 +856,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
     threadId: bot.threadId,
     messages,
     pinOn: [bot.busy, composerDock.pad],
-    hasMore: bot.hasMore,
+    hasMore: bot.hasMore, rests: staysInView,
   });
 
   const lastBotTextId = useMemo(
@@ -885,7 +884,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const bubbleStyle = useMemo(() => (colorMine ? userBubbleStyle(bot.color, { flat: !advanced }) : undefined), [colorMine, bot.color, advanced]);
   const hasMore = Boolean(bot.hasMore);
   const reactor = useReactor();
-  const speakerViewer = state.config?.team && reactor !== "user" ? reactor : null;
+  const speakerViewer = reactor !== "user" ? reactor : null;
   const rows = useMemo<ChatRows>(
     () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, botColor: bot.color, voiceId: bot.voice, tts, localVoice, hasMore, bots, mentionPeers, mentionPerson: { profileName: state.config?.profile?.name }, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, conversational: isConversational(bot.replyStyle), simple: !advanced, canReact: canWrite !== false, openedAt, speakerViewer, phone }),
     [bot.id, bot.threadId, bot.name, bot.color, bot.voice, tts, localVoice, hasMore, bots, mentionPeers, state.config?.profile?.name, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle, bot.replyStyle, advanced, canWrite, openedAt, speakerViewer, phone],
@@ -981,13 +980,13 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
 
   return (
     <ThreadLinkContext value={threadLink}>
-    <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
+    <main data-look="chat" className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <CallOverlay bot={bot} />
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
       {/* z-[25]: above the room set-up card (z-20), below the CallOverlay (z-30). */}
       <GlassBar edge="top" fade={!remoteClient} className="z-[25]">
       <div
-        {...headerDragProps}
+        {...headerDragProps} data-look="chat-header"
         className={cn(
           // A container query never matches the container itself, so the row that wraps is the child below.
           "@container/chathead",
@@ -1091,6 +1090,12 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           {/* The model and the bot's computer stay in view in both modes; Simple mode moves only ⋯ into the bot panel. */}
           {!phone && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}
           <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, store.state(), showThreads)} />{!phoneMenu && <WatchScreenButton botId={bot.id} messages={messages} liveTools={liveTools} place={place} />}
+          <PinnedMessagesMenu
+            pins={pinnedPreview(messages, bot.pinnedMessageId, bot.name)}
+            triggerClassName={cn(ELEVATED_FLOAT, ELEVATED_HOVER)}
+            onJump={(messageId) => dispatch({ type: "focusMessage", threadId: bot.threadId, messageId })}
+            onUnpin={remoteClient ? undefined : () => dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { pinnedMessageId: "" } })}
+          />
           {!phoneMenu && <button
             data-tour="computer"
             onClick={(event) => { if (!state.computerOpen) rememberComputerPanelOpen({ botId: bot.id, opener: event.currentTarget, tabs: event.detail === 0 }); dispatch({ type: "toggleComputer" }); }}
@@ -1118,18 +1123,6 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
 
       <ChatErrorBanner message={state.error} onDismiss={() => dispatch({ type: "error", message: null })} />
       <ChatNotice notice={state.notice} />
-
-      <PinnedBanner
-        bot={bot}
-        pinnedId={bot.pinnedMessageId}
-        messages={messages}
-        onJump={(messageId) =>
-          dispatch({ type: "focusMessage", threadId: bot.threadId, messageId })
-        }
-        onUnpin={remoteClient ? undefined : () =>
-          dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { pinnedMessageId: "" } })
-        }
-      />
 
       </GlassBar>
 
@@ -1216,7 +1209,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
             simple={!advanced}
             className={cn(!advanced && presenceUnderBubble && SIMPLE_STACKED)}
             label={teammatesWorking ? t("chat.teammatesWorking") : sharedRun.label}
-            visible={presenceVisible}
+            visible={presenceVisible} threadId={bot.threadId}
             {...now}
             phrases={teammatesWorking ? undefined : now.phrases}
             seed={`${bot.id}:${bot.threadId ?? ""}:${busySince ?? ""}`}
@@ -1227,7 +1220,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
       </div>
 
       <TranscriptAnnouncer threadKey={transcriptKey} snapshot={announcement} />
-      <div ref={setPagePane} data-page-pane-slot className="contents" style={{ "--page-pane-bottom": `${composerDock.height}px` } as CSSProperties} />
+      <div ref={setPagePane} data-page-pane-slot className="contents" style={{ "--page-pane-bottom": `${composerDock.box}px` } as CSSProperties} />
 
       <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
       {advanced && lastRunStep && showRun(recordedRun) && showRunCard && runDismissed.get(transcriptKey) !== lastRunStep.id && (

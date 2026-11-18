@@ -273,12 +273,13 @@ export function obsidianUrlFor(workspacePath: string): string {
 
 export type OpenerRunner = (command: string, args: string[]) => Promise<number | null>;
 
-/** No shell, fixed argv, nothing from the request. */
+/** No shell, fixed argv, nothing from the request. Not windowsHide: on Windows it starts GUI programs hidden too,
+ * so explorer.exe opened an invisible folder window. Every opener here is a GUI program, so no console shows. */
 const spawnOpener: OpenerRunner = (command, args) =>
   new Promise((done) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, args, { stdio: "ignore", windowsHide: true, detached: true });
+      child = spawn(command, args, { stdio: "ignore", windowsHide: false, detached: true });
     } catch {
       return done(null);
     }

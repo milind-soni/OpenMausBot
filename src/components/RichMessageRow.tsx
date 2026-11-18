@@ -7,12 +7,13 @@ import { BurstCard } from "./BurstCard";
 import { GoalRunRow } from "./GoalRunCard";
 import { HelperKeySuggestion } from "./HelperKeySuggestion";
 import { MessageBoundary } from "./MessageBoundary";
+import { SettingsCard } from "./SettingsCard";
 import { WidgetMessage } from "./widget/WidgetMessage";
 
 export function richRowKind(message: Message): Message["kind"] {
   // MausBot's follow-up is text the model reads, drawn under its intro's card row (OptionsCardRow).
   if (message.helperFollowup) return "options";
-  if (message.setupSuggestion || (message.kind === "goal.run" && message.goalRun) || (message.kind === "burst" && message.burst)) return "widget";
+  if (message.setupSuggestion || message.settingsCard || (message.kind === "goal.run" && message.goalRun) || (message.kind === "burst" && message.burst)) return "widget";
   if (message.kind === "widget" && !message.widget) return "text";
   if (message.kind === "app" && !message.app) return "text";
   return message.kind;
@@ -22,7 +23,9 @@ export function richRowKind(message: Message): Message["kind"] {
 export function RichMessageRow({ botId, botName, threadId, message, room }: { botId: string; botName: string; threadId?: string; message: Message; room?: boolean }) {
   return (
     <MessageBoundary fallbackText={message.text ?? ""}>
-      {message.setupSuggestion
+      {message.settingsCard
+        ? <SettingsCard message={message} />
+        : message.setupSuggestion
         ? <HelperKeySuggestion threadId={threadId} message={message} />
         : message.kind === "burst" && message.burst
           ? <div className="flex justify-start"><BurstCard card={message.burst} /></div>

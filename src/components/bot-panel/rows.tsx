@@ -134,12 +134,12 @@ export function NavRow({ title, hint, value, icon, onClick, drill = true, danger
       className={cn(rowCls, "w-full text-left enabled:hover:bg-ink/[0.03] disabled:cursor-default disabled:opacity-45")}
     >
       {icon && <RowIcon icon={icon} />}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-[45%] flex-1">
         <div className={cn(titleCls, danger && "text-danger")}>{title}</div>
         {hint && <div className={hintCls}>{hint}</div>}
       </div>
       {value !== undefined && value !== null && value !== "" && (
-        <span className="inline-flex max-w-[45%] shrink-0 items-center gap-1 truncate text-[13px] text-ink-secondary">{value}</span>
+        <span className="inline-flex min-w-0 max-w-[45%] items-center gap-1 text-[13px] text-ink-secondary"><span className="truncate">{value}</span></span>
       )}
       {drill && <ChevronRight size={15} className="shrink-0 text-ink-tertiary" aria-hidden="true" />}
     </button>

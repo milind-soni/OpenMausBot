@@ -19,10 +19,18 @@ function reportedPid(stdout: Readable): Promise<number> {
   });
 }
 
+/** A Linux process that has exited but waits to be collected (an orphan's new parent may take a moment) still answers
+ * kill(pid, 0); killCliTree counts it as stopped, and so does this. */
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
+  } catch {
+    return false;
+  }
+  if (process.platform !== "linux") return true;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return !["Z", "X"].includes(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0]!);
   } catch {
     return false;
   }

@@ -134,6 +134,8 @@ const __APP_VERSION__: string;
         dismiss(key: string): Promise<{ suggest: import("../lib/two-places").TwoPlacesSuggestion | null }>;
         onChanged(callback: () => void): () => void;
       };
+      /** This computer's page and My Cloud's own page: the other one's bots in this sidebar (electron/places-together.mjs). */
+      placesTogether?: import("../../electron/places-together.mjs").PlacesTogetherBridge;
       /** Settings on the person's own Cloud: the plan, read only. */
       cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
       /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */
@@ -455,7 +457,7 @@ const __APP_VERSION__: string;
       credentialStore?: { unreadable(): Promise<boolean>; reset(): Promise<"reset" | "cancelled" | "quitting" | "failed" | "readable"> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "openaiApiKey" | "anthropicApiKey" | "openrouterApiKey" | "mistralApiKey" | "cerebrasApiKey" | "groqApiKey" | "greenferenceApiKey" | "modelgoApiKey" | "metaApiKey" | "deepseekApiKey" | "openaiCompatApiKey" | "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
+        name: "openaiApiKey" | "anthropicApiKey" | "openrouterApiKey" | "mistralApiKey" | "cerebrasApiKey" | "groqApiKey" | "greenferenceApiKey" | "modelgoApiKey" | "metaApiKey" | "deepseekApiKey" | "openaiCompatApiKey" | "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "customDeciderKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
         value: string,
         options?: { everyClaudeBot?: false },
       ): Promise<ConfigStatus>;
@@ -551,6 +553,8 @@ export interface CompanionAccountState {
   /** The secure address was ended for old phone apps: a phone that has not used the encrypted connection must be
    * updated and paired again. */
   tunnelRetired?: boolean;
+  /** What failed, as one fixed word for the connection diagnosis. Absent on older builds. */
+  problem?: "unconfigured" | "unreachable" | "sign_in" | "busy" | "limit" | "update" | "address" | "failed";
 }
 
 export type AndroidUsbDevice = {

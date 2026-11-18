@@ -414,6 +414,22 @@ An HTTP 401 tells the bot to send the message again (a sign-in is refreshed
 when a message starts) and, if that fails, to sign in again or check the
 server's header values in Plugins → MCP servers.
 
+### Which bot made a call, on a server that runs on a lent computer
+
+A server saved on a Cloud to run on a computer lent to it is started by that
+computer. Each tool call it gets names the bot and conversation that made it,
+in the call's `_meta`:
+
+```json
+{ "_meta": { "openmausbot/caller": { "botId": "…", "threadId": "…", "verified": false } } }
+```
+
+It is a hint for the server's own logs or per-bot settings, never proof of
+who called: the Cloud says it, the computer passes it on as it is, and
+OpenMausBot never uses it to allow or refuse anything. The Cloud sends it
+only to a desktop app new enough to pass it on, so an older one keeps running
+calls as before; a listing of the server's tools never carries it.
+
 ## What a Claude bot sees, and the "Also use my Claude Code MCP servers" switch
 
 A bot on the Claude engine gets the tools and instructions its owner gave it:

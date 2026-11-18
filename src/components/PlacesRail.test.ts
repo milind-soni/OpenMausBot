@@ -263,7 +263,7 @@ it("Connect to a server never sits grey without saying why: it says it is lookin
   expect(form.querySelector("[data-connect-problem]")?.textContent).toBe("Can't reach 192.168.1.21:8799. Check the server is running and reachable from this computer.");
 });
 
-it("Connect to a server says plainly that another computer's desktop app can't be connected to, and points to My Cloud", async () => {
+it("Connect to a server says how another computer's desktop app is opened from here: its Your other computers link, or My Cloud", async () => {
   const probe = vi.fn(async (address: string): Promise<unknown> => (address === "123456"
     ? { outcome: "problem", problem: "oldCode" }
     : { outcome: "problem", problem: "desktopApp", host: "192.168.1.30:8799" }));
@@ -272,17 +272,43 @@ it("Connect to a server says plainly that another computer's desktop app can't b
   await click(host.querySelector("[data-rail-add]"));
   await click(document.querySelector('[data-place-add-choice="server"]'));
   const form = document.querySelector('[data-place-add="own-server"]')!;
+  expect(form.querySelector("[data-connect-other-computer]")?.textContent).toBe("For another computer running the MausBot app: on that computer, open Settings → Phone & devices → Your other computers.");
   await type(form.querySelector("[data-own-server-link]"), "192.168.1.30:8799");
   await settle();
   const line = form.querySelector("[data-connect-problem]")?.textContent ?? "";
-  expect(line).toContain("192.168.1.30:8799 is a MausBot desktop app, and one desktop app can't connect to another");
+  expect(line).toContain("192.168.1.30:8799 is a MausBot desktop app. To open it from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
   expect(line).toContain("My Cloud");
-  expect(line).not.toContain("isn't a MausBot server");
+  expect(line).not.toMatch(/can't connect to another|isn't a MausBot server/);
   expect((form.querySelector("[data-own-server-connect]") as HTMLButtonElement).disabled).toBe(true);
-  // The 6-digit code a desktop app shows for pairing a phone gets the same pointer, not "a code from an older MausBot".
   await type(form.querySelector("[data-own-server-link]"), "123456");
   await settle();
-  expect(form.querySelector("[data-connect-problem]")?.textContent).toContain("That 6-digit code pairs a phone with a desktop app");
+  const code = form.querySelector("[data-connect-problem]")?.textContent ?? "";
+  expect(code).toContain("That code is for the phone app. To open that computer from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
+  expect(code).toContain("My Cloud");
+  expect(code).not.toMatch(/can't connect to another|older MausBot/);
+});
+
+it("an address typed key by key stays in its box; a pasted one moves on to the code", async () => {
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  await click(document.querySelector('[data-place-add-choice="server"]'));
+  const form = document.querySelector('[data-place-add="own-server"]')!;
+  const address = form.querySelector("[data-own-server-link]") as HTMLInputElement;
+  const afterTimers = () => act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+  for (const key of "maus.local") {
+    const focused = document.activeElement as HTMLInputElement;
+    await type(focused, focused.value + key);
+    await afterTimers();
+  }
+  expect([address.value, (form.querySelector("[data-own-server-code]") as HTMLInputElement).value]).toEqual(["maus.local", ""]);
+  expect(document.activeElement).toBe(address);
+  await type(address, "");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(address, "192.168.1.20:8799");
+    address.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste" }));
+  });
+  await afterTimers();
+  expect(document.activeElement).toBe(form.querySelector("[data-own-server-code]"));
 });
 
 it("Connect to a server takes an address and a code typed apart: a code pasted alone moves to its field, and main names the server it found", async () => {

@@ -9,7 +9,7 @@ import { clip, oneLine } from "./host/text-clip.ts";
  * platform, 262,144 for diagnostics and a 600 KB body. */
 export const DEVS_REPORT_LIMITS = {
   description: 10_000, message: 3_000, summary: 2_000, seen: 3_000, steps: 2_000,
-  field: 40, diagnostics: 48_000, problems: 20, problemChars: 300, logLines: 80, logLineChars: 400, body: 600 * 1024,
+  field: 40, diagnostics: 48_000, problems: 20, problemChars: 300, performanceLines: 40, performanceChars: 1_200, logLines: 80, logLineChars: 400, body: 600 * 1024,
 } as const;
 
 /** The fields today's Admin reads for the person's address, and the reply-to one it is gaining; it ignores fields it
@@ -65,7 +65,11 @@ export interface DevsReportInput {
   /** Why no bot wrote a summary. */
   noSummary?: string;
   problems: string[];
+  /** Turn timings, usage limits and process use: numbers, fixed codes and opaque ids only. */
+  performance?: string[];
   log: string[];
+  /** One line per cloud computer used since the server started: its opaque id and counts, nothing it ran. */
+  cloudComputers?: string[];
   contactEmail?: string;
 }
 
@@ -151,6 +155,8 @@ function diagnose(input: DevsReportInput, redact: (text: string) => string): str
   lines.push("", "## Recent problems in this conversation, newest last");
   const problems = input.problems.slice(-DEVS_REPORT_LIMITS.problems).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.problemChars));
   lines.push(...(problems.length ? problems : ["(none)"]));
+  if (input.cloudComputers?.length) lines.push("", "## Cloud computers since the server started", ...input.cloudComputers.slice(0, DEVS_REPORT_LIMITS.problems).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.problemChars)));
+  if (input.performance?.length) lines.push("", ...input.performance.slice(0, DEVS_REPORT_LIMITS.performanceLines).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.performanceChars)));
   lines.push("", "## Server warnings and errors, newest last");
   const log = input.log.slice(-DEVS_REPORT_LIMITS.logLines).map((line) => oneLine(redact(line), DEVS_REPORT_LIMITS.logLineChars));
   lines.push(...(log.length ? log : ["(none since the server started)"]));

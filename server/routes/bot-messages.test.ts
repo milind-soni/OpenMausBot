@@ -5,10 +5,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ContextBreakdown } from "../../shared/context-breakdown.ts";
 import { WIDGET_SAMPLES } from "../../shared/widget-samples.ts";
 import { createAgentCard } from "../chat-widgets.ts";
 import { DATA_DIR } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
+import { startFresh } from "../fresh-start.ts";
 import { json, readBody } from "../harness/http.ts";
 import { createRunOwners } from "../host/run-owner.ts";
 import { promptWithReply } from "../replies.ts";
@@ -17,6 +19,7 @@ import { acceptedSendMatch, sendFingerprint, SendSequencer } from "../send-idemp
 import { _queuedCount, drainSteeredMessages, queuedSteeredMessage, queueSteeredMessage } from "../steer-queue.ts";
 import { Store, type Message } from "../store.ts";
 import { typedWords } from "../typed-sends.ts";
+import { USER_ERROR } from "../user-errors.ts";
 import { createBotMessageRoutes, type BotMessageRouteDeps } from "./bot-messages.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -161,8 +164,46 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
   };
   const row = (id: string, thread = threadId): Message => store.messagesFor(thread).find((message) => message.id === id)!;
   const sent = (thread = threadId): Message[] => store.messagesFor(thread).filter((message) => message.role === "user");
-  return { store, bot, threadId, state, post, edit, cancelQueued, show, row, sent, patches: vi.spyOn(store, "patchMessage") };
+  const context = async () => {
+    const response = await fetch(`${base}/api/bots/${bot.id}/context`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) });
+    return { status: response.status, body: await response.json() as Record<string, any> };
+  };
+  return { store, bot, threadId, state, post, edit, cancelQueued, context, show, row, sent, patches: vi.spyOn(store, "patchMessage") };
 }
+
+describe("POST /api/bots/:id/context", () => {
+  const counted: ContextBreakdown = { tokens: 6000, window: 200000, categories: [{ id: "messages", kind: "used", tokens: 6000 }] };
+  /** An engine that has been asked and answers only when the test lets it. */
+  function engine() {
+    let asked!: () => void;
+    let answer!: (breakdown: ContextBreakdown) => void;
+    const reached = new Promise<void>((resolve) => { asked = resolve; });
+    const reply = new Promise<ContextBreakdown>((resolve) => { answer = resolve; });
+    const registry = { get: () => ({ instanceId: "claude", driverKind: "claudeAgent", adapter: { contextBreakdown: () => { asked(); return reply; } } }) };
+    return { registry, reached, answer };
+  }
+
+  it("returns the engine's count for the conversation it still holds", async () => {
+    const { registry, reached, answer } = engine();
+    const { context, threadId } = await fixture({ registry });
+    const reading = context();
+    await reached;
+    answer(counted);
+    expect(await reading).toEqual({ status: 200, body: { threadId, breakdown: counted } });
+  });
+
+  it("drops a count the engine returns after the person started fresh while it was counting", async () => {
+    const { registry, reached, answer } = engine();
+    const { store, bot, context, threadId } = await fixture({ registry });
+    store.appendMessage(threadId, { role: "user", kind: "text", text: "hello" });
+    store.appendMessage(threadId, { role: "bot", kind: "text", text: "hi" });
+    const reading = context();
+    await reached;
+    expect(startFresh(store, bot.id, threadId)).not.toBeNull();
+    answer(counted);
+    expect(await reading).toEqual({ status: 200, body: { threadId, breakdown: null } });
+  });
+});
 
 describe("editing a message with no AI", () => {
   it("says what a Send says on a team, and starts no turn", async () => {
@@ -544,6 +585,15 @@ describe("POST /api/bots/:id/messages with widgetAction", () => {
     expect((await post({ threadId, text: "Hold off until Monday", replyToId: widgetId })).status).toBe(202);
     expect(sent().map((message) => [message.text, message.replyToId])).toEqual([["Hello", undefined], ["Hold off until Monday", widgetId]]);
     expect(state.accepted.map((input) => input.replyTo?.id)).toEqual([undefined, widgetId]);
+  });
+});
+
+describe("a typed answer to a card the server refuses", () => {
+  it("returns the refusal with its language-pack key, like a pressed card's", async () => {
+    const error = USER_ERROR["serverError.card.cloudOwnerOnly"];
+    const { threadId, post, sent } = await fixture({ typedCardAnswer: async () => ({ status: 403, error }) });
+    expect(await post({ threadId, text: "allow" })).toEqual({ status: 403, body: { error, errorKey: "serverError.card.cloudOwnerOnly" } });
+    expect(sent()).toEqual([]);
   });
 });
 

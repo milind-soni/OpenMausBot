@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { IdleCompactResult } from "../contracts.ts";
 import type { HandedState } from "../delta-context.ts";
 import type { Message } from "../store.ts";
-import { WARM_SUMMARY_IDLE_MS, WARM_SUMMARY_RETRY_MS, WARM_SUMMARY_SOON_MS } from "../warm-summary.ts";
+import { createJobSlots } from "../job-slots.ts";
+import { WARM_SUMMARY_GIVE_UP_MS, WARM_SUMMARY_IDLE_MS, WARM_SUMMARY_RETRY_MS, WARM_SUMMARY_SOON_MS } from "../warm-summary.ts";
 import { addServerLinePacks } from "../server-lines.ts";
 import { createWarmSummaryHost, keptAfterSummary, PRESENCE_HOLD_MS, summaryInstructions, type WarmSummaryHostDeps } from "./warm-summary-host.ts";
 
@@ -118,6 +119,32 @@ function setup(overrides: Partial<WarmSummaryHostDeps> = {}, options: { tokens?:
 }
 
 describe("warm summaries for a Claude conversation", () => {
+  it("skips a summary that waited for a free slot until its cache went cold, and writes one that waited less", async () => {
+    let finish!: () => void;
+    const slots = createJobSlots(1);
+    const other = slots.run(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const cold = setup({ slots });
+    cold.finishTurn();
+    await cold.advance(WARM_SUMMARY_IDLE_MS);
+    expect(slots.waiting).toBe(1);
+    await cold.advance(WARM_SUMMARY_GIVE_UP_MS);
+    finish();
+    await other;
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+    expect(cold.compactCalls).toEqual([]);
+    expect(cold.host.state("t1")?.last?.outcome).toMatch(/^failed: the prompt cache has gone cold \(after waiting for a free slot\)/);
+
+    const warm = setup({ slots });
+    const again = slots.run(() => new Promise<void>((resolve) => { finish = resolve; }));
+    warm.finishTurn();
+    await warm.advance(WARM_SUMMARY_IDLE_MS);
+    await warm.advance(60_000);
+    finish();
+    await again;
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+    expect(warm.compactCalls).toHaveLength(1);
+  });
+
   it("moves the conversation to the summarized fork and carries the last two exchanges on word for word", async () => {
     const f = setup();
     f.finishTurn();

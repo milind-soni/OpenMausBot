@@ -72,7 +72,8 @@ export function createWebhookRoomPost(deps: WebhookRoomDeps): Pick<WebhookManage
         if (!group) fail(404, ROOM_GONE);
         const talks = deps.roomTalks(bot, group);
         if (!talks.ok) fail(403, roomPostProblem(bot, group, talks));
-        store.appendMessage(group.threadId, {
+        const threadId = group.threadId;
+        store.appendMessage(threadId, {
           role: "bot",
           kind: "text",
           text: content.text,
@@ -84,6 +85,7 @@ export function createWebhookRoomPost(deps: WebhookRoomDeps): Pick<WebhookManage
             : {}),
         });
         store.patchGroup(group.id, { unread: true });
+        return threadId;
       },
     }, trigger, payload),
   };

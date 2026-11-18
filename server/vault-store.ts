@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { HELD_SECRET_MASK } from "../shared/redact.ts";
-import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
+import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginPlace, loginSite, loginUsableBy, type BitwardenCredentials, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
 import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { decryptBrowserState, encryptBrowserState } from "./browser-sites.ts";
@@ -65,6 +65,8 @@ const fileSchema = z.object({
   logins: z.array(diskLoginSchema),
   secrets: z.array(diskSecretSchema).optional(),
   onePassword: z.object({ token: z.string().min(1), connectedAt: z.number() }).optional(),
+  /** Bitwarden's server address, API key and master password, read only by its command line tool's environment. */
+  bitwarden: z.object({ serverUrl: z.string().min(1), clientId: z.string().min(1), clientSecret: z.string().min(1), password: z.string().min(1), connectedAt: z.number() }).optional(),
   /** Vault id → the bots that may use its logins; a vault not named here is for every bot. Kept across reconnects. */
   onePasswordGrants: z.record(z.string(), botsSchema).optional(),
   /** 1Password item (`<vault id>:<item id>`) → the bots that may use it, ahead of its vault's choice. Kept across reconnects. */
@@ -127,6 +129,8 @@ export interface NewLogin extends LoginPlace {
 }
 
 export interface LoginPatch {
+  /** A new host for the login: its site becomes that host's, and its sign-in hosts just that host. */
+  site?: string;
   username?: string;
   password?: string;
   totp?: TotpKey | null;
@@ -290,12 +294,15 @@ export class VaultStore {
     return summarizeLogin(login);
   }
 
-  update(id: string, patch: LoginPatch): LoginSummary | null {
+  /** "taken" when the login would move onto a site where the same account is already saved. */
+  update(id: string, patch: LoginPatch): LoginSummary | null | "taken" {
     const data = this.read();
     const current = data.logins.find((login) => login.id === id);
     if (!current) return null;
+    const moved = patch.site !== undefined && !current.hosts.includes(patch.site);
     const next: StoredLogin = {
       ...current,
+      ...(moved ? loginPlace(patch.site!, [], current.exactHost) : {}),
       ...(patch.username === undefined ? {} : { username: patch.username }),
       ...(patch.password === undefined ? {} : { password: patch.password }),
       ...(patch.bots === undefined ? {} : { bots: patch.bots }),
@@ -304,6 +311,7 @@ export class VaultStore {
     };
     if (patch.totp === null) delete next.totp;
     else if (patch.totp) next.totp = patch.totp;
+    if (moved && data.logins.some((login) => login.id !== id && sameAccount(login, next))) return "taken";
     this.write({ ...data, logins: data.logins.map((login) => login.id === id ? next : login) });
     return summarizeLogin(next);
   }
@@ -345,13 +353,15 @@ export class VaultStore {
     return (this.read().secrets ?? []).filter((secret) => secretReadable(secret, reader)).map(summarizeSecret).sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  /** The secret `botId` may use by this name, as a ref or a file, in a turn `reader` names: one kept to some bots before
-   * one for every bot, then the newest. */
+  /** The secret `botId` may use by this name, as a ref or a file, in a turn `reader` names: the person's own before the
+   * team's of the same name, whichever was saved later; then one kept to some bots before one for every bot; then the
+   * newest. */
   usableSecret(name: string, botId: string, delivery: "ref" | "file", reader: VaultReader): StoredSecret | null {
     const key = vaultNameKey(name);
     const matches = (this.read().secrets ?? []).filter((secret) => vaultNameKey(secret.name) === key && loginUsableBy(secret, botId) &&
       secretReadable(secret, reader) && (delivery === "ref" || !secret.refOnly));
-    return matches.sort((a, b) => Number(b.bots !== "all") - Number(a.bots !== "all") || b.updatedAt - a.updatedAt)[0] ?? null;
+    return matches.sort((a, b) => Number(Boolean(b.person)) - Number(Boolean(a.person)) || Number(b.bots !== "all") - Number(a.bots !== "all") ||
+      b.updatedAt - a.updatedAt)[0] ?? null;
   }
 
   secretNamesFor(botId: string, reader: VaultReader): Array<{ name: string; refOnly?: true }> {
@@ -484,6 +494,16 @@ export class VaultStore {
     this.write(token ? { ...rest, onePassword: { token, connectedAt: this.now() } } : rest);
   }
 
+  bitwardenCredentials(): BitwardenCredentials | null {
+    const saved = this.read().bitwarden;
+    return saved ? { serverUrl: saved.serverUrl, clientId: saved.clientId, clientSecret: saved.clientSecret, password: saved.password } : null;
+  }
+
+  setBitwardenCredentials(credentials: BitwardenCredentials | null): void {
+    const { bitwarden: _previous, ...rest } = this.read();
+    this.write(credentials ? { ...rest, bitwarden: { ...credentials, connectedAt: this.now() } } : rest);
+  }
+
   onePasswordGrants(): Record<string, LoginBots> {
     return this.read().onePasswordGrants ?? {};
   }
@@ -518,6 +538,7 @@ export class VaultStore {
     return [
       ...data.logins.flatMap((login) => [login.password, ...(login.totp ? [login.totp.secret] : [])]),
       ...(data.onePassword ? [data.onePassword.token] : []),
+      ...(data.bitwarden ? [data.bitwarden.clientSecret, data.bitwarden.password] : []),
       ...(data.secrets ?? []).map((secret) => secret.value),
     ];
   }

@@ -129,6 +129,14 @@ function isOpenRouterUrl(url: string): boolean {
   }
 }
 
+const isClaudeModel = (model: string) => /^anthropic\//iu.test(model);
+
+/** OpenRouter caches a Claude prompt only when asked; `session_id` keeps one thread on the provider that holds its cache.
+ * https://openrouter.ai/docs/features/prompt-caching */
+function openRouterPromptCache(threadId: string | undefined): Record<string, unknown> {
+  return { cache_control: { type: "ephemeral" }, ...(threadId ? { session_id: threadId } : {}) };
+}
+
 function loopbackLmStudioV1Url(baseUrl: string): string | null {
   try {
     const url = new URL(baseUrl);
@@ -181,7 +189,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
   install: {
     docsUrl: "https://openrouter.ai/keys",
     settings: "connections",
-    signInCommand: "Save an OpenAI-compatible API key in Settings → API keys, or set OPENAI_COMPAT_API_KEY on the server.",
+    signInCommand: "Save an OpenAI-compatible API key in Settings → AI → Providers, or set OPENAI_COMPAT_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
@@ -204,7 +212,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     if (!savedKey && ollamaCandidate && !isOllamaServer(config) && await answersAsOllama()) await probeOllama(config.url, { timeoutMs: 1_500 });
     const apiKey = savedKey || (ollamaCandidate && isOllamaServer(config) ? OLLAMA_PLACEHOLDER_KEY : "");
     const missingKey = !ownKeyVariable || OWN_KEY_ENVS.has(config.apiKeyEnv)
-      ? "No API key — open Settings → API keys."
+      ? "No API key — open Settings → AI → Providers."
       : `no API key — set ${config.apiKeyEnv} or add it to the instance config`;
     const seeded = config.catalog === "openai" ? OPENAI_MODELS : isOllamaServer(config) ? NO_MODELS : DEFAULT_MODELS;
     let catalog: ModelCatalog = config.managedModels
@@ -384,7 +392,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         },
       } : {}),
       modelVariants: ollamaCandidate || config.catalog === "openai" || openRouter,
-      requestBody: (model, messages, stream, variant) => ({
+      requestBody: (model, messages, stream, variant, threadId) => ({
         model,
         messages,
         stream,
@@ -394,6 +402,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         ...(config.provider && isOpenRouterUrl(config.url)
           ? { provider: { order: [config.provider], allow_fallbacks: false } }
           : {}),
+        ...(isOpenRouterUrl(config.url) && isClaudeModel(model) ? openRouterPromptCache(threadId) : {}),
       }),
       httpErrorLabel: "upstream",
       missingKeyError: missingKey,

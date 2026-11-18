@@ -32,6 +32,8 @@ export interface MenuRow {
   efforts?: readonly string[];
   /** Why no thread can run on this engine now; it then lists no models. */
   unusable?: string;
+  /** Models the engine has but won't run until something changes, with what: the bot can say so instead of calling them gone. */
+  blocked?: Array<{ id: string; why: string }>;
 }
 
 export interface ModelMenu {
@@ -62,13 +64,16 @@ export function modelMenu(input: {
     const labels = new Map(engine.models.options.filter((option) => !option.orgBlocked && !option.needsCliUpdate).map((option) => [option.id, option.label]));
     const ids = [...new Set([...[input.current, ...input.pinned].filter((pin) => pin.instanceId === instanceId).map((pin) => pin.model), engine.models.default, ...labels.keys()])]
       .filter(Boolean);
-    const matching = terms.length ? ids.filter((id) => terms.every((term) => `${name} ${id} ${labels.get(id) ?? ""}`.toLowerCase().includes(term))) : ids;
-    if (!matching.length && !(terms.length && terms.every((term) => name.toLowerCase().includes(term)))) continue;
+    const matches = (id: string, label = "") => terms.every((term) => `${name} ${id} ${label}`.toLowerCase().includes(term));
+    const matching = ids.filter((id) => matches(id, labels.get(id)));
+    const blocked = engine.models.options.filter((option) => (option.orgBlocked || option.needsCliUpdate) && matches(option.id, option.label)).slice(0, MENU_SHORT)
+      .map((option) => ({ id: option.id, why: option.orgBlocked ? "turned off by this account's organization" : `needs ${name} CLI ${option.needsCliUpdate} or newer: update it` }));
+    if (!matching.length && !blocked.length && !(terms.length && terms.every((term) => name.toLowerCase().includes(term)))) continue;
     if (input.down(engine)) {
       unavailable.push(name);
       continue;
     }
-    if (!matching.length) continue;
+    if (!matching.length && !blocked.length) continue;
     const cap = terms.length ? room : matching.length <= MENU_WHOLE ? matching.length : MENU_SHORT;
     const listed: string[] = [];
     let examined = 0, refusedInRow = 0, why: string | null = null;
@@ -86,7 +91,7 @@ export function modelMenu(input: {
     }
     const more = matching.length - examined;
     if (!listed.length && why) {
-      engines.push({ instanceId, name, unusable: why });
+      engines.push({ instanceId, name, unusable: why, ...(blocked.length ? { blocked } : {}) });
       continue;
     }
     room -= listed.length;
@@ -99,6 +104,7 @@ export function modelMenu(input: {
       }) } : {}),
       ...(more > 0 ? { more } : {}),
       ...(efforts.length ? { efforts } : {}),
+      ...(blocked.length ? { blocked } : {}),
     });
   }
   return { current: input.current, engines, ...(unavailable.length ? { unavailable } : {}) };

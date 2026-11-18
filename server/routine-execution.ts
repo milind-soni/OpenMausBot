@@ -1,7 +1,5 @@
-import type { RoutineRetryCause } from "../shared/routines.ts";
 import { stopCause } from "./drivers/engine-errors.ts";
 import { redactSecretsInText } from "./redact.ts";
-import { retryNote } from "./routine-recovery.ts";
 import type { Routine, RoutineContextAttachment, RoutineRun, RoutineRunOn, RoutineRunTrigger } from "./routines.ts";
 
 export interface RoutineContinuityCarry {
@@ -69,9 +67,8 @@ export function composeExecutionPrompt(
   prompt: string,
   attachments: readonly RoutineContextAttachment[] | undefined,
   carry?: RoutineContinuityCarry | null,
-  retried?: RoutineRetryCause,
 ): string {
-  const parts = [`${routineHeader(routine.name, routine.trigger)}${routine.trigger === "webhook" ? "" : `Trigger id: ${routine.id}\n`}${prompt}`, retried ? retryNote(retried) : ""];
+  const parts = [`${routineHeader(routine.name, routine.trigger)}${routine.trigger === "webhook" ? "" : `Trigger id: ${routine.id}\n`}${prompt}`];
   const foreign = foreignPaths([prompt, ...(attachments ?? []).map((attachment) => attachment.path)], runHostPlatform(routine.runOn));
   if (foreign.length) {
     parts.push(`[OpenMausBot: this run is on a ${hostName(runHostPlatform(routine.runOn))} computer, where ${foreign.join(", ")} cannot exist. If the work needs ${foreign.length > 1 ? "them" : "it"}, say plainly what is missing instead of reporting success.]`);
@@ -136,16 +133,9 @@ export function routineFailure(error: string | undefined, stopReason: string | n
 /** How long a routine may be held up before it acts: a deferred run tells the owner, a waiting run gives way. */
 export const ROUTINE_DEFERRAL_NOTICE_MS = 30 * 60_000;
 export const ROUTINE_SUPERSEDED = "Stopped waiting: the next scheduled run of this routine started instead";
-export const ROUTINE_SKIPPED_WHILE_WAITING = "Skipped because the previous run of this routine is still waiting";
 
 /** Waiting since a notice window before its routine's next occurrence came due, with no hand-off still open: that occurrence starts instead. */
 export function supersededBy(dueAt: number, run: Pick<RoutineRun, "status" | "waitingSince" | "threadId">, handedOffWorkLive?: (threadId: string) => boolean): boolean {
   return run.status === "waiting" && run.waitingSince !== undefined && run.waitingSince <= dueAt - ROUTINE_DEFERRAL_NOTICE_MS &&
     !(run.threadId && handedOffWorkLive?.(run.threadId));
-}
-
-/** Once per wait: the first occurrence skipped after the waiting run blocking it passed the notice window. */
-export function skipNeedsNotice(dueAt: number, waitingSince: number, previousSkipAt: number | undefined): boolean {
-  const staleAt = waitingSince + ROUTINE_DEFERRAL_NOTICE_MS;
-  return dueAt >= staleAt && (previousSkipAt === undefined || previousSkipAt < staleAt);
 }

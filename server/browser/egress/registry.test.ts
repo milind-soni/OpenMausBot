@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { createServer, isIP, type AddressInfo } from "node:net";
+import { connect, createServer, isIP, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -224,6 +224,37 @@ describe("one gate per browser session", () => {
         expect(await socksCode(otherPort, "www.instagram.com", 443), `${host}: its own way`).toBe(4);
         expect(offered, `${host} sent a connection to the person's computer`).toEqual([]);
       } finally { await other.close(); }
+    }
+  });
+});
+
+describe("a session's gate once its browser has ended", () => {
+  it("closes the listener and opens again on the same port", async () => {
+    const egress = new BrowserEgress();
+    egress.configure({ host: "server", config: () => undefined });
+    const port = await egress.open("bot-a");
+    expect(egress.sessions()).toEqual(["bot-a"]);
+    await egress.release("bot-a");
+    expect(egress.sessions()).toEqual([]);
+    await expect(new Promise((resolve, reject) => { const socket = connect(port, "127.0.0.1"); socket.once("connect", () => { socket.destroy(); resolve("open"); }); socket.once("error", reject); })).rejects.toMatchObject({ code: "ECONNREFUSED" });
+    expect(await egress.open("bot-a")).toBe(port);
+    await egress.close();
+  });
+
+  it("takes any free port when its old one was taken meanwhile", async () => {
+    const egress = new BrowserEgress();
+    egress.configure({ host: "server", config: () => undefined });
+    const port = await egress.open("bot-b");
+    await egress.release("bot-b");
+    const squatter = createServer().listen(port, "127.0.0.1");
+    await new Promise((resolve) => squatter.once("listening", resolve));
+    try {
+      const again = await egress.open("bot-b");
+      expect(again).not.toBe(port);
+      expect(again).toBeGreaterThan(0);
+    } finally {
+      squatter.close();
+      await egress.close();
     }
   });
 });

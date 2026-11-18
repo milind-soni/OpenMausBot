@@ -235,18 +235,26 @@ same rules hold on the desktop, a server and Cloud:
   environments, so there a Chrome whose daemon was killed is not found.
 
 **Containers.** Chrome's helper processes need something to collect them
-once their parent exits, and Chrome needs shared memory. Both Docker compose
-files and the Podman one set `init: true` and `shm_size: 512m`, as
-OpenMausBot's desktop containers do (`--shm-size 512m`); a plain
-`docker run` wants `--init --shm-size=512m`. agent-browser 0.37.0 itself
-adds `--no-sandbox` and `--disable-dev-shm-usage` when it sees
-`/.dockerenv` or `/run/.containerenv`, runs as root or under CI, or finds
-docker, kubepods or lxc in `/proc/1/cgroup`. A runtime that shows none of
-these (a Kubernetes pod on cgroup v2, for one) needs `/dev/shm` room of its
-own (on Kubernetes, an `emptyDir` with `medium: Memory`). The image does
-not set `AGENT_BROWSER_ARGS`: OpenMausBot hands its browsers a curated
-environment that would not carry it. On Fly Machines (the Cloud home) Fly's
-own init runs as PID 1.
+once their parent exits, and Chrome needs shared memory. The server image
+brings both: tini is its entrypoint, so exited processes are collected on a
+host that passes no `--init` (a container platform), and a Chrome started
+where `/dev/shm` is under 512 MB, or missing, gets
+`--disable-dev-shm-usage`, which keeps its shared memory in `/tmp`. Both
+Docker compose files and the Podman one still set `init: true` and
+`shm_size: 512m`, as OpenMausBot's desktop containers do
+(`--shm-size 512m`); an init on top of the image's own is harmless. A
+server whose entrypoint was replaced, so that it is process 1 itself, says
+so in one line at start and starts itself again under the image's tini,
+which then stays process 1 for the life of the container.
+agent-browser 0.37.0 itself adds `--no-sandbox` and
+`--disable-dev-shm-usage` when it sees `/.dockerenv` or
+`/run/.containerenv`, runs as root or under CI, or finds docker, kubepods
+or lxc in `/proc/1/cgroup`; a runtime that shows none of these (a
+Kubernetes pod on cgroup v2, for one) is covered by the `/dev/shm` check.
+The Cloud home image has the same tini entrypoint: on Fly Machines Fly's
+init runs as PID 1 and tini collects beneath it, and on a host that starts
+the image with a plain `docker run` tini is PID 1.
+See [Running on a container platform](self-hosting.md#running-on-a-container-platform-railway-render-kubernetes-cloud-run).
 
 ## Video recording
 

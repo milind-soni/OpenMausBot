@@ -79,6 +79,7 @@ describe("checkFraming", () => {
       if (req.url === "/deny") res.writeHead(200, { "x-frame-options": "DENY" }).end("no");
       else if (req.url === "/hop") res.writeHead(302, { location: "/deny" }).end();
       else if (req.url === "/ok") res.writeHead(200).end("yes");
+      else if (req.url === "/team") res.writeHead(401, { "content-type": "text/html" }).end("<title>Login Redirect</title>");
       else res.writeHead(404).end();
     });
     await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
@@ -92,6 +93,10 @@ describe("checkFraming", () => {
   it("reads the headers of the page itself", async () => {
     expect(await checkFraming(`http://panel.test:${port}/deny`, APP, test)).toBe("blocked");
     expect(await checkFraming(`http://panel.test:${port}/ok`, APP, test)).toBe("allowed");
+  });
+
+  it("says a page that answers 401 asks for a login", async () => {
+    expect(await checkFraming(`http://panel.test:${port}/team`, APP, test)).toBe("login");
   });
 
   it("can't tell from a redirect, which may lead to a sign-in page the person's browser never gets", async () => {

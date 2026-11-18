@@ -78,7 +78,8 @@ const data = (value: string, max: number) => oneLine(value.replace(/[[\]]/g, " "
 
 function busyLines(busy: Busy[] | null, timeZone: string, now: number): string {
   if (!busy) return `Calendar: not connected, so when they are free is not known.`;
-  const shown = busy.filter((slot) => slot.end > now).sort((a, b) => a.start - b.start).slice(0, MAX_BUSY);
+  const upcoming = busy.filter((slot) => slot.end > now).sort((a, b) => a.start - b.start);
+  const shown = upcoming.slice(0, MAX_BUSY);
   if (!shown.length) return `Busy times in the next ${LOOK_AHEAD_DAYS} days: none.`;
   const day = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone });
   const time = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone });
@@ -87,7 +88,10 @@ function busyLines(busy: Busy[] | null, timeZone: string, now: number): string {
     return sameDay ? `${day.format(slot.start)} ${time.format(slot.start)}–${time.format(slot.end)}`
       : `${day.format(slot.start)} ${time.format(slot.start)} – ${day.format(slot.end)} ${time.format(slot.end)}`;
   });
-  return `Busy times in the next ${LOOK_AHEAD_DAYS} days (free at every other time): ${lines.join("; ")}.`;
+  const coverage = upcoming.length > MAX_BUSY
+    ? "partial list; additional busy times are omitted, so availability outside these intervals is unknown"
+    : "free at every other time";
+  return `Busy times in the next ${LOOK_AHEAD_DAYS} days (${coverage}): ${lines.join("; ")}.`;
 }
 
 function factsBlock(input: Question, busy: Busy[] | null, timeZone: string, now: number): string {
@@ -125,7 +129,10 @@ export function readAnswer(raw: string, name: string): string | null {
   if (!json) return null;
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { return null; }
-  const answer = parsed && typeof parsed === "object" ? (parsed as { answer?: unknown }).answer : undefined;
+  if (!parsed || typeof parsed !== "object") return null;
+  const response = parsed as { answer?: unknown; wait?: unknown };
+  if (response.wait === true) return null;
+  const answer = response.answer;
   if (typeof answer !== "string") return null;
   const text = oneLine(answer, MAX_ANSWER);
   return text && !commits(text, name) ? text : null;

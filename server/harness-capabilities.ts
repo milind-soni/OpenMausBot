@@ -13,6 +13,7 @@ const ENVELOPE: CatalogProfile = {
   voiceNotes: true,
   computerSelection: true,
   cloudHome: false,
+  localVm: true,
   chief: true,
   botId: "",
 };

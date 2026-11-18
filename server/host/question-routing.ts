@@ -1,4 +1,4 @@
-// Who answers a bot's question. At Full access ("Just do it") a question asked with an ask tool in work handed on that the
+// Who answers a bot's question. At Full access a question asked with an ask tool in work handed on that the
 // person started is not put to them: the bot takes its default, or hands a real choice to its requester.
 // Otherwise a question waits for the person, and an answer counts wherever it is given, also when their Chief or another
 // bot passes it on to the bot that asks, naming the question it answers. What the bot that handed work on sends to the
@@ -25,6 +25,8 @@ export interface QuestionRoutingDeps {
   answerNode(id: string, text: string, by: Answerer): boolean;
   /** The bot's turn in `threadId` waits on this card's live request. */
   live(threadId: string, requestId: string): boolean;
+  /** Some question in `threadId` is live: `live` is false for every request of a thread that has none. */
+  hasLive(threadId: string): boolean;
   /** The bot's work in `threadId` was started by an outside event or runs with no person behind it. */
   unattended(botId: string, threadId: string): boolean;
   /** Answers the live question request a turn waits on; true when the turn took the answer. */
@@ -75,6 +77,7 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
     const parked = deps.parkedFor(target.id).filter((node) => node.parentId && !node.groupId && (!node.cards?.length || signInsOnly(node)))
       .map((node) => ({ threadId: node.threadId, question: withDefault(node.question ?? "").question, node }));
     const live = store.tasks(target.id).flatMap((task) => {
+      if (!deps.hasLive(task.threadId)) return [];
       const card = store.messagesFor(task.threadId).findLast((row) => !row.inbox && answerableInWords(row.card) && deps.live(task.threadId, row.card!.requestId!));
       if (!card) return [];
       const node = deps.active().find((n) => n.threadId === task.threadId && n.botId === target.id && n.status === "running");

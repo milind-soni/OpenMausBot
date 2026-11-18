@@ -1,5 +1,6 @@
 import type { AppDocument } from "../../../shared/app";
 import { APP_FRAME_LIMITS, createAppBridge, type AppBridgeAdapter, type AppHostContext } from "../../../shared/app-frame/bridge";
+import { APP_HEADING_METHOD, APP_SELECTION_CHARS, APP_SELECTION_METHOD } from "../../../shared/app-frame/helper";
 
 /** Exactly these two tokens: never allow-same-origin, allow-popups or allow-top-navigation, and no `allow`
  * attribute. */
@@ -89,6 +90,40 @@ export function trackAppEngagement(iframe: HTMLIFrameElement): AppEngagement {
 
 export type AppFrameAdapter = Omit<AppBridgeAdapter, "post" | "engaged" | "now">;
 
+/** Text the person selected in a bot's page, and where its last line ends in the host window. */
+export interface AppSelection {
+  text: string;
+  left: number;
+  bottom: number;
+}
+
+const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+/** The page helper's selection report: undefined for any other message or a malformed one, null once it is gone. */
+export function readPageSelection(data: unknown): AppSelection | null | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const message = data as { jsonrpc?: unknown; method?: unknown; id?: unknown; params?: { text?: unknown; left?: unknown; bottom?: unknown } };
+  if (message.jsonrpc !== "2.0" || message.method !== APP_SELECTION_METHOD || message.id !== undefined) return undefined;
+  const { text, left, bottom } = message.params ?? {};
+  if (typeof text !== "string" || text.length > APP_SELECTION_CHARS) return undefined;
+  if (!text.trim()) return null;
+  return finite(left) && finite(bottom) ? { text, left, bottom } : undefined;
+}
+
+const APP_SIZE_METHOD = "ui/notifications/size-changed";
+
+/** The page helper's word on whether the page opens with a heading, null while it is still drawing itself; undefined
+ * for any other message. Its first answer may come on the page's size report. */
+export function readPageHeading(data: unknown): boolean | null | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const message = data as { jsonrpc?: unknown; method?: unknown; id?: unknown; params?: { heading?: unknown } };
+  if (message.jsonrpc !== "2.0" || message.id !== undefined) return undefined;
+  const heading = message.params?.heading;
+  if (message.method === APP_SIZE_METHOD) return typeof heading === "boolean" ? heading : undefined;
+  if (message.method !== APP_HEADING_METHOD) return undefined;
+  return typeof heading === "boolean" || heading === null ? heading : undefined;
+}
+
 export interface AppFrameHostOptions {
   container: HTMLElement;
   doc: AppDocument;
@@ -100,6 +135,10 @@ export interface AppFrameHostOptions {
   log?(params: unknown): void;
   /** The frame fills its container and the page scrolls inside it: the size the View reports is ignored. */
   fill?: boolean;
+  /** Text the person selected in a page that may message (never a room's), or null once it is gone: to cite it. */
+  onSelection?(selection: AppSelection | null): void;
+  /** Whether the page, as rendered, opens with a heading of its own; again whenever that changes. Null: still drawing. */
+  onHeading?(heading: boolean | null): void;
 }
 
 export interface AppFrameHost {
@@ -159,6 +198,7 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
   const engagement = trackAppEngagement(iframe);
   let gone = false;
   let leaving = false;
+  let said: boolean | null | undefined;
   const bridge = createAppBridge({
     doc,
     hostContext: options.hostContext,
@@ -178,7 +218,25 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
       now: () => Date.now(),
     },
   });
-  const onMessage = (event: MessageEvent) => bridge.handleMessage({ source: event.source, data: event.data });
+  const onMessage = (event: MessageEvent) => {
+    const heading = event.source === iframe.contentWindow ? readPageHeading(event.data) : undefined;
+    if (heading !== undefined) {
+      // The size first, in the same turn, so the card is laid out once.
+      if ((event.data as { method?: unknown }).method === APP_SIZE_METHOD) bridge.handleMessage({ source: event.source, data: event.data });
+      if (leaving || heading === said) return;
+      said = heading;
+      options.onHeading?.(heading);
+      return;
+    }
+    const selection = event.source === iframe.contentWindow ? readPageSelection(event.data) : undefined;
+    if (selection === undefined) return bridge.handleMessage({ source: event.source, data: event.data });
+    // Only to cite in the person's own chat: never in a room, and only what they selected themselves.
+    if (!options.onSelection || !doc.can.message || doc.room || !bridge.initialized || leaving) return;
+    if (!selection) return options.onSelection(null);
+    if (!engagement.engaged()) return;
+    const box = iframe.getBoundingClientRect();
+    options.onSelection({ text: selection.text, left: box.left + selection.left, bottom: box.top + selection.bottom });
+  };
   win?.addEventListener("message", onMessage);
   // The router listens before the frame can speak: it loads on insertion.
   iframe.srcdoc = doc.srcdoc;

@@ -2121,7 +2121,7 @@ describe("changedInstanceIds", () => {
   it("replaces only the engines whose launch config a save changed", () => {
     const saved: AppConfig = { mistral: { key: "m1" }, openaiCompat: { key: "c1", url: "https://compat.example/v1" } };
     expect(reloaded({ mistral: { key: "m1" }, openaiCompat: { key: "c1", url: "https://compat.example/v1" } }, saved)).toEqual([]);
-    expect(reloaded({ mistral: { key: "m2" } }, saved)).toEqual(["mistral"]);
+    expect(reloaded({ mistral: { key: "m2" } }, saved)).toEqual(["mistral", "mistralVibe"]);
     expect(reloaded({ openaiCompat: { key: "c2", url: "https://compat.example/v1" } }, saved)).toEqual(["openaiCompat"]);
     expect(reloaded({ openaiCompat: { key: "c1", url: "https://other.example/v1" } }, saved)).toEqual(["openaiCompat"]);
     expect(reloaded({ anthropic: { key: "a" } }, saved), "Claude (API key) runs on the key too").toEqual(["claude", "claudeApi"]);

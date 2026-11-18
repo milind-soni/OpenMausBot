@@ -1,4 +1,4 @@
-import type { WireBot } from "../../shared/wire.ts";
+import type { BotCreateResponse, WireBot } from "../../shared/wire.ts";
 import { freshLook } from "../bot-look.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
@@ -19,6 +19,7 @@ import type { TeamPeople } from "../team-people.ts";
 import { writeMemoryFile, writeMemoryTopic } from "../workspace.ts";
 import { refusalBody, userError } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
+import { botLimitRefusal } from "../bot-limit.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody);
@@ -32,6 +33,9 @@ export interface BotCreateRouteDeps {
   hostedWorkspace: boolean;
   hostedFullAccessRefusal: string;
   desktopManaged: boolean;
+  /** The place a new bot works on when neither its request nor the New bot defaults name one: on the desktop app,
+   * This computer, where it can use the person's own files and apps; undefined (Auto) everywhere else. */
+  newBotComputer?(selection: ModelSelection): "local" | undefined;
   maxWorkspaceBots: number;
   /** Whether this bot is paused: a Starter Cloud keeps only so many awake, and one made past them starts paused. */
   paused(botId: string): boolean;
@@ -185,7 +189,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (hostedModels && !hostedModels.allows(selection)) return json(res, 400, { error: hostedModels.error() });
       // The capacity check sits beside the synchronous write, after every await.
       if (store.bots.length >= MAX_WORKSPACE_BOTS) {
-        return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
+        return json(res, 409, { error: botLimitRefusal(MAX_WORKSPACE_BOTS) });
       }
       // Apply the audience before creation can announce the bot to members.
       const created = body.visibility === undefined ? null : parseVisibility(body.visibility);
@@ -206,7 +210,8 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           ...ordinary, name: bot.name, section, modelSelection: bot.modelSelection,
           mascotExpression: ordinary.mascotExpression ?? undefined,
           avatarUrl: ordinary.avatarUrl || undefined,
-          computer: ordinary.computer ?? undefined, cwd: checkedCwd.cwd ?? undefined,
+          // Auto with Approve for me stays Auto: This computer with it needs the warning only the bot's Settings shows.
+          computer: ordinary.computer ?? (ordinary.computer === undefined && ordinary.approvalMode !== "auto" ? deps.newBotComputer?.(selection) : undefined), cwd: checkedCwd.cwd ?? undefined,
           mcpServers: ordinary.mcpServers ?? undefined,
           browserProfile: ordinary.browserProfile || undefined,
           voiceNoteEveryReply: ordinary.voiceNoteEveryReply ?? undefined,
@@ -270,7 +275,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           messages: store.messagesFor(bot.threadId),
           activeLeafId: store.activeLeaf(bot.threadId),
         },
-      });
+      } satisfies BotCreateResponse<ReturnType<typeof store.messagesFor>[number]>);
     }
     return PASS;
   };

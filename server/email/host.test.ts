@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import "../server-line-packs.ts";
 import { setConversationLanguage } from "../server-lines.ts";
 import { boxUploadsDir } from "../bot-box/plan.ts";
-import { EmailError, openGuard, SendingError } from "./client.ts";
+import { EmailError, openGuard, sendingError, SendingError } from "./client.ts";
 import { outsideRouteRefused } from "../host/outside-fence.ts";
 import { createEmailHost, EMAIL_INTERNAL_MCP_PATH, emailAccess, emailAllowedFor, type EmailBot, type EmailHostDeps } from "./host.ts";
 import { createEmailService } from "./service.ts";
@@ -105,6 +105,24 @@ describe("a turn's Email tools", () => {
     expect(host.prompt({ id: "b1", name: "Ada" })).toContain("Sending from me@shop.example doesn't work until the person fixes its outgoing server");
   });
 
+  it.each(["EAI_AGAIN", "ETIMEOUT", "ETIMEDOUT", "ESERVFAIL", "ECONNREFUSED", "EREFUSED"])("a temporary DNS failure (%s) does not disable later sends", async (originalCode) => {
+    let calls = 0;
+    const { call, service, host, rows } = await fixture({ sendMessage: async (account) => {
+      calls++;
+      if (calls === 1) throw sendingError(Object.assign(new Error("private resolver detail"), { code: "EDNS", originalCode }), account.smtp!);
+      return { messageId: "<1@x>", accepted: ["a@b.example"], rejected: [], filed: false };
+    } });
+    const send = () => call("EMAIL_SEND_MESSAGE", { to: ["a@b.example"], subject: "Hi", text: "Body" });
+    const failed = await send();
+    expect(failed.isError).toBe(true);
+    expect(failed.content[0]!.text).not.toContain("private resolver detail");
+    expect(service.sendingProblem("me@shop.example")).toBeUndefined();
+    expect(host.prompt({ id: "b1", name: "Ada" })).not.toContain("doesn't work until the person fixes");
+    expect((await send()).isError).toBeUndefined();
+    expect(calls).toBe(2);
+    expect(rows).toHaveLength(1);
+  });
+
   it("a header can't be smuggled into a send", async () => {
     let sent = 0;
     const { call } = await fixture({ sendMessage: (async () => { sent++; return { messageId: "<1@x>", accepted: [], rejected: [], filed: false }; }) as never });
@@ -178,6 +196,16 @@ describe("a turn's Email tools", () => {
     expect(host.prompt({ id: "b", name: "A" })).toContain("me@shop.example");
     expect(host.prompt({ id: "b", name: "A" })).not.toContain(PASSWORD);
     expect(host.prompt({ id: "b", name: "A", composio: false })).toBe("");
+    expect(empty.host.available()).toBe(false);
+    expect(host.available()).toBe(true);
+  });
+
+  it("a bot with Email turned off is neither given the tools nor told about them", async () => {
+    const { host } = await fixture();
+    const off = { id: "b", name: "A", toolsOff: ["email"] };
+    expect(host.integration(off, () => "cap", "http://127.0.0.1:1")).toBeNull();
+    expect(host.prompt(off)).toBe("");
+    expect(host.integration({ ...off, toolsOff: ["data", "pages"] }, () => "cap", "http://127.0.0.1:1")).not.toBeNull();
   });
 });
 
