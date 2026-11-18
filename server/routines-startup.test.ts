@@ -165,7 +165,9 @@ it("recovers queued/due work and a waiting routine's imported hand-off after res
     const resumedThread = (await api("GET", `/api/threads/${interruptedBot.threadId}/messages?limit=100`)).messages as Array<{ tool?: { name?: string }; from?: { botId?: string } }>;
     expect(resumedThread.some((message) => message.tool?.name === "Waiting routine's peer replied" && message.from?.botId === orphanPeer.id)).toBe(true);
     expect(resumedThread.some((message) => message.tool?.name?.startsWith("Resumed with Waiting routine's peer results"))).toBe(true);
-    expect(runs.filter(run => run.routineId === cron.id && run.scheduledFor < Math.floor(Date.now() / 60_000) * 60_000)).toHaveLength(1);
+    expect(runs.filter(run => run.routineId === cron.id && run.scheduledFor < ranFor)).toEqual([
+      expect.objectContaining({ status: "missed", scheduledFor: cronDueAt }),
+    ]);
     const restoredCron = (await api("GET", "/api/routines")).routines.find((routine: { id: string }) => routine.id === cron.id);
     expect(restoredCron.schedule).toEqual(cron.schedule);
     expect(restoredCron.nextRunAt).toBeGreaterThan(Date.now());
