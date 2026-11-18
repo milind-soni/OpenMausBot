@@ -1,0 +1,174 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { RUN_COMPUTER_LINES } from "../shared/cloud-computer-recovery.ts";
+import { ROUTINE_SUPERSEDED } from "./routine-execution.ts";
+import { WAKE_RETRY_AFTER_MS, wakeRetry } from "./routine-wake-retry.ts";
+import { RoutineManager, type RoutineManagerOptions } from "./routines.ts";
+
+const MINUTE = 60_000;
+const START = new Date(2026, 10, 18, 8, 0, 0).getTime();
+const dirs: string[] = [];
+const managers: RoutineManager[] = [];
+afterEach(() => {
+  for (const manager of managers.splice(0)) manager.close();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+/** A cloud bot's routine whose computer answers each wake from `wakes`, in order: a reason it did not start, or null. */
+function harness(wakes: Array<string | null | "hang">, everyMinutes = 60) {
+  const dir = mkdtempSync(join(tmpdir(), "omb-wake-retry-"));
+  dirs.push(dir);
+  const world = { at: START, started: [] as string[], prepared: [] as string[] };
+  let tasks = 0;
+  const options: RoutineManagerOptions = {
+    file: join(dir, "routines.json"), now: () => world.at, botState: () => "ready",
+    createTask: (botId) => ({ threadId: `${botId}-thread-${++tasks}` }),
+    startTurn: async (_botId, threadId) => { world.started.push(threadId); },
+    prepareRun: (run) => {
+      world.prepared.push(run.id);
+      const answer = wakes.shift() ?? null;
+      return answer === "hang" ? new Promise<string | null>(() => {}) : Promise.resolve(answer);
+    },
+    preparing: RUN_COMPUTER_LINES.waking,
+  };
+  const h = {
+    world, options,
+    manager: new RoutineManager(options),
+    restart() { h.manager.close(); h.manager = new RoutineManager(options); managers.push(h.manager); return h.manager; },
+    /** A scheduler pass at `at`, then one more once the computer's answer is in. */
+    async passAt(at: number) {
+      world.at = at;
+      await h.manager.tick();
+      await settle();
+      await h.manager.tick();
+    },
+    runs: () => h.manager.listRuns(),
+  };
+  managers.push(h.manager);
+  const routine = h.manager.create({ name: "Out of hours", prompt: "Check the inbox", botId: "cloud-bot", schedule: { type: "interval", everyMinutes, anchorAt: START } });
+  return { ...h, routine, due: routine.nextRunAt! };
+}
+
+describe("a scheduled run whose cloud computer did not wake", () => {
+  it("stays queued, says when it tries again, and starts on the second try", async () => {
+    const h = harness([RUN_COMPUTER_LINES.noWake, null]);
+    await h.passAt(h.due);
+    expect(h.world.started).toEqual([]);
+    const [run] = h.runs();
+    expect(run).toMatchObject({ status: "queued", scheduledFor: h.due, retryAt: h.due + WAKE_RETRY_AFTER_MS[0]!, wakeRetries: 1, attentionCode: "routines.server.wakeRetry" });
+    expect(run!.attention).toMatch(/^The cloud computer did not wake, so this run has not started yet\. It tries again at /);
+    expect(run).not.toHaveProperty("error");
+
+    // Nothing is asked of the computer before the retry is due.
+    await h.passAt(h.due + WAKE_RETRY_AFTER_MS[0]! - MINUTE);
+    expect(h.world.prepared).toHaveLength(1);
+
+    await h.passAt(h.due + WAKE_RETRY_AFTER_MS[0]!);
+    expect(h.world.prepared).toEqual([run!.id, run!.id]);
+    expect(h.world.started).toHaveLength(1);
+    expect(h.runs()).toMatchObject([{ id: run!.id, status: "running", scheduledFor: h.due }]);
+  });
+
+  it("never starts the same occurrence twice: later passes leave it alone, and the next occurrence is a run of its own", async () => {
+    const h = harness([RUN_COMPUTER_LINES.noWake, null, null]);
+    await h.passAt(h.due);
+    await h.passAt(h.due + WAKE_RETRY_AFTER_MS[0]!);
+    for (const later of [1, 10, 25]) await h.passAt(h.due + WAKE_RETRY_AFTER_MS[0]! + later * MINUTE);
+    expect(h.world.started).toHaveLength(1);
+    const threadId = h.runs()[0]!.threadId!;
+    h.manager.handleRuntimeEvent({ eventId: `done-${threadId}`, provider: "fake", threadId, createdAt: new Date(h.world.at).toISOString(), type: "turn.completed", ok: true } as Parameters<RoutineManager["handleRuntimeEvent"]>[0]);
+    expect(h.runs()[0]).toMatchObject({ status: "completed" });
+    await h.passAt(h.due + 60 * MINUTE);
+    expect(h.world.started).toHaveLength(2);
+    expect(h.runs().map((run) => run.scheduledFor).sort()).toEqual([h.due, h.due + 60 * MINUTE]);
+  });
+
+  it("keeps its retry across a restart and starts it once", async () => {
+    const h = harness([RUN_COMPUTER_LINES.noWake, null]);
+    await h.passAt(h.due);
+    const [before] = h.runs();
+    await settle();
+    h.restart();
+    expect(h.runs()).toMatchObject([{ id: before!.id, status: "queued", retryAt: before!.retryAt, wakeRetries: 1 }]);
+    await h.passAt(before!.retryAt!);
+    await h.passAt(before!.retryAt! + MINUTE);
+    expect(h.world.started).toHaveLength(1);
+    expect(h.runs()).toMatchObject([{ id: before!.id, status: "running" }]);
+  });
+
+  it("tries three more times at most, then fails saying the next scheduled run tries again", async () => {
+    const h = harness([RUN_COMPUTER_LINES.noWake, RUN_COMPUTER_LINES.noWake, RUN_COMPUTER_LINES.noWake, RUN_COMPUTER_LINES.noWake]);
+    await h.passAt(h.due);
+    for (const after of WAKE_RETRY_AFTER_MS) await h.passAt(h.due + after);
+    expect(h.world.prepared).toHaveLength(4);
+    expect(h.world.started).toEqual([]);
+    expect(h.runs()).toMatchObject([{ status: "failed", errorCode: "routines.server.noWakeRetried",
+      error: "The cloud computer did not wake in 4 tries, so this run did not start. The next scheduled run tries again." }]);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: true });
+  });
+
+  it("gives up before the next occurrence is due, which takes over", async () => {
+    // Every 15 minutes: one retry fits before the next occurrence, a second would not.
+    const h = harness([RUN_COMPUTER_LINES.noWake, RUN_COMPUTER_LINES.noWake, null], 15);
+    await h.passAt(h.due);
+    expect(h.runs()).toMatchObject([{ status: "queued", retryAt: h.due + WAKE_RETRY_AFTER_MS[0]! }]);
+    await h.passAt(h.due + WAKE_RETRY_AFTER_MS[0]!);
+    expect(h.runs()).toMatchObject([{ status: "failed", error: "The cloud computer did not wake in 2 tries, so this run did not start. The next scheduled run tries again." }]);
+    await h.passAt(h.due + 15 * MINUTE);
+    expect(h.world.started).toHaveLength(1);
+    expect(h.runs().find((run) => run.status === "running")).toMatchObject({ scheduledFor: h.due + 15 * MINUTE });
+  });
+
+  it("gives way when a retry is still waiting for its computer as the next occurrence comes due", async () => {
+    const h = harness([RUN_COMPUTER_LINES.noWake, "hang", null], 15);
+    await h.passAt(h.due);
+    const [first] = h.runs();
+    await h.passAt(first!.retryAt!);
+    expect(h.runs()).toMatchObject([{ id: first!.id, status: "queued", attention: RUN_COMPUTER_LINES.waking }]);
+    await h.passAt(h.due + 15 * MINUTE);
+    expect(h.runs().find((run) => run.id === first!.id)).toMatchObject({ status: "cancelled", error: ROUTINE_SUPERSEDED });
+    const next = h.runs().find((run) => run.id !== first!.id)!;
+    expect(next).toMatchObject({ scheduledFor: h.due + 15 * MINUTE, status: "running" });
+    expect(next).not.toHaveProperty("skipped");
+    expect(h.world.started).toHaveLength(1);
+  });
+
+  it("fails at once for any other reason it did not start: those are not tried again", async () => {
+    for (const reason of [RUN_COMPUTER_LINES.noAnswer, RUN_COMPUTER_LINES.afterRestart, RUN_COMPUTER_LINES.wakeRefused]) {
+      const h = harness([reason, null]);
+      await h.passAt(h.due);
+      await h.passAt(h.due + 30 * MINUTE);
+      expect(h.world.prepared).toHaveLength(1);
+      expect(h.world.started).toEqual([]);
+      expect(h.runs()).toMatchObject([{ status: "failed", error: reason }]);
+      expect(h.runs()[0]).not.toHaveProperty("wakeRetries");
+    }
+  });
+});
+
+describe("whether a run that did not wake is tried again", () => {
+  const run = () => ({ status: "queued" as const, target: "bot" as const, scheduledFor: START, attention: "x" as string | undefined });
+  const hourly = { enabled: true, nextRunAt: START + 60 * MINUTE };
+
+  it("is not for a run its schedule did not start, a paused routine, or a routine with no time left before the next occurrence", () => {
+    expect(wakeRetry(run(), RUN_COMPUTER_LINES.noWake, undefined, START + 4 * MINUTE)).toBe(RUN_COMPUTER_LINES.noWake);
+    expect(wakeRetry(run(), RUN_COMPUTER_LINES.noWake, { enabled: false, nextRunAt: null }, START + 4 * MINUTE)).toBe(RUN_COMPUTER_LINES.noWake);
+    expect(wakeRetry(run(), RUN_COMPUTER_LINES.noWake, { enabled: true, nextRunAt: START + 9 * MINUTE }, START + 4 * MINUTE)).toBe(RUN_COMPUTER_LINES.noWake);
+  });
+
+  it("waits at least a short gap after a try that ended late", () => {
+    const late = run();
+    expect(wakeRetry(late, RUN_COMPUTER_LINES.noWake, hourly, START + 30 * MINUTE)).toBe(true);
+    expect(late).toMatchObject({ retryAt: START + 32 * MINUTE, wakeRetries: 1 });
+  });
+
+  it("ends a once-only routine's tries without promising a next run", () => {
+    const once = { ...run(), wakeRetries: 3 };
+    expect(wakeRetry(once, RUN_COMPUTER_LINES.noWake, { enabled: true, nextRunAt: null }, START + 25 * MINUTE))
+      .toBe("The cloud computer did not wake in 4 tries, so this run did not start.");
+  });
+});

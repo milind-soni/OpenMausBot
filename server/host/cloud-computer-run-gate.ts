@@ -44,6 +44,13 @@ export interface RunComputerGateDeps {
   now?(): number;
 }
 
+/** The provider answered the wake with a refusal a later try would meet too (a plan or start limit, a rejected key), not a
+ * timeout, a network failure, a rate limit or a fault on its side. */
+const refusedWake = (error: unknown): boolean => {
+  const status = (error as { boatStatus?: unknown } | null)?.boatStatus;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429;
+};
+
 const VERDICT_LINE: Record<RecoveryVerdict, string> = {
   "restart-failed": RUN_COMPUTER_LINES.afterRestart, "person-busy": RUN_COMPUTER_LINES.personBusy,
   "restart-limited": RUN_COMPUTER_LINES.restartLimited, shared: RUN_COMPUTER_LINES.shared,
@@ -65,8 +72,10 @@ export function createRunComputerGate(deps: RunComputerGateDeps) {
     if (!machine || signal?.aborted) return null;
     let woke = false;
     if (SLEEPING.has(machine.state)) {
-      machine = await deps.wake(owner, WAKE_BUDGET_MS).catch(() => null);
-      if (!machine) return RUN_COMPUTER_LINES.noWake;
+      const woken = await deps.wake(owner, WAKE_BUDGET_MS).then((found) => found ?? RUN_COMPUTER_LINES.noWake,
+        (error: unknown) => refusedWake(error) ? RUN_COMPUTER_LINES.wakeRefused : RUN_COMPUTER_LINES.noWake);
+      if (typeof woken === "string") return woken;
+      machine = woken;
       woke = true;
     }
     const deadline = now() + RUN_COMPUTER_WAIT_MS;
