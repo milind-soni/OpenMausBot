@@ -83,7 +83,7 @@ export function createStartupScreen({
     const reveal = (via) => {
       if (revealed || win.isDestroyed() || isQuitting()) return;
       revealed = true;
-      onReveal?.(via);
+      onReveal?.(isHidden() ? "hidden" : via);
       const minimized = !splash.isDestroyed() && splash.isMinimized();
       if (isHidden()) {
         win.setSkipTaskbar(true);

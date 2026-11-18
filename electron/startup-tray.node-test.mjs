@@ -233,4 +233,11 @@ test("the startup screen says how the workspace came up, once", async t => {
   await slow.splash.ready; slow.splash.attach(slow.win);
   t.mock.timers.tick(10_000);
   assert.deepEqual(ways, ["painted", "crashed", "timeout"]);
+  const hidden = fixture({ onReveal: via => ways.push(via) });
+  await hidden.splash.ready;
+  hidden.splash.window.emit("close", { preventDefault() {} });
+  hidden.win.webContents.executeJavaScript = () => Promise.resolve();
+  hidden.splash.attach(hidden.win);
+  hidden.win.webContents.emit("did-finish-load"); await flush();
+  assert.equal(ways.at(-1), "hidden");
 });

@@ -180,11 +180,12 @@ export const accountSettling = (account: CloudAccountState | null | undefined): 
   account?.status === "signed-out" && account.message === "restoring";
 
 const ACCOUNT_SETTLE_MS = 5_000;
-const ACCOUNT_SETTLE_TRIES = 6;
+const ACCOUNT_SETTLE_LIMIT_MS = 30_000;
 
-async function settledAccount(read: () => Promise<CloudAccountState>, wait: (ms: number) => Promise<void>): Promise<CloudAccountState> {
+async function settledAccount(read: () => Promise<CloudAccountState>, wait: (ms: number) => Promise<void>, now: () => number): Promise<CloudAccountState> {
+  const until = now() + ACCOUNT_SETTLE_LIMIT_MS;
   let account = await read();
-  for (let tries = 1; tries < ACCOUNT_SETTLE_TRIES && accountSettling(account); tries++) {
+  while (accountSettling(account) && now() + ACCOUNT_SETTLE_MS < until) {
     await wait(ACCOUNT_SETTLE_MS);
     account = await read();
   }
@@ -244,7 +245,7 @@ function claimDay(day: string): boolean {
 
 /** At most one app_snapshot per app origin per UTC day; an opted-out install makes no request at all. */
 export async function sendDailySnapshot(state: SnapshotState, sources: UsageSources, now = Date.now(),
-  wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))): Promise<boolean> {
+  wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), clock = Date.now): Promise<boolean> {
   if (!analyticsEnabled() || gathering || !state.config) return false;
   if (!claimDay(utcDay(now))) return false;
   gathering = true;
@@ -255,7 +256,7 @@ export async function sendDailySnapshot(state: SnapshotState, sources: UsageSour
       settle(() => sources.connectedApps()),
       settle(() => sources.request<{ sessions?: unknown; current?: unknown }>("/api/auth/sessions")),
       companion ? settle(() => companion.state()) : null,
-      cloudAccount ? settle(() => settledAccount(() => cloudAccount.state(), wait)).then((account) => account ? cloudPlanFromAccount(account) : null)
+      cloudAccount ? settle(() => settledAccount(() => cloudAccount.state(), wait, clock)).then((account) => account ? cloudPlanFromAccount(account) : null)
         : cloudPlan ? settle(() => cloudPlan.state()).then((snapshot) => snapshot ? cloudPlanFromSnapshot(snapshot) : null)
         : undefined,
       config.box?.configured

@@ -1180,12 +1180,12 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     listeningGraceMs: SERVER_LISTENING_GRACE_MS,
   });
   if (identity.outcome === "ready" && serverSupervisor.isCurrent(proc)) return { proc };
-  slog(bootFailureMessage(port, identity)); launchAnalytics.serverFailed(identity.outcome);
+  slog(bootFailureMessage(port, identity));
   const stopped = await stopUtilityServer(proc);
   if (!stopped) {
     slog(`child on port ${port} did not exit after termination; refusing to start a sibling server`);
   }
-  return { proc: null, reason: stopped ? identity.outcome : "stuck-child", abort: !stopped };
+  launchAnalytics.serverFailed(stopped ? identity.outcome : "stuck-child"); return { proc: null, reason: stopped ? identity.outcome : "stuck-child", abort: !stopped };
 }
 
 async function startServerPackaged() {

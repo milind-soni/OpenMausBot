@@ -1,6 +1,6 @@
 import { Component, type ReactNode } from "react";
 
-import { track } from "@/lib/analytics";
+import { initAnalytics, track } from "@/lib/analytics";
 import { t } from "@/lib/i18n";
 
 // React unmounts everything below a root that has no error boundary when a render or an effect throws (react.dev,
@@ -13,6 +13,7 @@ export class PageBoundary extends Component<{ children: ReactNode }, { error: Er
   }
 
   componentDidCatch() {
+    void initAnalytics();
     track("app_load", { stage: "error" });
   }
 

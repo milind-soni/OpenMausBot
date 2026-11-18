@@ -79,7 +79,10 @@ function useCheckSteps(checks: Record<string, EngineLiveCheck>, instances: reado
     for (const [instanceId, check] of Object.entries(checks)) {
       const was = before.current[instanceId];
       const driverKind = instances.find((instance) => instance.instanceId === instanceId)?.driverKind ?? "";
-      if (check.state === "checking" && was?.state !== "checking") started.current[instanceId] = Date.now();
+      if (check.state === "checking" && was?.state !== "checking") {
+        started.current[instanceId] = Date.now();
+        connectAiStep("test_started", "cloud_welcome", { driverKind });
+      }
       if (check.state === "checking" || was?.state !== "checking") continue;
       const seconds = (Date.now() - (started.current[instanceId] ?? Date.now())) / 1000;
       connectAiStep(check.state === "working" ? "test_ok" : "test_failed", "cloud_welcome",

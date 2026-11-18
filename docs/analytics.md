@@ -198,7 +198,7 @@ count.
 | `server_spawned` | The app's own server process started | |
 | `server_ready` | That server answers | `reason`: `relay`, the desktop app connected to another server |
 | `server_failed` | The server did not answer on any port | `reason`: `timeout`, `exited`, `foreign-owner` (another program answers on the port), `stuck-child` |
-| `window_shown` | The window replaced the loading screen | `reason`: `painted` (the app drew its first screen), `crashed`, `timeout` (ten seconds passed first), `shown` |
+| `window_shown` | The window replaced the loading screen | `reason`: `painted` (the app drew its first screen), `crashed`, `timeout` (ten seconds passed first), `shown`, `hidden` (the loading screen was put away in the tray, so the window stays out of sight) |
 | `page_load_failed` | The window could not load the app's own page | |
 | `page_crashed` | The window's page crashed | `reason`: `crashed`, `oom`, `killed`, `abnormal-exit`, `launch-failed`, `integrity-failure` |
 

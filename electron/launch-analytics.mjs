@@ -14,7 +14,7 @@ export const LAUNCH_STAGES = Object.freeze([
 /** Why the server did not start, how the window came up, and Electron's render-process-gone reasons. */
 export const LAUNCH_REASONS = Object.freeze([
   "timeout", "exited", "foreign-owner", "stuck-child", "relay",
-  "painted", "crashed", "shown",
+  "painted", "crashed", "shown", "hidden",
   "abnormal-exit", "integrity-failure", "killed", "launch-failed", "oom",
 ]);
 const OS = { darwin: "Mac OS X", win32: "Windows", linux: "Linux" };

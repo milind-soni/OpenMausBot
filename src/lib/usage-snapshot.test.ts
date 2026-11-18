@@ -281,7 +281,7 @@ describe("the daily usage snapshot", () => {
     const states = [{ status: "signed-out", message: "restoring" }, { status: "signed-out", message: "restoring" }, { status: "signed-out" }];
     const waits: number[] = [];
     await snapshot.sendDailySnapshot(hostileState(), hostileSources({ cloudAccount: { state: async () => states.shift() as never } }), DAY,
-      async (ms) => void waits.push(ms));
+      async (ms) => void waits.push(ms), () => 0);
     expect(waits).toEqual([5_000, 5_000]);
     expect(snapshots()[0]).toMatchObject({ cloud_plan: "none" });
   });
@@ -289,9 +289,21 @@ describe("the daily usage snapshot", () => {
   it("gives up waiting after half a minute and says the plan is unknown", async () => {
     const { snapshot } = await freshModules();
     const waits: number[] = [];
+    let clock = 0;
     await snapshot.sendDailySnapshot(hostileState(), hostileSources({ cloudAccount: { state: async () => ({ status: "signed-out", message: "restoring" }) } }), DAY,
-      async (ms) => void waits.push(ms));
+      async (ms) => { waits.push(ms); clock += ms; }, () => clock);
     expect(waits).toHaveLength(5);
+    expect(snapshots()[0]).toMatchObject({ cloud_plan: "unknown" });
+  });
+
+  it("counts slow reads of the sign-in toward that half minute", async () => {
+    const { snapshot } = await freshModules();
+    let clock = 0, reads = 0;
+    await snapshot.sendDailySnapshot(hostileState(), hostileSources({
+      cloudAccount: { state: async () => { reads++; clock += 4_000; return { status: "signed-out", message: "restoring" }; } },
+    }), DAY, async (ms) => { clock += ms; }, () => clock);
+    expect(clock).toBeLessThanOrEqual(30_000 + 4_000);
+    expect(reads).toBe(4);
     expect(snapshots()[0]).toMatchObject({ cloud_plan: "unknown" });
   });
 
