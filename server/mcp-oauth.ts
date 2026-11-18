@@ -191,6 +191,13 @@ async function postForm(
   return { status: response.status, body };
 }
 
+/** Failures before the connection opened: the request never left, so nothing was presented. */
+const NOT_CONNECTED = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "ENETDOWN", "UND_ERR_CONNECT_TIMEOUT"]);
+function neverSent(error: unknown): boolean {
+  const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+  return typeof code === "string" && NOT_CONNECTED.has(code);
+}
+
 function tokensFrom(body: Record<string, unknown>, previous?: McpOAuthTokens): McpOAuthTokens | null {
   if (typeof body.access_token !== "string" || !body.access_token) return null;
   const refresh = typeof body.refresh_token === "string" && body.refresh_token ? body.refresh_token : previous?.refresh;
@@ -477,8 +484,10 @@ export class McpOAuthManager {
         refresh_token: tokens.refresh,
         resource: record.url,
       }, client);
-    } catch {
-      // The answer was lost: the token stays spent, because the server may have rotated it.
+    } catch (error) {
+      // A connection that never opened sent nothing, so the token is still good. Any other lost answer keeps it spent,
+      // because the server may have rotated it.
+      if (neverSent(error)) this.store.clearSpentRefresh(name, sent);
       if (!isDeepStrictEqual(this.store.get(name, record.url), record)) return { token: null, outcome: null };
       return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
     }
@@ -487,8 +496,12 @@ export class McpOAuthManager {
     if (!next) {
       const dead = (answer.status === 400 || answer.status === 401)
         && (answer.body.error === "invalid_grant" || answer.body.error === "invalid_client");
-      // The answer came, but it was no token: the server may have rotated the token anyway, so it stays spent.
-      if (!dead) return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
+      // The server answered without a token (busy, rate-limited, down for a moment): it issued nothing, so the token is
+      // still good and the next attempt may present it.
+      if (!dead) {
+        this.store.clearSpentRefresh(name, sent);
+        return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
+      }
       this.markNeedsSignIn(name, record.url);
       return { token: null, outcome: "rejected" };
     }

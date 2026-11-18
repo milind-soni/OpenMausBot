@@ -166,6 +166,32 @@ it("does not present a spent refresh token again after a restart", async () => {
   }
 });
 
+it("presents the refresh token again when nothing reached the server", async () => {
+  // Offline, or the address does not answer: the request never left, so the token was not spent and the sign-in stays.
+  const closed = createServer();
+  await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+  const port = (closed.address() as { port: number }).port;
+  await new Promise<void>((resolve) => closed.close(() => resolve()));
+  manager.adopt("docs", resource, { ...record("old"), tokenEndpoint: `http://127.0.0.1:${port}/token` }, () => true);
+  expect(await manager.accessToken("docs", resource)).toBeNull();
+  expect(await manager.accessToken("docs", resource)).toBeNull();
+  expect(events).toEqual(["unreachable", "unreachable"]);
+  expect(manager.authState("docs", resource)).not.toBe("needs-sign-in");
+});
+
+it("presents the refresh token again after the server answered without one", async () => {
+  // A busy or rate-limited server issued nothing, so the next renewal sends the same token.
+  const first = manager.accessToken("docs", resource);
+  const request = await nextRequest();
+  reply(request, 503, { error: "temporarily_unavailable" });
+  expect(await first).toBeNull();
+  const second = manager.accessToken("docs", resource);
+  const again = await nextRequest();
+  expect(again.form.get("refresh_token")).toBe("old-refresh");
+  reply(again, 200, { access_token: "fresh-access", refresh_token: "new-refresh" });
+  expect(await second).toBe("fresh-access");
+});
+
 it("presents the refresh token again when the server kept it", async () => {
   // A server that does not rotate refresh tokens answers without a new one, and the old token stays valid
   // (RFC 6749 section 6). The next renewal has to present it again, so the mark of a spent token is cleared when
