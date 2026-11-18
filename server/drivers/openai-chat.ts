@@ -81,7 +81,6 @@ interface NativeLog {
   outgoing(turn: SendTurnInput, messages: OpenAIChatMessage[], model: string, tools: ChatToolDefinition[]): unknown;
   incoming(completion: Completion): unknown;
 }
-
 const LIVENESS_MISSES = 3;
 
 interface RuntimeOptions<Config> {
@@ -91,7 +90,8 @@ interface RuntimeOptions<Config> {
   apiUrl: string;
   models: () => ModelCatalog;
   prepareTurn?: (turn: SendTurnInput, signal: AbortSignal) => Promise<void> | undefined;
-  requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean, variant?: string, threadId?: string): Record<string, unknown>;
+  selectedReasoning?: (model: string, variant?: string) => boolean;
+  requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean, variant?: string, threadId?: string, selectedModel?: string): Record<string, unknown>;
   httpErrorLabel: string;
   /** A refusal this provider words itself: the sentence the person sees instead of the HTTP line, or undefined. */
   plainRefusal?: (status: number, body: string) => string | undefined;
@@ -277,8 +277,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         : timeoutController.signal;
 
       const served = options.servedModel ? await options.servedModel(model) : model;
-      const requestBody = options.requestBody(served, messages, stream, variant, threadId);
-      const effort = selectedReasoningEffort(requestBody, route, variant);
+      const requestBody = options.requestBody(served, messages, stream, variant, threadId, model);
+      const effort = selectedReasoningEffort(requestBody, route, variant, options.selectedReasoning?.(model, variant));
       const payload = JSON.stringify(route === "responses"
         ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort })
         : {

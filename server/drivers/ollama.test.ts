@@ -28,7 +28,7 @@ afterEach(async () => {
 interface FakeModel { name: string; size?: number; details?: Record<string, unknown>; capabilities?: string[]; thinking?: unknown }
 
 /** A server speaking Ollama's own routes and its OpenAI-compatible chat, recording each chat request. */
-async function fakeOllama(options: { models?: FakeModel[]; version?: string | null; tags?: boolean } = {}) {
+async function fakeOllama(options: { models?: FakeModel[]; version?: string | null; tags?: boolean; refuseThinkingTools?: boolean } = {}) {
   // Read per request, so a test can change what the server answers.
   const models = options.models ?? [];
   const chats: Array<{ model: string; tools?: unknown[]; reasoning_effort?: string }> = [];
@@ -53,6 +53,9 @@ async function fakeOllama(options: { models?: FakeModel[]; version?: string | nu
     if (path === "/v1/models") return json({ data: models.map((model) => ({ id: model.name })) });
     if (path === "/v1/chat/completions") {
       chats.push(JSON.parse(data) as { model: string; tools?: unknown[]; reasoning_effort?: string });
+      if (options.refuseThinkingTools && chats.at(-1)?.tools?.length && chats.at(-1)?.reasoning_effort !== "none") {
+        return json({ error: { message: "Tools with reasoning_effort need /v1/responses or reasoning_effort none." } }, 400);
+      }
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Hi." }, finish_reason: "stop" }] })}\n\n`);
       return response.end("data: [DONE]\n\n");
@@ -420,6 +423,45 @@ describe("the chat engine on Ollama", () => {
       recorder.stop();
       await instance.dispose();
     }
+  });
+
+  it("keeps configured effort choices when Ollama uses a context alias", async () => {
+    const thinker: FakeModel = { name: "qwen3:4b", size: GB, capabilities: ["completion", "tools", "thinking"] };
+    const { url, chats } = await fakeOllama({ models: [thinker] });
+    const instance = await create({ url: `${url}/v1`, catalog: "ollama", reasoningEfforts: { "qwen3:4b": ["low", "max"] } });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      expect(instance.models.options.find((option) => option.id === "qwen3:4b")?.variants?.map((option) => option.id)).toEqual(["low", "max"]);
+      await instance.adapter.sendTurn({ threadId: "configured", text: "hi", model: "qwen3:4b", variant: "max" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(chats[0]).toMatchObject({ model: expect.stringMatching(/^qwen3:4b-omb-\d+k$/), reasoning_effort: "max" });
+    } finally { recorder.stop(); await instance.dispose(); }
+  });
+
+  it("does not disable an explicit undescribed thinking choice when a provider refuses tools", async () => {
+    const thinker: FakeModel = { name: "qwen3:4b", size: GB, capabilities: ["completion", "tools", "thinking"] };
+    const { url, chats } = await fakeOllama({ models: [thinker, LLAMA], refuseThinkingTools: true });
+    const instance = await create({ url: `${url}/v1`, catalog: "ollama" });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "on", text: "hi", model: "qwen3:4b", variant: "on" });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "on")).toMatchObject({ ok: false });
+      expect(chats).toHaveLength(1);
+      expect(chats[0]).not.toHaveProperty("reasoning_effort");
+      expect(recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringContaining("selected effort was not changed") }));
+
+      await instance.adapter.sendTurn({ threadId: "default", text: "hi", model: "qwen3:4b" });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "default")).toMatchObject({ ok: true });
+      expect(chats[1]).toHaveProperty("reasoning_effort", "none");
+
+      await instance.adapter.sendTurn({ threadId: "off", text: "hi", model: "qwen3:4b", variant: "off" });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "off")).toMatchObject({ ok: true });
+      expect(chats[2]).toHaveProperty("reasoning_effort", "none");
+
+      await instance.adapter.sendTurn({ threadId: "unrelated", text: "hi", model: "llama3.2:latest", variant: "on" });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "unrelated")).toMatchObject({ ok: true });
+      expect(chats.slice(3).map((chat) => chat.reasoning_effort)).toEqual([undefined, "none"]);
+    } finally { recorder.stop(); await instance.dispose(); }
   });
 
   it("asks nothing of a server on this network that has a fixed model list", async () => {

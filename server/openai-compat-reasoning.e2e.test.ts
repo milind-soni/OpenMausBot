@@ -29,7 +29,11 @@ it("retains a custom API's selected reasoning level and sends it after restart",
   await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
   const address = provider.address();
   if (!address || typeof address === "string") throw new Error("fixture did not bind TCP");
-  const fixture = await launchVerificationServer();
+  const fixture = await launchVerificationServer().catch(async (error: unknown) => {
+    provider.closeAllConnections();
+    await new Promise<void>((resolve) => provider.close(() => resolve()));
+    throw error;
+  });
   const { dataDir, url, logPath } = fixture.info;
   let restarted: ChildProcess | undefined;
   const api = async (method: string, path: string, body?: unknown) => {
@@ -91,9 +95,12 @@ it("retains a custom API's selected reasoning level and sends it after restart",
     expect((await control("wait", "--bot", created.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
     expect(bodies.slice(before).some((body) => body.model === "fixture/future" && body.reasoning_effort === "max")).toBe(true);
   } finally {
-    await waitForExit(restarted, { signal: "SIGTERM" });
-    await fixture.close();
-    provider.closeAllConnections();
-    await new Promise<void>((resolve) => provider.close(() => resolve()));
+    try {
+      await waitForExit(restarted, { signal: "SIGTERM" });
+      await fixture.close();
+    } finally {
+      provider.closeAllConnections();
+      await new Promise<void>((resolve) => provider.close(() => resolve()));
+    }
   }
 }, 120_000);

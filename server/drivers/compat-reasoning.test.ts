@@ -67,6 +67,7 @@ describe("OpenAI-compatible reasoning choices", () => {
   it.each([
     ["flat", { id: "vendor/future" }, "reasoning_effort"],
     ["nested", { id: "vendor/future", supported_parameters: ["reasoning"], reasoning_efforts: ["low", "max"] }, "reasoning"],
+    ["model name resembling an Ollama alias", { id: "vendor/model-omb-16k", reasoning_efforts: ["max"] }, "reasoning_effort"],
   ])("sends the exact choice in the %s format, but omits it by default", async (_name, model, property) => {
     const bodies: Array<Record<string, any>> = [];
     vi.stubGlobal("fetch", vi.fn(async (url, init) => {
@@ -82,12 +83,13 @@ describe("OpenAI-compatible reasoning choices", () => {
     const recorder = recordEvents(instance.adapter);
     try {
       await instance.refreshModels?.();
-      await instance.adapter.sendTurn({ threadId: "default", text: "hello", model: "vendor/future" });
+      await instance.adapter.sendTurn({ threadId: "default", text: "hello", model: model.id });
       expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "default")).toMatchObject({ ok: true });
-      await instance.adapter.sendTurn({ threadId: "max", text: "hello", model: "vendor/future", variant: "max" });
+      await instance.adapter.sendTurn({ threadId: "max", text: "hello", model: model.id, variant: "max" });
       expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "max")).toMatchObject({ ok: true });
       expect(bodies[0]).not.toHaveProperty("reasoning_effort");
       expect(bodies[0]).not.toHaveProperty("reasoning");
+      expect(bodies[1]!.model).toBe(model.id);
       expect(bodies[1]![property]).toEqual(property === "reasoning" ? { effort: "max" } : "max");
     } finally { recorder.stop(); await instance.dispose(); }
   });

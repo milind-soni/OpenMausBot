@@ -399,6 +399,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       nudgeAnnouncedAction: true,
       models: () => reasoningCatalog(catalog, reasoningFor),
       prepareTurn: (turn, signal) => loading && (turn.variant || isOllamaServer(config)) ? waitForCatalog(loading, signal) : undefined,
+      selectedReasoning: (model, variant) => Boolean(variant && fact(model)?.thinking?.choices.includes(variant)),
       refreshModels: fetchModels,
       imageInput: (model) => fact(model)?.vision ?? true,
       toolUse: (model) => fact(model)?.tools ?? true,
@@ -411,13 +412,13 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         },
       } : {}),
       modelVariants: true,
-      requestBody: (model, messages, stream, variant, threadId) => ({
+      requestBody: (model, messages, stream, variant, threadId, selectedModel) => ({
         model,
         messages,
         stream,
         stream_options: stream ? { include_usage: true } : undefined,
         ...withEffort(thinkingEffort(fact(pickedName(model))?.thinking, variant)),
-        ...apiEffort(model, variant),
+        ...apiEffort(selectedModel ?? model, variant),
         ...(config.provider && isOpenRouterUrl(config.url)
           ? { provider: { order: [config.provider], allow_fallbacks: false } }
           : {}),
