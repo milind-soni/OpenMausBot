@@ -138,6 +138,32 @@ describe("Mistral (Vibe) ACP driver", () => {
     expect(JSON.parse(promptRows.at(-1)!)).toMatchObject({ model: "zai-glm-5-3-flash" });
   });
 
+  // A close that fails re-loads in a fresh process instead: one more launch per new bearer.
+  it.each([["1", 1], ["error", 3]])("closes the live session before re-loading it with a new MCP bearer, so vibe-acp streams each reply once (close: %s)", async (close, processes) => {
+    const launches = join(scratch, "launches");
+    const { instance, recorder } = await create({
+      MISTRAL_API_KEY: "engine-fixture-key", FAKE_ACP_LAUNCH_COUNT_FILE: launches,
+      FAKE_ACP_SESSION_CLOSE: String(close), FAKE_ACP_COPY_LIVE_LOAD: "1", FAKE_ACP_TEXT_REPLY: "hello",
+    });
+    const agents = (token: string) => ({
+      command: process.execPath,
+      args: ["/app/dist-server/agents-proxy.js"],
+      env: { OMB_HARNESS_URL: "http://127.0.0.1:8799", OMB_COMMS_TOKEN: token, OMB_BOT_ID: "sprout", OMB_THREAD_ID: "mistral-vibe-bearer" },
+    });
+    const reply = async (text: string, token: string, resume: boolean) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "mistral-vibe-bearer", text, model: "mistral-medium-3.5", approvalMode: "ask",
+        ...(resume ? { resumeCursor: "fake-acp-session" } : {}), integrations: { agents: agents(token) },
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return recorder.events.find((event) => event.turnId === turnId && event.type === "item.completed" && event.itemType === "assistant_text");
+    };
+    expect(await reply("one", "token-one", false)).toMatchObject({ text: "hello" });
+    expect(await reply("two", "token-two", true)).toMatchObject({ text: "hello" });
+    expect(await reply("three", "token-three", true)).toMatchObject({ text: "hello" });
+    expect(Number(readFileSync(launches, "utf8"))).toBe(processes);
+  });
+
   it("turns Vibe's session/request_permission into an approval card and answers with the person's choice", async () => {
     const answer = join(scratch, "permission.txt");
     const { instance, recorder } = await create({ FAKE_ACP_MODE: "permission", FAKE_ACP_PERMISSION_ANSWER: answer });

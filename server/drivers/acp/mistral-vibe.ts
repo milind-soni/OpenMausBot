@@ -182,6 +182,7 @@ export const mistralVibeSupport: AcpSupport = {
   // Model is a session config option (see header); ids pass through unchanged.
   selectModel: { configId: "model" },
   shareProcess: true,
+  closeBeforeLiveLoad: true,
   resolveModels: resolveMistralVibeModels,
   resolveModelsOnCreate: false,
   fallbackModel(sessionConfig, catalogDefault) {
