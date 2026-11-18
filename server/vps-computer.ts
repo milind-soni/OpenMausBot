@@ -39,7 +39,7 @@ export const VPS_CONTAINER_PREFIX = "openmausbot-vps";
 export { dockerCliInstallCommand, vpsStartsForTurn, vpsUnavailableHint } from "./vps-hints.ts";
 // Lazy: index must finish data migration and take the writer lease before this may create the data directory.
 let vpsEnvironmentIdCache: string | null = null;
-function vpsEnvironmentId(): string {
+export function vpsEnvironmentId(): string {
   if (!vpsEnvironmentIdCache) vpsEnvironmentIdCache = loadEnvironmentId(DATA_DIR);
   return vpsEnvironmentIdCache;
 }

@@ -9,7 +9,7 @@ import type { BrowserCleanupCoordinator, BrowserCleanupRequest } from "../browse
 import { finalizeBrowserCleanupMutation, requireBrowserCleanupAcknowledged } from "../browser-lifecycle-cleanup.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
-import { boatAccountResourceChangeError, vpsAliasResourceChangeError } from "../cloud-backend.ts";
+import { boatAccountResourceChangeError, vpsAliasLeftBehindNotice, vpsAliasResourceChangeError } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
 import {
   browserProfilePartitionTarget,
@@ -277,18 +277,18 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         }
         for (const provider of transitioningProviders) computerProviderConfigTransitions.add(provider);
 
+        let vpsLeftOn: string | null = null;
         if (changingVpsAlias && currentVpsAlias) {
           const inventory = await vps.listManagedVpsComputers(
             { vps: { sshAlias: currentVpsAlias } },
             managedBoatOwners(),
           );
           if (!inventory.available) {
-            return json(res, 503, {
-              error: `${inventory.problem ?? "VPS computer inventory is unavailable"}. Keep the current SSH config alias and retry`,
-            });
+            vpsLeftOn = currentVpsAlias;
+          } else {
+            const resourceError = vpsAliasResourceChangeError(inventory.instances.length);
+            if (resourceError) return json(res, 409, { error: resourceError });
           }
-          const resourceError = vpsAliasResourceChangeError(inventory.instances.length);
-          if (resourceError) return json(res, 409, { error: resourceError });
         }
 
         let boatRecovery = changingBoatToken ? boatCreateRecoverySnapshot() : [];
@@ -683,7 +683,10 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         finalized.acknowledgements.every(Boolean),
         removedBrowserProfileIds.length === 1 ? "The browser profile" : "The browser profiles",
       );
-      return json(res, 200, configForAccess(finalized.value, auth));
+      return json(res, 200, {
+        ...(configForAccess(finalized.value, auth) as object),
+        ...(vpsLeftOn ? { notice: vpsAliasLeftBehindNotice(nextVpsAlias ? "Saved" : "Removed", vpsLeftOn, `label=${vps.VPS_ENVIRONMENT_LABEL}=${vps.vpsEnvironmentId()}`) } : {}),
+      });
       } finally {
         for (const provider of transitioningProviders) computerProviderConfigTransitions.delete(provider);
         if (changingLocalVmMode) localVmModeChangeBusy.set(false);

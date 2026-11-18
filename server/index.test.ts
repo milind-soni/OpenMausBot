@@ -11141,10 +11141,12 @@ describe("harness HTTP API", () => {
       )).toBe(false);
 
       const cleared = await api("PUT", "/api/config", { vps: { sshAlias: "" } });
-      expect(cleared.status).toBe(503);
-      expect(cleared.body.error).toContain("fixture SSH is unavailable");
-      expect(cleared.body.error).toContain("Keep the current SSH config alias");
-      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("fixture-vps");
+      expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+      expect(cleared.body.notice).toContain("Removed. fixture-vps could not be reached");
+      expect(cleared.body.notice).toContain("docker -H ssh://fixture-vps ps -a --filter label=com.openmausbot.environment=");
+      expect(cleared.body.notice).toContain("docker -H ssh://fixture-vps rm -f <name>");
+      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("");
+      expect(existsSync(fakeVpsFixture)).toBe(true);
     } finally {
       rmSync(fakeSshUnavailable, { force: true });
       rmSync(fakeVpsFixture, { force: true });

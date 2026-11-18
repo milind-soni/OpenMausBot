@@ -144,6 +144,7 @@ export function VpsConnection() {
   const [alias, setAlias] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const configured = Boolean(state.config?.vps?.configured);
   const clearing = !alias.trim() && configured;
 
@@ -155,10 +156,12 @@ export function VpsConnection() {
     if (saving || (!alias.trim() && !configured)) return;
     setSaving(true);
     setError(null);
+    setNotice(null);
     api("/api/config", { method: "PUT", body: JSON.stringify({ vps: { sshAlias: alias.trim() } }) })
-      .then((status: ConfigStatus) => {
+      .then(({ notice: savedNotice, ...status }: ConfigStatus & { notice?: string }) => {
         dispatch({ type: "configStatus", config: status });
         setAlias(status.vps?.sshAlias ?? "");
+        setNotice(savedNotice ?? null);
       })
       .catch((e) => setError(e.message))
       .finally(() => setSaving(false));
@@ -197,6 +200,7 @@ export function VpsConnection() {
           {saving ? <Loader2 size={13} className="animate-spin" aria-hidden="true" /> : clearing ? t("keys.row.remove") : t("common.save")}
         </button>
       </div>
+      {notice && <div role="status" className="text-[12px] leading-4 text-ink-secondary">{notice}</div>}
       {error && <div role="alert" className="text-[12px] leading-4 text-danger">{error}</div>}
     </div>
   );

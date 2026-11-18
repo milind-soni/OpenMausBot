@@ -15,6 +15,13 @@ export function vpsLeftBehindNotice(done: "Moved" | "Deleted", alias: string, co
     `When ${alias} is back, remove it with: docker -H ssh://${alias} rm -f ${containerName}`;
 }
 
+/** What an unreachable old default alias may still run for this installation, and how to find and remove it. */
+export function vpsAliasLeftBehindNotice(done: "Saved" | "Removed", alias: string, environmentFilter: string): string {
+  return `${done}. ${alias} could not be reached, so this installation's computers there, if any are still there, were left as they are. ` +
+    `When ${alias} is back, list them with: docker -H ssh://${alias} ps -a --filter ${environmentFilter} ` +
+    `and remove any you no longer need with: docker -H ssh://${alias} rm -f <name>`;
+}
+
 /** Why a bot that gets its cloud computer from Boat can't have one while a self-hosted VPS is saved but not chosen for it. */
 export function vpsNotChosenReason(botName: string, vpsAlias: string | null): string | null {
   return vpsAlias ? `${botName}'s cloud computer comes from Boat, which is not available here. The self-hosted VPS ${vpsAlias} is set up ` +
