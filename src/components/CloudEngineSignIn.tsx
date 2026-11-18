@@ -52,7 +52,7 @@ export type CloudEngineChoices = ReturnType<typeof useCloudEngineChoices>;
 export function cloudEngineChoices(engines: CloudEngineChoices, { handing = false, columns }: { handing?: boolean; columns?: string } = {}): ReactNode {
   const { instances, dispatch, open, setOpen, checking, recheck, choices, live } = engines;
   return <>
-    <div role="group" aria-label={t("cloudSignIn.title")} inert={handing} className={cn("mt-8 grid gap-3 transition-opacity duration-300 ease-out", columns ?? (choices.length === 3 ? "grid-cols-3" : "grid-cols-2"), handing && "opacity-40")}>
+    {choices.length > 0 && <div role="group" aria-label={t("cloudSignIn.title")} inert={handing} className={cn("mt-8 grid gap-3 transition-opacity duration-300 ease-out", columns ?? (choices.length === 3 ? "grid-cols-3" : "grid-cols-2"), handing && "opacity-40")}>
       {choices.map((choice, i) => {
         const picked = open === choice.id;
         const instance = cloudEngine(instances, choice.driverKind);
@@ -91,7 +91,7 @@ export function cloudEngineChoices(engines: CloudEngineChoices, { handing = fals
           </button>
         );
       })}
-    </div>
+    </div>}
 
     {choices.map((choice) => {
       const instance = cloudEngine(instances, choice.driverKind);
