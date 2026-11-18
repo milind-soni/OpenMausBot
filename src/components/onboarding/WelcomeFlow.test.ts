@@ -211,6 +211,12 @@ describe("with no AI working yet", () => {
     await show();
     await press("Install OpenCode");
     expect(f.api).toHaveBeenCalledWith("/api/instances/opencodeGo/install", { method: "POST" });
+    // Installed, still listing its models: its pill waits.
+    f.state = { ...f.state, instances: [signIn(), { ...freeOpenCode, snapshot: { state: "available", authenticated: true }, models: { default: "", options: [] }, aiTest: undefined }] };
+    await show();
+    expect(button("Waiting for OpenCode…")).toBeDefined();
+    expect(button("Next")).toBeUndefined();
+    expect(f.checks).toEqual([]);
     f.state = { ...f.state, instances: [signIn(), { ...freeOpenCode, aiTest: undefined }] };
     await show();
     await act(async () => {});

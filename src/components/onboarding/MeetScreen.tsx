@@ -12,7 +12,7 @@ import { useStore, type InstanceInfo } from "@/state/store";
 import { freeFallback } from "../../../shared/ai-ranking";
 import { ConnectAiDialog } from "./ConnectAi";
 import { PILL, SignInPill, useSignInPill } from "./SignInPill";
-import { useWelcomeAi } from "./welcome-ai";
+import { aiRuns, useWelcomeAi } from "./welcome-ai";
 
 const MASCOT_SIZE = 72;
 const PLACEHOLDER_MS = 700;
@@ -70,7 +70,9 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
   useEffect(() => {
     if (!hosted && known && !ready && tested?.state !== "testing") setAsking(true);
   }, [hosted, known, ready, tested?.state]);
-  const works = (instance: InstanceInfo) => engineReady(instance) && !freeFallback(instance);
+  const works = (instance: InstanceInfo) => aiRuns(instance) && !freeFallback(instance);
+  // Picked and installed, still listing its models: its pill waits until its test message.
+  const settling = (instance: InstanceInfo | undefined) => Boolean(instance && instance.instanceId === chosen && engineReady(instance) && !aiRuns(instance));
   const first = firstAis(state.instances, works).filter(({ instance }) => !works(instance) && (instance.install || engineReady(instance)));
   const { recommended } = aiChoices(state.instances.filter((instance) => instance.install && !engineReady(instance)));
   const choice = (kind: FirstAiKind) => first.find((entry) => entry.kind === kind)?.instance;
@@ -111,7 +113,8 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
           {t("onboarding.hosted.intro")}
         </p>
       )}
-      <div className="absolute left-1/2 top-[calc(50%+200px)] flex w-[320px] max-w-[calc(100%-32px)] -translate-x-1/2 flex-col items-center">
+      <div className={cn("absolute left-1/2 flex w-[320px] max-w-[calc(100%-32px)] -translate-x-1/2 flex-col items-center",
+        signingIn ? "top-[min(calc(50%+200px),calc(100%-180px))]" : "top-[calc(50%+200px)]")}>
         {asking && ready && tested && (
           <p role="status" data-ai-connected="" className="absolute -top-8 flex items-center gap-1.5 whitespace-nowrap text-[13px] leading-[18px] text-success">
             <Check size={14} strokeWidth={2.5} aria-hidden="true" />{t("onboarding.meet.connected", { name: tested.instance.displayName })}
@@ -122,7 +125,7 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
             {shown.map(({ kind, instance }, index) => (
               <SignInPill key={kind} pill={pills[kind]} instance={instance} quiet={index > 0}
                 name={kind === "chatgpt" ? t("cloudSignIn.codex") : undefined}
-                waiting={testing !== null && instance?.instanceId === waitsFor}
+                waiting={(testing !== null && instance?.instanceId === waitsFor) || settling(instance)}
                 onDialog={() => setDialog(true)} onPick={instance && (() => setChosen(instance.instanceId))} />
             ))}
           </div>

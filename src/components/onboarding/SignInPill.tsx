@@ -69,6 +69,7 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
     try {
       await api(`${base}/install`, { method: "POST" });
       try { await refreshInstances(); } catch {}
+      try { await refreshModels(id); } catch {}
       if (live.current) setSlot({ kind: "start" });
     } catch (cause) { fail(cause); }
   };

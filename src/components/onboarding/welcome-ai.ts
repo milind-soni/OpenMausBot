@@ -9,7 +9,7 @@ type Known = { state: AiTestState; error?: string };
 
 const keyOf = (instance: InstanceInfo) => `${instance.instanceId}\n${aiSignInKey(instance.snapshot)}`;
 /** As the new-bot default sees it: an AI that offers no model yet (OpenCode still listing them) can't run a bot. */
-const runs = (instance: InstanceInfo) =>
+export const aiRuns = (instance: InstanceInfo) =>
   engineReady(instance) && Boolean(instance.models.default.trim() || instance.models.options.some((option) => option.id.trim()));
 
 export type WelcomeAiNow = NonNullable<ReturnType<typeof welcomeAi<InstanceInfo>>> & {
@@ -47,7 +47,7 @@ export function useWelcomeAi(instances: readonly InstanceInfo[], enabled = true,
   }, []);
   const known = (instance: InstanceInfo): Known | undefined => answers[keyOf(instance)]
     ?? (instance.aiTest && instance.aiTest !== "testing" ? { state: instance.aiTest, ...(instance.aiTestError ? { error: instance.aiTestError } : {}) } : undefined);
-  const found = welcomeAi(instances, runs, (instance) => known(instance)?.state, (instance) => instance.instanceId === chosen);
+  const found = welcomeAi(instances, aiRuns, (instance) => known(instance)?.state, (instance) => instance.instanceId === chosen);
   const asking = enabled && found?.state === "testing" ? keyOf(found.instance) : null;
   useEffect(() => {
     if (asking) ask(asking);
