@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { findCliCandidates } from "../env-path.ts";
-import { killCliTree } from "../procs.ts";
+import { captureCliTree, killCliTree } from "../procs.ts";
 import { appendNative } from "./native.ts";
 import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "./session-idle.ts";
 
@@ -244,9 +244,8 @@ export function codexWarmSessions<Carried>(instanceId: string) {
     return entry.session;
   };
 
-  const close = async (threadId: string, why: string, contractChanged?: string[]): Promise<void> => {
-    const session = forget(threadId, why, contractChanged);
-    if (!session) return;
+  /** Ends the whole tree: an app-server's MCP servers and shells can outlive it. */
+  const end = async (session: KeptCodex<Carried>): Promise<void> => {
     const stopped = killCliTree(session.connection.child);
     stopping.add(stopped);
     try {
@@ -256,10 +255,16 @@ export function codexWarmSessions<Carried>(instanceId: string) {
     }
   };
 
+  const close = async (threadId: string, why: string, contractChanged?: string[]): Promise<void> => {
+    const session = forget(threadId, why, contractChanged);
+    if (session) await end(session);
+  };
+
   return {
     /** Keeps a process whose turn completed. False when it is not kept: the caller ends it. */
     keep(threadId: string, session: KeptCodex<Carried>): boolean {
       const { connection } = session;
+      captureCliTree(connection.child);
       if (!keepEnabled() || !connection.alive || kept.has(threadId)) return false;
       connection.detach();
       connection.nativeThreadId = session.nativeThreadId;
@@ -278,7 +283,7 @@ export function codexWarmSessions<Carried>(instanceId: string) {
       };
       kept.set(threadId, entry);
       connection.exitedIdle = () => {
-        if (kept.get(threadId) === entry) forget(threadId, "exited while idle");
+        if (kept.get(threadId) === entry && forget(threadId, "exited while idle")) void end(session);
       };
       return true;
     },
