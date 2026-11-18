@@ -3,7 +3,7 @@ import { addTemplate } from "@/lib/template-add";
 import { api, type Action, type Bot } from "@/state/store";
 import type { LocaleKey } from "@/locales";
 import { takeImportName } from "../../shared/import-name";
-import { GrokImportError, grokMovePlan, mergeGrokBots, parseGrokExport, type GrokBot, type GrokMovePlan } from "../../shared/grok-import";
+import { GROK_HISTORY_REASONS, GrokImportError, grokMovePlan, mergeGrokBots, parseGrokExport, type GrokBot, type GrokHistoryReason, type GrokMovePlan } from "../../shared/grok-import";
 
 /** What the desktop app found on this computer. */
 export interface GrokLook {
@@ -111,6 +111,16 @@ export function previewGrokMove(bots: readonly GrokBot[], facts: GrokPreviewFact
   return preview;
 }
 
+/** A moved Bot's chat: how many messages came over, or why none did ("failed": the request itself didn't get an answer). */
+export type GrokHistory = { messages: number } | { reason: GrokHistoryReason | "failed" };
+
+async function bringHistory(botId: string, grokName: string): Promise<GrokHistory> {
+  const answer = await api<{ messages?: unknown; reason?: unknown } | null>("/api/setup-import/grok/history",
+    { method: "POST", body: JSON.stringify({ botId, grokName }), timeoutMs: 60_000 }).catch(() => null);
+  if (typeof answer?.messages === "number") return { messages: answer.messages };
+  return { reason: GROK_HISTORY_REASONS.find((reason) => reason === answer?.reason) ?? "failed" };
+}
+
 export interface GrokMovedBot {
   name: string;
   skills: number;
@@ -120,6 +130,8 @@ export interface GrokMovedBot {
   notes: number;
   memories: number;
   apps: number;
+  /** Absent where the move can't look at this computer: a browser, a paired device or a Cloud. */
+  history?: GrokHistory;
 }
 
 export interface GrokReport {
@@ -129,8 +141,9 @@ export interface GrokReport {
   failed: string[];
 }
 
-/** Imports each plan through the package path, then switches on its skills. One Bot failing is named and the rest carry on. */
-export async function runGrokMove(preview: GrokPreview, dispatch: (action: Action) => void): Promise<GrokReport> {
+/** Imports each plan through the package path, switches on its skills and, on the desktop app (`local`), brings its chat
+ * over from the Grok Bot app there. One Bot failing is named and the rest carry on. */
+export async function runGrokMove(preview: GrokPreview, dispatch: (action: Action) => void, local = false): Promise<GrokReport> {
   const report: GrokReport = { bots: [], moved: preview.moved, unreadable: preview.unreadable, failed: [] };
   for (const plan of preview.plans) {
     try {
@@ -141,7 +154,9 @@ export async function runGrokMove(preview: GrokPreview, dispatch: (action: Actio
         const on = skill.on && await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.folder)}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) }).then(() => true, () => false);
         if (!on) skillsOff.push(skill.name);
       }
-      report.bots.push({ name: bot.name, skills: plan.skills.length, skillsOff, routines: plan.routines, notes: plan.notes, memories: plan.memories, apps: plan.apps });
+      const history = local ? await bringHistory(bot.id, plan.name) : undefined;
+      report.bots.push({ name: bot.name, skills: plan.skills.length, skillsOff, routines: plan.routines, notes: plan.notes, memories: plan.memories, apps: plan.apps,
+        ...(history ? { history } : {}) });
     } catch {
       report.failed.push(plan.name);
     }
