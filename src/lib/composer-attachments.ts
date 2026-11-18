@@ -206,6 +206,12 @@ const ACCEPTED_AUDIO_MIMES = new Set([
   ...Object.values(AUDIO_MIMES_BY_EXTENSION),
   "audio/x-m4a", "audio/x-wav", "audio/wave", "audio/x-flac",
 ]);
+const VIDEO_MIMES_BY_EXTENSION: Readonly<Record<string, string>> = {
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  mov: "video/quicktime",
+};
+const ACCEPTED_VIDEO_MIMES = new Set(Object.values(VIDEO_MIMES_BY_EXTENSION));
 
 export function documentMime(file: Pick<File, "name" | "type">): string | null {
   const declared = file.type.split(";", 1)[0]!.trim().toLowerCase();
@@ -382,9 +388,11 @@ export async function imageAttachmentFromFile(
 export async function fileAttachmentFromFile(file: File, anyType = false): Promise<FileAttachment | null> {
   const declared = file.type.split(";", 1)[0]!.trim().toLowerCase();
   const extension = file.name.split(".").at(-1)?.toLowerCase() ?? "";
+  const video = ACCEPTED_VIDEO_MIMES.has(declared) ? declared : VIDEO_MIMES_BY_EXTENSION[extension];
   const mime = documentMime(file) ??
     (ACCEPTED_AUDIO_MIMES.has(declared) ? declared : AUDIO_MIMES_BY_EXTENSION[extension]) ??
     ARCHIVE_MIMES_BY_EXTENSION[extension] ??
+    (file.size <= FILE_MAX_BYTES ? video : undefined) ??
     (anyType ? declared || "application/octet-stream" : undefined);
   if (!mime) return null;
   if (file.size > FILE_MAX_BYTES) throw new AttachError(file.name, FILE_MAX_BYTES);
