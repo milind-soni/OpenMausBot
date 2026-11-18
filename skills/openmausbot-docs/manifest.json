@@ -23,7 +23,9 @@
     "more than one device",
     "between devices",
     "second computer",
-    "my other computer"
+    "my other computer",
+    "more than one computer",
+    "bots on my phone"
   ],
   "requiredCapabilities": []
 }
