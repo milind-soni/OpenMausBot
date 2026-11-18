@@ -69,6 +69,12 @@ export const localFilePath = (href?: string): string | null => {
   return href;
 };
 
+// A plain-path link as the server reads it: cut at ? or #, then percent-decoded once.
+export const decodedLinkPath = (href: string): string => {
+  try { return decodeURIComponent(href.split(/[?#]/, 1)[0]!); }
+  catch { return href; }
+};
+
 export function chatUrlTransform(value: string, key = "href"): string {
   if (looksLikeThreadRefUrl(value) || isUseMyComputerUrl(value)) return value;
   // Markdown-to-HTML percent-encodes a destination's backslashes (C:%5CUsers…); restore them and leave other escapes
@@ -333,7 +339,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 // Security: no href at all, since an <a href="file://…"> reaches setWindowOpenHandler on a middle or modifier click,
 // which calls shell.openExternal without main's containment check.
 // source: the original a delivered copy came from, offered on right-click (Show in Finder) like in the gallery.
-function LocalFileLink({ filePath, name, source, children, message }: { filePath: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
+function LocalFileLink({ filePath, shownPath, name, source, children, message }: { filePath: string; shownPath: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, name, message);
   const preview = useHtmlPreview(filePath, name ?? fileName(filePath), message);
   const revealMenu = useRevealOriginalMenu();
@@ -385,7 +391,7 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
       )}
       {save.state === "failed" && save.outsideWorkspace && (
         <span className="inline-flex flex-wrap items-center gap-x-1.5 text-[12px]">
-          <OutsideWorkspaceFile filePath={filePath} />
+          <OutsideWorkspaceFile filePath={shownPath} />
         </span>
       )}
       {save.folder && <MessageFolderFiles folderPath={filePath} listing={save.folder} message={message} />}
@@ -653,7 +659,9 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   if (localPath) {
     const copy = delivered && Object.hasOwn(delivered, fileName(localPath)) ? delivered[fileName(localPath)] : undefined;
     const source = copy && originals && Object.hasOwn(originals, copy) ? originals[copy] : undefined;
-    return <LocalFileLink filePath={copy ?? localPath} name={copy ? fileName(localPath) : undefined} source={source} message={message}>{children}</LocalFileLink>;
+    // localFilePath already decodes a file:// URL; a plain path link is still encoded and gets the server's single decode.
+    const shownPath = copy ?? (/^file:\/\//i.test(href) ? localPath : decodedLinkPath(localPath));
+    return <LocalFileLink filePath={copy ?? localPath} shownPath={shownPath} name={copy ? fileName(localPath) : undefined} source={source} message={message}>{children}</LocalFileLink>;
   }
   if (!/^https?:\/\//i.test(href)) {
     return (
