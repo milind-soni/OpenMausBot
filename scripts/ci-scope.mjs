@@ -38,6 +38,8 @@ export const AREA_CHECKS = {
   // The relay is its own package with its own lockfile; nothing outside relay/ reaches it except the shared vectors,
   // which it keeps a pinned copy of.
   relay: ["relay"],
+  "sdk-typescript": ["build", "linux-tests"],
+  "sdk-contract": ["linux-tests"],
   "e2e-vectors": [...SERVER_CHECKS, "relay"],
   everything: EVERY_CHECK,
 };
@@ -227,6 +229,8 @@ const AREAS = [
   [/^cloudflare\/control-plane\//, "control-plane"],
   [/^announcements\//, "announcements"],
   [/^relay\//, "relay"],
+  [/^sdks\/typescript\//, "sdk-typescript"],
+  [/^sdks\/contract\//, "sdk-contract"],
 ];
 
 export function areaOf(file) {
