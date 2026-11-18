@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { inventoryAccountSchema, toolkitInventoryPageSchema } from "./composio-inventory-schema.ts";
 import * as composio from "./composio.ts";
 import type { AppConfig } from "./config.ts";
 import { createTeamConnectionsHost } from "./host/team-connections-host.ts";
@@ -134,4 +135,17 @@ describe.each(["connected_accounts", "toolkits"])("self-hosted %s inventory", (w
       await expect(composio.connectedServiceSlugs(cfg)).resolves.toEqual([]);
     },
   );
+});
+
+it.each(["_1password", "_1PASSWORD", "a".repeat(200)])("accepts inventory toolkit %s without adding a length or case restriction", (slug) => {
+  expect(inventoryAccountSchema.safeParse({ id: "ca_fixture", toolkit: { slug } }).success).toBe(true);
+  expect(toolkitInventoryPageSchema.safeParse({ items: [{ slug, connected_account: { id: "ca_fixture" } }] }).success).toBe(true);
+});
+it.each(["", "-x", "Bad Slug", "a/b", "__proto__"])("rejects invalid inventory toolkit %s", (slug) => {
+  expect(inventoryAccountSchema.safeParse({ id: "ca_fixture", toolkit: { slug } }).success).toBe(false);
+  expect(toolkitInventoryPageSchema.safeParse({ items: [{ slug, is_no_auth: true }] }).success).toBe(false);
+});
+it("still rejects leading underscores in account ids", () => {
+  expect(inventoryAccountSchema.safeParse({ id: "_account", toolkit: { slug: "_1password" } }).success).toBe(false);
+  expect(toolkitInventoryPageSchema.safeParse({ items: [{ slug: "_1password", connected_account: { id: "_account" } }] }).success).toBe(false);
 });
