@@ -9,8 +9,10 @@
 - `response`: `status` plus `body` (JSON) or `rawBody` and `contentType`; optional `headers`; or `drop: true` to close the socket unanswered.
 - `repeat: true` on an exchange answers every later request the same way.
 - A request the exchanges don't list fails the case. That is how "never a second POST" and "GET stops after 3 tries" are checked.
+- Every exchange without `repeat` must be consumed, or the case fails.
+- A `body` response is sent as `application/json`; `query` is URL-encoded on the same path; `timeout` and `pollInterval` are seconds.
 - Every case ends with exactly one of `result` or `error`.
-- `result`: the normalised answer, compared field by field for equality.
-- `error`: `type` (class name) plus any of `status`, `thread`, `retryAfter`, `message`, compared exactly. `messageContains` is a substring check (used by `unknown-status`).
+- `result`: compared by deep equality with exactly these keys (a runner first normalises its answer to a plain object; Python via `dataclasses.asdict`).
+- `error`: `type` (class name) plus any of `status`, `thread`, `retryAfter`, `message`. `type` is checked by instance-of and only the listed fields are checked; a field listed as `null` must be unset (undefined/None). `message` is compared exactly. `messageContains` is a substring check (used by `unknown-status`).
 - An HTTP error with a non-JSON body, or JSON without a string `error`, has message `HTTP <status>`.
 - `old-server` and `post-502` give no `message`: the runner doesn't check it.

@@ -509,7 +509,8 @@
    "error": {
     "type": "RateLimitError",
     "status": 429,
-    "message": "Too many calls: this key takes 10 a minute"
+    "message": "Too many calls: this key takes 10 a minute",
+    "retryAfter": null
    }
   },
   {
