@@ -822,6 +822,32 @@ describe("ChatMarkdown attachments", () => {
     }
   });
 
+  it("names a linked page by its real file name, not its percent-encoded spelling", () => {
+    const filePath = String.raw`C:\Users\Maus\Downloads\2026 AI视频分析报告.html`;
+    for (const text of [`[报告](<${filePath}>)`, "已保存到 `" + filePath + "`", "[报告](file:///C:/Users/Maus/Downloads/2026%20AI%E8%A7%86%E9%A2%91%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html)"]) {
+      const html = renderToStaticMarkup(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } }));
+      expect(html).toContain('title="Preview page: 2026 AI视频分析报告.html"');
+      expect(html).toContain('aria-label="Save a copy of 2026 AI视频分析报告.html"');
+      expect(html).not.toContain("%E8");
+    }
+  });
+
+  it("decodes a linked name once: a literal %25 in a file:// link stays as written", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "[Report](file:///Users/maus/100%2541%20report.html)", message: { threadId: "thread-1", messageId: "message-1" },
+    }));
+    expect(html).toContain('title="Preview page: 100%41 report.html"');
+  });
+
+  it("names a delivered copy by its literal file name, without decoding it", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "[Report](/old/100%41.html)", message: { threadId: "thread-1", messageId: "message-1" },
+      delivered: { "100%41.html": "/store/delivered-100.html" },
+    }));
+    expect(html).toContain('title="Preview page: 100%41.html"');
+    expect(html).not.toContain("100A.html");
+  });
+
   it("preserves dollar signs in Windows file destinations", () => {
     const save = vi.spyOn(AttachmentPreview, "useLocalFileSave");
     const filePath = "C:\\Users\\Maus\\R$5\\receipt.pdf";

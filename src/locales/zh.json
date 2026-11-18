@@ -164,6 +164,7 @@
   "html.loading": "正在打开页面…",
   "html.tooLarge": "此页面过大，无法在应用内预览（上限 2 MB）。请下载原文件后再查看。",
   "html.loadFailed": "无法打开此页面。请检查网络连接后重试。仅支持 UTF-8 编码的 HTML 文件。",
+  "html.refused": "无法打开此页面：{reason}",
   "html.source": "查看源码",
   "html.rendered": "查看页面",
   "html.reload": "重新加载",

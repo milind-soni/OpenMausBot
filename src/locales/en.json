@@ -152,6 +152,7 @@
   "html.loading": "Opening page…",
   "html.tooLarge": "This page is too large for an in-app preview (2 MB). Download the original to view it.",
   "html.loadFailed": "Could not open this page. Check your connection and try again. UTF-8 HTML files are supported.",
+  "html.refused": "Could not open this page: {reason}",
   "html.source": "View source",
   "html.rendered": "View page",
   "html.reload": "Reload",
