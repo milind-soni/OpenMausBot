@@ -173,8 +173,8 @@ sessions into `engine-homes/`, the old data folder's rename). They stay as
 they are. The marker does not replace them; it adds the one thing they cannot
 do, which is to stop an older version at the door.
 
-**What the marker protects today: nothing yet.** Both numbers are 1 and no
-version writes format 2, so the marker has never stopped a server, and a
+**What the marker protects today: nothing yet.** The server reads format 2
+but still writes format 1. The marker has never stopped a server, and a
 rollback of one release can still lose data without it noticing:
 
 - Many JSON stores accept only `"version": 1` and throw, or start empty, on

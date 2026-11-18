@@ -10,7 +10,7 @@ import { writeFileAtomic } from "./atomic.ts";
  * one ahead. A change the previous release cannot read takes two releases: raise `reads` (and ship the code that reads
  * the new format) in one, raise `writes` in the next. server/data-format.test.ts fails on any other step.
  */
-export const DATA_FORMAT = { writes: 1, reads: 1 } as const;
+export const DATA_FORMAT = { writes: 1, reads: 2 } as const;
 
 export const DATA_FORMAT_FILE = "data-format.json";
 

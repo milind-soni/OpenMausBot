@@ -29,6 +29,14 @@ const totpSchema = z.object({
 
 const botsSchema = z.union([z.literal("all"), z.array(z.string())]);
 
+const STORED_SECRET_VALUE_MAX_BYTES = 65_536;
+
+function checkNewSecretValue(value: string): void {
+  if (Buffer.byteLength(value) > SECRET_VALUE_MAX_BYTES) {
+    throw new RangeError(`A new Vault secret value can be at most ${SECRET_VALUE_MAX_BYTES} bytes.`);
+  }
+}
+
 // The previous release reads `version: 1` records by `host` alone and replaces a file it cannot parse, so every record
 // keeps `host` (its first sign-in host) and the version stays 1: going back a release never loses a saved login.
 const diskLoginSchema = z.object({
@@ -50,7 +58,7 @@ const diskLoginSchema = z.object({
 const diskSecretSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(VAULT_SECRET_NAME_MAX),
-  value: z.string().min(1).max(SECRET_VALUE_MAX_BYTES),
+  value: z.string().min(1).refine((value) => Buffer.byteLength(value) <= STORED_SECRET_VALUE_MAX_BYTES),
   source: z.enum(["card", "settings"]),
   bots: botsSchema,
   refOnly: z.literal(true).optional(),
@@ -371,6 +379,7 @@ export class VaultStore {
 
   /** The same name saved again for the same bots and the same person replaces its value; otherwise it is a new secret. */
   saveSecret(input: NewSecret): VaultSecret {
+    checkNewSecretValue(input.value);
     const data = this.read();
     const secrets = data.secrets ?? [];
     const at = this.now();
@@ -398,6 +407,7 @@ export class VaultStore {
     const at = this.now();
     const current = secrets.find((secret) => secret.id === input.id);
     if (current?.person) return null;
+    checkNewSecretValue(input.value);
     const received: StoredSecret = {
       id: input.id, name: input.name, value: input.value, source: input.source, bots: input.bots, ...(input.refOnly ? { refOnly: true } : {}),
       createdAt: current?.createdAt ?? at, updatedAt: at, ...(current?.lastUsedAt === undefined ? {} : { lastUsedAt: current.lastUsedAt }),
@@ -411,6 +421,7 @@ export class VaultStore {
     const data = this.read();
     const current = data.secrets?.find((secret) => secret.id === id);
     if (!data.secrets || !current) return null;
+    if (patch.value !== undefined) checkNewSecretValue(patch.value);
     const next: StoredSecret = {
       ...current,
       ...(patch.name === undefined ? {} : { name: patch.name }),
