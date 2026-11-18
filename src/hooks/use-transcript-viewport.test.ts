@@ -360,9 +360,13 @@ describe("transcript viewport", () => {
   it("slides back to the latest window when the reader returns to the bottom", () => {
     const view = mount({ messages: rows(300) });
     view.act(() => view.current.showEarlier());
+    view.act(() => {
+      scroller.scrollTop = 1_000;
+      view.current.scrollHandlers.onScroll();
+    });
     view.rerender({ messages: rows(301) });
     expect(view.current.hiddenCount).toBe(60);
-    expect(view.current.laterCount, "the row past the cap waits below").toBe(1);
+    expect(view.current.laterCount, "the row past the cap waits below a reader up the page").toBe(1);
 
     view.act(() => {
       scroller.scrollTop = scroller.bottom;
@@ -378,6 +382,27 @@ describe("transcript viewport", () => {
     expect(view.current.following).toBe(true);
     expect(view.current.hiddenCount).toBe(181);
     expect(scroller.scrollTop).toBe(scroller.bottom);
+  });
+
+  it("lets the oldest rows go instead when rows arrive under a reader near the bottom", () => {
+    let thread = rows(300);
+    const view = mount({ messages: thread });
+    view.act(() => view.current.showEarlier());
+    view.act(() => {
+      scroller.scrollTop = scroller.bottom - 200;
+      view.current.scrollHandlers.onScroll();
+    });
+    expect(view.current.following).toBe(false);
+    for (let step = 0; step < 300; step++) {
+      scroller.scrollTop = Math.max(0, scroller.bottom - 200);
+      const reading = view.current.windowedMessages[Math.floor(scroller.scrollTop / ROW)]!.id;
+      thread = [...thread, { id: `new${step}`, role: "bot" }];
+      view.rerender({ messages: thread });
+      expect(view.current.windowedMessages.length).toBeLessThanOrEqual(TRANSCRIPT_WINDOW_MAX);
+      expect(view.current.laterCount).toBe(0);
+      expect(view.current.windowedMessages[Math.floor(scroller.scrollTop / ROW)]!.id).toBe(reading);
+    }
+    expect(view.current.windowedMessages.at(-1)?.id).toBe("new299");
   });
 
   it("shows the tail of a thread that shrinks under the window, following or not", () => {

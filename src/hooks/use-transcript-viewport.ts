@@ -13,6 +13,7 @@ import {
 import { BOTTOM_FOLLOW_THRESHOLD, followBottomGrowth, useBottomFollowResize } from "@/lib/bottom-follow";
 import { useFocusMessage } from "@/lib/focus-message";
 import {
+  TRANSCRIPT_WINDOW_MAX,
   TRANSCRIPT_WINDOW_SIZE,
   capWindowEnd,
   focusWindowRange,
@@ -68,15 +69,21 @@ function openVisit(key: string, messages: readonly { id: string }[]): Transcript
   return { key, follow: initialTranscriptFollow(false), restore: { rowId: remembered.rowId!, offsetWithinRow: remembered.offsetWithinRow ?? 0, ...window } };
 }
 
-/** The window for this render: shifted over older rows put in front, tailed while following, capped while reading. */
-function nextWindow(window: HeldWindow, messages: readonly { id: string; role?: string }[], following: boolean): TranscriptWindowBounds & { added: number } {
+/**
+ * The window for this render: shifted over older rows put in front, tailed while following, capped while reading.
+ * New rows past the cap wait below a reader up the page; under one reading near the bottom, the oldest rows go instead.
+ */
+function nextWindow(window: HeldWindow, messages: readonly { id: string; role?: string }[], following: boolean, readingBottom: () => boolean): TranscriptWindowBounds & { added: number } {
   const added = window.first !== undefined && window.first !== messages[0]?.id ? messages.findIndex((message) => message.id === window.first) : -1;
   const bounds = added > 0 ? windowAfterPrepend(window, added, messages.length) : { start: window.start, end: window.end };
   if (following) {
     const start = bounds.end === null ? followWindowStart(messages, bounds.start) : tailWindowStart(messages.length);
     return { start, end: null, added };
   }
-  return { ...(bounds.end === null ? capWindowEnd(bounds, messages.length) : bounds), added };
+  if (bounds.end !== null) return { ...bounds, added };
+  const capped = capWindowEnd(bounds, messages.length);
+  if (capped.end === null || !readingBottom()) return { ...capped, added };
+  return { start: Math.max(bounds.start, messages.length - TRANSCRIPT_WINDOW_MAX), end: null, added };
 }
 
 export function useTranscriptViewport<T extends { id: string; role?: string }>({
@@ -114,6 +121,10 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     const el = scrollRef.current, list = transcriptRef.current;
     anchor.current = el ? { key: transcriptKey, rows: list ? rowsInView(el, list, restingCardId.current) : [], height: el.scrollHeight } : null;
   };
+  const readingBottom = () => {
+    const el = scrollRef.current;
+    return Boolean(el) && gapBelow(el!) <= el!.clientHeight;
+  };
   const lastTop = useRef(0);
   const movingDown = useRef(false);
   // One visit per conversation: switching back opens where the reader left it, or at the end if they were there.
@@ -135,10 +146,10 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const first = messages[0]?.id;
   const next = switched
     ? { start: current.restore?.start ?? tailStart, end: current.restore?.end ?? null, added: -1 }
-    : nextWindow(transcriptWindow, messages, following);
+    : nextWindow(transcriptWindow, messages, following, readingBottom);
   if (switched || next.start !== transcriptWindow.start || next.end !== transcriptWindow.end || first !== transcriptWindow.first) {
-    // Older rows arrived in front of the drawn ones: the DOM is still the last commit's, so the row on screen is read now.
-    if (next.added > 0) holdRow();
+    // Rows came in front of the drawn ones or left their top: the DOM is still the last commit's, so it is read now.
+    if (!switched && !following && (next.added > 0 || next.start > transcriptWindow.start)) holdRow();
     setTranscriptWindow({ key: transcriptKey, first, start: next.start, end: next.end });
   }
   const {
