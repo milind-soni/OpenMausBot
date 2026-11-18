@@ -27,3 +27,25 @@ it("draws its words in the field's own type and padding, so the caret stays at t
   expect([mirror().fontSize, mirror().lineHeight, mirror().paddingLeft], "and follows the field when its classes change").toEqual(["15px", "24px", "4px"]);
   act(() => root.unmount());
 });
+
+it("uses native textarea rendering during composition and restores mention rendering on end or blur", () => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  const inputRef = createRef<HTMLTextAreaElement>();
+  const onCompositionStart = vi.fn();
+  const onCompositionEnd = vi.fn();
+  act(() => root.render(createElement(MentionTextarea, { inputRef, peers: [], onCompositionStart, onCompositionEnd })));
+  const input = inputRef.current!;
+  const editor = host.querySelector(".mention-editor")!;
+  act(() => input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+  expect(editor.hasAttribute("data-composing")).toBe(true);
+  expect(onCompositionStart).toHaveBeenCalledOnce();
+  act(() => input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })));
+  expect(editor.hasAttribute("data-composing")).toBe(false);
+  expect(onCompositionEnd).toHaveBeenCalledOnce();
+  act(() => input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+  act(() => input.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+  expect(editor.hasAttribute("data-composing")).toBe(false);
+  act(() => root.unmount());
+});
