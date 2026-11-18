@@ -1,0 +1,154 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+import { b64u, fromB64u, utf8, type Bytes } from "./bytes.ts";
+import { admission, credentialHash, keyId, psk } from "./credentials.ts";
+import { importKeyPair, isPublicKey, phoneHello, prologue, type SessionKeys, type TraceStep, type TransportByte } from "./noise.ts";
+
+const VECTORS = new URL("../../../companion/src/e2e/vectors/", import.meta.url);
+const text = readFileSync(new URL("v1.json", VECTORS), "utf8");
+const v = JSON.parse(text);
+const bytes = (hex: string) => Uint8Array.from(Buffer.from(hex, "hex"));
+const hex = (data: Uint8Array) => Buffer.from(data).toString("hex");
+
+const T_PUB = bytes(v.V1.transportPublic);
+const pskOf = (name: string) => bytes(v.V1.credentials.find((c: { name: string }) => c.name === name).psk);
+const PSKS: Record<string, Bytes> = { device: pskOf("device"), pairing: pskOf("pairing") };
+const PAYLOAD1 = utf8(v.inputs.payload1);
+
+const phoneEphemeral = () => importKeyPair(bytes(v.inputs.phoneEphemeralPrivate), bytes(v.V1.phoneEphemeralPublic));
+
+async function phone(transport: TransportByte, pskName: string, trace?: TraceStep[]) {
+  return phoneHello({ remoteStatic: T_PUB, psk: PSKS[pskName], transport, ephemeral: await phoneEphemeral(), trace }, PAYLOAD1, v.inputs.connB64u);
+}
+
+async function v2Session(): Promise<SessionKeys> {
+  const hello = await phone(1, "device");
+  return hello.finish(bytes(v.V2.message2));
+}
+
+describe("the shared vectors", () => {
+  it("are the pinned file", () => {
+    const [digest] = readFileSync(new URL("v1.sha256", VECTORS), "utf8").trim().split(/\s+/);
+    expect(createHash("sha256").update(text, "utf8").digest("hex")).toBe(digest);
+  });
+});
+
+describe("the browser modules", () => {
+  it.each(["bytes.ts", "credentials.ts", "noise.ts"])("%s uses no Node-only API", (name) => {
+    const source = readFileSync(new URL(name, import.meta.url), "utf8");
+    expect(source).not.toMatch(/from "node:|\bBuffer\b|\bprocess\./);
+  });
+});
+
+describe("V1 derivations", () => {
+  it("give keyId and every credential value", async () => {
+    expect(hex(await keyId(T_PUB))).toBe(v.V1.keyId);
+    expect(b64u(T_PUB)).toBe(v.V1.transportPublicB64u);
+    expect(v.V1.credentials.length).toBeGreaterThan(0);
+    for (const credential of v.V1.credentials) {
+      const hash = await credentialHash(credential.token);
+      expect(hex(hash)).toBe(credential.credHash);
+      expect(hex(await psk(hash, bytes(v.V1.keyId)))).toBe(credential.psk);
+      const adm = await admission(hash, bytes(v.inputs.hostId));
+      expect(hex(adm)).toBe(credential.adm);
+      expect(b64u(adm)).toBe(credential.admB64u);
+    }
+  });
+
+  it("accept only the canonical uncompressed point", async () => {
+    expect(v.V1.points.length).toBeGreaterThan(0);
+    for (const point of v.V1.points) expect(await isPublicKey(bytes(point.hex)), point.name).toBe(point.valid);
+  });
+});
+
+describe("strict b64u", () => {
+  it("round-trips and refuses padding, other alphabets and non-canonical spellings", () => {
+    expect(hex(fromB64u(v.inputs.connB64u)!)).toBe(v.inputs.conn);
+    expect(b64u(bytes(v.inputs.conn))).toBe(v.inputs.connB64u);
+    expect(fromB64u("")).toEqual(new Uint8Array(0));
+    expect(fromB64u("AA")).toEqual(new Uint8Array([0]));
+    expect(fromB64u("AAE")).toEqual(new Uint8Array([0, 1]));
+    expect(fromB64u("-_8")).toEqual(new Uint8Array([0xfb, 0xff]));
+    for (const bad of ["AA==", "AA=", "A", "AB+/", "AB c", "AB", "AAB", "AAAAA"]) expect(fromB64u(bad), bad).toBeNull();
+  });
+});
+
+describe.each([
+  ["V2", 1 as TransportByte, "device"],
+  ["V3", 2 as TransportByte, "pairing"],
+])("%s handshake, phone side", (name, transport, pskName) => {
+  const vector = v[name];
+
+  it("gives the pinned bytes and the pinned state at every step", async () => {
+    expect(hex(prologue(transport))).toBe(vector.prologue);
+    const trace: TraceStep[] = [];
+    const hello = await phone(transport, pskName, trace);
+    expect(hex(hello.message1)).toBe(vector.message1);
+    const keys = await hello.finish(bytes(vector.message2));
+    expect(trace).toEqual(vector.trace);
+    expect(hex(keys.kPc)).toBe(vector.kPc);
+    expect(hex(keys.kCp)).toBe(vector.kCp);
+    expect(hex(keys.handshakeHash)).toBe(vector.handshakeHash);
+  });
+});
+
+describe("V4 transport records, phone side", () => {
+  it("seals what the phone sends and opens what the computer sends, counter by counter", async () => {
+    const keys = await v2Session();
+    expect(v.V4.records.some((r: { direction: string }) => r.direction === "cp")).toBe(true);
+    for (const record of v.V4.records) {
+      if (record.direction === "pc") {
+        expect(keys.send.nonce).toBe(record.n);
+        expect(hex(await keys.send.seal(bytes(record.frame)))).toBe(record.record);
+      } else {
+        expect(keys.receive.nonce).toBe(record.n);
+        expect(hex(await keys.receive.open(bytes(record.record)))).toBe(record.frame);
+      }
+    }
+  });
+});
+
+describe("V6 must fail, phone side", () => {
+  const phoneCases = (v.V6.handshake as Array<{ name: string; side: string; message2: string }>).filter((c) => c.side === "phone");
+
+  it("has phone cases", () => expect(phoneCases.length).toBeGreaterThan(0));
+
+  it.each(phoneCases)("handshake: $name is a hard stop", async (c) => {
+    const hello = await phone(1, "device");
+    await expect(hello.finish(bytes(c.message2))).rejects.toThrow(/^e2e: /);
+  });
+
+  it.each((v.V6.records as Array<{ name: string; receiver: string; records: string[]; failsAt: number }>).filter((c) => c.receiver === "phone"))(
+    "record: $name",
+    async (c) => {
+      const keys = await v2Session();
+      let failedAt = -1;
+      for (const [index, record] of c.records.entries()) {
+        try {
+          await keys.receive.open(bytes(record));
+        } catch {
+          failedAt = index;
+          break;
+        }
+      }
+      expect(failedAt).toBe(c.failsAt);
+    },
+  );
+
+  it("refuses every record after a failed one, even a genuine one", async () => {
+    const keys = await v2Session();
+    const first = v.V4.records.find((r: { direction: string }) => r.direction === "cp");
+    const forged = bytes(first.record);
+    forged[0] ^= 1;
+    await expect(keys.receive.open(forged)).rejects.toThrow("e2e: aead");
+    await expect(keys.receive.open(bytes(first.record))).rejects.toThrow("e2e: failed");
+  });
+
+  it("refuses a second finish", async () => {
+    const hello = await phone(1, "device");
+    await hello.finish(bytes(v.V2.message2));
+    await expect(hello.finish(bytes(v.V2.message2))).rejects.toThrow("e2e: finished");
+  });
+});
