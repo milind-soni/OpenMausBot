@@ -88,7 +88,7 @@ describe("augmentedPath", () => {
   posixIt("keeps the last login-shell PATH available during a rescan", async () => {
     const shell = join(homedir(), "fake-login-shell");
     const rcOnlyBin = join(homedir(), "rc-only", "bin");
-    writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
+    writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s__OMB_END__' '${rcOnlyBin}'\n`);
     chmodSync(shell, 0o755);
 
     const previousShell = process.env.SHELL;
@@ -116,7 +116,7 @@ describe("augmentedPath", () => {
     const shell = join(homedir(), "fake-login-shell");
     const rcOnlyBin = join(homedir(), "rc-only", "bin");
     // Answers only when it leads its own process group, as a detached (setsid) child does; an attached one shares the server's.
-    writeFileSync(shell, `#!/bin/sh\n[ "$(ps -o pgid= -p $$ | tr -d ' ')" = "$$" ] && printf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
+    writeFileSync(shell, `#!/bin/sh\n[ "$(ps -o pgid= -p $$ | tr -d ' ')" = "$$" ] && printf '__OMB_PATH__%s__OMB_END__' '${rcOnlyBin}'\n`);
     chmodSync(shell, 0o755);
 
     const saved = { SHELL: process.env.SHELL, VITEST: process.env.VITEST };
@@ -140,7 +140,7 @@ describe("augmentedPath", () => {
     const shell = join(homedir(), "fake-login-shell");
     const rcOnlyBin = join(homedir(), "rc-only", "bin");
     const jobPid = join(homedir(), "rc-job.pid");
-    writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\nsleep 30 &\necho $! > '${jobPid}'\n`);
+    writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s__OMB_END__' '${rcOnlyBin}'\nsleep 30 &\necho $! > '${jobPid}'\n`);
     chmodSync(shell, 0o755);
 
     const saved = { SHELL: process.env.SHELL, VITEST: process.env.VITEST };
@@ -172,7 +172,7 @@ describe("augmentedPath", () => {
     const finished = join(homedir(), "flood-finished");
     writeFileSync(
       shell,
-      `#!/bin/sh\necho $$ > '${shellPid}'\nprintf '__OMB_PATH__%s\\n' '${rcOnlyBin}'\nhead -c 2000000 /dev/zero\n: > '${finished}'\n`,
+      `#!/bin/sh\necho $$ > '${shellPid}'\nprintf '__OMB_PATH__%s__OMB_END__\\n' '${rcOnlyBin}'\nhead -c 2000000 /dev/zero\n: > '${finished}'\n`,
     );
     chmodSync(shell, 0o755);
     // /proc/<pid>/stat: a killed process its parent has not reaped yet (state Z) still answers kill(pid, 0).
@@ -219,12 +219,89 @@ describe("augmentedPath", () => {
     }
   });
 
+  posixIt("waits for the login shell's whole answer, even when the rest arrives after the shell exits", async () => {
+    const shell = join(homedir(), "fake-login-shell");
+    const firstBin = join(homedir(), "first", "bin");
+    const restBin = join(homedir(), "rest", "bin");
+    const shellPid = join(homedir(), "split-shell.pid");
+    const go = join(homedir(), "split-answer.go");
+    // The shell exits after half its answer; a job holding its stdout writes the rest once the test says go (bounded at 10 s).
+    writeFileSync(
+      shell,
+      [
+        "#!/bin/sh",
+        `echo $$ > '${shellPid}'`,
+        `printf '__OMB_PATH__%s' '${firstBin}'`,
+        `(i=0; while [ ! -e '${go}' ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done; printf ':%s__OMB_END__' '${restBin}') &`,
+        "",
+      ].join("\n"),
+    );
+    chmodSync(shell, 0o755);
+
+    const saved = { SHELL: process.env.SHELL, VITEST: process.env.VITEST };
+    try {
+      process.env.SHELL = shell;
+      delete process.env.VITEST;
+      resetPathCacheForTests();
+
+      augmentedPath();
+      const pid = await vi.waitFor(() => {
+        const written = existsSync(shellPid) ? Number(readFileSync(shellPid, "utf8").trim()) : 0;
+        expect(written).toBeGreaterThan(0);
+        return written;
+      });
+      // Gone from the process table = reaped, and Node emits "exit" as it reaps.
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
+      writeFileSync(go, "");
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(restBin), { timeout: 5000 });
+      expect(augmentedPath().split(delimiter)).toContain(firstBin);
+    } finally {
+      if (saved.SHELL === undefined) delete process.env.SHELL;
+      else process.env.SHELL = saved.SHELL;
+      if (saved.VITEST === undefined) delete process.env.VITEST;
+      else process.env.VITEST = saved.VITEST;
+      resetPathCacheForTests();
+    }
+  });
+
+  posixIt("stops reading once the login shell's answer is complete, ignoring a background job's later output", async () => {
+    const shell = join(homedir(), "fake-login-shell");
+    const rcOnlyBin = join(homedir(), "rc-only", "bin");
+    const jobStatus = join(homedir(), "late-job.status");
+    writeFileSync(
+      shell,
+      `#!/bin/sh\nprintf '__OMB_PATH__%s__OMB_END__' '${rcOnlyBin}'\n(head -c 200000 /dev/zero; echo $? > '${jobStatus}') &\n`,
+    );
+    chmodSync(shell, 0o755);
+
+    const saved = { SHELL: process.env.SHELL, VITEST: process.env.VITEST };
+    try {
+      process.env.SHELL = shell;
+      delete process.env.VITEST;
+      resetPathCacheForTests();
+
+      augmentedPath();
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin));
+      // 141 = 128 + SIGPIPE: the job's write hit a pipe nobody reads any more (0 would mean it was all read).
+      await vi.waitFor(() => expect(existsSync(jobStatus) && readFileSync(jobStatus, "utf8").trim()).toBe("141"), {
+        timeout: 5000,
+      });
+      expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin);
+    } finally {
+      if (saved.SHELL === undefined) delete process.env.SHELL;
+      else process.env.SHELL = saved.SHELL;
+      if (saved.VITEST === undefined) delete process.env.VITEST;
+      else process.env.VITEST = saved.VITEST;
+      resetPathCacheForTests();
+    }
+  });
+
   posixIt("keeps the login-shell PATH in the same order after a rescan", async () => {
     const knownBin = join(homedir(), ".local", "bin");
     mkdirSync(knownBin, { recursive: true });
     const shell = join(homedir(), "fake-login-shell");
     const rcOnlyBin = join(homedir(), "rc-only", "bin");
-    writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
+    writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s__OMB_END__' '${rcOnlyBin}'\n`);
     chmodSync(shell, 0o755);
 
     const saved = { PATH: process.env.PATH, SHELL: process.env.SHELL, VITEST: process.env.VITEST };
@@ -260,7 +337,7 @@ describe("augmentedPath", () => {
     const shell = join(homedir(), "fake-login-shell");
     const ran = join(homedir(), "login-shell-ran");
     const rcOnlyBin = join(homedir(), "rc-only", "bin");
-    writeFileSync(shell, `#!/bin/sh\n: > '${ran}'\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
+    writeFileSync(shell, `#!/bin/sh\n: > '${ran}'\nprintf '__OMB_PATH__%s__OMB_END__' '${rcOnlyBin}'\n`);
     chmodSync(shell, 0o755);
 
     const saved = { PATH: process.env.PATH, SHELL: process.env.SHELL, VITEST: process.env.VITEST };

@@ -141,7 +141,7 @@ function probeLoginShellPath(): void {
   const shell = process.env.SHELL || "/bin/zsh";
   // -l -i: nvm and friends live in .zshrc/.bashrc, which only interactive shells read; a marker isolates $PATH from rc noise.
   // detached: an interactive shell makes its job the terminal's foreground, which stops `openmausbot setup` and its sign-in CLI (SIGTTOU).
-  const child = spawn(shell, ["-l", "-i", "-c", 'printf "__OMB_PATH__%s" "$PATH"'], {
+  const child = spawn(shell, ["-l", "-i", "-c", 'printf "__OMB_PATH__%s__OMB_END__" "$PATH"'], {
     detached: true,
     stdio: ["ignore", "pipe", "ignore"],
   });
@@ -153,7 +153,7 @@ function probeLoginShellPath(): void {
     if (finished) return;
     finished = true;
     clearTimeout(deadline);
-    child.stdout.destroy();
+    child.stdout?.destroy();
     // An interactive shell ignores SIGTERM, and something its rc started in the background can hold stdout open after it exits.
     if (exitCode === undefined && child.pid) {
       try {
@@ -163,20 +163,19 @@ function probeLoginShellPath(): void {
   };
   const deadline = setTimeout(finish, PROBE_TIMEOUT_MS);
   deadline.unref();
-  // Applied as soon as the shell has exited cleanly, not when stdout closes: its rc may leave a background job holding it.
+  // Applied once the shell has exited cleanly and its whole answer has arrived, not when stdout closes: its rc may leave a
+  // background job holding it. Reading stops there, so that job's later output is never part of the answer.
   const applyIfDone = (): void => {
     if (exitCode !== 0) return;
-    const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
-    if (!m || !m[1] || m[1] === loginShellPath) return;
-    loginShellPath = m[1];
-    cached = buildPath();
+    const m = /__OMB_PATH__([^\n]*?)__OMB_END__/.exec(stdout);
+    if (!m) return;
+    if (m[1] && m[1] !== loginShellPath) {
+      loginShellPath = m[1];
+      cached = buildPath();
+    }
+    finish();
   };
-  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-    bytes += Buffer.byteLength(chunk);
-    if (bytes > PROBE_MAX_OUTPUT_BYTES) return finish();
-    stdout += chunk;
-    applyIfDone();
-  });
+  // Listeners first: spawn can fail (EMFILE) without creating stdout and report it later through "error".
   child.on("error", finish);
   child.on("exit", (code) => {
     exitCode = code;
@@ -184,6 +183,12 @@ function probeLoginShellPath(): void {
     else finish();
   });
   child.on("close", finish);
+  child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+    bytes += Buffer.byteLength(chunk);
+    if (bytes > PROBE_MAX_OUTPUT_BYTES) return finish();
+    stdout += chunk;
+    applyIfDone();
+  });
 }
 
 export function resetPathCacheForTests(): void {
