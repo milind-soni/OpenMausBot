@@ -99,8 +99,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "voice+non-chief": 50309,
   "shared+non-chief": 51793,
   "shared+voice+non-chief": 52574,
-  "skills+non-chief": 51614,
-  "skills+voice+non-chief": 52395,
+  "skills+non-chief": 52110,
+  "skills+voice+non-chief": 52891,
   "skills+shared+non-chief": 53879,
   "skills+shared+voice+non-chief": 54660,
   "skills+shared+voice+cloud-home": 62843,
@@ -117,7 +117,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+images": 60010,
   "skills+shared+voice+x+team+images+hosting": 71107,
   "default+hosting": 59808,
-  "default+tools-off": 53040,
+  "default+tools-off": 53536,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
