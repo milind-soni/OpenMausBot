@@ -748,6 +748,16 @@ beforeAll(async () => {
           text: `[Clip](<${pathToFileURL(linkedVideo).href}>) and [notes](<${pathToFileURL(linkedFile).href}>)`,
           from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
         },
+        {
+          id: "handoff-result-card", at: 14, parentId: "linked-video-message", role: "bot", kind: "activity",
+          roomRequest: { id: "handoff-request", phase: "result" },
+          attachments: [{ kind: "file", path: deliveredImage, mime: "image/png", name: "returned.png" }],
+          from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
+        },
+        {
+          id: "plain-activity-card", at: 15, parentId: "handoff-result-card", role: "bot", kind: "activity",
+          tool: { name: "Did something", ok: true },
+        },
       ],
     }),
   );
@@ -14642,6 +14652,20 @@ describe("message pages", () => {
     });
     expect(saved.status).toBe(200);
     expect(await saved.text()).toBe("delivered photo bytes");
+  });
+
+  it("saves a file attached to a hand-off result card, and only that file", async () => {
+    const threadId = "test-linked-file-room-thread";
+    const save = (id: string, path: string) => api("POST", `/api/threads/${threadId}/messages/${id}/file`, { path });
+    const attached = await fetch(`${BASE}/api/threads/${threadId}/messages/handoff-result-card/file`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: join(home, ".openmausbot", "attachments", "5e1dbd0a-7c3a-4f1e-9b2d-6a0c4f8e2b71.png") }),
+    });
+    expect(attached.status).toBe(200);
+    expect(await attached.text()).toBe("delivered photo bytes");
+    expect((await save("handoff-result-card", join(home, "Downloads", "sideboard.png"))).status).toBe(403);
+    expect((await save("plain-activity-card", join(home, ".openmausbot", "attachments", "5e1dbd0a-7c3a-4f1e-9b2d-6a0c4f8e2b71.png"))).status).toBe(403);
   });
 
   it("downloads an exact user attachment only from the private attachment store", async () => {
