@@ -103,3 +103,60 @@ it("a bridged turn on the chat-completions runtime carries on after use_tool nam
   expect(completed).toMatchObject({ ok: true });
   expect(errors).toEqual([]);
 }, 30_000);
+
+it("does not fail a turn that ends after a hand-off refused only because nothing was left to do", async () => {
+  // One whole turn: the bot hands a message to a teammate that no longer waits on an answer, is told so, and finishes.
+  const detail = "nothing of Scout's waits on an answer as a1: it was answered or its work ended. Send it without answers if it still needs doing";
+  const requests: ChatRequest[] = [];
+  const provider = createServer(async (request, response) => {
+    if (request.url === "/v1/models") {
+      response.setHeader("content-type", "application/json");
+      response.end('{"data":[]}');
+      return;
+    }
+    let data = "";
+    if (request.method !== "POST") { response.writeHead(404); response.end(); return; }
+    for await (const part of request) data += part.toString();
+    requests.push(JSON.parse(data) as ChatRequest);
+    if (requests.length === 1) calls(response, "call_handoff", "agents_coordinate_bots", { bot_ids: ["bot-scout"], message: "Thanks, looks good", answers: "a1" });
+    else sse(response, { content: "Nothing is left to do for @Scout; finishing here." }, "stop");
+  });
+  // The harness as the proxy reaches it: this hand-off is refused for what is left to do, not for anything that broke.
+  const harness = createServer(async (request, response) => {
+    let data = "";
+    for await (const part of request) data += part.toString();
+    response.setHeader("content-type", "application/json");
+    if (request.url !== "/api/internal/coordinate-bots") { response.end("{}"); return; }
+    response.statusCode = 409;
+    response.end(JSON.stringify({ receipts: [{ botId: "bot-scout", outcome: "failed", detail, instructionOnly: true }], error: detail, instructionOnly: true }));
+  });
+  await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => harness.listen(0, "127.0.0.1", resolve));
+  const providerAddress = provider.address(), harnessAddress = harness.address();
+  if (!providerAddress || typeof providerAddress === "string" || !harnessAddress || typeof harnessAddress === "string") throw new Error("a fixture did not bind TCP");
+  const instance = await OpenAICompatDriver.create({
+    instanceId: randomUUID(), displayName: "Refusal fixture", enabled: true,
+    config: { url: `http://127.0.0.1:${providerAddress.port}/v1`, apiKeyEnv: "FIXTURE_CHAT_KEY" },
+    environment: { FIXTURE_CHAT_KEY: "fixture-key" },
+  });
+  const recorder = recordEvents(instance.adapter);
+  cleanups.push(async () => {
+    recorder.stop();
+    await instance.dispose();
+    for (const server of [provider, harness]) { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
+  });
+  const agents: NonNullable<SendTurnInput["integrations"]>["agents"] = {
+    command: process.execPath,
+    args: [join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts")],
+    env: { OMB_HARNESS_URL: `http://127.0.0.1:${harnessAddress.port}`, OMB_BOT_ID: "bot-chat", OMB_THREAD_ID: "thread-chat", OMB_COMMS_TOKEN: "unused" },
+  };
+  await instance.adapter.sendTurn({ threadId: randomUUID(), text: "Answer Scout's question.", model: "fixture-model", integrations: { agents } });
+  const completed = await recorder.until((event) => event.type === "turn.completed");
+
+  // The refusal reached the model as an ordinary result it can read...
+  expect(requests[1]!.messages.at(-1)).toMatchObject({ role: "tool", tool_call_id: "call_handoff" });
+  expect(JSON.parse(requests[1]!.messages.at(-1)!.content as string)).toEqual({ ok: true, result: detail });
+  // ...so the turn it ended on is a success, not "Stopped because the tool call ... failed".
+  expect(completed).toMatchObject({ ok: true });
+  expect(recorder.events.filter((event) => event.type === "runtime.error")).toEqual([]);
+}, 30_000);

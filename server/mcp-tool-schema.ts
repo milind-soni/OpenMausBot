@@ -175,8 +175,8 @@ export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (lin
       if (!isObject(frame.result) || !Array.isArray(frame.result.tools)) return line;
 
       const own = frame.result.nextCursor ? [] : ownTools;
-      const ownNames = new Set(own.map((tool) => tool.name));
-      const listed: unknown[] = own.length
+      const ownNames = new Set(ownTools.map((tool) => tool.name));
+      const listed: unknown[] = ownNames.size
         ? [...frame.result.tools.filter((tool: unknown) => !isObject(tool) || !ownNames.has(tool.name)), ...own]
         : frame.result.tools;
       const tools = profile ? fitToolList(listed, profile, log) : listed.map((tool: unknown) => {
@@ -184,7 +184,7 @@ export function createToolListNormalizer(profile?: ToolSchemaProfile, log?: (lin
         const inputSchema = providerSafeInputSchema(tool.inputSchema);
         return inputSchema === tool.inputSchema ? tool : { ...tool, inputSchema };
       });
-      const changed = own.length > 0 || tools.length !== listed.length || tools.some((tool, index) => tool !== listed[index]);
+      const changed = own.length > 0 || listed.length !== frame.result.tools.length || tools.length !== listed.length || tools.some((tool, index) => tool !== listed[index]);
       return changed ? JSON.stringify({ ...frame, result: { ...frame.result, tools } }) : line;
     },
   };

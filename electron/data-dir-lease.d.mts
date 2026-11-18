@@ -38,3 +38,9 @@ export declare function inMacSyncedFolder(path: string, home: string): boolean;
 export declare function clearRecordsFromEarlierRunOfThisContainer(
   dataDir: string,
 ): { path: string; host: string; pid: number }[];
+
+export type DataDirLeaseHolder =
+  | { state: "none" | "invalid"; path: string }
+  | { state: "alive" | "dead" | "other-machine"; path: string; pid: number; host: string; createdAt: number };
+
+export declare function describeDataDirLease(dataDir: string): DataDirLeaseHolder;

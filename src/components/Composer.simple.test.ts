@@ -14,6 +14,7 @@ import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 
 const fixture = vi.hoisted(() => ({
   advanced: false,
+  admin: true,
   agentsMcp: true,
   dispatch: vi.fn(),
   call: null as Record<string, unknown> | null,
@@ -33,7 +34,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 });
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/cloud-guest", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/cloud-guest")>(), useReactor: () => "user" }));
-vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 vi.mock("./CallView", () => ({ CallButton: (props: Record<string, unknown>) => {
   fixture.call = props;
@@ -87,6 +88,7 @@ function openPlus() {
 
 beforeEach(() => {
   fixture.advanced = false;
+  fixture.admin = true;
   fixture.agentsMcp = true;
   fixture.liveCall = null;
   fixture.config = undefined;
@@ -196,20 +198,22 @@ describe("the Simple composer in a bot chat", () => {
     expectBotButton(sendButton(), "yellow");
   });
 
-  it("turns its round button into Stop while the bot works, and keeps a quiet Stop beside Send while you type", () => {
+  it("keeps Call beside Stop while the bot works, including while typing", () => {
     const busy = { ...bot, busy: true };
     render({ bot: busy });
     const slot = container.querySelector<HTMLButtonElement>('[data-composer-stop="slot"]')!;
     expect(slot.getAttribute("aria-label")).toBe("Stop this turn");
     expectBotButton(slot, "purple");
-    expect(fixture.call).toBeNull();
+    expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
     click(slot);
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "interrupt", botId: "atlas", threadId: "atlas-thread" });
 
     restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "and also this", attachments: [] });
+    fixture.call = null;
     render({ bot: busy });
     expect(container.querySelector('[data-composer-stop="beside"]')).not.toBeNull();
     expect(container.querySelector('[data-composer-stop="slot"]')).toBeNull();
+    expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
   });
 
   it("shows the approval level as a chip only while this conversation overrides the bot, in the panel's words", () => {
@@ -219,10 +223,10 @@ describe("the Simple composer in a bot chat", () => {
     render({ bot: { ...bot, tasks: [{ ...task, approvalMode: "full" }] } });
     const chip = container.querySelector("[data-approval-chip]")!;
     expect(chip.getAttribute("data-approval-chip")).toBe("full");
-    expect(chip.textContent).toBe("Just do it");
+    expect(chip.textContent).toBe("Full access");
     click(chip.closest("button"));
     const level = popover()!;
-    expect(level.textContent).toContain("Ask me first");
+    expect(level.textContent).toContain("Ask for approval");
     expect(level.textContent).toContain("Command allowlist");
     expect(level.querySelector('[data-menu-key="approval:full"] .lucide-check')).not.toBeNull();
     click(level.querySelector('[data-menu-key="approval:ask"]'));
@@ -415,4 +419,14 @@ describe("the Advanced composer", () => {
       expect(classes("[data-composer-row]")).not.toContain("flex-wrap");
     });
   });
+});
+
+it.each([false, true])("keeps Call for a shared viewer without Stop permission (waiting for teammates: %s)", waiting => {
+  fixture.admin = false;
+  fixture.config = { team: true };
+  const shared: Bot = { ...bot, tasks: [{ threadId: bot.threadId, title: "Shared", createdAt: 1, busy: !waiting, waitingForTeammates: waiting, askedBy: { id: "other-person", name: "Other person" } }] };
+  restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "Follow-up from another viewer", attachments: [] });
+  render({ bot: shared });
+  expect(container.querySelector('[aria-label="Stop this turn"]')).toBeNull();
+  expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
 });

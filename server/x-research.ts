@@ -445,6 +445,8 @@ export function createXRelayClient(options: { url: string; token: string; own?: 
   async function list(endpoint: string, body: Row, opts: ListOptions): Promise<XPostList> {
     const since = opts.sinceId === undefined ? undefined : BigInt(opts.sinceId);
     const posts: XPost[] = [];
+    const postIds = new Set<string>();
+    const cursors = new Set<string>();
     let cursor: string | undefined;
     let more = false;
     for (let page = 0; page < opts.pages; page++) {
@@ -461,11 +463,17 @@ export function createXRelayClient(options: { url: string; token: string; own?: 
           if (opts.newestFirst && index > 0 && at(raw, "isPinned") !== true) reachedSeen = true;
           return;
         }
-        posts.push(post);
+        if (!postIds.has(post.id)) {
+          postIds.add(post.id);
+          posts.push(post);
+        }
       });
       cursor = cursorOf(answer);
       more = Boolean(cursor) && rows.length > 0 && !reachedSeen;
       if (!more || posts.length >= opts.limit) break;
+      // A provider may repeat its cursor; do not pay for the same page again.
+      if (cursor && cursors.has(cursor)) break;
+      if (cursor) cursors.add(cursor);
     }
     if (posts.length > opts.limit) {
       posts.length = opts.limit;

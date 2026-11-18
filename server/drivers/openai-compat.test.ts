@@ -334,8 +334,8 @@ describe("OpenAICompatDriver", () => {
     expect(inst.models).toEqual({
       default: "vendor/model-a",
       options: [
-        { id: "vendor/model-a", label: "Model A", custom: true },
-        { id: "vendor/model-b", label: "vendor/model-b", custom: true },
+        { id: "vendor/model-a", label: "Model A", custom: true, variants: ["low", "medium", "high", "xhigh", "max"].map((id) => ({ id, label: id })) },
+        { id: "vendor/model-b", label: "vendor/model-b", custom: true, variants: ["low", "medium", "high", "xhigh", "max"].map((id) => ({ id, label: id })) },
       ],
     });
     await inst.dispose();

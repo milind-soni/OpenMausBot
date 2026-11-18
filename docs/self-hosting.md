@@ -161,6 +161,116 @@ its npx cache. The service log never shows a code. Get one with:
 npx openmausbot pair
 ```
 
+### Podman (rootless, as a service)
+
+> **Warning: this install isolates less than the Docker install.** The
+> server shares the machine's network (Podman's host network), so:
+>
+> - Any port a bot or a tool opens on `0.0.0.0` is open on every interface
+>   of the machine, including a VPS's public IP, whatever `--local` says.
+>   Bots run unboxed, beside the data folder that holds the engines' logins.
+> - Bots can reach every loopback service on the machine: databases, other
+>   apps' admin ports.
+> - Every local account and process on the machine counts as the owner on
+>   the server's port, and can attach to Chrome's debugging port.
+>
+> Use it on a machine only you sign in to, and put a host firewall in front
+> (`ufw`, `firewalld`) that lets in only what you mean to serve.
+
+It needs Linux and Podman 4.9 or newer. One command run as your own user,
+without `sudo`, installs the published server image as your user's systemd
+service:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/podman/install.sh | sh
+podman exec -it openmausbot openmausbot pair      # a code, and a sign-in link for this machine's browser
+```
+
+It writes a Quadlet unit, `~/.config/containers/systemd/openmausbot.container`,
+that runs the image pinned by its digest. systemd starts it again when it
+fails or stops answering its health check. It starts at boot once your user
+may run services without being logged in. The installer checks this and
+prints the one line to run as an administrator; it never runs `sudo` itself:
+
+```sh
+sudo loginctl enable-linger "$USER"
+```
+
+The server uses the host's network, as `npx openmausbot serve` does. It
+listens on `127.0.0.1:8799` only, and a program on this machine counts as its
+owner ([Loopback trust](#loopback-trust-owner-or-service)). Nothing is
+forwarded into a container. `--local` and `--lan` decide only which
+addresses the server's own port answers; they do not limit other ports (see
+the warning above). Options, given after `sh -s --`:
+
+| Option | Does |
+|---|---|
+| `--lan` | The server's port also answers other devices on this network, over plain http, and only from private addresses. Each device pairs. |
+| `--local` | Back to this machine only (the default). |
+| `--port N` | Another port, when 8799 is taken (webhooks use the next one). |
+| `--public-url URL` | The HTTPS address a tunnel or proxy in front of it serves, for pairing links. |
+| `--dir PATH` | Another folder for the data and settings (not a Docker install's folder). |
+| `--uninstall` | Stops and removes the service. Keeps the data. |
+
+Running the command again repairs the install and keeps the version, the
+folder, the data and your settings. It restarts the server only when
+something changed. Without `--dir` it keeps the folder the service already
+uses; a `--dir` that names another folder is refused. It also refuses while
+`update.sh` is running, or after an update that did not finish: run
+`update.sh` first.
+
+| | Where |
+|---|---|
+| Data (chats, settings, engine logins) | `~/.local/share/openmausbot/data`, owned by your user on the host |
+| The server's settings | `~/.local/share/openmausbot/server.env`. Apply a change with `systemctl --user restart openmausbot` |
+| Log | `journalctl --user -u openmausbot -f` |
+| Status | `systemctl --user status openmausbot` |
+
+**Update.** `~/.local/share/openmausbot/update.sh` updates to the stable
+version (`--version X.Y.Z` for another, `--check` to only look). It is
+`deploy/update.sh`, as for Docker installs: it downloads the image by digest,
+stops the service, copies the data into a Podman volume and checks the copy,
+points the unit at the new image and restarts the service. Then it waits until
+the server answers and can still start bots. If it cannot, the old image and
+the copy of the data go back. `update.sh --rollback` goes back after an update
+that worked. Run it as your user, without `sudo`. The app's **Update server**
+button does not run it on this install yet: run `update.sh` yourself.
+When a rollback cannot find the old version by its digest, it names the
+copy it kept on this machine, `openmausbot-before-update:local`, in the
+unit and in `.env`. Running the installer again never downloads that name:
+it pins the copy by the digest it came with, or, when it has none, keeps
+it as it is and says so, until the next `update.sh`.
+
+**Uninstall.** Run the same command with `--uninstall`. The data stays.
+Some of its files can belong to the container's other user ids, so remove
+it through Podman: `podman unshare rm -rf ~/.local/share/openmausbot`. The
+copy of the data the last update kept is a Podman volume:
+`podman volume ls --filter label=com.mausbot.role=update-backup`.
+
+**What rootless does not do.**
+
+- The bots' sandbox (bubblewrap) is off. The published server image does
+  not include bubblewrap, so bots run in the server's container, beside its
+  data, as with the Docker image. Use this install on a machine only you
+  sign in to. Bubblewrap itself can run in a rootless container, with the
+  repository's seccomp profile (`connector/profiles/seccomp-omb-home.json`)
+  and `/proc` left uncovered (`--security-opt unmask=/proc/*`). There the
+  box's self-check passes 31 of 32 checks; the kernel keyring stays
+  reachable. This install sets neither.
+- Chrome runs with `--no-sandbox` inside the container, as in every
+  container install, and the container is the boundary. It needs no other
+  flag: the built-in browser starts and loads pages.
+- No HTTPS of its own: put Caddy, a tunnel or Tailscale in front and pass
+  `--public-url`.
+- Per-bot Linux desktops (**Local VM**) need the Podman socket, which this
+  install does not mount. [deploy/podman](../deploy/podman/README.md) runs
+  the full stack with them.
+
+Tested on Ubuntu 24.04 (x86-64, Podman 4.9.3), with
+`kernel.apparmor_restrict_unprivileged_userns=1`, and nowhere else yet.
+Other distributions with Podman 4.9 or newer (RHEL 9.4, or Podman 5 on
+Debian 13 and Fedora), SELinux hosts and ARM64 have not been tried.
+
 ## Troubleshooting
 
 | You see | It means | Do this |
@@ -578,6 +688,51 @@ turns that waited, starts the system refused by error code, engines that
 never came up, and processes that had to be force-stopped or outlived their
 turn. It holds numbers and fixed words only: no command line, path, bot name
 or message.
+
+**Per bot.** The same report carries each bot's share, taken from the same
+process list (no extra work per bot): its processes, threads, resident memory
+(now and at its most since start) and CPU time, counting its engine, what the
+engine started (including what outlived its turn in the engine's process group
+or session) and its own browser. An engine or browser several bots share (a
+shared engine process, a browser profile used by more than one bot) is counted
+once as "shared", never against any one bot. The report shows the ten bots
+using the most memory; `GET /api/diagnostics/bots` (admin only) lists every
+bot. Bot ids and numbers only.
+
+**Idle engines close sooner when room runs short.** A conversation's engine
+stays loaded after its turn (10 minutes by default, `OMB_SESSION_IDLE_MS`;
+30 seconds for work nobody is watching), a bot's browser stays open for its
+idle time, and a process several bots share is recycled a minute after its
+last session (`OMB_ACP_SHARED_RECYCLE_MS`; this one stays fixed). Where turns
+wait for room, a conversation's engine time and a browser's idle time shrink
+as memory or the process limit fills, down to a tenth (never below their
+floor), and engines already kept are looked at again every few seconds.
+Before a new turn or browser waits for room, the engine idle longest is
+closed.
+
+**One bot's memory.** Where turns wait for room, the server watches how
+much memory each bot uses against twice its fair share (the memory over
+the turns that may run at once), at least 1,900 MB and at most 80% of it,
+for each engine the bot runs (a bot with several conversations open may use
+that much for each). By default it only writes down a bot that stays over
+(for 30 seconds, or sooner while memory is short): the bot's id, the memory
+it used and how it was measured, the limit, its engines and the room left
+go to the server log and the health report. Nothing is stopped. To have the
+server act, set `OMB_BOT_MEMORY_MAX_MB` to a number of MB (any Linux host,
+the desktop app included); `auto` is the default (watch only) and `off` turns
+the watching off. Even then it acts only while the server is short of
+memory, only on the bot using the most, and in steps: first what the bot
+left running and its idle engines; then, measured again and still over, its
+largest busy engine. The browser of a stopped engine's conversation is
+closed once that turn lets it go. A turn whose engine is stopped ends with a
+line saying the bot used more memory than this computer allows for one bot.
+Engines and browsers several bots share, and a process other conversations
+may join, are never stopped this way; on a Team Cloud only the stopped
+conversation's own browser is closed, never the same bot's browsers for
+other members. The
+server watches by reading its process list; it logs at start whether the
+host also offers a systemd scope or a delegated cgroup, which are not used
+yet.
 
 **Bots' cloud computers do not count.** A bot's cloud computer runs at the
 provider that hosts it, not in this container, so its desktop and browser
@@ -1292,14 +1447,16 @@ the day or month rolls over, and cuts nothing off mid-turn.
 
 When a turn ends on a usage limit (a subscription's 5-hour or weekly limit,
 one model's own weekly window, a model's extra usage credits), the bot carries
-on by itself with another AI the person has set up until that limit resets,
-and the person hears it once for that stretch of the limit, as a notification:
-"Codex reached its limit until 14:00, so Kai is using Claude meanwhile." With
-no AI to carry on, it says the bot waits instead. Nobody is asked.
+on by itself with a backup the person chose until that limit resets, and the
+person hears it once for that stretch of the limit, as a notification: "Codex
+reached its limit until 14:00, so Kai is using Claude meanwhile." With no
+chosen backup that can carry on, the bot waits for the reset and the
+notification says so ("…no backup you chose can take over"); no other AI is
+picked for it. Nobody is asked.
 
 - **Which AI.** For one model's own limit, the same AI's default model first;
-  then the backups chosen for the bot or in Automatic recovery; then the AI a
-  new bot would get. Only an AI that can run a turn now (installed, signed in,
+  then the backups chosen for the bot or in Automatic recovery, in that order.
+  Only an AI that can run a turn now (installed, signed in,
   allowed by your organisation, not limited itself) with the tools and the
   working folder the current one has, and one the conversation's approval level
   can move to without asking (Auto-accept edits stays on an AI that has it).
@@ -1822,3 +1979,52 @@ engine credentials, browser state, and external workspaces. For Docker, the
 whole `/data` volume includes the CLI homes. See the
 [backup and restore instructions](deploy-vps.md#back-up) for the exact scope
 and stop/start commands.
+
+### The doctor: checking and repairing the data
+
+The doctor checks a server's data folder and repairs what can be repaired
+without losing anything. It runs by itself on the first start of each new
+version, before the server reads its data. It writes one log line for each
+thing it found, and adds a short `doctor` summary to `/api/health` (as seen by
+the owner): the names of the checks it fixed and of those left for you, never a
+path. When the new version fails its health check, `update.sh` runs that
+version's doctor with `--fix`. If the doctor repairs something, the update
+starts the new version once more; otherwise it rolls back as before.
+
+You can run it yourself, as the server's user:
+
+```sh
+openmausbot doctor --data                 # check and report; changes nothing
+openmausbot doctor --data --fix           # also apply the safe repairs (stop the server first)
+openmausbot doctor --data --json          # the report as JSON
+docker compose exec omb openmausbot doctor --data   # Docker
+```
+
+`--data-dir DIR` points it at another folder. It exits 0 when everything is
+fine (after `--fix`, fine now) and 8 when a problem is left. `--fix` changes
+nothing when it runs as a user other than the data folder's owner (Linux and
+macOS).
+
+| Check | Looks at | Repaired by `--fix` |
+|---|---|---|
+| Data format | `data-format.json` | Never. Data from a newer version stops every repair: install that version, or roll back. |
+| Data folder lease | `openmausbot-server.lease` | A lease a dead process on this machine left is retired. A live server means nothing is changed. |
+| Folders | the data folder, `events`, `native` | Missing folders are made. |
+| Bots and rooms | `bots.json`, `groups.json` | A damaged file (not a whole list) is put back from the whole temp file of a save that was cut short. With no such copy, a copy of the damaged file is kept and you are told how to restore it. A file this user cannot read at all is reported as not checked and left alone. |
+| Unfinished saves | `<file>.<pid>.<id>.tmp` at the top of the data folder | Moved into the backup. |
+| Engine-run records | `engine-runs/` | Records with neither a server nor a process to stop are moved into the backup. |
+| Messages database | `messages.db` | SQLite's `quick_check`. A write-ahead log over 64 MB is folded back into the database. A damaged database is reported, never rewritten. One that cannot be opened (permissions, another program's lock) is reported as not checked, not as damaged. |
+| Private files | `config.json`, `sessions.json`, `bots.json`, `messages.db`, … | Made owner-only (0600). Not on Windows. |
+| Settings file | `config.json` | Never: it tells you `openmausbot config restore latest` when dated copies exist. |
+
+Before changing anything, a repair copies it into
+`<data>/doctor-backups/<time>/`, with a `manifest.json` that lists what changed
+(for a file mode, the old mode). When a new run copies something, earlier runs
+go: any beyond the ten newest, and, oldest first, as many as it takes to bring
+the earlier runs together under 2 GB. A run that kept a copy of `bots.json` or
+`groups.json` stays for at least 30 days either way. The copies stay on that
+computer and are not part of a workspace backup.
+
+As a server starts, the doctor reads `messages.db` through and copies it before
+a checkpoint only while it and its write-ahead log come to 256 MB or less, so an update never waits on a large database;
+`openmausbot doctor --data` does both at any size.

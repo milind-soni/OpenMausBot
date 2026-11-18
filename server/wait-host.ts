@@ -28,6 +28,55 @@ export function waitRunChat(
   return directChat(run.botId, run.resultsThreadId) ? run.resultsThreadId : null;
 }
 
+/** A wait continuation is proved by the turn's originating run and fired notice in the same bot's chat, never its prompt. */
+export function waitContinuesHere(
+  run: Pick<RoutineRun, "id" | "eventSource" | "triggerSource" | "botId" | "threadId" | "resultsThreadId" | "webhookId" | "deliveryId"> | null,
+  botId: string,
+  threadId: string,
+  store: Pick<Store, "messagesFor">,
+  originatingRunId: string | undefined,
+): boolean {
+  if (!run || !originatingRunId || run.id !== originatingRunId || run.eventSource !== "wait" || run.triggerSource !== "webhook" || run.botId !== botId
+    || run.threadId !== threadId || run.resultsThreadId !== threadId || !run.deliveryId
+    || run.webhookId !== `wait:${run.deliveryId}`) return false;
+  return store.messagesFor(threadId).some((message) => message.wait?.status === "fired" && message.wait.id === run.deliveryId);
+}
+
+interface WaitRunOwner {
+  automationRunId?: string;
+  messageId?: string;
+  stopped?: boolean;
+  generations: ReadonlySet<string>;
+}
+
+export function waitTurnRunId(
+  turn: { automationRunId?: string; cardContinuation?: boolean; computerSelectionContinuation?: boolean } | undefined,
+  previous: Pick<WaitRunOwner, "automationRunId" | "messageId" | "stopped"> | undefined,
+  requestMessageId: string | undefined,
+): string | undefined {
+  if (turn?.automationRunId) return turn.automationRunId;
+  if (!(turn?.cardContinuation || turn?.computerSelectionContinuation) || !requestMessageId
+    || previous?.stopped || previous?.messageId !== requestMessageId) return undefined;
+  return previous.automationRunId;
+}
+
+export function waitContinuationCheck<T extends { botId: string; threadId: string; generation: string; externalRuntime?: unknown }>(
+  capability: T,
+  deps: {
+    active: (capability: T) => boolean;
+    request: (threadId: string) => WaitRunOwner | undefined;
+    run: (threadId: string) => Parameters<typeof waitContinuesHere>[0];
+    store: Pick<Store, "messagesFor">;
+  },
+): () => boolean {
+  return () => {
+    const request = deps.request(capability.threadId);
+    return !capability.externalRuntime && deps.active(capability)
+      && request?.stopped !== true && request?.generations.has(capability.generation) === true
+      && waitContinuesHere(deps.run(capability.threadId), capability.botId, capability.threadId, deps.store, request.automationRunId);
+  };
+}
+
 type CardStore = Pick<Store, "messagesFor" | "patchMessage">;
 
 function settleWaitCard(store: CardStore, threadId: string, messageId: string, how: "fired" | "expired" | "cancelled"): void {

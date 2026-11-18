@@ -421,7 +421,11 @@ async function listTriggers(args: Json, forBotId: string | undefined, context: T
   const now = typeof r.now === "string" ? r.now : new Date().toISOString();
   const timeZone = typeof r.timeZone === "string" && r.timeZone ? r.timeZone : "local computer timezone";
   const clock = `current time: ${now}; timezone: ${timeZone}`;
-  if (typeof r.error === "string") return { text: `${r.error} (${clock})`, isError: true };
+  if (typeof r.error === "string") {
+    // A trigger id that is not this bot's is an answer the bot can pass on; a failed call ends the turn.
+    if (r.missing === true) return { text: `${r.error} (${clock})` };
+    return { text: `${r.error} (${clock})`, isError: true };
+  }
   if (r.trigger) return { text: `Trigger (${clock}):\n${JSON.stringify(r.trigger, null, 2)}` };
   const triggers = Array.isArray(r.triggers) ? r.triggers : [];
   if (!triggers.length) return { text: `This bot has no triggers. Current time: ${now}. Timezone: ${timeZone}.` };

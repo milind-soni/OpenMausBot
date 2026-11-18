@@ -116,7 +116,7 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     words: ["meta", "muse", "llama"], mark: provider("meta", "meta"), kind: "key",
     target: providerKey("meta", { slot: "metaApiKey", placeholder: "LLM|…", href: "https://dev.meta.ai/docs/authentication", test: "meta", analytics: "meta", shape: /^LLM\|/ }) },
   { id: "deepseek", section: "ai", labelKey: "keys.deepseek.label", purposeKey: "keys.purpose.deepseek", name: "DeepSeek", env: ["OMB_DEEPSEEK_API_KEY"],
-    words: ["deepseek", "dsh", "harness"], mark: provider("deepseekAgent", "deepseek"), kind: "key",
+    words: ["deepseek", "dsh", "harness", "voice", "speech", "dictation"], mark: provider("deepseekAgent", "deepseek"), kind: "key",
     target: providerKey("deepseek", { slot: "deepseekApiKey", placeholder: "sk-…", href: "https://platform.deepseek.com/api_keys", analytics: "deepseek" }) },
   { id: "opencodeGo", section: "ai", labelKey: "keys.opencode.label", purposeKey: "keys.purpose.opencodeGo", name: "OpenCode", env: ["OPENCODE_API_KEY"],
     words: ["opencode", "zen", "go"], mark: provider("opencodeGo"), kind: "key",

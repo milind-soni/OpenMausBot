@@ -82,6 +82,13 @@ export function mcpServerServes(server: object & { bot?: string }, botId: string
   return !server.bot || server.bot === botId;
 }
 
+/** Why a team setup plan cannot give this bot the named server, or null when it can. */
+export function mcpServerProblemFor(servers: Record<string, unknown> | undefined, name: string, botId: string): string | null {
+  const server = servers && Object.hasOwn(servers, name) ? servers[name] : undefined;
+  if (!server || typeof server !== "object") return "no such server";
+  return mcpServerServes(server, botId) ? null : "that server belongs to another bot";
+}
+
 /** How many MCP servers one bot can use: the shared ones plus its own. */
 export const MAX_MCP_SERVERS = 20;
 /** How many the whole install can hold, shared and per-bot together. */

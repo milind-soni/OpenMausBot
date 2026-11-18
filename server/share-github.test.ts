@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { parsePackageDocument } from "../shared/package-format.ts";
+import { canonicalJson, parsePackageDocument } from "../shared/package-format.ts";
 import { writeShareFolder } from "../shared/share-folder.ts";
 import { fetchGithubTemplate, githubTemplateSource } from "./share-github.ts";
 import { fetchLibraryTeam, TEAM_LIBRARY_RAW_ROOT } from "./team-library.ts";
@@ -50,6 +51,41 @@ describe("GitHub template links", () => {
     expect(folder.kind === "package" && folder.document.package.skills?.entries.map((skill) => skill.name)).toEqual(["pricing-policy", "research-brief", "objection-handling"]);
     expect(asked.map((call) => call.url.slice(base.length + 1))).toEqual(["bot.md", "team.md", "skills/pricing-policy/SKILL.md", "skills/research-brief/SKILL.md", "skills/objection-handling/SKILL.md", "avatars/lead.png"]);
     expect(asked.every((call) => call.redirect === "error")).toBe(true);
+  });
+
+  it.each(["references/C# examples.md", "references/URL%20encoding.md", "references/space in name.md", "references/中文指南.md"])("imports the complete template over HTTP when a skill file is named %s", async (path) => {
+    const input = structuredClone(team);
+    input.package.skills!.entries[0]!.files = [{ path, content: `# Reference\nRead ${path}.\n` }];
+    const document = parsePackageDocument(input);
+    const files = writeShareFolder(document, "department");
+    const prefix = "/acme/teams/main/teams/helper/";
+    const requested: string[] = [];
+    const server = createServer((request, response) => {
+      const pathname = decodeURIComponent(new URL(request.url!, "http://localhost").pathname);
+      const relative = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : "";
+      requested.push(relative);
+      const body = files[relative];
+      if (body === undefined) { response.writeHead(404); response.end("Not Found"); return; }
+      response.end(typeof body === "string" ? body : Buffer.from(body));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("No fixture port");
+      const origin = `http://127.0.0.1:${address.port}`;
+      const fetcher = ((url: string, init?: RequestInit) => {
+        expect(url.startsWith(`${RAW}/`)).toBe(true);
+        return fetch(`${origin}${url.slice(RAW.length)}`, init);
+      }) as typeof fetch;
+      const folder = await fetchGithubTemplate("https://github.com/acme/teams/tree/main/teams/helper", fetcher);
+      expect(folder.kind).toBe("package");
+      if (folder.kind !== "package") throw new Error("Not a package");
+      expect(canonicalJson(folder.document)).toBe(canonicalJson(document));
+      expect(requested).toContain(`skills/pricing-policy/${path}`);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("falls back from main to master for a repository link and says so when nothing is there", async () => {

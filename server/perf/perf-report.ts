@@ -2,6 +2,7 @@
 // (plain lines for a @devs report and the desktop's diagnostics). Built only from the turn records' checked fields, the
 // process buckets and the limit clock's driver kinds, windows and times: nothing else reaches either.
 import type { EngineLimitsReport } from "../../shared/limit-reset.ts";
+import { botFootprintLines, type BotFootprintReport } from "./bot-footprint.ts";
 import type { DayAggregate } from "./day-ledger.ts";
 import { SLOW_TURN_MS } from "./day-ledger.ts";
 import { PHASES, type Phase, type PhaseStats } from "./phases.ts";
@@ -30,6 +31,8 @@ export interface PerfSources {
   stalls?: StallsReport | null;
   /** How close the server is to its process and memory limits (process-health.ts); null where nothing records it. */
   processes?: ProcessHealth | null;
+  /** Each bot's processes, threads, memory and CPU, the most memory first (bot-footprint.ts); null where not sampled. */
+  bots?: BotFootprintReport | null;
 }
 
 /** Engines refusing work, or within 10 points of their limit: driver kind, window, use and reset time only. */
@@ -55,8 +58,10 @@ export function perfHealth(sources: PerfSources) {
     process: sources.process,
     stalls: sources.stalls ?? null,
     processes: sources.processes ?? null,
+    bots: sources.bots ?? null,
   };
   const size = () => JSON.stringify(body).length;
+  if (size() > PERF_HEALTH_MAX_BYTES && body.bots) body.bots = { ...body.bots, shown: body.bots.shown.slice(0, 3), ...(body.bots.cap ? { cap: { ...body.bots.cap, events: body.bots.cap.events.slice(-1) } } : {}) };
   if (size() > PERF_HEALTH_MAX_BYTES && body.process) body.process = { ...body.process, buckets: body.process.buckets.slice(0, 6) };
   if (size() > PERF_HEALTH_MAX_BYTES) body.h24.tools = body.h24.tools.slice(0, 4);
   if (size() > PERF_HEALTH_MAX_BYTES) body.live = body.live.slice(0, 2);
@@ -64,6 +69,7 @@ export function perfHealth(sources: PerfSources) {
   if (size() > PERF_HEALTH_MAX_BYTES) body.process = null;
   if (size() > PERF_HEALTH_MAX_BYTES) body.stalls = null;
   if (size() > PERF_HEALTH_MAX_BYTES) body.processes = null;
+  if (size() > PERF_HEALTH_MAX_BYTES) body.bots = null;
   return body;
 }
 export type PerfHealth = ReturnType<typeof perfHealth>;
@@ -131,6 +137,7 @@ export function perfLines(sources: PerfSources, recent: readonly TurnTiming[], r
   } else lines.push("Processes: not sampled yet");
   if (sources.stalls) lines.push(...stallLines(sources.stalls));
   if (sources.processes) lines.push(...processHealthLines(sources.processes));
+  if (sources.bots) lines.push(...botFootprintLines(sources.bots));
   lines.push(recentTitle);
   lines.push(...(recent.length ? recent.map((turn) => `  ${turnLine(turn)}`) : ["  (none)"]));
   return lines;

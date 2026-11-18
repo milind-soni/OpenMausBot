@@ -632,8 +632,8 @@ The grant (`automaticGrant`) is the same for every Cloud of the person's own:
 - **Never the terminal**: no command runs on this computer for a Cloud, and a
   bot that asks is told not to run it another way.
 
-Nothing asks for a confirmation: each bot's own approval level (Ask first or
-Just do it) governs what it does with this computer, as with any tool. The move
+Nothing asks for a confirmation: each bot's own approval level (Ask for approval
+or Full access) governs what it does with this computer, as with any tool. The move
 to My Cloud lends each moved bot's own project folder with editing on top
 (`lendProjects`); while lending is paused, or before My Cloud is signed in, the
 move tries again later.

@@ -1,6 +1,6 @@
 // A macOS app launched from Finder inherits a bare PATH (no ~/.local/bin, /opt/homebrew/bin or nvm/volta/asdf shims),
 // so every agent CLI spawn goes through augmentedPath().
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, join } from "node:path";
@@ -134,21 +134,62 @@ function mergePaths(parts: string[]): string {
   return [...new Set(parts.filter(Boolean))].join(delimiter);
 }
 
+const PROBE_TIMEOUT_MS = 5000;
+const PROBE_MAX_OUTPUT_BYTES = 1024 * 1024;
+
 function probeLoginShellPath(): void {
   const shell = process.env.SHELL || "/bin/zsh";
   // -l -i: nvm and friends live in .zshrc/.bashrc, which only interactive shells read; a marker isolates $PATH from rc noise.
-  execFile(
-    shell,
-    ["-l", "-i", "-c", 'printf "__OMB_PATH__%s" "$PATH"'],
-    { timeout: 5000 },
-    (err, stdout) => {
-      if (err || !stdout) return;
-      const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
-      if (!m || !m[1]) return;
+  // detached: an interactive shell makes its job the terminal's foreground, which stops `openmausbot setup` and its sign-in CLI (SIGTTOU).
+  const child = spawn(shell, ["-l", "-i", "-c", 'printf "__OMB_PATH__%s__OMB_END__" "$PATH"'], {
+    detached: true,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  let stdout = "";
+  let bytes = 0;
+  let exitCode: number | null | undefined;
+  let finished = false;
+  const finish = (): void => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(deadline);
+    // An interactive shell ignores SIGTERM, and something its rc started in the background can hold stdout open after it exits.
+    // Killed before stdout closes: a closed pipe ends only the writer, and the shell would run its next command meanwhile.
+    if (exitCode === undefined && child.pid) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {}
+    }
+    child.stdout?.destroy();
+  };
+  const deadline = setTimeout(finish, PROBE_TIMEOUT_MS);
+  deadline.unref();
+  // Applied once the shell has exited cleanly and its whole answer has arrived, not when stdout closes: its rc may leave a
+  // background job holding it. Reading stops there, so that job's later output is never part of the answer.
+  const applyIfDone = (): void => {
+    if (exitCode !== 0) return;
+    const m = /__OMB_PATH__([^\n]*?)__OMB_END__/.exec(stdout);
+    if (!m) return;
+    if (m[1] && m[1] !== loginShellPath) {
       loginShellPath = m[1];
       cached = buildPath();
-    },
-  );
+    }
+    finish();
+  };
+  // Listeners first: spawn can fail (EMFILE) without creating stdout and report it later through "error".
+  child.on("error", finish);
+  child.on("exit", (code) => {
+    exitCode = code;
+    if (code === 0) applyIfDone();
+    else finish();
+  });
+  child.on("close", finish);
+  child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+    bytes += Buffer.byteLength(chunk);
+    if (bytes > PROBE_MAX_OUTPUT_BYTES) return finish();
+    stdout += chunk;
+    applyIfDone();
+  });
 }
 
 export function resetPathCacheForTests(): void {

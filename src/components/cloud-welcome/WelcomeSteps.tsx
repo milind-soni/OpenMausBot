@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Ref } from "react";
 import { Check, ChevronDown, CircleAlert, FolderOpen, Plug } from "lucide-react";
-import { cloudEngine, cloudEngineChoices, useCloudEngineChoices } from "@/components/CloudEngineSignIn";
+import { cloudEngineChoices, useCloudEngineChoices } from "@/components/CloudEngineSignIn";
 import { useCloudPlanSnapshot } from "@/components/CloudTrialNotice";
 import { engineReady } from "@/components/EngineLibrary";
 import { EngineCheckLine } from "@/components/EngineLiveCheck";
@@ -9,12 +9,13 @@ import { usd } from "@/lib/cloud-plan";
 import { welcomeCredit } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { plainSignIn } from "@/lib/onboarding";
+import { firstAis, signInFollows } from "@/lib/onboarding";
 import { useStore, type Bot } from "@/state/store";
 import { CARD, CARD_IDLE, CardIcon, Footer, PRIMARY, QUIET, SECONDARY, StepHeading } from "./parts";
 
 /** Connecting an AI: an AI that already works when the step opens (one signed in here, or the plan's credit) is used as
- * it is and the step finishes itself; otherwise one recommended sign-in, every other way folded under it. */
+ * it is and the step finishes itself; otherwise Claude's, ChatGPT's and OpenCode's own setups, every other way folded
+ * under them. */
 export function WelcomeEngine({ name, headingRef, onFinish }: { name: string; headingRef: Ref<HTMLHeadingElement>; onFinish: () => void }) {
   const engines = useCloudEngineChoices();
   const plan = useCloudPlanSnapshot(window.ogb?.cloudPlan);
@@ -27,9 +28,9 @@ export function WelcomeEngine({ name, headingRef, onFinish }: { name: string; he
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   if (readyOnOpen.current) return null;
-  const claude = cloudEngine(engines.instances, "claudeAgent");
-  const claudeCheck = claude && engines.live.checks[claude.instanceId];
-  const others = { ...engines, choices: engines.choices.filter((choice) => choice.id !== "claude") };
+  const first = firstAis(engines.instances, engineReady);
+  const shown = new Set(first.map(({ instance }) => instance.driverKind));
+  const others = { ...engines, choices: engines.choices.filter((choice) => !shown.has(choice.driverKind)) };
   return <section aria-labelledby="cloud-welcome-step" data-welcome-step="engine" className="flex flex-col">
     <StepHeading headingRef={headingRef} title={t("cloudSetup.engine.title")} sub={t("cloudWelcome.engine.sub", { name })} />
     {credit?.state === "active" && <p role="status" data-welcome-credit className="mt-5 flex items-start gap-2.5 rounded-xl bg-success/12 px-3.5 py-3 text-[13px] leading-relaxed text-ink">
@@ -40,11 +41,15 @@ export function WelcomeEngine({ name, headingRef, onFinish }: { name: string; he
       <CircleAlert size={16} aria-hidden="true" className="mt-px shrink-0 text-warning" />
       <span>{t(credit.state === "used_up" ? "cloudSignIn.creditUsedUp" : "cloudSignIn.creditEnded")}</span>
     </p>}
-    {claude && <div data-welcome-recommended={claude.instanceId} className="mt-6 rounded-2xl border border-hairline/50 bg-card px-4 py-4">
-      {engineReady(claude)
-        ? claudeCheck && <EngineCheckLine name={claude.displayName} check={claudeCheck} onRetry={() => void engines.live.run(claude.instanceId)} />
-        : <EngineSetup instance={claude} unframed description={plainSignIn(claude) ? t("onboarding.engines.signInHint", { name: claude.displayName }) : undefined} />}
-    </div>}
+    {first.map(({ kind, instance }, index) => {
+      const name = kind === "chatgpt" ? t("cloudSignIn.codex") : instance.displayName;
+      const check = engines.live.checks[instance.instanceId];
+      return <div key={kind} data-welcome-recommended={instance.instanceId} className={cn(index ? "mt-3" : "mt-6", "rounded-2xl border border-hairline/50 bg-card px-4 py-4")}>
+        {engineReady(instance)
+          ? check && <EngineCheckLine name={name} check={check} onRetry={() => void engines.live.run(instance.instanceId)} />
+          : <EngineSetup instance={instance} unframed description={signInFollows(instance) ? t("onboarding.engines.signInHint", { name }) : undefined} />}
+      </div>;
+    })}
     <button type="button" data-welcome-other-ways aria-expanded={more} onClick={() => setMore((value) => !value)}
       className="mt-4 flex items-center gap-1.5 self-start rounded-md px-1.5 py-1 text-[13px] font-medium text-ink-secondary transition-colors hover:text-ink motion-reduce:transition-none">
       {t("onboarding.engines.otherWays")}

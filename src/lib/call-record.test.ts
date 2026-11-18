@@ -248,6 +248,23 @@ describe("callConversation", () => {
     expect(entries(transcript, "c1")).toEqual(["said:m1", "answer:b1"]);
   });
 
+  it("places the bot's spoken lines among the rows by when they began, even on a call where nothing was asked", () => {
+    const transcript = [
+      spoken("m1", "check the build", "c1"),
+      msg("b1", { text: "The build is green.", requestMessageId: "m1" }),
+      callRow("r1", "c1"),
+    ];
+    const [asked, answered] = transcript;
+    const lines = [
+      { at: asked!.at - 1, text: "Hi, what can I do?" },
+      { at: asked!.at, text: "On it." },
+      { at: answered!.at + 0.5, text: "It's green." },
+    ];
+    const kinds = callConversation(transcript, "c1", lines).map((entry) => entry.kind === "spoken" ? `spoken:${entry.text}` : `${entry.kind}:${entry.id}`);
+    expect(kinds).toEqual(["spoken:Hi, what can I do?", "spoken:On it.", "said:m1", "answer:b1", "spoken:It's green."]);
+    expect(callConversation([callRow("r2", "c2")], "c2", [{ at: 1, text: "Hello!" }])).toEqual([{ kind: "spoken", id: "spoken-0", text: "Hello!" }]);
+  });
+
   it("is empty for a call where nothing was asked", () => {
     expect(callConversation([callRow("r1", "c1")], "c1")).toEqual([]);
   });

@@ -23,7 +23,7 @@ async function listThreads(from: BotRecord) {
     readBody: async () => ({}),
   });
   let body: { threads: Array<Record<string, unknown>> } | undefined;
-  await route({ res: {}, path: "/api/internal/threads", method: "GET", json: (_res: unknown, _status: number, value: never) => { body = value; } } as never);
+  await route({ res: {}, url: new URL("http://x/api/internal/threads"), path: "/api/internal/threads", method: "GET", json: (_res: unknown, _status: number, value: never) => { body = value; } } as never);
   return body!.threads;
 }
 
@@ -39,6 +39,34 @@ describe("list_threads on a queued handoff", () => {
     const running = rows.find((thread) => thread.threadId === "t-ops-busy");
     expect(running).toMatchObject({ state: "running" });
     expect(running).not.toHaveProperty("waiting");
+  });
+});
+
+describe("list_threads past the first 100", () => {
+  async function page(query: string) {
+    const many = Array.from({ length: 130 }, (_, index) => task(`t-${index}`, `Event ${index}`, undefined));
+    many.forEach((row, index) => { row.createdAt = index; });
+    const route = createInternalThreadRoutes({
+      store: { bot: () => undefined, bots: [lead], tasks: (id: string) => id === lead.id ? many : [] } as never,
+      coordinator: { awaitingAnswer: () => false, parkedDirect: () => undefined, activeDirect: () => undefined, active: () => [] } as never,
+      from: lead, fromThreadId: "t-own", ownsThread: () => true, shown: () => true,
+      threadBusy: () => false, queuedThreadPosition: () => null, queuedReason: () => "", readBody: async () => ({}),
+    });
+    let body: { threads: Array<{ threadId: string }>; total: number; page: number; pageSize: number } | undefined;
+    await route({ res: {}, url: new URL(`http://x/api/internal/threads${query}`), path: "/api/internal/threads", method: "GET",
+      json: (_res: unknown, _status: number, value: never) => { body = value; } } as never);
+    return body!;
+  }
+
+  it("gives the newest 100 first and the older ones on page 2, with the total", async () => {
+    const first = await page("");
+    expect(first).toMatchObject({ total: 130, page: 1, pageSize: 100 });
+    expect(first.threads).toHaveLength(100);
+    expect(first.threads[0]!.threadId).toBe("t-129");
+    const second = await page("?page=2");
+    expect(second).toMatchObject({ total: 130, page: 2 });
+    expect(second.threads.map((thread) => thread.threadId)).toEqual(Array.from({ length: 30 }, (_, index) => `t-${29 - index}`));
+    expect((await page("?page=0")).page).toBe(1);
   });
 });
 

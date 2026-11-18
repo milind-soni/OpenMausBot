@@ -3,12 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mountChatTools, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { joinLateChatTools, mountChatTools, type ChatToolDefinition, type ChatToolSession } from "./chat-mcp-tools.ts";
+import type { SendTurnInput } from "../contracts.ts";
 import { HOST_COMPUTER_READY, HOST_COMPUTER_STAND_IN, hostComputerKey, hostComputerStartupMs } from "./chat-host-computer.ts";
 
 const FAKE = `
-  import { writeFileSync } from "node:fs";
-  const { MODE, DELAY_MS, ANSWERED } = process.env;
+  import { existsSync, writeFileSync } from "node:fs";
+  const { MODE, DELAY_MS, ANSWERED, GATE } = process.env;
   const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
   const reply = (message, result) => send({ jsonrpc: "2.0", id: message.id, result });
   const schema = { type: "object", properties: { value: { type: "string" } }, required: ["value"], additionalProperties: false };
@@ -22,10 +23,12 @@ const FAKE = `
       buffer = buffer.slice(newline + 1);
       if (MODE === "silent") continue;
       if (MODE === "exit") process.exit(3);
-      if (message.method === "initialize") setTimeout(() => {
+      const answer = () => setTimeout(() => {
         writeFileSync(ANSWERED, "1");
         reply(message, { protocolVersion: "2024-11-05", capabilities: { tools: {} } });
       }, Number(DELAY_MS ?? 0));
+      const opened = () => (!GATE || existsSync(GATE) ? answer() : setTimeout(opened, 10));
+      if (message.method === "initialize") opened();
       else if (message.method === "tools/list") reply(message, { tools: [{ name: "write", description: "Fixture write", inputSchema: schema }] });
       else if (message.method === "tools/call") reply(message, { content: [{ type: "text", text: "recorded:" + message.params.arguments.value }] });
     }
@@ -154,4 +157,33 @@ describe("this desktop's own computer in a chat turn", () => {
     expect(() => session.validate("computer_write", { value: "z" })).not.toThrow();
     await vi.waitFor(() => expect(lines).toEqual([expect.objectContaining({ text: { key: "chat.notice.computerToolsDidNotStart", params: { why: "chat.notice.part.computerToolsTookTooLong" } } })]));
   });
+
+  it("in a background start, keeps its stand-in while a slower server joins, then lists its own tools beside both", async () => {
+    // A driver that failed before gets the short wait, so the turn goes on with the stand-in well inside the other
+    // servers' startup budget, and the gated server can join after the mount.
+    const driver = `background-${randomUUID()}`;
+    await mount(computer(driver, { MODE: "exit" }).server, 5_000, 20_000);
+    const starting = computer(driver, { DELAY_MS: "2500" });
+    const gate = join(dirs[0]!, `gate-${randomUUID()}`);
+    const plain = (env: Record<string, string> = {}) => ({ command: process.execPath, args: [script], env: { ANSWERED: join(dirs[0]!, `answered-${randomUUID()}`), ...env } });
+    const ask: ChatToolDefinition = { type: "function", function: { name: "ask_user", description: "Ask", parameters: { type: "object" } } };
+    const settled: string[] = [];
+    const session = await mountChatTools({ localComputer: starting.server, agents: plain(), custom: { notes: plain({ GATE: gate }) } } as SendTurnInput["integrations"],
+      controller.signal, true, undefined, undefined, undefined, undefined, undefined, undefined,
+      { startupMs: 5_000, hostComputerMs: 20_000, background: true, onSettled: (server) => settled.push(server) });
+    sessions.push(session);
+    expect(names(session)).toEqual(["agents_write", HOST_COMPUTER_STAND_IN]);
+    expect(settled).not.toContain("notes");
+    session.definitions.push(ask);
+
+    writeFileSync(gate, "");
+    await vi.waitFor(() => expect(settled).toContain("notes"), { timeout: 10_000, interval: 20 });
+    expect(await joinLateChatTools(session, [ask])).toEqual([]);
+    expect(names(session)).toEqual(["agents_write", HOST_COMPUTER_STAND_IN, "notes_write", "ask_user"]);
+
+    await expect(session.execute(HOST_COMPUTER_STAND_IN, {}, controller.signal)).resolves.toEqual({ ok: true, text: HOST_COMPUTER_READY });
+    expect(names(session)).toEqual(["agents_write", "computer_write", "notes_write", "ask_user"]);
+    await expect(session.execute("notes_write", { value: "n" }, controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:n" });
+    expect(await joinLateChatTools(session, [ask]), "nothing left to join").toBeUndefined();
+  }, 30_000);
 });

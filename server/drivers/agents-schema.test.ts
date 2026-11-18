@@ -100,7 +100,7 @@ describe("the advertised agents tool schemas", () => {
     expect(coordinate.bot_ids).not.toHaveProperty("minItems");
     expect(coordinate.bot_ids).not.toHaveProperty("uniqueItems");
     expect(coordinate.message).not.toHaveProperty("maxLength");
-    expect(fullInputSchema("coordinate_bots")).toMatchObject({ properties: { bot_ids: { minItems: 1, maxItems: 4, uniqueItems: true }, message: { maxLength: 4000 } } });
+    expect(fullInputSchema("coordinate_bots")).toMatchObject({ properties: { bot_ids: { minItems: 1, maxItems: 4, uniqueItems: true }, message: { maxLength: 12_000 } } });
     const schema = { type: "object", additionalProperties: false, properties: {
       every_minutes: { type: "integer", minimum: 5, maximum: 1_440, description: "Whole minutes, from 5 to 1440." },
       limit: { type: "integer", minimum: 1, maximum: 25 },
@@ -149,11 +149,20 @@ describe("every agents call is held to its full schema", () => {
     const schema = fullInputSchema("coordinate_bots");
     expect(outOfBounds("coordinate_bots", schema, { bot_ids: ["a"], message: "hi", title: null, reason: null })).toBeUndefined();
     const refused = outOfBounds("coordinate_bots", schema, {
-      bot_ids: ["a", "a", "b", "c", "d"], message: "m".repeat(4_001), title: "t".repeat(81), reason: "r".repeat(201), done_when: "d".repeat(1_001),
+      bot_ids: ["a", "a", "b", "c", "d"], message: "m".repeat(12_001), title: "t".repeat(81), reason: "r".repeat(201), done_when: "d".repeat(1_001),
     })!;
     expect(refused).toContain("bot_ids takes at most 4 items (it has 5)");
     expect(refused).toContain("bot_ids must not repeat an item");
-    expect(refused).toContain("message takes at most 4000 characters (it has 4001)");
+    expect(refused).toContain("message takes at most 12000 characters (it has 12001)");
     expect(refused).toContain("and 2 more");
+  });
+
+  it("takes a brief up to the engine's own limit, and refuses only past it", () => {
+    const schema = fullInputSchema("coordinate_bots");
+    // The 4,013-6,448-character briefs a bot really sends were refused by the old 4,000 cap.
+    expect(outOfBounds("coordinate_bots", schema, { bot_ids: ["a"], message: "m".repeat(6_000) })).toBeUndefined();
+    expect(outOfBounds("coordinate_bots", schema, { bot_ids: ["a"], message: "m".repeat(12_000) })).toBeUndefined();
+    expect(outOfBounds("coordinate_bots", schema, { bot_ids: ["a"], message: "m".repeat(12_001) }))
+      .toBe("coordinate_bots was not run: message takes at most 12000 characters (it has 12001). Fix these and call it again.");
   });
 });

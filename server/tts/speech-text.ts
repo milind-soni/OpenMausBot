@@ -1,3 +1,33 @@
+import { fromMarkdown } from "mdast-util-from-markdown";
+
+type MarkdownNode = {
+  type: string;
+  children?: MarkdownNode[];
+  position?: { start: { offset?: number }; end: { offset?: number } };
+};
+
+function stripEmphasis(text: string): string {
+  const pending: MarkdownNode[] = [fromMarkdown(text)];
+  const markers: Array<[number, number]> = [];
+  while (pending.length) {
+    const node = pending.pop()!;
+    if (node.children) pending.push(...node.children);
+    if (node.type !== "emphasis" && node.type !== "strong") continue;
+    const start = node.position?.start.offset;
+    const end = node.position?.end.offset;
+    if (start === undefined || end === undefined) continue;
+    const width = node.type === "strong" ? 2 : 1;
+    markers.push([start, start + width], [end - width, end]);
+  }
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const [start, end] of markers.sort((a, b) => a[0] - b[0])) {
+    parts.push(text.slice(cursor, start));
+    cursor = end;
+  }
+  return parts.join("") + text.slice(cursor);
+}
+
 function describeCodeBlock(fence: string): string {
   const lang = fence.trim().split(/\s+/)[0]?.replace(/[^a-z0-9+#]/gi, "") ?? "";
   type SpokenLanguages = Record<string, string>;
@@ -36,9 +66,13 @@ export function speakable(input: string): string {
   // Fenced code first: nothing inside it may meet the rules below.
   text = text.replace(/```([^\n]*)\n[\s\S]*?(?:```|$)/g, (_m, fence: string) => describeCodeBlock(fence));
   text = text.replace(/~~~([^\n]*)\n[\s\S]*?(?:~~~|$)/g, (_m, fence: string) => describeCodeBlock(fence));
+  text = stripEmphasis(text);
 
   // Images before links: the syntax differs by one character.
-  text = text.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_m, alt: string) => (alt ? `. (image: ${alt}) ` : ". (an image) "));
+  text = text.replace(/!\[([^\]]*)\]\([^)]*\)/g, (_m, alt: string) => {
+    const description = stripEmphasis(alt);
+    return description ? `. (image: ${description}) ` : ". (an image) ";
+  });
   text = text.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
   text = text.replace(/<https?:\/\/[^>\s]+>/g, " a link ");
   text = text.replace(/\bhttps?:\/\/\S+/g, " a link ");
@@ -63,8 +97,6 @@ export function speakable(input: string): string {
   text = text.replace(/^\s*>\s?/gm, "");
   text = text.replace(/^\s*(?:[-*_]\s*){3,}$/gm, "");
 
-  text = text.replace(/(\*\*|__)(.*?)\1/g, "$2");
-  text = text.replace(/(\*|_)(?=\S)(.*?)(?<=\S)\1/g, "$2");
   text = text.replace(/~~(.*?)~~/g, "$1");
 
   text = text.replace(/\[[ xX]\]\s*/g, "");

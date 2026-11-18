@@ -47,14 +47,8 @@ export function DigestChip({ message }: { message: Message }) {
 
 const COMPACTION_CHIP = "max-w-[600px] rounded-xl border border-hairline/40 bg-panel px-3 py-2 text-[12px] text-ink-secondary";
 
-export function CompactionChip({ message }: { message: Message }) {
-  if (!message.compaction) return message.engineCompaction ? (
-    <div className={COMPACTION_CHIP} data-testid="engine-compaction-chip">
-      <p className="font-medium">{t("chat.engineCompactionTitle")}</p>
-      <p className="mt-1">{t("chat.engineCompactionHint")}</p>
-    </div>
-  ) : null;
-  if (message.compaction.fresh) {
+export function CompactionChip({ message, onNewChat }: { message: Message; onNewChat?: () => void }) {
+  if (message.compaction?.fresh) {
     return (
       <div role="separator" data-testid="fresh-start-divider" className="flex w-full items-center gap-3 py-1 text-[12px] text-ink-secondary">
         <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
@@ -63,12 +57,27 @@ export function CompactionChip({ message }: { message: Message }) {
       </div>
     );
   }
-  const excerpts = message.compaction.summary.startsWith(EXCERPT_SUMMARY_HEADER);
-  return (
+  const excerpts = message.compaction?.summary.startsWith(EXCERPT_SUMMARY_HEADER);
+  const chip = message.compaction ? (
     <details className={COMPACTION_CHIP} data-testid="compaction-chip">
       <summary className="cursor-pointer font-medium">{t(excerpts ? "chat.compactionExcerptTitle" : "chat.compactionTitle")}</summary>
       <p className="mt-2">{t(excerpts ? "chat.compactionExcerptHint" : "chat.compactionHint")}</p>
       <p className="mt-2 whitespace-pre-wrap break-words">{message.compaction.summary}</p>
     </details>
+  ) : message.engineCompaction ? (
+    <div className={COMPACTION_CHIP} data-testid="engine-compaction-chip">
+      <p className="font-medium">{t("chat.engineCompactionTitle")}</p>
+      <p className="mt-1">{t("chat.engineCompactionHint")}</p>
+    </div>
+  ) : null;
+  if (!chip || !onNewChat) return chip;
+  return (
+    <div>
+      {chip}
+      <p className="mt-1 flex flex-wrap items-center gap-x-2 px-3 text-[12px] text-ink-secondary" data-testid="new-chat-hint">
+        {t("chat.newChatHint")}
+        <button type="button" onClick={onNewChat} className="font-medium text-accent hover:underline">{t("chat.newChatHintButton")}</button>
+      </p>
+    </div>
   );
 }

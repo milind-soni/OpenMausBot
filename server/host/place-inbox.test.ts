@@ -112,6 +112,32 @@ describe("finished work reaches the inbox once", () => {
     const reopened = setup({}, f.dataDir);
     expect(infoRows(reopened).map((row) => row.text).sort()).toEqual(["All three pages are live.", "It stopped in eli-pricing."]);
   });
+
+  it("takes finished work out of the inbox once the person has read it", () => {
+    const f = setup();
+    f.inbox.route(routine, { routine: true });
+    expect(infoRows(f)).toHaveLength(1);
+    f.inbox.markRead(OWNER, f.inbox.view(OWNER).rows[0]!.id);
+    expect(infoRows(f), "finished work the person has read leaves the inbox").toEqual([]);
+    expect(f.inbox.view(OWNER).rows[0]!.tab).toBe("done");
+    expect(f.inbox.count(OWNER), "nothing waits on the person any more").toBe(0);
+  });
+
+  it("keeps a message that waits for an answer listed after the person read it", () => {
+    const f = setup();
+    expect(f.inbox.message("eli", "eli-main", "Can you look at the deck?").status).toBe(200);
+    const row = f.inbox.view(OWNER).rows[0]!;
+    expect(row.kind).toBe("message");
+    f.inbox.markRead(OWNER, row.id);
+    expect(f.inbox.view(OWNER).rows[0]!.tab, "it still waits for a reply").toBe("info");
+  });
+
+  it("points a line at the message it came from, so a client can open the conversation there", () => {
+    const f = setup();
+    const posted = f.store.appendMessage("eli-main", { role: "bot", text: "All three pages are live." });
+    f.inbox.route(summary, { summary: true });
+    expect(f.inbox.view(OWNER).rows[0]!.origin?.messageId).toBe(posted.id);
+  });
 });
 
 describe("who is asking for the inbox", () => {

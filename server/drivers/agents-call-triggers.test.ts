@@ -116,6 +116,17 @@ describe("the trigger tool's actions", () => {
     await callTool("trigger_info", { action: "events", app: "Gmail" }, events.context);
     expect(events.calls[0]!.path).toBe("/api/internal/trigger-events?fromBotId=scout&fromThreadId=thread-1&app=gmail");
   });
+
+  it("answers a trigger id that is not this bot's, and keeps a real failure a failure", async () => {
+    const missing = context({ api: { now: "2026-10-29T09:00:00Z", timeZone: "UTC",
+      error: "No trigger with that id belongs to this bot. Call trigger_info without trigger_id to see its ids.", missing: true } });
+    const answer = await callTool("trigger_info", { action: "list", trigger_id: "old-1" }, missing.context);
+    expect(answer.isError).toBeUndefined();
+    expect(answer.text).toContain("No trigger with that id belongs to this bot");
+    const refused = context({ api: { now: "2026-10-29T09:00:00Z", timeZone: "UTC",
+      error: "that bot's automations are set up by bots in its own department or by its Chief, or it is unavailable." } });
+    expect((await callTool("trigger_info", { action: "list", for_bot_id: "helper" }, refused.context)).isError).toBe(true);
+  });
 });
 
 describe("delete_trigger", () => {

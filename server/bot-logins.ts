@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
 
-import { browserMatesOf, loginPageCheck, loginPlace, loginSite, type LoginBots, type LoginPlace } from "../shared/logins.ts";
+import { browserMatesOf, loginPageCheck, loginPlace, loginSite, loginUsableBy, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
 import type { LinkedSecret } from "../shared/vault.ts";
 import type { FillCandidate } from "./login-fill.ts";
 import { receiveLoginHandoff, type ConnectionHandoffAnswer, type ConnectionHandoffWhat, type LoginHandoffResult } from "./login-handoff.ts";
 import type { VaultReader, VaultStore } from "./vault-store.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import type { LoginRouteDeps } from "./routes/logins.ts";
-import { findLinkedSecret, linkedCandidates, linkedSecretNames, linkedSecrets, linkedSites, readLinkedSecret, type VaultProvider } from "./vault/providers.ts";
+import { savedSecretsPrompt } from "./system-prompt.ts";
+import { findLinkedSecret, linkedCandidates, linkedSecretNames, linkedSecrets, linkedSites, readLinkedSecret, type LinkedSecretUse, type VaultProvider } from "./vault/providers.ts";
+import type { BitwardenLogins } from "./host/bitwarden-vault.ts";
 
 const linkedItemId = (secretId: string, field: string | undefined) => `linked-${createHash("sha256").update(`${secretId}\0${field ?? ""}`).digest("hex").slice(0, 32)}`;
 
@@ -53,16 +55,20 @@ export function cardLoginPlace(cardHost: string, observed: ObservedPage | null, 
 export class BotLogins {
   readonly store: VaultStore;
   readonly onePassword: OnePasswordLogins;
+  readonly bitwarden: BitwardenLogins | null;
   readonly providers: readonly VaultProvider[];
   private readonly bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }>;
   private readonly hold: (value: string) => void;
+  /** Secrets a reference named, which the list may not show by name: `linkedById` finds them again by the id they got. */
+  private readonly referenced = new Map<string, LinkedSecretUse>();
 
   /** `hold` masks a value read from a linked manager wherever text crosses to a bot or a transcript. */
   constructor(store: VaultStore, onePassword: OnePasswordLogins, bots: () => ReadonlyArray<{ id: string; browserProfile?: string | null }> = () => [],
-    hold: (value: string) => void = () => {}) {
+    hold: (value: string) => void = () => {}, bitwarden: BitwardenLogins | null = null) {
     this.store = store;
     this.onePassword = onePassword;
-    this.providers = [onePassword];
+    this.bitwarden = bitwarden;
+    this.providers = bitwarden ? [onePassword, bitwarden] : [onePassword];
     this.bots = bots;
     this.hold = hold;
   }
@@ -117,6 +123,12 @@ export class BotLogins {
     return [...this.store.secretNamesFor(botId, reader), ...linked];
   }
 
+  /** The Vault's sentence in the bot's prompt: the names it may ask for, and that 1Password references work while it may use any. */
+  secretsPrompt(botId: string, reader: VaultReader): string {
+    const references = this.providers.filter((provider) => provider.resolve && provider.items().some((item) => loginUsableBy(item, botId))).map((provider) => provider.id);
+    return savedSecretsPrompt(this.secretNamesFor(botId, reader), references);
+  }
+
   /** A secret a linked manager holds for the bot by this name, read from it now; its id is safe as a file name. */
   async linkedSecret(name: string, botId: string): Promise<{ id: string; name: string; value: string } | null> {
     await this.fresh();
@@ -124,11 +136,15 @@ export class BotLogins {
     if (!use) return null;
     const value = await readLinkedSecret(use);
     this.hold(value);
-    return { id: linkedItemId(use.secret.id, use.field), name: use.field ? `${use.secret.name} ${use.field}` : use.secret.name, value };
+    const id = linkedItemId(use.secret.id, use.field);
+    this.referenced.set(id, use);
+    return { id, name: use.field ? `${use.secret.name} ${use.field}` : use.secret.name, value };
   }
 
   /** The linked secret `linkedSecret` gave this id: who may use it, and its value read from the manager when asked. */
   linkedById(id: string): { bots: LoginBots; read(): Promise<string> } | null {
+    const referenced = this.referenced.get(id);
+    if (referenced) return { bots: referenced.secret.bots, read: async () => { const value = await readLinkedSecret(referenced); this.hold(value); return value; } };
     for (const provider of this.providers) {
       for (const secret of linkedSecrets(provider)) {
         const name = linkedSecretNames(secret).find(({ field }) => linkedItemId(secret.id, field) === id);
@@ -186,6 +202,26 @@ export class BotLogins {
         // Kept whole, even for an item not loaded here yet: it then opens no wider than the computer that chose it.
         setItemGrants: (grants, keep) => this.store.setOnePasswordItemGrants(keep ? { ...this.store.onePasswordItemGrants(), ...grants } : grants),
       },
+      bitwarden: this.bitwarden ? bitwardenRoutes(this.store, this.bitwarden) : undefined,
     };
   }
+}
+
+/** Connecting checks the credentials first and keeps them only once Bitwarden accepted them. */
+function bitwardenRoutes(store: VaultStore, bitwarden: BitwardenLogins): NonNullable<LoginRouteDeps["bitwarden"]> {
+  return {
+    status: () => bitwarden.status(),
+    list: () => { void bitwarden.fresh(); return bitwarden.items().flatMap(({ kind, ...item }) => (kind === "login" ? [item as LoginSummary] : [])); },
+    connect: async (credentials) => {
+      await bitwarden.refresh(credentials);
+      store.setBitwardenCredentials(credentials);
+      return bitwarden.status();
+    },
+    refresh: () => bitwarden.refresh(),
+    disconnect: async () => {
+      store.setBitwardenCredentials(null);
+      await bitwarden.disconnect();
+      return bitwarden.status();
+    },
+  };
 }
