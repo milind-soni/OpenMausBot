@@ -199,28 +199,38 @@ export class RecordCipher {
 
   async seal(plaintext: Bytes): Promise<Bytes> {
     if (plaintext.length > MAX_RECORD_PLAINTEXT) throw new NoiseError("record_too_large");
-    return this.#state.encryptWithAd(EMPTY, plaintext);
+    return this.#state.encryptWithAd(EMPTY, new Uint8Array(plaintext));
   }
 
   /** Any failure is a hard stop: after one, every later record is refused too. Opens run one at a time in call
    * order, so a record never opens while an earlier one could still fail. */
   open(record: Bytes): Promise<Bytes> {
-    const bytes = record.length > MAX_RECORD_BYTES ? null : new Uint8Array(record);
-    const opened = this.#opening.then(() => this.#openNext(bytes));
+    const copy = copyRecord(record);
+    const opened = this.#opening.then(() => this.#openNext(copy));
     this.#opening = opened.catch(() => undefined);
     return opened;
   }
 
-  /** `record` is the caller's bytes copied at the call, or null when they were too large to copy. */
-  async #openNext(record: Bytes | null): Promise<Bytes> {
+  /** `record` is the caller's bytes copied at the call, or why they could not be copied. */
+  async #openNext(record: Bytes | NoiseError): Promise<Bytes> {
     if (this.#failed) throw new NoiseError("failed");
     try {
-      if (!record) throw new NoiseError("record_too_large");
+      if (record instanceof NoiseError) throw record;
       return await this.#state.decryptWithAd(EMPTY, record);
     } catch (error) {
       this.#failed = true;
       throw error;
     }
+  }
+}
+
+/** A failed copy (too large, or a detached buffer) is returned, not thrown, so it fails in its place in the queue. */
+function copyRecord(record: Bytes): Bytes | NoiseError {
+  if (record.length > MAX_RECORD_BYTES) return new NoiseError("record_too_large");
+  try {
+    return new Uint8Array(record);
+  } catch {
+    return new NoiseError("bad_record");
   }
 }
 
@@ -243,7 +253,8 @@ export function encodePayload1(conn: Bytes, app: string): Bytes {
 
 const parseJson = (bytes: Bytes): unknown => {
   try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    // ignoreBOM keeps a leading BOM, which JSON.parse refuses, as the computer side does.
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes));
   } catch {
     return null;
   }
@@ -283,22 +294,27 @@ export interface PhoneHello {
   finish(message2: Bytes): Promise<SessionKeys>;
 }
 
-/** `payload1` is exact bytes so vectors can pin them, read once at the call; message 2 must echo its `conn`. */
+/** `payload1` is exact bytes so vectors can pin them; it and every option are read once at the call, before the
+ * first await. Message 2 must echo payload 1's `conn`. */
 export async function phoneHello(options: PhoneHandshakeOptions, payload1Bytes: Bytes): Promise<PhoneHello> {
   if (payload1Bytes.length > MAX_HANDSHAKE_PAYLOAD) throw new NoiseError("payload_too_large");
   const payload1 = new Uint8Array(payload1Bytes);
+  const pinned = new Uint8Array(options.remoteStatic);
+  const pskBytes = new Uint8Array(options.psk);
+  const { transport, trace, ephemeral } = options;
+  const fixedEphemeral = ephemeral && { privateKey: ephemeral.privateKey, publicKey: new Uint8Array(ephemeral.publicKey) };
   const conn = payload1Conn(payload1);
-  const remoteStatic = await publicKey(options.remoteStatic);
-  if (options.psk.length !== 32) throw new NoiseError("bad_psk");
-  const state = new SymmetricState(options.trace ?? null);
+  const remoteStatic = await publicKey(pinned);
+  if (pskBytes.length !== 32) throw new NoiseError("bad_psk");
+  const state = new SymmetricState(trace ?? null);
   state.mark("init");
-  await state.mixHash(prologue(options.transport));
+  await state.mixHash(prologue(transport));
   state.mark("prologue");
-  await state.mixHash(options.remoteStatic);
+  await state.mixHash(pinned);
   state.mark("s");
-  await state.mixKeyAndHash(options.psk);
+  await state.mixKeyAndHash(pskBytes);
   state.mark("msg1.psk");
-  const e = options.ephemeral ?? (await generateKeyPair());
+  const e = fixedEphemeral ?? (await generateKeyPair());
   await state.mixHash(e.publicKey);
   await state.mixKey(e.publicKey);
   state.mark("msg1.e");

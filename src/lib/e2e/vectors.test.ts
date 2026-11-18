@@ -169,6 +169,30 @@ describe("V6 must fail, phone side", () => {
     await expect(pending).resolves.toBeDefined();
   });
 
+  it("fails an oversized record in its place in the queue: earlier ones open, later ones are refused", async () => {
+    const keys = await v2Session();
+    const [first, second] = v.V4.records.filter((r: { direction: string }) => r.direction === "cp");
+    const results = await Promise.allSettled([
+      keys.receive.open(bytes(first.record)),
+      keys.receive.open(new Uint8Array(65_536)),
+      keys.receive.open(bytes(second.record)),
+    ]);
+    expect(results.map((r) => (r.status === "rejected" ? (r.reason as Error).message : "opened"))).toEqual(["opened", "e2e: record_too_large", "e2e: failed"]);
+  });
+
+  it("fails a record whose buffer was transferred in its place in the queue, without throwing from open", async () => {
+    const keys = await v2Session();
+    const [first, second] = v.V4.records.filter((r: { direction: string }) => r.direction === "cp");
+    const detached = bytes(second.record);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    const results = await Promise.allSettled([
+      keys.receive.open(bytes(first.record)),
+      keys.receive.open(detached),
+      keys.receive.open(bytes(second.record)),
+    ]);
+    expect(results.map((r) => (r.status === "rejected" ? (r.reason as Error).message : "opened"))).toEqual(["opened", "e2e: bad_record", "e2e: failed"]);
+  });
+
   it("refuses a genuine record opened before an earlier failed one settled", async () => {
     const keys = await v2Session();
     const [first, second] = v.V4.records.filter((r: { direction: string }) => r.direction === "cp");
@@ -204,6 +228,11 @@ describe("payload 1, phone side", () => {
     await expect(phoneHello({ remoteStatic: T_PUB, psk: PSKS.device, transport: 1 }, utf8(json))).rejects.toThrow("e2e: bad_payload1");
   });
 
+  it("is refused as raw bytes with a leading UTF-8 BOM, which the computer side refuses too", async () => {
+    const withBom = Uint8Array.from([0xef, 0xbb, 0xbf, ...utf8('{"v":1,"conn":"XkCuA2LSB-yRqiCTmMwKqQ"}')]);
+    await expect(phoneHello({ remoteStatic: T_PUB, psk: PSKS.device, transport: 1 }, withBom)).rejects.toThrow("e2e: bad_payload1");
+  });
+
   it("takes raw bytes without app", async () => {
     await expect(phoneHello({ remoteStatic: T_PUB, psk: PSKS.device, transport: 1 }, utf8('{"v":1,"conn":"XkCuA2LSB-yRqiCTmMwKqQ"}'))).resolves.toBeDefined();
   });
@@ -212,6 +241,28 @@ describe("payload 1, phone side", () => {
     const payload1 = PAYLOAD1.slice();
     const pending = phoneHello({ remoteStatic: T_PUB, psk: PSKS.device, transport: 1, ephemeral: await phoneEphemeral() }, payload1);
     payload1.fill(0x20);
+    const hello = await pending;
+    expect(hex(hello.message1)).toBe(v.V2.message1);
+    await expect(hello.finish(bytes(v.V2.message2))).resolves.toBeDefined();
+  });
+});
+
+describe("caller-owned bytes, phone side", () => {
+  it("seals the frame as it was when seal was called, even if the caller changes it afterwards", async () => {
+    const keys = await v2Session();
+    const record = v.V4.records.find((r: { direction: string }) => r.direction === "pc");
+    const frame = bytes(record.frame);
+    const pending = keys.send.seal(frame);
+    frame.fill(0);
+    expect(hex(await pending)).toBe(record.record);
+  });
+
+  it("hashes and uses the pinned key and PSK as they were when phoneHello was called", async () => {
+    const remoteStatic = T_PUB.slice();
+    const secret = PSKS.device.slice();
+    const pending = phoneHello({ remoteStatic, psk: secret, transport: 1, ephemeral: await phoneEphemeral() }, PAYLOAD1);
+    remoteStatic.fill(0);
+    secret.fill(0);
     const hello = await pending;
     expect(hex(hello.message1)).toBe(v.V2.message1);
     await expect(hello.finish(bytes(v.V2.message2))).resolves.toBeDefined();
