@@ -38,12 +38,12 @@ describe("the finished list", () => {
     expect(stamps[0]!.getAttribute("dateTime")).toBe(new Date(NOW - 5 * 60_000).toISOString());
   });
 
-  it("tints the conversation the chat window has open, and only that one", async () => {
+  it("marks the conversation the chat window has open, and only that one", async () => {
     const bots = [bot("eli", [task("open", { updatedAt: NOW }), task("elsewhere", { updatedAt: NOW - 60_000 })])];
     await mount(bots, [], { kind: "bot", botId: "eli", threadId: "open" });
     const rows = [...document.querySelectorAll<HTMLElement>("[data-inbox-finished] button")];
     expect(rows.map((row) => row.getAttribute("aria-current"))).toEqual(["page", null]);
     expect(rows.map((row) => row.hasAttribute("data-open-thread"))).toEqual([true, false]);
-    expect(rows[0]!.className).toContain("bg-accent/15");
+    expect(rows[0]!.className.split(" ")).toContain("bg-raised");
   });
 });

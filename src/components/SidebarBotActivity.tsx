@@ -8,6 +8,7 @@ import { isArchived, orderedSidebarThreads, orderedThreadList, threadRecency, th
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { endedOnFailure } from "@/lib/mascot";
+import { rowSelectedSurface } from "./SidebarRowMarkers";
 
 export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
   const tasks = bot.tasks ?? [{
@@ -87,8 +88,8 @@ export function isOpenThread(entry: AttentionThread, open: OpenThread | undefine
   return open.kind === "group" && entry.groupId === open.groupId;
 }
 
-/** The row of the conversation the chat window has open: a tint, a left accent bar and an inset outline read as one mark at a glance. */
-export const openThreadRow = "bg-accent/15 shadow-[inset_3px_0_0_0_var(--color-accent)] ring-1 ring-inset ring-accent/30 hover:bg-accent/20";
+/** The row of the conversation the chat window has open: the plain fill a selected sidebar row has. */
+export const openThreadRow = rowSelectedSurface;
 
 export function attentionOwnerName(entry: AttentionThread): string {
   return entry.kind === "bot" ? entry.botName : entry.groupName;
@@ -178,7 +179,7 @@ export function AttentionThreadRows({ entries, onJump, inset = false, unreadDot 
   entries: AttentionThread[]; onJump: (entry: AttentionThread) => void; inset?: boolean;
   /** Mark an unread conversation with a dot and a heavier title, the way the Inbox's own rows are marked. */
   unreadDot?: boolean;
-  /** The conversation the chat window has open, tinted like a selected sidebar row. */
+  /** The conversation the chat window has open, marked like a selected sidebar row. */
   current?: OpenThread;
 }) {
   return <>

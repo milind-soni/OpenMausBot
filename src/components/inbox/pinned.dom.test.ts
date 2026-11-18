@@ -55,12 +55,12 @@ describe("the pinned section", () => {
     expect(stamp?.getAttribute("dateTime")).toBe(new Date(NOW - 5 * 60_000).toISOString());
   });
 
-  it("tints the conversation the chat window has open, and only that one", async () => {
+  it("marks the conversation the chat window has open, and only that one", async () => {
     await mount([bot("eli", [task("open", { pinned: true }), task("elsewhere", { pinned: true, updatedAt: NOW - 60_000 })])],
       [], { kind: "bot", botId: "eli", threadId: "open" });
     const rows = [...document.querySelectorAll<HTMLElement>("[data-pinned-row]")];
     expect(rows.map((row) => row.getAttribute("aria-current"))).toEqual(["page", null]);
-    expect(rows[0]!.className).toContain("bg-accent/15");
+    expect(rows[0]!.className.split(" ")).toContain("bg-raised");
   });
 
   it("gathers a room's pinned conversation too", async () => {

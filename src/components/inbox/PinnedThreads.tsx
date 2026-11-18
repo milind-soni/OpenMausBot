@@ -24,7 +24,7 @@ export function PinnedThreads({ bots, groups, queued, now, current, onOpen, onUn
   queued: Record<string, unknown[]>;
   /** The clock each row's last-activity label is relative to. */
   now: number;
-  /** The conversation the chat window has open, tinted like a selected sidebar row. */
+  /** The conversation the chat window has open, marked like a selected sidebar row. */
   current?: OpenThread;
   onOpen(row: AttentionThread): void;
   onUnpin(row: AttentionThread): void;

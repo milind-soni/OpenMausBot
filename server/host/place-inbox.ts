@@ -25,8 +25,6 @@ const MAX_LINES = 2_000;
 const MAX_SEEN_ASKS = 2_000;
 const KEEP_MS = 30 * 24 * 60 * 60_000;
 const VIEW_ROWS = 200;
-/** How many finished, already-read lines the inbox keeps under its active list. */
-const SETTLED_ROWS = 5;
 const ROW_TEXT_MAX = 4_000;
 const NOTICE_TEXT_MAX = 2_000;
 const HOUR_MS = 60 * 60_000;
@@ -194,11 +192,8 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
 
   function view(auth: RequestAuth): InboxView {
     const visible = [...askRows(auth), ...lines.filter((line) => lineFor(auth, line)).map(lineRow)].sort((a, b) => b.at - a.at);
-    // The finished lines the list would otherwise drop follow the active ones, so the panel can show them in its
-    // own Finished list instead of losing them the moment they are read.
-    const listed = visible.filter((row) => row.tab !== "done");
-    const settled = visible.filter((row) => row.tab === "done" && row.kind !== "ask").slice(0, SETTLED_ROWS);
-    const rows = [...listed, ...settled].slice(0, VIEW_ROWS + SETTLED_ROWS);
+    // What is still active comes first, so settled lines never push it out of the view; settled ones fill the rest.
+    const rows = [...visible.filter((row) => row.tab !== "done"), ...visible.filter((row) => row.tab === "done")].slice(0, VIEW_ROWS);
     return { botId: null, threadId: null, rows, anchor: null };
   }
 

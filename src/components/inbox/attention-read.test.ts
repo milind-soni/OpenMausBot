@@ -44,7 +44,7 @@ const open = (selectedId: string, activeView = "chat") =>
     Pick<AppState, "activeView" | "selectedId" | "bots" | "groups">);
 
 describe("inboxOpenThread", () => {
-  it("names the open bot thread or room thread so both lists can tint that row", () => {
+  it("names the open bot thread or room thread so both lists can mark that row", () => {
     expect(inboxOpenThread(open("eli"))).toEqual({ kind: "bot", botId: "eli", threadId: "eli-main" });
     expect(inboxOpenThread(open("room"))).toEqual({ kind: "group", groupId: "room", threadId: "room-thread" });
   });
