@@ -12,6 +12,7 @@ import { useProjects } from "@/state/projects";
 import { ProjectSuggestionList } from "./ProjectSuggestionList";
 import { StagedAttachmentsTray } from "./AttachmentViewer";
 import { readFileAsAttachment } from "@/lib/attachments";
+import { messageTooLargeReason } from "@/lib/messageSize";
 import { draftKey, getQueued, loadDraft, saveDraft, setQueued as setQueuedFor, subscribeQueue } from "@/lib/composerDrafts";
 
 /** The active @mention query at the caret: the text between an `@` that
@@ -252,10 +253,18 @@ export function Composer({
   const queued = useSyncExternalStore(subscribeQueue, () => getQueued(draftId));
   const setQueued = (message: { text: string; attachments: Attachment[] } | null) => setQueuedFor(queueTarget, message);
   useEffect(() => saveDraft(draftId, { text, attachments }), [draftId, text, attachments]);
+  // the server refuses oversized bodies; catch that here so the draft stays put
+  const [sizeError, setSizeError] = useState<string | null>(null);
+  useEffect(() => setSizeError(null), [text, attachments]);
   const send = () => {
     const t = text.trim();
     if (!t && attachments.length === 0) return;
     const currentAttachments = attachments.length > 0 ? [...attachments] : undefined;
+    const tooLarge = messageTooLargeReason(t, currentAttachments);
+    if (tooLarge) {
+      setSizeError(tooLarge);
+      return;
+    }
     if (busy) {
       setQueued({ text: t, attachments: attachments });
       setText("");
@@ -328,6 +337,11 @@ export function Composer({
       {speechError && (
         <div className="mx-auto mb-2 max-w-[900px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}
+        </div>
+      )}
+      {sizeError && (
+        <div role="alert" className="mx-auto mb-2 max-w-[900px] rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
+          {sizeError}
         </div>
       )}
       <div className="relative mx-auto max-w-[900px]">
