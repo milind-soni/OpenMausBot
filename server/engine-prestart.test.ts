@@ -21,7 +21,7 @@ function host(overrides: Partial<EnginePrestartDeps> = {}) {
   const prestart = createEnginePrestart({
     adapter: (id) => (id === "claude" ? { prestart: {
       start: async (input) => { started.push(input); if (state.up) held.add(input.threadId); return state.up; },
-      held: (threadId) => held.has(threadId),
+      held: (threadId) => held.has(threadId), ready: (threadId) => held.has(threadId),
       drop: (threadId) => { dropped.push(threadId); held.delete(threadId); },
     } } : undefined),
     credentials,

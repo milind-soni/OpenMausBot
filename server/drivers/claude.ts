@@ -1202,9 +1202,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         })).digest("hex"),
       });
 
-      // A process started ahead has not listed the tools the harness serves only during a turn: it lists them now, or is not used.
+      // A process started ahead is taken once it has started up and has listed again the tools the harness serves only during a turn.
       const ahead = sessions.get(threadId);
-      if (!spare && ahead?.spare && !ahead.closing && ahead.argsKey === argsKey && !(await ahead.tools?.relist(Object.keys(mcpServers)))) closeSession(threadId, "never used");
+      if (!spare && ahead?.spare && !ahead.closing && ahead.argsKey === argsKey && !(ahead.tools?.ready && await ahead.tools.relist(Object.keys(mcpServers)))) closeSession(threadId, "never used");
       const live = sessions.get(threadId);
       if (!turn.sessionReset && live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
         stopIdleClose(`${instanceId}\0${threadId}`, live.idleTimer); // busy again: no longer idle
@@ -1369,7 +1369,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         replaysUserMessages,
         turn: spare ? null : { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false, pendingSteers: new Set(), deferred: null, continuationGrace: null, continuationSilence: null },
         idleTimer: null,
-        closing: false, spare, take: (taker) => { turnId = taker; }, ...(spare ? { tools: spareTools.forProcess((frame) => writeControlFrame(session.child.stdin, frame)) } : {}),
+        closing: false, spare, take: (taker) => { turnId = taker; }, ...(spare ? { tools: spareTools.forProcess((frame) => writeControlFrame(child.stdin, frame)) } : {}),
         stderr: "",
         costTotal: undefined,
       };
@@ -2034,7 +2034,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             spares.set(turn.threadId, launch);
             return launch;
           },
-          held: (threadId) => spares.has(threadId) || sessions.get(threadId)?.spare === true,
+          held: (threadId) => spares.has(threadId) || sessions.get(threadId)?.spare === true, ready: (threadId) => sessions.get(threadId)?.spare === true && sessions.get(threadId)?.tools?.ready === true,
           drop: (threadId) => {
             const close = () => { const s = sessions.get(threadId); if (s?.spare) { closeSession(threadId, "never used"); stopSession(s); } };
             close();

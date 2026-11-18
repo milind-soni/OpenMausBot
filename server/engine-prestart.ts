@@ -4,18 +4,29 @@
 // same model, approval level and folder rule, launches the same way but for its own id and its own bearers. This file
 // keeps that last launch per bot, rewrites it for the new conversation and asks the driver to start it. The driver takes
 // the process for the first turn only when that turn's own launch comes out identical, and replaces it otherwise
-// (ProviderAdapter.prestart), so a wrong guess costs a process that was never used, never a wrong one that was.
+// so a wrong guess costs a process that was never used, never a wrong one that was.
 //
 // Not started ahead: a bot's very first conversation (no launch to go by), a launch that mounts anything beyond
 // OpenMausBot's own tool servers (a person's MCP servers, connected apps, a browser or a computer would be started
-// early), a guest's or tool-scoped turn, and any host where engines wait for memory (session-idle.ts prestartAllowed).
+// early), a guest's or tool-scoped turn, and any host where engines wait for memory.
 import { randomBytes } from "node:crypto";
 
 import type { ProviderAdapter, SendTurnInput } from "./contracts.ts";
 import { PRESTART_IDLE_MS, PRESTART_MOST } from "./drivers/session-idle.ts";
 
-/** A conversation's bearers as index.ts keeps them: per slot, what the bearer grants and the bearer. */
+/** Each conversation's bearers: per slot, what the bearer grants and the bearer. */
 export type SessionCredentials = Map<string, Map<string, { grants: string; token: string }>>;
+
+/** The conversation's bearer for a slot: the one it holds while its grants stand, a new one otherwise. */
+export function bearerForGrants(credentials: SessionCredentials, threadId: string, slot: string, grants: string): string {
+  const slots = credentials.get(threadId) ?? new Map<string, { grants: string; token: string }>();
+  credentials.set(threadId, slots);
+  const held = slots.get(slot);
+  if (held?.grants === grants) return held.token;
+  const token = randomBytes(24).toString("hex");
+  slots.set(slot, { grants, token });
+  return token;
+}
 
 export interface EnginePrestartDeps {
   adapter(instanceId: string): Pick<ProviderAdapter, "prestart"> | undefined;
@@ -77,18 +88,8 @@ export function createEnginePrestart(deps: EnginePrestartDeps) {
     deps.credentials.delete(threadId);
   };
 
-  /** The bearer the conversation's next turn will mint for this slot: the one it holds while the grants stand, a new one
-   * otherwise. The same rule as index.ts sessionBearer, which then finds it. */
-  const bearerFor = (botId: string, threadId: string, slot: string, grantedElsewhere: string): string => {
-    const grants = JSON.stringify({ ...JSON.parse(grantedElsewhere), threadId, approval: deps.approval(botId, threadId) });
-    const slots = deps.credentials.get(threadId) ?? new Map<string, { grants: string; token: string }>();
-    deps.credentials.set(threadId, slots);
-    const held = slots.get(slot);
-    if (held?.grants === grants) return held.token;
-    const token = randomBytes(24).toString("hex");
-    slots.set(slot, { grants, token });
-    return token;
-  };
+  const bearerFor = (botId: string, threadId: string, slot: string, grantedElsewhere: string): string =>
+    bearerForGrants(deps.credentials, threadId, slot, JSON.stringify({ ...JSON.parse(grantedElsewhere), threadId, approval: deps.approval(botId, threadId) }));
 
   return {
     /** Called with every turn's input as it goes to its engine; returns it unchanged. A person's own turn becomes what

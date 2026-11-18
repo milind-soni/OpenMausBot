@@ -28,6 +28,10 @@ describe("asking a started process to list its tools again", () => {
   it("asks only for the servers that list through the harness, and is done when each answers", async () => {
     const sent: any[] = [];
     const tools = claudePrestartTools().forProcess(async (frame) => { sent.push(frame); return true; });
+    expect(sent.splice(0)).toEqual([{ type: "control_request", request_id: "prestart-ready", request: { subtype: "mcp_status" } }]);
+    expect(tools.ready).toBe(false);
+    expect(tools.frame({ type: "control_response", response: { subtype: "error", request_id: "prestart-ready", error_code: "unsupported_request" } })).toBe(true);
+    expect(tools.ready).toBe(true);
     const done = tools.relist(["agents", "data", "ogb", "email"]);
     expect(sent.map((frame) => frame.request)).toEqual([{ subtype: "mcp_reconnect", serverName: "data" }, { subtype: "mcp_reconnect", serverName: "email" }]);
     expect(tools.frame({ type: "control_response", response: { subtype: "success", request_id: "someone-else" } })).toBe(false);
@@ -40,6 +44,7 @@ describe("asking a started process to list its tools again", () => {
     const sent: any[] = [];
     const engine = claudePrestartTools();
     const tools = engine.forProcess(async (frame) => { sent.push(frame); return true; });
+    sent.splice(0);
     const failed = tools.relist(["data"]);
     tools.frame({ type: "control_response", response: { subtype: "error", request_id: sent[0].request_id, error: "Server not connected" } });
     expect(await failed).toBe(false);
@@ -75,7 +80,7 @@ describe("ClaudeDriver: a process started before the first message (fake CLI)", 
   /** Launched, and running far enough to have said so: `count` processes in all so far. */
   const started = async (threadId: string, count: number, extra: Partial<SendTurnInput> = {}) => {
     const launched = await instance.adapter.prestart!.start(turn(threadId, { text: "", ...extra }));
-    if (launched) await until(() => pids().length >= count, `process ${count} to start`);
+    if (launched) await until(() => pids().length >= count && instance.adapter.prestart!.ready(threadId), `process ${count} to start up`);
     return launched;
   };
   const create = async (environment: Record<string, string> = {}) => {
@@ -182,12 +187,15 @@ describe("ClaudeDriver: a process started before the first message (fake CLI)", 
     expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
   });
 
-  it("is taken by a message sent while it is still launching: one process", async () => {
+  it("is replaced by a message that comes before it has started up: the turn never waits for it", async () => {
     const launching = instance.adapter.prestart!.start(turn("t-race", { text: "" }));
     const sent = instance.adapter.sendTurn(turn("t-race"));
     await Promise.all([launching, sent]);
     await recorder.until((e) => e.type === "turn.completed");
-    expect(pids()).toHaveLength(1);
+    await until(() => pids().filter(alive).length === 1, "only the turn's own process to be left");
+    expect(instance.adapter.prestart!.held("t-race")).toBe(false);
+    expect(recorder.events.filter((e) => e.type === "session.started")).toHaveLength(1);
+    expect(recorder.events.filter((e) => e.type === "runtime.error")).toEqual([]);
     expect(recorder.events.find((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
   });
 
@@ -198,6 +206,7 @@ describe("ClaudeDriver: a process started before the first message (fake CLI)", 
     expect(await started("t-busy", 1)).toBe(false);
     expect(await started("t-twice", 2)).toBe(true);
     expect(await instance.adapter.prestart!.start(turn("t-twice", { text: "" }))).toBe(true);
+    expect(instance.adapter.prestart!.ready("t-twice")).toBe(true);
     await instance.adapter.sendTurn(turn("t-twice"));
     await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-twice");
     expect(pids()).toHaveLength(2);

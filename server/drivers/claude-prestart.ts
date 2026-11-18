@@ -1,13 +1,17 @@
-// A Claude process started before its conversation's first message (ProviderAdapter.prestart) connects its tool servers
+// A Claude process started before its conversation's first message connects its tool servers
 // at once. Some of OpenMausBot's own servers answer `tools/list` by asking the harness with the conversation's bearer, and
 // the harness honours a bearer only while a turn runs, so that process lists nothing from them. Before the first turn
 // takes the process it asks the CLI to connect those servers again ({type:"control_request", request:{subtype:
 // "mcp_reconnect", serverName}}, answered once the server is connected and listed; Claude Code 2.1.321), now that the turn
 // stands. A CLI that does not know the request cannot be started ahead at all.
+//
+// The CLI reads its input only once it has started up, and prints nothing until its first message. A control request
+// written at launch is therefore answered, whatever the answer, exactly when the process is ready for a message; a turn
+// that comes before that answer is quicker with a process of its own than waiting to ask this one twice.
 
-/** The tool servers that list through the harness (harness-mcp-proxy.ts). */
+/** The tool servers whose `tools/list` the harness answers. */
 const LISTED_BY_HARNESS = new Set(["browser", "computer", "data", "email", "device"]);
-const ID_PREFIX = "prestart-tools-";
+const ID_PREFIX = "prestart-tools-", READY_ID = "prestart-ready";
 const RECONNECT_WAIT_MS = 3_000;
 
 export function claudePrestartTools() {
@@ -31,10 +35,15 @@ export function claudePrestartTools() {
         pending.delete(id);
         resolve?.(ok);
       };
+      let ready = false;
+      void write({ type: "control_request", request_id: READY_ID, request: { subtype: "mcp_status" } });
       return {
+        /** The CLI has started up and reads its input. */
+        get ready(): boolean { return ready; },
         /** Consumes every answer to its own requests; false for every other frame. */
         frame(o: any): boolean {
           const id = o?.type === "control_response" ? o.response?.request_id : undefined;
+          if (id === READY_ID) return (ready = true);
           if (typeof id !== "string" || !id.startsWith(ID_PREFIX)) return false;
           if (o.response.subtype !== "success" && o.response.error_code === "unsupported_request") unsupported = true;
           settle(id, o.response.subtype === "success");
