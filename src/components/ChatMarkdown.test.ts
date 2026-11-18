@@ -956,6 +956,47 @@ describe("ChatMarkdown attachments", () => {
       expect(render(true)).toContain(`>${filePath}</code>`);
     });
 
+    describe("a backticked folder path with a space", () => {
+      const folder = "D:\\Claude Works\\v3\\";
+      const text = `The videos are in \`${folder}\``;
+      const outsideSave = () => vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+        state: "failed", reason: "", savedTo: "", outsideWorkspace: true, retryable: false, folder: null,
+        save: vi.fn(async () => undefined),
+      });
+
+      it("shows the real path in a browser, not the link's %20 spelling", () => {
+        const save = outsideSave();
+        try {
+          const html = renderToStaticMarkup(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } }));
+          expect(html).toContain(`>${folder}</code>`);
+          expect(html).not.toContain("%20");
+        } finally {
+          save.mockRestore();
+        }
+      });
+
+      it("asks the desktop app to show the real folder", async () => {
+        const save = outsideSave();
+        const ogb = (window as { ogb?: unknown }).ogb;
+        const reveal = vi.fn(async () => "shown" as const);
+        (window as { ogb?: unknown }).ogb = { revealInFolder: reveal, remoteClient: { active: false } };
+        const host = document.createElement("div");
+        document.body.append(host);
+        const root = createRoot(host);
+        try {
+          await act(async () => root.render(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } })));
+          const show = [...host.querySelectorAll("button")].find((button) => button.textContent === "Show in folder")!;
+          await act(async () => show.click());
+          expect(reveal).toHaveBeenCalledWith(folder);
+        } finally {
+          await act(async () => root.unmount());
+          host.remove();
+          (window as { ogb?: unknown }).ogb = ogb;
+          save.mockRestore();
+        }
+      });
+    });
+
     it("leaves other failures alone", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
       try {

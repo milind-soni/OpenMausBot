@@ -69,6 +69,12 @@ export const localFilePath = (href?: string): string | null => {
   return href;
 };
 
+// A plain-path link as the server reads it: cut at ? or #, then percent-decoded once.
+export const decodedLinkPath = (href: string): string => {
+  try { return decodeURIComponent(href.split(/[?#]/, 1)[0]!); }
+  catch { return href; }
+};
+
 export function chatUrlTransform(value: string, key = "href"): string {
   if (looksLikeThreadRefUrl(value) || isUseMyComputerUrl(value)) return value;
   // Markdown-to-HTML percent-encodes a destination's backslashes (C:%5CUsers…); restore them and leave other escapes
@@ -385,7 +391,7 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
       )}
       {save.state === "failed" && save.outsideWorkspace && (
         <span className="inline-flex flex-wrap items-center gap-x-1.5 text-[12px]">
-          <OutsideWorkspaceFile filePath={filePath} />
+          <OutsideWorkspaceFile filePath={decodedLinkPath(filePath)} />
         </span>
       )}
       {save.folder && <MessageFolderFiles folderPath={filePath} listing={save.folder} message={message} />}
