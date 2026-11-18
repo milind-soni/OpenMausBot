@@ -7,7 +7,7 @@ import { CUSTOM_SECRET_TARGET, credentialResumeOutcome, isCredentialTargetId } f
 import { phoneSecretEnvelopeSchema, type SecretCards } from "../host/secret-cards.ts";
 import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { SECRET_VALUE_MAX_BYTES } from "../secret-vault.ts";
+import { VAULT_VALUE_BODY_MAX_BYTES } from "../vault/value-limits.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 /** Whose a conversation is, for who may type a secret into its card. */
@@ -70,7 +70,7 @@ export function createSecretCardRoutes(deps: SecretCardRouteDeps): RouteHandler 
       // JSON only, so a form posted from another local page cannot save one.
       const mediaType = String(req.headers["content-type"] ?? "").split(";", 1)[0]!.trim().toLowerCase();
       if (mediaType !== "application/json") return json(res, 415, { error: "content-type must be application/json" });
-      const raw = await readBody(req, SECRET_VALUE_MAX_BYTES * 4);
+      const raw = await readBody(req, VAULT_VALUE_BODY_MAX_BYTES);
       const fields = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
       const threadId = String(fields.threadId ?? "");
       if (!deps.threadVisible(auth, threadId) || !secretMessage(m[1]!, threadId, m[2]!)) return json(res, 404, { ...userError("serverError.secret.missing") });

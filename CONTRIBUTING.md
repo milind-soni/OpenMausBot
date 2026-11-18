@@ -147,6 +147,9 @@ Such a change ships in **two releases**:
 2. **Write it one release later.** Start writing the new format and raise
    `writes` to match. The release before can already read it.
 
+For Vault values over 4 KiB, **Prepare next release** advances `writes` to 2
+when the preceding published release's tag confirms format 2 read support.
+
 The rule is between one release and the next. The stable channel may skip
 releases, so going back from one stable version to the one before it can cross
 both steps; there the updater's copy of the data is the way back, and the
@@ -173,9 +176,9 @@ sessions into `engine-homes/`, the old data folder's rename). They stay as
 they are. The marker does not replace them; it adds the one thing they cannot
 do, which is to stop an older version at the door.
 
-**What the marker protects today: nothing yet.** The server reads format 2
-but still writes format 1. The marker has never stopped a server, and a
-rollback of one release can still lose data without it noticing:
+**What the marker protects.** Once a release writes format 2, it stops
+older servers that cannot read it. Unrecorded format changes can still
+cause data loss on rollback:
 
 - Many JSON stores accept only `"version": 1` and throw, or start empty, on
   anything else: among them `server/command-allowlist.ts`, `server/fleet.ts`,

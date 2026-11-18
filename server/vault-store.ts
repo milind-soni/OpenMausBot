@@ -9,10 +9,11 @@ import { z } from "zod";
 
 import { HELD_SECRET_MASK } from "../shared/redact.ts";
 import { LOGIN_FIELD_MAX, LOGIN_HOSTS_MAX, loginMatchesHost, loginPlace, loginSite, loginUsableBy, type BitwardenCredentials, type LoginBots, type LoginPlace, type LoginSummary } from "../shared/logins.ts";
-import { SECRET_VALUE_MAX_BYTES, VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
+import { VAULT_SECRET_NAME_MAX, vaultNameKey, type VaultSecret } from "../shared/vault.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { decryptBrowserState, encryptBrowserState } from "./browser-sites.ts";
 import type { TotpKey } from "./totp.ts";
+import { STORED_VAULT_VALUE_MAX_BYTES, VAULT_VALUE_MAX_BYTES } from "./vault/value-limits.ts";
 
 export const LOGINS_FILE = "logins.json.enc";
 export const LOGINS_KEY_FILE = "logins-key";
@@ -29,11 +30,9 @@ const totpSchema = z.object({
 
 const botsSchema = z.union([z.literal("all"), z.array(z.string())]);
 
-const STORED_SECRET_VALUE_MAX_BYTES = 65_536;
-
 function checkNewSecretValue(value: string): void {
-  if (Buffer.byteLength(value) > SECRET_VALUE_MAX_BYTES) {
-    throw new RangeError(`A new Vault secret value can be at most ${SECRET_VALUE_MAX_BYTES} bytes.`);
+  if (Buffer.byteLength(value) > VAULT_VALUE_MAX_BYTES) {
+    throw new RangeError(`A new Vault secret value can be at most ${VAULT_VALUE_MAX_BYTES} bytes.`);
   }
 }
 
@@ -58,7 +57,7 @@ const diskLoginSchema = z.object({
 const diskSecretSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(VAULT_SECRET_NAME_MAX),
-  value: z.string().min(1).refine((value) => Buffer.byteLength(value) <= STORED_SECRET_VALUE_MAX_BYTES),
+  value: z.string().min(1).refine((value) => Buffer.byteLength(value) <= STORED_VAULT_VALUE_MAX_BYTES),
   source: z.enum(["card", "settings"]),
   bots: botsSchema,
   refOnly: z.literal(true).optional(),

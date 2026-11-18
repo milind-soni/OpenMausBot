@@ -88,6 +88,8 @@ jobs:
 
       - name: Commit the version bump
         env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_VERSION: ${{ steps.version.outputs.current }}
           VERSION: ${{ steps.version.outputs.next }}
         run: |
           npm pkg set "version=$VERSION"
@@ -97,9 +99,14 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "release/v$VERSION"
           node scripts/tighten-ratchets.mjs
-          node scripts/record-data-format.mjs
+          published_format=()
+          if gh release view "v$PREVIOUS_VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '(.isDraft or .isPrerelease) | not' | grep -qx true &&
+            git show "refs/tags/v$PREVIOUS_VERSION:server/data-format-released.json" > "$RUNNER_TEMP/published-format.json"; then
+            published_format=("$RUNNER_TEMP/published-format.json")
+          fi
+          node scripts/record-data-format.mjs "${published_format[@]}"
           node scripts/generate-locale.mjs --record-hashes
-          git add package.json server/data-format-released.json scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts src/locales/source-hashes.json
+          git add package.json server/data-format.ts server/data-format-released.json scripts/testing/file-size-ratchet.test.ts scripts/testing/index-route-ratchet.test.ts src/locales/source-hashes.json
           git commit -m "chore(release): bump version to $VERSION"
           git push --set-upstream origin "release/v$VERSION"
 

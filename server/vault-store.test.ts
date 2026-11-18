@@ -9,6 +9,7 @@ import { addHeldSecretScrubber, redactSecretsInText } from "../shared/redact.ts"
 import { decryptBrowserState, encryptBrowserState } from "./browser-sites.ts";
 import { HeldSecrets, LOGINS_FILE, LOGINS_KEY_FILE, MEMBER_SECRETS_FILE, TEAM_READER, VaultStore, secretForms } from "./vault-store.ts";
 import { parseTotpKey } from "./totp.ts";
+import { VAULT_VALUE_MAX_BYTES } from "./vault/value-limits.ts";
 
 // Obvious fakes only: nothing here is anyone's real login.
 const PASSWORD = "fake-Pa55word&<\"quoted\">";
@@ -200,9 +201,9 @@ describe("the Vault's saved secrets", () => {
     expect(afterSave.list()).toEqual([login]);
   });
 
-  it("keeps newly saved, received and replaced values within 4 KiB", () => {
+  it("enforces the UTF-8 byte limit for newly saved, received and replaced values", () => {
     const store = new VaultStore({ dataDir: dir });
-    const value = "🔑".repeat(1_024);
+    const value = "🔑".repeat(VAULT_VALUE_MAX_BYTES / 4);
     const input = { name: "Fixture secret", value, source: "settings", bots: "all" } as const;
     const saved = store.saveSecret(input);
     const tooLarge = value + "x";
