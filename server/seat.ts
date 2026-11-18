@@ -3,14 +3,16 @@
 import { openPersonWait } from "../shared/person-wait.ts";
 import { closeIdleEngines } from "./drivers/session-idle.ts";
 import { sinceFreshStart } from "./fresh-start.ts";
-import type { Message, Store } from "./store.ts";
-import { userError } from "./user-errors.ts";
+import type { Message, Store, TaskRecord } from "./store.ts";
+import { userError, type UserError } from "./user-errors.ts";
 
 export const HANDOFF_REQUEST =
   "Write a short hand-off note for when this conversation is picked up again in a new session: where you got to, " +
   "what you were about to do next, and anything that must not be forgotten. Reply with the note only, under 200 words.";
 
 type SeatStore = Pick<Store, "activePath" | "appendMessage" | "patchTask" | "taskByThread">;
+
+export type ConversationRefusal = UserError & { threadId: string; title: string };
 
 /** The bot's answer to the newest hand-off request, while no one has written in the conversation since. */
 export function handoffNote(path: readonly Message[]): Message | null {
@@ -20,7 +22,7 @@ export function handoffNote(path: readonly Message[]): Message | null {
 }
 
 /** Why the seat cannot close now, in the words the person is shown; null when it can. */
-export function seatCloseRefusal(store: Pick<Store, "activePath">, threadId: string, busy: boolean): ReturnType<typeof userError> | null {
+export function seatCloseRefusal(store: Pick<Store, "activePath">, threadId: string, busy: boolean): UserError | null {
   if (busy) return userError("serverError.seat.busy");
   const path = store.activePath(threadId);
   const wait = openPersonWait(path);
@@ -46,4 +48,26 @@ export function closeSeat(store: SeatStore, botId: string, threadId: string): Me
   }
   closeIdleEngines(threadId);
   return saved;
+}
+
+/** The bot's conversations that still hold an engine session to resume: what closing its whole seat ends. */
+export function openConversations(store: Pick<Store, "tasks">, botId: string): TaskRecord[] {
+  return store.tasks(botId).filter((task) => Object.keys(task.resumeCursors ?? {}).length > 0);
+}
+
+/** Closes every open conversation of the bot, or none: while any one cannot close, each that cannot says why and nothing
+ * changes. `mayClose` leaves out conversations the caller may not change; they stay as they are. */
+export function closeWholeSeat(
+  store: SeatStore & Pick<Store, "tasks">,
+  botId: string,
+  busy: (threadId: string) => boolean,
+  mayClose: (threadId: string) => boolean = () => true,
+): { closed: Message[]; refusals: ConversationRefusal[] } {
+  const open = openConversations(store, botId).filter((task) => mayClose(task.threadId));
+  const refusals = open.flatMap((task) => {
+    const refusal = seatCloseRefusal(store, task.threadId, busy(task.threadId));
+    return refusal ? [{ ...refusal, threadId: task.threadId, title: task.title }] : [];
+  });
+  if (refusals.length) return { closed: [], refusals };
+  return { closed: open.flatMap((task) => closeSeat(store, botId, task.threadId) ?? []), refusals: [] };
 }

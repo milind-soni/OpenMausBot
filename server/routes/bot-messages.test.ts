@@ -169,8 +169,8 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
     const response = await fetch(`${base}/api/bots/${bot.id}/context`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) });
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
-  const seat = async (action: "handoff" | "close") => {
-    const response = await fetch(`${base}/api/bots/${bot.id}/seat/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) });
+  const seat = async (action: "handoff" | "close", body: unknown = { threadId }) => {
+    const response = await fetch(`${base}/api/bots/${bot.id}/seat/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
   return { store, bot, threadId, state, post, edit, cancelQueued, context, seat, show, row, sent, patches: vi.spyOn(store, "patchMessage") };
@@ -229,6 +229,31 @@ describe("POST /api/bots/:id/seat/handoff and /seat/close", () => {
     expect(await seat("handoff")).toMatchObject({ status: 409, body: { errorKey: "serverError.seat.busy" } });
     expect(await seat("close")).toMatchObject({ status: 409, body: { errorKey: "serverError.seat.busy" } });
     expect(state.accepted).toEqual([]);
+  });
+
+  it("closes every open conversation at once, or names each one that cannot close and closes none", async () => {
+    const { store, bot, threadId, seat } = await fixture();
+    const second = store.createTask(bot.id, "Import screen", false)!.threadId;
+    for (const thread of [threadId, second]) store.patchTask(bot.id, thread, { resumeCursors: { claude: `session-${thread}` } });
+    const answer = (thread: string) => {
+      store.appendMessage(thread, { role: "user", kind: "text", text: HANDOFF_REQUEST });
+      store.appendMessage(thread, { role: "bot", kind: "text", text: NOTE });
+    };
+    answer(threadId);
+
+    expect(await seat("close", { all: true, threadId })).toMatchObject({ status: 400 });
+    expect(await seat("close", { all: true })).toMatchObject({
+      status: 409,
+      body: { errorKey: "serverError.seat.notAll", errorParams: { count: 1 }, conversations: [{ threadId: second, title: "Import screen", errorKey: "serverError.seat.noNote" }] },
+    });
+    expect(store.taskByThread(bot.id, threadId)?.resumeCursors).toEqual({ claude: `session-${threadId}` });
+
+    answer(second);
+    const closed = await seat("close", { all: true });
+    expect(closed.status).toBe(200);
+    expect(closed.body.notes.map((note: Message) => note.compaction?.summary)).toEqual([NOTE, NOTE]);
+    for (const thread of [threadId, second]) expect(store.taskByThread(bot.id, thread)?.resumeCursors).toEqual({});
+    expect(await seat("close", { all: true })).toMatchObject({ status: 200, body: { notes: [] } });
   });
 });
 

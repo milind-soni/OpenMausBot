@@ -9536,6 +9536,7 @@
   "serverError.seat.busy": "the bot is working; stop it or let it finish before closing its seat",
   "serverError.seat.waiting": "the bot is waiting on you ({kind}); answer it before closing its seat",
   "serverError.seat.noNote": "the bot has not written a hand-off note since the last message; ask it for one before closing its seat",
+  "serverError.seat.notAll": "nothing was closed: {count} of the bot's conversations cannot close yet, and each one says why",
   "serverError.team.personalMove": "Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into {team}.",
   "serverError.team.memberLogin": "On {team} only an admin can save a login, and it is then used by every bot in {team}.",
   "serverError.team.signInFirst": "Sign in to {team} in the app first.",

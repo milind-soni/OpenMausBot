@@ -4,7 +4,7 @@ import { selectReplay } from "./context-rebuild.ts";
 import { isContextMessage } from "./delta-context.ts";
 import { armIdleClose, stopIdleClose } from "./drivers/session-idle.ts";
 import { engineSessionOutdated } from "./fresh-start.ts";
-import { closeSeat, HANDOFF_REQUEST, handoffNote, seatCloseRefusal } from "./seat.ts";
+import { closeSeat, closeWholeSeat, HANDOFF_REQUEST, handoffNote, openConversations, seatCloseRefusal } from "./seat.ts";
 import { Store, type Message } from "./store.ts";
 
 const NOTE = "Got the parser passing. Next: wire it into the import screen. Do not touch the old CSV path.";
@@ -80,5 +80,45 @@ describe("closing a seat", () => {
 
     expect(closeSeat(store, bot.id, bot.threadId)?.id).toBe(saved!.id);
     expect(store.activePath(bot.threadId).filter((message) => message.kind === "compaction")).toHaveLength(1);
+  });
+});
+
+describe("closing a bot's whole seat", () => {
+  it("names each open conversation that cannot close and closes none, then closes them all; never one the caller may not change", () => {
+    const { store, bot, say } = setup();
+    const answer = (threadId: string) => {
+      store.appendMessage(threadId, { role: "user", kind: "text", text: HANDOFF_REQUEST });
+      store.appendMessage(threadId, { role: "bot", kind: "text", text: NOTE });
+    };
+    const task = (title: string) => {
+      const threadId = store.createTask(bot.id, title, false)!.threadId;
+      store.patchTask(bot.id, threadId, { resumeCursors: { claude: `session-${title}` } });
+      return threadId;
+    };
+    const busy = task("Busy");
+    const theirs = task("Theirs");
+    store.createTask(bot.id, "Never ran", false);
+    expect(openConversations(store, bot.id).map((open) => open.threadId).sort()).toEqual([bot.threadId, busy, theirs].sort());
+
+    say("user", HANDOFF_REQUEST);
+    say("bot", NOTE);
+    answer(busy);
+    const closed: string[] = [];
+    for (const threadId of [bot.threadId, busy, theirs]) {
+      timers.push([`claude\0${threadId}`, armIdleClose(`claude\0${threadId}`, 600_000, { idle: () => true, close: () => { closed.push(threadId); }, threadId })]);
+    }
+    const mayClose = (threadId: string) => threadId !== theirs;
+
+    const refused = closeWholeSeat(store, bot.id, (threadId) => threadId === busy, mayClose);
+    expect(refused.closed).toEqual([]);
+    expect(refused.refusals).toEqual([expect.objectContaining({ threadId: busy, title: "Busy", errorKey: "serverError.seat.busy" })]);
+    expect(closed).toEqual([]);
+
+    const done = closeWholeSeat(store, bot.id, () => false, mayClose);
+    expect(done.refusals).toEqual([]);
+    expect(done.closed.map((note) => note.compaction?.summary)).toEqual([NOTE, NOTE]);
+    expect(closed.sort()).toEqual([bot.threadId, busy].sort());
+    expect(openConversations(store, bot.id).map((open) => open.threadId)).toEqual([theirs]);
+    expect(closeWholeSeat(store, bot.id, () => false, mayClose)).toEqual({ closed: [], refusals: [] });
   });
 });

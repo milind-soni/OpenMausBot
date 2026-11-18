@@ -37,7 +37,7 @@ import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { noteTypedSend } from "../typed-sends.ts";
 import { engineSessionOutdated, startFresh } from "../fresh-start.ts";
-import { closeSeat, HANDOFF_REQUEST, seatCloseRefusal } from "../seat.ts";
+import { closeSeat, closeWholeSeat, HANDOFF_REQUEST, seatCloseRefusal } from "../seat.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { refusalBody, refusalText, userError } from "../user-errors.ts";
@@ -500,6 +500,14 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     m = path.match(/^\/api\/bots\/([\w-]+)\/seat\/(handoff|close)$/);
     if (m && method === "POST") {
       const body = await readBody(req);
+      if (m[2] === "close" && body?.all === true) {
+        if (body.threadId !== undefined) return json(res, 400, { error: "send threadId to close one conversation, or all: true to close every one, not both" });
+        const bot = store.bot(m[1]);
+        if (!bot) return json(res, 404, { error: "no such bot" });
+        const { closed, refusals } = closeWholeSeat(store, bot.id, (threadId) => threadBusy(bot.id, threadId), (threadId) => !cloudThreadRefusal(auth, threadId));
+        if (refusals.length) return json(res, 409, { ...userError("serverError.seat.notAll", { count: refusals.length }), conversations: refusals });
+        return json(res, 200, { ok: true, notes: closed });
+      }
       requirePinnedClientThread(m[1], body?.threadId);
       const bot = requestedTaskBot(m[1], body?.threadId);
       const notYours = cloudThreadRefusal(auth, bot.threadId);
