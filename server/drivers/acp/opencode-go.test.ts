@@ -298,6 +298,58 @@ describe("OpenCode catalog", () => {
     }
   });
 
+  it("ends a turn whose shell command moved to the background, and keeps the turn that command later wakes out of the next one", async () => {
+    // OpenCode 2.3.1+ moves a shell command still running at its timeout to the background instead of killing it; the
+    // prompt ends, and the command's finish wakes a turn that 2.3.1's ACP streams with no session/prompt behind it.
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-background-wake-"));
+    const authDir = join(scratch, "opencode");
+    mkdirSync(authDir, { recursive: true });
+    writeFileSync(join(authDir, "auth.json"), JSON.stringify({ opencode: { type: "api", key: "zen-secret" } }));
+    const woken = join(scratch, "woken");
+    const dump = join(scratch, "dump.json");
+    const driver = createOpenCodeDriver(async () => catalog("opencode/big-pickle"));
+    const instance = await driver.create({
+      instanceId: "opencode-background-wake",
+      displayName: "OpenCode",
+      environment: {
+        XDG_DATA_HOME: scratch,
+        OPENCODE_API_KEY: "",
+        FAKE_ACP_MODELS: "opencode/big-pickle",
+        FAKE_ACP_MODE: "background-wake",
+        FAKE_ACP_WOKEN_FILE: woken,
+        FAKE_ACP_DUMP: dump,
+      },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    const recorder = recordEvents(instance.adapter);
+    let pid = 0;
+    try {
+      const first = await instance.adapter.sendTurn({ threadId: "t-opencode-background-wake", text: "build it", model: "opencode/big-pickle" });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId)).toMatchObject({ ok: true });
+      expect(JSON.stringify(recorder.events)).toContain("build started");
+      pid = (JSON.parse(readFileSync(dump, "utf8")) as { pid: number }).pid;
+      for (let i = 0; i < 200 && !existsSync(woken); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(existsSync(woken)).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(JSON.stringify(recorder.events)).not.toContain("WOKEN");
+      expect(recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+
+      const second = await instance.adapter.sendTurn({ threadId: "t-opencode-background-wake", text: "and now?", model: "opencode/big-pickle" });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId)).toMatchObject({ ok: true });
+      const secondEvents = JSON.stringify(recorder.events.filter((event) => "turnId" in event && event.turnId === second.turnId));
+      expect(secondEvents).toContain("second answer");
+      expect(JSON.stringify(recorder.events)).not.toContain("WOKEN");
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      await removeTempDir(scratch);
+    }
+    // Dispose ends OpenCode itself; its own shell daemon stops when that owner connection goes.
+    expect(pid).toBeGreaterThan(0);
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
+
   it("classifies ACP's standard authentication error", () => {
     expect(classifyOpenCodeError({ code: -32000 })).toBe("invalid_credentials");
   });

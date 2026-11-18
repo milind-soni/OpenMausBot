@@ -26,6 +26,8 @@
 //       grok 1.0.25's initialize, or FAKE_ACP_MCP_HANDSHAKE; FAKE_ACP_MCP_SCHEMA_BYTES=1 adds each schema's length)
 //     | lend-question (list_shared_computers around a question)
 //     | list-peers (list_bots through the agents MCP; keeps the first agents server it is offered, like Hermes)
+//     | background-wake (OpenCode 2.3.1+: the first prompt's shell call moves to the background and the prompt ends; 300 ms
+//       later that shell's finish streams a turn no prompt asked for, then FAKE_ACP_WOKEN_FILE is written)
 //   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list reports these comma-separated native servers after the session's accepted ones
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
@@ -496,6 +498,7 @@ let onAskQuestionAnswered: (() => void) | null = null;
 
 let hangingPromptId: unknown = null;
 let streamingPromptId: unknown = null;
+let backgroundWakePlayed = false;
 let hangKeepAlive: ReturnType<typeof setInterval> | null = null;
 
 type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
@@ -1235,6 +1238,27 @@ function handle(msg: any) {
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
         complete();
+        return;
+      }
+      if (mode === "background-wake") {
+        // OpenCode 2.3.1+: a shell command still running at its timeout moves to the background, the prompt ends, and the
+        // command's finish later wakes a turn OpenCode streams as session/updates no session/prompt asked for.
+        const update = (u: Record<string, unknown>) => out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params?.sessionId, update: u } });
+        if (backgroundWakePlayed) {
+          update({ sessionUpdate: "agent_message_chunk", content: { text: "second answer" } });
+          complete();
+          return;
+        }
+        backgroundWakePlayed = true;
+        update({ sessionUpdate: "tool_call", toolCallId: "tc-build", status: "in_progress", kind: "execute", title: "make", rawInput: { command: "make" } });
+        update({ sessionUpdate: "tool_call_update", toolCallId: "tc-build", status: "completed", rawOutput: { output: "Command moved to the background (shell ID: sh_1)." } });
+        update({ sessionUpdate: "agent_message_chunk", content: { text: "build started" } });
+        complete();
+        setTimeout(() => {
+          update({ sessionUpdate: "agent_message_chunk", content: { text: "WOKEN build finished" } });
+          update({ sessionUpdate: "tool_call", toolCallId: "tc-woken", status: "completed", kind: "execute", title: "make test", rawOutput: { output: "WOKEN ok" } });
+          if (process.env.FAKE_ACP_WOKEN_FILE) writeFileSync(process.env.FAKE_ACP_WOKEN_FILE, "sent");
+        }, 300);
         return;
       }
       if (mode === "finished-tools") {
