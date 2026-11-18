@@ -64,7 +64,7 @@ describe("a scheduled run whose cloud computer did not wake", () => {
     expect(h.world.started).toEqual([]);
     const [run] = h.runs();
     expect(run).toMatchObject({ status: "queued", scheduledFor: h.due, retryAt: h.due + WAKE_RETRY_AFTER_MS[0]!, wakeRetries: 1, attentionCode: "routines.server.wakeRetry" });
-    expect(run!.attention).toMatch(/^The cloud computer did not wake, so this run has not started yet\. It tries again at /);
+    expect(run!.attention).toMatch(/^The cloud desktop did not wake, so this run has not started yet\. It tries again at /);
     expect(run).not.toHaveProperty("error");
 
     // Nothing is asked of the computer before the retry is due.
@@ -110,7 +110,7 @@ describe("a scheduled run whose cloud computer did not wake", () => {
     expect(h.world.prepared).toHaveLength(4);
     expect(h.world.started).toEqual([]);
     expect(h.runs()).toMatchObject([{ status: "failed", errorCode: "routines.server.noWakeRetried",
-      error: "The cloud computer did not wake in 4 tries, so this run did not start. The next scheduled run tries again." }]);
+      error: "The cloud desktop did not wake in 4 tries, so this run did not start. The next scheduled run tries again." }]);
     expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: true });
   });
 
@@ -120,7 +120,7 @@ describe("a scheduled run whose cloud computer did not wake", () => {
     await h.passAt(h.due);
     expect(h.runs()).toMatchObject([{ status: "queued", retryAt: h.due + WAKE_RETRY_AFTER_MS[0]! }]);
     await h.passAt(h.due + WAKE_RETRY_AFTER_MS[0]!);
-    expect(h.runs()).toMatchObject([{ status: "failed", error: "The cloud computer did not wake in 2 tries, so this run did not start. The next scheduled run tries again." }]);
+    expect(h.runs()).toMatchObject([{ status: "failed", error: "The cloud desktop did not wake in 2 tries, so this run did not start. The next scheduled run tries again." }]);
     await h.passAt(h.due + 15 * MINUTE);
     expect(h.world.started).toHaveLength(1);
     expect(h.runs().find((run) => run.status === "running")).toMatchObject({ scheduledFor: h.due + 15 * MINUTE });
@@ -179,6 +179,6 @@ describe("whether a run that did not wake is tried again", () => {
   it("ends a once-only routine's tries without promising a next run", () => {
     const once = { ...run(), wakeRetries: 3 };
     expect(wakeRetry(once, RUN_COMPUTER_LINES.noWake, { enabled: true, nextRunAt: null }, START + 25 * MINUTE))
-      .toBe("The cloud computer did not wake in 4 tries, so this run did not start.");
+      .toBe("The cloud desktop did not wake in 4 tries, so this run did not start.");
   });
 });
