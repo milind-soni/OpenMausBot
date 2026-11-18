@@ -438,7 +438,9 @@ export async function sendMessage(account: EmailAccount, guard: EmailGuard, inpu
     filed = await imapSession(account, guard, async (client) => {
       const sentBox = (await client.list()).find((box) => box.specialUse === "\\Sent");
       if (!sentBox) return false;
-      await client.append(sentBox.path, raw, ["\\Seen"]);
+      // Bcc belongs in the private Sent copy, never in the SMTP message.
+      composed.keepBcc = true;
+      await client.append(sentBox.path, input.bcc?.length ? await composed.build() : raw, ["\\Seen"]);
       return true;
     });
   } catch {}

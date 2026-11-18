@@ -23,7 +23,17 @@ const image = { cid: "logo", data_base64: png.toString("base64") };
 const account = { address: "me@example.test", username: "fake", password: "fake", smtp: { host: "fake.invalid", port: 465, secure: true }, imap: { host: "fake.invalid", port: 993, secure: true } } as EmailAccount;
 const input = { to: ["to@example.test"], cc: ["cc@example.test"], bcc: ["bcc@example.test"], subject: "test", text: "plain" };
 beforeEach(() => { fake.fail = false; fake.smtpCalls = 0; fake.imapCalls = 0; fake.readCalls = 0; });
-it("composes alternatives, original PNG CID bytes, recipients and reply headers; files the identical raw", async () => {
+async function sentCopy() {
+  const sent = await simpleParser(fake.raw, { skipImageLinks: true });
+  const filed = await simpleParser(fake.filed, { skipImageLinks: true });
+  expect(sent.bcc).toBeUndefined();
+  for (const key of ["messageId", "date", "from", "to", "cc", "subject", "text", "html", "inReplyTo", "references", "attachments"] as const) {
+    expect(filed[key], key).toEqual(sent[key]);
+  }
+  return filed;
+}
+
+it("composes alternatives, original PNG CID bytes, recipients and reply headers; keeps Bcc only in Sent", async () => {
   const result = await sendMessage(account, openGuard, { ...input, html: '<p>rich<img src="cid:logo"></p>', inline_images: [image], inReplyTo: "<original@example.test>" });
   const parsed = await simpleParser(fake.raw, { skipImageLinks: true });
   expect(fake.raw.toString()).toContain("multipart/alternative");
@@ -34,8 +44,21 @@ it("composes alternatives, original PNG CID bytes, recipients and reply headers;
   expect(parsed.inReplyTo).toBe("<original@example.test>");
   expect(parsed.references).toBe("<original@example.test>");
   expect(fake.envelope.to).toEqual([...input.to, ...input.cc, ...input.bcc]);
-  expect(fake.filed).toEqual(fake.raw);
+  expect((await sentCopy()).bcc).toMatchObject({ value: [{ address: input.bcc[0] }] });
   expect(result.filed).toBe(true);
+});
+it("preserves named blind-copy recipients in a plain-text Sent copy", async () => {
+  const result = await sendMessage(account, openGuard, { ...input, bcc: ['"Hidden, Name" <hidden@example.test>', "隐名 <second@example.test>"] });
+  expect((await sentCopy()).bcc).toMatchObject({ value: [
+    { address: "hidden@example.test", name: "Hidden, Name" }, { address: "second@example.test", name: "隐名" },
+  ] });
+  expect(fake.envelope.to).toEqual([...input.to, ...input.cc, "hidden@example.test", "second@example.test"]);
+  expect(result.filed).toBe(true);
+});
+it.each([undefined, []])("files the identical raw when Bcc is %j", async (bcc) => {
+  await sendMessage(account, openGuard, { ...input, bcc });
+  expect((await sentCopy()).bcc).toBeUndefined();
+  expect(fake.filed).toEqual(fake.raw);
 });
 it("keeps old text calls and reports failed filing", async () => {
   fake.fail = true;
@@ -102,7 +125,7 @@ it("preserves HTML and inline PNG bytes through the native host and client", asy
     expect(parsed.references).toBe("<original@example.test>");
     expect(parsed.to).toMatchObject({ value: [{ address: input.to[0] }] });
     expect(parsed.cc).toMatchObject({ value: [{ address: input.cc[0] }] });
-    expect(fake.filed).toEqual(fake.raw);
+    expect((await sentCopy()).bcc).toMatchObject({ value: [{ address: input.bcc[0] }] });
     expect(fake.smtpCalls).toBe(1); expect(fake.imapCalls).toBe(1);
   });
 });
@@ -141,7 +164,7 @@ it("passes the maximum declared aggregate through harnessMcpRequest and rejects 
       expect(parsed.inReplyTo).toBe(replyMessageId);
       expect(parsed.references).toBe(replyMessageId);
       expect(parsed.html).toBe(args.html);
-      expect(fake.filed).toEqual(fake.raw);
+      expect((await sentCopy()).bcc).toMatchObject({ value: [{ address: input.bcc[0] }] });
       expect(JSON.parse(valid.result.content[0]!.text).filed).toBe(true);
       fake.smtpCalls = 0; fake.imapCalls = 0; fake.readCalls = 0;
       const over = { ...args, html: args.html + "x" };
