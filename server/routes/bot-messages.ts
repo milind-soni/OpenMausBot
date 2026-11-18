@@ -37,6 +37,7 @@ import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { noteTypedSend } from "../typed-sends.ts";
 import { engineSessionOutdated, startFresh } from "../fresh-start.ts";
+import { closeSeat, HANDOFF_REQUEST, seatCloseRefusal } from "../seat.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { refusalBody, refusalText, userError } from "../user-errors.ts";
@@ -494,6 +495,31 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (threadBusy(bot.id, bot.threadId)) return json(res, 409, userError("serverError.chat.busyFresh"));
       if (phoneSecretSubmissions.hasThread(bot.threadId)) return json(res, 409, userError("serverError.chat.savingCredential"));
       return json(res, 200, { ok: true, message: startFresh(store, bot.id, bot.threadId), threadId: bot.threadId });
+    }
+
+    m = path.match(/^\/api\/bots\/([\w-]+)\/seat\/(handoff|close)$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      requirePinnedClientThread(m[1], body?.threadId);
+      const bot = requestedTaskBot(m[1], body?.threadId);
+      const notYours = cloudThreadRefusal(auth, bot.threadId);
+      if (notYours) return json(res, 403, { error: notYours });
+      if (m[2] === "close") {
+        const refusal = seatCloseRefusal(store, bot.threadId, threadBusy(bot.id, bot.threadId));
+        if (refusal) return json(res, 409, refusal);
+        return json(res, 200, { ok: true, note: closeSeat(store, bot.id, bot.threadId), threadId: bot.threadId });
+      }
+      if (threadBusy(bot.id, bot.threadId)) return json(res, 409, userError("serverError.seat.busy"));
+      try {
+        const receipt = await acceptDirectSend({
+          botId: bot.id, threadId: bot.threadId, text: HANDOFF_REQUEST, sender: messageSender(auth), trigger: usageTriggerFor(auth),
+          personPresent: auth.kind === "session" || DESKTOP_MANAGED, admin: owners.admin(auth),
+        });
+        return json(res, 202, receipt);
+      } catch (error) {
+        if (error instanceof DirectSendRefused) return json(res, error.status, error.body);
+        throw error;
+      }
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/context$/);

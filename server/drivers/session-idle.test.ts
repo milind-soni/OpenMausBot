@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { forgetPresence, personAsks, sawThread, seenWithin } from "../thread-presence.ts";
 import {
-  armIdleClose, engineIdleMs, idleEnginesAllowed, keepWarm, sessionIdlePolicy, SMALL_BOX_IDLE_MS, stopIdleClose, UNWATCHED_IDLE_MS, warmEngineKeys,
+  armedIdleCount, armIdleClose, closeIdleEngines, engineIdleMs, idleEnginesAllowed, keepWarm, sessionIdlePolicy, SMALL_BOX_IDLE_MS, stopIdleClose, UNWATCHED_IDLE_MS,
+  warmEngineKeys,
 } from "./session-idle.ts";
 
 const GB = 1024 ** 3;
@@ -156,6 +157,29 @@ describe("idle engines on a small box", () => {
       vi.advanceTimersByTime(1);
       expect(a.state.closed).toBe(1);
       stopIdleClose("a", timer);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("closing a conversation's idle engine now", () => {
+  it("closes only that conversation's idle engines, never a busy one, and stops their timers", () => {
+    vi.useFakeTimers();
+    try {
+      const closed: string[] = [];
+      const engine = (key: string, threadId: string, idle = true) => ({ idle: () => idle, close: () => { closed.push(key); }, threadId });
+      const before = armedIdleCount();
+      armIdleClose("claude\0t1", 600_000, engine("claude\0t1", "t1"));
+      armIdleClose("acp\0t1", 600_000, engine("acp\0t1", "t1"));
+      armIdleClose("claude\0t2", 600_000, engine("claude\0t2", "t2"));
+      const busy = armIdleClose("codex\0t1", 600_000, engine("codex\0t1", "t1", false));
+      expect(closeIdleEngines("t1")).toBe(2);
+      expect(closed).toEqual(["claude\0t1", "acp\0t1"]);
+      expect(armedIdleCount()).toBe(before + 2);
+      vi.advanceTimersByTime(600_000);
+      expect(closed).toEqual(["claude\0t1", "acp\0t1", "claude\0t2", "codex\0t1"]);
+      stopIdleClose("codex\0t1", busy);
     } finally {
       vi.useRealTimers();
     }

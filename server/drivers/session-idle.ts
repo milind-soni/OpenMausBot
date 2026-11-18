@@ -144,6 +144,20 @@ export function sweepIdleEngines(memory: Pick<EngineMemory, "enabled" | "headroo
 }
 engineMemory.useIdleSweep(() => void sweepIdleEngines());
 
+/** Closes now every idle per-chat engine kept for this conversation, whatever its idle time left. Returns how many. */
+export function closeIdleEngines(threadId: string): number {
+  let closed = 0;
+  for (const [key, { engine, timer }] of armed) {
+    if (engine.threadId !== threadId || !engine.idle()) continue;
+    clearTimeout(timer);
+    armed.delete(key);
+    warmEngines.delete(key);
+    engine.close();
+    closed += 1;
+  }
+  return closed;
+}
+
 /** How many per-chat engines are kept idle now: for tests. */
 export const armedIdleCount = (): number => armed.size;
 

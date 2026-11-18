@@ -17,6 +17,7 @@ import { promptWithReply } from "../replies.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { acceptedSendMatch, sendFingerprint, SendSequencer } from "../send-idempotency.ts";
 import { _queuedCount, drainSteeredMessages, queuedSteeredMessage, queueSteeredMessage } from "../steer-queue.ts";
+import { HANDOFF_REQUEST } from "../seat.ts";
 import { Store, type Message } from "../store.ts";
 import { typedWords } from "../typed-sends.ts";
 import { USER_ERROR } from "../user-errors.ts";
@@ -168,7 +169,11 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
     const response = await fetch(`${base}/api/bots/${bot.id}/context`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) });
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
-  return { store, bot, threadId, state, post, edit, cancelQueued, context, show, row, sent, patches: vi.spyOn(store, "patchMessage") };
+  const seat = async (action: "handoff" | "close") => {
+    const response = await fetch(`${base}/api/bots/${bot.id}/seat/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId }) });
+    return { status: response.status, body: await response.json() as Record<string, any> };
+  };
+  return { store, bot, threadId, state, post, edit, cancelQueued, context, seat, show, row, sent, patches: vi.spyOn(store, "patchMessage") };
 }
 
 describe("POST /api/bots/:id/context", () => {
@@ -202,6 +207,28 @@ describe("POST /api/bots/:id/context", () => {
     expect(startFresh(store, bot.id, threadId)).not.toBeNull();
     answer(counted);
     expect(await reading).toEqual({ status: 200, body: { threadId, breakdown: null } });
+  });
+});
+
+describe("POST /api/bots/:id/seat/handoff and /seat/close", () => {
+  const NOTE = "Parser passes. Next: the import screen. Keep the old CSV path.";
+
+  it("asks the bot for its note as an ordinary send, then saves the note and closes", async () => {
+    const { store, threadId, state, seat, sent } = await fixture();
+    expect(await seat("close")).toMatchObject({ status: 409, body: { errorKey: "serverError.seat.noNote" } });
+    expect((await seat("handoff")).status).toBe(202);
+    expect(state.accepted.map((send) => send.text)).toEqual([HANDOFF_REQUEST]);
+    expect(sent().at(-1)?.text).toBe(HANDOFF_REQUEST);
+    store.appendMessage(threadId, { role: "bot", kind: "text", text: NOTE });
+    const closed = await seat("close");
+    expect(closed).toMatchObject({ status: 200, body: { ok: true, threadId, note: { kind: "compaction", compaction: { summary: NOTE } } } });
+  });
+
+  it("refuses both while the bot works, and sends nothing", async () => {
+    const { state, seat } = await fixture({ threadBusy: () => true });
+    expect(await seat("handoff")).toMatchObject({ status: 409, body: { errorKey: "serverError.seat.busy" } });
+    expect(await seat("close")).toMatchObject({ status: 409, body: { errorKey: "serverError.seat.busy" } });
+    expect(state.accepted).toEqual([]);
   });
 });
 
