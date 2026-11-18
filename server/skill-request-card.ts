@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 
 import { redactSecretsInText } from "./redact.ts";
-import { listSkills, readSkillFile, readSkillReferences } from "./skills.ts";
+import { fetchSkillFromSource } from "./skill-fetch.ts";
+import { isSkillReferencePath, MAX_SKILL_REFERENCES, STAGED_SKILL_REFERENCE_MAX_BYTES } from "./skill-storage.ts";
+import { listSkills, readSkillFile, readSkillReferences, STAGED_GIST_MAX } from "./skills.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 
 type SkillFile = { path: string; content: string };
@@ -47,6 +49,42 @@ export function parseSkillManageReferences(value: unknown): SkillFile[] | { erro
     typeof (file as { content?: unknown }).content === "string");
   if (!valid) return { error: 'references must be a list of { path: "references/<topic>.md", content } objects' };
   return references.map((file) => ({ path: file.path.trim(), content: file.content }));
+}
+
+/**
+ * skill_manage action "import": fetch the skill the way the Skills page Import box does (HTTPS from the app, no git on
+ * the person's computer) and turn it into a create request, so it gets the same card, scan and name checks as one the
+ * bot wrote. Only SKILL.md and its references/<topic>.md files come in; the card says what was left behind.
+ */
+export async function importedSkillRequest<T extends Record<string, unknown>>(body: T, fetcher: typeof fetch = fetch, cancel?: AbortSignal): Promise<T | { importError: string }> {
+  if (body.action !== "import") return body;
+  const source = typeof body.source === "string" ? body.source.trim() : "";
+  if (!source) return { importError: "skill_manage import needs source: owner/repo, a GitHub link to a skill folder or its SKILL.md, or a skills.sh link." };
+  const fetched = await fetchSkillFromSource(source, fetcher, cancel);
+  if ("error" in fetched) return { importError: `Could not import a skill from ${source}: ${fetched.error}` };
+  if (fetched.skills.length !== 1) {
+    const names = fetched.skills.map((skill) => skill.source.split("/").pop()).join(", ");
+    return { importError: `${source} has ${fetched.skills.length} skills (${names}). Import one at a time: pass the link to that skill's folder or its skills.sh page.` };
+  }
+  const skill = fetched.skills[0]!;
+  const skillMd = skill.files.find((file) => file.path === "SKILL.md");
+  if (!skillMd) return { importError: `${source} has no SKILL.md to import.` };
+  const references = skill.files
+    .filter((file) => isSkillReferencePath(file.path) && file.content.byteLength <= STAGED_SKILL_REFERENCE_MAX_BYTES)
+    .slice(0, MAX_SKILL_REFERENCES);
+  const left = [...skill.files.filter((file) => file !== skillMd && !references.includes(file)).map((file) => file.path), ...skill.skipped.map((file) => file.path)];
+  const gist = left.length
+    ? `Imported from ${skill.source}. Not brought in (only SKILL.md and references/*.md are): ${left.join(", ")}`.slice(0, STAGED_GIST_MAX)
+    : body.gist;
+  return {
+    ...body,
+    action: "create",
+    skill_name: undefined,
+    skill_md: skillMd.content.toString("utf8"),
+    references: references.map((file) => ({ path: file.path, content: file.content.toString("utf8") })),
+    source: skill.source,
+    gist,
+  };
 }
 
 /** Any scrub change to the SKILL.md or a reference drops sha256, so the card is deny-only and never approves bytes it did not show. */

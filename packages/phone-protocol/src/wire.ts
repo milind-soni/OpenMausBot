@@ -332,7 +332,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Whether this bot may use the X research tools (x_search and its
    * actions), which spend the workspace's treg balance.
    * Absent/false = off: the person turns it on per bot. */
-  xResearch?: boolean;
+  xResearch?: boolean; /** Team Cloud: an admin let it change the team's shared files from any chat. Absent: it reads them only. */ teamFilesEdit?: boolean;
   /** Whether this bot uses native memory. Absent/true = enabled. */
   memoryEnabled?: boolean;
   /** Built-in tool groups turned off for this bot (shared/tool-groups.ts). Absent or empty: all on. */
@@ -901,8 +901,8 @@ export interface RoomQueueEntry {
   /** 1-based place in that thread's line; `of` counts the whole line. */
   position: number;
   of: number;
-  /** Who a queued member waits on: the member running now, else the one speaking (or the one ahead). */
-  waitingForBotId?: string;
+  /** Who a queued member waits on: the member running now, else the one speaking (or the one ahead). `busyIn`: where it runs now outside this room, another room's thread (`groupId` set) or a thread of its own; it starts here when that finishes. */
+  waitingForBotId?: string; busyIn?: { groupId?: string; threadId: string };
   assignmentId?: string;
 }
 

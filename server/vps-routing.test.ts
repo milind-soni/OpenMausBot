@@ -439,6 +439,27 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
     }
   }, 30_000);
 
+  it("tells a Boat bot without Boat that the saved VPS is not chosen for it, instead of only asking for Boat", async () => {
+    await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } });
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    try {
+      rmSync(gateFile, { force: true }); rmSync(`${acpDump}.mcp.json`, { force: true });
+      await api("PATCH", `/api/bots/${bot.id}`, { browser: false, computer: null, modelSelection: { instanceId: "vps", model: "fake-model" } });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Use the remote computer" })).status).toBe(202);
+      await until(async () => existsSync(`${acpDump}.mcp.json`), "the turn");
+      const agents = JSON.parse(readFileSync(`${acpDump}.mcp.json`, "utf8")).find((tool: { name: string }) => tool.name === "agents");
+      const token = agents.env.find((entry: { name: string }) => entry.name === "OMB_COMMS_TOKEN").value;
+      const availability = await (await fetch(`${BASE}/api/internal/computer/select`, { headers: { authorization: `Bearer ${token}` } })).json() as any;
+      const cloud = availability.options.find((option: any) => option.surface === "cloud");
+      expect(cloud.available).toBe(false);
+      expect(cloud.reason).toContain("production-vps");
+      expect(cloud.reason).toContain("Self-hosted VPS");
+    } finally {
+      writeFileSync(gateFile, "open");
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+    }
+  }, 30_000);
+
   it.each(["stopped", "missing", "stopped-during-turn"])(
     "lets Auto discover a %s VPS and start or create it through its chat tool",
     async state => {

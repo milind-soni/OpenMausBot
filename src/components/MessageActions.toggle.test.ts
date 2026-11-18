@@ -26,7 +26,7 @@ async function render(forceOpen = false) {
   await act(async () => {
     root.render(
       createElement("div", { [MESSAGE_ROW]: "" },
-        createElement("div", { "data-chat-bubble": "" }, createElement("p", null, "an answer")),
+        createElement("div", { "data-chat-bubble": "" }, createElement("p", null, "an answer"), createElement("video", { "data-media": "" })),
         createElement("span", { "data-outside": "" }, "gap"),
         createElement(MessageActions, {
           side: "bot",
@@ -148,6 +148,12 @@ describe("message actions row", () => {
     window.getSelection()!.selectAllChildren(body());
     expect(await rightClick(body())).toBe(false);
     window.getSelection()!.removeAllRanges();
+    expect(items()).toHaveLength(0);
+  });
+
+  it("leaves the native menu for a video in the bubble, which offers Save and Open", async () => {
+    await render();
+    expect(await rightClick(host.querySelector("[data-media]")!)).toBe(false);
     expect(items()).toHaveLength(0);
   });
 

@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request, type Server } from "node:http";
 import { connect, type Socket } from "node:net";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12144,6 +12144,26 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("refuses a skill_manage import it cannot fetch with the reason, and stages nothing", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { skillAuthoring: true });
+      const post = async (body: Record<string, unknown>) => {
+        const response = await fetch(`${BASE}/api/internal/skills/stage`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, action: "import", ...body }),
+        });
+        return { status: response.status, error: ((await response.json()) as { error: string }).error };
+      };
+      expect(await post({})).toEqual({ status: 422, error: expect.stringContaining("skill_manage import needs source") });
+      expect(await post({ source: "not a link" })).toEqual({ status: 422, error: expect.stringMatching(/^Could not import a skill from not a link: /) });
+      expect((await api("GET", `/api/bots/${bot.id}/skills`)).body.skills).toEqual([]);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("turns a bot's own skill on, off or deletes it at once, with a receipt the person can undo", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -14492,7 +14512,7 @@ describe("message pages", () => {
     expect(whole.status).toBe(200);
     expect(whole.headers.get("content-type")).toBe("video/mp4");
     expect(whole.headers.get("accept-ranges")).toBe("bytes");
-    expect(whole.headers.get("content-disposition")).toBe("inline");
+    expect(whole.headers.get("content-disposition")).toBe(`inline; filename="clip.mp4"; filename*=UTF-8''clip.mp4`);
     expect(whole.headers.get("cache-control")).toBe("private, no-store");
     expect(whole.headers.get("x-content-type-options")).toBe("nosniff");
     expect(whole.headers.get("cross-origin-resource-policy")).toBe("same-origin");
@@ -14531,6 +14551,75 @@ describe("message pages", () => {
       expect((await fetch(`${BASE}${link.url}`)).status).toBe(404);
     } finally {
       writeFileSync(video, bytes);
+    }
+  });
+
+  it("streams a video over the 25 MB preview cap to a remote browser's cookie session in capped chunks, never to anyone else", async () => {
+    const threadId = "test-linked-file-room-thread";
+    const route = `/api/threads/${threadId}/messages/linked-video-message/file`;
+    const video = join(home, ".openmausbot", "workspaces", "test-bot-a", "clip.mp4");
+    const original = readFileSync(video);
+    const size = 30 * 1024 * 1024;
+    const chunk = 8 * 1024 * 1024;
+    // What a Cloud's edge proxy hands the server: the browser is remote and signed in by its cookie alone.
+    const viaEdge = { "x-forwarded-for": "198.51.100.30", "x-forwarded-proto": "https" };
+    const pairing = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+    const paired = await fetch(`${BASE}/api/auth/pair`, {
+      method: "POST", headers: { ...viaEdge, "content-type": "application/json" }, body: JSON.stringify({ code: pairing.body.code, label: "Cloud browser", cookie: true }),
+    });
+    expect(paired.status).toBe(200);
+    const browser = { ...viaEdge, cookie: paired.headers.get("set-cookie")!.split(";", 1)[0]! };
+    try {
+      truncateSync(video, size);
+      const marks = openSync(video, "r+");
+      writeSync(marks, "HEAD", 0);
+      writeSync(marks, "TAIL", size - 4);
+      closeSync(marks);
+
+      expect((await fetch(`${BASE}${route}`, {
+        method: "POST", headers: { ...viaEdge, "content-type": "application/json" }, body: JSON.stringify({ path: pathToFileURL(video).href, media: true }),
+      })).status).toBe(403);
+      const issued = await fetch(`${BASE}${route}`, {
+        method: "POST", headers: { ...browser, "content-type": "application/json" }, body: JSON.stringify({ path: pathToFileURL(video).href, media: true }),
+      });
+      expect(issued.status).toBe(200);
+      const link = (await issued.json()) as { url: string; bytes: number };
+      expect(link.bytes).toBe(size);
+
+      const first = await fetch(`${BASE}${link.url}`, { headers: { ...browser, range: "bytes=0-" } });
+      expect(first.status).toBe(206);
+      expect(first.headers.get("content-range")).toBe(`bytes 0-${chunk - 1}/${size}`);
+      expect(first.headers.get("content-length")).toBe(String(chunk));
+      const firstBytes = Buffer.from(await first.arrayBuffer());
+      expect(firstBytes.byteLength).toBe(chunk);
+      expect(firstBytes.subarray(0, 4).toString()).toBe("HEAD");
+
+      const small = await fetch(`${BASE}${link.url}`, { headers: { ...browser, range: "bytes=2-3" } });
+      expect(small.status).toBe(206);
+      expect(await small.text()).toBe("AD");
+      const last = await fetch(`${BASE}${link.url}`, { headers: { ...browser, range: "bytes=-4" } });
+      expect(last.headers.get("content-range")).toBe(`bytes ${size - 4}-${size - 1}/${size}`);
+      expect(await last.text()).toBe("TAIL");
+      const middle = await fetch(`${BASE}${link.url}`, { headers: { ...browser, range: `bytes=${chunk}-${size - 1}` } });
+      expect(middle.headers.get("content-range")).toBe(`bytes ${chunk}-${2 * chunk - 1}/${size}`);
+      await middle.body?.cancel();
+      const past = await fetch(`${BASE}${link.url}`, { headers: { ...browser, range: `bytes=${size}-` } });
+      expect(past.status).toBe(416);
+      expect(past.headers.get("content-range")).toBe(`bytes */${size}`);
+
+      // Save As sends no Range: the whole file streams, named for the download.
+      const whole = await fetch(`${BASE}${link.url}`, { headers: browser });
+      expect(whole.status).toBe(200);
+      expect(whole.headers.get("content-length")).toBe(String(size));
+      expect(whole.headers.get("content-disposition")).toBe(`inline; filename="clip.mp4"; filename*=UTF-8''clip.mp4`);
+      await whole.body?.cancel();
+
+      // The link is this browser's: the edge without its cookie, and this machine's own callers, get nothing.
+      expect((await fetch(`${BASE}${link.url}`, { headers: { ...viaEdge, range: "bytes=0-" } })).status).toBe(403);
+      expect((await fetch(`${BASE}${link.url}`, { headers: { range: "bytes=0-" } })).status).toBe(404);
+    } finally {
+      writeFileSync(video, original);
+      await fetch(`${BASE}/api/auth/logout`, { method: "POST", headers: browser }).catch(() => undefined);
     }
   });
 

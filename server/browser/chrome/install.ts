@@ -62,8 +62,9 @@ export async function downloadArchive(
   url: string,
   destination: string,
   bytes: number,
-  options: { fetchImpl?: typeof fetch; onProgress?: (progress: DownloadProgress) => void; timeoutMs?: number } = {},
+  options: { fetchImpl?: typeof fetch; onProgress?: (progress: DownloadProgress) => void; timeoutMs?: number; label?: string } = {},
 ): Promise<string> {
+  const what = options.label ?? "Chrome";
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DOWNLOAD_TIMEOUT_MS);
   timer.unref?.();
@@ -72,15 +73,15 @@ export async function downloadArchive(
   try {
     const response = await (options.fetchImpl ?? fetch)(url, { redirect: "follow", signal: controller.signal });
     const body = response.body;
-    if (!response.ok || !body) throw new Error(`the Chrome download failed (HTTP ${response.status})`);
+    if (!response.ok || !body) throw new Error(`the ${what} download failed (HTTP ${response.status})`);
     const declared = Number(response.headers.get("content-length") ?? NaN);
-    if (Number.isFinite(declared) && declared !== bytes) throw new Error("the Chrome download did not match its pinned size; nothing was installed");
+    if (Number.isFinite(declared) && declared !== bytes) throw new Error(`the ${what} download did not match its pinned size; nothing was installed`);
     const file = createWriteStream(destination, { mode: 0o600 });
     file.once("error", () => controller.abort());
     await pipeline(async function* () {
       for await (const chunk of body) {
         received += chunk.byteLength;
-        if (received > bytes) throw new Error("the Chrome download was larger than its pinned size; nothing was installed");
+        if (received > bytes) throw new Error(`the ${what} download was larger than its pinned size; nothing was installed`);
         hash.update(chunk);
         yield chunk;
         options.onProgress?.({ received, total: bytes });
@@ -92,7 +93,7 @@ export async function downloadArchive(
   } finally {
     clearTimeout(timer);
   }
-  if (received !== bytes) throw new Error("the Chrome download ended early; nothing was installed");
+  if (received !== bytes) throw new Error(`the ${what} download ended early; nothing was installed`);
   return hash.digest("hex");
 }
 

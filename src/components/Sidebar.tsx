@@ -193,7 +193,7 @@ export const GroupListItem = memo(function GroupListItem({
       title={density === "icons" ? group.name : undefined}
       aria-label={density === "icons" ? group.name : undefined}
     >
-      <span className={cn("rounded-full", selected && !expanded && "ring-2 ring-accent/70 ring-offset-2 ring-offset-panel")}>{group.dm ? <StackedMauses members={members} density={railTile ? "comfortable" : density} large={simpleRow || railTile} /> : <RoomMark density={railTile ? "comfortable" : density} large={simpleRow || railTile} />}</span>
+      {group.dm ? <StackedMauses members={members} density={railTile ? "comfortable" : density} large={simpleRow || railTile} /> : <RoomMark density={railTile ? "comfortable" : density} large={simpleRow || railTile} />}
       <div className={cn("min-w-0 flex-1", density === "icons" && "hidden")}>
         <div className={cn("flex items-baseline justify-between gap-2", simpleRow && "pr-7")}>
           <span className={cn("truncate text-[14px] text-ink", simpleRow ? "font-medium leading-5" : "font-semibold")}>{group.name}</span>
@@ -733,7 +733,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const body = (
     <>
-      <span className={cn("relative flex shrink-0", simpleRow && "-m-[3px]", selected && "rounded-full ring-2 ring-accent/70 ring-offset-2 ring-offset-panel")} title={iconOnly || simpleList ? undefined : [bot.name, ...details].join(" · ")}>
+      <span className={cn("relative flex shrink-0", simpleRow && "-m-[3px]")} title={iconOnly || simpleList ? undefined : [bot.name, ...details].join(" · ")}>
         <BotAvatar
           bot={bot}
           state={stateForBot({ ...bot, messages: visible })}

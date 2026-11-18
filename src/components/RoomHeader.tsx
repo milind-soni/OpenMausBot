@@ -9,9 +9,10 @@ import { normalizeState } from "@/lib/mascot";
 import { effectivePlace, placeLabelKey } from "@/lib/place";
 import { openRoomPanel } from "@/lib/room-panel";
 import { chosenResponder, responderChoice, responderTitle } from "@/lib/room-responder";
-import { roomSpeakerIds } from "@/lib/room-threads";
+import { busyPlaceOf, roomSpeakerIds } from "@/lib/room-threads";
 import { formatTokens } from "@/lib/usage";
 import { useStore, type Bot, type Group } from "@/state/store";
+import type { RoomQueueEntry } from "../../shared/wire";
 import { BotAvatar } from "./Avatar";
 import { RoomContextBadge } from "./ContextWarning";
 import { ConversationTurnLimit } from "./ConversationTurnLimit";
@@ -62,12 +63,12 @@ export function DefaultResponderSelect({ group, members }: { group: Group; membe
   );
 }
 
-function memberMauses(group: Group, members: Bot[]) {
+function memberMauses(group: Group, members: Bot[], placeOf: (entry: RoomQueueEntry) => string | undefined) {
   const contextWarnings = roomContextWarnings(group, members);
   const speakersElsewhere = new Set(roomSpeakerIds(group).filter((id) => id !== group.busyBotId));
   return members.map((b) => {
     const busy = group.busyBotId === b.id;
-    const queueTitle = busy ? undefined : roomMemberQueueTitle(group, members, b);
+    const queueTitle = busy ? undefined : roomMemberQueueTitle(group, members, b, placeOf);
     const contextWarning = contextWarnings.find((warning) => warning.bot.id === b.id);
     const busyElsewhere = !busy && speakersElsewhere.has(b.id);
     const held = !group.dm && Boolean(group.holds?.[b.id]);
@@ -149,8 +150,8 @@ export function RoomHeader({
   membersTriggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
-  const { dispatch } = useStore();
-  const faces = memberMauses(group, members);
+  const { state, dispatch } = useStore();
+  const faces = memberMauses(group, members, busyPlaceOf(state.groups, state.bots));
   const pinned = (
     <PinnedMessagesMenu
       pins={pinnedPreview(group.messages, group.pinnedMessageId, t("room.aBot"), false)}

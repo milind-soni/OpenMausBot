@@ -1,5 +1,6 @@
 // POSIX-gated: the fake CLI is a shebang script.
 import { spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -140,6 +141,38 @@ posixOnly("engine hooks e2e (fake Claude honouring the settings hooks)", () => {
     const forged = await h.api("POST", "/api/internal/hook", { event: "PostToolUse", payload: { tool_use_id: "x" } }, { authorization: "Bearer not-a-real-token" });
     expect(forged.status).toBe(401);
   });
+});
+
+posixOnly("engine hooks e2e: full tool output that arrives after its turn ended", () => {
+  const h = harness("late", {}, { FAKE_CLAUDE_HOOKS_AFTER_TURN_MS: "4000" });
+
+  it("is still saved on that turn's rows, each once, and the ended turn's bearer is good for nothing else", async () => {
+    const bot = await h.runTurn();
+    expect(bot.messages.find((m: Msg) => m.kind === "digest").digest?.hookCoverage).toBe("preview");
+    const rows = async (): Promise<Msg[]> => (await h.getBot(bot.id)).messages.filter((m: Msg) => m.kind === "activity" && m.tool?.itemId);
+    const tokenDir = createHash("sha256").update(`${bot.id}\0${bot.threadId}`).digest("hex").slice(0, 24);
+    const bearer = { authorization: `Bearer ${readFileSync(join(h.home(), ".openmausbot", "hook-tokens", tokenDir, "token"), "utf8").trim()}` };
+
+    // While the late outputs are still owed, the ended turn's bearer writes only into its own bot and conversation.
+    const owed = (await rows()).find((m) => m.tool!.fullResult !== true)!;
+    for (const named of [{ botId: "another-bot" }, { fromBotId: "another-bot" }, { threadId: "another-thread" }, { fromThreadId: "another-thread" }]) {
+      const forged = await h.api("POST", "/api/internal/hook", { event: "PostToolUse", payload: { tool_use_id: owed.tool!.itemId, tool_response: "forged" }, ...named }, bearer);
+      expect(forged.status, JSON.stringify(named)).toBe(403);
+    }
+    await h.waitFor(async () => (await rows()).every((m) => m.tool!.fullResult === true), "the late hooks to save both outputs");
+    const digest = (await h.getBot(bot.id)).messages.find((m: Msg) => m.kind === "digest");
+    expect(digest.digest?.hookCoverage).toBe("full");
+    expect(digest.text).not.toContain("from tool previews");
+    const root = join(h.home(), ".openmausbot", "tool-results");
+    const spilled = readdirSync(join(root, readdirSync(root)[0]!)).map((name) => readFileSync(join(root, readdirSync(root)[0]!, name), "utf8"));
+    expect(spilled.some((text) => text.includes(BIG.slice(0, 200)))).toBe(true);
+    expect(spilled.some((text) => text.includes("forged"))).toBe(false);
+
+    const [first] = await rows();
+    const again = await h.api("POST", "/api/internal/hook", { event: "PostToolUse", payload: { tool_use_id: first!.tool!.itemId, tool_response: "replaced" } }, bearer);
+    expect(again.status).toBe(401);
+    expect((await h.api("POST", "/api/internal/hook", { event: "PreCompact", payload: { trigger: "auto" } }, bearer)).status).toBe(401);
+  }, 60_000);
 });
 
 posixOnly("engine hooks e2e: compaction", () => {

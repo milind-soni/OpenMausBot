@@ -512,7 +512,9 @@ describe("agents-proxy MCP surface", () => {
         expect(description).toContain("Only a pending result requires ending the turn");
       } else {
         expect(description).toContain("It applies at once, with an Undo where possible: read the result before saying it did.");
-        expect(description).toContain("It never raises another bot's execution permissions.");
+        // A Chief's team setup may set a bot's MCP servers, so it names that instead.
+        if (tool === "propose_team_setup") expect(description).toContain("mcpServers sets an existing bot's MCP servers; no other execution permission changes.");
+        else expect(description).toContain("It never raises another bot's execution permissions.");
       }
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
@@ -987,6 +989,30 @@ describe("agents-proxy MCP surface", () => {
     expect(start.description).not.toMatch(/\b(delegate_bot|ask_bot)\b/);
   });
 
+  it.each(["bot", "botId", "toBotId", "bot_ids", "reportBack"])("start_thread refuses unknown %s before creating a task", async (key) => {
+    const before = threadCalls;
+    const res = await callTool("start_thread", { title: "Review", message: "Review the patch.", [key]: "Helper" });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain(`unknown arguments "${key}"`);
+    expect(res.result.content[0].text).toContain("coordinate_bots with bot_ids from list_bots");
+    expect(threadCalls).toBe(before);
+  });
+
+  it.each([null, "", "   ", 42, ["bot-helper"], { id: "bot-helper" }])("start_thread refuses an invalid legacy bot_id %j instead of falling back to itself", async (bot_id) => {
+    const before = threadCalls;
+    const res = await callTool("start_thread", { title: "Review", message: "Review the patch.", bot_id });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("bot_id must be a non-empty bot ID");
+    expect(threadCalls).toBe(before);
+  });
+
+  it("start_thread does not ignore a conflicting recipient alias beside a valid legacy bot_id", async () => {
+    const before = threadCalls;
+    const res = await callTool("start_thread", { title: "Review", message: "Review the patch.", bot_id: "bot-helper", bot: "Another helper" });
+    expect(res.result.isError).toBe(true);
+    expect(threadCalls).toBe(before);
+  });
+
   it("start_thread on a teammate is a hand-off into a fresh thread: the receipt's thread and assignment id, no deprecation line", async () => {
     const previous = threadResponse;
     threadResponse = { receipts: [{ botId: "bot-helper", botName: "Helper", outcome: "queued", detail: "handed to the coordinator; the teammate's turn has not started yet", requestId: "asg-peer-9", threadId: "thread-peer" }],
@@ -1335,6 +1361,20 @@ describe("agents-proxy MCP surface", () => {
     assignmentStatusResponse = DONE_ASSIGNMENT;
   });
 
+  it("assignment_status on a hand-off sent from another own chat says its result does not resume this one", async () => {
+    const running = { assignment: { id: "asg-7", botId: "bot-helper", botName: "Helper", status: "running" }, children: [], inbox: [] };
+    try {
+      assignmentStatusResponse = running;
+      expect((await callTool("assignment_status", { id: "asg-7" })).result.content[0].text).toContain("Its result resumes you on its own");
+      assignmentStatusResponse = { ...running, sentElsewhere: true };
+      const text = (await callTool("assignment_status", { id: "asg-7" })).result.content[0].text;
+      expect(text).toContain("It was sent from another of your chats, so its result returns there and does not resume you here");
+      expect(text).not.toContain("resumes you on its own");
+    } finally {
+      assignmentStatusResponse = DONE_ASSIGNMENT;
+    }
+  });
+
   it("assignment_status long-polls with wait_ms, capped at 240000, and refuses a bad wait", async () => {
     lastAssignmentStatusUrl = null;
     const res = await callTool("assignment_status", { id: "task-earlier123", wait_ms: 900_000 });
@@ -1359,9 +1399,10 @@ describe("agents-proxy MCP surface", () => {
       expect(missing.result.isError).toBe(true);
       expect(missing.result.content[0].text).toContain("No assignment asg-gone is known here");
       assignmentStatusCode = 403;
+      assignmentStatusResponse = { error: "it was handed off by another bot" };
       const foreign = await callTool("assignment_status", { id: "asg-theirs" });
       expect(foreign.result.isError).toBe(true);
-      expect(foreign.result.content[0].text).toContain("Assignment asg-theirs is not this conversation's");
+      expect(foreign.result.content[0].text).toBe("Assignment asg-theirs can't be read here: it was handed off by another bot.");
     } finally {
       assignmentStatusCode = 200;
       assignmentStatusResponse = DONE_ASSIGNMENT;
@@ -2107,7 +2148,7 @@ describe("agents-proxy MCP surface", () => {
     const manage = list.result.tools.find((t: { name: string }) => t.name === "skill_manage");
     expect(JSON.stringify(manage.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
     expect(manage.inputSchema.required).toEqual(["action"]);
-    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update", "enable", "disable", "delete"]);
+    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update", "import", "enable", "disable", "delete"]);
 
     const listed = await callTool("skills_list", {});
     expect(listed.result.content[0].text).toContain("file-expense");

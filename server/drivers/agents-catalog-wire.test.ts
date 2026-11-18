@@ -113,9 +113,9 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+no-computer-pick": 56733,
   "default+room": 53729,
   "non-chief+room": 45312,
-  "skills+shared+voice+x+team+images": 67952,
-  "default+images": 58718,
-  "skills+shared+voice+x+team+images+hosting": 69815,
+  "skills+shared+voice+x+team+images": 69244,
+  "default+images": 60010,
+  "skills+shared+voice+x+team+images+hosting": 71107,
   "default+hosting": 59808,
   "default+tools-off": 53040,
 };
@@ -277,9 +277,9 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts generate_image only when an image provider is set up, and adds nothing else", () => {
+  it("mounts generate_image and edit_image only when an image provider is set up, and adds nothing else", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires["default+images"]!).filter((tool) => tool !== "generate_image")).toEqual(names(wires.default!));
+    expect(names(wires["default+images"]!).filter((tool) => tool !== "generate_image" && tool !== "edit_image")).toEqual(names(wires.default!));
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(wires[name]!).includes("generate_image"), name).toBe(profile.env.OMB_IMAGE_GENERATION === "1");
     }

@@ -15,6 +15,13 @@ export function vpsLeftBehindNotice(done: "Moved" | "Deleted", alias: string, co
     `When ${alias} is back, remove it with: docker -H ssh://${alias} rm -f ${containerName}`;
 }
 
+/** Why a bot that gets its cloud computer from Boat can't have one while a self-hosted VPS is saved but not chosen for it. */
+export function vpsNotChosenReason(botName: string, vpsAlias: string | null): string | null {
+  return vpsAlias ? `${botName}'s cloud computer comes from Boat, which is not available here. The self-hosted VPS ${vpsAlias} is set up ` +
+    `but not chosen for ${botName}: ask the person to choose Self-hosted VPS as the cloud backend in ${botName}'s Bot settings, ` +
+    `Access section, then select cloud again.` : null;
+}
+
 export function cloudBackendChangeError(botBusy: boolean, activeVpsThread: boolean): string | null {
   return botBusy || activeVpsThread ? CLOUD_BACKEND_CHANGE_ERROR : null;
 }

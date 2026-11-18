@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
 import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { ChatMcpClient, ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatToolNotices, directServers, joinLateChatTools, mcpStartupMs, mountChatTools, trimmedToolsNotice, type ChatToolDefinition, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { ChatMcpClient, ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatMcpEnvironment, chatToolNotices, directServers, joinLateChatTools, mcpStartupMs, mountChatTools, trimmedToolsNotice, type ChatToolDefinition, type ChatToolSession } from "./chat-mcp-tools.ts";
 import { EXECUTOR_LIKE_TOOLS } from "../testing/executor-like-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
 import type { SendTurnInput } from "../contracts.ts";
@@ -40,6 +40,19 @@ const dirs: string[] = [];
 const sessions: ChatToolSession[] = [];
 const controllers: AbortController[] = [];
 const schema = { type: "object", properties: { value: { type: "string" } }, required: ["value"], additionalProperties: false };
+
+describe("configured MCP environment", () => {
+  it("keeps an npm cache that works and preserves an explicit override", () => {
+    const cache = mkdtempSync(join(tmpdir(), "omb-npm-cache-"));
+    try {
+      const inherited = { npm_config_cache: cache, PATH: "/bin" };
+      expect(chatMcpEnvironment({}, inherited).npm_config_cache).toBe(cache);
+      expect(chatMcpEnvironment({ npm_config_cache: "/tmp/custom-npm-cache" }, inherited).npm_config_cache).toBe("/tmp/custom-npm-cache");
+    } finally {
+      rmSync(cache, { recursive: true, force: true });
+    }
+  });
+});
 
 function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
   const dir = mkdtempSync(join(tmpdir(), "omb-chat-mcp-"));

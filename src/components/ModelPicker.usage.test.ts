@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 // The usage bars inside the model button, in both modes, in the narrow header and in the bot panel, and the same rows
-// at the top of the open model menu.
+// at the top of the open model menu, under a ring for every connected AI that reports usage.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -147,5 +147,81 @@ describe("the model button's usage bars", () => {
     flushSync(() => chip().click());
     await settle();
     expect(document.querySelector("[data-usage-menu]")).toBeNull();
+  });
+});
+
+describe("the model menu's usage rings", () => {
+  const other = (engine: string, name: string, used: number, blocked = false): EngineLimit =>
+    ({ ...usage(used, blocked), engine, name, driver: "codex", window: "weekly", windows: [{ window: "weekly", usedPercent: used, resetsAt: RESET }] });
+  const openMenu = async () => {
+    render();
+    flushSync(() => chip().click());
+    await settle();
+    return document.querySelector<HTMLElement>("[data-model-picker-content]")!;
+  };
+  const rings = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLButtonElement>("[data-usage-engine]")];
+  const shownRows = (menu: HTMLElement) => [...menu.querySelectorAll("[data-usage-row]")].map((row) => row.getAttribute("data-usage-row"));
+
+  for (const advanced of [false, true]) {
+    it(`show one ring for every AI that reports usage, coloured by how much is left (${advanced ? "Advanced" : "Simple"})`, async () => {
+      fixture.advanced = advanced;
+      remember([usage(38), other("codex", "Codex", 91), other("gemini", "Gemini", 100, true), { ...other("local", "Local", 0), usedPercent: null, windows: [] }]);
+      const menu = await openMenu();
+      expect(menu.firstElementChild?.hasAttribute("data-usage-menu")).toBe(true);
+      expect(rings(menu).map((ring) => [ring.dataset.usageEngine, ring.textContent, ring.querySelector("[data-usage-ring]")?.getAttribute("data-usage-ring")]))
+        .toEqual([["claude", "Claude", "fine"], ["codex", "Codex", "near"], ["gemini", "Gemini", "out"]]);
+      expect(rings(menu).map((ring) => ring.querySelector("[data-usage-ring]")?.getAttribute("class")?.match(/text-\w+/)?.[0])).toEqual(["text-success", "text-warning", "text-danger"]);
+      expect(rings(menu).map((ring) => ring.getAttribute("aria-label"))).toEqual(["Claude: 38% used, resets 3:40 PM", "Codex: 91% used, resets 3:40 PM", "Gemini: at its limit, resets 3:40 PM"]);
+    });
+  }
+
+  it("start on the bot's own AI, and show another AI's rows when its ring is pressed", async () => {
+    remember([usage(38), other("codex", "Codex", 91)]);
+    const menu = await openMenu();
+    expect(rings(menu).map((ring) => ring.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+    expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
+    flushSync(() => rings(menu)[1]!.click());
+    expect(rings(menu).map((ring) => ring.getAttribute("aria-pressed"))).toEqual(["false", "true"]);
+    expect(shownRows(menu)).toEqual(["weekly"]);
+    expect(menu.querySelector("[data-usage-rows]")?.textContent).toContain("Codex usage");
+    expect(document.querySelector("[data-model-picker-content]")).not.toBeNull();
+  });
+
+  it("go back to the bot's own AI when the pressed AI stops reporting usage", async () => {
+    remember([usage(38), other("codex", "Codex", 91)]);
+    const menu = await openMenu();
+    flushSync(() => rings(menu)[1]!.click());
+    expect(shownRows(menu)).toEqual(["weekly"]);
+    remember([usage(38)]);
+    expect(menu.querySelector("[data-usage-rings]")).toBeNull();
+    expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
+    remember([usage(38), other("gemini", "Gemini", 50)]);
+    expect(rings(menu).map((ring) => ring.getAttribute("aria-pressed"))).toEqual(["true", "false"]);
+    expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
+  });
+
+  it("draw less of the ring as the usage runs down, and none at the limit", async () => {
+    remember([usage(25), other("codex", "Codex", 75), other("gemini", "Gemini", 100, true)]);
+    const menu = await openMenu();
+    const arcs = rings(menu).map((ring) => ring.querySelector("circle[stroke-dasharray]")?.getAttribute("stroke-dasharray")?.split(" ").map(Number));
+    expect(arcs[0]![0]! / arcs[0]![1]!).toBeCloseTo(0.75);
+    expect(arcs[1]![0]! / arcs[1]![1]!).toBeCloseTo(0.25);
+    expect(arcs[2]).toBeUndefined();
+    expect(rings(menu)[2]!.querySelector("path")).not.toBeNull();
+  });
+
+  it("stay away while the bot's own AI is the only one that reports usage", async () => {
+    const menu = await openMenu();
+    expect(menu.querySelector("[data-usage-rings]")).toBeNull();
+    expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
+  });
+
+  it("show another AI's ring, with no rows until it is pressed, when the bot's own AI reports no usage", async () => {
+    remember([other("codex", "Codex", 91)]);
+    const menu = await openMenu();
+    expect(rings(menu).map((ring) => ring.getAttribute("aria-pressed"))).toEqual(["false"]);
+    expect(shownRows(menu)).toEqual([]);
+    flushSync(() => rings(menu)[0]!.click());
+    expect(shownRows(menu)).toEqual(["weekly"]);
   });
 });
