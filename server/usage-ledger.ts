@@ -202,47 +202,54 @@ function freezeRows(rows: DatedRow[]): void {
   }
 }
 
-function readMonth(path: string): DatedRow[] {
+function readMonth(path: string, from: number, to: number, result: Readonly<UsageRow>[]): void {
   const before = settledMonth(path);
   const cached = monthSnapshots.get(path);
   monthSnapshots.delete(path);
   if (cached && before?.stamp === cached.stamp) {
     monthSnapshots.set(path, cached);
-    return cached.rows;
+    for (const { at, row } of cached.rows) {
+      if (at >= from && at <= to) result.push(row);
+    }
+    return;
   }
 
   let text: string;
   try {
     text = readFileSync(path, "utf8");
   } catch {
-    return [];
+    return;
   }
-  const rows: DatedRow[] = [];
+  let snapshot: DatedRow[] | null = before && settledMonth(path)?.stamp === before.stamp ? [] : null;
+  let weight = before?.bytes ?? 0;
   for (const line of text.split("\n")) {
     if (!line) continue;
+    let row: unknown;
     try {
-      const row: unknown = JSON.parse(line);
-      if (!isUsageRow(row)) continue;
-      const at = Date.parse(row.at);
-      if (Number.isFinite(at)) rows.push({ at, row });
+      row = JSON.parse(line);
     } catch {
+      continue;
+    }
+    if (!isUsageRow(row)) continue;
+    const at = Date.parse(row.at);
+    if (!Number.isFinite(at)) continue;
+    if (at >= from && at <= to) result.push(row);
+    if (snapshot) {
+      weight += 256;
+      if (weight > MAX_SNAPSHOT_WEIGHT) snapshot = null;
+      else snapshot.push({ at, row });
     }
   }
-  if (before && settledMonth(path)?.stamp === before.stamp) {
-    const weight = before.bytes + rows.length * 256;
-    if (weight <= MAX_SNAPSHOT_WEIGHT) {
-      freezeRows(rows);
-      monthSnapshots.set(path, { stamp: before.stamp, weight, rows });
-      let total = 0;
-      for (const entry of monthSnapshots.values()) total += entry.weight;
-      for (const [oldest, entry] of monthSnapshots) {
-        if (monthSnapshots.size <= MAX_CACHED_MONTHS && total <= MAX_SNAPSHOT_WEIGHT) break;
-        monthSnapshots.delete(oldest);
-        total -= entry.weight;
-      }
-    }
+  if (!snapshot || !before || settledMonth(path)?.stamp !== before.stamp) return;
+  freezeRows(snapshot);
+  monthSnapshots.set(path, { stamp: before.stamp, weight, rows: snapshot });
+  let total = 0;
+  for (const entry of monthSnapshots.values()) total += entry.weight;
+  for (const [oldest, entry] of monthSnapshots) {
+    if (monthSnapshots.size <= MAX_CACHED_MONTHS && total <= MAX_SNAPSHOT_WEIGHT) break;
+    monthSnapshots.delete(oldest);
+    total -= entry.weight;
   }
-  return rows;
 }
 
 export function readUsage(dataDir: string, range: { from: Date; to: Date }): Readonly<UsageRow>[] {
@@ -250,9 +257,7 @@ export function readUsage(dataDir: string, range: { from: Date; to: Date }): Rea
   const from = range.from.getTime();
   const to = range.to.getTime();
   for (const key of monthsBetween(range.from, range.to)) {
-    for (const { at, row } of readMonth(join(dataDir, DIR, `${key}.jsonl`))) {
-      if (at >= from && at <= to) rows.push(row);
-    }
+    readMonth(join(dataDir, DIR, `${key}.jsonl`), from, to, rows);
   }
   return rows;
 }

@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -141,6 +142,24 @@ describe("usage ledger files", () => {
     } finally {
       clock.mockRestore();
     }
+  });
+
+  it("reads a narrow date range from an oversized month under a constrained heap", () => {
+    const at = "2026-09-02T00:00:00Z";
+    const file = usageFileFor(dataDir, new Date(at));
+    mkdirSync(join(dataDir, "usage"));
+    const line = JSON.stringify(row({ at })) + "\n";
+    const batch = line.repeat(10_000);
+    for (let batchIndex = 0; batchIndex < 30; batchIndex++) appendFileSync(file, batch);
+    appendFileSync(file, JSON.stringify(row({ at: "2026-09-30T12:00:00Z", botId: "match" })));
+    const output = execFileSync(process.execPath, [
+      "--max-old-space-size=128", "--experimental-strip-types", "--input-type=module", "--eval",
+      `import { readUsage } from ${JSON.stringify(new URL("./usage-ledger.ts", import.meta.url).href)};
+       const rows = readUsage(process.argv[1], { from: new Date("2026-09-30"), to: new Date("2026-10-01") });
+       console.log(JSON.stringify(rows.map((row) => row.botId)));`,
+      dataDir,
+    ], { encoding: "utf8", timeout: 15_000 });
+    expect(JSON.parse(output)).toEqual(["match"]);
   });
 
   it("keeps a full disk or a missing directory from failing the turn", async () => {
