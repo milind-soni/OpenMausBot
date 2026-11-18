@@ -1,0 +1,110 @@
+---
+title: CLI
+description: Run MausBot from scripts and CI with the openmausbot command.
+icon: Terminal
+---
+
+The `openmausbot` command can drive a running workspace without a screen: set up a team from a file, give a bot a job, wait until it and every teammate it asked are done, and keep what they made. It works against the server on this computer or one somewhere else. It is built for scripts, CI and other agents: every command can print one JSON document, and the exit code says how things went.
+
+```sh
+npm install -g openmausbot            # or use npx openmausbot …
+openmausbot serve --no-pair &         # a workspace with no screen (or use your desktop app)
+openmausbot engine set claude --key-env ANTHROPIC_API_KEY
+openmausbot team apply launch-room.yaml
+openmausbot run "Room Lead" "Rehearse the launch of https://example.com" --export ./rehearsal
+```
+
+`run` prints progress as it goes, then the Room Lead's final reply and the files it links, and writes everything to `./rehearsal`.
+
+## Which workspace, and as whom
+
+- `--url URL` or `OPENMAUSBOT_URL`: a workspace somewhere else. `https://` works anywhere; plain `http://` works only on this computer or a private network (a LAN address, Tailscale, `*.local`).
+- `--port N` or `OMB_PORT`: this computer, on that port.
+- Otherwise the command looks on this computer's usual ports (8799, 18799, 28799), as the desktop app uses them.
+
+On this computer a headless server treats you as its owner, and no token is needed. Anywhere else you need a token:
+
+```sh
+openmausbot connect https://maus.example.com --code 7KQ2-M9XD-H4TP --out ~/.openmausbot-token
+openmausbot doctor --url https://maus.example.com --token-file ~/.openmausbot-token
+```
+
+Make the pairing code on the server with `openmausbot pair`. The token goes to a file only you can read and is never printed. Pass it with `--token-file FILE` or `OPENMAUSBOT_TOKEN`; there is no `--token` flag, because a command line can be read by other programs.
+
+For CI, make an access token that ends on a date you choose:
+
+```sh
+openmausbot token create "Nightly CI" --scope client --expires 90d --out ci-token
+openmausbot token list      # name, scope, end date, last used (never the token)
+openmausbot token revoke ID # it stops working at once
+```
+
+`--scope client`, the default, can chat and answer approvals but not change settings.
+
+## Output and exit codes
+
+Without `--json` you get plain lines. With `--json` you get exactly one JSON document on stdout, a failure included. Progress goes to stderr as one JSON object per line; `--quiet` drops it. Everything printed has secrets removed.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Done |
+| 1 | Failed, stopped or stalled, or a step was refused |
+| 2 | The command line or a file is wrong |
+| 3 | Someone must answer (a question or an approval card) |
+| 4 | Timed out (the work keeps running) |
+| 5 | Cannot reach the server, not allowed, or the server is too old |
+| 6 | `team apply --check` found changes |
+| 7 | `doctor --host`: this machine is missing something the server needs |
+| 130 | Ctrl-C (the work keeps running) |
+
+## Commands
+
+Run `openmausbot help VERB` for any of these. A target is a bot or room by name or id.
+
+| Command | What it does |
+|---|---|
+| `doctor` | Checks the server answers, is new enough, who you are to it, and that an engine is ready. `doctor --host` checks a Linux machine can run the server before you install it. |
+| `bots`, `channels`, `models` | Your bots and what each is doing, your rooms, and the models each engine offers. |
+| `messages TARGET` | The latest messages of a conversation. |
+| `send TARGET TEXT` | Sends one message and returns at once. `--send-id ID` makes a retry safe: the same id never sends twice. |
+| `run TARGET TEXT` | Gives a bot or room one job and waits until it is done. |
+| `wait TARGET` | Waits on work already running. |
+| `interrupt TARGET` | Presses Stop. `--tree` also stops every teammate still working on its job. |
+| `export TARGET --out DIR` | Writes a conversation's job to a folder: the job tree, transcripts and the files its replies link. |
+| `events` | The server's live events as JSON lines. |
+| `team apply FILE`, `team export --out FILE` | Makes the workspace match a team file, or writes one. |
+| `engine set KIND`, `engine list` | Gives the workspace an engine key without a screen. |
+| `connect`, `token` | Get a token for a workspace elsewhere, or make one for CI. |
+| `mcp` | The [MCP server](/docs/developers/mcp-server) on stdin and stdout. |
+
+The message for `send` and `run` can be the next word, `--text TEXT`, `--message-file FILE`, or `-` to read it from stdin.
+
+## Run a job
+
+```sh
+openmausbot run "Room Lead" --message-file brief.md --timeout 45m --on-input exit --export ./out
+```
+
+`run` starts a new conversation, sends the message once, and waits for the whole job: the bot's own turn and every piece of work it handed to a teammate. The server does the waiting, so a long wait costs one request at a time, not a poll loop.
+
+- `--wait job` (the default) waits for the bot and every teammate; `--wait turn` only for the bot's own turn; `--wait none` sends and returns.
+- `--on-input exit` (the default) stops waiting with exit 3 when someone must answer; `wait` keeps waiting for the answer; `stop` stops the job.
+- `--on-timeout leave` (the default) leaves the work running; `stop` stops it.
+- `--strict` fails the run if any teammate's part failed, even when the bot finished.
+
+With `--json` the result carries the job's `state` (`completed`, `idle`, `needs-input`, `failed`, `stalled` or `timed-out`), the job tree, the final reply and the files it links.
+
+## The team file
+
+A team file says what the workspace should have: teams and their briefs, bots with their standing instructions, models, approval levels and computers, skills, rooms, and the engines they run on. Write it in YAML or JSON.
+
+```sh
+openmausbot team apply launch-room.yaml             # plan, then apply
+openmausbot team apply launch-room.yaml --dry-run   # only the plan
+openmausbot team apply launch-room.yaml --check     # exit 6 if anything would change (CI)
+openmausbot team export --team "Launch Room" --out exported.yaml
+```
+
+Run it again and it prints `No changes.` and sends nothing. Teams are never deleted; bots and rooms a team no longer lists are deleted only with `--prune`, and only in a team marked `prune: true`. Every change goes through the same requests the app makes, with the same checks.
+
+The full reference, with every field of the team file, is [docs/headless-cli.md](https://github.com/milind-soni/OpenMausBot/blob/main/docs/headless-cli.md) in the repository.

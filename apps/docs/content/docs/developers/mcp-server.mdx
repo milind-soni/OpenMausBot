@@ -1,0 +1,95 @@
+---
+title: MCP server
+description: Let another MCP client coordinate your MausBot team.
+icon: Plug
+---
+
+MausBot includes a local stdio MCP server. It lets another MCP client, such as Claude Code, coordinate your team while MausBot is running.
+
+## What it can do
+
+- List bots and channels, with their active task and current activity.
+- Read bounded transcript pages and search local transcripts, without screenshot pixels.
+- Create and safely edit bot profiles, channels, and separate task conversations.
+- Send work to a bot or channel, wait for the conversation to settle or need help, and interrupt its active turn.
+- List the configured models and switch an idle bot to an exact available one.
+
+It cannot approve requests, remember permission grants, delete data, import teams, change credentials, or control computer and VM lifecycle. Those actions stay in the app.
+
+## Add it to an MCP client
+
+With the `openmausbot` npm package installed, the client can run it directly:
+
+```json
+{
+  "mcpServers": {
+    "openmausbot": { "command": "openmausbot", "args": ["mcp"], "env": { "OMB_PORT": "8799" } }
+  }
+}
+```
+
+The desktop app bundles the server too, so Node and pnpm aren't needed. On macOS:
+
+```json
+{
+  "mcpServers": {
+    "openmausbot": {
+      "command": "/Applications/OpenMausBot.app/Contents/MacOS/OpenMausBot",
+      "args": ["/Applications/OpenMausBot.app/Contents/Resources/server/mcp-server.js"],
+      "env": { "ELECTRON_RUN_AS_NODE": "1" }
+    }
+  }
+}
+```
+
+On Windows, use the installed `OpenMausBot.exe` as the command, the adjacent `resources\server\mcp-server.js` as the argument, and the same `ELECTRON_RUN_AS_NODE=1`. The per-user install is under `%LOCALAPPDATA%\Programs\OpenMausBot`. On Ubuntu `.deb` installs, the executable is `/opt/OpenMausBot/openmausbot` and the script is `/opt/OpenMausBot/resources/server/mcp-server.js`.
+
+## Let it change things
+
+Read-only tools work on this computer with no setup. In a packaged desktop build, the tools that create, change, send, switch or interrupt need a paired session:
+
+1. In MausBot, open **Settings → Phone → Set up a phone** and reveal the one-time pairing code.
+2. Exchange it on this computer (remove spaces from the displayed code):
+
+   ```sh
+   curl -X POST http://127.0.0.1:8799/api/auth/pair \
+     -H 'content-type: application/json' \
+     --data '{"code":"YOUR-CODE","label":"Local MCP client"}'
+   ```
+
+   If the desktop picked a fallback port, use the port shown in Settings. Copy the returned `token`; the code works once.
+3. Put the same port and the token in the client's configuration:
+
+   ```json
+   "env": {
+     "ELECTRON_RUN_AS_NODE": "1",
+     "OMB_PORT": "8799",
+     "OPENMAUSBOT_TOKEN": "omb_sess_..."
+   }
+   ```
+
+The paired client appears with phones under **Settings → Phone** and can be revoked there.
+
+<Callout type="warn" title="Keep the token private">
+  Do not share the token or commit it to a repository.
+</Callout>
+
+## Finding the server
+
+With no configuration, the MCP process looks on MausBot's three desktop ports (8799, 18799, 28799) and accepts only a health answer that identifies itself as MausBot. Set `OMB_PORT` to force one local port, or `OPENMAUSBOT_URL` to use an explicit address. Plain `http://` works only on this computer or a private network; anything else needs `https://`. When a token is set, name the server with `OPENMAUSBOT_URL` or `OMB_PORT`, so the credential is never sent while probing other ports.
+
+## Tools
+
+| Purpose | Tools |
+|---|---|
+| Inspect | `get_system_health`, `list_bots`, `list_channels`, `get_bot_messages`, `get_channel_messages`, `search_messages`, `list_available_models` |
+| Create and organize | `create_bot`, `update_bot_profile`, `create_channel`, `update_channel`, `create_task`, `switch_task`, `rename_task` |
+| Run work | `send_bot_message`, `send_channel_message`, `wait_for_conversation`, `interrupt_conversation`, `set_bot_model` |
+
+`wait_for_conversation` returns `settled`, `needs-user`, `failed`, `stalled` or `timed-out`, with a small redacted tail of the transcript. It also covers work the bot handed to teammates: a conversation isn't settled while that work is outstanding, and a teammate waiting on a question or an approval ends the wait with `needs-user` at once. The server holds each request until something changes, so a wait is not a poll loop.
+
+`send_bot_message` and `send_channel_message` take an optional `send_id` (16 to 80 letters, digits, `-` or `_`). Sending again with the same id returns the first send's receipt instead of a second message.
+
+## Safety
+
+Transcript reads are capped at 200 messages and search at 100 hits. Screenshot pixels and permission grant keys are removed from results. Model changes are refused while a bot is working. If you expose MausBot through a reverse proxy, authentication and TLS at that proxy are part of your deployment's security boundary.

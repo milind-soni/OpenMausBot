@@ -1,0 +1,45 @@
+---
+title: Developers
+description: Drive MausBot from scripts, servers and other agents with the CLI, the client SDKs, the Bot API and the MCP server.
+icon: Code
+---
+
+MausBot's bots are not only for the app. You can give one a job from a script, send it a message from your own server, or let another agent coordinate your team.
+
+Pick the way in that fits where your code runs.
+
+## CLI
+
+<Cards>
+  <Card title="The openmausbot command" href="/docs/developers/cli" description="Set up a team from a file, give a bot a job, wait until it is done and keep what it made. Built for scripts and CI." />
+</Cards>
+
+## Client SDKs
+
+Talk to one bot from your own code, through its [Bot API](/docs/developers/bot-api). Both packages are called `mausbot`.
+
+<Cards>
+  <Card title="TypeScript" href="/docs/developers/sdks/typescript" description="No dependencies. Node 18+, Bun, Deno and edge runtimes." />
+  <Card title="Python" href="/docs/developers/sdks/python" description="Sync and async clients on httpx. Python 3.9+." />
+</Cards>
+
+| SDK | Package | Version |
+|---|---|---|
+| TypeScript | `mausbot` on npm | `0.1.0` |
+| Python | `mausbot` on PyPI | `0.1.0` |
+
+Each major SDK version uses one Bot API version.
+
+## Integrations
+
+<Cards>
+  <Card title="MCP server" href="/docs/developers/mcp-server" description="Let another MCP client list your bots, send them work and wait for the result." />
+</Cards>
+
+## Building agents?
+
+The bots you already have are the agents. See [Bots, folders, and threads](/docs/features/bots-and-tasks) for how they work and [Routines and webhooks](/docs/features/automation) to run them on a schedule or from an outside event.
+
+<Callout type="warn" title="Keep a Bot API key on a server">
+  A key reads whatever its bot can read: the bot's instructions and memory, through its replies. Keep it on a server, never in a browser page or an app bundle. A key marked **Acts as me** is as powerful as the owner: anyone holding it can make the bot do anything its level allows.
+</Callout>

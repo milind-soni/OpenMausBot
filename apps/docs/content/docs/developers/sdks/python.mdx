@@ -1,0 +1,133 @@
+---
+title: Python SDK
+description: Talk to a MausBot bot from Python, with a sync and an async client.
+icon: FileCode
+---
+
+`mausbot` is a small client for a bot's [Bot API](/docs/developers/bot-api). It needs Python 3.9+ and one dependency, `httpx`. It is for servers only: the key it holds reads whatever the bot can read.
+
+## Install
+
+```sh
+pip install mausbot
+```
+
+{/* TODO(publish) */}
+
+`mausbot` 0.1.0 isn't on PyPI yet.
+
+## Quickstart
+
+On the bot's **Bot API** card, copy the address and the key into the environment. Never put a key in your code.
+
+```sh
+export MAUSBOT_BOT_URL="https://your.domain/hooks/api/v1/bots/<botId>/messages"
+export MAUSBOT_BOT_KEY="..."
+```
+
+```python
+from mausbot import Bot
+
+with Bot() as bot:  # reads MAUSBOT_BOT_URL and MAUSBOT_BOT_KEY
+    answer = bot.ask("What's on my calendar tomorrow?")
+    if answer.status == "replied":
+        print(answer.reply)
+```
+
+Paste the card's address as it is: the old or the `/v1` form, with or without a trailing slash, or a local `http://127.0.0.1:<port>/...` address. The SDK calls `/v1` either way. Both values are trimmed, so a key with a newline from a `.env` file works.
+
+You can pass them yourself instead, as `endpoint` and `key`, or as `base_url` and `bot_id`:
+
+```python
+import os
+from mausbot import Bot
+
+bot = Bot(os.environ["MAUSBOT_BOT_URL"], os.environ["MAUSBOT_BOT_KEY"])
+```
+
+## ask, send, thread, wait
+
+| Call | What it does |
+|---|---|
+| `ask(message, ...)` | Sends the message and waits for the answer. The easy one. |
+| `send(message, ...)` | One `POST`, and the server's answer as it is. |
+| `thread(thread_id)` | One `GET` of a thread. |
+| `wait(thread_id, ...)` | Keeps reading a thread until it isn't `working`. |
+
+Keyword arguments: `thread` (go on in an earlier conversation), `wait` (seconds the server holds the call, on `send` and `ask`), `timeout` and `poll_interval` (seconds, on `ask` and `wait`).
+
+Every result has a `status`:
+
+| `status` | Class | Fields | Meaning |
+|---|---|---|---|
+| `replied` | `Replied` | `reply`, `thread` | The bot answered. |
+| `needs_approval` | `NeedsApproval` | `thread` | The bot asked for an approval. A person answers it in the app. |
+| `working` | `Working` | `thread` | Still at it (`send` and `thread` only). |
+| `failed` | `Failed` | `thread`, `error` | The job failed or was stopped (`send` and `thread` only). |
+
+```python
+answer = bot.ask("What's on my calendar tomorrow?")
+bot.ask("Move the 3pm to Friday", thread=answer.thread)
+
+sent = bot.send("Start the weekly report", wait=0)  # one POST
+now = bot.thread(sent.thread)                       # one GET
+done = bot.wait(sent.thread, timeout=600)           # until it isn't working
+```
+
+`ask` and `wait` return `Replied` or `NeedsApproval`. A `NeedsApproval` is a result, not an error: a person answers in the app, and you can `wait` on the thread again later. `ask` and `wait` raise `JobFailedError` when the job failed, where `send` and `thread` hand you a `Failed` to look at.
+
+`ask` has one overall `timeout` (default 600 seconds) that covers everything it waits for. When it runs out, `WaitTimeoutError` carries the thread, so you can pick it up with `wait`.
+
+If the thread you continue is still busy, `ask` waits for it, then sends once. If that thread is waiting for an approval in the app, or is still busy when the wait ran out, `ask` raises `NotSentError`: your message was not sent.
+
+## Async
+
+`AsyncBot` is the same with `await`, on `httpx.AsyncClient`.
+
+```python
+from mausbot import AsyncBot
+
+async with AsyncBot() as bot:
+    answer = await bot.ask("What's on my calendar tomorrow?")
+```
+
+Use `with Bot(...) as bot:` or `async with AsyncBot(...) as bot:` to close the connection pool.
+
+## Errors
+
+All errors extend `MausBotError`. The key is never put in an error or a `repr`.
+
+| Class | When |
+|---|---|
+| `APIStatusError` | Base of the HTTP errors. Has `status`, `body` (the parsed JSON, or `None`) and the server's `error` text as its message, or `HTTP <status>` when the body isn't JSON. Any other 4xx raises this class itself. |
+| `BadRequestError` | 400, 413, 415 |
+| `AuthenticationError` | 401 |
+| `PermissionDeniedError` | 403 |
+| `NotFoundError` | 404 |
+| `ConflictError` | 409 |
+| `RateLimitError` | 429, with `retry_after` in seconds when the server sent it |
+| `ServerError` | 5xx, including a proxy's HTML error page |
+| `ServerTooOldError` | This MausBot server predates `/v1`. Update MausBot. |
+| `APIConnectionError` | The request never got an answer. |
+| `WaitTimeoutError` | A wait ran out. Has `thread`. |
+| `JobFailedError` | The job failed or was stopped. Has `thread`; the message is the server's `error`. |
+| `NotSentError` | Your message was not sent. Has `thread`. |
+
+```python
+from mausbot import RateLimitError, NotSentError, WaitTimeoutError
+
+try:
+    bot.ask("Summarise yesterday")
+except RateLimitError as error:
+    print("Slow down", error.retry_after)
+except WaitTimeoutError as error:
+    print("Still working:", error.thread)
+except NotSentError:
+    print("Not sent; try again after the app is answered")
+```
+
+## Retries
+
+The SDK retries a `GET` up to 2 times (`max_retries`) on a network error or a 5xx, waiting 0.5 seconds (`retry_delay`) and doubling. It never retries a `POST`, because a retried `POST` could start a second turn. If a `send` fails on the network, you decide whether to send again.
+
+`wait` and `ask` poll every 2 seconds (`poll_interval`), growing by half each time up to 10.

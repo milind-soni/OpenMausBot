@@ -1,0 +1,117 @@
+---
+title: TypeScript SDK
+description: Talk to a MausBot bot from Node, Bun, Deno or an edge runtime.
+icon: FileCode
+---
+
+`mausbot` is a small client for a bot's [Bot API](/docs/developers/bot-api). It has no dependencies, needs Node 18+ (or Bun, Deno, or an edge runtime with `fetch`), and is ESM. It is for servers only: the key it holds reads whatever the bot can read.
+
+## Install
+
+```sh
+npm install mausbot
+```
+
+{/* TODO(publish) */}
+
+`mausbot` 0.1.0 isn't on npm yet.
+
+## Quickstart
+
+On the bot's **Bot API** card, copy the address and the key into the environment. Never put a key in your code.
+
+```sh
+export MAUSBOT_BOT_URL="https://your.domain/hooks/api/v1/bots/<botId>/messages"
+export MAUSBOT_BOT_KEY="..."
+```
+
+```ts
+import { Bot } from "mausbot";
+
+const bot = new Bot(); // reads MAUSBOT_BOT_URL and MAUSBOT_BOT_KEY
+
+const answer = await bot.ask("What's on my calendar tomorrow?");
+if (answer.status === "replied") console.log(answer.reply);
+```
+
+Paste the card's address as it is: the old or the `/v1` form, with or without a trailing slash, or a local `http://127.0.0.1:<port>/...` address. The SDK calls `/v1` either way. Both values are trimmed, so a key with a newline from a `.env` file works.
+
+You can pass them yourself instead, as `endpoint` and `key`, or as `baseUrl` and `botId`:
+
+```ts
+const bot = new Bot({ endpoint: process.env.MAUSBOT_BOT_URL, key: process.env.MAUSBOT_BOT_KEY });
+```
+
+## ask, send, thread, wait
+
+| Call | What it does |
+|---|---|
+| `ask(message, options?)` | Sends the message and waits for the answer. The easy one. |
+| `send(message, options?)` | One `POST`, and the server's answer as it is. |
+| `thread(id)` | One `GET` of a thread. |
+| `wait(id, options?)` | Keeps reading a thread until it isn't `working`. |
+
+Options: `thread` (go on in an earlier conversation), `wait` (seconds the server holds the call, on `send` and `ask`), `timeout` and `pollInterval` (seconds, on `ask` and `wait`).
+
+Every result has a `status`:
+
+| `status` | Fields | Meaning |
+|---|---|---|
+| `replied` | `reply`, `thread` | The bot answered. |
+| `needs_approval` | `thread` | The bot asked for an approval. A person answers it in the app. |
+| `working` | `thread` | Still at it (`send` and `thread` only). |
+| `failed` | `thread`, `error` | The job failed or was stopped (`send` and `thread` only). |
+
+```ts
+const answer = await bot.ask("What's on my calendar tomorrow?");
+await bot.ask("Move the 3pm to Friday", { thread: answer.thread });
+
+const sent = await bot.send("Start the weekly report", { wait: 0 }); // one POST
+const now = await bot.thread(sent.thread);                          // one GET
+const done = await bot.wait(sent.thread, { timeout: 600 });         // until it isn't working
+```
+
+`ask` and `wait` return `replied` or `needs_approval`. A `needs_approval` is a result, not an error: a person answers in the app, and you can `wait` on the thread again later. `ask` and `wait` throw `JobFailedError` when the job failed, where `send` and `thread` hand you `status: "failed"` to look at.
+
+`ask` has one overall `timeout` (default 600 seconds) that covers everything it waits for. When it runs out, `WaitTimeoutError` carries the thread, so you can pick it up with `wait`.
+
+If the thread you continue is still busy, `ask` waits for it, then sends once. If that thread is waiting for an approval in the app, or is still busy when the wait ran out, `ask` throws `NotSentError`: your message was not sent.
+
+## Errors
+
+All errors extend `MausBotError`. The key is never put in an error.
+
+| Class | When |
+|---|---|
+| `APIStatusError` | Base of the HTTP errors. Has `status`, `body` (the parsed JSON, or `undefined`) and the server's `error` text as its message, or `HTTP <status>` when the body isn't JSON. Any other 4xx raises this class itself. |
+| `BadRequestError` | 400, 413, 415 |
+| `AuthenticationError` | 401 |
+| `PermissionDeniedError` | 403 |
+| `NotFoundError` | 404 |
+| `ConflictError` | 409 |
+| `RateLimitError` | 429, with `retryAfter` in seconds when the server sent it |
+| `ServerError` | 5xx, including a proxy's HTML error page |
+| `ServerTooOldError` | This MausBot server predates `/v1`. Update MausBot. |
+| `APIConnectionError` | The request never got an answer. |
+| `WaitTimeoutError` | A wait ran out. Has `thread`. |
+| `JobFailedError` | The job failed or was stopped. Has `thread`; the message is the server's `error`. |
+| `NotSentError` | Your message was not sent. Has `thread`. |
+
+```ts
+import { Bot, RateLimitError, NotSentError, WaitTimeoutError } from "mausbot";
+
+try {
+  await bot.ask("Summarise yesterday");
+} catch (error) {
+  if (error instanceof RateLimitError) console.log("Slow down", error.retryAfter);
+  else if (error instanceof WaitTimeoutError) console.log("Still working:", error.thread);
+  else if (error instanceof NotSentError) console.log("Not sent; try again after the app is answered");
+  else throw error;
+}
+```
+
+## Retries
+
+The SDK retries a `GET` up to 2 times (`maxRetries`) on a network error or a 5xx, waiting 0.5 seconds (`retryDelay`) and doubling. It never retries a `POST`, because a retried `POST` could start a second turn. If a `send` fails on the network, you decide whether to send again.
+
+`wait` and `ask` poll every 2 seconds (`pollInterval`), growing by half each time up to 10.

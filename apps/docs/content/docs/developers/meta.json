@@ -1,0 +1,5 @@
+{
+  "title": "Developers",
+  "icon": "Code",
+  "pages": ["index", "bot-api", "sdks", "cli", "mcp-server"]
+}
