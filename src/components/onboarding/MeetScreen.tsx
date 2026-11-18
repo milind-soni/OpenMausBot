@@ -5,6 +5,7 @@ import { engineReady } from "@/components/EngineLibrary";
 import { usePrefersReducedMotion } from "@/components/mascot-clock";
 import { brand, productName } from "@/lib/brand";
 import { cn } from "@/lib/cn";
+import { ConnectAiPlaceContext, useConnectAiSteps } from "@/lib/connect-ai-events";
 import { DEFAULT_BOT_NAME, myDefaultBot, useViewerEmail } from "@/lib/default-bot";
 import { activeLocale, t } from "@/lib/i18n";
 import { aiChoices, aiWorks, firstAis, type FirstAiKind } from "@/lib/onboarding";
@@ -63,13 +64,16 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
   const maus = myDefaultBot(state.bots, useViewerEmail());
   // An AI counts once it answered a test message (or cannot be sent one); OpenCode's free model only once picked here.
   const [chosen, setChosen] = useState<string | null>(null);
-  const tested = useWelcomeAi(state.instances, !hosted, chosen);
+  const tested = useWelcomeAi(state.instances, !hosted, chosen, "meet");
   const ready = aiWorks(tested);
   const known = state.instances.length > 0;
   const [asking, setAsking] = useState(false);
+  const step = useConnectAiSteps("meet");
   useEffect(() => {
-    if (!hosted && known && !ready && tested?.state !== "testing") setAsking(true);
-  }, [hosted, known, ready, tested?.state]);
+    if (hosted || !known || tested?.state === "testing") return;
+    step("opened", { aiReady: ready, ...(tested ? { driverKind: tested.instance.driverKind } : {}), ...(tested?.state === "failed" ? { reason: tested.reason ?? "other" } : {}) });
+    if (!ready) setAsking(true);
+  }, [hosted, known, ready, tested, step]);
   const works = (instance: InstanceInfo) => aiRuns(instance) && !freeFallback(instance);
   // Picked and installed, still listing its models: its pill waits until its test message.
   const settling = (instance: InstanceInfo | undefined) => Boolean(instance && instance.instanceId === chosen && engineReady(instance) && !aiRuns(instance));
@@ -78,9 +82,9 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
   const choice = (kind: FirstAiKind) => first.find((entry) => entry.kind === kind)?.instance;
   const lead = first.length ? undefined : recommended;
   const pills = {
-    claude: useSignInPill(choice("claude") ?? lead),
-    chatgpt: useSignInPill(choice("chatgpt")),
-    opencode: useSignInPill(choice("opencode")),
+    claude: useSignInPill(choice("claude") ?? lead, "meet"),
+    chatgpt: useSignInPill(choice("chatgpt"), "meet"),
+    opencode: useSignInPill(choice("opencode"), "meet"),
   };
   const shown = first.length ? first : [{ kind: "claude" as const, instance: lead }];
   const [dialog, setDialog] = useState(false);
@@ -94,6 +98,7 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
     ?? (tested?.state === "failed" ? tested.error ?? t("onboarding.engines.noAnswer", { name: tested.instance.displayName }) : null);
   const signingIn = asking && !ready;
   return (
+    <ConnectAiPlaceContext.Provider value="meet">
     <div className="relative h-full min-h-[600px] w-full text-center">
       <h1 id="welcome-title" className="absolute left-1/2 top-[calc(50%-264px)] w-max max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 text-[28px] font-normal leading-[34px] tracking-[-0.02em] text-ink">
         {t("onboarding.meet.title", { app: productName() })}
@@ -139,12 +144,13 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
           <p className="mt-3 text-[13px] leading-[18px] text-ink-secondary">
             <button type="button" onClick={() => setDialog(true)} className="rounded transition-colors hover:text-ink">{t("onboarding.meet.otherWays")}</button>
             <span aria-hidden="true"> · </span>
-            <button type="button" data-welcome-later="" onClick={onNext} className="rounded transition-colors hover:text-ink">{t("onboarding.meet.setupLater")}</button>
+            <button type="button" data-welcome-later="" onClick={() => { step("later"); onNext(); }} className="rounded transition-colors hover:text-ink">{t("onboarding.meet.setupLater")}</button>
           </p>
         )}
         {signingIn && failure && <p role="alert" className="mt-2 text-[13px] leading-[18px] text-danger">{failure}</p>}
       </div>
       {dialog && <ConnectAiDialog hosted={hosted} tested={tested} onChoose={setChosen} onClose={() => setDialog(false)} />}
     </div>
+    </ConnectAiPlaceContext.Provider>
   );
 }

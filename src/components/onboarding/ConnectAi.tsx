@@ -5,6 +5,7 @@ import { engineReady } from "@/components/EngineLibrary";
 import { InstanceProviderMark } from "@/components/ProviderIcons";
 import { ModelgoOption } from "@/components/ModelgoOffer";
 import { cn } from "@/lib/cn";
+import { useConnectAiPlace, useConnectAiSteps, useDialogOpened } from "@/lib/connect-ai-events";
 import { t } from "@/lib/i18n";
 import { engineDisplayName } from "@/lib/engine-name";
 import { modelgoOfferable } from "@/lib/modelgo-offer";
@@ -54,6 +55,7 @@ export function ConnectAi({ hosted = false, tested, onChoose }: { hosted?: boole
   const [checking, setChecking] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const latestRequest = useRef(0);
+  const step = useConnectAiSteps(useConnectAiPlace());
 
   const refresh = useCallback(async (fresh = true) => {
     const request = ++latestRequest.current;
@@ -129,7 +131,7 @@ export function ConnectAi({ hosted = false, tested, onChoose }: { hosted?: boole
             <div className="flex w-full flex-col gap-3">
               {leading.map((instance) => (
                 <div key={instance.instanceId} data-ai-recommended={instance.instanceId} className="animate-rise w-full rounded-2xl bg-card p-4 text-left"
-                  onClickCapture={() => onChoose?.(instance.instanceId)}>
+                  onClickCapture={() => { step("chosen", { driverKind: instance.driverKind }); onChoose?.(instance.instanceId); }}>
                   <EngineSetup instance={instance} {...setupFor(instance)} className="border-0 bg-transparent p-0" />
                 </div>
               ))}
@@ -150,12 +152,18 @@ export function ConnectAi({ hosted = false, tested, onChoose }: { hosted?: boole
               onConnected={() => void refresh()}
             />
           )}
-          {showModelgo && <ModelgoOption open={open === "modelgo"} onToggle={() => setOpen(open === "modelgo" ? null : "modelgo")}>
+          {showModelgo && <ModelgoOption open={open === "modelgo"} onToggle={() => {
+            if (open !== "modelgo") step("chosen", { driverKind: "modelgo" });
+            setOpen(open === "modelgo" ? null : "modelgo");
+          }}>
             {modelgo && <EngineSetup instance={modelgo} {...setupFor(modelgo)} className="mx-4 mb-3.5 border-0 bg-inset" />}
           </ModelgoOption>}
           {otherRows.map((instance) => (
             <OtherWay key={instance.instanceId} instance={instance} open={open === instance.instanceId}
-              onToggle={() => setOpen(open === instance.instanceId ? null : instance.instanceId)} />
+              onToggle={() => {
+                if (open !== instance.instanceId) step("chosen", { driverKind: instance.driverKind });
+                setOpen(open === instance.instanceId ? null : instance.instanceId);
+              }} />
           ))}
           <button
             type="button"
@@ -176,6 +184,7 @@ export function ConnectAi({ hosted = false, tested, onChoose }: { hosted?: boole
 export function ConnectAiDialog({ hosted = false, tested, onChoose, onClose }: {
   hosted?: boolean; tested: WelcomeAiNow | null; onChoose?: (instanceId: string) => void; onClose: () => void;
 }) {
+  useDialogOpened(useConnectAiPlace());
   return (
     <div
       className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4"
