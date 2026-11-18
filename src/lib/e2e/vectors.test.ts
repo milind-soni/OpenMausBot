@@ -19,6 +19,15 @@ const PAYLOAD1 = utf8(v.inputs.payload1);
 
 const phoneEphemeral = () => importKeyPair(bytes(v.inputs.phoneEphemeralPrivate), bytes(v.V1.phoneEphemeralPublic));
 
+/** Each promise's outcome, in the order they settled (not the order they were made). */
+async function settledInOrder(promises: Promise<unknown>[]) {
+  const order: string[] = [];
+  await Promise.allSettled(
+    promises.map((p, i) => p.then(() => order.push(`${i}:opened`), (e: Error) => order.push(`${i}:${e.message}`))),
+  );
+  return order;
+}
+
 async function phone(transport: TransportByte, pskName: string, trace?: TraceStep[]) {
   return phoneHello({ remoteStatic: T_PUB, psk: PSKS[pskName], transport, ephemeral: await phoneEphemeral(), trace }, PAYLOAD1);
 }
@@ -172,12 +181,12 @@ describe("V6 must fail, phone side", () => {
   it("fails an oversized record in its place in the queue: earlier ones open, later ones are refused", async () => {
     const keys = await v2Session();
     const [first, second] = v.V4.records.filter((r: { direction: string }) => r.direction === "cp");
-    const results = await Promise.allSettled([
+    const order = await settledInOrder([
       keys.receive.open(bytes(first.record)),
       keys.receive.open(new Uint8Array(65_536)),
       keys.receive.open(bytes(second.record)),
     ]);
-    expect(results.map((r) => (r.status === "rejected" ? (r.reason as Error).message : "opened"))).toEqual(["opened", "e2e: record_too_large", "e2e: failed"]);
+    expect(order).toEqual(["0:opened", "1:e2e: record_too_large", "2:e2e: failed"]);
   });
 
   it("fails a record whose buffer was transferred in its place in the queue, without throwing from open", async () => {
@@ -185,12 +194,12 @@ describe("V6 must fail, phone side", () => {
     const [first, second] = v.V4.records.filter((r: { direction: string }) => r.direction === "cp");
     const detached = bytes(second.record);
     structuredClone(detached.buffer, { transfer: [detached.buffer] });
-    const results = await Promise.allSettled([
+    const order = await settledInOrder([
       keys.receive.open(bytes(first.record)),
       keys.receive.open(detached),
       keys.receive.open(bytes(second.record)),
     ]);
-    expect(results.map((r) => (r.status === "rejected" ? (r.reason as Error).message : "opened"))).toEqual(["opened", "e2e: bad_record", "e2e: failed"]);
+    expect(order).toEqual(["0:opened", "1:e2e: bad_record", "2:e2e: failed"]);
   });
 
   it("refuses a genuine record opened before an earlier failed one settled", async () => {
@@ -266,6 +275,15 @@ describe("caller-owned bytes, phone side", () => {
     const hello = await pending;
     expect(hex(hello.message1)).toBe(v.V2.message1);
     await expect(hello.finish(bytes(v.V2.message2))).resolves.toBeDefined();
+  });
+
+  it("refuses a wrong-sized pinned key or PSK before copying it, the pinned key first", async () => {
+    const neverCopied = (length: number) =>
+      ({ length, [Symbol.iterator]: () => { throw new Error("copied"); } }) as unknown as Bytes;
+    const hello = (remoteStatic: Bytes, secret: Bytes) => phoneHello({ remoteStatic, psk: secret, transport: 1 }, PAYLOAD1);
+    await expect(hello(neverCopied(66), PSKS.device)).rejects.toThrow("e2e: bad_point");
+    await expect(hello(T_PUB, neverCopied(33))).rejects.toThrow("e2e: bad_psk");
+    await expect(hello(neverCopied(66), neverCopied(33))).rejects.toThrow("e2e: bad_point");
   });
 });
 

@@ -299,13 +299,14 @@ export interface PhoneHello {
 export async function phoneHello(options: PhoneHandshakeOptions, payload1Bytes: Bytes): Promise<PhoneHello> {
   if (payload1Bytes.length > MAX_HANDSHAKE_PAYLOAD) throw new NoiseError("payload_too_large");
   const payload1 = new Uint8Array(payload1Bytes);
+  const conn = payload1Conn(payload1);
+  if (options.remoteStatic.length !== PUBLIC_KEY_BYTES) throw new NoiseError("bad_point");
+  if (options.psk.length !== 32) throw new NoiseError("bad_psk");
   const pinned = new Uint8Array(options.remoteStatic);
   const pskBytes = new Uint8Array(options.psk);
   const { transport, trace, ephemeral } = options;
   const fixedEphemeral = ephemeral && { privateKey: ephemeral.privateKey, publicKey: new Uint8Array(ephemeral.publicKey) };
-  const conn = payload1Conn(payload1);
   const remoteStatic = await publicKey(pinned);
-  if (pskBytes.length !== 32) throw new NoiseError("bad_psk");
   const state = new SymmetricState(trace ?? null);
   state.mark("init");
   await state.mixHash(prologue(transport));
