@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as procs from "../procs.ts";
-import { CodexConnection, codexContractDiff, codexLoginIdentity, codexSpawnContract, codexWarmSessions, type KeptCodex } from "./codex-warm.ts";
+import { CodexConnection, codexConfigDigest, codexContractDiff, codexLoginIdentity, codexSpawnContract, codexWarmSessions, type KeptCodex } from "./codex-warm.ts";
 import { armedIdleCount, sessionIdlePolicy } from "./session-idle.ts";
 
 const children: ChildProcessWithoutNullStreams[] = [];
@@ -15,10 +15,10 @@ const idleChild = () => {
   return child;
 };
 const session = (overrides: Partial<KeptCodex<null>> = {}): KeptCodex<null> => ({
-  connection: new CodexConnection(idleChild()), contract: "{}", nativeThreadId: "native-1", configDigest: "config", carried: null, ...overrides,
+  connection: new CodexConnection(idleChild()), contract: "{}", nativeThreadId: "native-1", configDigest: "config", cwd: "/work", carried: null, ...overrides,
 });
 const contract = (overrides: Partial<Parameters<typeof codexSpawnContract>[0]> = {}) => codexSpawnContract({
-  cli: "codex-not-installed", args: ["app-server", "-c", "model=\"a\""], env: { PATH: "/nowhere", TOKEN: "first-secret" }, cwd: "/work", box: {}, thread: { model: "a" }, login: null, ...overrides,
+  cli: "codex-not-installed", args: ["app-server", "-c", "model=\"a\""], env: { PATH: "/nowhere", CODEX_HOME: "/nowhere", TOKEN: "first-secret" }, cwd: "/work", box: {}, thread: { model: "a" }, login: null, ...overrides,
 });
 
 afterEach(async () => {
@@ -36,10 +36,13 @@ describe("a Codex app-server's launch contract", () => {
   it("names what changed and never carries a value", () => {
     const before = contract();
     expect(codexContractDiff(before, contract())).toEqual([]);
-    expect(codexContractDiff(before, contract({ env: { PATH: "/nowhere", TOKEN: "second-secret", ADDED: "x" } }))).toEqual(["env:TOKEN", "env:ADDED"]);
+    expect(codexContractDiff(before, contract({ env: { PATH: "/nowhere", CODEX_HOME: "/nowhere", TOKEN: "second-secret", ADDED: "x" } }))).toEqual(["env:TOKEN", "env:ADDED"]);
     expect(codexContractDiff(before, contract({ args: ["app-server"], cwd: "/other", thread: { model: "b" }, login: "someone", box: { box: { allowEnv: ["A"] } } })))
       .toEqual(["args", "cwd", "box", "thread", "login"]);
     expect(before).not.toContain("first-secret");
+    expect(codexConfigDigest({ mcp_servers: { a: { command: "x" }, b: { command: "y" } }, model: "m" }))
+      .toBe(codexConfigDigest({ model: "m", mcp_servers: { b: { command: "y" }, a: { command: "x" } } }));
+    expect(codexContractDiff(codexConfigDigest({ model: "m", plugins: { a: {} } }), codexConfigDigest({ model: "m", plugins: { a: { enabled: false } } }))).toEqual(["config:plugins"]);
     expect(before).not.toContain("model=");
   });
 

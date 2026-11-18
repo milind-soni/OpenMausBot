@@ -608,6 +608,7 @@ process.stdin.on("data", (chunk) => {
         }
         break;
       case "config/read":
+        logStartup("config/read");
         if (mode === "config-read-error") {
           dump();
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "config unavailable" } });

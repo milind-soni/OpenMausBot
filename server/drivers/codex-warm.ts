@@ -1,16 +1,26 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { findCliCandidates } from "../env-path.ts";
 import { killCliTree } from "../procs.ts";
 import { appendNative } from "./native.ts";
 import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "./session-idle.ts";
 
-const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(value) ?? "").digest("hex");
+/** Codex 0.160.1 lists a table's entries (its plugins, its MCP servers) in a different order from one `config/read` to the
+ * next, so tables are compared with their keys in order. */
+const ordered = (value: unknown): unknown => Array.isArray(value) ? value.map(ordered)
+  : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, entry]) => [key, ordered(entry)]))
+    : value;
+const digest = (value: unknown): string => createHash("sha256").update(JSON.stringify(ordered(value)) ?? "").digest("hex");
 
-/** A fingerprint of the effective configuration `config/read` returned. */
-export const codexConfigDigest = digest;
+/** A fingerprint of the effective configuration `config/read` returned, one per top-level setting. */
+export function codexConfigDigest(config: unknown): string {
+  const settings = config && typeof config === "object" && !Array.isArray(config) ? config as Record<string, unknown> : { config };
+  return JSON.stringify({ config: ordered(Object.fromEntries(Object.entries(settings).map(([name, value]) => [name, digest(value)]))) });
+}
 
 export interface CodexUsageTotal {
   input: number;
@@ -42,6 +52,7 @@ export class CodexConnection {
   exitedIdle: (() => void) | null = null;
   private link: CodexTurnLink | null = null;
   private buffer = "";
+  private readonly asked = new Map<number, (result: unknown) => void>();
   readonly child: ChildProcessWithoutNullStreams;
 
   constructor(child: ChildProcessWithoutNullStreams) {
@@ -71,6 +82,17 @@ export class CodexConnection {
     this.link = null;
   }
 
+  /** A request of the connection's own, answered whether or not a turn is attached. Resolves undefined on an error
+   * reply; never resolves if the process exits first. */
+  ask(method: string, params: unknown): Promise<unknown> {
+    const id = this.nextId++;
+    if (method === "config/read") this.sensitiveResponseIds.add(id);
+    return new Promise((resolve) => {
+      this.asked.set(id, resolve);
+      this.write({ jsonrpc: "2.0", id, method, params });
+    });
+  }
+
   write(message: unknown): void {
     try {
       this.child.stdin.write(JSON.stringify(message) + "\n");
@@ -91,7 +113,11 @@ export class CodexConnection {
         continue;
       }
       this.stderrSinceOutput = "";
-      if (this.link) this.link.message(message);
+      const answer = message?.id !== undefined && !message.method ? this.asked.get(message.id) : undefined;
+      if (answer) {
+        this.asked.delete(message.id);
+        answer(message.result);
+      } else if (this.link) this.link.message(message);
       else this.unattended(message);
     }
   }
@@ -144,7 +170,12 @@ export function codexSpawnContract(parts: {
   thread: unknown;
   login: string | null;
 }): string {
+  let config: string | null = null;
+  try {
+    config = digest(readFileSync(join(parts.env.CODEX_HOME || join(parts.env.HOME || parts.env.USERPROFILE || homedir(), ".codex"), "config.toml"), "utf8"));
+  } catch {}
   return JSON.stringify({
+    config,
     cli: cliIdentity(parts.cli, parts.env.PATH),
     args: digest(parts.args),
     cwd: parts.cwd,
@@ -167,12 +198,13 @@ export function codexContractDiff(previous: string, next: string): string[] {
   const changed: string[] = [];
   for (const field of new Set([...Object.keys(before), ...Object.keys(after)])) {
     if (JSON.stringify(before[field]) === JSON.stringify(after[field])) continue;
-    if (field !== "env") {
+    const was = before[field], now = after[field];
+    if (!was || !now || typeof was !== "object" || typeof now !== "object") {
       changed.push(field);
       continue;
     }
-    const was = (before.env ?? {}) as Record<string, string>, now = (after.env ?? {}) as Record<string, string>;
-    for (const name of new Set([...Object.keys(was), ...Object.keys(now)])) if (was[name] !== now[name]) changed.push(`env:${name}`);
+    const old = was as Record<string, unknown>, current = now as Record<string, unknown>;
+    for (const name of new Set([...Object.keys(old), ...Object.keys(current)])) if (old[name] !== current[name]) changed.push(`${field}:${name}`);
   }
   return changed;
 }
@@ -182,7 +214,10 @@ export interface KeptCodex<Carried> {
   connection: CodexConnection;
   contract: string;
   nativeThreadId: string;
+  /** The effective configuration the process reported when its last turn ended. Codex 0.160.1 adds its plugins and
+   * their MCP servers some time after it starts, so what it reports at start is not what it reports later. */
   configDigest: string;
+  cwd: string;
   carried: Carried;
 }
 
@@ -228,6 +263,10 @@ export function codexWarmSessions<Carried>(instanceId: string) {
       if (!keepEnabled() || !connection.alive || kept.has(threadId)) return false;
       connection.detach();
       connection.nativeThreadId = session.nativeThreadId;
+      void connection.ask("config/read", { cwd: session.cwd, includeLayers: false }).then((result) => {
+        const config = (result as { config?: unknown } | undefined)?.config;
+        if (config !== undefined) session.configDigest = codexConfigDigest(config);
+      });
       const entry = {
         session,
         idleTimer: armIdleClose(idleKey(threadId), engineIdleMs(threadId, policy), {

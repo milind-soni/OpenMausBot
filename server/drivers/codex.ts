@@ -65,7 +65,7 @@ import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-que
 import { codexQuestionReply, openAsyncQuestion, type CodexAsk } from "./codex-questions.ts";
 import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
 export { codexUpdateCommand };
-import { customApprovalParams, namedApprovalParams, permissionProfileUnsupported, withResolvedSandbox, type CodexApprovalParams } from "./codex-approval-config.ts"; import { CodexConnection, codexConfigDigest, codexLoginIdentity, codexSpawnContract, codexWarmSessions } from "./codex-warm.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts"; import { COMPUTER_PROXY_TIMEOUT_MS } from "../harness-budget.ts";
+import { customApprovalParams, namedApprovalParams, permissionProfileUnsupported, withResolvedSandbox, type CodexApprovalParams } from "./codex-approval-config.ts"; import { CodexConnection, codexConfigDigest, codexContractDiff, codexLoginIdentity, codexSpawnContract, codexWarmSessions } from "./codex-warm.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts"; import { COMPUTER_PROXY_TIMEOUT_MS } from "../harness-budget.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
@@ -561,7 +561,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       let startingNativeTurn = false;
       const earlyNotifications: any[] = [];
       const mcpStartup = reused ? null : mcpStartupTracker(child);
-      let mcpFailed = false, keepable: { configDigest: string; carried: { initialized: any; approvalParams: CodexApprovalParams; rolloutPath: unknown } } | null = null;
+      let mcpFailed = false, keepable: { configDigest: string; cwd: string; carried: { initialized: any; approvalParams: CodexApprovalParams; rolloutPath: unknown } } | null = null;
       const state = {
         settled: false,
         lastError: "",
@@ -1195,7 +1195,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         }
         // config/read reads the files again (codex-cli 0.160.1); the loaded thread keeps what it started with.
         const configDigest = codexConfigDigest(effectiveConfig);
-        if (reused && reused.configDigest !== configDigest) return relaunch("", "Codex configuration changed", "rpc_error", true);
+        if (reused && reused.configDigest !== configDigest) { appendNative(threadId, { dir: "out", source: "codex.session", msg: { close: "configuration changed", contractChanged: codexContractDiff(reused.configDigest, configDigest) } }); return relaunch("", "Codex configuration changed", "rpc_error", true); }
         if (!reused) await warm.retired();
         if (privateEnv.length || authBridge) {
           const snapshot = (effectiveConfig as { features?: { shell_snapshot?: unknown } } | null)?.features?.shell_snapshot;
@@ -1351,7 +1351,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         ];
         const startTurn = () => {
           promptSubmitted = true;
-          startingNativeTurn = true; keepable = { configDigest, carried: { initialized, approvalParams, rolloutPath: rolloutAt?.path } };
+          startingNativeTurn = true; keepable = { configDigest, cwd: turn.cwd ?? homedir(), carried: { initialized, approvalParams, rolloutPath: rolloutAt?.path } };
           return request("turn/start", {
             threadId: codexThreadId,
             input: turnInput,
