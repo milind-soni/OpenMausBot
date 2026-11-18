@@ -185,7 +185,6 @@ export function SettingsWindow() {
               {(!narrow || !showList) && (
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                   {!narrow && closeButton}
-                  {/* pr-16 keeps cards clear of the floating close button (right-3 + size-8 = 44 px) as they scroll under it. */}
                   <div ref={scrollRef} data-settings-scroll data-settings-content=""
                     className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "pb-12 pl-8 pr-16")}>
                     <div className={cn("flex max-w-[640px] flex-col", narrow && "max-w-none")}>
