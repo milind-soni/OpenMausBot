@@ -3822,5 +3822,7 @@
   "imageGen.higgsfield.connected": "Connecté à votre compte Higgsfield",
   "imageGen.higgsfield.notConnected": "Non connecté, ou la connexion a expiré",
   "imageGen.higgsfield.help": "{app} crée des images avec le compte Higgsfield auquel vous vous connectez sous Plugins. Chaque image consomme des crédits de ce compte.",
-  "imageGen.higgsfield.open": "Ouvrir Plugins"
+  "imageGen.higgsfield.open": "Ouvrir Plugins",
+  "inbox.settled.title": "Terminé",
+  "inbox.settled.read": "Lu"
 }

@@ -5915,5 +5915,7 @@
   "imageGen.higgsfield.connected": "Đã kết nối với tài khoản Higgsfield của bạn",
   "imageGen.higgsfield.notConnected": "Chưa kết nối, hoặc phiên đăng nhập đã hết hạn",
   "imageGen.higgsfield.help": "{app} tạo ảnh bằng tài khoản Higgsfield mà bạn đăng nhập trong Plugin. Mỗi ảnh tốn tín dụng của tài khoản đó.",
-  "imageGen.higgsfield.open": "Mở Plugin"
+  "imageGen.higgsfield.open": "Mở Plugin",
+  "inbox.settled.title": "Đã xong",
+  "inbox.settled.read": "Đã đọc"
 }

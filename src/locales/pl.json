@@ -7122,5 +7122,7 @@
   "imageGen.higgsfield.connected": "Połączono z twoim kontem Higgsfield",
   "imageGen.higgsfield.notConnected": "Brak połączenia lub logowanie wygasło",
   "imageGen.higgsfield.help": "{app} tworzy obrazy na koncie Higgsfield, na które logujesz się w sekcji Wtyczki. Każdy obraz zużywa kredyty z tego konta.",
-  "imageGen.higgsfield.open": "Otwórz Wtyczki"
+  "imageGen.higgsfield.open": "Otwórz Wtyczki",
+  "inbox.settled.title": "Zakończone",
+  "inbox.settled.read": "Przeczytane"
 }

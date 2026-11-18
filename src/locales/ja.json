@@ -7959,5 +7959,7 @@
   "imageGen.higgsfield.connected": "Higgsfield アカウントに接続済み",
   "imageGen.higgsfield.notConnected": "未接続、またはサインインが切れています",
   "imageGen.higgsfield.help": "{app} は、プラグインでサインインした Higgsfield アカウントで画像を作ります。画像 1 枚ごとにそのアカウントのクレジットを消費します。",
-  "imageGen.higgsfield.open": "プラグインを開く"
+  "imageGen.higgsfield.open": "プラグインを開く",
+  "inbox.settled.title": "完了",
+  "inbox.settled.read": "既読"
 }

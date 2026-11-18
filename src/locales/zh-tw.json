@@ -10187,5 +10187,7 @@
   "imageGen.higgsfield.connected": "已連接到你的 Higgsfield 帳號",
   "imageGen.higgsfield.notConnected": "未連接，或登入已失效",
   "imageGen.higgsfield.help": "{app} 使用你在「外掛」中登入的 Higgsfield 帳號產生圖片。每張圖片都會消耗該帳號的額度。",
-  "imageGen.higgsfield.open": "開啟外掛"
+  "imageGen.higgsfield.open": "開啟外掛",
+  "inbox.settled.title": "已完成",
+  "inbox.settled.read": "已讀"
 }
