@@ -515,6 +515,24 @@ jobs:
         env:
           RELAY_FUZZ_MS: ${{ github.event_name == 'schedule' && '600000' || '20000' }}
 
+  sdk-python:
+    needs: static
+    if: contains(needs.static.outputs.jobs, '"sdk-python"')
+    # sdks/python replays sdks/contract/cases.json against the sync and async clients, on the runner's own Python.
+    name: sdk-python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: sdks/python
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -m venv .venv
+      - run: .venv/bin/pip install -e ".[dev]"
+      - run: .venv/bin/pytest -q
+
   deploy-composio-broker:
     # Only deploys on push to upstream main. PRs run the control-plane tests
     # but do not deploy: the wiring is exercised end-to-end only by a merged

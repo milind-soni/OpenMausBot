@@ -42,3 +42,8 @@ deploy/podman/.env
 deploy/podman/.env.*
 !deploy/podman/.env.example
 /.env
+
+# Python SDK virtualenv
+sdks/python/.venv/
+__pycache__/
+*.egg-info/

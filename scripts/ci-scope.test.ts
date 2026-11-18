@@ -148,6 +148,11 @@ describe("CI path scope", () => {
       expect(selectCiScope([file])).toEqual({ areas: ["relay"], checks: ["relay"] });
     });
 
+  it("runs only the Python SDK job for its own files, and that job beside the Linux tests for the shared contract", () => {
+    expect(selectCiScope(["sdks/python/src/mausbot/_bot.py"])).toEqual({ areas: ["sdk-python"], checks: ["sdk-python"] });
+    expect(selectCiScope(["sdks/contract/cases.json"])).toEqual({ areas: ["sdk-contract"], checks: ["linux-tests", "sdk-python"] });
+  });
+
   it("runs the server's checks and the relay's for the shared E2E vectors, which the relay keeps a pinned copy of", () => {
     expect(selectCiScope(["companion/src/e2e/vectors/v1.json"])).toEqual({ areas: ["e2e-vectors"], checks: [...checks("server"), "relay"].sort() });
     expect(selectCiScope(["companion/src/e2e/noise.ts"])).toEqual({ areas: ["server"], checks: checks("server") });

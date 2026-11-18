@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 // where the event runs it), and the subsets in VITEST_SUBSETS.
 export const SELECTABLE_JOBS = [
   "build", "vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes", "cloudflared-linux-arm64",
-  "foss", "control-plane", "ui-smoke", "browser-identity", "package-linux", "browser-driver", "relay",
+  "foss", "control-plane", "ui-smoke", "browser-identity", "package-linux", "browser-driver", "relay", "sdk-python",
 ];
 
 // The server imports Electron and renderer modules, and the macOS smokes run
@@ -19,7 +19,7 @@ const SERVER_CHECKS = [
   "build", "linux-tests", "host-tests", "behavior-evals", "packaged-server", "foss", "electron-smokes",
   "ui-smoke", "browser-identity", "browser-driver", "package-linux",
 ];
-const EVERY_CHECK = [...SERVER_CHECKS, "windows-cua", "cloudflared-linux-arm64", "control-plane", "relay"];
+const EVERY_CHECK = [...SERVER_CHECKS, "windows-cua", "cloudflared-linux-arm64", "control-plane", "relay", "sdk-python"];
 
 /** What a pull request's change in each area can affect. */
 export const AREA_CHECKS = {
@@ -39,7 +39,9 @@ export const AREA_CHECKS = {
   // which it keeps a pinned copy of.
   relay: ["relay"],
   "sdk-typescript": ["build", "linux-tests"],
-  "sdk-contract": ["linux-tests"],
+  // Its own job: a venv with the one dependency and pytest, no pnpm.
+  "sdk-python": ["sdk-python"],
+  "sdk-contract": ["linux-tests", "sdk-python"],
   "e2e-vectors": [...SERVER_CHECKS, "relay"],
   everything: EVERY_CHECK,
 };
@@ -230,6 +232,7 @@ const AREAS = [
   [/^announcements\//, "announcements"],
   [/^relay\//, "relay"],
   [/^sdks\/typescript\//, "sdk-typescript"],
+  [/^sdks\/python\//, "sdk-python"],
   [/^sdks\/contract\//, "sdk-contract"],
 ];
 
