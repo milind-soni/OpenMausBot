@@ -2766,6 +2766,7 @@
   "computer.problem.localNeedsApp": "Nur die {app}-App auf diesem Computer kann einen Bot ihn benutzen lassen. Öffne die App hier, um ihn zu benutzen.",
   "computer.problem.localWindows": "Bots können diesen PC gerade nicht benutzen. Starte {app} neu, und wenn das nicht hilft, öffne Einstellungen → Diese App → Hilfe.",
   "computer.problem.localMac": "Bots können diesen Mac noch nicht benutzen. Prüfe, ob {app} in Systemeinstellungen → Datenschutz & Sicherheit unter Bildschirmaufnahme und Bedienungshilfen erlaubt ist, und starte es dann neu.",
+  "computer.problem.localMacTooOld": "Bots können diesen Mac nicht benutzen: Die lokale Desktopsteuerung braucht macOS 13 Ventura oder neuer. Aktualisiere macOS, um sie zu nutzen.",
   "place.view.ccNeedsKey.short": "Zuerst Boat verbinden",
   "place.action.addBoatKey": "Boat verbinden",
   "place.view.browserOff.short": "Ausgeschaltet",

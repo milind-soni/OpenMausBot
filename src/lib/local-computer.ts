@@ -48,6 +48,7 @@ export function localComputerDisabledReason({
   }
   if (capabilities.host.label === "Browser") return t("computer.problem.localNeedsApp");
   if (capabilities.host.platform === "win32") return t("computer.problem.localWindows");
+  if (capabilities.localComputer.reasonCode === "macos-version-unsupported") return t("computer.problem.localMacTooOld");
   return t("computer.problem.localMac");
 }
 

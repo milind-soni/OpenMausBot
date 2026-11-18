@@ -77,7 +77,8 @@ export function MacLocalControl() {
   }, [awaitingGrant, hidden]);
 
   if (capabilities.host.platform !== "darwin" || capabilities.localComputer.reasonCode === "remote-server") return null;
-  if (capabilities.localComputer.available || hidden) return null;
+  // Too old a macOS: no permission or retry helps, and the computer picker already says to update.
+  if (capabilities.localComputer.available || hidden || capabilities.localComputer.reasonCode === "macos-version-unsupported") return null;
 
   if (settings) {
     // In Settings: an ordinary row. A 16 px warning mark, the title, its reason, and one primary; Retry and Not now quiet.
