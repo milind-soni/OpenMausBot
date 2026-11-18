@@ -52,6 +52,15 @@ describe("the Teams popup", () => {
     expect(buttons(popup)).toEqual(["Invite your team", "Not now", "Close"]);
   });
 
+  it("links every audience to the website's Team plans", async () => {
+    for (const action of [{ kind: "start", inApp: false, url: "https://cloud.example/pro/buy" }, { kind: "got-it" }, { kind: "invite", url: "https://admin.example/people" }] as TeamsAction[]) {
+      const popup = await show(action);
+      const link = [...popup.querySelectorAll("a")].find(a => a.textContent?.includes("See Team plans"));
+      expect(link?.getAttribute("href"), action.kind).toBe("https://www.openmausbot.com/pricing#teams");
+      await act(async () => root?.unmount()); root = null;
+    }
+  });
+
   it("Escape closes it, and Tab keeps focus inside", async () => {
     const popup = await show({ kind: "start", inApp: false, url: "https://cloud.example/pro/buy" });
     const list = [...popup.querySelectorAll<HTMLElement>("button")];
