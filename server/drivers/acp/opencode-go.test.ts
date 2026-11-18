@@ -342,7 +342,7 @@ describe("OpenCode catalog", () => {
         expect(await ask(threadId, "build it")).toMatchObject({ ok: true });
         expect(JSON.stringify(recorder.events)).toContain("build started");
         const session = promptedSession(calls)!;
-        await until(() => calls().some((call) => call.method === "session/delete" && call.sessionId === session));
+        await until(() => calls().some((call) => call.method === "session/close" && call.sessionId === `${session}-fork`));
         const methods = calls().map((call) => `${call.method} ${call.sessionId ?? ""}`.trim());
         expect(methods.slice(methods.indexOf(`session/fork ${session}`))).toEqual(expect.arrayContaining([
           `session/delete ${session}`, `session/close ${session}-fork`]));
