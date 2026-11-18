@@ -77,7 +77,7 @@ function workspace(seed: { bots?: Rec[]; groups?: Rec[]; sections?: string[]; co
     throw new Error(`no route for ${method} ${path}`);
   };
   const client: HeadlessClient = {
-    baseUrl: "http://omb", explicit: true, json, raw: async () => { throw new Error("no raw reads here"); },
+    baseUrl: "http://omb", explicit: true, identity: { kind: "none" }, json, raw: async () => { throw new Error("no raw reads here"); },
     tool: async (name, args: Rec) => {
       writes.push(`tool ${name}`);
       if (name === "create_channel") state.groups.push({ id: `room-${++ids}`, name: args.name, memberIds: args.member_ids, section: args.section,
@@ -321,7 +321,7 @@ describe("team export", () => {
       const out = join(dir, `team.${extension}`);
       const ctx = { verb: "team export", flags: { out }, positionals: [], env: {}, io: { out: () => undefined, err: () => undefined, readStdin: async () => "" },
         output: new Output({ out: () => undefined, err: () => undefined, readStdin: async () => "" }, {}), client: async () => client,
-        signal: new AbortController().signal, defaultWaitMs: 1_000 } as VerbContext;
+        signal: new AbortController().signal, defaultWaitMs: 1_000, botShell: false, saved: null, interactive: false, confirm: async () => false, openBrowser: async () => false } as VerbContext;
       await teamExportVerb(ctx);
       if (extension === "yaml") expect(readFileSync(out, "utf8")).toMatch(/^# Written by openmausbot team export/);
       const back = loadTeamFile(out);
@@ -345,7 +345,7 @@ describe("team export", () => {
       const out = join(dir, `team.${extension}`);
       const ctx = { verb: "team export", flags: { out }, positionals: [], env: {}, io: { out: () => undefined, err: () => undefined, readStdin: async () => "" },
         output: new Output({ out: () => undefined, err: () => undefined, readStdin: async () => "" }, {}), client: async () => client,
-        signal: new AbortController().signal, defaultWaitMs: 1_000 } as VerbContext;
+        signal: new AbortController().signal, defaultWaitMs: 1_000, botShell: false, saved: null, interactive: false, confirm: async () => false, openBrowser: async () => false } as VerbContext;
       const exported = await teamExportVerb(ctx);
       expect((exported.result as Rec).redacted).toEqual(['team "Launch Room" brief', 'bot "Room Lead" soul', 'bot "Room Lead" skill launch-report']);
       const written = [readFileSync(out, "utf8"), readFileSync(join(dir, "skills/room-lead/launch-report/SKILL.md"), "utf8")].join("\n");

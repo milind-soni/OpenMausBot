@@ -83,8 +83,11 @@ export async function connectVerb(ctx: VerbContext): Promise<VerbOutcome> {
   if (!code) {
     const minted = await call(origin, "/api/auth/pairing", { method: "POST", body: JSON.stringify({ label, ...(ctx.flags.client ? { scopes: ["client"] } : {}) }) });
     if (minted.status !== 200 || typeof minted.body.code !== "string") {
+      const desktop = typeof minted.body.error === "string" && minted.body.error.includes("must come from the desktop app");
       throw new HeadlessError(`this server will not mint a pairing code for a command on this computer${minted.body.error ? ` (${minted.body.error})` : ""}`,
-        EXIT.unreachable, `${cliCommand("pair")} in a terminal on this computer, then pass --code CODE`);
+        EXIT.notAllowed, desktop
+          ? `the MausBot app runs this server: run ${cliCommand("login")} instead and press Allow in the app, or make a code in Settings → Phone & devices and pass --code CODE`
+          : `${cliCommand("pair")} in a terminal on this computer, then pass --code CODE`);
     }
     code = minted.body.code as string;
   }
