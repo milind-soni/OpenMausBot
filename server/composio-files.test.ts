@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "./config.ts";
-import { requestFileUpload } from "./composio-files.ts";
+import { requestFileUpload, UploadServiceOutdatedError } from "./composio-files.ts";
 
 const request = { toolkit_slug: "googledrive", tool_slug: "GOOGLEDRIVE_UPLOAD_FILE", filename: "report.pdf", mimetype: "application/pdf", md5: "0".repeat(32) };
 const withKey = { composio: { apiKey: "ak_test" } } as unknown as AppConfig;
@@ -40,5 +40,20 @@ describe("upload links for connected-app files", () => {
   it("takes a link on this computer only from a service run on this computer", async () => {
     vi.stubGlobal("fetch", answering({ key: "k", url: "http://127.0.0.1:9000/upload/1" }));
     await expect(requestFileUpload(withKey, request, { url: "http://127.0.0.1:9000", token: service.token })).resolves.toMatchObject({ url: "http://127.0.0.1:9000/upload/1" });
+  });
+  it("says the connected-apps service is out of date when it has no upload route", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({ error: "not found" }, { status: 404 }));
+    const outdated = requestFileUpload(withKey, request, service);
+    await expect(outdated).rejects.toBeInstanceOf(UploadServiceOutdatedError);
+    await expect(outdated).rejects.toThrow("out of date");
+  });
+
+  it("keeps the answer's own error for other failures and for Composio's 404", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({ error: "googledrive is not connected" }, { status: 409 }));
+    await expect(requestFileUpload(withKey, request, service)).rejects.toThrow("googledrive is not connected");
+    vi.stubGlobal("fetch", async () => Response.json({ error: "not found" }, { status: 404 }));
+    const fromComposio = requestFileUpload(withKey, request);
+    await expect(fromComposio).rejects.toThrow("not found");
+    await expect(fromComposio).rejects.not.toBeInstanceOf(UploadServiceOutdatedError);
   });
 });
