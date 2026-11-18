@@ -74,8 +74,8 @@ function newerData(dataDir: string, version: string, marker: DataFormatMarker): 
 
 /**
  * Records that this version has run on the folder. Never lowers a marker: an older version that could read the data
- * leaves it. Throws only DataFormatError, for data it cannot read; a marker it cannot write (a read-only folder, a file
- * Windows holds open past the retries) is said in the log and the start goes on, since the data itself is fine.
+ * leaves it. A marker is optional for format 1. A server writing a newer format needs the marker to protect that data
+ * against rollback, so a failed write throws DataFormatError before stores can open.
  */
 export function stampDataFormat(
   dataDir: string,
@@ -91,7 +91,11 @@ export function stampDataFormat(
   try {
     write(file, `${JSON.stringify(next, null, 2)}\n`);
   } catch (error) {
-    console.warn(`[data-format] could not write ${file} (${error instanceof Error ? error.message : String(error)}); starting without it.`);
+    const detail = error instanceof Error ? error.message : String(error);
+    if (format.writes > 1) {
+      throw new DataFormatError(`OpenMausBot startup failed: could not write data format ${format.writes} to ${file} (${detail}). Fix the marker write error, then restart.`);
+    }
+    console.warn(`[data-format] could not write ${file} (${detail}); starting without it.`);
   }
 }
 

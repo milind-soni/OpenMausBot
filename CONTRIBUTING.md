@@ -195,10 +195,9 @@ cause data loss on rollback:
 - The marker is one number for the whole folder. A workspace backup does not
   carry it (it describes the folder it is in), so a backup a newer version
   made, restored into an older server, is not stopped by it.
-- A marker that cannot be read (empty or full of NULs after a power loss, not
-  readable by the server's user) counts as format 1 while `writes` is 1, and
-  a marker that cannot be written is said in the log and skipped: the check
-  must never be the reason a healthy install does not start.
+- While `writes` is 1, an unreadable marker counts as format 1 and a failed
+  marker write is logged. A server writing a newer format stops startup if
+  it cannot read or establish the marker that protects against rollback.
 
 For the rule to hold by itself, these would have to change:
 
