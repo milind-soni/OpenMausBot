@@ -7,7 +7,9 @@ import type { Delivery } from "./person-inbox.ts";
 
 /** The run that made a call, as it was before the call went out: a call can outlive it. */
 type Run = { id: string; routineId: string; botId: string };
-type Refused = { target: RosterMember; from: RosterMember; run: string };
+type Refused = { target: RosterMember; from: RosterMember };
+/** Who each run was refused by, per run and per bot: another run's late answer is never this run's. */
+type Refusals = Map<string, Map<string, Refused>>;
 
 export interface RefusedHandoffDeps {
   bots(): readonly RosterMember[];
@@ -28,7 +30,7 @@ export interface RefusedHandoffDeps {
 }
 
 export function createRefusedHandoffs(deps: RefusedHandoffDeps) {
-  const refused = new Map<string, Map<string, Refused>>();
+  const refused = new Map<string, Refusals>();
   const toldWriter = new Map<string, string>();
 
   function words(threadId: string, seen: readonly Refused[]): string {
@@ -41,18 +43,24 @@ export function createRefusedHandoffs(deps: RefusedHandoffDeps) {
     /** A coordinate_bots call came back: remembers the bots the run that made it could not reach, and forgets one it has reached since. */
     settled(threadId: string, from: RosterMember, named: readonly string[], status: number, run: Run | undefined): void {
       if (!run) return;
-      const seen = refused.get(threadId) ?? new Map<string, Refused>();
+      // The run must still hold this conversation: another run's answer is not this one's.
+      if (deps.runOf(threadId)?.id !== run.id) return;
+      const byRun = refused.get(threadId) ?? new Map<string, Map<string, Refused>>();
+      const mine = byRun.get(run.id) ?? new Map<string, Refused>();
       for (const raw of named) {
         const target = status >= 400 ? unreachableTeammate(deps.bots(), from, raw, (bot) => deps.hides?.(from, bot) === true) : null;
-        if (target) seen.set(target.id, { target, from, run: run.id });
-        if (status < 400) for (const [id, was] of seen) if (namesTeammate(was.target, raw)) seen.delete(id);
+        if (target) mine.set(target.id, { target, from });
+        if (status < 400) for (const [id, was] of mine) if (namesTeammate(was.target, raw)) mine.delete(id);
       }
-      if (seen.size) refused.set(threadId, seen);
+      if (mine.size) byRun.set(run.id, mine);
+      else byRun.delete(run.id);
+      if (byRun.size) refused.set(threadId, byRun);
       else refused.delete(threadId);
     },
     /** The run in this conversation is ending well: what it must say instead, once; null when nothing was refused, or another run was. */
     take(threadId: string): string | null {
-      const run = deps.runOf(threadId), seen = [...refused.get(threadId)?.values() ?? []].filter((was) => was.run === run?.id);
+      const run = deps.runOf(threadId), byRun = refused.get(threadId), seen = [...(run ? byRun?.get(run.id)?.values() ?? [] : [])];
+      // Another run's records here belong to a run that no longer holds the thread, so they can never be said.
       refused.delete(threadId);
       if (!seen.length) return null;
       const said = words(threadId, seen);

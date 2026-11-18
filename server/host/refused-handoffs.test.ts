@@ -84,6 +84,27 @@ describe("a routine's refused hand-off", () => {
     expect(later, "the run that started since never made that call").toBeNull();
   });
 
+  it("keeps a refusal when another run's delayed refusal for the same bot settles after it", () => {
+    const { refused, lines, now } = fixture({ writer: "p_olive", asked: "p_mara" });
+    now(r1);
+    refused.settled("t", rooms, ["Bookkeeping"], 403, r1);
+    now(r1);
+    refused.settled("t", rooms, ["Bookkeeping"], 403, r2);
+    expect(refused.take("t"), "the run that was refused still says so").toBe(SAID);
+    expect(lines.map((line) => line.to), "and its writer still hears it, once").toEqual(["p_olive"]);
+    expect(refused.take("t"), "the run that no longer owns the conversation says nothing").toBeNull();
+    expect(lines).toHaveLength(1);
+  });
+
+  it("keeps a refusal when another run's delayed success for the same bot settles after it", () => {
+    const { refused, lines, now } = fixture({ writer: "p_olive", asked: "p_mara" });
+    now(r1);
+    refused.settled("t", rooms, ["Bookkeeping"], 403, r1);
+    refused.settled("t", rooms, ["books"], 202, r2);
+    expect(refused.take("t"), "another run reaching Bookkeeping did not reach it for this one").toBe(SAID);
+    expect(lines.map((line) => line.to)).toEqual(["p_olive"]);
+  });
+
   it("tells who wrote the routine in their inbox when the bot's failures reach someone else, once for the same words", () => {
     const { refused, lines } = fixture({ writer: "p_olive", asked: "p_mara" });
     refused.settled("t", rooms, ["Bookkeeping"], 403, r1);
