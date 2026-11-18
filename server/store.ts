@@ -40,6 +40,7 @@ import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sharedAsMaker, sharedUnlessRestricted, type NewBotSharingRule } from "./new-bot-sharing.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
+import { messagesBefore } from "./thread-history.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 import { buildTask, threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
@@ -1075,21 +1076,20 @@ export class Store {
     return this.thread(threadId).messages;
   }
 
+  messagesBefore(threadId: string, before: string, limit: number) {
+    return messagesBefore(threadId, before, limit, this.threads.get(threadId), () => this.thread(threadId));
+  }
+
   /** Legacy rows without a parentId chain only on a full load, so a bounded page missing that context falls back to one. */
   messagesTail(threadId: string, limit: number): { messages: Message[]; hasMore: boolean; activeLeafId: string | null } {
     let state = this.threads.get(threadId);
     if (!state) {
       const tail = mdb.readThreadTail(threadId, messagesFile(threadId), limit);
       const legacyRows = tail.hasMore !== undefined && tail.messages.some((m) => m.parentId === undefined);
-      if (tail.hasMore !== true || legacyRows) {
-        state = this.threads.load(threadId, legacyRows ? mdb.readThread(threadId, messagesFile(threadId)) : tail);
-      } else {
-        return {
-          messages: tail.messages,
-          hasMore: tail.hasMore,
-          activeLeafId: tail.activeLeafId ?? tail.messages.at(-1)?.id ?? null,
-        };
+      if (tail.hasMore === true && !legacyRows) {
+        return { messages: tail.messages, hasMore: true, activeLeafId: tail.activeLeafId ?? tail.messages.at(-1)?.id ?? null };
       }
+      state = this.threads.load(threadId, legacyRows ? mdb.readThread(threadId, messagesFile(threadId)) : tail);
     }
     const { messages, activeLeafId } = state;
     const start = Math.max(0, messages.length - limit);
