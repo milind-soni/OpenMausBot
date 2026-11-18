@@ -320,7 +320,7 @@ export class Store {
         botsMigrated = true;
       }
       if (!existsSync(soulFile(b.id))) {
-        try { writeSoulMirror(b.id, b.soul); } catch (e) {
+        try { writeSoulMirror(b.id, b.soul, false); } catch (e) {
           console.warn(`[bot-folder] could not create SOUL.md for ${b.id}: ${(e as Error).message}`);
         }
       }
@@ -1276,7 +1276,8 @@ export class Store {
       >
     > = {},
     opts: {
-      seedMessages?: boolean; id?: string; threadId?: string; beforeShown?: (bot: BotRecord) => void;
+      /** `settle` finishes the new bot's record (patchBot and the like) before its one save; a throw leaves no bot behind. */
+      seedMessages?: boolean; id?: string; threadId?: string; beforeShown?: (bot: BotRecord) => void; settle?: (bot: BotRecord) => void;
     } = {},
   ): BotRecord {
     const toolScope = parseToolScope(profile.toolScope);
@@ -1318,13 +1319,12 @@ export class Store {
       busy: false,
     }];
     // Persist before publishing or greeting, so an interrupted creation cannot inherit tools.
-    this.saveBots([bot, ...this.bots]);
-    this.bots.unshift(bot);
-    try {
-      writeSoulMirror(bot.id, bot.soul ?? "");
-    } catch (e) {
-      console.warn(`[bot-folder] could not write SOUL.md mirror for ${bot.id}: ${(e as Error).message}`);
+    try { this.bots.unshift(bot); opts.settle?.(bot); this.saveBots(); } catch (error) {
+      const at = this.bots.findIndex((made) => made.id === bot.id); if (at >= 0) this.bots.splice(at, 1);
+      if (opts.settle) try { this.saveBots(); } catch { console.warn(`store: bot ${bot.id} was not finished and may reappear on restart`); } finally { this.emit({ type: "bot.deleted", botId: bot.id }); }
+      throw error;
     }
+    try { writeSoulMirror(bot.id, bot.soul ?? "", false); } catch (e) { console.warn(`[bot-folder] could not write SOUL.md mirror for ${bot.id}: ${(e as Error).message}`); }
     // Before its transcript: clients need the bot/thread mapping to place either message.
     opts.beforeShown?.(bot); this.emit({ type: "bot", botId: bot.id });
     if (opts.seedMessages !== false) {

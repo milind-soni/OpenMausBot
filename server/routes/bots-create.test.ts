@@ -2,11 +2,13 @@
 // desktop app), while a request, the New bot defaults, Approve for me, or a server without it keep their own.
 import { rmSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WireBot } from "../../shared/wire.ts";
+import { OwnedFile } from "../atomic.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
+import { BOTS_FILE } from "../registry-store.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { Store, type BotRecord } from "../store.ts";
 import { createBotCreateRoutes, type BotCreateRouteDeps } from "./bots-create.ts";
@@ -85,5 +87,21 @@ describe("where a new bot works", () => {
     expect((await fx.create({ name: "Ada", useDefaults: false, settings: { approvalMode: "auto" } })).computer).toBeUndefined();
     expect((await fixture({ newBotComputer: () => undefined }).create({ name: "Bea" })).computer).toBeUndefined();
     expect((await fixture().create({ name: "Cy" })).computer).toBeUndefined();
+  });
+});
+
+describe("saving a new bot", () => {
+  it("writes bots.json once, with the request's settings already in it", async () => {
+    const fx = fixture({ newBotComputer: () => "local" });
+    await fx.create({ name: "Warm" });
+    const write = vi.spyOn(OwnedFile.prototype, "write");
+    try {
+      const bot = await fx.create({ name: "Ada", useDefaults: false, settings: { soul: "Be brief.", approvalMode: "auto", browser: false } });
+      const written = write.mock.results.flatMap((result, call) => result.value === true && (write.mock.contexts[call] as OwnedFile).path === BOTS_FILE ? [write.mock.calls[call]![0]] : []);
+      expect(written).toHaveLength(1);
+      expect(JSON.parse(written[0]!)[0]).toMatchObject({ id: bot.id, name: "Ada", soul: "Be brief.", autoApprove: true, browser: false });
+    } finally {
+      write.mockRestore();
+    }
   });
 });
