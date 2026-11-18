@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { api } from "@/state/store";
 import { takeComputerPanelBrowserView } from "@/lib/computer-panel-focus";
 import { readComputerPanelView } from "@/lib/computer-panel-view";
 import { browsingSiteOf, keepWorking, nextWorkingTurns, openBotBrowser, readMapBrowsing, type WorkingTurns } from "./map-browsing";
@@ -73,6 +74,11 @@ describe("the Team map's Browsing chip", () => {
     expect(first).toEqual({ constructor: 1 });
     expect(nextWorkingTurns(nextWorkingTurns(first, "", next), "constructor", next)).toEqual({ constructor: 2 });
     expect(browsingSiteOf({ ...bot, id: "constructor" }, {})).toBeUndefined();
+  });
+
+  it("leaves out a read entry for an id such as constructor when no bot by that id is working", async () => {
+    vi.mocked(api).mockResolvedValueOnce({ bots: [{ botId: "constructor", site: "github.com" }] });
+    expect(await readMapBrowsing(() => ({}))).toEqual({});
   });
 
   it("opens the bot's chat with its Browser panel open", () => {

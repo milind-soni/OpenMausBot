@@ -5,10 +5,8 @@ import type { MapBrowsingPayload } from "../../shared/map-computer";
 
 export const MAP_BROWSING_POLL_MS = 5_000;
 
-/** A bot's own entry only: an id such as `constructor` never reads what every object inherits. */
 const ownEntry = <T>(record: Readonly<Record<string, T>>, id: string): T | undefined => (Object.hasOwn(record, id) ? record[id] : undefined);
 
-/** The site a bot's chip names: only while it works, so a read from before its turn ended never lingers. */
 export function browsingSiteOf(bot: { id: string; busy?: boolean }, sites: Readonly<Record<string, string>>): string | undefined {
   return bot.busy ? ownEntry(sites, bot.id) : undefined;
 }
