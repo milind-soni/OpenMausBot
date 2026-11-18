@@ -1225,7 +1225,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               const selectionParams = narrowsNativeTools(turn.toolScope)
                 ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
               let loaded = false;
-              if (cursor && (!support.closeBeforeLiveLoad || liveSessionId !== cursor || await request("session/close", { sessionId: cursor }, 30_000).then(() => true, () => false))) {
+              if (cursor && (!support.closeBeforeLiveLoad || liveSessionId !== cursor || await request("session/close", { sessionId: cursor }, 30_000).then(() => { session.sessionId = session.sessionKey = null; return true; }, () => false))) {
                 try {
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
