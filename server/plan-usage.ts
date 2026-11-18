@@ -217,7 +217,7 @@ function codexHasCredits(value: unknown): boolean {
   if (credits.unlimited === true) return true;
   if (credits.has_credits !== true) return false;
   const balance = typeof credits.balance === "string" ? Number(credits.balance) : credits.balance;
-  return !(typeof balance === "number" && balance <= 0);
+  return typeof balance === "number" && Number.isFinite(balance) && balance > 0;
 }
 
 /** Whether Codex's ChatGPT credits are on and not used up: sends then go on past a full window and are paid from them. */
