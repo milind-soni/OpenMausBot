@@ -134,6 +134,9 @@ function mergePaths(parts: string[]): string {
   return [...new Set(parts.filter(Boolean))].join(delimiter);
 }
 
+const PROBE_TIMEOUT_MS = 5000;
+const PROBE_MAX_OUTPUT_BYTES = 1024 * 1024;
+
 function probeLoginShellPath(): void {
   const shell = process.env.SHELL || "/bin/zsh";
   // -l -i: nvm and friends live in .zshrc/.bashrc, which only interactive shells read; a marker isolates $PATH from rc noise.
@@ -141,20 +144,46 @@ function probeLoginShellPath(): void {
   const child = spawn(shell, ["-l", "-i", "-c", 'printf "__OMB_PATH__%s" "$PATH"'], {
     detached: true,
     stdio: ["ignore", "pipe", "ignore"],
-    timeout: 5000,
   });
   let stdout = "";
-  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-    stdout += chunk;
-  });
-  child.on("error", () => {});
-  child.on("close", (code) => {
-    if (code !== 0 || !stdout) return;
+  let bytes = 0;
+  let exitCode: number | null | undefined;
+  let finished = false;
+  const finish = (): void => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(deadline);
+    child.stdout.destroy();
+    // An interactive shell ignores SIGTERM, and something its rc started in the background can hold stdout open after it exits.
+    if (exitCode === undefined && child.pid) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {}
+    }
+  };
+  const deadline = setTimeout(finish, PROBE_TIMEOUT_MS);
+  deadline.unref();
+  // Applied as soon as the shell has exited cleanly, not when stdout closes: its rc may leave a background job holding it.
+  const applyIfDone = (): void => {
+    if (exitCode !== 0) return;
     const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
-    if (!m || !m[1]) return;
+    if (!m || !m[1] || m[1] === loginShellPath) return;
     loginShellPath = m[1];
     cached = buildPath();
+  };
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    bytes += Buffer.byteLength(chunk);
+    if (bytes > PROBE_MAX_OUTPUT_BYTES) return finish();
+    stdout += chunk;
+    applyIfDone();
   });
+  child.on("error", finish);
+  child.on("exit", (code) => {
+    exitCode = code;
+    if (code === 0) applyIfDone();
+    else finish();
+  });
+  child.on("close", finish);
 }
 
 export function resetPathCacheForTests(): void {

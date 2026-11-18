@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -127,6 +127,81 @@ describe("augmentedPath", () => {
 
       augmentedPath();
       await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin));
+    } finally {
+      if (saved.SHELL === undefined) delete process.env.SHELL;
+      else process.env.SHELL = saved.SHELL;
+      if (saved.VITEST === undefined) delete process.env.VITEST;
+      else process.env.VITEST = saved.VITEST;
+      resetPathCacheForTests();
+    }
+  });
+
+  posixIt("uses the login-shell PATH once the shell exits, even when its rc leaves a job holding stdout open", async () => {
+    const shell = join(homedir(), "fake-login-shell");
+    const rcOnlyBin = join(homedir(), "rc-only", "bin");
+    const jobPid = join(homedir(), "rc-job.pid");
+    writeFileSync(shell, `#!/bin/sh\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\nsleep 30 &\necho $! > '${jobPid}'\n`);
+    chmodSync(shell, 0o755);
+
+    const saved = { SHELL: process.env.SHELL, VITEST: process.env.VITEST };
+    try {
+      process.env.SHELL = shell;
+      delete process.env.VITEST;
+      resetPathCacheForTests();
+
+      augmentedPath();
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin), { timeout: 3000 });
+    } finally {
+      if (existsSync(jobPid)) {
+        try {
+          process.kill(Number(readFileSync(jobPid, "utf8").trim()));
+        } catch {}
+      }
+      if (saved.SHELL === undefined) delete process.env.SHELL;
+      else process.env.SHELL = saved.SHELL;
+      if (saved.VITEST === undefined) delete process.env.VITEST;
+      else process.env.VITEST = saved.VITEST;
+      resetPathCacheForTests();
+    }
+  });
+
+  posixIt("drops a login-shell probe whose output passes 1 MiB", async () => {
+    const shell = join(homedir(), "fake-login-shell");
+    const rcOnlyBin = join(homedir(), "rc-only", "bin");
+    const shellPid = join(homedir(), "flood-shell.pid");
+    const finished = join(homedir(), "flood-finished");
+    writeFileSync(
+      shell,
+      `#!/bin/sh\necho $$ > '${shellPid}'\nprintf '__OMB_PATH__%s\\n' '${rcOnlyBin}'\nhead -c 2000000 /dev/zero\n: > '${finished}'\n`,
+    );
+    chmodSync(shell, 0o755);
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    const saved = { SHELL: process.env.SHELL, VITEST: process.env.VITEST };
+    try {
+      process.env.SHELL = shell;
+      delete process.env.VITEST;
+      resetPathCacheForTests();
+
+      augmentedPath();
+      const pid = await vi.waitFor(
+        () => {
+          const written = existsSync(shellPid) ? Number(readFileSync(shellPid, "utf8").trim()) : 0;
+          expect(written).toBeGreaterThan(0);
+          return written;
+        },
+        { timeout: 5000 },
+      );
+      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5000 });
+      expect(existsSync(finished)).toBe(false);
+      expect(augmentedPath().split(delimiter)).not.toContain(rcOnlyBin);
     } finally {
       if (saved.SHELL === undefined) delete process.env.SHELL;
       else process.env.SHELL = saved.SHELL;
