@@ -103,3 +103,17 @@ describe("a relay with RELAY_PHONE_ORIGINS", () => {
     host.control.ws.close();
   });
 });
+
+describe("a relay that lists only a trailing-dot origin", () => {
+  const DOTTED = `${APP}.`;
+  let relay: TestRelay;
+  before(async () => {
+    relay = await startTestRelay({}, { phoneOrigins: [...loadConfig({ ...base, RELAY_PHONE_ORIGINS: DOTTED }).phoneOrigins] });
+  });
+  after(() => relay.stop());
+
+  test("lets in the dotted spelling only, never the undotted one", async () => {
+    assert.equal(await Client.refusal(relay.url, "/v1/phone", { headers: { origin: DOTTED } }), 101);
+    assert.equal(await Client.refusal(relay.url, "/v1/phone", { headers: { origin: APP } }), 403);
+  });
+});
