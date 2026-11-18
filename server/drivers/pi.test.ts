@@ -5,13 +5,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ensureDirs, NATIVE_DIR } from "../config.ts";
+import { DATA_DIR, ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { publishedMessages, replyProblems } from "../harness/text-items.testkit.ts";
 import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
+import { piSessionDir } from "./pi-session.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
 import {
   applyPiLocalCatalog,
@@ -477,6 +478,59 @@ describe("PiDriver turns (fake CLI)", () => {
       | { sessionId: string }
       | undefined;
     expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
+  });
+
+  it("starts conversation turns without --no-session and keeps catalog probes ephemeral", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-dir-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-pi-session-dir", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const rows = readFileSync(dump, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv?: string[] });
+    const probes = rows.filter((row) => row.argv && !row.argv.includes("-e"));
+    const turns = rows.filter((row) => row.argv?.includes("-e"));
+    expect(probes.some((row) => row.argv!.join(" ") === "--mode rpc --no-session")).toBe(true);
+    expect(turns.length).toBeGreaterThan(0);
+    for (const row of turns) {
+      expect(row.argv).toEqual(["--mode", "rpc", "--session-dir", piSessionDir(), "-e", expect.any(String)]);
+      expect(row.argv).not.toContain("--no-session");
+    }
+    expect(piSessionDir()).toBe(join(DATA_DIR, "pi-sessions"));
+  });
+
+  it("reads sessionFile from get_state when new_session omits it, then resumes with switch_session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-state-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump, FAKE_PI_SESSION_FILE_IN_STATE_ONLY: "1" });
+    const first = await instance.adapter.sendTurn({ threadId: "t-pi-state-session", text: "first" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const firstSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId) as
+      | { sessionId: string }
+      | undefined;
+    expect(firstSession?.sessionId).toMatch(/\/fake\/pi-session-\d+\.json/);
+
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-pi-state-session",
+      text: "second",
+      resumeCursor: firstSession!.sessionId,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const secondSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === second.turnId) as
+      | { sessionId: string }
+      | undefined;
+    expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
+
+    const rpc = readFileSync(dump, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { rpc?: string; sessionPath?: string })
+      .filter((row) => row.rpc);
+    expect(rpc.map((row) => row.rpc)).toEqual(["new_session", "switch_session"]);
+    expect(rpc[1]?.sessionPath).toBe(firstSession?.sessionId);
   });
 
   it("delivers the full prompt once per session and rides volatile changes as notes", async () => {

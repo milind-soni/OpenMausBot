@@ -1,8 +1,8 @@
 import { piModelId } from "./pi-model-id.ts";
 import { RuntimeNoticeError, runtimeErrorText } from "./runtime-notice-error.ts";
 // The pi coding agent (@earendil-works/pi-coding-agent) over its own stdio JSON-RPC mode
-// (`pi --mode rpc --no-session`), not ACP. pi is BYOK and reads ~/.pi/agent/auth.json itself, so
-// this driver holds no key; resumeCursor is pi's `sessionFile` (switch_session).
+// (`pi --mode rpc`), not ACP. pi is BYOK and reads ~/.pi/agent/auth.json itself, so this driver
+// holds no key; resumeCursor is pi's `sessionFile` (switch_session).
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,14 +48,15 @@ import {
 import { appendNative } from "./native.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
+import { piTurnArgs } from "./pi-session.ts";
 import { noticeFailure } from "../chat-notices.ts";
 
-import { decodePiFrame, PiRpcChunks, piLineReader, readPiPromptImages } from "./pi-rpc.ts";
+import { decodePiFrame, PiRpcChunks, piLineReader, piNativeLogMessage, readPiPromptImages } from "./pi-rpc.ts";
 import { PiRunUsage, type PiUsage, type TurnUsage } from "./pi-usage.ts";
 export { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
 
 const DRIVER_KIND = "piAgent";
-const PI_ARGS = ["--mode", "rpc", "--no-session"];
+const PI_ARGS = ["--mode", "rpc", "--no-session"]; // catalog probes only: do not write a session file
 const PI_MODEL_UPDATE_ARGS = ["update", "--models", "--no-approve"];
 /** omp's RPC transport caps a frame at 1 MiB and chunks bigger ones only after the client
  *  negotiates protocol 2. Vanilla pi has no handshake frame to wait for. */
@@ -69,21 +70,6 @@ const PI_SESSION_SLOW_MS = 20_000;
 
 /** pi answered success:false: an explicit refusal from a live runtime, not a transport failure. */
 class PiRpcRefusalError extends Error {}
-
-/** Native logs go into bug reports: keep the RPC shape and size, never image bytes. */
-function piNativeLogMessage(message: Record<string, unknown>): Record<string, unknown> {
-  if (!Array.isArray(message.images)) return message;
-  return {
-    ...message,
-    images: message.images.map((image) => {
-      if (!image || typeof image !== "object") return image;
-      const value = image as Record<string, unknown>;
-      return typeof value.data === "string"
-        ? { ...value, data: `[image data: ${value.data.length} base64 chars]` }
-        : value;
-    }),
-  };
-}
 
 export function piThinkingLevel(effort: EffortLevel): (typeof EFFORT_LEVELS)[number] | "off" {
   return effort === "none" ? "off" : effort;
@@ -476,7 +462,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         } catch {}
         throw err;
       }
-      const childArgs = [...PI_ARGS, "-e", SPAWNED_PROXIES.piMcpExtension];
+      const childArgs = [...piTurnArgs(), "-e", SPAWNED_PROXIES.piMcpExtension];
 
       // spawnCli can throw synchronously, before settle() could remove the credential file.
       const child = (() => {
@@ -827,7 +813,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         sessionReady = true;
         sessionOpened = true;
       } catch {
-        // pi --no-session accepts a prompt without an explicit session.
+        // A prompt can still be accepted without an explicit session handshake.
       }
       if (settled) return { turnId };
 
@@ -846,12 +832,15 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           return { turnId };
         }
       }
-      if (!chosen) {
+      // Official new_session returns only `{ cancelled }`; sessionFile is on get_state when persisted.
+      if (!chosen || (sessionOpened && !sessionFile)) {
         try {
           const statePromise = awaitResponse("get_state");
           send({ type: "get_state" });
-          const state = await statePromise as { model?: unknown } | undefined;
-          confirmedModel = piModelId(state?.model);
+          const state = await statePromise as { model?: unknown; sessionFile?: string; sessionId?: string } | undefined;
+          if (!chosen) confirmedModel = piModelId(state?.model);
+          if (typeof state?.sessionFile === "string" && state.sessionFile) sessionFile = state.sessionFile;
+          sessionId = sessionFile ?? (typeof state?.sessionId === "string" ? state.sessionId : null) ?? sessionId;
         } catch {}
       }
       if (settled) return { turnId };

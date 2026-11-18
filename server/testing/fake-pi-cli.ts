@@ -7,6 +7,8 @@
 //     | session-slow (answers new_session after FAKE_PI_SESSION_DELAY_MS, default 800, and dumps {sessionReplied})
 //   FAKE_PI_MODELS  provider/model pairs (default "ollama-cloud/glm-5.2,openai/gpt-4o")
 //   FAKE_PI_DUMP  path to append {argv, env} JSON to
+//   FAKE_PI_SESSION_FILE_IN_STATE_ONLY  new_session/switch_session return only {cancelled}, like official pi;
+//     sessionFile is available from get_state
 //   FAKE_PI_STEER_REFUSE  answer a steer with an explicit success:false
 //   FAKE_PI_STEER_OUT_OF_ORDER  hold the first steer until a second arrives, then refuse the first and accept the second
 
@@ -359,7 +361,13 @@ function handle(cmd: any) {
       }
       sessionCounter += 1;
       currentSessionFile = `/fake/pi-session-${sessionCounter}.json`;
-      const sessionReply = { type: "response", command: "new_session", success: true, data: { sessionId: `s-${sessionCounter}`, sessionFile: currentSessionFile } };
+      const sessionData = process.env.FAKE_PI_SESSION_FILE_IN_STATE_ONLY
+        ? { cancelled: false }
+        : { sessionId: `s-${sessionCounter}`, sessionFile: currentSessionFile };
+      const sessionReply = { type: "response", command: "new_session", success: true, data: sessionData };
+      if (process.env.FAKE_PI_DUMP) {
+        try { appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ rpc: "new_session" }) + "\n"); } catch {}
+      }
       if (mode !== "session-slow") {
         send(sessionReply);
         return;
@@ -375,7 +383,13 @@ function handle(cmd: any) {
         return;
       }
       currentSessionFile = cmd.sessionPath ?? currentSessionFile;
-      send({ type: "response", command: "switch_session", success: true, data: { sessionId: "s-resumed", sessionFile: currentSessionFile } });
+      const switchData = process.env.FAKE_PI_SESSION_FILE_IN_STATE_ONLY
+        ? { cancelled: false }
+        : { sessionId: "s-resumed", sessionFile: currentSessionFile };
+      if (process.env.FAKE_PI_DUMP) {
+        try { appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ rpc: "switch_session", sessionPath: currentSessionFile }) + "\n"); } catch {}
+      }
+      send({ type: "response", command: "switch_session", success: true, data: switchData });
       return;
     case "set_model": {
       if (process.env.FAKE_PI_DUMP) {
