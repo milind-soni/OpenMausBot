@@ -267,13 +267,13 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     const takesEffort = (id: string, row: OpenRouterModelRow) => config.catalog === "openai" ? OPENAI_REASONING.test(id)
       : openRouter && Array.isArray(row.supported_parameters) && row.supported_parameters.includes("reasoning");
     const apiEffort = (model: string, variant: string | undefined) => {
-      const explicit = reasoningBody(reasoningFor(model), variant);
+      const selected = reasoningFor(model);
+      const listed = catalog.options.find((option) => option.id === model)?.variants;
+      // An OpenAI or OpenRouter level the model no longer lists is left out, as before, so a saved level never fails the turn.
+      if (variant && (config.catalog === "openai" || openRouter) && !(selected?.choices ?? listed ?? []).some((choice) => choice.id === variant)) return {};
+      const explicit = reasoningBody(selected, variant);
       if (explicit) return explicit;
-      if (!variant) return {};
-      if (!catalog.options.find((option) => option.id === model)?.variants?.some((choice) => choice.id === variant)) {
-        if (config.catalog === "openai" || openRouter) throw new Error("Selected reasoning effort is unavailable for this model. Refresh models and choose a supported effort or use the provider default.");
-        return {};
-      }
+      if (!variant || !listed?.some((choice) => choice.id === variant)) return {};
       return config.catalog === "openai" ? { reasoning_effort: variant } : openRouter ? { reasoning: { effort: variant } } : {};
     };
 

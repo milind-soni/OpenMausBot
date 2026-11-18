@@ -57,9 +57,9 @@ describe("reasoning effort on an API key", () => {
       });
       await turn(instance, "gpt-5.2", "low");
       await turn(instance, "gpt-5.2");
-      expect(await turn(instance, "gpt-4.1", "low")).toMatchObject({ ok: false });
-      expect(await turn(instance, "gpt-5.2", "max")).toMatchObject({ ok: false });
-      expect(chats.map((chat) => chat.reasoning_effort)).toEqual(["low", undefined]);
+      expect(await turn(instance, "gpt-4.1", "low"), "a level the model does not list is left out").toMatchObject({ ok: true });
+      expect(await turn(instance, "gpt-5.2", "max")).toMatchObject({ ok: true });
+      expect(chats.map((chat) => chat.reasoning_effort)).toEqual(["low", undefined, undefined, undefined]);
     } finally { await instance.dispose(); }
   });
 
@@ -71,9 +71,9 @@ describe("reasoning effort on an API key", () => {
       expect(variantsOf(instance)).toMatchObject({ "acme/thinker": ["low", "medium", "high", "xhigh", "max"], "acme/plain": undefined });
       await turn(instance, "acme/thinker", "high");
       await turn(instance, "acme/thinker", "max");
-      expect(await turn(instance, "acme/thinker", "ultra")).toMatchObject({ ok: false });
-      expect(await turn(instance, "acme/plain", "high")).toMatchObject({ ok: false });
-      expect(chats.map((chat) => chat.reasoning)).toEqual([{ effort: "high" }, { effort: "max" }]);
+      expect(await turn(instance, "acme/thinker", "ultra"), "a level the model does not list is left out").toMatchObject({ ok: true });
+      expect(await turn(instance, "acme/plain", "high")).toMatchObject({ ok: true });
+      expect(chats.map((chat) => chat.reasoning)).toEqual([{ effort: "high" }, { effort: "max" }, undefined, undefined]);
       expect(chats.every((chat) => chat.reasoning_effort === undefined)).toBe(true);
     } finally { await instance.dispose(); }
   });
