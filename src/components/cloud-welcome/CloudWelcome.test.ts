@@ -41,6 +41,8 @@ const CLOUD = { name: "Studio Cloud", origin: "https://omb-u-1a2b3c4d5e6f.fly.de
 const quiet: CloudSendNotice = { ready: true, bots: [], updatedBots: [], skills: 0, logins: 0, onePassword: false, settings: 0, signature: "", dismissed: false, running: false, last: null, whole: null };
 const claude = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", access: "subscription", authentication: { method: "paste-code" }, snapshot: { state: "available", authenticated: false }, models: { default: "", options: [] } };
 const codex = { ...claude, instanceId: "codex", driverKind: "codex", displayName: "Codex" };
+const openCode = { instanceId: "opencodeGo", driverKind: "opencodeGo", displayName: "OpenCode", access: "subscription",
+  install: { server: { standalone: { version: "1", downloadBytes: 1 } } }, snapshot: { state: "unavailable" }, models: { default: "", options: [] } };
 const credit = { instanceId: "trial", driverKind: "openai-compat", displayName: "Trial credit · Claude", readOnly: true, trialCredit: "active", snapshot: { state: "available" }, models: { default: "", options: [] } };
 
 let host: HTMLDivElement;
@@ -146,7 +148,7 @@ describe("CloudWelcome", () => {
     expect(host.querySelector("[data-bring-update]")).toBeNull();
     expect(host.querySelector('[aria-current="step"]')!.getAttribute("data-welcome-rail")).toBe("bring");
     expect([...document.body.querySelectorAll("button")].map((node) => node.textContent?.trim())).toEqual([
-      "1Bring your stuffYour bots and chats (Not done yet)", "2Connect your AIClaude or ChatGPT (Not done yet)", "3Files and appsOptional (Not done yet)",
+      "1Bring your stuffYour bots and chats (Not done yet)", "2Connect your AIClaude, ChatGPT or OpenCode (Not done yet)", "3Files and appsOptional (Not done yet)",
       "Skip setup", "Continue",
     ]);
     expect(sent()).toEqual([]);
@@ -263,20 +265,31 @@ describe("CloudWelcome", () => {
     expect(hintsPut().at(-1)).toEqual(expect.arrayContaining([welcomeStepHint("engine")]));
   });
 
-  it("with no AI working, leads with the Claude sign-in and folds the other ways under it", () => {
+  it("with no AI working, leads with the Claude, ChatGPT and OpenCode setups and folds the other ways under them", () => {
     fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [welcomeStepHint("bring")] };
+    // The Cloud refuses the ChatGPT plan's own sign-in: ChatGPT is Codex's.
+    const plan = { ...codex, instanceId: "chatgpt", displayName: "ChatGPT plan", authentication: { method: "browser-pkce" },
+      snapshot: { state: "unavailable", authenticated: false, chatgptPlan: true, authenticationUnavailableReason: "Not on a Cloud." } };
+    fixture.state.instances = [claude, codex, plan, openCode];
     render();
     expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull();
+    expect(text()).toContain("Your bots think with your own Claude or ChatGPT plan, or with OpenCode. Set one up once on My Cloud.");
+    expect([...host.querySelectorAll("[data-welcome-recommended]")].map((node) => node.getAttribute("data-welcome-recommended"))).toEqual(["claude", "codex", "opencodeGo"]);
+    const plain = (name: string) => `Use the ${name} account you already have. You sign in on their own website, so your password stays with them.`;
     expect(host.querySelector('[data-welcome-recommended="claude"] [data-engine-setup="claude"]')?.getAttribute("data-description"), "one plain line, not the setup's own")
-      .toBe("Use the Claude account you already have. You sign in on their own website, so your password stays with them.");
+      .toBe(plain("Claude"));
+    expect(host.querySelector('[data-welcome-recommended="codex"] [data-engine-setup="codex"]')?.getAttribute("data-description")).toBe(plain("ChatGPT"));
+    expect(host.querySelector('[data-welcome-recommended="opencodeGo"] [data-engine-setup="opencodeGo"]')?.hasAttribute("data-description"), "OpenCode installs with nothing to sign in to")
+      .toBe(false);
     expect(host.querySelector("[data-cloud-choice]")).toBeNull();
     fixture.state.instances = [{ ...claude, authentication: undefined }, codex];
     render();
     expect(host.querySelector('[data-welcome-recommended="claude"] [data-engine-setup="claude"]')?.hasAttribute("data-description"), "a sign-in finished in Terminal keeps its own instructions")
       .toBe(false);
     click("Other ways");
-    expect(host.querySelector('[data-cloud-choice="codex"]')).not.toBeNull();
-    expect(host.querySelector('[data-cloud-choice="claude"]'), "the recommended way is not offered twice").toBeNull();
+    expect(host.querySelector('[data-cloud-choice="codex"]'), "ChatGPT is not offered twice").toBeNull();
+    expect(host.querySelector('[data-cloud-choice="claude"]'), "Claude is not offered twice").toBeNull();
+    expect(host.querySelector('[role="group"][aria-label]'), "no empty row of tiles").toBeNull();
     expect(host.querySelector('[data-cloud-choice="api-key"]')).not.toBeNull();
     click("Skip for now");
     expect(host.querySelector('[data-welcome-step="files"]')).not.toBeNull();
@@ -312,6 +325,26 @@ describe("CloudWelcome", () => {
     click("Test again");
     await vi.waitFor(() => expect(host.querySelectorAll('[data-engine-check="working"]')).toHaveLength(2));
     expect(checks).toEqual(["claude", "codex", "codex"]);
+  });
+
+  it("checks OpenCode with one tiny real message once it is installed here, and Continue moves on", async () => {
+    fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [welcomeStepHint("bring")] };
+    fixture.state.instances = [claude, codex, openCode];
+    const checks: string[] = [];
+    const config = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation(async (path: string, init?: RequestInit) => {
+      const check = /^\/api\/instances\/([\w.-]+)\/check$/.exec(path);
+      if (!check) return config(path, init);
+      checks.push(check[1]!);
+      return { ok: true };
+    });
+    render();
+    fixture.state = { ...fixture.state, instances: [claude, codex, { ...openCode, snapshot: { state: "available", authenticated: true, freeFallback: true } }] };
+    render();
+    await vi.waitFor(() => expect(text()).toContain("OpenCode is working"));
+    expect(checks).toEqual(["opencodeGo"]);
+    click("Continue");
+    expect(host.querySelector('[data-welcome-step="files"]')).not.toBeNull();
   });
 
   it("in the app on a Cloud of the person's own, the folders card says this computer's files are used by themselves, with nothing to press", async () => {

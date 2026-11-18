@@ -82,7 +82,8 @@ export function chipAction(chip: Exclude<IntroChip, "ai">): Action {
 
 function IntroConnectAi({ onClose }: { onClose: () => void }) {
   const { state } = useStore();
-  return <ConnectAiDialog tested={useWelcomeAi(state.instances, true)} onClose={onClose} />;
+  const [chosen, setChosen] = useState<string | null>(null);
+  return <ConnectAiDialog tested={useWelcomeAi(state.instances, true, chosen)} onChoose={setChosen} onClose={onClose} />;
 }
 
 /** What is still missing, as chips under MausBot's follow-up (Simple mode): at most INTRO_CHIPS, and one that was tapped
