@@ -56,6 +56,9 @@ export function Composer({
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers the members (Buzz rule: only mentioned bots reply).
   const busy = group ? Boolean(group.busyBotId) : Boolean(bot?.busy);
+  // rooms take the message now: the server answers it right after the
+  // current turn, ahead of any bot-to-bot handoffs. DMs still hold it here.
+  const queueLocally = busy && !group;
   const busyName = group
     ? (members?.find((b) => b.id === group.busyBotId)?.name ?? "A bot")
     : (bot?.name ?? "The bot");
@@ -245,8 +248,8 @@ export function Composer({
     }
   };
 
-  // One message may be queued while the bot works; it auto-sends the moment
-  // the turn settles. Enter during a turn queues instead of silently dying.
+  // In DMs, one message may be queued while the bot works; it auto-sends
+  // when the turn settles. Rooms send immediately to take priority over handoffs.
   // The queue lives in composerDrafts and is drained by the app shell, so it
   // still sends if the user switches to another conversation meanwhile.
   const queueTarget = useMemo(() => (group ? { groupId: group.id } : { botId: bot?.id ?? "" }), [group, bot?.id]);
@@ -265,7 +268,7 @@ export function Composer({
       setSizeError(tooLarge);
       return;
     }
-    if (busy) {
+    if (queueLocally) {
       setQueued({ text: t, attachments: attachments });
       setText("");
       setAttachments([]);
@@ -498,7 +501,9 @@ export function Composer({
               : isDragging
                 ? "Drop files to attach…"
                 : busy
-                  ? `${busyName} is working — Enter queues your message`
+                  ? group
+                    ? `${busyName} is working — your message goes next`
+                    : `${busyName} is working — Enter queues your message`
                   : group
                     ? `Message ${group.name} — @ for bots, # for projects`
                     : `Message ${bot?.name ?? ""} — # for projects`
@@ -538,14 +543,14 @@ export function Composer({
         {hasContent && (
           <button
             onClick={send}
-            aria-label={busy ? "Queue message" : "Send message"}
-            title={busy ? "Queue — sends when the bot finishes" : "Send"}
+            aria-label={queueLocally ? "Queue message" : "Send message"}
+            title={queueLocally ? "Queue — sends when the bot finishes" : busy ? `Send — answered after ${busyName}'s turn, before any handoffs` : "Send"}
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              busy ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent hover:brightness-110",
+              queueLocally ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent hover:brightness-110",
             )}
           >
-            {busy ? <Clock size={15} /> : <ArrowUp size={17} />}
+            {queueLocally ? <Clock size={15} /> : <ArrowUp size={17} />}
           </button>
         )}
         </div>

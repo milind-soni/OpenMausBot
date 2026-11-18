@@ -78,6 +78,11 @@ posixOnly("room activity runtime", () => {
           environment: { FAKE_ACP_MODE: "mention-beta", FAKE_ACP_MENTION: "Alpha" },
           config: { cli: fakeCli, fullAuto: false },
         },
+        "mentions-slow": {
+          driver: "grokAgent",
+          environment: { FAKE_ACP_MODE: "mention-beta", FAKE_ACP_DELAY_MS: "1500" },
+          config: { cli: fakeCli, fullAuto: false },
+        },
         slow: {
           driver: "grokAgent",
           environment: { FAKE_ACP_MODE: "slow", FAKE_ACP_TICKS: "6", FAKE_ACP_TICK_MS: "400" },
@@ -375,6 +380,29 @@ posixOnly("room activity runtime", () => {
     expect(turns(alpha.id)).toBe(3);
     expect(turns(beta.id)).toBe(3);
   }, 40_000);
+
+  it.each(["@Alpha begin", "@Alpha and @Beta begin"])("lets a user message cut in ahead of pending replies to %s", async (opening) => {
+    const alpha = await makeBot("Alpha", "mentions-slow");
+    const beta = await makeBot("Beta", "happy");
+    const gamma = await makeBot("Gamma", "happy");
+    const group = (await api("POST", "/api/groups", { name: "Cut-in room", memberIds: [alpha.id, beta.id, gamma.id] })).body.group;
+    await api("PATCH", `/api/groups/${group.id}`, { handoffs: "on" });
+
+    const start = frames.length;
+    await api("POST", `/api/groups/${group.id}/messages`, { text: opening });
+    await waitForFrame(turnFrame(alpha.id, "turn.started"), "Alpha running", 12_000, start);
+    // posted while Alpha works; Alpha's reply will @Beta
+    expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "@Gamma actually, you take it" })).status).toBe(202);
+    await waitForFrame(turnFrame(gamma.id, "turn.completed"), "Gamma answers the cut-in", 12_000, start);
+
+    const after = frames.slice(start);
+    const gammaAt = after.findIndex(turnFrame(gamma.id, "turn.started"));
+    const betaAt = after.findIndex(turnFrame(beta.id, "turn.started"));
+    expect(gammaAt).toBeGreaterThan(-1);
+    expect(betaAt).toBe(-1);
+    expect(after.some((f) => f.kind === "message" && f.threadId === group.threadId
+      && f.message.tool?.name === "Your message goes first; Beta wasn't called in.")).toBe(true);
+  }, 30_000);
 
   it("routes unmentioned messages to the room's default responder", async () => {
     const alpha = await makeBot("Alpha", "happy");

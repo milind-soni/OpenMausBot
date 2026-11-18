@@ -883,6 +883,7 @@ async function runGroupMemberTurn(
   spoken: Set<string> = new Set(),
   epoch = groupQueueEpoch.get(groupId) ?? 0,
   retry?: { selection: ModelSelection; context: ActiveTurnContext },
+  chainUserMessages?: number,
 ): Promise<void> {
   const group = store.group(groupId);
   const bot = store.bot(botId);
@@ -892,6 +893,14 @@ async function runGroupMemberTurn(
     return;
   }
   spoken.add(botId);
+  // a user message posted after this point cuts in ahead of this turn's
+  // handoffs (counted, not timed: the opening message can share the ms)
+  const userMessageCount = () => store.messagesFor(group.threadId).filter((m) => m.role === "user").length;
+  const userMessagesAtStart = chainUserMessages ?? userMessageCount();
+  if (userMessageCount() > userMessagesAtStart) {
+    dropQueuedResponder(groupId, botId);
+    return;
+  }
   const selection = retry?.selection ?? turnSelection(bot, usageStore.get(bot.modelSelection.instanceId).status);
   if (bot.usingBackup && selection.instanceId === bot.modelSelection.instanceId) { store.patchBot(botId, { usingBackup: false }); publishBot(botId); }
   const instance = registry.get(selection.instanceId);
@@ -1043,7 +1052,19 @@ async function runGroupMemberTurn(
       .filter((b): b is NonNullable<typeof b> => Boolean(b) && b!.id !== bot.id);
     const mentioned = handoffMentions(replyText, members);
     const limit = latestGroup.maxHops ?? ROOM_DEFAULT_HOPS;
-    if (mentioned.length && (!roomHandoffsEnabled(latestGroup) || hop >= limit)) {
+    const cutIn = userMessageCount() > userMessagesAtStart;
+    if (mentioned.length && cutIn) {
+      // the user stepped in mid-chain: their message (already queued behind
+      // this turn) goes next, and the bots see the mention in the transcript
+      const names = mentioned.map((b) => b.name).join(" and ");
+      const line = store.appendMessage(group.threadId, {
+        role: "bot",
+        kind: "activity",
+        from: { botId: bot.id, name: bot.name, color: bot.color },
+        tool: { name: `Your message goes first; ${names} wasn't called in.`, ok: true },
+      });
+      broadcast({ kind: "message", threadId: group.threadId, message: line });
+    } else if (mentioned.length && (!roomHandoffsEnabled(latestGroup) || hop >= limit)) {
       const names = mentioned.map((b) => b.name).join(" and ");
       const line = store.appendMessage(group.threadId, {
         role: "bot",
@@ -1061,7 +1082,7 @@ async function runGroupMemberTurn(
       for (const next of mentioned) {
         if ((groupQueueEpoch.get(groupId) ?? 0) !== epoch) break;
         queueGroupResponders(groupId, [next.id]);
-        await runGroupMemberTurn(groupId, next.id, hop + 1, spoken, epoch);
+        await runGroupMemberTurn(groupId, next.id, hop + 1, spoken, epoch, undefined, userMessagesAtStart);
       }
     }
   }
@@ -1104,12 +1125,13 @@ function startGroupTurn(groupId: string, text: string, attachments?: Attachment[
   const prev = groupQueues.get(groupId) ?? Promise.resolve();
   const next = prev.then(async () => {
     const spoken = new Set<string>();
+    const chainUserMessages = store.messagesFor(group.threadId).filter((m) => m.role === "user").length;
     for (const responder of scheduled) {
       if ((groupQueueEpoch.get(groupId) ?? 0) !== epoch) break;
       if (spoken.has(responder.id)) continue;
       const latest = store.group(groupId);
       if (!latest?.queuedBotIds?.includes(responder.id)) continue;
-      await runGroupMemberTurn(groupId, responder.id, 0, spoken, epoch);
+      await runGroupMemberTurn(groupId, responder.id, 0, spoken, epoch, undefined, chainUserMessages);
     }
   });
   const settled = next.catch(() => {}).finally(() => {

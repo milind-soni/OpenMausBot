@@ -174,8 +174,14 @@ function handle(msg: any) {
       }
       if (mode === "mention-beta") {
         const target = process.env.FAKE_ACP_MENTION ?? "Beta";
-        out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `**@${target}** take the next step.` } } } });
-        complete();
+        const say = () => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `**@${target}** take the next step.` } } } });
+          complete();
+        };
+        // FAKE_ACP_DELAY_MS keeps the turn open so a test can post mid-turn
+        const delay = Number(process.env.FAKE_ACP_DELAY_MS) || 0;
+        if (delay) setTimeout(say, delay);
+        else say();
         return;
       }
       if (mode === "echo-context") {
