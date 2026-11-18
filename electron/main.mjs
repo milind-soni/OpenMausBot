@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildErrorPage, desktopViewerErrorPage } from "./error-pages.mjs";
+import { buildErrorPage, desktopViewerErrorPage, showBootFailure } from "./error-pages.mjs";
 import { startCua, stopCua, registerCuaIpc, requestComputerUse, setCuaStateListener, grantLocalComputer } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
 import { finishSpeech, speechBusy, startSpeech, stopSpeech } from "./speech.mjs";
@@ -2982,19 +2982,7 @@ app.whenReady().then(async () => {
         app.quit();
         return;
       }
-      const retried = await startServerPackaged();
-      if (retried) {
-        dialog.showErrorBox(
-          nativeT("native.boot.unhealthy.title"),
-          nativeT("native.boot.unhealthy.body", { folder: bootDataDir }),
-        );
-      } else {
-        dialog.showErrorBox(
-          nativeT("native.boot.failed.title"),
-          nativeT("native.boot.failed.body", { folder: bootDataDir }),
-        );
-        app.quit();
-      }
+      if (showBootFailure(dialog, nativeT, { retried: await startServerPackaged(), folder: bootDataDir })) app.quit();
     }
     if (!serverReady && !desktopShutdownStarted) serverSupervisor.startLater(startServerPackaged); // an always-on home keeps trying
   }

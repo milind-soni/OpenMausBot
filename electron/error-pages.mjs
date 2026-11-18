@@ -33,6 +33,16 @@ export function buildErrorPage({ allPortsOccupied, logDir, keepTrying = false },
   );
 }
 
+/**
+ * The box shown when the packaged server did not start at launch, after the fallback to the default data folder: it
+ * started and then stopped answering (`retried`), or it never started. Returns true when the app should quit.
+ */
+export function showBootFailure(dialog, t, { retried, folder }) {
+  if (retried) dialog.showErrorBox(t("native.boot.unhealthy.title"), t("native.boot.unhealthy.body", { folder }));
+  else dialog.showErrorBox(t("native.boot.failed.title"), t("native.boot.failed.body", { folder }));
+  return !retried;
+}
+
 /** The page the live-desktop viewer shows when it cannot open, in `text`'s language. */
 export function desktopViewerErrorPage(message, retryUrl, text = nativeText.englishText) {
   return (
