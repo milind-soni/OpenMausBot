@@ -90,7 +90,7 @@ async function fetchFolder(base: string, names: readonly string[], fetcher: Fetc
     let total = typeof manifest === "string" ? manifest.length : manifest.byteLength;
     if (name === "bot.md" || name === "team.md") {
       for (const path of namedFolderFiles(String(manifest))) {
-        const body = await fetchBody(`${base}/${path}`, SHARE_FOLDER_MAX_BYTES - total, fetcher, path.startsWith("avatars/"));
+        const body = await fetchBody(`${base}/${path.split("/").map(encodeURIComponent).join("/")}`, SHARE_FOLDER_MAX_BYTES - total, fetcher, path.startsWith("avatars/"));
         if (body === null) continue;
         total += typeof body === "string" ? body.length : body.byteLength;
         files[path] = body;

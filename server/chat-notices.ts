@@ -89,6 +89,7 @@ export const CHAT_NOTICE = {
   "chat.notice.phone.write.PHONE_SEND_WHATSAPP": "Send whatsapp on {phone}",
   "chat.notice.acpEmpty": "{provider} finished without replying.",
   "chat.notice.acpNoReason": "{provider} stopped without saying why.",
+  "chat.notice.acpNodeTooOld": "{provider} needs Node.js {needed} or newer, but this computer has Node.js {found}. Update Node.js from nodejs.org, then send your message again.",
   "chat.notice.acpMcpAppsFailed": "Connected apps couldn't be set up, so {provider} couldn't start this reply. Try again, or switch this bot to another AI.",
   "chat.notice.acpMcpServerFailed": "The \"{server}\" MCP server couldn't be set up, so {provider} couldn't start this reply. Try again, or switch this bot to another AI.",
   "chat.notice.stop.refusal": "{provider} refused to go on with this request (stop reason: {reason}). Try again, reword the request, or switch this bot to another AI.",
@@ -150,6 +151,8 @@ export const CHAT_NOTICE = {
   "chat.notice.computerAiUnsupported": "this bot's AI can't use this computer — pick another AI for this bot, or choose another place for it to work",
   "chat.notice.memoryReclaimedBrowser": "Ran out of room, so I closed the browser to keep everything else running.",
   "chat.notice.memoryReclaimedTask": "Ran out of room, so I stopped this task to keep everything else running.",
+  "chat.notice.botMemoryCap":
+    "{bot} used more memory than this computer allows for one bot ({used} MB of {cap} MB) while memory was running short, so I stopped this task to keep the other bots running. Send the message again to start over; if it keeps happening, give this task less to do at once, or give this computer more memory.",
   "chat.notice.memoryReclaimedBrowserDetail": "Ran out of room, so I closed the browser to keep everything else running. ({detail})",
   "chat.notice.memoryReclaimedTaskDetail": "Ran out of room, so I stopped this task to keep everything else running. ({detail})",
   "chat.notice.outOfProcesses": "There is no room to start another program ({code}), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.",

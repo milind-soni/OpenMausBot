@@ -584,9 +584,12 @@ class BotDb implements BotDatabase {
     if (numeric || temporal) {
       const sourceId = `omb_source.${id}`;
       const value = numeric ? `CAST(${sourceId} AS DOUBLE)` : `epoch(CAST(${sourceId} AS TIMESTAMP))`;
-      const sql = `WITH omb_range AS (SELECT min(${value}) AS lo, max(${value}) AS hi FROM ${from} AS omb_source WHERE ${sourceId} IS NOT NULL)
+      // NaN/infinity cannot define a finite bucket. Infinite dates produce
+      // NULL epochs; they must not be counted in the constant/first bucket.
+      const finite = `isfinite(${value})`;
+      const sql = `WITH omb_range AS (SELECT min(${value}) AS lo, max(${value}) AS hi FROM ${from} AS omb_source WHERE ${finite})
 SELECT LEAST(coalesce(floor((${value} - omb_range.lo) / nullif(omb_range.hi - omb_range.lo, 0) * ${bins}), 0), ${bins - 1})::INTEGER AS bin, count(*) AS n, min(omb_range.lo), min(omb_range.hi)
-FROM ${from} AS omb_source, omb_range WHERE ${sourceId} IS NOT NULL GROUP BY bin ORDER BY bin`;
+FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`;
       const rows = (await this.statement("panel", sql, options, (o, conn) => this.read(o, conn, sql))).rows;
       if (!rows.length) return result;
       const lo = Number(rows[0][2]);

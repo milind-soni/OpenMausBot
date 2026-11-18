@@ -1,5 +1,5 @@
 // The person's own computer (their screen, their apps, the browsers they are signed in to) is never covered by an approval
-// level, "Just do it" included: before a bot first touches it in a turn, the person is asked once, in these words. The
+// level, Full access included: before a bot first touches it in a turn, the person is asked once, in these words. The
 // English mirrors src/locales/en.json `approval.yourComputer.*` exactly (a test holds them together): the server has no i18n.
 
 /** What a bot's first call on the person's computer names, cleaned for a sentence they read. */

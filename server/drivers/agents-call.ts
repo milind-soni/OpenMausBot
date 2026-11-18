@@ -14,13 +14,13 @@ import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } fr
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
-import { boundedAgentResult } from "./agents-result.ts";
+import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
@@ -103,7 +103,7 @@ function renderAssignmentStatus(r: Json, id: string): string {
   const children = Array.isArray(r.children) ? r.children.filter(jsonRecord) : [];
   if (children.length) lines.push("Its own hand-offs:", ...children.map((child) => `- ${assignmentLine(child)}`));
   const settled = a.status === "completed" || a.status === "failed" || a.status === "cancelled" || a.status === "done";
-  if (!settled) lines.push("It is not settled. Its result resumes you on its own; do not wait on it in this turn.");
+  if (!settled) lines.push(`It is not settled. ${r.sentElsewhere === true ? "It was sent from another of your chats, so its result returns there and does not resume you here" : "Its result resumes you on its own"}; do not wait on it in this turn.`);
   return lines.join("\n");
 }
 
@@ -314,7 +314,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         isError: true,
       };
     }
-    const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
+    const answer = await apiResponse("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
       groupId: typeof canonical.group_id === "string" && canonical.group_id.trim() ? canonical.group_id.trim() : undefined, botIds: ids, message: canonical.message,
       reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
       rework: canonical.rework,
@@ -323,7 +323,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
       answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined, files: Array.isArray(canonical.files) && canonical.files.some((path) => path.trim()) ? canonical.files.filter((path) => path.trim()) : undefined,
     }) });
-    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+    return apiAnswer(answer.ok, answer.status, answer.body);
   }
   if (name === "assignment_status") {
     const id = args.id === undefined || args.id === null || args.id === "" ? "" : String(args.id).trim();
@@ -340,7 +340,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const { ok, status, body: r } = await apiResponse(`/api/internal/assignment-status${query.size ? `?${query.toString()}` : ""}`);
     if (!ok) {
       const why = status === 404 ? `No assignment ${id || "(none given)"} is known here: check the id against your coordinate_bots receipt or list_threads.`
-        : status === 403 ? `Assignment ${id} is not this conversation's; only its requester can read it.`
+        : status === 403 ? `Assignment ${id} can't be read here: ${String(r.error ?? "only the conversation that sent it can read it")}.`
         : String(r.error ?? `HTTP ${status}`);
       return { text: why, isError: true };
     }
@@ -424,23 +424,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!r.ok) return { text: String(r.body.error ?? `reset_cloud_computer failed (HTTP ${r.status}).`), isError: true };
     return { text: String(r.body.text ?? "") };
   }
-  if (name === "list_threads") {
-    const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
-    const r = await api(`/api/internal/threads?${query.toString()}`);
-    if (r.error) return { text: `Couldn't list threads: ${String(r.error)}`, isError: true };
-    const threads = Array.isArray(r.threads) ? r.threads.filter(jsonRecord) : [];
-    if (!threads.length) return { text: "No threads yet: you have none of your own beyond this one, and you have not opened any on a teammate." };
-    const stateWord: Record<string, string> = { running: "running", "waiting-on-you": "waiting on the person", queued: "queued", idle: "idle" };
-    const lines = threads.map((thread) => {
-      const where = thread.own === true ? "yours" : `on @${String(thread.botName)}${typeof thread.openedBy === "string" && thread.openedBy ? `, opened by @${thread.openedBy}` : ""}`;
-      const state = stateWord[String(thread.state)] ?? String(thread.state);
-      const unread = thread.unread === true ? ", unread for the person" : "";
-      const handoff = typeof thread.delegationId === "string" && thread.delegationId ? ` [delegation id: ${thread.delegationId}]` : "";
-      const waiting = typeof thread.waiting === "string" && thread.waiting ? `: ${thread.waiting}` : "";
-      return `- #${String(thread.title)} (${where}, ${state}${waiting}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
-    });
-    return { text: `Threads, newest first:\n${lines.join("\n")}` };
-  }
+  if (name === LIST_THREADS_TOOL) return callListThreadsTool(args, context);
   if (name === "close_thread") {
     const threadId = String(args.thread_id ?? "").trim();
     if (!threadId) return { text: "close_thread needs the thread_id from list_threads or start_thread.", isError: true };
@@ -919,16 +903,16 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         text: `A confirmation card is now visible to the user to ${verb} skill “${skillName}”. Nothing changes until they approve it. End this turn and wait for the decision.`,
       };
     }
-    if (args.action !== "create" && args.action !== "update") {
-      return { text: `skill_manage action must be "create", "update", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
+    if (args.action !== "create" && args.action !== "update" && args.action !== "import") {
+      return { text: `skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
-    if (!skillMd.trim()) {
+    if (!skillMd.trim() && args.action !== "import") {
       return { text: 'skill_manage needs skill_md: the full SKILL.md including YAML frontmatter, e.g. "---\\nname: file-expense\\ndescription: Files an expense in the company portal.\\n---\\n\\n# File expense\\n".', isError: true };
     }
     const source = typeof args.source === "string" ? args.source.trim() : "";
     if (!source) {
-      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill.', isError: true };
+      return { text: 'skill_manage needs source: the URL, folder, or "conversation" used to author the skill (for import, the GitHub or skills.sh link).', isError: true };
     }
     const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
     if (args.action === "update" && !skillName) {

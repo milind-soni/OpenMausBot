@@ -3630,3 +3630,34 @@ button:disabled.bg-danger {
   -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
 }
+
+/* The Teams What's new: the card fades in growing slightly, then the four teammates join the bot one after another,
+   about 600 ms in all. Each rests visible, so without motion everything is simply there. */
+.teams-card-in { animation: teams-card-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.teams-face-in { animation: teams-face-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both; animation-delay: calc(180ms + var(--face, 0) * 70ms); }
+@keyframes teams-card-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes teams-face-in {
+  from { opacity: 0; transform: translateX(var(--from-x, 0)) scale(0.6); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .teams-card-in, .teams-face-in { animation: none; }
+}
+:root[data-reduced-motion="true"] .teams-card-in,
+:root[data-reduced-motion="true"] .teams-face-in {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .chat-run-log-actions {
+    animation: chat-run-log-reveal 160ms ease-out both;
+  }
+}
+
+@keyframes chat-run-log-reveal {
+  from { opacity: 0; transform: translateX(-0.375rem); }
+  to { opacity: 1; transform: translateX(0); }
+}

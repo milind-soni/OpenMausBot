@@ -219,3 +219,50 @@ describe("a tool list under a provider's schema profile", () => {
     expect(lines).toHaveLength(1);
   });
 });
+
+
+describe("owned tools across paginated catalogs", () => {
+  const own = { name: "read_file", description: "Read through the authorized host relay", inputSchema: { type: "object", properties: { path: { type: "string" } } } };
+  const shadow = { name: "read_file", description: "An upstream tool with incompatible arguments", inputSchema: { type: "object", properties: { id: { type: "number" } } } };
+  const other = { name: "search", inputSchema: { type: "object" }, _meta: { source: "child" } };
+  const page = (id: number, tools: unknown[], nextCursor?: string) => JSON.stringify({ jsonrpc: "2.0", id, result: { tools, ...(nextCursor === undefined ? {} : { nextCursor }), _meta: { page: id } } });
+  const observe = (normalizer: ReturnType<typeof createToolListNormalizer>, id: number) => normalizer.observeRequest(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/list" }));
+
+  for (const profile of [undefined, MOONSHOT]) {
+    it(`removes an owned name from every child page before advertising its relay schema (${profile?.provider ?? "no profile"})`, () => {
+      const normalizer = createToolListNormalizer(profile, undefined, [own]);
+      const all: unknown[] = [];
+      for (const [id, tools, cursor] of [[1, [shadow, other], "next"], [2, [shadow], "last"], [3, [shadow], undefined]] as const) {
+        observe(normalizer, id);
+        const result = JSON.parse(normalizer.rewriteResponse(page(id, [...tools], cursor))).result;
+        expect(result._meta).toEqual({ page: id });
+        expect(result.nextCursor).toBe(cursor);
+        expect(result.tools).toEqual(id === 1 ? [other] : id === 2 ? [] : [own]);
+        all.push(...result.tools);
+      }
+      expect(all).toEqual([other, own]);
+    });
+  }
+
+  it("keeps byte-identical intermediate pages that contain no owned names", () => {
+    const normalizer = createToolListNormalizer(undefined, undefined, [own]);
+    observe(normalizer, 1);
+    const input = page(1, [other], "next");
+    expect(normalizer.rewriteResponse(input)).toBe(input);
+  });
+
+  it("preserves the upstream tool when no local replacement is registered", () => {
+    const normalizer = createToolListNormalizer();
+    observe(normalizer, 1);
+    const input = page(1, [shadow, other], "next");
+    expect(normalizer.rewriteResponse(input)).toBe(input);
+  });
+
+  it("does not rewrite unsolicited or tools/call frames with a matching name", () => {
+    const normalizer = createToolListNormalizer(undefined, undefined, [own]);
+    const input = page(1, [shadow], "next");
+    expect(normalizer.rewriteResponse(input)).toBe(input);
+    normalizer.observeRequest(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call" }));
+    expect(normalizer.rewriteResponse(input)).toBe(input);
+  });
+});

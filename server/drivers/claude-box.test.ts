@@ -145,7 +145,7 @@ describe("a Claude turn in the bot box", () => {
       await instance.adapter.sendTurn({ threadId: "t-boxed-hooks", botId: "bot-a", text: "hi", approvalMode: "full", cwd, integrations: { hooks: { url, token: "hook-bearer-1" } } });
       await recorder.until((event) => event.type === "turn.completed", 30_000);
 
-      expect(hooks.map((hook) => hook.event), "the hooks fired from inside the box").toEqual(expect.arrayContaining(["PostToolUse", "Stop"]));
+      expect(hooks.map((hook) => hook.event), "the hooks fired from inside the box").toEqual(["PostToolUse"]);
       for (const hook of hooks) expect(hook.authorization).toBe("Bearer hook-bearer-1");
       const boxed = wrap.mock.results.map((result) => result.value as WrappedSpawn | null).find((spawned) => spawned?.plan.botId === "bot-a");
       expect(boxed, "the engine ran in the box").toBeTruthy();

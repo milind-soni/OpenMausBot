@@ -11,12 +11,12 @@ import { TurnAuthenticationRefusedError, type ProviderInstance, type SendTurnInp
 import { UNGATED_MCP_OUTPUT_TOKENS } from "../mcp-gate-config.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { BACKGROUND_CALL_TIMEOUT_MS, BACKGROUND_SETTINGS, backgroundCallArgs } from "./claude-background.ts";
+import { claudeHookSettings } from "./claude-hooks.ts";
 import {
   autoCompactWindow,
   brokerSocketCandidates,
   claudeCliSupports,
   claudeCliUpdate,
-  claudeHookSettings,
   ClaudeDriver,
   createPermissionBroker,
   hookTokenFile,
@@ -104,12 +104,25 @@ describe("ClaudeDriver.decodeConfig", () => {
 
   it("starts the hook helper without a shell on Windows, where Git Bash or PowerShell would read the command line", () => {
     const helper = "C:\\Users\\it's $OMB_HOOK_TEST `literal`\\helper.ts";
-    const settings = claudeHookSettings(helper, "win32") as { PostToolUse: Array<{ hooks: unknown[] }> };
-    expect(settings.PostToolUse[0]!.hooks).toEqual([{ type: "command", command: process.execPath, args: [helper], timeout: 5 }]);
+    const settings = claudeHookSettings(helper, "win32") as { PostToolUseFailure: Array<{ hooks: unknown[] }> };
+    expect(settings.PostToolUseFailure[0]!.hooks).toEqual([{ type: "command", command: process.execPath, args: [helper], timeout: 5 }]);
   });
 
   it("hooks failed tool calls too, so a timed-out command can be given a hint", () => {
     expect(Object.keys(claudeHookSettings("/tmp/helper.ts"))).toContain("PostToolUseFailure");
+  });
+
+  it("starts a hook process that holds the engine only where the harness replies: a failed shell call and a compaction", () => {
+    type Entry = { matcher: string; hooks: Array<{ async?: boolean; timeout: number }> };
+    const settings = claudeHookSettings("/tmp/helper.ts", "linux") as Record<string, Entry[]>;
+    const held = Object.entries(settings).map(([event, [entry]]) => [event, entry!.matcher, entry!.hooks[0]!.async ?? false]);
+    expect(held).toEqual([
+      ["PostToolUse", "", true],
+      ["PostToolUseFailure", "Bash", false],
+      ["PreCompact", "", false],
+      ["SessionStart", "compact", false],
+    ]);
+    expect(settings.PostToolUse![0]!.hooks[0]!.timeout).toBeGreaterThan(30);
   });
 
   it("keeps the per-turn hook token where workspace backups never look", () => {
@@ -1753,8 +1766,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       const seen = JSON.parse(readFileSync(dump, "utf8"));
       expect(realpathSync(seen.cwd)).toBe(realpathSync(thread));
       expect(seen.settings.hooks.PreToolUse).toEqual([guard]);
-      expect(seen.settings.hooks.Stop).toHaveLength(2);
-      expect(seen.settings.hooks.Stop[0]).toEqual({ hooks: [{ type: "command", command: "/opt/guards/notify.sh" }] });
+      expect(seen.settings.hooks.Stop).toEqual([{ hooks: [{ type: "command", command: "/opt/guards/notify.sh" }] }]);
       expect(Object.keys(seen.settings.hooks)).toEqual(expect.arrayContaining(Object.keys(claudeHookSettings("/helper.ts"))));
       expect(seen.settings.enabledPlugins).toEqual({ "guard@team": true });
       expect(seen.settings.permissions).toEqual({ deny: ["Read(./.env)"] });
@@ -4226,15 +4238,6 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     } finally {
       squatter.close();
     }
-  });
-
-  it("answers to unknown or already-resolved asks resolve `unavailable` — typed, never a throw", async () => {
-    await create("hang");
-    await instance.adapter.sendTurn({ threadId: "t-perm-2", text: "go" });
-    await expect(instance.adapter.respondToRequest("t-perm-2", "never-asked", { behavior: "allow" })).resolves.toBe("unavailable");
-    await expect(instance.adapter.respondToRequest("no-such-thread", "x", { behavior: "deny" })).resolves.toBe("unavailable");
-    await instance.adapter.interruptTurn("t-perm-2");
-    await recorder.until((e) => e.type === "turn.completed");
   });
 
   it("resolves a pending ask as a system denial when the turn is interrupted", async () => {

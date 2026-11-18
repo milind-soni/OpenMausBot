@@ -88,6 +88,11 @@ export interface BoxRequest {
   relay?: string;
   /** The conversation this spawn runs for, when the caller knows it (a Team Cloud's engine homes do). */
   threadId?: string;
+  /** With `botId`, for a turn working outside its conversation's folder (a configured project folder): that folder
+   * (task-workspaces/<botId>/<thread>, its handed-off files), put back read-write where it exists. */
+  conversationFolder?: string;
+  /** The bot whose turn that is, for the audience rule only (BoxAudience); unlike `botId` it puts back nothing. */
+  conversationBot?: string;
   /** On a Team Cloud: what the conversation's audience gives the box of the bot's team things (BoxAudience). */
   audience?: BoxAudience;
 }
@@ -102,7 +107,15 @@ export interface BoxAudience {
   /** With `botThreads`: the bot's conversations the shared process may see, in place of all of them. Its own audience's
    * read-write, the team's read-only; another person's never. */
   threads?: { rw: readonly string[]; ro: readonly string[] };
+  /** The Team Cloud's shared folder (team-files/), at TEAM_FILES_IN_BOX in every box of a turn: read-only, or read-write
+   * for a bot an admin marked "Can edit team files" while the folder has room (server/host/team-files.ts). */
+  teamFiles?: { source: string; write: boolean };
 }
+
+/** Where every bot's box has its Team Cloud's shared folder. */
+export const TEAM_FILES_IN_BOX = "/team-files";
+/** Its template library, read-only in every box. */
+export const TEAM_FILES_LIBRARY = "templates";
 
 /** What stays read-only in a bot's own folder that is a non-team turn's working folder. */
 export const TEAM_FOLDER_KEPT = ["MEMORY.md", "memory", "skills"] as const;
@@ -239,6 +252,12 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     if (!covered(own) && own !== teamFolder) rw(own);
   }
   const ownFolders = botId && ID.test(botId) ? [join(dataDir, "workspaces", botId), join(dataDir, "task-workspaces", botId)] : [];
+  // Security: only a conversation folder of this box's own bot, and never in a process other conversations share.
+  const conversation = request.conversationFolder && !request.botThreads ? resolve(request.conversationFolder) : null;
+  if (conversation && botId && ID.test(botId) && taskWorkspaceIds(conversation, dataDir)?.botId === botId && !covered(conversation)) {
+    mounts.push({ kind: "bind", source: conversation, target: conversation, optional: true });
+    if (!writable.includes(conversation)) writable.push(conversation);
+  }
   if (mutate.has("bind-otherws")) {
     rw(join(dataDir, "workspaces"));
     rw(join(dataDir, "task-workspaces"));
@@ -297,6 +316,15 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
     readOnly.add(full);
     mounts.push({ kind: "ro", source: full, target: full, optional: true });
+  }
+
+  // The team's shared folder, at one path in every box: its own line, as nothing else is bound there.
+  const teamFiles = request.audience?.teamFiles;
+  if (teamFiles) {
+    mounts.push({ kind: teamFiles.write ? "bind" : "ro", source: resolve(teamFiles.source), target: TEAM_FILES_IN_BOX, optional: true });
+    if (teamFiles.write && !writable.includes(TEAM_FILES_IN_BOX)) writable.push(TEAM_FILES_IN_BOX);
+    // The team's template library (server/team-templates.ts) is its admins', so it stays read-only for a bot that may edit.
+    if (teamFiles.write) mounts.push({ kind: "ro", source: join(resolve(teamFiles.source), TEAM_FILES_LIBRARY), target: join(TEAM_FILES_IN_BOX, TEAM_FILES_LIBRARY), optional: true });
   }
 
   const options = ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--hostname", BOX_HOSTNAME];

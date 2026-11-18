@@ -66,7 +66,7 @@ for arg in "$@"; do
 done
 if [ -z "$DIR" ]; then
   DIR=$(cd "$(dirname "$0")" && pwd)
-  if [ ! -f "$DIR/docker-compose.yml" ] && [ ! -f "$DIR/compose.yaml" ] && [ -f /opt/openmausbot/compose.yaml ]; then DIR=/opt/openmausbot; fi
+  if [ ! -f "$DIR/docker-compose.yml" ] && [ ! -f "$DIR/compose.yaml" ] && [ ! -f "$DIR/podman.unit" ] && [ -f /opt/openmausbot/compose.yaml ]; then DIR=/opt/openmausbot; fi
 fi
 STATE="$DIR/.update"
 JOURNAL="$STATE/journal"
@@ -76,6 +76,16 @@ LOG="$STATE/update.log"
 cd "$DIR" 2>/dev/null || { printf '%s\n' "There is no folder $DIR."; exit 4; }
 # The pin is read from .env, never from the shell that happens to run this.
 unset OMB_IMAGE
+# A rootless Podman install (deploy/podman/install.sh) runs the server as its user's own systemd service, from the Quadlet
+# unit that podman.unit names. The steps are the same, through Podman and `systemctl --user` (podman_compose below).
+UNIT=""
+STORE=Docker
+# The commands this script names when a person has to step in.
+STOP_HINT="docker compose stop" START_HINT="docker compose up -d" LOGS_HINT="docker compose logs $SERVICE"
+if [ -f podman.unit ]; then
+  UNIT=$(head -n 1 podman.unit)
+  STORE=Podman
+fi
 
 # A step interrupted while its output goes to the log still speaks to the terminal.
 exec 3>&1
@@ -107,6 +117,41 @@ image_id() { docker image inspect -f '{{.Id}}' "$1" 2>/dev/null; }
 published_ref() { docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$1" 2>/dev/null | grep "^$REPO@" | head -n 1; }
 # The released version an image is labelled with; nothing for a build of main, whose label is the branch.
 image_version() { docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$1" 2>/dev/null | sed -n 's/^v\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p'; }
+if [ -n "$UNIT" ]; then
+  # The unit's name is its container's: openmausbot.container runs openmausbot.service, container openmausbot.
+  SERVER_UNIT=$(basename "$UNIT" .container)
+  STOP_HINT="systemctl --user stop $SERVER_UNIT" START_HINT="systemctl --user start $SERVER_UNIT" LOGS_HINT="journalctl --user -u $SERVER_UNIT"
+  # Podman takes the same commands as Docker here. The helpers mount the data folder, which SELinux labels for the
+  # server's container alone, so they run without a label of their own.
+  docker() { if [ "$1" = run ]; then shift; podman run --security-opt label=disable "$@"; else podman "$@"; fi; }
+  compose() { podman_compose "$@"; }
+fi
+# Image= in the unit follows OMB_IMAGE in .env, the one place an update pins it.
+unit_image() {
+  local image
+  image=$(sed -n 's/^OMB_IMAGE=//p' .env 2>/dev/null | tail -n 1)
+  printf '%s' "$image" | grep -Eqx '[A-Za-z0-9/:._@-]+' || return 1
+  [ -f "$UNIT" ] && grep -q '^Image=' "$UNIT" || return 1
+  sed "s|^Image=.*|Image=$image|" "$UNIT" >"$UNIT.update.tmp" && mv "$UNIT.update.tmp" "$UNIT"
+}
+# The Compose commands this script uses, for the one service of a Podman install. It has no Caddy.
+podman_compose() {
+  local verb=$1
+  shift
+  case "$verb" in
+    stop) systemctl --user stop "$SERVER_UNIT.service" ;;
+    up) unit_image && systemctl --user daemon-reload && systemctl --user restart "$SERVER_UNIT.service" ;;
+    ps) if [ "${1:-}" = -aq ]; then podman ps -aq --filter "name=^$SERVER_UNIT\$"; fi ;;
+    exec)
+      # `exec -T omb …`: the container is the unit's, and nothing is forwarded to its standard input.
+      shift 2
+      podman exec "$SERVER_UNIT" "$@" </dev/null
+      ;;
+    # The container's own lines: not systemd's about it, nor the container id Podman prints as it starts one.
+    logs) journalctl --user -u "$SERVER_UNIT.service" -t "$SERVER_UNIT" -n 40 -o cat --no-pager | grep -Ev '^[0-9a-f]{64}$' ;;
+    *) return 1 ;;
+  esac
+}
 name_of() { if [ -n "${2:-}" ]; then printf '%s' "$2"; else printf '%s' "$1" | sed 's/^.*sha256:\(.\{12\}\).*$/image \1/'; fi; }
 old_name() { name_of "${J_previous:-$J_previous_id}" "$J_previous_version"; }
 new_name() { name_of "$J_target" "$J_version"; }
@@ -512,6 +557,8 @@ wait_healthy() {
   WHY=""
   while :; do
     cid=$(container)
+    # A Podman install's container goes with the process it ran (systemd starts a new one): gone is stopped.
+    if [ -z "$cid" ] && [ -n "$UNIT" ]; then WHY="it stopped as it started ($(last_words))"; return 1; fi
     if [ -z "$cid" ]; then WHY="its container is gone"; return 1; fi
     state=$(inspect '{{.State.Status}} {{.RestartCount}} {{.Image}}' "$cid")
     status=${state%% *}
@@ -545,6 +592,29 @@ wait_whole() {
   fi
 }
 
+# The new version did not become healthy. Its own doctor may repair what stopped it (a cut-short save, a lease a killed
+# server left): `openmausbot doctor --data --fix` in the server's container while it is up, else, with the server
+# stopped, in a one-off container of the new image. The doctor changes nothing while a server uses the data, copies what
+# it changes into the data folder first, and repairs only what cannot lose data. Succeeds when it repaired something,
+# and the new version is then started once more. A version without the doctor answers a usage error: nothing repaired.
+doctor_repaired() {
+  local out cid
+  say "Running $(new_name)'s doctor on the data before going back…"
+  cid=$(container)
+  if [ -n "$cid" ] && [ "$(inspect '{{.State.Running}}' "$cid")" = true ]; then
+    out=$(compose exec -T "$SERVICE" openmausbot doctor --data --fix --json </dev/null 2>>"$LOG")
+  else
+    compose stop "$SERVICE" >>"$LOG" 2>&1
+    out=$(compose run --rm --no-deps -T "$SERVICE" openmausbot doctor --data --fix --json </dev/null 2>>"$LOG")
+  fi
+  printf '%s\n' "$out" >>"$LOG"
+  printf '%s\n' "$out" | grep -Eq '"fixed": ?[1-9]' || return 1
+  say "The doctor repaired the data (see $LOG). Starting $(new_name) once more…"
+  # New containers: the one that kept stopping carries its restart count (and Caddy, in a Compose file that runs it in
+  # the server's network, must join the new one's).
+  compose up -d --no-build --force-recreate >>"$LOG" 2>&1
+}
+
 finish() {
   cp "$JOURNAL" "$LAST.tmp" && mv "$LAST.tmp" "$LAST"
   rm -f "$JOURNAL"
@@ -552,7 +622,7 @@ finish() {
   if old_repository_layout; then
     say "Note: this docker-compose.yml runs Caddy in the server's network, so HTTPS goes down whenever the server restarts without Caddy (a crash, docker compose restart). git pull brings the current one, then: docker compose up -d"
   fi
-  say "The data from before the update is kept in the Docker volume $J_backup until the next update."
+  say "The data from before the update is kept in the $STORE volume $J_backup until the next update."
   say "To go back to it: ./update.sh --rollback"
 }
 
@@ -565,7 +635,7 @@ roll_back() { # why, exit code when the old version is back
   say "$why"
   say "Putting back the version and the data from before the update…"
   if ! stop_server; then
-    say "The server could not be stopped (see $LOG), so its data was left as it is. The update's journal is kept: run ./update.sh --rollback again once docker compose stop works."
+    say "The server could not be stopped (see $LOG), so its data was left as it is. The update's journal is kept: run ./update.sh --rollback again once $STOP_HINT works."
     exit 2
   fi
   if ! docker volume inspect "$J_backup" >/dev/null 2>&1; then
@@ -578,8 +648,8 @@ roll_back() { # why, exit code when the old version is back
   fi
   # The settings go back with the data, never before it: an old version is not started on data a newer one left.
   if ! put_back "$J_backup" "$J_data" "$helper_image" >>"$LOG" 2>&1; then
-    say "The data could not be put back from the Docker volume $J_backup (see $LOG). Neither was changed: the data is as $(new_name) left it, and the volume still holds the copy. The server is stopped."
-    say "Once the cause is fixed (often disk space), ./update.sh --rollback tries again. To run the server on the data as it is instead: docker compose up -d (that starts $(new_name) again)."
+    say "The data could not be put back from the $STORE volume $J_backup (see $LOG). Neither was changed: the data is as $(new_name) left it, and the volume still holds the copy. The server is stopped."
+    say "Once the cause is fixed (often disk space), ./update.sh --rollback tries again. To run the server on the data as it is instead: $START_HINT (that starts $(new_name) again)."
     exit 2
   fi
   restore_env
@@ -593,7 +663,7 @@ roll_back() { # why, exit code when the old version is back
   if wait_healthy "$J_previous_id"; then back=yes; fi
   rm -f "$JOURNAL" "$LAST"
   if [ "$back" = no ]; then
-    say "$(old_name) and its data are back, but it did not become healthy either ($WHY). See: docker compose logs $SERVICE"
+    say "$(old_name) and its data are back, but it did not become healthy either ($WHY). See: $LOGS_HINT"
     exit 2
   fi
   say "Your server runs $(old_name) again, with its data as it was before the update."
@@ -617,7 +687,7 @@ earlier_update() {
   else
     say "An earlier update to $(new_name), started ${J_started:-earlier}, did not finish, and $(new_name) is not healthy now ($WHY)."
   fi
-  say "Going back puts $(old_name) and the data as it was at ${J_started:-that update} back, from the Docker volume $J_backup. Everything made on this server since then (chats, files, settings) is lost."
+  say "Going back puts $(old_name) and the data as it was at ${J_started:-that update} back, from the $STORE volume $J_backup. Everything made on this server since then (chats, files, settings) is lost."
   if [ "$MODE" = rollback ] && [ "$ASSUME_YES" = yes ]; then
     answer=yes
   elif [ "$MODE" = rollback ]; then
@@ -631,7 +701,7 @@ earlier_update() {
     update:keep)
       cp "$JOURNAL" "$LAST.tmp" && mv "$LAST.tmp" "$LAST"
       rm -f "$JOURNAL"
-      say "Left as it is. The copy from before that update stays in the Docker volume $J_backup; ./update.sh --rollback puts it back."
+      say "Left as it is. The copy from before that update stays in the $STORE volume $J_backup; ./update.sh --rollback puts it back."
       ;;
     *) refuse "Nothing was changed. The unfinished update stays recorded in $JOURNAL, and the next ./update.sh asks again." ;;
   esac
@@ -734,8 +804,23 @@ if [ "$MODE" = target ]; then
   exit 0
 fi
 
+if [ -n "$UNIT" ]; then
+  # Root has Podman images and services of its own, not this user's.
+  [ "$(id -u)" != 0 ] || refuse "This is a Podman install of your own user: run it as that user, without sudo."
+  if [ -z "${XDG_RUNTIME_DIR:-}" ] && [ -d "/run/user/$(id -u)" ]; then
+    XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    export XDG_RUNTIME_DIR
+  fi
+  command -v podman >/dev/null 2>&1 || refuse "This needs Podman (podman version)."
+  systemctl --user show-environment >/dev/null 2>&1 || refuse "systemd for your user is not reachable (systemctl --user). Log in to this machine directly or over SSH, then run this again."
+  [ -f "$UNIT" ] || refuse "The service's unit $UNIT is gone. Run the Podman installer again, then this."
+  if [ "$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || true)" = no ]; then
+    say "Note: your user may not run services while logged out (linger is off), so the server stops when you log out and does not start at boot. Once, as an administrator: sudo loginctl enable-linger $(id -un)"
+  fi
+else
 docker compose version >/dev/null 2>&1 || refuse "This needs Docker with the Compose plugin (docker compose version)."
 [ -f docker-compose.yml ] || [ -f compose.yaml ] || [ -n "${COMPOSE_FILE:-}" ] || refuse "There is no docker-compose.yml or compose.yaml in $DIR. Name the install's folder: ./update.sh --dir PATH"
+fi
 
 if [ "$MODE" != check ]; then
   take_lock
@@ -756,12 +841,14 @@ fi
 # A fresh record for this update: nothing of a journal read above carries over.
 J_phase="" J_target="" J_target_id="" J_version="" J_engine="" J_caddy="" J_started=""
 CID=$(container)
+if [ -z "$CID" ] && [ -n "$UNIT" ]; then refuse "The server is not running. Start it first: systemctl --user start $SERVER_UNIT"; fi
 [ -n "$CID" ] || refuse "This install has no server yet. Start it once first: docker compose up -d"
 J_previous_id=$(inspect '{{.Image}}' "$CID")
 J_previous=$(published_ref "$J_previous_id")
 J_previous_version=$(image_version "$J_previous_id")
 J_data=$(inspect '{{range .Mounts}}{{if eq .Destination "/data"}}{{if eq .Type "volume"}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' "$CID")
 J_project=$(inspect '{{index .Config.Labels "com.docker.compose.project"}}' "$CID")
+[ -z "$UNIT" ] || J_project=$SERVER_UNIT
 [ -n "$J_data" ] || refuse "The server's container has no /data volume, so its data cannot be copied aside. Nothing was changed."
 if [ "$(inspect '{{.State.Running}}' "$CID")" = true ]; then J_running=yes; else J_running=no; fi
 # The version the server says it is decides what counts as older: a build of main (`latest`) is labelled with the
@@ -842,7 +929,7 @@ if [ "$ALLOW_OLDER" != yes ] && [ -n "$(older_reason)" ]; then
   say "Nothing was changed. To go ahead anyway, with the data copied first: ./update.sh --allow-older${WANT_VERSION:+ --version $WANT_VERSION}${WANT_IMAGE:+ --image $WANT_IMAGE}"
   exit 5
 fi
-if ! OMB_IMAGE="$J_target" docker compose config 2>/dev/null | grep -qF "image: $J_target"; then
+if [ -z "$UNIT" ] && ! OMB_IMAGE="$J_target" docker compose config 2>/dev/null | grep -qF "image: $J_target"; then
   abandon
   refuse "The Compose file in $DIR does not take its image from OMB_IMAGE. Get the current one (git pull, or run the installer again), then run this again. Nothing was changed."
 fi
@@ -895,12 +982,17 @@ pin_image "$J_target"
 # and fails when the new version never gets there; the wait below then says why. The current files start Caddy with
 # the server, so `up` returns at once and the wait below is the only one.
 if ! compose up -d --no-build >>"$LOG" 2>&1 && [ "$(inspect '{{.Image}}' "$(container)")" != "$J_target_id" ]; then
-  roll_back "Docker could not start $(new_name) (see $LOG)." 1
+  roll_back "$STORE could not start $(new_name) (see $LOG)." 1
 fi
 
 phase wait
 say "Waiting for it to answer and to be able to start bots…"
 if ! wait_healthy "$J_target_id" "$J_version" || ! wait_whole; then
-  roll_back "The update to $(new_name) did not work: $WHY." 1
+  first_why=$WHY
+  if doctor_repaired; then
+    if ! wait_healthy "$J_target_id" "$J_version" || ! wait_whole; then roll_back "The update to $(new_name) did not work: $WHY." 1; fi
+  else
+    roll_back "The update to $(new_name) did not work: $first_why." 1
+  fi
 fi
 finish

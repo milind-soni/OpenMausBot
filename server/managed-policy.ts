@@ -17,7 +17,7 @@ const policySchema = z.object({
   computers: z.object({ thisComputer: z.boolean(), localVm: z.boolean(), box: z.boolean(), vps: z.boolean() }).strict(),
   remoteAccess: z.boolean(),
   /** Connected apps by service slug. Absent: this policy says nothing about them. */
-  apps: z.object({ allowAll: z.boolean(), allowlist: z.array(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/)).max(200) }).strict().optional(),
+  apps: z.object({ allowAll: z.boolean(), allowlist: z.array(z.string().regex(/^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,63}$/)).max(200) }).strict().optional(),
   /** Present on a Team Cloud's rules. `requireFresh`: new turns wait while the rules can't be confirmed with the Admin.
    * `ownMcpOnly`: bots get only what the team's admins added; a bot can't add one, and a bot's own doesn't start. */
   team: z.object({ requireFresh: z.boolean(), ownMcpOnly: z.boolean() }).strict().optional(),

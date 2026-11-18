@@ -90,7 +90,8 @@ async function world(watched = false) {
   const readiness = createBoatReadiness({ health, counters, now, 
     // A little real time passes with each wait, so the test's clock cannot run through the run's twenty minutes while
     // the recovery's own steps (real requests, a real pause between two reads of a waking computer) are still under way.
-    sleep: async (ms) => { at += ms; await new Promise((resolve) => setTimeout(resolve, 25)); },
+    // A longer wait (the gaps grow after a wake) takes a little longer, so the ratio stays about the same.
+    sleep: async (ms) => { at += ms; await new Promise((resolve) => setTimeout(resolve, Math.max(25, Math.ceil(ms / 120)))); },
   });
   const told: string[] = [];
   const logged: string[] = [];

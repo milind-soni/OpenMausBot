@@ -56,7 +56,7 @@ import { CodexDeviceAuthController } from "./codex-device-auth.ts"; import { mes
 import { codexAccountEmail, codexHome } from "./codex-identity.ts";
 import { keepChatsOutOfCodexHistory, linkSharedCodexHome } from "./codex-shared-home.ts";
 import { containsControlCharacter, mcpAppApprovalForm, mcpAppApprovalText, mcpElicitationDeclined, plainRecord } from "./codex-app-approval.ts";
-import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
+import { archivedNativeCodexThread, CODEX_MISSING_CREDENTIALS, codexProviderMismatch, CODEX_SIGN_IN_EXPIRED, codexLimitFacts, codexNotSignedIn, CodexRpcError, codexSignInExpired, codexPlanModelRefused, codexPlanUnsupportedInput, codexSignInRefused, codexUserError, codexUserFailure, missingNativeCodexThread, type CodexRoute } from "./codex-errors.ts";
 import { codexLoginCheck, readCodexLogin, storedCodexLogin } from "./codex-login.ts";
 import { keyRejected, noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
@@ -504,7 +504,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // Interrupt state belongs to this turn so activity on other threads cannot cancel or revive its retry.
       let stopRequested = false;
       let promptSubmitted = false;
-      let recoveredMissingSession = false;
+      let recoveredMissingSession = false, droppedUnsupportedSession = false;
       let loginRaceRetried = false;
       const stopSignal = new AbortController();
       const { threadId } = turn;
@@ -662,7 +662,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           stdio: ["pipe", "pipe", "pipe"], ...customBox,
         }, "bot"));
 
-      let abandoned = false;
+      let abandoned = false, resumedNativeThread = false;
       let codexThreadId: string | null = null;
       let codexTurnId: string | null = null;
       let startingNativeTurn = false;
@@ -998,6 +998,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       };
       const turnError = (error: { message?: unknown; codexErrorInfo?: unknown }) => {
         const raw = String(error.message);
+        if (!droppedUnsupportedSession && resumedNativeThread && !state.streamed && !stopRequested && turn.recoveryText?.trim() && codexPlanUnsupportedInput(raw, route)) { droppedUnsupportedSession = true; void relaunch("unsupported_input", raw, "rpc_error").catch(() => {}); return; }
         const refused = chatgptTurn && loginMark() !== null && (codexSignInRefused(error) ||
           (state.authRecovery && !/\b403\b|forbidden/i.test(raw) && /\b401\b|unauthorized/i.test(raw)));
         if (retryLoginRace(raw, refused)) return;
@@ -1383,11 +1384,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           : config.authMode === "chatgpt-plan"
             ? { model: turn.model, modelProvider: "openai_chatgpt_plan" }
             : decodeCodexSelection(turn.model);
-        const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+        const cursor = !droppedUnsupportedSession && typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
         let startedModel: string | null = null;
-        let resumedNativeThread = false;
-        let rebuiltFromReplay = false;
-        let promptText = turn.text;
+        // The plan refused the dropped session before anything ran, so replaying the chat repeats no side effects.
+        let { text: promptText, replayed: rebuiltFromReplay } = droppedUnsupportedSession ? recoveryPromptFor({ recoveryText: turn.recoveryText, currentText: turn.text, failure: "before-accept" }) : { text: turn.text, replayed: false };
         if (cursor) {
           const resumeThread = () => request("thread/resume", {
             ...selectionConfig,

@@ -188,6 +188,14 @@ describe("Devin ACP driver", () => {
     expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...MODELS.split(",")]);
   });
 
+  it("lists a catalog of more than 128 models (a Devin Pro account has 145) without switching to each one", async () => {
+    const models = Array.from({ length: 145 }, (_, index) => `fixture-model-${index}`);
+    const rpc = join(scratch, "discovery-rpc.json");
+    const catalog = await resolveDevinModels({ ...process.env, FAKE_ACP_MODELS: models.join(","), FAKE_ACP_RPC_DUMP: rpc }, { cli: FAKE_CLI });
+    expect(catalog.options.map((option) => option.id)).toEqual(["agent-default", ...models]);
+    expect(JSON.parse(readFileSync(rpc, "utf8"))).not.toContain("session/set_config_option");
+  });
+
   it("starts nothing when the instance is created", async () => {
     await create();
     expect(existsSync(join(scratch, "launch.json"))).toBe(false);

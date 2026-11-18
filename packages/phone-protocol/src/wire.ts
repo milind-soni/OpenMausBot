@@ -39,7 +39,7 @@ import type { CompanionEndpointsSnapshot } from "./responses.ts";
 /** What a team bot's main chat is called, beside each person's own chats. */
 export const SHARED_CHAT_TITLE = "Shared chat";
 
-export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveElevenLabsSession, LiveElevenLabsTransport, LiveEndReason, LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport, LiveGeminiSession, LiveGeminiTransport, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
+export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveElevenLabsSession, LiveElevenLabsTransport, LiveEndReason, LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport, LiveGeminiSession, LiveGeminiTransport, LiveKeySource, LiveProvider, LiveSettings, LiveSpokenLine } from "./live-call-wire.ts";
 export type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
 export type { AuthPairResponse, AuthSessionResponse, BotCreateResponse, BotsResponse, BotUpdateResponse, CompanionE2EDescriptor, CompanionEndpointsSnapshot, InstancesResponse, LoopbackSessionResponse, PairedDevice, PairedSession, PairRequest, PairResponse, RoomCreateResponse, RoomTaskCreateResponse, RoomTaskUpdateResponse, RoomUpdateResponse, SearchHit, SearchResponse, SignedInSessionResponse, TaskResponse, WireComputerControl, WireInstance, WireMessagePage, WireModelOption } from "./responses.ts";
 
@@ -251,9 +251,9 @@ export interface ConnectorToolGrant {
 }
 
 /** Lowercased Composio service slug, e.g. `gmail`. */
-export const CONNECTOR_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,80}$/;
-/** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`. */
-export const CONNECTOR_TOOL_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
+export const CONNECTOR_SLUG_PATTERN = /^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,80}$/;
+/** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`, or `_1PASSWORD_GET_ITEM` for a `_`-led toolkit. */
+export const CONNECTOR_TOOL_NAME_PATTERN = /^(?:[A-Z][A-Z0-9_]{0,127}|_[A-Z0-9][A-Z0-9_]{0,126})$/;
 
 /** Fails closed: only an absent switch or a strict true allows the helper model; a hand-edited "false" or 0 reads as never. */
 export const helperModelAllowed = (bot: { helperModel?: unknown }): boolean => bot.helperModel === undefined || bot.helperModel === true;
@@ -332,7 +332,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Whether this bot may use the X research tools (x_search and its
    * actions), which spend the workspace's treg balance.
    * Absent/false = off: the person turns it on per bot. */
-  xResearch?: boolean;
+  xResearch?: boolean; /** Team Cloud: an admin let it change the team's shared files from any chat. Absent: it reads them only. */ teamFilesEdit?: boolean;
   /** Whether this bot uses native memory. Absent/true = enabled. */
   memoryEnabled?: boolean;
   /** Built-in tool groups turned off for this bot (shared/tool-groups.ts). Absent or empty: all on. */
@@ -901,8 +901,8 @@ export interface RoomQueueEntry {
   /** 1-based place in that thread's line; `of` counts the whole line. */
   position: number;
   of: number;
-  /** Who a queued member waits on: the member running now, else the one speaking (or the one ahead). */
-  waitingForBotId?: string;
+  /** Who a queued member waits on: the member running now, else the one speaking (or the one ahead). `busyIn`: where it runs now outside this room, another room's thread (`groupId` set) or a thread of its own; it starts here when that finishes. */
+  waitingForBotId?: string; busyIn?: { groupId?: string; threadId: string };
   assignmentId?: string;
 }
 

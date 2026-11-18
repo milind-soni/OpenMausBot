@@ -2,7 +2,7 @@
 // Cloud Pro dropped included AI. Disposable home; no network; a synthetic Claude CLI.
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, truncateSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -78,6 +78,7 @@ if (hang) process.env.FAKE_CLAUDE_MODE = "hang";
 const failure = ${JSON.stringify(join(home, "fail.json"))};
 if (!hang && existsSync(failure)) Object.assign(process.env, JSON.parse(readFileSync(failure, "utf8")));
 if (process.argv[2] !== "--version") process.env.FAKE_CLAUDE_DUMP = ${JSON.stringify(join(home, "spawn"))} + (hang ? "-hang.json" : ".json");
+process.env.FAKE_CLAUDE_REPLY_FILE = ${JSON.stringify(join(home, "reply.md"))};
 await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-claude-cli.ts")).href)});
 `, { mode: 0o755 });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
@@ -452,4 +453,70 @@ it("tells the Admin's signed health read a failed turn's code, never its words, 
   expect(log).not.toContain("ada.lovelace@example.test");
   expect((await read("W".repeat(43))).status).toBe(401);
   expect((await api("GET", "/api/cloud/health?after=0", { remote: true })).status).toBe(401);
+});
+
+it("streams a bot's 30 MB video to a browser signed in from the Cloud page, in ranges a player and a Save As both get", async () => {
+  const created = await api("POST", "/api/bots", { body: {
+    name: "Video fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true,
+  } });
+  expect(created.status, JSON.stringify(created.body)).toBe(201);
+  const botId = created.body.bot.id as string;
+  const clip = join(home, ".openmausbot", "workspaces", botId, "trip.mp4");
+  const size = 30 * 1024 * 1024;
+  mkdirSync(dirname(clip), { recursive: true });
+  writeFileSync(clip, "");
+  truncateSync(clip, size);
+  const marks = openSync(clip, "r+");
+  writeSync(marks, "HEAD", 0);
+  writeSync(marks, "TAIL", size - 4);
+  closeSync(marks);
+  writeFileSync(join(home, "reply.md"), `Here it is: [Trip](<${pathToFileURL(clip).href}>)`);
+  let reply: { id: string } | undefined;
+  let threadId = "";
+  try {
+    expect((await api("POST", `/api/bots/${botId}/messages`, { body: { text: "make the trip video" } })).status).toBe(202);
+    await expect.poll(async () => {
+      const bot = ((await api("GET", "/api/bots?messages=10")).body.bots as any[]).find((candidate) => candidate.id === botId);
+      threadId = bot?.threadId ?? "";
+      reply = bot?.messages.find((message: any) => message.role === "bot" && message.kind === "text" && String(message.text).includes("trip.mp4"));
+      return Boolean(reply);
+    }, { timeout: 15_000 }).toBe(true);
+  } finally {
+    rmSync(join(home, "reply.md"), { force: true });
+  }
+  const credential = await mintBrowserSignIn();
+  const signedIn = await browserRequest({ code: credential, label: "Edge on Windows", cookie: true, browser: true, attemptId: randomBytes(12).toString("base64url") });
+  expect(signedIn.status).toBe(200);
+  const cookie = (signedIn.headers.get("set-cookie") ?? "").split(";")[0]!;
+  // What the edge forwards from the browser: Chromium's own Sec-Fetch headers, the page's Origin only on the POST.
+  const edge = { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" };
+  const page = { ...edge, cookie, origin: base.replace("http:", "https:"), "sec-fetch-site": "same-origin", "sec-fetch-mode": "cors", "sec-fetch-dest": "empty" };
+  const player = { ...edge, cookie, "sec-fetch-site": "same-origin", "sec-fetch-mode": "no-cors", "sec-fetch-dest": "video" };
+  const route = `/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(reply!.id)}/file`;
+  const issued = await fetch(`${base}${route}`, { method: "POST", headers: { ...page, "content-type": "application/json" }, body: JSON.stringify({ path: pathToFileURL(clip).href, media: true }) });
+  expect(issued.status).toBe(200);
+  const link = await issued.json() as { url: string; mime: string; bytes: number };
+  expect(link).toMatchObject({ mime: "video/mp4", bytes: size });
+
+  const first = await fetch(`${base}${link.url}`, { headers: { ...player, range: "bytes=0-" } });
+  expect(first.status).toBe(206);
+  expect(first.headers.get("content-range")).toBe(`bytes 0-${8 * 1024 * 1024 - 1}/${size}`);
+  expect(Buffer.from(await first.arrayBuffer()).subarray(0, 4).toString()).toBe("HEAD");
+  const last = await fetch(`${base}${link.url}`, { headers: { ...player, range: "bytes=-4" } });
+  expect(last.status).toBe(206);
+  expect(await last.text()).toBe("TAIL");
+  expect((await fetch(`${base}${link.url}`, { headers: { ...player, range: `bytes=${size}-` } })).status).toBe(416);
+
+  // The desktop menu's Save As and Open: the window's own download, with the cookie and no Origin or Range.
+  const saved = await fetch(`${base}${link.url}`, { headers: { ...edge, cookie, "sec-fetch-site": "none", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document" } });
+  expect(saved.status).toBe(200);
+  expect(saved.headers.get("content-length")).toBe(String(size));
+  expect(saved.headers.get("content-disposition")).toBe(`inline; filename="trip.mp4"; filename*=UTF-8''trip.mp4`);
+  await saved.body?.cancel();
+
+  // The link is this browser's alone: the edge without its cookie, a page on another site, and the owner's app all get nothing.
+  expect((await fetch(`${base}${link.url}`, { headers: { ...edge, range: "bytes=0-" } })).status).toBe(403);
+  expect((await fetch(`${base}${link.url}`, { headers: { ...player, origin: "https://evil.example", "sec-fetch-site": "cross-site", range: "bytes=0-" } })).status).toBe(403);
+  expect((await api("GET", link.url)).status).toBe(404);
+  await fetch(`${base}/api/auth/logout`, { method: "POST", headers: { ...page } }).catch(() => undefined);
 });

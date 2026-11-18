@@ -7,8 +7,8 @@
 import { getDomain } from "tldts";
 
 /** Where a login came from: the sign-in card's Save, Settings, or the person's
- * 1Password vault (read-only here). */
-export type LoginSource = "card" | "settings" | "1password";
+ * 1Password or Bitwarden vault (read-only here). */
+export type LoginSource = "card" | "settings" | "1password" | "bitwarden";
 
 /** Which bots may use a login: every bot, or the ones named. */
 export type LoginBots = "all" | string[];
@@ -66,6 +66,29 @@ export interface OnePasswordStatus {
   items?: number;
   error?: string;
 }
+
+/** Bitwarden, connected through its command line tool with an account's API key and master password, none of which
+ * leaves the server. `server`: the Bitwarden server's host; `account`: the address the account signs in with. */
+export interface BitwardenStatus {
+  connected: boolean;
+  server?: string;
+  account?: string;
+  /** How many logins and secrets it lists. */
+  items?: number;
+  error?: string;
+}
+
+/** What an admin connects Bitwarden with: the server's https address, the account's personal API key and its master
+ * password. Sent once, kept sealed on the server, never sent back. */
+export interface BitwardenCredentials {
+  serverUrl: string;
+  clientId: string;
+  clientSecret: string;
+  password: string;
+}
+
+/** The Bitwarden servers an admin picks from; anything else is a self-hosted (or Vaultwarden) address. */
+export const BITWARDEN_SERVERS = ["https://vault.bitwarden.com", "https://vault.bitwarden.eu"] as const;
 
 /** The longest username or password a form takes. */
 export const LOGIN_FIELD_MAX = 512;

@@ -9,6 +9,9 @@ export interface PeerDeliveryReceipt {
   botName?: string;
   outcome: PeerDeliveryOutcome;
   detail: string;
+  /** A refusal that only says there is nothing left for this message to do: the bot reads it and finishes, and no turn
+   * fails on it. Anything that broke stays absent. */
+  instructionOnly?: true;
   taskId?: string;
   requestId?: string;
   threadId?: string;
@@ -25,6 +28,7 @@ export function peerDeliveryReceipt(receipt: PeerDeliveryReceipt): PeerDeliveryR
     ...(receipt.botName ? { botName: receipt.botName } : {}),
     outcome: receipt.outcome,
     detail: clip(receipt.detail, DETAIL_MAX) || "no detail recorded",
+    ...(receipt.instructionOnly ? { instructionOnly: true as const } : {}),
     ...(receipt.taskId ? { taskId: receipt.taskId } : {}),
     ...(receipt.requestId ? { requestId: receipt.requestId } : {}),
     ...(receipt.threadId ? { threadId: receipt.threadId } : {}),
@@ -35,6 +39,14 @@ export function peerDeliveryReceipt(receipt: PeerDeliveryReceipt): PeerDeliveryR
 
 const named = (receipt: PeerDeliveryReceipt): string =>
   peerName(receipt.botName ?? "") || peerName(receipt.botId) || "teammate";
+
+/** The coordinate call refused only to say there is nothing left for its message to do: it had a refusal, and every
+ * refusal's own words came from a receipt that said so. One part's instruction to finish is not the whole call's
+ * verdict, and a receipt that said anything else keeps the call a failure. */
+export function refusalsOnlyInstructions(refused: readonly string[], receipts: readonly PeerDeliveryReceipt[]): boolean {
+  const instructed = receipts.filter((receipt) => receipt.outcome === "failed" && receipt.instructionOnly === true).map((receipt) => receipt.detail);
+  return refused.length > 0 && refused.every((said) => instructed.includes(said));
+}
 
 export function renderPeerDeliveryReceipts(receipts: readonly PeerDeliveryReceipt[]): string {
   if (!receipts.length) return "";

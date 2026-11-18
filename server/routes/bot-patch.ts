@@ -307,6 +307,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.xResearch !== "boolean") return json(res, 400, { error: "xResearch must be true or false" });
         patch.xResearch = body.xResearch;
       }
+      // Lets the bot write the Team Cloud's shared folder from every chat, members' private ones too: an admin decision.
+      if (body.teamFilesEdit !== undefined) {
+        if (typeof body.teamFilesEdit !== "boolean") return json(res, 400, { error: "teamFilesEdit must be true or false" });
+        patch.teamFilesEdit = body.teamFilesEdit || undefined;
+      }
       if (body.toolsOff !== undefined) {
         const toolsOff = body.toolsOff === null ? [] : parseToolsOff(body.toolsOff);
         if (!toolsOff) return json(res, 400, { error: `toolsOff must be a list of ${TOOL_GROUPS.join(", ")}` });

@@ -50,7 +50,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     if (script.malformedFrame) return process.stdout.write("not-json\\n");
     if (script.malformedCatalog) return send(msg.id, { tools: [{ inputSchema: { type: "object" } }] });
     if (msg.params?.collision) { delayedList = msg; return; }
-    return send(msg.id, catalog(msg.params));
+    const listed = catalog(msg.params);
+    if (script.collidingQuery) listed.tools.push({ name: "query_result", description: "Upstream query with different arguments", inputSchema: { type: "object", properties: { sql: { type: "string" } } } });
+    return send(msg.id, listed);
   }
   if (msg.method === "tools/call") {
     appendFileSync(process.env.SCRIPT + ".calls", msg.params.name + "\\n");
@@ -444,6 +446,34 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       const last = JSON.parse(await nextLine()).result;
       expect(last.tools.map((tool: { name: string }) => tool.name)).toEqual(["write", "query_result"]);
       expect(last.tools[1].annotations.readOnlyHint).toBe(true);
+    });
+
+    it("replaces a colliding upstream query_result across all catalog pages", async () => {
+      start({ text: full, collidingQuery: true }, {}, SCOPED_UPSTREAM);
+      send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+      const first = JSON.parse(await nextLine()).result;
+      expect(first.nextCursor).toBe("second");
+      expect(first.tools.map((tool: { name: string }) => tool.name)).toEqual(["read", "write"]);
+      send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: { cursor: "second" } });
+      const last = JSON.parse(await nextLine()).result;
+      expect(last.tools.map((tool: { name: string }) => tool.name)).toEqual(["write", "query_result"]);
+      expect(last.tools[1].inputSchema.required).toEqual(["result", "query"]);
+      expect(last.tools[1].description).not.toContain("Upstream query");
+      const local = await query({ result: "missing", query: "@" }, 3);
+      expect(local.result.isError).toBe(true);
+      expect(local.result.content[0].text).toContain("no longer held");
+      expect(existsSync(join(scratch, "reply.json.calls"))).toBe(false);
+    });
+
+    it("keeps the upstream query_result catalog and execution when shaping is disabled", async () => {
+      start({ text: "upstream query executed", collidingQuery: true }, { OMB_GATE_BUDGET: "0" }, SCOPED_UPSTREAM);
+      send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+      const listed = JSON.parse(await nextLine()).result;
+      expect(listed.tools.map((tool: { name: string }) => tool.name)).toEqual(["read", "write", "query_result"]);
+      expect(listed.tools[2].description).toContain("Upstream query");
+      const reply = await query({ sql: "SELECT 1" }, 2);
+      expect(reply.result.content[0].text).toBe("upstream query executed");
+      expect(readFileSync(join(scratch, "reply.json.calls"), "utf8")).toBe("query_result\n");
     });
 
     it("never lists it when the budget is zero", async () => {
