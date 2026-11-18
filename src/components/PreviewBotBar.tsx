@@ -1,4 +1,5 @@
-import { Bot, Hand, Play, Square, X } from "lucide-react";
+import { Hand, Play, Square, X } from "lucide-react";
+import { BuddyIcon } from "./BuddyIcons";
 import type { PreviewTestingSession } from "@/lib/previewTesting";
 import { testingStore } from "@/lib/previewTestingStore";
 import { cn } from "@/lib/cn";
@@ -26,7 +27,7 @@ export function PreviewBotBar({ botTabs, botTab, attached, controlSession, error
             onClick={() => testingStore.setTab(null)}
             className={cn("flex max-w-[180px] shrink-0 items-center gap-1.5 truncate rounded-md px-2.5 py-1 text-[11.5px]", !botTab ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised")}
           >
-            {attached && <Bot className="h-3 w-3 shrink-0" aria-label={`${attached.botName} is on this page`} />}
+            {attached && <BuddyIcon className="h-3 w-3 shrink-0" aria-label={`${attached.botName} is on this page`} />}
             <span className="truncate">Your page</span>
           </button>
           {botTabs.map((s) => (
@@ -44,7 +45,7 @@ export function PreviewBotBar({ botTabs, botTab, attached, controlSession, error
       )}
       {controlSession && (
         <div className={cn("flex shrink-0 items-center gap-2 border-b border-hairline/40 bg-accent/5 px-3 py-1.5 text-[11.5px]", className)}>
-          {controlSession.state === "paused" ? <Hand className="h-3.5 w-3.5 shrink-0 text-ink-secondary" /> : <Bot className="h-3.5 w-3.5 shrink-0 text-accent" />}
+          {controlSession.state === "paused" ? <Hand className="h-3.5 w-3.5 shrink-0 text-ink-secondary" /> : <BuddyIcon className="h-3.5 w-3.5 shrink-0 text-accent" />}
           <span role="status" className="min-w-0 flex-1 truncate text-ink-secondary">
             {controlSession.state === "error"
               ? controlSession.error ?? "This test needs attention"

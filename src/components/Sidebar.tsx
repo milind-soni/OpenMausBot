@@ -3,7 +3,6 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "rea
 import {
   AlertTriangle,
   BellDot,
-  Bot as BotIcon,
   Check,
   ChevronDown,
   ClipboardCopy,
@@ -23,13 +22,13 @@ import {
   ListTodo,
   MonitorSmartphone,
   Trash2,
-  Users,
   Settings2,
 } from "lucide-react";
 import { RoomSettings } from "./RoomSettings";
 import { useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
 import { LiveBuddyAvatar } from "./LiveBuddyAvatar";
+import { BuddyIcon, RoomAvatar, RoomIcon } from "./BuddyIcons";
 import { taskSummary } from "@/lib/taskSummary";
 import { cn } from "@/lib/cn";
 import { usePanelResize } from "@/lib/usePanelResize";
@@ -89,7 +88,7 @@ interface ClearTarget {
 
 function groupPreview(group: Group, bots: Bot[]): string {
   if (group.busyBotId) {
-    return `${bots.find((b) => b.id === group.busyBotId)?.name ?? "A bot"} is working…`;
+    return `${bots.find((b) => b.id === group.busyBotId)?.name ?? "A Buddy"} is working…`;
   }
   const last = group.messages.at(-1);
   if (!last) return "No messages yet";
@@ -98,33 +97,6 @@ function groupPreview(group: Group, bots: Bot[]): string {
   return last.from ? `${last.from.name}: ${formatted}` : formatted;
 }
 
-/** Room avatars share the same compact slot as individual bots. */
-function StackedMauses({ members }: { members: Bot[] }) {
-  if (members.length <= 1) {
-    const b = members[0];
-    return (
-      <div className="flex size-10 shrink-0 items-center justify-center">
-        {b ? <MausAvatar color={b.color} state="happy" size={40} /> : <Users size={24} className="text-ink-secondary" />}
-      </div>
-    );
-  }
-  const shown = members.slice(0, 2);
-  const extra = members.length - shown.length;
-  return (
-    <div className="flex size-10 shrink-0 items-center justify-center">
-      <div className="flex items-center -space-x-2.5">
-        {shown.map((b) => (
-          <MausAvatar key={b.id} color={b.color} state="happy" size={26} />
-        ))}
-        {extra > 0 && (
-          <span className="z-10 flex size-[18px] items-center justify-center rounded-full border border-hairline/40 bg-raised text-[10px] font-medium text-ink-secondary">
-            +{extra}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function GroupListItem({
   group,
@@ -159,7 +131,7 @@ function GroupListItem({
         selected ? "border-accent/20 bg-accent/10" : "border-transparent hover:bg-raised/50",
       )}
     >
-      <span className="relative shrink-0"><StackedMauses members={members} />{collapsed && group.unread && <span aria-label="Unread messages" className="absolute right-0 top-0 size-1.5 rounded-full bg-accent" />}</span>
+      <span className="relative shrink-0"><RoomAvatar group={group} members={members} />{collapsed && group.unread && <span aria-label="Unread messages" className="absolute right-0 top-0 size-1.5 rounded-full bg-accent" />}</span>
       {!collapsed && (
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
@@ -336,7 +308,7 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
           disabled={!picked.size}
           className="mt-3 w-full rounded-lg bg-accent py-2 text-[14px] font-medium text-white hover:brightness-110 disabled:opacity-40"
         >
-          Create Room{picked.size ? ` · ${picked.size} ${picked.size === 1 ? "bot" : "bots"}` : ""}
+          Create Room{picked.size ? ` · ${picked.size} ${picked.size === 1 ? "Buddy" : "Buddies"}` : ""}
         </button>
       </div>
     </div>
@@ -759,7 +731,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
                   }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
-                  <BotIcon size={16} className="text-ink-secondary" aria-hidden="true" />
+                  <BuddyIcon size={16} className="text-ink-secondary" aria-hidden="true" />
                   <span>New Buddy</span>
                 </button>
                 <button
@@ -770,7 +742,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
                   }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
-                  <Users size={16} className="text-ink-secondary" aria-hidden="true" />
+                  <RoomIcon size={16} className="text-ink-secondary" aria-hidden="true" />
                   <span>New Room</span>
                 </button>
               </div>
