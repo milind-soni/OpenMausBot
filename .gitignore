@@ -16,6 +16,7 @@ electron/resources/OpenMausBot Speech.app
 electron/resources/OpenMausBot Recorder.app
 release
 .omb-scratch
+/shots/
 .wrangler/
 .dev.vars
 .dev.vars.*
