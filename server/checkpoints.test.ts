@@ -634,9 +634,25 @@ describe("a restart in the middle of a snapshot", () => {
     const written = statSync(join(shadow, ".git", "objects", blob.slice(0, 2), blob.slice(2))).mtimeMs;
     expect(Math.floor(written / 1000)).toBeGreaterThan(pruning);
     expect(existsSync(join(shadow, ".git", "omb-collecting"))).toBe(false);
-    // That collection, ending now, takes none of it.
+    // That collection, ending now, takes nothing written since: not even what no snapshot names yet.
+    writeFileSync(join(cwd, "staged.txt"), "read ahead, in no snapshot yet");
+    const unnamed = userGit(shadow, "hash-object", "-w", join(cwd, "staged.txt")).trim();
     userGit(shadow, "gc", "--quiet", `--prune=${pruning}`);
+    expect(userGit(shadow, "cat-file", "-p", unnamed)).toBe("read ahead, in no snapshot yet");
     expect(userGit(shadow, "show", `${next}:a.txt`)).toBe("next start");
+  });
+
+  it("keeps a shadow whose snapshots sit on a branch of another name", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "one");
+    const kept = await snapshot(bot, cwd, "turn X");
+    await drain(bot, cwd);
+    userGit(shadow, "branch", "-m", "main", "trunk");
+    vi.resetModules();
+    const fresh = await import("./checkpoints.ts");
+    expect(await fresh.snapshot(bot, cwd, "turn Y")).toBe(kept);
+    expect(userGit(shadow, "show", `${kept}:a.txt`)).toBe("one");
   });
 
   it("reads the folder again when the index names an object the shadow has lost", async () => {

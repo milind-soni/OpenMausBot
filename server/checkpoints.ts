@@ -337,8 +337,7 @@ async function outlastCollection(shadow: string): Promise<void> {
 /** A shadow is made beside its place and moved there whole, so nothing that stops this process part-way leaves a shadow
  * git cannot open. Takes no stop signal, for the same reason. */
 async function makeShadow(shadow: string, cwd: string): Promise<void> {
-  const made = existsSync(join(shadow, ".git", "packed-refs")) || existsSync(join(shadow, ".git", "refs", "heads", "main"));
-  if (made) return;
+  if (existsSync(join(shadow, ".git", "HEAD"))) return;
   const draft = `${shadow}.${process.pid}.new`;
   for (const stale of [draft, shadow]) rmSync(stale, { recursive: true, force: true });
   mkdirSync(draft, { recursive: true, mode: 0o700 });
