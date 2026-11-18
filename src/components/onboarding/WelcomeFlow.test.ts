@@ -206,6 +206,22 @@ describe("with no AI working yet", () => {
     expect(button("Set up later")).toBeDefined();
   });
 
+  it("says Set up ChatGPT, not Install, while Codex isn't on this computer yet", async () => {
+    const plan = { instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT plan", snapshot: { state: "unavailable" },
+      install: { docsUrl: "https://example.test", server: { package: "@openai/codex" } }, authentication: { method: "browser-pkce" }, models: { default: "m", options: [] } } as InstanceInfo;
+    const claudeToInstall = { ...claude(false), install: { docsUrl: "https://example.test", server: { package: "@anthropic-ai/claude-code" } } } as InstanceInfo;
+    f.state = { ...f.state, instances: [claudeToInstall, plan, { ...plan, instanceId: "codex", install: { docsUrl: "https://example.test" } }] };
+    await show();
+    expect([...host.querySelectorAll("[data-first-ais] button")].map((node) => node.textContent)).toEqual(["Install Claude", "Set up ChatGPT"]);
+    await press("Set up ChatGPT");
+    expect(f.api).toHaveBeenCalledWith("/api/instances/chatgpt/install", { method: "POST" });
+    // Without an install the app can run, it opens the dialog under the same label.
+    f.state = { ...f.state, instances: [claudeToInstall, { ...plan, install: { docsUrl: "https://example.test" } }] };
+    await show();
+    await press("Set up ChatGPT");
+    expect(host.querySelector("[data-connect-ai]")).not.toBeNull();
+  });
+
   it("installs OpenCode from its pill and counts its free model once it answered, since the person picked it", async () => {
     f.state = { ...f.state, instances: [signIn(), notInstalledOpenCode] };
     await show();

@@ -1292,7 +1292,6 @@
   "cloudWelcome.bring.move": "Przenieś",
   "cloudWelcome.bring.mausBotStays": "Zostaje na My Cloud: w zespole każdy ma własnego",
   "cloudWelcome.bring.moveFailed": "Nie można przenieść {bot}. Bot jest nadal na My Cloud, bez zmian.",
-  "cloudWelcome.engine.sub": "Twoje boty myślą dzięki twojemu planowi Claude lub ChatGPT. Zaloguj się raz w {name}.",
   "cloudWelcome.engine.credit": "Masz kredyty Claude o wartości {amount}, więc twoje boty mogą zacząć od razu. Zaloguj się, kiedy chcesz.",
   "cloudWelcome.engine.creditPlain": "Twój okres próbny obejmuje kredyty Claude, więc twoje boty mogą zacząć od razu. Zaloguj się, kiedy chcesz.",
   "cloudWelcome.engine.useCredit": "Na razie użyj moich kredytów",

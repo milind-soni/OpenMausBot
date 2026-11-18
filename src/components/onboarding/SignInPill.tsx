@@ -190,11 +190,13 @@ function PasteSlot({ name, onSubmit }: { name: string; onSubmit: (code: string) 
 /** The first screen's 288×36 slot while an AI is still to connect: its one button, the field for the code a provider
  * shows, or the code to enter on the provider's page. A `quiet` pill is one of the choices under the first, and one
  * that already works (OpenCode's free backup) is used as it is once picked. */
-export function SignInPill({ pill, instance, name = instance?.displayName ?? "", quiet = false, waiting, onDialog, onPick }: {
+export function SignInPill({ pill, instance, name = instance?.displayName ?? "", quiet = false, setUp = false, waiting, onDialog, onPick }: {
   pill: PillState;
   instance: InstanceInfo | undefined;
   name?: string;
   quiet?: boolean;
+  /** Its command-line app isn't here yet: the pill says Set up, not Install or Connect. */
+  setUp?: boolean;
   /** The test message after a sign-in is under way: the pill waits with it. */
   waiting: boolean;
   onDialog: () => void;
@@ -215,7 +217,8 @@ export function SignInPill({ pill, instance, name = instance?.displayName ?? "",
   if (slot.kind === "paste") return <PasteSlot name={name} onSubmit={(code) => void submit(code)} />;
   if (slot.kind === "code") return <CodeSlot code={slot.code} />;
   const way = instance && engineReady(instance) ? "use" : pillWay(instance);
-  const label = way === "install" ? t("onboarding.meet.install", { name })
+  const label = setUp && (way === "install" || way === "dialog") ? t("onboarding.meet.setUp", { name })
+    : way === "install" ? t("onboarding.meet.install", { name })
     : way === "sign-in" ? t("onboarding.meet.signIn", { name })
     : instance ? t("onboarding.meet.connectNamed", { name }) : t("onboarding.meet.connectAi");
   return (

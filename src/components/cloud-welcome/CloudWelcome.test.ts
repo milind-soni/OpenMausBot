@@ -273,6 +273,7 @@ describe("CloudWelcome", () => {
     fixture.state.instances = [claude, codex, plan, openCode];
     render();
     expect(host.querySelector('[data-welcome-step="engine"]')).not.toBeNull();
+    expect(text()).toContain("Your bots think with your own Claude or ChatGPT plan, or with OpenCode. Set one up once on My Cloud.");
     expect([...host.querySelectorAll("[data-welcome-recommended]")].map((node) => node.getAttribute("data-welcome-recommended"))).toEqual(["claude", "codex", "opencodeGo"]);
     const plain = (name: string) => `Use the ${name} account you already have. You sign in on their own website, so your password stays with them.`;
     expect(host.querySelector('[data-welcome-recommended="claude"] [data-engine-setup="claude"]')?.getAttribute("data-description"), "one plain line, not the setup's own")

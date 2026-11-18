@@ -16,8 +16,8 @@ import { withViewTransition } from "@/components/onboarding/view-transition";
 import { useStore, type InstanceInfo } from "@/state/store";
 import { openKeySettings } from "./keys/key-focus";
 
-type Choice = "claude" | "codex" | "grok";
-type ChoiceKind = "claudeAgent" | "codex" | "grokAgent";
+type Choice = "claude" | "codex" | "opencode" | "grok";
+type ChoiceKind = "claudeAgent" | "codex" | "opencodeGo" | "grokAgent";
 
 export function cloudEngine(instances: readonly InstanceInfo[], driverKind: ChoiceKind): InstanceInfo | undefined {
   return instances.find((instance) => instance.driverKind === driverKind && instance.access !== "custom" && !instance.readOnly);
@@ -38,6 +38,10 @@ export function useCloudEngineChoices() {
   const choices: Array<{ id: Choice; driverKind: ChoiceKind; label: string; hint: string }> = [
     { id: "claude", driverKind: "claudeAgent", label: t("cloudSignIn.claude"), hint: t("cloudSignIn.claudeHint") },
     { id: "codex", driverKind: "codex", label: t("cloudSignIn.codex"), hint: t("cloudSignIn.codexHint") },
+    // The server installs OpenCode's own build here, so it is offered before it is installed.
+    ...(cloudEngine(state.instances, "opencodeGo")
+      ? [{ id: "opencode" as const, driverKind: "opencodeGo" as const, label: t("cloudSignIn.opencode"), hint: t("cloudSignIn.opencodeHint") }]
+      : []),
     ...(cloudEngine(state.instances, "grokAgent")?.snapshot.state === "available"
       ? [{ id: "grok" as const, driverKind: "grokAgent" as const, label: t("cloudSignIn.grok"), hint: t("cloudSignIn.grokHint") }]
       : []),

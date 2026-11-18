@@ -3,7 +3,7 @@ import { Check, ChevronDown, CircleAlert, FolderOpen, Plug } from "lucide-react"
 import { cloudEngineChoices, useCloudEngineChoices } from "@/components/CloudEngineSignIn";
 import { useCloudPlanSnapshot } from "@/components/CloudTrialNotice";
 import { engineReady } from "@/components/EngineLibrary";
-import { EngineCheckLine, useEngineLiveCheck } from "@/components/EngineLiveCheck";
+import { EngineCheckLine } from "@/components/EngineLiveCheck";
 import { EngineSetup } from "@/components/EngineSetup";
 import { usd } from "@/lib/cloud-plan";
 import { welcomeCredit } from "@/lib/cloud-welcome";
@@ -18,8 +18,6 @@ import { CARD, CARD_IDLE, CardIcon, Footer, PRIMARY, QUIET, SECONDARY, StepHeadi
  * under them. */
 export function WelcomeEngine({ name, headingRef, onFinish }: { name: string; headingRef: Ref<HTMLHeadingElement>; onFinish: () => void }) {
   const engines = useCloudEngineChoices();
-  const openCode = firstAis(engines.instances).find(({ kind }) => kind === "opencode")?.instance;
-  const openCodeLive = useEngineLiveCheck(openCode ? [openCode] : []);
   const plan = useCloudPlanSnapshot(window.ogb?.cloudPlan);
   const own = engines.instances.some((instance) => !instance.trialCredit && engineReady(instance));
   const credit = own ? null : welcomeCredit(engines.instances, plan);
@@ -45,11 +43,10 @@ export function WelcomeEngine({ name, headingRef, onFinish }: { name: string; he
     </p>}
     {first.map(({ kind, instance }, index) => {
       const name = kind === "chatgpt" ? t("cloudSignIn.codex") : instance.displayName;
-      const check = engines.live.checks[instance.instanceId] ?? openCodeLive.checks[instance.instanceId];
-      const retry = () => void (kind === "opencode" ? openCodeLive : engines.live).run(instance.instanceId);
+      const check = engines.live.checks[instance.instanceId];
       return <div key={kind} data-welcome-recommended={instance.instanceId} className={cn(index ? "mt-3" : "mt-6", "rounded-2xl border border-hairline/50 bg-card px-4 py-4")}>
         {engineReady(instance)
-          ? check && <EngineCheckLine name={name} check={check} onRetry={retry} />
+          ? check && <EngineCheckLine name={name} check={check} onRetry={() => void engines.live.run(instance.instanceId)} />
           : <EngineSetup instance={instance} unframed description={signInFollows(instance) ? t("onboarding.engines.signInHint", { name }) : undefined} />}
       </div>;
     })}

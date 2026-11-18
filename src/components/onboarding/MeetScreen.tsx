@@ -125,6 +125,7 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
             {shown.map(({ kind, instance }, index) => (
               <SignInPill key={kind} pill={pills[kind]} instance={instance} quiet={index > 0}
                 name={kind === "chatgpt" ? t("cloudSignIn.codex") : undefined}
+                setUp={kind === "chatgpt" && instance?.snapshot.state !== "available"}
                 waiting={(testing !== null && instance?.instanceId === waitsFor) || settling(instance)}
                 onDialog={() => setDialog(true)} onPick={instance && (() => setChosen(instance.instanceId))} />
             ))}
