@@ -874,6 +874,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       costTotal: number | null | undefined;
       /** Root close can precede a failed group stop; retry its finalization. */
       finishClose?: () => Promise<void>;
+      /** A dead root's surviving group members cannot take the session back; settles the stopRequested turn. */
+      releaseInterrupted?: () => void;
       closed: Promise<void>;
     }
     const sessions = new Map<string, Session>();
@@ -885,17 +887,22 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const stopSession = (session: Session) => {
       void killCliTree(session.child).then((stopped) => {
         if (stopped) void session.finishClose?.();
+        // A live root keeps the verified-stop wait; a dead root's surviving group members cannot take the session back.
+        else if (session.child.exitCode !== null || session.child.signalCode !== null) session.releaseInterrupted?.();
       });
+    };
+    // The MCP config carries credentials and argv is readable via `ps`: the 0600 file must not sit on disk.
+    const clearMcpConfig = (session: Session) => {
+      if (!session.mcpConfigPath) return;
+      try {
+        rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
+      } catch {}
+      session.mcpConfigPath = null;
     };
     /** Forgets a CLI that died mid-turn and removes its files, so the retry starts a clean session. */
     const discardSession = (threadId: string, session: Session) => {
       session.elicit.close(); session.context.close();
-      if (session.mcpConfigPath) {
-        try {
-          rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
-        } catch {}
-        session.mcpConfigPath = null;
-      }
+      clearMcpConfig(session);
       if (session.systemPromptPath) {
         removePrivateTempDir(session.systemPromptPath);
         session.systemPromptPath = null;
@@ -1393,13 +1400,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           t.continuationSilence = null;
         }
         session.broker?.pause();
-        // The CLI read the credential-bearing config at start; it must not sit on disk.
-        if (session.mcpConfigPath) {
-          try {
-            rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
-          } catch {}
-          session.mcpConfigPath = null;
-        }
+        clearMcpConfig(session);
         if (session.systemPromptPath) {
           if (removePrivateTempDir(session.systemPromptPath)) session.systemPromptPath = null;
         }
@@ -1414,6 +1415,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
         if (session.child.exitCode === null && !session.closing) armIdle(threadId);
       };
+      session.releaseInterrupted = () => { if (session.turn?.stopRequested) settle(false, "interrupted"); };
       const settleResult = (result: NativeTurnResult) => settle(result.ok, result.stopReason, result.cost, result.usage);
       const currentTurnId = () => session.turn?.turnId ?? turnId;
       const reachLimit = (frame: { api_error_params?: { rate_limit_info?: unknown } }, words: unknown) => {
@@ -1695,6 +1697,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           session.broker?.close();
           session.broker = undefined;
           if (!session.spare) emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: "Claude could not be confirmed stopped; its helper processes may still be running." });
+          session.releaseInterrupted?.();
           return;
         }
         if (closeFinalized) return;
@@ -1812,11 +1815,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         session.broker?.close();
         session.elicit.close();
         session.context.close();
-        if (session.mcpConfigPath) {
-          try {
-            rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
-          } catch {}
-        }
+        clearMcpConfig(session);
         removePrivateTempDir(session.systemPromptPath);
         if (sessions.get(threadId) === session) sessions.delete(threadId);
       };

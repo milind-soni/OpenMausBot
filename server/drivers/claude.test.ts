@@ -3129,7 +3129,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }));
   });
 
-  it.each([false, true])("finalizes root close after an uncertain Stop succeeds on retry (retained: %s)", async (retained) => {
+  it.each([false, true])("settles an interrupted turn once the root closes, even with tree uncertainty (retained: %s)", async (retained) => {
     const gate = join(scratch, "retry-stop.gate");
     await create("slow", { FAKE_CLAUDE_SLOW_FINISH_GATE: gate });
     const threadId = `t-retry-stop-${retained}`;
@@ -3149,17 +3149,42 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     try {
       await instance.adapter.interruptTurn(threadId);
       await recorder.until((event) => event.type === "runtime.error" && event.message.includes("could not be confirmed stopped"));
-      expect(instance.adapter.hasSession(threadId)).toBe(true);
-      expect(recorder.events.some((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toBe(false);
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toMatchObject({ ok: false, stopReason: "interrupted" });
+      expect(instance.adapter.hasSession(threadId)).toBe(false);
+      expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toHaveLength(1);
     } finally {
       uncertain.mockRestore();
-      await instance.adapter.interruptTurn(threadId);
     }
-    await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId);
-    expect(instance.adapter.hasSession(threadId)).toBe(false);
-    expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toHaveLength(1);
 
     writeFileSync(gate, "finish");
+    const replacement = await instance.adapter.sendTurn({ threadId, text: "replacement" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId);
+  });
+
+  it("closes an interrupted turn even when the tool call's tree stays unconfirmed", async () => {
+    const release = join(scratch, "unconfirmed-release");
+    await create(undefined, {
+      FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ name: "Bash", input: { command: "sleep 60" }, hold: "idle" }]),
+      FAKE_CLAUDE_RELEASE: release,
+    });
+    const threadId = "t-unconfirmed-stop";
+    const running = await instance.adapter.sendTurn({ threadId, text: "hold the tool" });
+    await recorder.until((event) => event.type === "item.started" && event.itemType === "tool" && event.turnId === running.turnId);
+    const kill = procs.killCliTree;
+    const uncertain = vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
+      await kill(child, 0); // the engine itself is gone; only the tree answer stays unknown
+      return false;
+    });
+    try {
+      await instance.adapter.interruptTurn(threadId);
+      await recorder.until((event) => event.type === "runtime.error" && event.message.includes("could not be confirmed stopped"));
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toMatchObject({ ok: false, stopReason: "interrupted" });
+      expect(instance.adapter.hasSession(threadId)).toBe(false);
+      expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toHaveLength(1);
+    } finally {
+      uncertain.mockRestore();
+      writeFileSync(release, "go");
+    }
     const replacement = await instance.adapter.sendTurn({ threadId, text: "replacement" });
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId);
   });
