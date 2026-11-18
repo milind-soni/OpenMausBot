@@ -252,7 +252,7 @@ export function uploadFailedText(reference: Pick<FileReference, "tool">, name: s
     + `${app} failed and why, and do not keep retrying.`;
 }
 
-/** What the bot is told when the connected-apps service is too old to take the file: retrying cannot help. */
+/** What the bot is told when the connected-apps service is too old to take the file. */
 function uploadServiceOutdatedText(reference: Pick<FileReference, "tool">, name: string, app: string): string {
   return `OpenMausBot did not run ${reference.tool}: uploading ${name} for ${app} failed: the connected-apps service is out of date `
     + `and does not take file uploads yet. Nothing was written to ${app}. Trying again will not help: tell the person that sending `
