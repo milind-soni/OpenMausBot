@@ -30,7 +30,7 @@ import { handleDirectUpgrade, isE2EUpgrade } from "./e2e/direct.ts";
 import { CLOSE, TRANSPORT_RELAY } from "./e2e/noise.ts";
 import { createE2EOrigin } from "./e2e/origin.ts";
 import { E2ERegistry } from "./e2e/registry.ts";
-import { RelayClient } from "./e2e/relay-client.ts";
+import { allowFarRelay, RelayClient } from "./e2e/relay-client.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
 import { gzipTunnelReplies } from "./tunnel-gzip.ts";
 import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
@@ -201,6 +201,7 @@ function applyRelay(config: RelayConfig | null): void {
   e2e.setRelay(config && e2e.enabled ? { hostId: config.hostId, nodes: config.nodes } : null);
   if (!config || !e2e.enabled) return;
   if (relay) return relay.setToken(config.token, config.nodes);
+  allowFarRelay();
   relay = new RelayClient({
     nodes: config.nodes,
     token: config.token,

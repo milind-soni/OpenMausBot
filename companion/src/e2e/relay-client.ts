@@ -1,5 +1,7 @@
 // The computer's side of MausBot Relay: one outbound control socket, and one data socket per phone session. The relay
 // splices sealed bytes and can't open them; everything here is outside the encryption. Wire spec: README section 9.
+import { getDefaultAutoSelectFamilyAttemptTimeout, setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
+
 import { webSocketTransport } from "./phone.ts";
 import type { RecordTransport } from "./session.ts";
 
@@ -9,6 +11,18 @@ export type RelayStatus = "connected" | "connecting" | "off";
  * token refused (4401), the relay busy or restarting (4429, 4503, `restarting`), the socket failed or closed
  * ("unreachable"), or another socket for this computer took over (4409). */
 export type RelayProblem = "no_answer" | "token_refused" | "busy" | "unreachable" | "replaced";
+
+/** Node gives each of a host's addresses but the last 250 ms to connect, then drops it for the next, so a relay further
+ * away than that is unreachable whenever the address after a working one (often IPv6 that doesn't route) fails. */
+const RELAY_ADDRESS_ATTEMPT_MS = 2_500;
+
+/** Gives every address this process dials long enough to reach a far relay. Process-wide, so only a process whose
+ * outbound connections are the relay's should call it. */
+export function allowFarRelay(): void {
+  if (getDefaultAutoSelectFamilyAttemptTimeout() < RELAY_ADDRESS_ATTEMPT_MS) {
+    setDefaultAutoSelectFamilyAttemptTimeout(RELAY_ADDRESS_ATTEMPT_MS);
+  }
+}
 
 /** README section 10: 4429 means back off at least this long. */
 const LIMITED_MIN_MS = 30_000;

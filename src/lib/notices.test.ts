@@ -74,7 +74,7 @@ it("Boat's credit offer and the Grok Bot move are ones the desktop keeps for its
 
 it("the Teams What's new goes ahead of every notice, holds the queue while it waits, and the rest keep their order after it", () => {
   const all = (teams: boolean | null) => facts(true, true, true, true, true, true, true, true, true, true, true, true, true, true, teams);
-  expect(TEAMS_NOTICE).toBe("teams-2026-11");
+  expect(TEAMS_NOTICE).toBe("teams-2026-11b");
   expect(nextNotice(all(true), none)).toBe(TEAMS_NOTICE);
   expect(nextNotice(all(null), none), "nothing shows while it waits").toBeNull();
   expect(nextNotice(all(false), none)).toBe(GROK_MOVE_NOTICE);

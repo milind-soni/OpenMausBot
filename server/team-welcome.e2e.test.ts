@@ -100,15 +100,15 @@ it("a User's copy of a team bot carries what the welcome's one line reads, and a
 it("the Teams What's new and the last look at Announcements are each person's own, a member's included", async () => {
   const cleo = (await team.pair(CLEO)).token!, bob = (await team.pair(BOB)).token!;
   const hints = async (token: string) => ((await team.as(token, "GET", "/api/config")).body.onboarding as { hintsSeen: string[] }).hintsSeen;
-  expect((await team.as(cleo, "PUT", "/api/config", { onboarding: { hintsSeen: ["teams-2026-11"] } })).status, "a member cannot change the team's record").toBe(403);
-  expect((await team.as(cleo, "PUT", "/api/me/welcome", { hints: ["teams-2026-11", "announcements-read-1763380800000"] })).status).toBe(200);
+  expect((await team.as(cleo, "PUT", "/api/config", { onboarding: { hintsSeen: ["teams-2026-11b"] } })).status, "a member cannot change the team's record").toBe(403);
+  expect((await team.as(cleo, "PUT", "/api/me/welcome", { hints: ["teams-2026-11b", "announcements-read-1763380800000"] })).status).toBe(200);
   expect((await team.as(cleo, "PUT", "/api/me/welcome", { hints: ["announcements-read-1763467200000"] })).status).toBe(200);
   const cleos = await hints(cleo);
-  expect(cleos).toEqual(expect.arrayContaining(["teams-2026-11", "announcements-read-1763467200000"]));
+  expect(cleos).toEqual(expect.arrayContaining(["teams-2026-11b", "announcements-read-1763467200000"]));
   expect(cleos.filter((hint) => hint.startsWith("announcements-read-")), "the newest only").toEqual(["announcements-read-1763467200000"]);
-  expect(await hints(bob), "nobody else's").not.toEqual(expect.arrayContaining(["teams-2026-11"]));
-  const saved = await team.as(bob, "PUT", "/api/config", { onboarding: { hintsSeen: [...await hints(bob), "teams-2026-11", "announcements-read-1763380800000"] } });
+  expect(await hints(bob), "nobody else's").not.toEqual(expect.arrayContaining(["teams-2026-11b"]));
+  const saved = await team.as(bob, "PUT", "/api/config", { onboarding: { hintsSeen: [...await hints(bob), "teams-2026-11b", "announcements-read-1763380800000"] } });
   expect(saved.status, JSON.stringify(saved.body)).toBe(200);
-  expect(await hints(bob)).toEqual(expect.arrayContaining(["teams-2026-11", "announcements-read-1763380800000"]));
+  expect(await hints(bob)).toEqual(expect.arrayContaining(["teams-2026-11b", "announcements-read-1763380800000"]));
   expect((await hints(cleo)).filter((hint) => hint.startsWith("announcements-read-")), "an admin's save stays theirs").toEqual(["announcements-read-1763467200000"]);
 });

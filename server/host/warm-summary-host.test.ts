@@ -119,6 +119,44 @@ function setup(overrides: Partial<WarmSummaryHostDeps> = {}, options: { tokens?:
 }
 
 describe("warm summaries for a Claude conversation", () => {
+  it("does not give an awaited summary's extra capacity to a queued background job", async () => {
+    const slots = createJobSlots(1);
+    let finishBackground!: () => void;
+    const background = slots.run(() => new Promise<void>((resolve) => { finishBackground = resolve; }));
+    let finishSummary!: (result: IdleCompactResult) => void;
+    const summary = new Promise<IdleCompactResult>((resolve) => { finishSummary = resolve; });
+    let summaryStarted!: () => void;
+    const started = new Promise<void>((resolve) => { summaryStarted = resolve; });
+    const f = setup({ slots, instance: () => ({ adapter: { cacheKeepWarm: {
+      hold: () => true, compact: () => { summaryStarted(); return summary; },
+    } } }) }, { tokens: 170_000 });
+    const next = vi.fn(async () => undefined);
+    let queued: Promise<void> | undefined;
+    let turn: Promise<string> | undefined;
+    try {
+      f.finishTurn();
+      await f.advance(WARM_SUMMARY_SOON_MS);
+      queued = slots.run(next);
+      turn = f.host.beforeTurn("t1");
+      await started;
+      expect(slots.running).toBe(2);
+      finishSummary({ ok: true, session: "fork-session", sessionBefore: "live-session", input: 4, cacheRead: 150_000, cacheWrite: 40, output: 2_400, costUsd: 0.2, model: "claude-opus-5-5" });
+      expect(await turn).toBe("waited");
+      expect(f.task.resumeCursors.claude).toBe("fork-session");
+      expect(next).not.toHaveBeenCalled();
+      expect(slots.running).toBe(1);
+      expect(slots.waiting).toBe(1);
+      finishBackground();
+      await Promise.all([background, queued]);
+      expect(next).toHaveBeenCalledOnce();
+    } finally {
+      finishBackground();
+      finishSummary({ ok: false, reason: "test finished" });
+      f.host.dispose();
+      await Promise.all([background, queued, turn]);
+    }
+  });
+
   it("skips a summary that waited for a free slot until its cache went cold, and writes one that waited less", async () => {
     let finish!: () => void;
     const slots = createJobSlots(1);

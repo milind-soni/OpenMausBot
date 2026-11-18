@@ -311,6 +311,8 @@ export interface LoadPlan {
   source: string;
   stem: string;
   reader?: string;
+  /** Multi-file readers can keep their source paths beside a file's own filename column. */
+  readerWithFilename?: (column: string | false) => string;
   extensions?: DataExtension[];
   attach?: { type: "postgres" | "mysql" | "sqlite"; connection: string; table?: string };
   warnings: string[];
@@ -348,14 +350,15 @@ function csvOptions(options: LoadInput["options"], extra: Record<string, string>
   return parts.length ? `, ${parts.join(", ")}` : "";
 }
 
-function readerExpression(reader: "csv" | "tsv" | "json" | "parquet" | "xlsx", target: string | string[], input: LoadInput, many: boolean): string {
+function readerExpression(reader: "csv" | "tsv" | "json" | "parquet" | "xlsx", target: string | string[], input: LoadInput, many: boolean, filename: string | boolean = true): string {
   const path = Array.isArray(target) ? `[${target.map(quoteLiteral).join(", ")}]` : quoteLiteral(target);
-  const multi: Record<string, string> = many ? { union_by_name: "true", filename: "true" } : {};
+  const fileColumn = typeof filename === "string" ? quoteLiteral(filename) : String(filename);
+  const multi: Record<string, string> = many ? { union_by_name: "true", filename: fileColumn } : {};
   switch (reader) {
     case "csv": return `read_csv(${path}${csvOptions(input.options, multi)})`;
     case "tsv": return `read_csv(${path}${csvOptions({ ...input.options, delimiter: input.options?.delimiter ?? "\t" }, multi)})`;
-    case "json": return `read_json_auto(${path}${many ? ", union_by_name=true, filename=true" : ""}${input.options?.ignore_errors ? ", ignore_errors=true" : ""})`;
-    case "parquet": return `read_parquet(${path}${many ? ", union_by_name=true, filename=true" : ""})`;
+    case "json": return `read_json_auto(${path}${many ? `, union_by_name=true, filename=${fileColumn}` : ""}${input.options?.ignore_errors ? ", ignore_errors=true" : ""})`;
+    case "parquet": return `read_parquet(${path}${many ? `, union_by_name=true, filename=${fileColumn}` : ""})`;
     case "xlsx": {
       const parts = [path];
       if (input.sheet) parts.push(`sheet=${quoteLiteral(input.sheet)}`);
@@ -415,10 +418,11 @@ export function planLoad(input: LoadInput): LoadPlan[] {
     return [{ kind: "url", source: stripCredentials(source), stem: input.name ?? (stemOf(pathname) || "download"), reader: readerExpression(reader, source, input, false), extensions, warnings }];
   }
   const local = source.startsWith("~/") || source === "~" ? join(homedir(), source.slice(1)) : source;
-  if (GLOB_CHARS.test(local) || (kind === "folder" && !existsSync(local))) {
+  if ((GLOB_CHARS.test(local) || kind === "folder") && !existsSync(local)) {
     const reader = readerFor(extensionOf(local), kind === "folder" ? undefined : kind);
     if (!reader || reader === "sqlite" || reader === "xlsx") throw fail("source_unsupported", "A glob needs a file extension DuckDB reads many of: *.csv, *.parquet, *.json.", { hint: "Pass kind: csv, json or parquet with the glob." });
-    return [{ kind: "folder", source: local, stem: input.name ?? (basename(dirname(local)) || "files"), reader: readerExpression(reader, local, input, true), warnings }];
+    const read = (column: string | boolean = true) => readerExpression(reader, local, input, true, column);
+    return [{ kind: "folder", source: local, stem: input.name ?? (basename(dirname(local)) || "files"), reader: read(), readerWithFilename: read, warnings }];
   }
   let stat;
   try { stat = statSync(local); } catch { throw fail("source_not_found", `${local} does not exist.`); }
@@ -435,12 +439,13 @@ export function planLoad(input: LoadInput): LoadPlan[] {
     if (!families.size) throw fail("source_unsupported", `${local} holds no csv, tsv, json or parquet files.`);
     const stem = input.name ?? basename(local);
     // DuckDB globs take forward slashes on every platform and no braces: one glob per extension.
-    const folder = local.replace(/\\/g, "/");
+    const folder = local.replace(/\\/g, "/").replace(/[*?[\]]/g, "[$&]");
     return [...families.entries()].map(([reader, exts]) => {
       // One case-independent pattern per suffix avoids both missing .CSV on
       // Linux and overlapping .csv/.CSV patterns on case-insensitive filesystems.
       const globs = [...exts].map((ext) => `${folder}/**/*${ext.replace(/[a-z]/g, (letter) => `[${letter}${letter.toUpperCase()}]`)}`);
-      return { kind: "folder" as const, source: local, stem: families.size === 1 ? stem : `${stem}_${reader}`, reader: readerExpression(reader, globs.length === 1 ? globs[0]! : globs, input, true), warnings };
+      const read = (column: string | boolean = true) => readerExpression(reader, globs.length === 1 ? globs[0]! : globs, input, true, column);
+      return { kind: "folder" as const, source: local, stem: families.size === 1 ? stem : `${stem}_${reader}`, reader: read(), readerWithFilename: read, warnings };
     });
   }
   const reader = readerFor(extensionOf(local), kind);
@@ -471,8 +476,20 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   };
   const warnings: string[] = [];
   const create = async (name: string, relation: string, plan: LoadPlan, options: Record<string, string | number | boolean>) => {
-    const sql = `CREATE ${replace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${relation}`;
-    await ctx.database.run(sql, runOptions(ctx, { extensions: plan.extensions }));
+    const sql = (reader: string) => `CREATE ${replace ? "OR REPLACE " : ""}TABLE ${quoteIdent(name)} AS SELECT * FROM ${reader}`;
+    const execute = (statement: string) => ctx.database.run(statement, runOptions(ctx, { extensions: plan.extensions }));
+    try {
+      await execute(sql(relation));
+    } catch (error) {
+      const collision = error instanceof Error && /^Binder Error: (?:Option filename adds column "filename", but a column with this name is also in the file\.|table "(?:read_csv|read_json_auto|read_parquet)" has duplicate column name "filename")/.test(error.message);
+      if (!collision || !plan.readerWithFilename) throw error;
+      const schema = await execute(`DESCRIBE SELECT * FROM ${plan.readerWithFilename(false)}`);
+      const names = new Set(schema.rows.map((row) => String(row[0]).toLowerCase()));
+      let column = "source_filename";
+      for (let suffix = 2; names.has(column); suffix++) column = `source_filename_${suffix}`;
+      await execute(sql(plan.readerWithFilename(column)));
+      warnings.push(`Source file paths are in "${column}"; the files' own "filename" column is unchanged.`);
+    }
     const described = await ctx.database.describe(quoteIdent(name), runOptions(ctx));
     const columns = boundColumns(described.columns, DATA_LIMITS.describeBytesMax, 200).columns;
     ctx.sheet.recordSource({ name, sqlName: quoteIdent(name), kind: plan.kind, source: plan.source, options, rowCount: described.rowCount, columns, loadedAt: new Date().toISOString() });

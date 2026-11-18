@@ -59,10 +59,12 @@ describe("mascot facial feature colors", () => {
     }
   });
 
-  it("keeps default inks when an override is reset or comes from an older profile", () => {
+  it("cuts the features out of the body when no colour is set", () => {
     expect(renderBot({ color: "chrome", mascotFaceColor: null })).toContain('stroke="#1E2833"');
-    expect(renderBot({ mascotBody: "ghost" })).toContain('stroke="#0d0a10"');
-    expect(renderBot({})).toContain('stroke="#ffffff"');
+    for (const markup of [renderBot({ mascotBody: "ghost" }), renderBot({})]) {
+      expect(markup).toContain("<mask");
+      expect(markup).not.toMatch(/stroke="#(?:ffffff|0d0a10)"/);
+    }
   });
 
   it("does not paint features over an uploaded image", () => {

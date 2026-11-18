@@ -20,7 +20,7 @@ import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
@@ -424,23 +424,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!r.ok) return { text: String(r.body.error ?? `reset_cloud_computer failed (HTTP ${r.status}).`), isError: true };
     return { text: String(r.body.text ?? "") };
   }
-  if (name === "list_threads") {
-    const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
-    const r = await api(`/api/internal/threads?${query.toString()}`);
-    if (r.error) return { text: `Couldn't list threads: ${String(r.error)}`, isError: true };
-    const threads = Array.isArray(r.threads) ? r.threads.filter(jsonRecord) : [];
-    if (!threads.length) return { text: "No threads yet: you have none of your own beyond this one, and you have not opened any on a teammate." };
-    const stateWord: Record<string, string> = { running: "running", "waiting-on-you": "waiting on the person", queued: "queued", idle: "idle" };
-    const lines = threads.map((thread) => {
-      const where = thread.own === true ? "yours" : `on @${String(thread.botName)}${typeof thread.openedBy === "string" && thread.openedBy ? `, opened by @${thread.openedBy}` : ""}`;
-      const state = stateWord[String(thread.state)] ?? String(thread.state);
-      const unread = thread.unread === true ? ", unread for the person" : "";
-      const handoff = typeof thread.delegationId === "string" && thread.delegationId ? ` [delegation id: ${thread.delegationId}]` : "";
-      const waiting = typeof thread.waiting === "string" && thread.waiting ? `: ${thread.waiting}` : "";
-      return `- #${String(thread.title)} (${where}, ${state}${waiting}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
-    });
-    return { text: `Threads, newest first:\n${lines.join("\n")}` };
-  }
+  if (name === LIST_THREADS_TOOL) return callListThreadsTool(args, context);
   if (name === "close_thread") {
     const threadId = String(args.thread_id ?? "").trim();
     if (!threadId) return { text: "close_thread needs the thread_id from list_threads or start_thread.", isError: true };

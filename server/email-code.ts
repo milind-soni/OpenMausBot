@@ -57,10 +57,10 @@ const ADDRESSES = /\S+@\S+/gu;
 const DATES = /\b\d{4}-\d{1,2}-\d{1,2}\b|\b\d{1,2}[/.]\d{1,2}[/.]\d{2,4}\b/gu;
 const COPYRIGHT = /(?:©|\(c\)|copyright)\s*\d{4}/giu;
 const PHONES = /\+\d[\d ().-]{6,}\d|\(\d{3}\)\s*\d{3}[-. ]?\d{4}/gu;
-const CANDIDATE = /(?<![\p{L}\p{N}-])(\d{3}[- ]\d{3}|\d{4}[- ]\d{4}|[A-Z0-9]{4}-[A-Z0-9]{4}|\d{4,10}|[A-Z0-9]{4,10})(?![\p{L}\p{N}-])/gu;
+const CANDIDATE = /(?:(?<![\p{L}\p{N}-])|(?<=\p{Script=Han}))(\d{3}[- ]\d{3}|\d{4}[- ]\d{4}|[A-Z0-9]{4}-[A-Z0-9]{4}|\d{4,10}|[A-Z0-9]{4,10})(?:(?![\p{L}\p{N}-])|(?=\p{Script=Han}))/gu;
 const NOT_A_CODE_WORD = /(?:zip|postal|post|promo|coupon|discount|voucher|country|area|referral|invite|gift|error|reference|tracking|bar|qr|source)[- ]?code\b/giu;
-const CODE_WORD = /(?<![\p{L}\p{N}])(?:code|otp|passcode|pin|verification|verify|c[oó]digo|verifica[cç][aã]o|verificaci[oó]n|verifizierungscode|bestätigungscode|sicherheitscode|anmeldecode|код)(?![\p{L}\p{N}])/iu;
-const CODE_MAIL_SUBJECT = /(?<![\p{L}\p{N}])(?:code|otp|passcode|verify|verification|sign[- ]?in|log[- ]?in|login|c[oó]digo|verifica[cç][aã]o)(?![\p{L}\p{N}])/iu;
+const CODE_WORD = /验证码|驗證碼|(?<![\p{L}\p{N}])(?:code|otp|passcode|pin|verification|verify|c[oó]digo|verifica[cç][aã]o|verificaci[oó]n|verifizierungscode|bestätigungscode|sicherheitscode|anmeldecode|код)(?![\p{L}\p{N}])/iu;
+const CODE_MAIL_SUBJECT = /验证码|驗證碼|(?<![\p{L}\p{N}])(?:code|otp|passcode|verify|verification|sign[- ]?in|log[- ]?in|login|c[oó]digo|verifica[cç][aã]o)(?![\p{L}\p{N}])/iu;
 
 /** The readable text of a message body, without its markup. */
 export function bodyText(raw: string): string {

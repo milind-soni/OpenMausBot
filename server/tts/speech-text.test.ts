@@ -57,6 +57,27 @@ describe("speakable", () => {
     expect(speakable("**Done** ✅ — [x] shipped the _thing_")).toBe("Done — shipped the thing");
   });
 
+  it.each([
+    ["Set API_KEY and API_URL before running the command.", "Set API_KEY and API_URL before running the command."],
+    ["Open my_config_file.json.", "Open my_config_file.json."],
+    ["Use snake_case here and _emphasis_ there.", "Use snake_case here and emphasis there."],
+    ["Set **API_KEY** and **API_URL**.", "Set API_KEY and API_URL."],
+    ["Run `npm run build_app` and set `API_KEY`.", "Run npm run build_app and set API_KEY."],
+    ["Use `*.ts` and `*.js` to match files.", "Use *.ts and *.js to match files."],
+    ["***Important***: __do _not_ change__ the name.", "Important: do not change the name."],
+  ])("removes only Markdown emphasis from %j", (input, expected) => {
+    expect(speakable(input)).toBe(expected);
+  });
+
+  it.each([
+    ["See ![*diagram*](x.png).", "See. (image: diagram)."],
+    ["See ![**API_KEY**](x.png).", "See. (image: API_KEY)."],
+    ["See ![API_KEY](x.png).", "See. (image: API_KEY)."],
+    ["See ![](x.png).", "See. (an image)."],
+  ])("prepares the image description in %j", (input, expected) => {
+    expect(speakable(input)).toBe(expected);
+  });
+
   it("gives a heading a full stop so the voice breathes", () => {
     expect(speakable("## Results\nAll green")).toBe("Results. All green");
   });
