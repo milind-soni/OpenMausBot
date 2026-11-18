@@ -175,13 +175,21 @@ describe("augmentedPath", () => {
       `#!/bin/sh\necho $$ > '${shellPid}'\nprintf '__OMB_PATH__%s\\n' '${rcOnlyBin}'\nhead -c 2000000 /dev/zero\n: > '${finished}'\n`,
     );
     chmodSync(shell, 0o755);
+    // /proc/<pid>/stat: a killed process its parent has not reaped yet (state Z) still answers kill(pid, 0).
+    const procState = (pid: number) => {
+      try {
+        return readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.[0] ?? "?";
+      } catch {
+        return "?";
+      }
+    };
     const alive = (pid: number) => {
       try {
         process.kill(pid, 0);
-        return true;
       } catch {
         return false;
       }
+      return procState(pid) !== "Z";
     };
 
     const saved = { SHELL: process.env.SHELL, VITEST: process.env.VITEST };
@@ -199,7 +207,7 @@ describe("augmentedPath", () => {
         },
         { timeout: 5000 },
       );
-      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 5000 });
+      await vi.waitFor(() => expect(alive(pid), `probe shell state ${procState(pid)}`).toBe(false), { timeout: 5000 });
       expect(existsSync(finished)).toBe(false);
       expect(augmentedPath().split(delimiter)).not.toContain(rcOnlyBin);
     } finally {
