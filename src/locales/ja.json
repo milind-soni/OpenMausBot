@@ -7947,5 +7947,8 @@
   "voice.deepseek.description": "返信と音声メッセージを DeepSeek の Stella または Tide の声で読み上げます。DeepSeek を選ぶと、音声入力と「交互に話す」も DeepSeek の音声認識であなたの声を聞き取ります（1 回の録音につき約 2 分まで）。DeepSeek API キーを使い、料金は DeepSeek から請求されます。",
   "voice.deepseek.stella": "Stella（女性）",
   "voice.deepseek.tide": "Tide（男性）",
-  "call.capability.turnsNeedDeepSeekKey": "通話で交互に話すには DeepSeek キーを追加してください"
+  "call.capability.turnsNeedDeepSeekKey": "通話で交互に話すには DeepSeek キーを追加してください",
+  "alwaysOn.section": "常時オンの拠点",
+  "alwaysOn.title": "このコンピュータを常時オンの拠点として使う",
+  "alwaysOn.add.title": "Mac mini などの常時オンのコンピュータを追加"
 }

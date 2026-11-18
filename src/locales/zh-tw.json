@@ -10175,5 +10175,8 @@
   "voice.deepseek.description": "以 DeepSeek 的 Stella 或 Tide 聲音朗讀回覆和語音訊息。選擇 DeepSeek 後，聽寫和「輪流對話」也會透過 DeepSeek 語音轉文字聽你說話，每段錄音最長約兩分鐘。使用你的 DeepSeek API 金鑰，費用由 DeepSeek 收取。",
   "voice.deepseek.stella": "Stella（女聲）",
   "voice.deepseek.tide": "Tide（男聲）",
-  "call.capability.turnsNeedDeepSeekKey": "新增 DeepSeek 金鑰即可在通話中輪流對話"
+  "call.capability.turnsNeedDeepSeekKey": "新增 DeepSeek 金鑰即可在通話中輪流對話",
+  "alwaysOn.section": "常開的家",
+  "alwaysOn.title": "將這台電腦當作常開的家",
+  "alwaysOn.add.title": "加入 Mac mini 或其他常開的電腦"
 }

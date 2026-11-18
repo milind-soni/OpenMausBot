@@ -791,6 +791,30 @@ function clearRecords(dataDir, stale) {
   return cleared;
 }
 
+/**
+ * Who holds the data directory's lease, read only (`openmausbot doctor`): "none"; "alive", a running process on this
+ * machine; "dead", a process of this machine that is gone, which the next acquireDataDirLease() retires; "other-machine";
+ * or "invalid", a record that cannot be read, which acquireDataDirLease() refuses. Never changes a file.
+ */
+export function describeDataDirLease(dataDir) {
+  const path = join(validateDataDir(dataDir), LEASE_NAME);
+  let owner;
+  try {
+    owner = readOwner(path);
+  } catch {
+    return { state: "invalid", path };
+  }
+  if (!owner) return { state: "none", path };
+  const holder = { path, pid: owner.pid, host: owner.host, createdAt: owner.createdAt };
+  if (!sameMachine(owner, dataDir)) return { state: "other-machine", ...holder };
+  try {
+    return { state: ownerIsAlive(owner) ? "alive" : "dead", ...holder };
+  } catch {
+    // Liveness that cannot be told is taken as alive, as acquiring would refuse it.
+    return { state: "alive", ...holder };
+  }
+}
+
 export function acquireDataDirLeaseForProcess(dataDir, environment = process.env) {
   const encoded = consumeChildCapability(environment);
   return encoded === null

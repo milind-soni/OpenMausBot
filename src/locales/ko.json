@@ -7640,5 +7640,8 @@
   "voice.deepseek.description": "답장과 음성 메시지를 DeepSeek의 Stella 또는 Tide 목소리로 읽어 줘요. DeepSeek을 고르면 받아쓰기와 번갈아 말하기도 DeepSeek 음성 인식으로 들어요. 녹음 한 번에 약 2분까지예요. DeepSeek API 키를 쓰고 요금은 DeepSeek에서 청구돼요.",
   "voice.deepseek.stella": "Stella (여성)",
   "voice.deepseek.tide": "Tide (남성)",
-  "call.capability.turnsNeedDeepSeekKey": "통화에서 번갈아 말하려면 DeepSeek 키를 추가하세요"
+  "call.capability.turnsNeedDeepSeekKey": "통화에서 번갈아 말하려면 DeepSeek 키를 추가하세요",
+  "alwaysOn.section": "항상 켜진 홈",
+  "alwaysOn.title": "이 컴퓨터를 항상 켜진 홈으로 사용",
+  "alwaysOn.add.title": "Mac mini 또는 다른 항상 켜진 컴퓨터 추가"
 }

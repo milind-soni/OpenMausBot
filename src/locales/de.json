@@ -3978,6 +3978,8 @@
   "settings.simple.billing.used": "genutzt",
   "settings.skin.dressUp.title": "Meine Bots verkleiden",
   "server.cloudComputer.replaced": "Der Cloud-Computer von {name} hat nicht mehr reagiert, deshalb hat MausBot ihn durch einen neuen ersetzt. Dateien, die nur auf dem alten Computer lagen, sind weg.",
+  "server.cloudComputer.setAside": "Der Cloud-Computer von {name} hat nicht mehr reagiert, deshalb hat MausBot ihm einen neuen gegeben. Der alte bleibt mit seinen Dateien bis {date} in Einstellungen → Desktops & Browser → Desktops erhalten und wird danach gelöscht.",
+  "server.cloudComputer.noRoom": "Der Cloud-Computer von {name} reagiert nicht mehr, und der Tarif hat keinen Platz für einen neuen Computer daneben. MausBot hat ihn deshalb mit seinen Dateien behalten und versucht weiter, ihn zurückzuholen. „Computer neu starten“ im Computer-Bereich versucht es sofort noch einmal.",
   "server.cloudComputer.restarted": "Der Cloud-Computer von {name} hat nicht mehr reagiert, deshalb hat MausBot ihn neu gestartet. Er antwortet wieder; Programme, die darauf geöffnet waren, wurden geschlossen.",
   "server.cloudComputer.capped": "Der Cloud-Computer von {name} hat innerhalb einer Stunde nach dem Ersetzen wieder nicht reagiert, deshalb hat MausBot ihn so gelassen. „Computer ersetzen“ im Computer-Bereich versucht es noch einmal.",
   "server.cloudComputer.unreachable": "Cloud-Computer sind gerade nicht erreichbar. MausBot hat den Cloud-Computer von {name} behalten und prüft ihn erneut.",
@@ -4027,5 +4029,8 @@
   "call.capability.turnsNeedDeepSeekKey": "Füge einen DeepSeek-Schlüssel hinzu, um in Anrufen abwechselnd zu sprechen",
   "chat.notice.acpNodeTooOld": "{provider} braucht Node.js {needed} oder neuer, aber auf diesem Computer ist Node.js {found}. Aktualisiere Node.js von nodejs.org und sende deine Nachricht dann erneut.",
   "chat.newChatHint": "Starte einen neuen Chat, um Tokens zu sparen.",
-  "chat.newChatHintButton": "Neuer Chat"
+  "chat.newChatHintButton": "Neuer Chat",
+  "alwaysOn.section": "Immer eingeschaltetes Zuhause",
+  "alwaysOn.title": "Diesen Computer als immer eingeschaltetes Zuhause nutzen",
+  "alwaysOn.add.title": "Einen Mac mini oder anderen immer eingeschalteten Computer hinzufügen"
 }
