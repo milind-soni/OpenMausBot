@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { IMAGE_DEFAULT_MODELS, IMAGE_PROVIDERS, looksLikeApiKey, supportsImageComplexity, normalizeImageGenerationUrl, type ImageGenerationConfig, type ImageProvider } from "../shared/image-generation.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
+import { generateHiggsfieldImage, higgsfieldReady } from "./higgsfield-mcp.ts";
 
 export const IMAGE_GENERATION_TIMEOUT_MS = 120_000;
 const MAX_UPSTREAM_RESPONSE_BYTES = 15 * 1024 * 1024;
@@ -113,6 +114,13 @@ const PROVIDERS: Record<ImageProvider, {
     url: () => "https://openrouter.ai/api/v1/images",
     body: (request) => ({ aspect_ratio: request.aspect ?? "1:1" }),
   },
+  higgsfield: {
+    name: "Higgsfield",
+    missing: "Connect Higgsfield in Plugins first",
+    key: () => undefined,
+    url: () => "",
+    body: () => ({}),
+  },
   custom: {
     name: "Custom",
     missing: "Set a valid custom image API URL and model first",
@@ -177,6 +185,7 @@ export function primaryImageSlot(cfg: ImageCredentials): ImageSlot {
 
 export function imageSlotConfigured(cfg: ImageCredentials, slot: ImageSlot): boolean {
   if (slot.provider === "custom") return Boolean(customImageUrl(cfg) && slot.model);
+  if (slot.provider === "higgsfield") return higgsfieldReady() && Boolean(slot.model);
   return Boolean(PROVIDERS[slot.provider].key(cfg)?.trim() && slot.model);
 }
 
@@ -237,6 +246,10 @@ export async function generateImageWith(
 ): Promise<GeneratedImage> {
   const provider = PROVIDERS[slot.provider];
   if (!imageSlotConfigured(cfg, slot)) fail(provider.missing, 409, true);
+  if (slot.provider === "higgsfield") {
+    if (request.edit || request.gif) fail("Higgsfield makes new images only: no edits or animated GIFs", 409, true);
+    return generateHiggsfieldImage({ model: slot.model, prompt: request.prompt, ...(request.aspect && { aspect: request.aspect }) }, { ...(cancel && { signal: cancel }) });
+  }
 
   const apiKey = provider.key(cfg)?.trim();
   const { edit } = request;
