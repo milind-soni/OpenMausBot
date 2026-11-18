@@ -76,7 +76,7 @@ class Stub:
             do_GET = do_POST = _handle
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.server.daemon_threads = True
+        self.server.daemon_threads = False  # server_close() then joins the handler threads
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
 
     @property

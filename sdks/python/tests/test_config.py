@@ -24,13 +24,15 @@ def recorder(status=200, body=None):
 
 def test_rewrites_the_cards_address_to_v1_including_local_and_trailing_slash():
     calls, client = recorder()
-    Bot("http://127.0.0.1:8799/hooks/api/bots/b1/messages/", "k", http_client=client).send("x")
+    with client:
+        Bot("http://127.0.0.1:8799/hooks/api/bots/b1/messages/", "k", http_client=client).send("x")
     assert calls[0]["url"] == "http://127.0.0.1:8799/hooks/api/v1/bots/b1/messages"
 
 
 def test_keeps_an_address_that_already_has_v1():
     calls, client = recorder()
-    Bot("https://x.example/hooks/api/v1/bots/b1/messages", "k", http_client=client).send("x")
+    with client:
+        Bot("https://x.example/hooks/api/v1/bots/b1/messages", "k", http_client=client).send("x")
     assert calls[0]["url"] == "https://x.example/hooks/api/v1/bots/b1/messages"
 
 
@@ -38,7 +40,8 @@ def test_reads_env_trimmed(monkeypatch):
     monkeypatch.setenv("MAUSBOT_BOT_URL", " https://x.example/hooks/api/bots/b1/messages\n")
     monkeypatch.setenv("MAUSBOT_BOT_KEY", "k_test\n")
     calls, client = recorder()
-    Bot(http_client=client).send("x")
+    with client:
+        Bot(http_client=client).send("x")
     assert calls[0] == {"url": "https://x.example/hooks/api/v1/bots/b1/messages", "auth": "Bearer k_test"}
 
 
@@ -48,10 +51,18 @@ def test_refuses_a_missing_key_or_a_bad_address_at_construction(monkeypatch):
         Bot(CARD)
     monkeypatch.delenv("MAUSBOT_BOT_URL", raising=False)
     for endpoint in ("https://x.example/other", "not a url", None, "ftp://x.example/hooks/api/bots/b1/messages",
-                     "https://x.example/hooks/api/bots/%ff/messages"):
+                     "https://x.example/hooks/api/bots/%ff/messages",
+                     "https://x.example/hooks/api/bots/%zz/messages", "https://x.example/hooks/api/bots/%E/messages"):
         with pytest.raises(MausBotError) as info:
             Bot(endpoint, SECRET)
         assert SECRET not in str(info.value) and SECRET not in repr(info.value)
+
+
+@pytest.mark.parametrize("key", ["k_secret_\u00e9", "k_secret_\u200b", "k_sec\nret"])
+def test_refuses_a_key_with_characters_a_key_never_has(key):
+    with pytest.raises(MausBotError) as info:
+        Bot(CARD, key)
+    assert key not in str(info.value) and key not in repr(info.value)
 
 
 def test_refuses_a_bad_base_url_at_construction():
@@ -68,7 +79,7 @@ def test_a_bad_percent_escape_in_the_address_is_a_mausbot_error():
 def test_never_puts_the_key_in_an_error_or_a_repr():
     _, client = recorder(401, {"error": "Invalid key"})
     bot = Bot(CARD, SECRET, http_client=client)
-    with pytest.raises(AuthenticationError) as info:
+    with client, pytest.raises(AuthenticationError) as info:
         bot.send("x")
     assert SECRET not in str(info.value) and SECRET not in repr(info.value)
     assert SECRET not in repr(bot) and SECRET not in repr(vars(bot))

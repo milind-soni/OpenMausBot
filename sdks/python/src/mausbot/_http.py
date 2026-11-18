@@ -58,6 +58,9 @@ def make_config(endpoint: Optional[str], key: Optional[str], base_url: Optional[
     key = (key if key is not None else env.get("MAUSBOT_BOT_KEY", "")).strip()
     if not key:
         raise MausBotError(NO_KEY)
+    # httpx encodes header values as ASCII; anything else would raise with the key in the error.
+    if not (key.isascii() and key.isprintable()) or any(c.isspace() for c in key):
+        raise MausBotError("The key has characters a MausBot key never has.")
     base = base_url.strip().rstrip("/") if base_url else ""
     if base and _origin(base) is None:
         raise MausBotError("`base_url` must be an http or https address.")
@@ -67,6 +70,8 @@ def make_config(endpoint: Optional[str], key: Optional[str], base_url: Optional[
         if not found or not match:
             raise MausBotError(NO_ADDRESS)
         base = found[0] + match.group(1)
+        if re.search(r"%(?![0-9A-Fa-f]{2})", match.group(2)):
+            raise MausBotError(NO_ADDRESS)
         try:
             bot_id = unquote(match.group(2), errors="strict")
         except UnicodeDecodeError:
