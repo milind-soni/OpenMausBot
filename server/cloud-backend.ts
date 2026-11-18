@@ -16,10 +16,12 @@ export function vpsLeftBehindNotice(done: "Moved" | "Deleted", alias: string, co
 }
 
 /** What an unreachable old default alias may still run for this installation, and how to find and remove it. */
-export function vpsAliasLeftBehindNotice(done: "Saved" | "Removed", alias: string, environmentFilter: string, managedFilter: string): string {
+export function vpsAliasLeftBehindNotice(done: "Saved" | "Removed", alias: string, environmentFilter: string | null, managedFilter: string): string {
   return `${done}. ${alias} could not be reached, so this installation's computers there, if any are still there, were left as they are. ` +
-    `When ${alias} is back, list them with: docker -H ssh://${alias} ps -a --filter ${environmentFilter} ` +
-    `and remove any you no longer need with: docker -H ssh://${alias} rm -f <name>. ` +
+    (environmentFilter
+      ? `When ${alias} is back, list them with: docker -H ssh://${alias} ps -a --filter ${environmentFilter} ` +
+        `and remove any you no longer need with: docker -H ssh://${alias} rm -f <name>. `
+      : `This installation's ID could not be read, so no filter lists only its computers on ${alias}. `) +
     `Computers made by older versions have no installation label: docker -H ssh://${alias} ps -a --filter ${managedFilter} lists every managed one, ` +
     `so remove one of those only when you have its exact name from this installation, such as the one in a bot's move or delete notice. ` +
     `A name that only starts with openmausbot-vps- does not prove it is this installation's: if you have nothing more, leave it.`;

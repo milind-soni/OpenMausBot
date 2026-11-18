@@ -471,7 +471,7 @@ beforeAll(async () => {
       'import { appendFileSync, existsSync } from "node:fs";',
       'const args = process.argv.slice(2);',
       `appendFileSync(${JSON.stringify(fakeSshLog)}, JSON.stringify(args) + "\\n");`,
-      `if (existsSync(${JSON.stringify(fakeSshUnavailable)})) { console.error("fixture SSH is unavailable"); process.exit(255); }`,
+      `if (existsSync(${JSON.stringify(fakeSshUnavailable)})) { console.error("ssh: connect to host fixture-vps port 22: Connection refused"); process.exit(255); }`,
       'if (args[0] === "-F") args.splice(0, 2);',
       'if (args.length === 4 && args.slice(0, 3).join(" ") === "-O check --") process.exit(255);',
       'if (args.length === 8 && args.slice(0, 6).join(" ") === "-o BatchMode=yes -o PermitLocalCommand=no -T --" && args[7] === "true") process.exit(0);',
@@ -11157,7 +11157,7 @@ describe("harness HTTP API", () => {
       expect(cleared.body.notice).toContain(`docker -H ssh://fixture-vps ps -a --filter label=com.openmausbot.environment=${environmentId} `);
       expect(cleared.body.notice).toContain("docker -H ssh://fixture-vps rm -f <name>");
       expect(cleared.body.notice).toContain("docker -H ssh://fixture-vps ps -a --filter label=com.openmausbot.vps=1 lists every managed one");
-      expect(cleared.body.notice).toContain("does not prove it is this installation's: if you have nothing more, leave it");
+      expect(cleared.body.notice).toContain("A name that only starts with openmausbot-vps- does not prove it is this installation's: if you have nothing more, leave it");
       expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("");
       expect(existsSync(fakeVpsFixture)).toBe(true);
     } finally {

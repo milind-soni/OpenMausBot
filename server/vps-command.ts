@@ -24,8 +24,15 @@ const STREAM_CAP_CHARS = 16 * 1024 * 1024;
 /** SSH never got through (or the command ran out of time): unlike a Docker refusal, nothing on the host answered. */
 export class VpsHostUnreachableError extends Error {}
 
-// OpenSSH exits 255 for its own failures; Docker's SSH transport quotes that status when the connection drops.
-const SSH_EXIT_255 = /exit(?:ed with exit)? status 255\b/i;
+// OpenSSH's own words when it never reached the host. Exit status 255 alone is not proof: ssh also passes on a remote command's 255.
+const SSH_TRANSPORT_FAILURE = /\bssh: (?:Could not resolve hostname|connect to host \S+ port \d+:)/i;
+
+/** Only a lookup or connection failure ssh reports itself, or a timeout, means nothing on the host answered. */
+function sshNeverReachedHost(error: unknown): boolean {
+  if ((error as { killed?: boolean }).killed === true) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return SSH_TRANSPORT_FAILURE.test(message) || message === "VPS SSH initialization timed out";
+}
 
 function tailCollector() {
   const chunks: string[] = [];
@@ -54,7 +61,10 @@ export async function defaultRunner(args: string[], options: VpsCommandOptions =
   // Time spent waking a paused host does not count against the command's own timeout.
   if (destination) {
     try { deadline += await ensureVpsSshMaster(ssh, destination, Math.min(30_000, deadline - Date.now())); }
-    catch (error) { throw new VpsHostUnreachableError(error instanceof Error ? error.message : String(error)); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw sshNeverReachedHost(error) ? new VpsHostUnreachableError(message) : new Error(message);
+    }
   }
   if (Date.now() >= deadline) throw new VpsHostUnreachableError("Docker-over-SSH command timed out");
   return new Promise((resolve, reject) => {
@@ -109,9 +119,9 @@ export async function defaultRunner(args: string[], options: VpsCommandOptions =
       if (failure) return;
       settle(() => {
         if (code === 0) return resolve({ stdout: stdout.text(), stderr: stderr.text() });
-        const detail = stderr.text().trim().slice(-1000);
-        const message = detail || `Docker-over-SSH exited ${code ?? signal ?? "without a status"}`;
-        reject(SSH_EXIT_255.test(message) ? new VpsHostUnreachableError(message) : new Error(message));
+        const captured = stderr.text().trim();
+        const message = captured.slice(-1000) || `Docker-over-SSH exited ${code ?? signal ?? "without a status"}`;
+        reject(SSH_TRANSPORT_FAILURE.test(captured) ? new VpsHostUnreachableError(message) : new Error(message));
       });
     });
     try {

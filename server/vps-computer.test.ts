@@ -1421,6 +1421,13 @@ describe("a VPS inventory that fails", () => {
       if (process.platform !== "win32") {
         vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("ssh: Could not resolve hostname production-vps"));
         expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
+        // The host answered with a changed key, or the local ssh never started: the host may still be up.
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed."));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBeUndefined();
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("spawn ssh ENOENT"));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBeUndefined();
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(Object.assign(new Error("VPS SSH initialization timed out"), { killed: true }));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
       }
     } finally { spawnMock.mockReset(); }
   });

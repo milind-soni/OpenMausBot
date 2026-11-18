@@ -116,6 +116,11 @@ export interface ConfigRouteDeps {
   postiz?: Pick<Postiz, "configCheck" | "configSaved">;
 }
 
+/** The label that lists only this installation's VPS computers, or null when its ID can't be read. */
+function vpsEnvironmentFilter(): string | null {
+  try { return `label=${vps.VPS_ENVIRONMENT_LABEL}=${vps.vpsEnvironmentId()}`; } catch { return null; }
+}
+
 export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
@@ -549,6 +554,10 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         return spec ? [{ session, spec }] : [];
       });
       let configWriteCommitted = false;
+      // Ready before the save: once it commits, nothing that fails later may lose what the old server may still hold.
+      const vpsNotice = vpsLeftOn
+        ? vpsAliasLeftBehindNotice(nextVpsAlias ? "Saved" : "Removed", vpsLeftOn, vpsEnvironmentFilter(), `label=${vps.VPS_MANAGED_LABEL}=1`)
+        : null;
       const enginesBefore = engineLaunches(providerConfigs());
       const localVmModeChanged = changingLocalVmMode ? localVmModeChanging() : null;
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
@@ -589,11 +598,13 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.postiz?.key !== undefined) persisted.postiz.key = "";
           saveConfig(persisted);
           configWriteCommitted = true;
+          savedVpsNotice = vpsNotice;
           syncCredentialEnv(patch);
           Object.assign(cfg, loadConfig());
         } else {
           saveConfig(patch);
           configWriteCommitted = true;
+          savedVpsNotice = vpsNotice;
           // loadConfig prefers env over the file for credentials, so the env must follow the save.
           syncCredentialEnv(patch);
           Object.assign(cfg, loadConfig());
@@ -654,7 +665,6 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const changedEngines = new Set(changedInstanceIds(enginesBefore, engineLaunches(providerConfigs())));
       // Revoked before any await: a changed engine's old children are invalid at once.
       revokeEngineCapabilities(changedEngines);
-      if (vpsLeftOn) savedVpsNotice = vpsAliasLeftBehindNotice(nextVpsAlias ? "Saved" : "Removed", vpsLeftOn, `label=${vps.VPS_ENVIRONMENT_LABEL}=${vps.vpsEnvironmentId()}`, `label=${vps.VPS_MANAGED_LABEL}=1`);
       // Commit failures wait until every mandatory effect has run: no journal failure may leave a bearer or stale engines active.
       const finalized = await finalizeBrowserCleanupMutation({
         requests: browserCleanupRequests,
