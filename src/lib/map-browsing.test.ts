@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { takeComputerPanelBrowserView } from "@/lib/computer-panel-focus";
 import { readComputerPanelView } from "@/lib/computer-panel-view";
-import { browsingSiteOf, keepWorking, openBotBrowser, readMapBrowsing } from "./map-browsing";
+import { browsingSiteOf, keepWorking, nextWorkingTurns, openBotBrowser, readMapBrowsing, type WorkingTurns } from "./map-browsing";
 
 const reads = vi.hoisted(() => [] as Array<{ path: string; init: unknown }>);
 vi.mock("@/state/store", async (original) => ({
@@ -42,11 +42,28 @@ describe("the Team map's Browsing chip", () => {
   });
 
   it("reads in the background and leaves out a bot that stopped working while the read was out", async () => {
-    let working = "ada ben";
+    let working: WorkingTurns = { ada: 1, ben: 2 };
     const read = readMapBrowsing(() => working);
-    working = "ben";
+    working = { ben: 2 };
     expect(await read).toEqual({ ben: "example.com" });
     expect(reads).toEqual([{ path: "/api/computers/browsing", init: { background: true, timeoutMs: 10_000 } }]);
+  });
+
+  it("leaves out a bot that stopped and started again while the read was out, since the answer is from its last turn", async () => {
+    let working: WorkingTurns = { ada: 1, ben: 2 };
+    const read = readMapBrowsing(() => working);
+    working = { ada: 3, ben: 2 };
+    expect(await read).toEqual({ ben: "example.com" });
+  });
+
+  it("numbers a bot's turn when it starts working and keeps the number while it works", () => {
+    let turn = 0;
+    const next = () => ++turn;
+    const first = nextWorkingTurns({}, "ada ben", next);
+    expect(first).toEqual({ ada: 1, ben: 2 });
+    expect(nextWorkingTurns(first, "ben", next)).toEqual({ ben: 2 });
+    expect(nextWorkingTurns(nextWorkingTurns(first, "ben", next), "ada ben", next)).toEqual({ ada: 3, ben: 2 });
+    expect(nextWorkingTurns(first, "", next)).toEqual({});
   });
 
   it("opens the bot's chat with its Browser panel open", () => {
