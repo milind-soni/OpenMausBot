@@ -14,6 +14,7 @@ import { GuidedTour } from "@/components/onboarding/GuidedTour";
 import { LiveCallHost } from "@/components/LiveCallHost";
 import { ThreadRefsProvider } from "@/components/ThreadRefs";
 import { initAnalytics } from "@/lib/analytics";
+import { useAppLoadSignal } from "@/lib/app-load";
 import { parseComputerHelp } from "@/lib/computer-control";
 import { viewerClosedRelease } from "@/components/computer-takeover";
 import { Sidebar } from "@/components/Sidebar";
@@ -485,6 +486,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   );
 }
 
+function AppLoadSignal() {
+  useAppLoadSignal();
+  return null;
+}
+
 function Application() {
   useEffect(() => {
     initAnalytics();
@@ -493,6 +499,7 @@ function Application() {
   return (
     <DesktopCapabilitiesProvider>
       <StoreProvider>
+        <AppLoadSignal />
         <ThreadRefsProvider>
           <Shell viewer={viewer} />
         </ThreadRefsProvider>

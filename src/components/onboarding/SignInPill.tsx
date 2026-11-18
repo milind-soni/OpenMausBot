@@ -5,6 +5,8 @@ import { chatgptPlanLink, deviceSignInProvider, type DeviceSignInStatus } from "
 import { engineReady } from "@/components/EngineLibrary";
 import { needsSignIn } from "@/components/EngineSetup";
 import { openExternalLink } from "@/lib/app-links";
+import type { ConnectAiPlace } from "@/lib/analytics-allowlist";
+import { connectAiStep, useConnectAiPlace, useConnectAiSteps } from "@/lib/connect-ai-events";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { plainSignIn } from "@/lib/onboarding";
@@ -37,8 +39,8 @@ export function pillWay(instance: InstanceInfo | undefined): "install" | "sign-i
 
 /** One AI connected from the first screen's pill: installed (when the app installs it), signed in on the provider's
  * page, and the code pasted or shown in the same place. A finished sign-in refreshes the AIs, where the welcome's test
- * message takes over. */
-export function useSignInPill(instance: InstanceInfo | undefined) {
+ * message takes over. `place` names the first-run flow for usage analytics. */
+export function useSignInPill(instance: InstanceInfo | undefined, place: ConnectAiPlace | null = null) {
   const { refreshInstances, refreshModels } = useStore();
   const [slot, setSlot] = useState<Slot>({ kind: "start" });
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +79,7 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
   const start = async () => {
     setSlot({ kind: "busy" });
     setError(null);
+    if (place) connectAiStep("sign_in_started", place, { driverKind: instance?.driverKind ?? "" });
     try {
       const { auth }: { auth: DeviceSignInStatus } = await api(`${base}/auth/start`, { method: "POST" });
       if (auth.phase === "succeeded") return void await done();
@@ -204,6 +207,7 @@ export function SignInPill({ pill, instance, name = instance?.displayName ?? "",
   onPick?: () => void;
 }) {
   const { slot, install, start, submit } = pill;
+  const step = useConnectAiSteps(useConnectAiPlace());
   const look = quiet ? QUIET_PILL : PILL;
   if (waiting || slot.kind === "busy" || slot.kind === "waiting") {
     const link = slot.kind === "waiting" ? slot.link : null;
@@ -224,6 +228,7 @@ export function SignInPill({ pill, instance, name = instance?.displayName ?? "",
   return (
     <button type="button" data-primary={quiet ? undefined : ""} data-sign-in={way} className={look}
       onClick={() => {
+        step("chosen", { driverKind: instance?.driverKind ?? "" });
         onPick?.();
         if (way === "install") void install();
         else if (way === "sign-in") void start();

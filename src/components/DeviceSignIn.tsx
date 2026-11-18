@@ -4,6 +4,7 @@ import { api, ApiError, useStore } from "@/state/store";
 import { intlLocale, t } from "@/lib/i18n";
 import { openExternalLink } from "@/lib/app-links";
 import { useCopyFeedback } from "@/lib/copy-text";
+import { useSignInStarted } from "@/lib/connect-ai-events";
 import { engineSignedIn } from "@/lib/product-events";
 import type { LocaleKey } from "@/locales";
 import { deviceSignInHasCode, deviceSignInLink, isDeviceSignInCode, type DeviceSignInProvider } from "../../shared/device-sign-in";
@@ -158,7 +159,8 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
   autoStart?: boolean;
   onDone?: (signedIn: boolean) => void;
 }) {
-  const { refreshInstances, refreshModels } = useStore();
+  const { state: { instances }, refreshInstances, refreshModels } = useStore();
+  const signInStarted = useSignInStarted(instances, instanceId);
   const [auth, setAuth] = useState<DeviceSignInStatus | null>(null);
   const [busy, setBusy] = useState(autoStart);
   const started = useRef(false);
@@ -211,6 +213,7 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
   const start = async () => {
     setBusy(true);
     setError(null);
+    signInStarted();
     try {
       const { auth: next }: { auth: DeviceSignInStatus } = await api(`${base}/start`, { method: "POST" });
       setAuth(next);

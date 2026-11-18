@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, LogIn } from "lucide-react";
 import { api, useStore } from "@/state/store";
 import { intlLocale, t } from "@/lib/i18n";
+import { useSignInStarted } from "@/lib/connect-ai-events";
 import { engineSignedIn } from "@/lib/product-events";
 import { deviceFlowUnavailable, type DeviceSignInStatus } from "./DeviceSignIn";
 
@@ -20,7 +21,8 @@ export function EngineBrowserSignIn({ instanceId, autoStart = false, onDone }: {
   autoStart?: boolean;
   onDone?: (signedIn: boolean) => void;
 }) {
-  const { refreshInstances, refreshModels } = useStore();
+  const { state: { instances }, refreshInstances, refreshModels } = useStore();
+  const signInStarted = useSignInStarted(instances, instanceId);
   const [auth, setAuth] = useState<DeviceSignInStatus | null>(null);
   const [busy, setBusy] = useState(autoStart);
   const started = useRef(false);
@@ -72,6 +74,7 @@ export function EngineBrowserSignIn({ instanceId, autoStart = false, onDone }: {
   const start = async () => {
     setBusy(true);
     setError(null);
+    signInStarted();
     try {
       const { auth: next }: { auth: DeviceSignInStatus } = await api(`${base}/start`, { method: "POST" });
       setAuth(next);

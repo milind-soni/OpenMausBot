@@ -3,6 +3,7 @@ import { ExternalLink, Loader2, LogIn } from "lucide-react";
 import { api, ApiError, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { openExternalLink } from "@/lib/app-links";
+import { useSignInStarted } from "@/lib/connect-ai-events";
 import { engineSignedIn } from "@/lib/product-events";
 import { type DeviceSignInStatus } from "./DeviceSignIn";
 
@@ -34,7 +35,8 @@ export function ClaudeSignIn({ instanceId, autoStart = false, onDone }: {
   autoStart?: boolean;
   onDone?: (signedIn: boolean) => void;
 }) {
-  const { refreshInstances, refreshModels } = useStore();
+  const { state: { instances }, refreshInstances, refreshModels } = useStore();
+  const signInStarted = useSignInStarted(instances, instanceId);
   const [auth, setAuth] = useState<DeviceSignInStatus | null>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<"start" | "finish" | "cancel" | null>(autoStart ? "start" : null);
@@ -64,6 +66,7 @@ export function ClaudeSignIn({ instanceId, autoStart = false, onDone }: {
   const start = async () => {
     setBusy("start");
     setError(null);
+    signInStarted();
     try {
       const { auth: next }: { auth: DeviceSignInStatus } = await api(`${base}/start`, { method: "POST" });
       setCode("");
