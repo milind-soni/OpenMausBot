@@ -158,7 +158,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         const page = messagePageBefore(threadId, before, limit ?? DEFAULT_PAGE);
         return page ? json(res, 200, page) : json(res, 404, { error: "no such message" });
       }
-      return json(res, 200, { ...messagePage(threadId, limit ?? DEFAULT_PAGE), activeLeafId: store.activeLeaf(threadId) });
+      return json(res, 200, messagePage(threadId, limit ?? DEFAULT_PAGE));
     }
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/image$/);

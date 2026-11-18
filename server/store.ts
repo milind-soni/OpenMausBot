@@ -40,7 +40,7 @@ import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sharedAsMaker, sharedUnlessRestricted, type NewBotSharingRule } from "./new-bot-sharing.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
-import { messagesBefore } from "./thread-history.ts";
+import { lastMessageId, messagesBefore } from "./thread-history.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 import { buildTask, threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
@@ -1087,7 +1087,7 @@ export class Store {
       const tail = mdb.readThreadTail(threadId, messagesFile(threadId), limit);
       const legacyRows = tail.hasMore !== undefined && tail.messages.some((m) => m.parentId === undefined);
       if (tail.hasMore === true && !legacyRows) {
-        return { messages: tail.messages, hasMore: true, activeLeafId: tail.activeLeafId ?? tail.messages.at(-1)?.id ?? null };
+        return { messages: tail.messages, hasMore: true, activeLeafId: tail.activeLeafId || (tail.messages.at(-1)?.id ?? lastMessageId(threadId)) };
       }
       state = this.threads.load(threadId, legacyRows ? mdb.readThread(threadId, messagesFile(threadId)) : tail);
     }

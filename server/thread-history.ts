@@ -18,7 +18,7 @@ function sliceBefore({ messages, activeLeafId }: ThreadState, before: string, li
 const LAST_MESSAGE = "SELECT id FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1";
 const EARLIER_MESSAGES = "SELECT json FROM messages WHERE thread_id = ? AND rowid < ? ORDER BY rowid DESC LIMIT ?";
 
-function lastMessageId(threadId: string): string | null {
+export function lastMessageId(threadId: string): string | null {
   return (prepared(LAST_MESSAGE).get(threadId) as { id: string } | undefined)?.id ?? null;
 }
 
