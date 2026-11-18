@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -548,8 +548,119 @@ describe("a restart in the middle of a snapshot", () => {
       writeFileSync(join(cwd, "b.txt"), "kept");
       await fresh.release(bot, cwd, `dispatch-${round}`);
     }
-    // The lock was never this process's to remove.
+    // The lock was never this process's to remove; the index it guards is no longer anyone's, and git's own check passes.
     expect(existsSync(join(shadow, ".git", "index.lock"))).toBe(true);
+    expect(existsSync(join(shadow, ".git", "index"))).toBe(false);
+    expect(() => userGit(shadow, "fsck", "--connectivity-only", "--no-dangling")).not.toThrow();
+  });
+
+  it("finds a shadow git never finished making, and makes it again", async () => {
+    const { bot, cwd } = workspace();
+    const other = workspace();
+    const shadow = shadowOf(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "one");
+    writeFileSync(join(other.cwd, "a.txt"), "one");
+    // What `git init` leaves when it is ended while writing its config.
+    mkdirSync(join(shadow, ".git", "refs"), { recursive: true });
+    writeFileSync(join(shadow, ".git", "config"), "[core]\n");
+    writeFileSync(join(shadow, ".git", "config.lock"), "[core]\n");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const first = await snapshot(bot, cwd, "first turn", undefined, { pin: "dispatch-H" });
+    expect(first).toMatch(/^[0-9a-f]{40}$/);
+    expect(userGit(shadow, "show", `${first}:a.txt`)).toBe("one");
+    expect(await snapshot(bot, other.cwd, "the same bot elsewhere")).toMatch(/^[0-9a-f]{40}$/);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    await release(bot, cwd, "dispatch-H");
+  });
+
+  it("checkpoints a folder's first turn whenever the read-ahead before it was stopped", async () => {
+    for (let delay = 0; delay < 24; delay += 2) {
+      const { bot, cwd } = workspace();
+      for (let n = 0; n < 30; n += 1) writeFileSync(join(cwd, `file${n}.txt`), `file ${n}`);
+      const stopped = new AbortController();
+      const reading = prime(bot, cwd, stopped.signal);
+      setTimeout(() => stopped.abort(), delay);
+      await reading;
+      const first = await snapshot(bot, cwd, "first turn");
+      expect(first, `stopped after ${delay} ms`).toMatch(/^[0-9a-f]{40}$/);
+      expect(userGit(shadowOf(bot, cwd), "ls-tree", "-r", "--name-only", first!).trim().split("\n")).toHaveLength(30);
+    }
+  }, 60_000);
+
+  it("clears the locks a git ended by force left on the shadow's refs and config, once they are too old to be held", async () => {
+    for (const lock of ["HEAD.lock", join("refs", "heads", "main.lock"), "packed-refs.lock", "config.lock"]) {
+      const { bot, cwd } = workspace();
+      const shadow = shadowOf(bot, cwd);
+      writeFileSync(join(cwd, "a.txt"), "one");
+      const leaked = await snapshot(bot, cwd, "turn X", undefined, { pin: "dispatch-X" });
+      await drain(bot, cwd);
+      userGit(shadow, "pack-refs", "--all", "--prune");
+      const path = join(shadow, ".git", lock);
+      writeFileSync(path, "");
+      const longAgo = new Date(Date.now() - 60_000);
+      utimesSync(path, longAgo, longAgo);
+      vi.resetModules();
+      const fresh = await import("./checkpoints.ts");
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      writeFileSync(join(cwd, "a.txt"), "next start");
+      const next = await fresh.snapshot(bot, cwd, "turn Y", undefined, { pin: "dispatch-Y" });
+      expect(next, lock).toMatch(/^[0-9a-f]{40}$/);
+      // The pin the last process left was swept, and this turn's pin is released.
+      expect(userGit(shadow, "for-each-ref", "--format=%(objectname)", "refs/omb-live/").trim(), lock).toBe(next);
+      expect(next).not.toBe(leaked);
+      await fresh.release(bot, cwd, "dispatch-Y");
+      expect(userGit(shadow, "for-each-ref", "refs/omb-live/").trim(), lock).toBe("");
+      expect(existsSync(path), lock).toBe(false);
+      expect(warn, lock).not.toHaveBeenCalled();
+      warn.mockRestore();
+    }
+  }, 60_000);
+
+  it("writes nothing while a collection its last server left running could still prune it", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "one");
+    await snapshot(bot, cwd, "turn X");
+    await drain(bot, cwd);
+    // A collection that prunes everything unreachable up to this second was running when the server died.
+    const pruning = Math.floor(Date.now() / 1000);
+    writeFileSync(join(shadow, ".git", "omb-collecting"), String(pruning));
+    vi.resetModules();
+    const fresh = await import("./checkpoints.ts");
+    writeFileSync(join(cwd, "a.txt"), "next start");
+    const next = await fresh.snapshot(bot, cwd, "turn Y");
+    const blob = userGit(shadow, "rev-parse", `${next}:a.txt`).trim();
+    const written = statSync(join(shadow, ".git", "objects", blob.slice(0, 2), blob.slice(2))).mtimeMs;
+    expect(Math.floor(written / 1000)).toBeGreaterThan(pruning);
+    expect(existsSync(join(shadow, ".git", "omb-collecting"))).toBe(false);
+    // That collection, ending now, takes none of it.
+    userGit(shadow, "gc", "--quiet", `--prune=${pruning}`);
+    expect(userGit(shadow, "show", `${next}:a.txt`)).toBe("next start");
+  });
+
+  it("reads the folder again when the index names an object the shadow has lost", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "one");
+    writeFileSync(join(cwd, "b.txt"), "kept");
+    const before = await snapshot(bot, cwd, "turn X");
+    await drain(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "staged, then pruned");
+    // Older than the index, so git takes the staged entry as current and does not write the file's object again.
+    const earlier = new Date(Date.now() - 60_000);
+    utimesSync(join(cwd, "a.txt"), earlier, earlier);
+    expect(await diffWorkingTree(bot, cwd, before!)).toEqual({ changed: ["a.txt"], added: [], deleted: [] });
+    const lost = userGit(cwd, "hash-object", join(cwd, "a.txt")).trim();
+    rmSync(join(shadow, ".git", "objects", lost.slice(0, 2), lost.slice(2)));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const next = await snapshot(bot, cwd, "turn Y");
+    expect(next).toMatch(/^[0-9a-f]{40}$/);
+    expect(userGit(shadow, "show", `${next}:a.txt`)).toBe("staged, then pruned");
+    expect(userGit(shadow, "show", `${next}:b.txt`)).toBe("kept");
+    expect(() => userGit(shadow, "fsck", "--connectivity-only", "--no-dangling", next!)).not.toThrow();
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 

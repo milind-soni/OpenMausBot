@@ -1,19 +1,19 @@
 // Real git does the work; execFile is wrapped only to record calls and inject a timeout or object counts, readdirSync only to record calls.
 import { createHash } from "node:crypto";
 import { execFile as realExecFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 // Shadow repos live under DATA_DIR, which server/testing/setup.ts points at a
 // disposable test home before any test module imports config.ts.
-import { CHECKPOINTS_DIR, diffWorkingTree, prime, release, snapshot } from "./checkpoints.ts";
+import { CHECKPOINTS_DIR, FAILURES_BEFORE_OFF, diffWorkingTree, prime, quiet, release, snapshot } from "./checkpoints.ts";
 import { checkpointGitSlots } from "./job-slots.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
-type Injected = { error: Error; stdout?: string; stderr?: string } | { stdout: string } | { until: Promise<unknown> };
+type Injected = { error: Error; stdout?: string; stderr?: string } | { stdout: string } | { until: Promise<Error | void> };
 const hooks = vi.hoisted(() => ({
   calls: [] as string[][],
   inject: null as null | ((args: string[]) => Injected | undefined),
@@ -38,7 +38,7 @@ vi.mock("node:child_process", async (importOriginal) => {
       hooks.calls.push(args);
       const injected = hooks.inject?.(args);
       if (injected && "until" in injected) {
-        // Held like a slow git: it runs once `until` settles, or ends as Node ends a child whose signal fired.
+        // Held like a slow git: it runs once `until` settles (or fails with what it settles to), or ends as Node ends a child whose signal fired.
         const signal = (options as { signal?: AbortSignal }).signal;
         let over = false;
         const end = (error: Error | null) => {
@@ -48,7 +48,7 @@ vi.mock("node:child_process", async (importOriginal) => {
           else actual.execFile(file, args, options, callback);
         };
         signal?.addEventListener("abort", () => end(Object.assign(new Error("The operation was aborted"), { name: "AbortError", code: "ABORT_ERR" })), { once: true });
-        void injected.until.then(() => end(null));
+        void injected.until.then((failure) => end(failure ?? null));
         return {};
       }
       if (injected) {
@@ -615,5 +615,195 @@ describe("git timeout", () => {
     const third = await snapshot(bot, cwd, "turn 3");
     expect(third).toMatch(/^[0-9a-f]{40}$/);
     expect(third).not.toBe(first);
+  });
+});
+
+function shadowOf(bot: string, cwd: string): string {
+  return join(CHECKPOINTS_DIR, bot, createHash("sha256").update(realpathSync(cwd)).digest("hex").slice(0, 16));
+}
+
+describe("a shadow's first use", () => {
+  it("is not cut short by the read-ahead that started it being stopped, and leaves nothing half-made", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    let open = () => {};
+    const held = new Promise<void>((done) => { open = done; });
+    let inits = 0;
+    hooks.inject = args => args[0] === "init" && (inits += 1) === 1 ? { until: held } : undefined;
+    const stopped = new AbortController();
+    const reading = prime(bot, cwd, stopped.signal);
+    await vi.waitFor(() => expect(inits).toBe(1));
+    // The bot is moved off the folder while git is still making the shadow.
+    stopped.abort();
+    const turn = snapshot(bot, cwd, "first turn", undefined, { pin: "dispatch-1" });
+    open();
+    expect(await reading).toBe(false);
+    expect(await turn).toMatch(/^[0-9a-f]{40}$/);
+    expect(inits).toBe(1);
+    const shadow = shadowOf(bot, cwd);
+    expect(readdirSync(join(shadow, ".git")).filter((name) => name.endsWith(".lock"))).toEqual([]);
+    expect(readdirSync(join(shadow, "..")).filter((name) => name.endsWith(".new"))).toEqual([]);
+    await release(bot, cwd, "dispatch-1");
+  });
+});
+
+describe("a snapshot that fails", () => {
+  it("costs that turn its checkpoint, never the bot's other folders, and turns its own folder off only after several in a row", async () => {
+    const { bot, cwd } = workspace();
+    const other = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    writeFileSync(join(other.cwd, "a.txt"), "one");
+    expect(await snapshot(bot, cwd, "first")).toMatch(/^[0-9a-f]{40}$/);
+    await drain(bot, cwd);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let broken = true;
+    hooks.inject = args => broken && args[0] === "commit-tree" ? { error: new Error("Command failed: git commit-tree"), stderr: "fatal: unable to write" } : undefined;
+    for (let turn = 1; turn < FAILURES_BEFORE_OFF; turn += 1) {
+      writeFileSync(join(cwd, "a.txt"), `edit ${turn}`);
+      expect(await snapshot(bot, cwd, `failing ${turn}`, undefined, { pin: `dispatch-${turn}` })).toBeNull();
+      expect(String(warn.mock.calls.at(-1)?.[0])).toContain("checkpoint not taken");
+    }
+    expect(shadowGit(bot, cwd, "for-each-ref", "--format=%(objectname)", "refs/omb-live/").trim()).toBe("");
+    // The same bot in another folder is untouched, and so is this folder once git works again.
+    broken = false;
+    expect(await snapshot(bot, other.cwd, "other folder")).toMatch(/^[0-9a-f]{40}$/);
+    expect(await snapshot(bot, cwd, "working again")).toMatch(/^[0-9a-f]{40}$/);
+    await drain(bot, cwd);
+    broken = true;
+    for (let turn = 1; turn <= FAILURES_BEFORE_OFF; turn += 1) {
+      writeFileSync(join(cwd, "a.txt"), `later edit ${turn}`);
+      expect(await snapshot(bot, cwd, `failing again ${turn}`)).toBeNull();
+    }
+    expect(String(warn.mock.calls.at(-1)?.[0])).toContain("disabled");
+    hooks.calls = [];
+    expect(await snapshot(bot, cwd, "off")).toBeNull();
+    expect(hooks.calls).toEqual([]);
+    broken = false;
+    writeFileSync(join(other.cwd, "a.txt"), "two");
+    expect(await snapshot(bot, other.cwd, "other folder still on")).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it("tries once more without a lock that a git stopped by force left on the shadow's refs", async () => {
+    for (const lock of ["HEAD.lock", join("refs", "heads", "main.lock"), "packed-refs.lock", "config.lock"]) {
+      const { bot, cwd } = workspace();
+      const shadow = shadowOf(bot, cwd);
+      writeFileSync(join(cwd, "a.txt"), "one");
+      await snapshot(bot, cwd, "first", undefined, { pin: "dispatch-1" });
+      await drain(bot, cwd);
+      shadowGit(bot, cwd, "pack-refs", "--all", "--prune");
+      writeFileSync(join(shadow, ".git", lock), "");
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await release(bot, cwd, "dispatch-1");
+      writeFileSync(join(cwd, "a.txt"), "two");
+      const second = await snapshot(bot, cwd, "second", undefined, { pin: "dispatch-2" });
+      expect(second, lock).toMatch(/^[0-9a-f]{40}$/);
+      expect(shadowGit(bot, cwd, "for-each-ref", "--format=%(objectname)", "refs/omb-live/").trim(), lock).toBe(second);
+      expect(warn, lock).not.toHaveBeenCalled();
+      await release(bot, cwd, "dispatch-2");
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("a folder being read ahead when its turn starts", () => {
+  it("gives the turn the read-ahead's answer when the folder proves too big, without a second attempt", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    let giveUp: (failure: Error) => void = () => {};
+    const slow = new Promise<Error>((done) => { giveUp = done; });
+    hooks.inject = args => args[0] === "add" ? { until: slow } : undefined;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const reading = prime(bot, cwd);
+    const turn = snapshot(bot, cwd, "the turn", undefined, { pin: "dispatch-1" });
+    await vi.waitFor(() => expect(subcommands()).toContain("add"));
+    giveUp(timeoutError("add"));
+    expect(await reading).toBe(false);
+    expect(await turn).toBeNull();
+    expect(subcommands().filter(command => command === "add")).toHaveLength(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("collections", () => {
+  it("prune only what was unreachable before they started, and say so on disk while they run", async () => {
+    const { bot, cwd } = workspace();
+    const marker = join(shadowOf(bot, cwd), ".git", "omb-collecting");
+    writeFileSync(join(cwd, "a.txt"), "one");
+    await snapshot(bot, cwd, "first");
+    let during: string | null = null;
+    hooks.inject = (args) => {
+      if (args[0] === "count-objects") return { stdout: countObjects({ count: 7000 }) };
+      if (args[0] === "gc") during = readFileSync(marker, "utf8");
+      return undefined;
+    };
+    writeFileSync(join(cwd, "a.txt"), "two");
+    const started = Math.floor(Date.now() / 1000);
+    const hash = await snapshot(bot, cwd, "collection due");
+    await diffWorkingTree(bot, cwd, hash!);
+    await drain(bot, cwd);
+    const prune = hooks.calls.find(args => args[0] === "gc")?.find(arg => arg.startsWith("--prune="))?.slice("--prune=".length);
+    expect(Number(prune)).toBeGreaterThanOrEqual(started);
+    expect(Number(prune)).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+    expect(during).toBe(prune);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it("are never ended by force on Windows: one that has started runs to its end, and the turn waits for it", async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    try {
+      const { bot, cwd } = workspace();
+      writeFileSync(join(cwd, "a.txt"), "one");
+      await snapshot(bot, cwd, "first");
+      let open = () => {};
+      const held = new Promise<void>((done) => { open = done; });
+      let collections = 0;
+      hooks.inject = (args) => {
+        if (args[0] === "count-objects") return collections === 0 ? { stdout: countObjects({ count: 7000 }) } : undefined;
+        if (args[0] === "gc") return (collections += 1) === 1 ? { until: held } : undefined;
+        return undefined;
+      };
+      writeFileSync(join(cwd, "a.txt"), "two");
+      const before = await snapshot(bot, cwd, "collection due", undefined, { pin: "dispatch-1" });
+      await diffWorkingTree(bot, cwd, before!);
+      await vi.waitFor(() => expect(collections).toBe(1));
+      writeFileSync(join(cwd, "a.txt"), "three");
+      hooks.calls = [];
+      let taken = false;
+      const next = snapshot(bot, cwd, "next turn").then((hash) => { taken = true; return hash; });
+      await new Promise((turn) => setImmediate(turn));
+      expect(taken).toBe(false);
+      expect(subcommands()).not.toContain("add");
+      open();
+      expect(await next).toMatch(/^[0-9a-f]{40}$/);
+      await release(bot, cwd, "dispatch-1");
+      await drain(bot, cwd);
+      expect(collections).toBe(1);
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+    }
+  });
+});
+
+describe("quiet", () => {
+  it("resolves once no git is running or waiting on the bot's shadows", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    await snapshot(bot, cwd, "first");
+    await drain(bot, cwd);
+    let open = () => {};
+    const held = new Promise<void>((done) => { open = done; });
+    hooks.inject = args => args[0] === "add" ? { until: held } : undefined;
+    const stopped = new AbortController();
+    const reading = prime(bot, cwd, stopped.signal);
+    await vi.waitFor(() => expect(subcommands()).toContain("add"));
+    let isQuiet = false;
+    const waiting = quiet(bot).then(() => { isQuiet = true; });
+    await new Promise((turn) => setImmediate(turn));
+    expect(isQuiet).toBe(false);
+    stopped.abort();
+    await waiting;
+    expect(await reading).toBe(false);
+    open();
   });
 });

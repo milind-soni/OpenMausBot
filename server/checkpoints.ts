@@ -9,10 +9,11 @@
 // snapshot-before-every-turn cadence follows Cline.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, parse, resolve } from "node:path";
+import { dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { DATA_DIR } from "./config.ts";
 import { execFileInGroup } from "./group-exec.ts";
@@ -115,13 +116,6 @@ export const GC_EVERY_COMMITS = 25;
 const GC_LOOSE_OBJECTS = 6_700;
 const GC_NEW_DATA_KIB = 262_144;
 
-const disabledBots = new Set<string>();
-
-function disable(botId: string, message: string): void {
-  disabledBots.add(botId);
-  console.warn(`workspace checkpoints disabled for bot ${botId} this session: ${message}`);
-}
-
 class GitTimeoutError extends Error {}
 
 const disabledFolders = new Set<string>();
@@ -130,6 +124,20 @@ function disableFolder(shadow: string, botId: string, worktree: string, message:
   if (disabledFolders.has(shadow)) return;
   disabledFolders.add(shadow);
   console.warn(`workspace checkpoints disabled for bot ${botId} in ${worktree} this session: ${message}`);
+}
+
+/** Snapshots of a folder that failed one after another. One failure costs that turn its checkpoint and nothing else; this
+ * many in a row turn the folder off for the session, and never the bot's other folders. */
+export const FAILURES_BEFORE_OFF = 3;
+const failedInARow = new Map<string, number>();
+
+function snapshotFailed(shadow: string, botId: string, worktree: string, message: string): void {
+  const failures = (failedInARow.get(shadow) ?? 0) + 1;
+  failedInARow.set(shadow, failures);
+  // The next use looks again for a lock a stopped git left.
+  locksCleared.delete(shadow);
+  if (failures >= FAILURES_BEFORE_OFF) disableFolder(shadow, botId, worktree, message);
+  else console.warn(`workspace checkpoint not taken for bot ${botId} in ${worktree}: ${message}`);
 }
 
 function folderShadow(botId: string, cwd: string): { worktree: string; shadow: string } | null {
@@ -279,13 +287,91 @@ const heldPins = new Map<string, Set<string>>();
 /** The shadows this process has taken over from the one before it: once each, or it would sweep its own turns' pins. */
 const takenOver = new Set<string>();
 
+/** The shadows whose leftover locks were looked for, since the start or since their last failure. */
+const locksCleared = new Set<string>();
+
+/** Git holds each of these for one ref or config write, a few milliseconds: one this old has no git behind it. The index
+ * lock is not among them, because a git reading a big folder holds that one for as long as it reads. */
+const STALE_LOCK_MS = 5_000;
+const SHORT_LOCKS = ["HEAD.lock", "packed-refs.lock", "config.lock", "gc.pid.lock", join("refs", "heads", "main.lock")];
+
+/** Windows ends a stopped git with no chance to clean up, and a crash does the same anywhere: the lock it held would fail
+ * every later snapshot. A lock younger than `staleMs` is waited for until it goes or reaches that age. Zero only where
+ * every git this process started on the shadow has ended: its own gits run one at a time there. */
+async function clearStaleLocks(shadow: string, staleMs = STALE_LOCK_MS): Promise<void> {
+  if (staleMs > 0 && locksCleared.has(shadow)) return;
+  const dir = join(shadow, ".git");
+  const pins = await readdir(join(dir, LIVE_REFS)).then((names) => names.filter((name) => name.endsWith(".lock")).map((name) => join(LIVE_REFS, name)), () => []);
+  for (const name of [...SHORT_LOCKS, ...pins]) {
+    const path = join(dir, name);
+    for (let stat = statSync(path, { throwIfNoEntry: false }); stat; stat = statSync(path, { throwIfNoEntry: false })) {
+      const age = Date.now() - stat.mtimeMs;
+      if (age < 0 || age >= staleMs) {
+        rmSync(path, { force: true });
+        break;
+      }
+      await sleep(Math.min(250, staleMs - age));
+    }
+  }
+  locksCleared.add(shadow);
+}
+
+/** While a collection runs, the second it prunes up to. A collection outlives a server that dies, and what the next
+ * server writes must be newer than that second, or the collection would prune it as it is written. */
+const COLLECTING = "omb-collecting";
+
+async function outlastCollection(shadow: string): Promise<void> {
+  const marker = join(shadow, ".git", COLLECTING);
+  let until: number;
+  try {
+    until = Number(readFileSync(marker, "utf8"));
+  } catch {
+    return;
+  }
+  const now = () => Math.floor(Date.now() / 1000);
+  // A second from a clock since set back is not waited for.
+  if (Number.isSafeInteger(until) && until - now() <= 2) while (now() <= until) await sleep(100);
+  rmSync(marker, { force: true });
+}
+
+/** A shadow is made beside its place and moved there whole, so nothing that stops this process part-way leaves a shadow
+ * git cannot open. Takes no stop signal, for the same reason. */
+async function makeShadow(shadow: string, cwd: string): Promise<void> {
+  const made = existsSync(join(shadow, ".git", "packed-refs")) || existsSync(join(shadow, ".git", "refs", "heads", "main"));
+  if (made) return;
+  const draft = `${shadow}.${process.pid}.new`;
+  for (const stale of [draft, shadow]) rmSync(stale, { recursive: true, force: true });
+  mkdirSync(draft, { recursive: true, mode: 0o700 });
+  writeFileSync(join(draft, "gitconfig"), GITCONFIG, { mode: 0o600 });
+  writeFileSync(join(draft, "gitconfig_empty"), "", { mode: 0o600 });
+  const env = gitEnv(draft, cwd);
+  // --template= keeps the user's init.templateDir hooks/config out
+  await runGit(["init", "--initial-branch=main", "--template="], cwd, env);
+  await runGit(["commit", "--no-verify", "--allow-empty", "-m", "checkpoint base"], cwd, env);
+  renameSync(draft, shadow);
+}
+
 // Pins outlive a crashed process, so the first use of a shadow in this process drops every leftover pin.
 const droppedPins = new Set<string>();
-async function sweepLiveRefs(cwd: string, env: NodeJS.ProcessEnv, shadow: string, signal?: AbortSignal): Promise<void> {
-  if (takenOver.has(shadow)) return;
-  const stale = (await runGit(["for-each-ref", "--format=%(refname)", LIVE_REFS], cwd, env, signal)).split("\n").filter(Boolean);
-  for (const ref of stale) await runGit(["update-ref", "-d", ref], cwd, env, signal);
+async function sweepLiveRefs(cwd: string, env: NodeJS.ProcessEnv, shadow: string): Promise<void> {
+  const stale = (await runGit(["for-each-ref", "--format=%(refname)", LIVE_REFS], cwd, env)).split("\n").filter(Boolean);
+  for (const ref of stale) await runGit(["update-ref", "-d", ref], cwd, env);
   if (stale.length > 0) droppedPins.add(shadow);
+}
+
+/** A shadow's first use in this process, whole or not at all: nothing here is stopped part-way by a turn's or a
+ * read-ahead's signal. */
+async function takeOver(shadow: string, cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
+  if (takenOver.has(shadow)) return;
+  mkdirSync(dirname(shadow), { recursive: true, mode: 0o700 });
+  await makeShadow(shadow, cwd);
+  writeFileSync(join(shadow, "gitconfig"), GITCONFIG, { mode: 0o600 });
+  writeFileSync(join(shadow, "gitconfig_empty"), "", { mode: 0o600 });
+  await outlastCollection(shadow);
+  await clearStaleLocks(shadow);
+  leaveLockedIndex(shadow, env);
+  dropAbandonedIndex(shadow);
+  await sweepLiveRefs(cwd, env, shadow);
   takenOver.add(shadow);
 }
 
@@ -295,7 +381,7 @@ async function sweepLiveRefs(cwd: string, env: NodeJS.ProcessEnv, shadow: string
 function leaveLockedIndex(shadow: string, env: NodeJS.ProcessEnv): void {
   const dir = join(shadow, ".git");
   const current = indexName(shadow);
-  if (takenOver.has(shadow) || !existsSync(join(dir, `${current}.lock`))) return;
+  if (!existsSync(join(dir, `${current}.lock`))) return;
   const next = `index-${Date.now().toString(36)}`;
   let before = "";
   try {
@@ -310,6 +396,16 @@ function leaveLockedIndex(shadow: string, env: NodeJS.ProcessEnv): void {
   writeFileSync(join(dir, INDEX_POINTER), `${next}\n${current}\n`, { mode: 0o600 });
   indexNames.set(shadow, next);
   env.GIT_INDEX_FILE = join(dir, next);
+}
+
+/** The index a shadow moved away from names objects nothing keeps any more, which git's own checks of the shadow would
+ * report. No git of this process reads it; a git still running from before may put it back once, for the next start. */
+function dropAbandonedIndex(shadow: string): void {
+  try {
+    const [current, before = ""] = readFileSync(join(shadow, ".git", INDEX_POINTER), "utf8").split("\n");
+    if (INDEX_NAME.test(before) && before !== current) rmSync(join(shadow, ".git", before), { force: true });
+  } catch {
+  }
 }
 
 /** After a git of this process was stopped in a way that let it clean nothing up (Windows ends the whole tree at once).
@@ -386,10 +482,13 @@ const excludedCacheDirs = new Map<string, readonly string[]>();
  * when it could not be listed. */
 type Prepared = { head: Head; staged: string | null; ignored: string | null };
 
-/** The first use in a process writes the shadow's config and exclude files, so a new exclude list reaches existing shadows.
+/** The first use in a process writes the shadow's exclude file, so a new exclude list reaches existing shadows.
  * Later uses find the exclude file naming the cache directories of the pass before, so the listings that read it run
  * beside the scan that checks it, and run again only when the scan disagrees. */
 async function prepare(cwd: string, env: NodeJS.ProcessEnv, shadow: string, signal?: AbortSignal): Promise<Prepared> {
+  signal?.throwIfAborted();
+  await takeOver(shadow, cwd, env);
+  await clearStaleLocks(shadow);
   signal?.throwIfAborted();
   env.GIT_INDEX_FILE = join(shadow, ".git", indexName(shadow));
   const list = (args: string[]) => runGit(args, cwd, env, signal).catch((e: unknown) => {
@@ -407,19 +506,10 @@ async function prepare(cwd: string, env: NodeJS.ProcessEnv, shadow: string, sign
     excludedCacheDirs.set(shadow, await scanCacheDirs(cwd, env, shadow, signal));
     return { head, staged, ignored: await list(IGNORED_LISTING) };
   }
-  mkdirSync(shadow, { recursive: true, mode: 0o700 });
-  writeFileSync(join(shadow, "gitconfig"), GITCONFIG, { mode: 0o600 });
-  writeFileSync(join(shadow, "gitconfig_empty"), "", { mode: 0o600 });
-  if (!existsSync(join(shadow, ".git", "HEAD"))) {
-    // --template= keeps the user's init.templateDir hooks/config out
-    await runGit(["init", "--initial-branch=main", "--template="], cwd, env, signal);
-  }
-  leaveLockedIndex(shadow, env);
   mkdirSync(join(shadow, ".git", "info"), { recursive: true });
   const headRead = readHead(cwd, env, signal).catch(() => null);
   const dirs = await scanCacheDirs(cwd, env, shadow, signal);
   const head = (await headRead) ?? (await baseHead(cwd, env, signal));
-  await sweepLiveRefs(cwd, env, shadow, signal);
   const [staged, ignored] = await Promise.all([list(STAGED_LISTING), list(IGNORED_LISTING)]);
   excludedCacheDirs.set(shadow, dirs);
   return { head, staged, ignored };
@@ -518,6 +608,19 @@ function indexChecksum(env: NodeJS.ProcessEnv): string | null {
   }
 }
 
+/** An index can name an object the shadow has lost (a collection of an earlier version, still running after its server,
+ * prunes what the next server stages). Read from nothing, the folder's files are all written again. */
+async function writeTree(cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<string> {
+  try {
+    return (await runGit(["write-tree"], cwd, env, signal)).trim();
+  } catch (e) {
+    if (e instanceof GitTimeoutError || signal?.aborted) throw e;
+    await runGit(["read-tree", "--empty"], cwd, env, signal);
+    await runGit(["add", "-A", "--ignore-errors", "."], cwd, env, signal);
+    return (await runGit(["write-tree"], cwd, env, signal)).trim();
+  }
+}
+
 /** The index as the last finished snapshot left it, and that snapshot's tree. */
 const snapshotIndex = new Map<string, { checksum: string; tree: string }>();
 
@@ -545,7 +648,7 @@ async function commitAll(cwd: string, env: NodeJS.ProcessEnv, shadow: string, pr
     if (pinFailure) throw pinFailure;
     const staged = indexChecksum(env);
     const last = snapshotIndex.get(shadow);
-    const tree = staged !== null && last?.checksum === staged ? last.tree : (await runGit(["write-tree"], cwd, env, signal)).trim();
+    const tree = staged !== null && last?.checksum === staged ? last.tree : await writeTree(cwd, env, signal);
     const changed = tree !== head.tree;
     let hash = head.hash;
     if (changed || head.base === null) {
@@ -624,18 +727,28 @@ async function collectionDue(shadow: string, result: CommitResult, cwd: string, 
   return due;
 }
 
+/** Prunes what was unreachable when it started and nothing newer: a collection this process no longer waits for (it died,
+ * or was restarted) can then never prune what a later git is writing. Windows ends a stopped git by force, with its locks
+ * left in place, so there a collection that has started runs to its end and the turn waits for it. */
 async function collectObsolete(shadow: string, cwd: string, env: NodeJS.ProcessEnv, stop: AbortController): Promise<void> {
+  const signal = process.platform === "win32" ? undefined : stop.signal;
+  const marker = join(shadow, ".git", COLLECTING);
+  const before = Math.floor(Date.now() / 1000);
   try {
-    await runGit(["reflog", "expire", "--expire=now", "--all"], cwd, env, stop.signal);
-    await runGit(["gc", "--prune=now", "--quiet"], cwd, env, stop.signal);
+    writeFileSync(marker, String(before), { mode: 0o600 });
+    await runGit(["reflog", "expire", "--expire=now", "--all"], cwd, env, signal);
+    stop.signal.throwIfAborted();
+    await runGit(["gc", `--prune=${before}`, "--quiet"], cwd, env, signal);
   } catch {
     if (!stop.signal.aborted) console.warn("checkpoint cleanup deferred; the latest snapshot is preserved");
     else if (!pendingCollections.has(shadow)) pendingCollections.set(shadow, (again) => collectObsolete(shadow, cwd, env, again));
+  } finally {
+    rmSync(marker, { force: true });
   }
 }
 
 function usableFolder(botId: string, cwd: string): { worktree: string; shadow: string } | null {
-  if (disabledBots.has(botId) || refusalReason(cwd) !== null) return null;
+  if (refusalReason(cwd) !== null) return null;
   const folder = folderShadow(botId, cwd);
   return folder === null || disabledFolders.has(folder.shadow) ? null : folder;
 }
@@ -651,7 +764,15 @@ export async function snapshot(botId: string, cwd: string, label: string, signal
     yieldCollection(shadow);
     const env = gitEnv(shadow, worktree);
     const hash = await serialize(shadow, async () => {
-      const result = await commitAll(worktree, env, shadow, await prepare(worktree, env, shadow, signal), label, opts?.pin, signal);
+      // A read-ahead this snapshot waited behind may have found the folder too big: the turn takes that answer.
+      if (disabledFolders.has(shadow)) return null;
+      const capture = async () => commitAll(worktree, env, shadow, await prepare(worktree, env, shadow, signal), label, opts?.pin, signal);
+      const result = await capture().catch(async (e: unknown) => {
+        if (e instanceof GitTimeoutError || signal?.aborted) throw e;
+        // Once more, without whatever lock a git stopped by force left behind.
+        await clearStaleLocks(shadow, 0);
+        return capture();
+      });
       if (!result) return null;
       // Counted behind this snapshot, off the turn's path, and held for the turn's settled diff: GC never eats into the digest's capture window.
       void serialize(shadow, async () => {
@@ -659,13 +780,14 @@ export async function snapshot(botId: string, cwd: string, label: string, signal
       }).catch(() => {});
       return result.hash;
     });
+    if (hash !== null) failedInARow.delete(shadow);
     if (hash !== null && opts?.pin !== undefined) heldPins.set(shadow, (heldPins.get(shadow) ?? new Set()).add(opts.pin));
     return hash;
   } catch (e) {
     if (signal?.aborted) return null;
     const message = e instanceof Error ? e.message : String(e);
     if (e instanceof GitTimeoutError) disableFolder(shadow, botId, worktree, message);
-    else disable(botId, message);
+    else snapshotFailed(shadow, botId, worktree, message);
     return null;
   }
 }
@@ -692,6 +814,19 @@ export async function prime(botId: string, cwd: string, signal?: AbortSignal): P
   });
 }
 
+/** Resolves once no git of this process is running or waiting on any of the bot's shadows: its folder can then be removed.
+ * A collection queued or running there is stopped first. */
+export async function quiet(botId: string): Promise<void> {
+  const mine = (shadow: string) => shadow.startsWith(join(CHECKPOINTS_DIR, botId) + sep);
+  for (const [shadow, stop] of collecting) if (mine(shadow)) stop.abort();
+  await Promise.all([...chains].filter(([shadow]) => mine(shadow)).map(([, tail]) => tail));
+}
+
+/** At shutdown: no collection is left running behind the server. */
+export function stopCollections(): void {
+  for (const stop of collecting.values()) stop.abort();
+}
+
 /** Queued behind the shadow's pending operations, so a diff already queued still finds its commit. */
 export async function release(botId: string, cwd: string, pin: string): Promise<void> {
   if (!(await gitAvailable())) return;
@@ -701,7 +836,13 @@ export async function release(botId: string, cwd: string, pin: string): Promise<
     if (!existsSync(join(shadow, ".git", "HEAD"))) return;
     const env = gitEnv(shadow, worktree);
     const held = heldPins.get(shadow)?.delete(pin) ?? false;
-    await serialize(shadow, () => runGit(["update-ref", "-d", liveRef(pin)], worktree, env));
+    await serialize(shadow, async () => {
+      const unpin = () => runGit(["update-ref", "-d", liveRef(pin)], worktree, env);
+      await unpin().catch(async () => {
+        await clearStaleLocks(shadow, 0);
+        await unpin();
+      });
+    });
     // A turn that ended without a settled diff: the collection its snapshot held runs now.
     if (held) releaseCollection(shadow);
   } catch (e) {
