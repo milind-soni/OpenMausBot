@@ -204,6 +204,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
 
       const message = store.messagesFor(threadId).find((candidate) => candidate.id === m![2]);
       if (!message) return json(res, 404, { error: "no such message" });
+      if (!visible.thread(threadId)) return json(res, 404, { error: "no such conversation" });
       // A non-text card (a hand-off result is an activity message) shares only what it explicitly attaches.
       const attachmentsOnly = message.kind !== "text";
       if ((attachmentsOnly && !message.attachments?.length) || (!message.text && !message.attachments?.length)) {
