@@ -975,6 +975,16 @@ describe("ChatMarkdown attachments", () => {
         }
       });
 
+      it("keeps a # or an escape in a file:// link's already-decoded path", () => {
+        const save = outsideSave();
+        try {
+          const html = renderToStaticMarkup(createElement(ChatMarkdown, { text: "[report](file:///tmp/Reports%23Final/100%2520x/)", message: { threadId: "thread-1", messageId: "message-1" } }));
+          expect(html).toContain(">/tmp/Reports#Final/100%20x/</code>");
+        } finally {
+          save.mockRestore();
+        }
+      });
+
       it("asks the desktop app to show the real folder", async () => {
         const save = outsideSave();
         const ogb = (window as { ogb?: unknown }).ogb;
