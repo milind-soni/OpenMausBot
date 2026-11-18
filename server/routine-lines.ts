@@ -50,8 +50,8 @@ export const ROUTINE_LINE = {
   "routines.server.restoredMany": "Not run again: {count} scheduled runs from before this schedule was restored from a backup",
   "routines.server.duplicate": "Not started: this scheduled run had already started once",
   "routines.server.wakeRetry": "The cloud desktop did not wake, so this run has not started yet. It tries again at {resets}",
-  "routines.server.noWakeRetried": "The cloud desktop did not wake in {tries} tries, so this run did not start. The next scheduled run tries again.",
-  "routines.server.noWakeRetriedLast": "The cloud desktop did not wake in {tries} tries, so this run did not start.",
+  "routines.server.noWakeRetried": "The cloud desktop did not wake, even after more tries, so this run did not start. The next scheduled run tries again.",
+  "routines.server.noWakeRetriedLast": "The cloud desktop did not wake, even after more tries, so this run did not start.",
 } as const;
 
 export type RoutineLineKey = keyof typeof ROUTINE_LINE;

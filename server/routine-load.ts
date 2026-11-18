@@ -139,8 +139,9 @@ export function loadRun(run: RoutineRun): RoutineRun {
     workedMs: instant(run.workedMs),
     skipped: loadSkips(run.skipped),
     wakeRetries: loadWakeRetries(run.wakeRetries),
+    wakeRetryUntil: instant(run.wakeRetryUntil),
   };
-  return withoutUndefined(loaded, ["timeoutMinutes", "access", "deliver", "checkKey", "busyMs", "workedMs", "skipped", "wakeRetries"]);
+  return withoutUndefined(loaded, ["timeoutMinutes", "access", "deliver", "checkKey", "busyMs", "workedMs", "skipped", "wakeRetries", "wakeRetryUntil"]);
 }
 
 const REQUEST_ACTIONS = new Set<RoutineRequestOperation["action"]>(["create", "update", "pause", "resume", "run_now", "delete"]);

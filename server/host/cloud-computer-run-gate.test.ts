@@ -157,7 +157,15 @@ describe("an unattended run and its cloud computer", () => {
     h.used();
     await expect(h.gate.prepare(RUN)).resolves.toBeNull();
     await expect(h.gate.prepare({ ...RUN, wakeRetries: 1 })).resolves.toBe(RUN_COMPUTER_LINES.noWake);
+    // A run that started since its wake retries is an ordinary run again.
+    await expect(h.gate.prepare({ ...RUN, wakeRetries: 1, startedAt: 1, retried: "restarted" })).resolves.toBeNull();
     expect(h.seen.wakes).toBe(0);
+  });
+
+  it("leaves a lookup the provider refused to the turn, even on a retry", async () => {
+    const h = harness({ findThrows: Object.assign(new Error("boat.dev rejected the Boat API key"), { status: 503 }) });
+    h.used();
+    await expect(h.gate.prepare({ ...RUN, wakeRetries: 1 })).resolves.toBeNull();
   });
 
   it("tells a provider that refused the wake from one that did not answer: only the second is worth another try", async () => {

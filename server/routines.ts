@@ -32,7 +32,7 @@ import { busyWait, markStop, RunClock, runOverLimit, SlowStops, withBoundedStops
 import { noStartAlert, noStartSpacing, turnBackOn } from "./routine-no-start.ts"; import { afterRunSpacing, failureSpacingAlert, runSpacing } from "./routine-failure-spacing.ts"; import { blockingRun, recordSkip, type RoutineSkips } from "./routine-skips.ts";
 import { restartRetryAt, startupDecision } from "./routine-restarts.ts"; import { routineHealthOf, type RoutineHealth } from "./routine-health.ts"; import { Occurrences, ROUTINE_TURN_GONE } from "./routine-occurrences.ts"; import type { Occurrence } from "./routine-ledger.ts";
 import { CATCH_UP_MS, planOccurrence, settleRestored, staggered } from "./routine-catch-up.ts"; import { evictRuns } from "./routine-run-history.ts"; import { RunWatch } from "./routine-run-watch.ts"; import { scheduleSection, type ScheduleSection } from "./routine-schedule-report.ts";
-import { EVENT_RETRY_WINDOW_MS, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts"; import { wakeRetry, type WakeRetryMark } from "./routine-wake-retry.ts";
+import { EVENT_RETRY_WINDOW_MS, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts"; import { waitsToWakeAgain, wakeGiveUp, wakeRetry, wakeRetryEnded, type WakeRetryMark } from "./routine-wake-retry.ts";
 import { attachmentPathsOf, cloneAttachments } from "./routine-attachments.ts";
 import { loadInstalledPackage, matchingRequestReceipt, rememberRequest } from "./routine-load.ts";
 import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
@@ -1026,7 +1026,7 @@ export class RoutineManager {
       for (const threadId of this.slowStops.sweep()) interruptRunTurns(this.runs.filter((run) => run.threadId === threadId).slice(-1), this.options);
       this.ledger.beat(); for (const run of this.watch.lost(this.runs, now)) this.settleFailure(run, ROUTINE_TURN_GONE, {});
       for (const run of this.runs) {
-        const over = runOverLimit(run, this.clock, now);
+        const over = runOverLimit(run, this.clock, now), ended = wakeRetryEnded(run, now, this.routines.find((routine) => routine.id === run.routineId)); if (ended !== null) { this.failRun(run, ended); continue; }
         if (over) await this.stopRun(Object.assign(run, over.codes), over.text, "limit-reached");
       }
       const isDue = (routine: Routine) => !this.closing && routine.enabled && this.targetState(routine) !== "missing" && (!routine.checks
@@ -1106,7 +1106,7 @@ export class RoutineManager {
           const mayDispatch = intervalAllowsOccurrence(definition.schedule, now) &&
             (!requiresCurrentDayOccurrence || (latest !== null && isSameLocalDay(latest, now)));
           if (!mayDispatch) {
-            if (nextOccurrence(definition.schedule, now) === null) {
+            if (waitsToWakeAgain(run)) this.failRun(run, wakeGiveUp(run, definition)); else if (nextOccurrence(definition.schedule, now) === null) {
               this.failRun(run, "The routine ended before this scheduled run could start", "missed");
             }
             continue;

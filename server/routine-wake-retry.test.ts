@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RUN_COMPUTER_LINES } from "../shared/cloud-computer-recovery.ts";
-import { ROUTINE_SUPERSEDED } from "./routine-execution.ts";
-import { WAKE_RETRY_AFTER_MS, waitsToWakeAgain, wakeRetry } from "./routine-wake-retry.ts";
+import { CATCH_UP_MS } from "./routine-catch-up.ts";
+import { WAKE_RETRY_AFTER_MS, WAKE_RETRY_LAST_MS, waitsToWakeAgain, wakeRetry } from "./routine-wake-retry.ts";
+import type { RoutineScheduleInput } from "./routine-schedules.ts";
 import { RoutineManager, type RoutineManagerOptions } from "./routines.ts";
 
 const MINUTE = 60_000;
@@ -18,7 +19,7 @@ afterEach(() => {
 });
 
 /** A cloud bot's routine whose computer answers each wake from `wakes`, in order: a reason it did not start, or null. */
-function harness(wakes: Array<string | null | "hang">, everyMinutes = 60) {
+function harness(wakes: Array<string | null | "hang">, everyMinutes = 60, schedule?: RoutineScheduleInput) {
   const dir = mkdtempSync(join(tmpdir(), "omb-wake-retry-"));
   dirs.push(dir);
   const world = { at: START, started: [] as string[], prepared: [] as string[] };
@@ -53,7 +54,7 @@ function harness(wakes: Array<string | null | "hang">, everyMinutes = 60) {
     runs: () => h.manager.listRuns(),
   };
   managers.push(h.manager);
-  const routine = h.manager.create({ name: "Out of hours", prompt: "Check the inbox", botId: "cloud-bot", schedule: { type: "interval", everyMinutes, anchorAt: START } });
+  const routine = h.manager.create({ name: "Out of hours", prompt: "Check the inbox", botId: "cloud-bot", schedule: schedule ?? { type: "interval", everyMinutes, anchorAt: START } });
   return { ...h, routine, due: routine.nextRunAt! };
 }
 
@@ -110,7 +111,7 @@ describe("a scheduled run whose cloud computer did not wake", () => {
     expect(h.world.prepared).toHaveLength(4);
     expect(h.world.started).toEqual([]);
     expect(h.runs()).toMatchObject([{ status: "failed", errorCode: "routines.server.noWakeRetried",
-      error: "The cloud desktop did not wake in 4 tries, so this run did not start. The next scheduled run tries again." }]);
+      error: "The cloud desktop did not wake, even after more tries, so this run did not start. The next scheduled run tries again." }]);
     expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: true });
   });
 
@@ -120,7 +121,7 @@ describe("a scheduled run whose cloud computer did not wake", () => {
     await h.passAt(h.due);
     expect(h.runs()).toMatchObject([{ status: "queued", retryAt: h.due + WAKE_RETRY_AFTER_MS[0]! }]);
     await h.passAt(h.due + WAKE_RETRY_AFTER_MS[0]!);
-    expect(h.runs()).toMatchObject([{ status: "failed", error: "The cloud desktop did not wake in 2 tries, so this run did not start. The next scheduled run tries again." }]);
+    expect(h.runs()).toMatchObject([{ status: "failed", error: "The cloud desktop did not wake, even after more tries, so this run did not start. The next scheduled run tries again." }]);
     await h.passAt(h.due + 15 * MINUTE);
     expect(h.world.started).toHaveLength(1);
     expect(h.runs().find((run) => run.status === "running")).toMatchObject({ scheduledFor: h.due + 15 * MINUTE });
@@ -133,11 +134,58 @@ describe("a scheduled run whose cloud computer did not wake", () => {
     await h.passAt(first!.retryAt!);
     expect(h.runs()).toMatchObject([{ id: first!.id, status: "queued", attention: RUN_COMPUTER_LINES.waking }]);
     await h.passAt(h.due + 15 * MINUTE);
-    expect(h.runs().find((run) => run.id === first!.id)).toMatchObject({ status: "cancelled", error: ROUTINE_SUPERSEDED });
+    expect(h.runs().find((run) => run.id === first!.id)).toMatchObject({ status: "failed", error: "The cloud desktop did not wake, even after more tries, so this run did not start. The next scheduled run tries again." });
     const next = h.runs().find((run) => run.id !== first!.id)!;
     expect(next).toMatchObject({ scheduledFor: h.due + 15 * MINUTE, status: "running" });
     expect(next).not.toHaveProperty("skipped");
     expect(h.world.started).toHaveLength(1);
+  });
+
+  it("never queues a try outside an interval schedule's hours, and gives one up that comes due outside them", async () => {
+    const window = { type: "interval", everyMinutes: 15, anchorAt: START, window: { start: "08:00", end: "09:00" } } as const;
+    // Three tries from 08:45: 08:50 and 08:57 are inside the window, 09:05 would not be.
+    const h = harness([RUN_COMPUTER_LINES.noWake, RUN_COMPUTER_LINES.noWake, RUN_COMPUTER_LINES.noWake, null], 15, window);
+    const last = START + 45 * MINUTE;
+    await h.passAt(last);
+    const [run] = h.runs().filter((candidate) => candidate.scheduledFor === last);
+    expect(run).toMatchObject({ status: "queued", retryAt: START + 50 * MINUTE });
+    await h.passAt(START + 50 * MINUTE);
+    expect(h.runs().find((candidate) => candidate.id === run!.id)).toMatchObject({ status: "queued", retryAt: START + 57 * MINUTE });
+    await h.passAt(START + 57 * MINUTE);
+    expect(h.runs().find((candidate) => candidate.id === run!.id)).toMatchObject({ status: "failed", error: "The cloud desktop did not wake, even after more tries, so this run did not start. The next scheduled run tries again." });
+    expect(h.manager.hasActiveRuns()).toBe(false);
+
+    // A try queued inside the window whose pass only comes after it ends is given up, not left waiting for tomorrow.
+    const late = harness([RUN_COMPUTER_LINES.noWake, RUN_COMPUTER_LINES.noWake, null], 15, window);
+    await late.passAt(last);
+    await late.passAt(START + 50 * MINUTE);
+    expect(late.runs().find((candidate) => candidate.scheduledFor === last)).toMatchObject({ status: "queued", retryAt: START + 57 * MINUTE });
+    await late.passAt(START + 62 * MINUTE);
+    expect(late.runs().find((candidate) => candidate.scheduledFor === last)).toMatchObject({ status: "failed", error: "The cloud desktop did not wake, even after more tries, so this run did not start. The next scheduled run tries again." });
+    expect(late.manager.hasActiveRuns()).toBe(false);
+    expect(late.world.started).toEqual([]);
+  });
+
+  it("tries a once-only routine's run again, though the routine turned itself off when the run was made", async () => {
+    const at = START + 30 * MINUTE;
+    const h = harness([RUN_COMPUTER_LINES.noWake, null], 60, { type: "once", at });
+    await h.passAt(at);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ enabled: false, nextRunAt: null });
+    expect(h.runs()).toMatchObject([{ status: "queued", retryAt: at + WAKE_RETRY_AFTER_MS[0]!, wakeRetries: 1 }]);
+    await h.passAt(at + WAKE_RETRY_AFTER_MS[0]!);
+    expect(h.world.started).toHaveLength(1);
+    expect(h.runs()).toMatchObject([{ status: "running", scheduledFor: at }]);
+  });
+
+  it("gives up a try left waiting while the server slept past the next occurrence, which then runs in its place", async () => {
+    const h = harness([RUN_COMPUTER_LINES.noWake, null, null], 60, { type: "cron", expression: "0 * * * *", timeZone: "UTC" });
+    await h.passAt(h.due);
+    const [first] = h.runs();
+    expect(first).toMatchObject({ status: "queued", wakeRetryUntil: h.due + 60 * MINUTE });
+    await h.passAt(h.due + 14 * 60 * MINUTE);
+    expect(h.runs().find((run) => run.id === first!.id)).toMatchObject({ status: "failed", error: "The cloud desktop did not wake, even after more tries, so this run did not start. The next scheduled run tries again." });
+    expect(h.runs().some((run) => run.skipped?.behind === first!.id)).toBe(false);
+    expect(h.world.prepared.filter((id) => id === first!.id)).toHaveLength(1);
   });
 
   it("fails at once for any other reason it did not start: those are not tried again", async () => {
@@ -155,12 +203,15 @@ describe("a scheduled run whose cloud computer did not wake", () => {
 
 describe("whether a run that did not wake is tried again", () => {
   const run = () => ({ status: "queued" as const, target: "bot" as const, scheduledFor: START, attention: "x" as string | undefined });
-  const hourly = { enabled: true, nextRunAt: START + 60 * MINUTE };
+  const every = { type: "interval", everyMinutes: 60, anchorAt: START } as const;
+  const hourly = { enabled: true, nextRunAt: START + 60 * MINUTE, schedule: every };
 
   it("is not for a run its schedule did not start, a paused routine, or a routine with no time left before the next occurrence", () => {
     expect(wakeRetry(run(), RUN_COMPUTER_LINES.noWake, undefined, START + 4 * MINUTE)).toBe(RUN_COMPUTER_LINES.noWake);
-    expect(wakeRetry(run(), RUN_COMPUTER_LINES.noWake, { enabled: false, nextRunAt: null }, START + 4 * MINUTE)).toBe(RUN_COMPUTER_LINES.noWake);
-    expect(wakeRetry(run(), RUN_COMPUTER_LINES.noWake, { enabled: true, nextRunAt: START + 9 * MINUTE }, START + 4 * MINUTE)).toBe(RUN_COMPUTER_LINES.noWake);
+    expect(wakeRetry(run(), RUN_COMPUTER_LINES.noWake, { enabled: false, nextRunAt: null, schedule: every }, START + 4 * MINUTE)).toBe(RUN_COMPUTER_LINES.noWake);
+    expect(wakeRetry(run(), RUN_COMPUTER_LINES.noWake, { enabled: true, nextRunAt: START + 9 * MINUTE, schedule: every }, START + 4 * MINUTE)).toBe(RUN_COMPUTER_LINES.noWake);
+    // A run that already started once (a restart put it back) is not this run's to try again.
+    expect(wakeRetry({ ...run(), startedAt: START + MINUTE, retried: "restarted" as const }, RUN_COMPUTER_LINES.noWake, hourly, START + 4 * MINUTE)).toBe(RUN_COMPUTER_LINES.noWake);
   });
 
   it("waits at least a short gap after a try that ended late", () => {
@@ -176,9 +227,12 @@ describe("whether a run that did not wake is tried again", () => {
     expect(waitsToWakeAgain({ status: "running", wakeRetries: 1, startedAt: START + 5 * MINUTE })).toBe(false);
   });
 
-  it("ends a once-only routine's tries without promising a next run", () => {
-    const once = { ...run(), wakeRetries: 3 };
-    expect(wakeRetry(once, RUN_COMPUTER_LINES.noWake, { enabled: true, nextRunAt: null }, START + 25 * MINUTE))
-      .toBe("The cloud desktop did not wake in 4 tries, so this run did not start.");
+  it("ends a once-only routine's tries without promising a next run, and bounds them by how late a missed run still starts", () => {
+    const onceOnly = { enabled: false, nextRunAt: null, schedule: { type: "once", at: START } } as const;
+    const first = run();
+    expect(wakeRetry(first, RUN_COMPUTER_LINES.noWake, onceOnly, START + 4 * MINUTE)).toBe(true);
+    expect(first).toMatchObject({ wakeRetries: 1, wakeRetryUntil: START + WAKE_RETRY_LAST_MS });
+    expect(WAKE_RETRY_LAST_MS).toBe(CATCH_UP_MS);
+    expect(wakeRetry({ ...run(), wakeRetries: 3 }, RUN_COMPUTER_LINES.noWake, onceOnly, START + 25 * MINUTE)).toBe("The cloud desktop did not wake, even after more tries, so this run did not start.");
   });
 });
