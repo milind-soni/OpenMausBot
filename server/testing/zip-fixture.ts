@@ -9,6 +9,8 @@ export interface ZipFixtureMember {
   method?: 0 | 8;
   /** Overrides the uncompressed size the directory claims. */
   declaredBytes?: number;
+  /** General-purpose flags, in both headers: bit 0 marks the member encrypted. */
+  flags?: number;
 }
 
 export function buildZip(members: ZipFixtureMember[]): Buffer {
@@ -25,7 +27,7 @@ export function buildZip(members: ZipFixtureMember[]): Buffer {
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(member.flags ?? 0, 6);
     local.writeUInt16LE(method, 8);
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(stored.length, 18);
@@ -37,7 +39,7 @@ export function buildZip(members: ZipFixtureMember[]): Buffer {
     central.writeUInt32LE(0x02014b50, 0);
     central.writeUInt16LE(member.mode === undefined ? 20 : 0x0314, 4);
     central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(0, 8);
+    central.writeUInt16LE(member.flags ?? 0, 8);
     central.writeUInt16LE(method, 10);
     central.writeUInt32LE(crc, 16);
     central.writeUInt32LE(stored.length, 20);
