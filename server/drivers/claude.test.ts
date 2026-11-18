@@ -3207,7 +3207,8 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       await instance.adapter.interruptTurn(threadId);
       expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toMatchObject({ ok: false, stopReason: "interrupted" });
       // The root's late close finalizes through the same unconfirmed tree; the warning must not repeat.
-      await vi.waitFor(() => expect(uncertain.mock.calls.length).toBeGreaterThanOrEqual(2));
+      await vi.waitFor(() => expect(uncertain.mock.results.length).toBeGreaterThanOrEqual(2));
+      await uncertain.mock.results[1].value;
       expect(recorder.events.filter((event) => event.type === "runtime.error" && event.message.includes("could not be confirmed stopped"))).toHaveLength(1);
     } finally {
       uncertain.mockRestore();
