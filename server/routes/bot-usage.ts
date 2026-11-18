@@ -13,7 +13,7 @@ interface BotUsageDeps {
   readableFrom(threadId: string): (otherThreadId: string) => boolean;
   crossThreadReads(): boolean;
   knownThread(botId: string, threadId: string): boolean;
-  bot(botId: string): RosterMember | undefined;
+  bot(botId: string): RosterMember | null;
   caps(): UsageCapsConfig | undefined;
   onPlan(instanceId: string): boolean;
   now?(): Date;
