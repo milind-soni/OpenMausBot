@@ -42,7 +42,7 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
   if (tooOld) problems.push(`OpenMausBot ${server!.version ?? "(unknown version)"} is too old for the headless commands: it cannot report a conversation's job`);
   if (isOmb && !availableCount) problems.push("no engine is available: set one up with `openmausbot engine set KIND --key-env VAR`");
   if (session?.kind === "session" && typeof session.expiresAt === "number" && session.expiresAt - Date.now() < 14 * DAY) {
-    warnings.push(`this session expires in ${Math.max(0, Math.floor((session.expiresAt - Date.now()) / DAY))} days: get a new one with openmausbot connect`);
+    warnings.push(`this session expires in ${Math.max(0, Math.floor((session.expiresAt - Date.now()) / DAY))} days: sign in again with openmausbot login (a script: openmausbot token create)`);
   }
   const browser = config?.browserEngine ?? null;
   if (browser && browser.kind !== "engine") warnings.push(`bots have no built-in browser here: ${browser.reason ?? "not installed"}${browser.installable ? " (install it with `openmausbot browser install`)" : ""}`);
@@ -98,14 +98,15 @@ export async function doctor(ctx: VerbContext): Promise<VerbOutcome> {
 }
 
 export async function list(ctx: VerbContext): Promise<VerbOutcome> {
-  const tool = ctx.verb === "bots" ? "list_bots" : ctx.verb === "channels" ? "list_channels" : "list_available_models";
+  const bots = ctx.verb === "bots" || ctx.verb === "bots list";
+  const tool = bots ? "list_bots" : ctx.verb === "channels" ? "list_channels" : "list_available_models";
   const result = await (await ctx.client()).tool(tool, {});
-  const human = ctx.verb === "bots"
+  const human = bots
     ? (result.bots as Rec[]).map((bot) => `${bot.name}${bot.title ? ` — ${bot.title}` : ""} · ${bot.section ? `team ${bot.section}` : "no team"}${bot.chiefOfStaff ? " · Chief of Staff" : ""} · ${bot.activity === "waiting-on-you" ? "waiting on you" : bot.busy ? "working" : bot.waitingForTeammates ? "waiting on teammates" : "idle"} · id ${bot.id}`)
     : ctx.verb === "channels"
       ? (result.channels as Rec[]).map((room) => `${room.name} · ${room.memberIds?.length ?? 0} members · ${room.working ? "working" : "idle"} · id ${room.id}`)
       : (result.instances as Rec[]).map((instance) => `${instance.instanceId} · ${instance.snapshot?.state ?? "unknown"}${instance.models?.default ? ` · default ${instance.models.default}` : ""}${Array.isArray(instance.models?.options) ? ` · ${instance.models.options.length} models` : ""}`);
-  return { result, exitCode: EXIT.done, human: human.length ? human : [`No ${ctx.verb === "models" ? "engines" : ctx.verb} yet.`] };
+  return { result, exitCode: EXIT.done, human: human.length ? human : [`No ${ctx.verb === "models" ? "engines" : bots ? "bots" : ctx.verb} yet.`] };
 }
 
 export async function messages(ctx: VerbContext): Promise<VerbOutcome> {

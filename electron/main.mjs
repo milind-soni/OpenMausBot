@@ -23,8 +23,7 @@ import {
   readSafeLogTail,
 } from "./diagnostics.mjs";
 import { migrateWorkspaceConfigFile, workspaceCredentialEnv } from "./workspace-credentials.mjs";
-import { evictStartupCacheOnce, readLastRunVersion } from "./startup-cache-eviction.mjs";
-import { createLaunchAnalytics } from "./launch-analytics.mjs";
+import { evictStartupCacheOnce } from "./startup-cache-eviction.mjs"; import { desktopLaunchAnalytics } from "./launch-analytics.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { bootFailureMessage, listeningSignal, pollServerIdentity, SERVER_BOOT_TIMEOUT_MS, SERVER_LISTENING_GRACE_MS } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
@@ -505,9 +504,7 @@ function slog(line) {
 
 // Synchronous: a fatal exception can end Electron before an async write flushes.
 // uncaughtExceptionMonitor observes Node's fatal path without handling it, so the process still exits.
-const launchAnalytics = createLaunchAnalytics({ fetch: (...args) => session.defaultSession.fetch(...args), choice: () => nativeText.prefs.analytics(), lastVersion: readLastRunVersion(app.getPath("userData")),
-  version: app.getVersion(), platform: process.platform, packaged: app.isPackaged, env: process.env });
-installDesktopCrashListeners({
+const launchAnalytics = desktopLaunchAnalytics({ app, session, prefs: nativeText.prefs }); installDesktopCrashListeners({
   appTarget: app,
   processTarget: process,
   record: (event) => { appendDesktopCrashRecord(DESKTOP_CRASH_LOG, DESKTOP_CRASH_LOG_MAX_BYTES, formatDesktopCrashRecord(event)); launchAnalytics.crashed(event); },
@@ -2023,8 +2020,7 @@ function createWindow({ deferNavigation = false } = {}) {
     }
   });
   win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-    if (!isMainFrame || errorCode === -3) return; // -3: aborted by a newer navigation
-    if (validatedURL.startsWith(`${rendererOrigin()}/`)) launchAnalytics.stage("page_load_failed");
+    if (!isMainFrame || errorCode === -3 /* aborted by a newer navigation */) return; if (validatedURL.startsWith(`${rendererOrigin()}/`)) launchAnalytics.stage("page_load_failed");
     const remote = activeRemote(environmentsState);
     if (!remote) return;
     let origin = null;

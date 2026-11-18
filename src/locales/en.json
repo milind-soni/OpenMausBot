@@ -10157,6 +10157,9 @@
   "routines.server.restored": "Not run again: this schedule was restored from a backup made before this run had its turn",
   "routines.server.restoredMany": "Not run again: {count} scheduled runs from before this schedule was restored from a backup",
   "routines.server.duplicate": "Not started: this scheduled run had already started once",
+  "routines.server.wakeRetry": "The cloud desktop did not wake, so this run has not started yet. It tries again at {resets}",
+  "routines.server.noWakeRetried": "The cloud desktop did not wake, even after more tries, so this run did not start. The next scheduled run tries again.",
+  "routines.server.noWakeRetriedLast": "The cloud desktop did not wake, even after more tries, so this run did not start.",
   "routines.server.capSkippedOne": "Skipped: {why} ({amount}) is reached. Runs start again after {resets}",
   "routines.server.capSkippedMany": "Skipped {count} runs: {why} ({amount}) is reached. Runs start again after {resets}",
   "routines.server.part.capServerDay": "the daily usage cap for all bots",
@@ -11186,5 +11189,13 @@
   "chat.unreadContext.images": "Image",
   "chat.unreadContext.files": "File",
   "chat.unreadContext.moreCitations": "and {count} more",
-  "inbox.settled.read": "Read"
+  "inbox.settled.read": "Read",
+  "cliLogin.title": "A terminal wants to control {app}",
+  "cliLogin.bodyHere": "Someone ran openmausbot login in a terminal on this computer.",
+  "cliLogin.bodyElsewhere": "Someone ran openmausbot login on another computer ({source}).",
+  "cliLogin.match": "Allow it only if your terminal shows this same code.",
+  "cliLogin.scopeAll": "Full control",
+  "cliLogin.scopeChat": "Chat only",
+  "cliLogin.allow": "Allow",
+  "cliLogin.deny": "Deny"
 }

@@ -19,7 +19,7 @@ installation that took a relay token in the last two days and then refuses it a
 tunnel for good, and a server may be pointed at one. So the server still keeps
 the relay off, and says why, when it serves `--tunnel`, runs on a fleet
 credential (`OMB_INSTALLATION_CREDENTIAL`), or holds a tunnel address from a
-plain `openmausbot login`.
+plain `openmausbot account login`.
 
 ## Use it
 
@@ -127,7 +127,7 @@ declarations only.
 
 ## The control plane
 
-`openmausbot login` registers the server as an installation (its platform, and
+`openmausbot account login` registers the server as an installation (its platform, and
 `appVersion` the npm package's version) and keeps its `omb_install_…`
 credential in `tunnel-account.json`, mode 0600. Plain `login` also reserves a
 tunnel address; `login --relay` reserves none (the account service's on-demand
@@ -151,7 +151,7 @@ A server qualifies today; no control plane change is needed to get a token:
 **Servers keep their tunnel.** A server's tunnel serves browsers and the
 desktop app, not only phones. The server sends `kind: "server"` on
 `POST /v1/installations`, `POST .../self/endpoint` and `POST .../self/relay-token`
-(`openmausbot login`, `serve --tunnel`, a fleet container and `serve --relay`
+(`openmausbot account login`, `serve --tunnel`, a fleet container and `serve --relay`
 alike); the desktop app sends nothing new. The hosted control plane stores it,
 never marks a server's tunnel for the relay (`relay_proven`, `legacy_cutoff`)
 and never answers a server `relay_capable` (its README, "Self-hosted servers").

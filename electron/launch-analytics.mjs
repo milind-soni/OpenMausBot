@@ -1,6 +1,7 @@
 // The desktop app's launch, stage by stage, for usage analytics: the app's pages can count only launches that got as
 // far as a page, so main says how far each launch got. It honours the same Usage analytics switch as the pages.
 import { randomUUID } from "node:crypto";
+import { readLastRunVersion } from "./startup-cache-eviction.mjs";
 
 // The app's own PostHog project; the phc_ token is a write-only public key, the same one the app's pages send with.
 const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
@@ -82,4 +83,12 @@ export function createLaunchAnalytics({ fetch, choice, lastVersion, version, pla
       if (event?.kind === "renderer" && event.surface === "main-window" && event.reason !== "clean-exit") stage("page_crashed", { reason: event.reason });
     },
   };
+}
+
+/** This app's launch: Electron's own `app` and `session`, and the desktop's kept choices. */
+export function desktopLaunchAnalytics({ app, session, prefs, env = process.env }) {
+  return createLaunchAnalytics({
+    fetch: (...args) => session.defaultSession.fetch(...args), choice: () => prefs.analytics(), lastVersion: readLastRunVersion(app.getPath("userData")),
+    version: app.getVersion(), platform: process.platform, packaged: app.isPackaged, env,
+  });
 }

@@ -40,10 +40,29 @@ describe("parseCommand", () => {
   });
 
   it("knows which verbs change something", () => {
-    for (const verb of ["send", "run", "interrupt", "team apply", "engine set", "token create", "token revoke"]) expect(MUTATING_VERBS.has(verb), verb).toBe(true);
-    for (const verb of ["doctor", "bots", "wait", "messages", "export", "events", "team export", "engine list"]) expect(MUTATING_VERBS.has(verb), verb).toBe(false);
-    expect([...HEADLESS_VERBS].sort()).toEqual(["bots", "channels", "connect", "doctor", "edit", "engine", "events", "export", "interrupt", "mcp",
-      "messages", "models", "new-bot", "new-channel", "run", "send", "send-channel", "set-model", "team", "token", "wait"]);
+    for (const verb of ["send", "run", "interrupt", "team apply", "engine set", "token create", "token revoke", "bots delete", "bots pause", "stop",
+      "threads clear", "threads delete", "computers start", "computers sleep"]) expect(MUTATING_VERBS.has(verb), verb).toBe(true);
+    for (const verb of ["doctor", "bots", "bots list", "bots get", "status", "whoami", "threads list", "computers list", "wait", "messages", "export", "events", "team export", "engine list"]) {
+      expect(MUTATING_VERBS.has(verb), verb).toBe(false);
+    }
+    expect([...HEADLESS_VERBS].sort()).toEqual(["bots", "channels", "computers", "connect", "doctor", "edit", "engine", "events", "export", "interrupt", "login",
+      "logout", "mcp", "messages", "models", "new-bot", "new-channel", "run", "send", "send-channel", "servers", "set-model", "status", "stop", "team",
+      "threads", "token", "use", "wait", "whoami"]);
+  });
+
+  it("keeps bare bots a list, and reads a bots, threads or computers action", () => {
+    expect(parseCommand(["bots", "--json"])).toMatchObject({ verb: "bots", flags: { json: true } });
+    expect(parseCommand(["bots", "delete", "QA 1", "QA 2", "--dry-run"])).toMatchObject({ verb: "bots delete", positionals: ["QA 1", "QA 2"], flags: { "dry-run": true } });
+    expect(parseCommand(["bots", "pause", "--team", "Support"])).toMatchObject({ verb: "bots pause", flags: { team: "Support" } });
+    expect(parseCommand(["stop", "--all", "-y"])).toMatchObject({ verb: "stop", flags: { all: true, yes: true } });
+    expect(usage(() => parseCommand(["threads"]))).toMatchObject({ exitCode: 2, message: "threads needs one of: list, clear, delete" });
+    expect(usage(() => parseCommand(["bots", "pause", "x", "--yes"]))).toMatchObject({ exitCode: 2 });
+    // no flag skips a permission or approval of any kind
+    for (const verb of ["stop", "bots delete", "threads clear", "login"]) {
+      for (const skip of ["--yolo", "--skip-permissions", "--dangerously-skip-permissions", "--token"]) {
+        expect(usage(() => parseCommand([...verb.split(" "), "x", skip])), `${verb} ${skip}`).toMatchObject({ exitCode: 2 });
+      }
+    }
   });
 });
 

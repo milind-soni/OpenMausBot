@@ -153,7 +153,7 @@ export function tunnelHolder(env: NodeJS.ProcessEnv, dataDir: string): string | 
   const account = openTunnelCredentials(dataDir);
   if (account.status === "unavailable") return `${account.file} could not be read, so this machine may hold a tunnel address`;
   const document = account.read();
-  if (describeTunnelAccount(document).address || document[MANAGED_COMPANION_ENDPOINT_FIELD]) return "this machine holds a tunnel address from `openmausbot login`";
+  if (describeTunnelAccount(document).address || document[MANAGED_COMPANION_ENDPOINT_FIELD]) return "this machine holds a tunnel address from `openmausbot account login`";
   return null;
 }
 
