@@ -92,4 +92,3 @@ export const CONNECT_AI_STEP = ["opened", "dialog_opened", "chosen", "sign_in_st
 export type ConnectAiStep = (typeof CONNECT_AI_STEP)[number];
 export { AI_TEST_REASONS as AI_TEST_REASON } from "../../shared/ai-ranking";
 export const APP_LOAD_WAITING = ["server", "data", "settings"] as const;
-export const SIGN_IN_GATE = ["signed_out", "session_ended", "team_left", "service_trust"] as const;

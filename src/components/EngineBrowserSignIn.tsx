@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2, LogIn } from "lucide-react";
 import { api, useStore } from "@/state/store";
 import { intlLocale, t } from "@/lib/i18n";
-import { useSignInStarted } from "@/lib/connect-ai-events";
 import { engineSignedIn } from "@/lib/product-events";
 import { deviceFlowUnavailable, type DeviceSignInStatus } from "./DeviceSignIn";
 
@@ -16,13 +15,14 @@ function ended(phase: "failed" | "expired"): DeviceSignInStatus {
 }
 
 /** A start button, a spinner while the person finishes in their browser, and the outcome. */
-export function EngineBrowserSignIn({ instanceId, autoStart = false, onDone }: {
+export function EngineBrowserSignIn({ instanceId, autoStart = false, onDone, onStart }: {
   instanceId: string;
   autoStart?: boolean;
   onDone?: (signedIn: boolean) => void;
+  /** A sign-in is starting. */
+  onStart?: () => void;
 }) {
-  const { state: { instances }, refreshInstances, refreshModels } = useStore();
-  const signInStarted = useSignInStarted(instances, instanceId);
+  const { refreshInstances, refreshModels } = useStore();
   const [auth, setAuth] = useState<DeviceSignInStatus | null>(null);
   const [busy, setBusy] = useState(autoStart);
   const started = useRef(false);
@@ -74,7 +74,7 @@ export function EngineBrowserSignIn({ instanceId, autoStart = false, onDone }: {
   const start = async () => {
     setBusy(true);
     setError(null);
-    signInStarted();
+    onStart?.();
     try {
       const { auth: next }: { auth: DeviceSignInStatus } = await api(`${base}/start`, { method: "POST" });
       setAuth(next);

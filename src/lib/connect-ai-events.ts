@@ -3,6 +3,7 @@ import { track } from "@/lib/analytics";
 import {
   AI_TEST_REASON, allow, CONNECT_AI_PLACE, CONNECT_AI_STEP, engineForDriver, type ConnectAiPlace, type ConnectAiStep,
 } from "@/lib/analytics-allowlist";
+import { useStore } from "@/state/store";
 
 /** Which first-run flow a Connect an AI control sits in. Outside one (Settings, the engine library) it is null and nothing
  * is sent. */
@@ -22,11 +23,12 @@ export function connectAiStep(step: ConnectAiStep, place: ConnectAiPlace, facts:
   });
 }
 
-/** `connectAiStep` for one mounted control, each step and engine sent once (React's StrictMode mounts twice in development). */
+/** `connectAiStep` for one mounted control: `opened` once, every other step once for each engine (React's StrictMode
+ * mounts twice in development). */
 export function useConnectAiSteps(place: ConnectAiPlace | null) {
   const sent = useRef(new Set<string>());
   return useCallback((step: ConnectAiStep, facts: ConnectAiFacts = {}) => {
-    const key = `${step}\n${facts.driverKind ?? ""}`;
+    const key = step === "opened" ? step : `${step}\n${facts.driverKind ?? ""}`;
     if (!place || sent.current.has(key)) return;
     sent.current.add(key);
     connectAiStep(step, place, facts);
@@ -44,8 +46,8 @@ export function useDialogOpened(place: ConnectAiPlace | null): void {
 }
 
 /** A sign-in to an AI starting inside a first-run flow; elsewhere it sends nothing. */
-export function useSignInStarted(instances: ReadonlyArray<{ instanceId: string; driverKind: string }>, instanceId: string) {
+export function useSignInStarted(instanceId: string) {
   const step = useConnectAiSteps(useConnectAiPlace());
-  const driverKind = instances.find((instance) => instance.instanceId === instanceId)?.driverKind ?? "";
-  return () => step("sign_in_started", { driverKind });
+  const instances = useStore().state?.instances;
+  return () => step("sign_in_started", { driverKind: instances?.find((instance) => instance.instanceId === instanceId)?.driverKind ?? "" });
 }

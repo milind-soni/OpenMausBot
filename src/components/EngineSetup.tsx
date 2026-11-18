@@ -274,7 +274,7 @@ export function EngineWarningNotice({
 
 function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; signInOnly: boolean }) {
   const { state, refreshInstances, refreshModels } = useStore();
-  const signInStarted = useSignInStarted(state.instances, instance.instanceId);
+  const signInStarted = useSignInStarted(instance.instanceId);
   const [busy, setBusy] = useState<"install" | "signin" | "complete" | "check" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [flow, setFlow] = useState<{ flowId: string; authorizationUrl: string } | null>(null);
@@ -567,6 +567,7 @@ export function EngineSetup({
   onHost?: boolean;
 }) {
   const { state } = useStore();
+  const signInStarted = useSignInStarted(instance.instanceId);
   const cloudHome = state.config?.cloudHome === true;
   const install = instance.install;
   const installCommand = installCommandFor(install);
@@ -667,10 +668,10 @@ export function EngineSetup({
       ))}
 
       {engineBrowserSignIn ? (
-        <EngineBrowserSignIn key={instance.instanceId} instanceId={instance.instanceId} />
+        <EngineBrowserSignIn key={instance.instanceId} instanceId={instance.instanceId} onStart={signInStarted} />
       ) : deviceSignIn || browserSignIn ? (
         <>
-          <DeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} browserPkce={browserSignIn} provider={provider} />
+          <DeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} browserPkce={browserSignIn} provider={provider} onStart={signInStarted} />
           {deviceSignIn && provider !== "codex" && signInCommand && serverTerminal(cloudHome) && (
             <details className="mt-2 rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
               <summary className="cursor-pointer select-none">{t("engineSetup.preferTerminal")}</summary>
@@ -679,7 +680,7 @@ export function EngineSetup({
           )}
         </>
       ) : pasteSignIn ? (
-        <ClaudeSignIn key={instance.instanceId} instanceId={instance.instanceId} />
+        <ClaudeSignIn key={instance.instanceId} instanceId={instance.instanceId} onStart={signInStarted} />
       ) : install.server && !signInOnly ? (
         <ServerEngineInstall instance={instance} mode="install" command={installCommand} />
       ) : install.managed ? (
