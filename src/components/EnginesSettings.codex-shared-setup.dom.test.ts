@@ -45,7 +45,7 @@ describe("Settings → Codex accounts", () => {
     const notes = container.querySelectorAll("[data-accounts='chatgpt'] ~ [data-codex-shared-setup]");
     expect(notes).toHaveLength(1);
     expect(notes[0]!.textContent).toContain("your own Codex setup");
-    expect(notes[0]!.textContent).toContain("AGENTS.md");
+    expect(notes[0]!.textContent).toContain("OMB_CODEX_INHERIT_USER_CONFIG=1");
   });
 
   it("keeps the note off other engines' account cards", async () => {
