@@ -33,6 +33,7 @@ import {
   readTranscriptPosition,
   rememberTranscriptPosition,
   rowScrollTop,
+  rowsInView,
   settleScroll,
   topRow,
   transitionTranscriptFollow,
@@ -106,11 +107,12 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
 
   const transcriptKey = `${ownerId}:${threadId}`;
   const tailStart = tailWindowStart(messages.length);
-  /** The row on screen before a window step, put back by the commit after it. */
-  const anchor = useRef<{ key: string; row: ReturnType<typeof topRow>; height: number } | null>(null);
+  /** The rows on screen before a window step; the commit after it puts the first one still drawn back in place. */
+  const anchor = useRef<{ key: string; rows: ReturnType<typeof rowsInView>; height: number } | null>(null);
+  const restingCardId = useRef<string | undefined>(undefined);
   const holdRow = () => {
     const el = scrollRef.current, list = transcriptRef.current;
-    anchor.current = el ? { key: transcriptKey, row: list ? topRow(el, list) : null, height: el.scrollHeight } : null;
+    anchor.current = el ? { key: transcriptKey, rows: list ? rowsInView(el, list, restingCardId.current) : [], height: el.scrollHeight } : null;
   };
   const lastTop = useRef(0);
   const movingDown = useRef(false);
@@ -151,6 +153,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   }, [messages, transcriptWindow.start, transcriptWindow.end, rests]);
   const windowRef = useRef(transcriptWindow);
   windowRef.current = transcriptWindow;
+  restingCardId.current = windowedMessages[0] && windowedMessages[0] !== messages[startIndex] ? windowedMessages[0].id : undefined;
   const drawnBounds: TranscriptWindowBounds = { start: startIndex, end: laterCount > 0 ? endIndex : null };
   const laterRef = useRef(laterCount);
   laterRef.current = laterCount;
@@ -271,7 +274,11 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     anchor.current = null;
     expandingRef.current = false;
     if (held.key !== transcriptKey) return;
-    const top = held.row && list ? rowScrollTop(el, list, held.row.rowId, held.row.offsetWithinRow) : undefined;
+    let top: number | undefined;
+    for (const row of list ? held.rows : []) {
+      top = rowScrollTop(el, list!, row.rowId, row.offsetWithinRow);
+      if (top !== undefined) break;
+    }
     el.scrollTop = top ?? el.scrollTop + el.scrollHeight - held.height;
     lastTop.current = el.scrollTop;
   });
