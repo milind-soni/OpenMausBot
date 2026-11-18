@@ -1,6 +1,9 @@
-// Definitions, container directives, bracketed display math and raw HTML that runs past blank lines (comments,
-// declarations, <script>, <pre>, <style>, <textarea>) can tie blocks together; so can "$$$", whose pairing is unclear.
-const DOCUMENT_WIDE_SYNTAX = /^ {0,3}(?:\[(?!\^)[^\]\n]+\]:|:::|\\\[)|<[!?]|<(?:script|pre|style|textarea)\b|\$\$\$/im;
+// Definitions, container directives and bracketed display math can tie blocks together; so can "$$$", whose pairing is
+// unclear.
+const DOCUMENT_WIDE_SYNTAX = /^ {0,3}(?:\[(?!\^)[^\]\n]+\]:|:::|\\\[)|\$\$\$/m;
+// Raw HTML that runs past blank lines: a comment, declaration, <script>, <pre>, <style> or <textarea> starting a line,
+// in or out of a quote or list item.
+const SPANNING_HTML = /^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t>]))*[ \t]*(?:<[!?]|<(?:script|pre|style|textarea)(?:[\s>]|$))/i;
 const FENCE_OPENER = /^ {0,3}(`{3,}|~{3,})/;
 const MATH_FENCE = /^\$\$[ \t]*$/;
 // After a blank line these still continue the previous block: a list item or indented content.
@@ -32,6 +35,7 @@ export function splitMarkdownBlocks(text: string): string[] | null {
     } else if (line.trim() === "") {
       afterBlankLine = true;
     } else {
+      if (SPANNING_HTML.test(line)) return null;
       if (afterBlankLine && lineStart > blockStart && !CONTINUATION.test(line)) {
         blocks.push(text.slice(blockStart, lineStart));
         blockStart = lineStart;
@@ -99,7 +103,9 @@ function listItems(lines: string[]): StreamPieces | null {
   // Above the list: blocks a blank line closes, or a paragraph the first item may interrupt.
   if (head.some((line) => line !== "" && (CONTINUATION.test(line) || FENCE_OPENER.test(line)))) return null;
   const last = head.at(-1);
-  if (last !== undefined && last !== "" && (last.startsWith("|") || (first[2] && !/^1[.)]/.test(lines[start]!)))) return null;
+  if (last !== undefined && last !== "" && (last.includes("|") || (first[2] && !/^1[.)]/.test(lines[start]!)))) return null;
+  // An HTML block runs on to a blank line or further, and may take the list with it.
+  if (head.some((line) => /^ {0,3}</.test(line))) return null;
   const pieces: string[] = [];
   let piece = lines[start]!;
   for (const [index, line] of lines.entries()) {

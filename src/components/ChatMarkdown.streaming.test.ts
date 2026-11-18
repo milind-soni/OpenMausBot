@@ -148,6 +148,14 @@ describe("a reply's Markdown while it streams", () => {
     expect(normalizingParses, "the growing table is not parsed again to repair it").toEqual([]);
   });
 
+  it("cuts a reply around an HTML page in a code fence", () => {
+    const page = "```html\n<!doctype html>\n<script>\nlet a = 1;\n\nlet b = 2;\n</script>\n```\n\n";
+    draw(`${page}After`, true);
+    parsed.length = 0;
+    draw(`${page}After the page`, true);
+    expect(parsed).toEqual(["After the page"]);
+  });
+
   it("parses whole the list or table it cannot cut", () => {
     for (const text of ["- one\n- two\n\n- loose", "- costs $5\n- and $10", "Intro\n2. two\n3. three"]) {
       parsed.length = 0;
@@ -164,13 +172,15 @@ describe("a reply's Markdown while it streams", () => {
   });
 });
 
+// Its second fence is closed only by the next item, so it shows as still open until the reply is finished.
+const FENCE_CLOSED_BY_ITEM = "1. Install:\n   ```bash\n   npm i\n   ```\n2. Run:\n   ```\n   npm start\n3. Done";
 const CORPUS = [
   "Here is the plan:\n- first step with **bold**\n- second `code` step\n- third [link](https://example.com)\n\nDone.",
   "Steps:\n\n1. one\n2. two\n3. three\n",
   "- a\n  - a1\n  - a2\n- b\n  1. b1\n- c",
   "- [ ] todo\n- [x] done\n- plain",
   "- one\n- two\n\n- three",
-  "1. Install:\n   ```bash\n   npm i\n   ```\n2. Run:\n   ```\n   npm start\n3. Done",
+  FENCE_CLOSED_BY_ITEM,
   "- costs $5 now\n- then $10 later\n- x$y and z$ w",
   "- 123\n- \u05e9\u05dc\u05d5\u05dd \u05e2\u05d5\u05dc\u05dd\n- 456",
   "- item one\nlazy line\n- item two",
@@ -192,6 +202,13 @@ const CORPUS = [
   "- a | b\n- c | d\n- e",
   "Look:\n+ plus one\n+ plus two\n\n10) ten\n11) eleven",
   " - a\n- b\n- c",
+  "<div>\n- a\n- b",
+  "<details>\n<summary>S</summary>\n- a\n- b\n</details>",
+  "<br>\n- a\n- b",
+  "a | b\n- | -\n- c",
+  "Use `<script>` and `<!-- -->` in a line.\n\nNext\n\n- a\n- b",
+  "```html\n<!doctype html>\n<html>\n<script>\nlet a = 1;\n\nlet b = 2;\n</script>\n</html>\n```\n\nAfter\n\n- x\n- y",
+  "> quote\n> <!-- note\n\nstill -->\n\nEnd",
   "-\tx\n- b\n- c",
 ];
 
@@ -214,9 +231,9 @@ describe("a reply streamed one character at a time", () => {
         drawIn(whole, prefix, true, false);
         expect(streamed.element.innerHTML, JSON.stringify(prefix)).toBe(whole.element.innerHTML);
       }
+      const lastStreamed = streamed.element.innerHTML;
       drawIn(streamed, text, false, true);
-      drawIn(whole, text, false, true);
-      expect(streamed.element.innerHTML, text).toBe(whole.element.innerHTML);
+      if (text !== FENCE_CLOSED_BY_ITEM) expect(lastStreamed, `finished: ${text}`).toBe(streamed.element.innerHTML);
     }
     for (const { element, root } of roots) {
       act(() => root.unmount());

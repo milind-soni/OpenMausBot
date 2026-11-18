@@ -6,7 +6,6 @@ import { otherSpeaker } from "@/lib/own-profile";
 import { sameDrawnBots } from "@/lib/drawn-bots";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useSpeech } from "@/lib/tts/useSpeech";
-import { localSystemVoiceActive } from "@/lib/local-voice";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
@@ -54,6 +53,9 @@ interface RoomTextMessageProps {
   onReply: (message: Message) => void;
   canReact: boolean;
   phone: boolean;
+  /** Drawn again in a new language. */
+  locale: string;
+  localVoice: boolean;
 }
 
 /** Members are drawn by name and look, and spoken in their voice. */
@@ -79,6 +81,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
   onReply,
   canReact,
   phone,
+  localVoice,
 }: RoomTextMessageProps) {
   const dispatch = useStoreDispatch(), store = useStoreRef();
   const focusNonce = useStoreSelector((state) => {
@@ -114,7 +117,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
     messageId: m.id,
     voiceId: speakerBot?.voice,
     tts,
-    localVoice: localSystemVoiceActive(),
+    localVoice,
     canSpeak: true,
     viewRaw,
     onToggleRaw: () => setViewRaw((raw) => !raw),
@@ -129,7 +132,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
       {canReact && m.from && <ReactAction threadId={threadId} message={m} />}
       {botText && <CopyButton text={botText} className={messageActionClass} />}
       {botText && viewRaw && <RawToggleAction active onToggle={() => setViewRaw(false)} className={messageActionClass} />}
-      {botText && (speaking || speakReady(tts, speakerBot?.voice, localSystemVoiceActive())) && <SpeakButton text={botText} botId={speakerBot?.id} messageId={m.id} voiceId={speakerBot?.voice} tts={tts} localVoice={localSystemVoiceActive()} className={cn(messageActionClass, speaking && "text-accent")} />}
+      {botText && (speaking || speakReady(tts, speakerBot?.voice, localVoice)) && <SpeakButton text={botText} botId={speakerBot?.id} messageId={m.id} voiceId={speakerBot?.voice} tts={tts} localVoice={localVoice} className={cn(messageActionClass, speaking && "text-accent")} />}
     </MessageActions>
   );
   return (

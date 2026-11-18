@@ -7,8 +7,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Action, BotAnnouncement, InstanceInfo, Message } from "@/state/store";
 import type { RuntimeEvent } from "../../shared/runtime-events";
+import { setLocale } from "@/lib/i18n";
 
-const renders = vi.hoisted(() => ({ bubbles: 0 }));
+const renders = vi.hoisted(() => ({ bubbles: 0, chips: 0 }));
+vi.mock("./ToolActivity", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./ToolActivity")>();
+  return { ...original, ToolActivity: (props: Parameters<typeof original.ToolActivity>[0]) => { renders.chips++; return original.ToolActivity(props); } };
+});
 // A text bubble asks for its pin action once each time it is drawn.
 vi.mock("./message-menu", async (importOriginal) => {
   const original = await importOriginal<typeof import("./message-menu")>();
@@ -48,7 +53,7 @@ const room = {
 const json = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body)));
 const answers: Record<string, unknown> = {
   "/api/instances": { instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test", snapshot: { state: "available" }, models: { options: [{ id: "m", label: "Model" }] } } as unknown as InstanceInfo] },
-  "/api/config": {},
+  "/api/config": { features: { showToolCalls: true } },
   "/api/routines": { routines: [], runs: [] },
   "/api/webhooks": { webhooks: [], attempts: [] },
 };
@@ -128,6 +133,50 @@ describe("a room on screen", () => {
     await send({ kind: "message", threadId: "a-thread", message: { id: "a1", at: ++cursor, role: "bot", kind: "text", text: "a1" } });
     await send({ kind: "bot", bot: { ...announced("a", "Ada"), busy: true, activity: "working" } });
     expect(renders.bubbles).toBe(before);
+  });
+
+  it("draws only the newest bubbles for a message saved in the room", async () => {
+    const before = renders.bubbles;
+    await send({ kind: "message", threadId: "room-thread", message: { id: "saved-1", at: at + ++cursor, role: "bot", kind: "text", text: "Saved", from: { botId: "b", name: "Bea", color: "green" } } });
+    expect(document.querySelector('[data-mid="saved-1"]')).not.toBeNull();
+    expect(renders.bubbles - before).toBeLessThanOrEqual(3);
+  });
+
+  it("draws no bubble again for a tool step saved in the room", async () => {
+    const before = renders.bubbles;
+    await send({ kind: "message", threadId: "room-thread", message: { id: "step-1", at: at + ++cursor, role: "bot", kind: "activity", tool: { name: "Read file" }, from: { botId: "a", name: "Ada", color: "green" } } });
+    expect(document.querySelector('[data-mid="step-1"]')).not.toBeNull();
+    expect(renders.bubbles - before).toBe(0);
+  });
+
+  it("draws no tool chip again for a delta or a store change it does not show", async () => {
+    const chips = renders.chips;
+    expect(chips).toBeGreaterThan(0);
+    flushSync(() => noteLiveReplyEvent({ eventId: "ts2", provider: "claudeAgent", threadId: "room-thread", createdAt: new Date(at).toISOString(), turnId: "t2", type: "turn.started" } as RuntimeEvent));
+    for (let i = 0; i < 5; i++) flushSync(() => noteLiveReplyEvent({
+      eventId: `d2-${i}`, provider: "claudeAgent", threadId: "room-thread", createdAt: new Date(at).toISOString(), turnId: "t2", itemId: "y",
+      type: "content.delta", streamKind: "assistant_text", delta: `more${i} `, botId: "a",
+    } as RuntimeEvent));
+    flushSync(() => dispatch({ type: "connected", value: false }));
+    flushSync(() => dispatch({ type: "connected", value: true }));
+    await settle();
+    expect(document.querySelector('[data-mid^="live:"]')?.textContent).toContain("more4");
+    expect(renders.chips).toBe(chips);
+  });
+
+  it("draws every bubble and tool chip again in a new language", async () => {
+    const before = renders.bubbles, chips = renders.chips;
+    setLocale("de");
+    try {
+      flushSync(() => dispatch({ type: "connected", value: false }));
+      await settle();
+      expect(renders.bubbles - before).toBeGreaterThanOrEqual(120);
+      expect(renders.chips).toBeGreaterThan(chips);
+    } finally {
+      setLocale("en");
+      flushSync(() => dispatch({ type: "connected", value: true }));
+      await settle();
+    }
   });
 
   it("draws every bubble again when a member's name changes, which @-mentions show", async () => {

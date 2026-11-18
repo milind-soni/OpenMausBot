@@ -14,7 +14,7 @@ import {
   type Message,
 } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
-import { useStoreRef } from "@/state/store-ref";
+import { useStoreRef } from "@/state/store-ref"; import { localSystemVoiceActive } from "@/lib/local-voice";
 import { RoomTextMessage } from "./RoomTextMessage";
 import { BotAvatar } from "./Avatar";
 import { ScreenFrame } from "./ScreenFrame";
@@ -86,7 +86,7 @@ import { RoomHeader } from "./RoomHeader";
 import { useChatFindRequests, useChatFindShortcut } from "@/lib/chat-find";
 import { simpleRoomHeader } from "@/lib/room-panel";
 
-export const RoomToolChip = memo(function RoomToolChip({ message, roomId, threadId, live = false }: { message: Message; roomId?: string; threadId?: string; live?: boolean }) {
+export const RoomToolChip = memo(function RoomToolChip({ message, roomId, threadId, live = false }: { message: Message; roomId?: string; threadId?: string; live?: boolean; /** Drawn again in a new language. */ locale?: string }) {
   const bots = useStoreSelector((s) => s.bots), instances = useStoreSelector((s) => s.instances), dispatch = useStoreDispatch(), store = useStoreRef();
   const tool = message.tool;
   if (!tool) return null;
@@ -117,7 +117,7 @@ export const RoomToolChip = memo(function RoomToolChip({ message, roomId, thread
 export const Transcript = memo(function Transcript({
   group,
   members,
-  locale,
+  locale, localVoice = false,
   messages: saved,
   transcript,
   emergingId,
@@ -127,7 +127,7 @@ export const Transcript = memo(function Transcript({
 }: {
   group: Group;
   members: Bot[];
-  locale: string;
+  locale: string; localVoice?: boolean;
   messages: Message[];
   transcript: Message[];
   emergingId?: string | null;
@@ -179,7 +179,7 @@ export const Transcript = memo(function Transcript({
   const textRow = (message: Message, emerging: boolean, eager: boolean) => (
     <RoomTextMessage groupId={group.id} threadId={group.threadId} dm={Boolean(group.dm)} pinned={group.pinnedMessageId === message.id} working={roomBusy}
       message={message} members={members} replyTarget={message.replyToId ? byId.get(message.replyToId) : undefined}
-      emerging={emerging} eager={eager} onReply={onReply} canReact={canReact} phone={phone} />
+      emerging={emerging} eager={eager} onReply={onReply} canReact={canReact} phone={phone} locale={locale} localVoice={localVoice} />
   );
   const unreadIds = useMemo(() => unreadMessageIds(messages, unreadDividerId), [messages, unreadDividerId]);
   let dividerPlaced = false;
@@ -213,7 +213,7 @@ export const Transcript = memo(function Transcript({
               <ActivityRun messages={item.messages} forceOpen={item.messages.some((step) => step.id === focusedId)}>
                 {item.messages.map((step) => (
                   <div key={step.id} className="contents" data-mid={step.id}>
-                    <RoomToolChip message={step} threadId={group.threadId} live={liveTools.has(step.id)} />
+                    <RoomToolChip message={step} threadId={group.threadId} live={liveTools.has(step.id)} locale={locale} />
                   </div>
                 ))}
               </ActivityRun>
@@ -271,7 +271,7 @@ export const Transcript = memo(function Transcript({
             </div>
           ) : m.kind === "activity" && m.tool ? (
             roomActivityVisible(m, showToolCalls) ? (
-              m.dataResult ? <DataResultChip message={m} /> : isStatusActivity(m) ? <StatusActivityRow message={m} /> : <RoomToolChip message={m} roomId={group.id} threadId={group.threadId} live={liveTools.has(m.id)} />
+              m.dataResult ? <DataResultChip message={m} /> : isStatusActivity(m) ? <StatusActivityRow message={m} /> : <RoomToolChip message={m} roomId={group.id} threadId={group.threadId} live={liveTools.has(m.id)} locale={locale} />
             ) : null
           ) : m.kind === "screen" ? (
             <ScreenFrame threadId={group.threadId} message={m} />
@@ -886,7 +886,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
           <Transcript
             group={group}
             members={members}
-            locale={activeLocale()}
+            locale={activeLocale()} localVoice={localSystemVoiceActive()}
             messages={windowedMessages}
             transcript={group.messages}
             emergingId={popping?.id}
