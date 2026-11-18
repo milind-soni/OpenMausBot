@@ -93,7 +93,7 @@ export interface TurnImageInput {
   source?: "video-frame";
 }
 
-/** A video already admitted to the private attachment store; a driver with `nativeImageInput` gets it as the clip within its `nativeVideoBytes`, otherwise as TurnImageInput frames while the turn has image slots left. */
+/** A video already admitted to the private attachment store; a driver with `nativeImageInput` gets it as the clip within its `nativeVideoBytes`. Otherwise, best effort, a driver with `nativeImageInput` gets TurnImageInput frames when the turn has image slots left and ffprobe and ffmpeg can sample it, and none when they can't. */
 export interface TurnVideoInput {
   path: string;
   mime: "video/mp4" | "video/webm" | "video/quicktime";
@@ -277,7 +277,7 @@ export interface ProviderAdapter {
     images?: boolean;
     /** sendTurn consumes `images` as structured input, so dispatch strips the attachment path from `text`. */
     nativeImageInput?: boolean;
-    /** With `nativeImageInput`, sendTurn also takes `videos` as the clips themselves, up to this many bytes per turn; any other clip arrives as frames only while the turn has image slots left. */
+    /** With `nativeImageInput`, sendTurn also takes `videos` as the clips themselves, up to this many bytes per turn; any other clip arrives, best effort, as frames only when the turn has image slots left and ffprobe and ffmpeg can sample it. */
     nativeVideoBytes?: number;
     /** Effort levels the driver can pass to its CLI, ascending; absent hides the control. */
     effortLevels?: readonly EffortLevel[];

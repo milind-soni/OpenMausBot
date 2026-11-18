@@ -5,7 +5,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { ATTACHMENTS_DIR, FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
 import type { ProviderAdapter, TurnImageInput, TurnVideoInput } from "./contracts.ts";
-import { CHAT_IMAGE_BUDGET } from "./drivers/chat-images.ts";
+import { CHAT_IMAGE_BUDGET, chatMediaUrlBytes } from "./drivers/chat-images.ts";
 import { decodeAttachmentAttribute } from "./message-file.ts";
 import { videoFrameImages } from "./turn-video.ts";
 
@@ -174,33 +174,48 @@ export function extractTurnImages(
   return { text: providerText, images: admittedImages.map((item) => item.image), videos };
 }
 
-/** Base64 length of `bytes`, the size a clip or image takes in a chat request. */
-const encodedBytes = (bytes: number) => Math.ceil(bytes / 3) * 4;
+const mediaUrlBytes = (media: readonly { mime: string; bytes: number }[]) => media.reduce((total, item) => total + chatMediaUrlBytes(item), 0);
 
 /** The clips an engine that takes video gets as they are: those within its byte limit that also keep the turn's `images` inside the request's media budget. */
 export function nativeClips(videos: readonly TurnVideoInput[], engine: Pick<ProviderAdapter["capabilities"], "nativeImageInput" | "nativeVideoBytes">,
   images: readonly TurnImageInput[] = []): TurnVideoInput[] {
   const limit = engine.nativeImageInput ? engine.nativeVideoBytes ?? 0 : 0;
-  let clipBytes = 0, encoded = images.reduce((total, image) => total + encodedBytes(image.bytes), 0);
+  let clipBytes = 0, encoded = mediaUrlBytes(images);
   return videos.filter((clip) => {
-    if (clipBytes + clip.bytes > limit || encoded + encodedBytes(clip.bytes) > CHAT_IMAGE_BUDGET) return false;
+    const url = chatMediaUrlBytes(clip);
+    if (clipBytes + clip.bytes > limit || encoded + url > CHAT_IMAGE_BUDGET) return false;
     clipBytes += clip.bytes;
-    encoded += encodedBytes(clip.bytes);
+    encoded += url;
     return true;
   });
 }
 
-/** Stills sampled from a message's videos not `sent` as clips, never taking a turn that already carries `earlier` images past its image count. */
-export function videoFramesWithin(earlier: number, videos: readonly TurnVideoInput[], sent: readonly TurnVideoInput[] = []): Promise<TurnImageInput[]> {
-  return videoFrameImages(videos.filter((video) => !sent.includes(video)), TURN_IMAGE_MAX_COUNT - earlier);
+/** Stills sampled from a message's videos not `sent` as clips, never taking a turn that already carries `earlier` images past its image count;
+ *  beside a sent clip, only the frames that still fit the request's media budget with the clips and the turn's other pictures (`alongside`). */
+export async function videoFramesWithin(earlier: number, videos: readonly TurnVideoInput[], sent: readonly TurnVideoInput[] = [],
+  alongside: readonly TurnImageInput[] = []): Promise<TurnImageInput[]> {
+  const frames = await videoFrameImages(videos.filter((video) => !sent.includes(video)), TURN_IMAGE_MAX_COUNT - earlier);
+  if (!sent.length) return frames;
+  let room = CHAT_IMAGE_BUDGET - mediaUrlBytes([...sent, ...alongside]);
+  return frames.filter((frame) => {
+    const url = chatMediaUrlBytes(frame);
+    if (url > room) return false;
+    room -= url;
+    return true;
+  });
 }
 
 /** A burst's media: clips chosen once for all its lines against every line's pictures, so it fits one request, then each line's pictures and the frames of its clips not sent. */
 export async function turnMedia(lines: readonly { images: readonly TurnImageInput[]; videos: readonly TurnVideoInput[] }[],
   engine: Pick<ProviderAdapter["capabilities"], "nativeImageInput" | "nativeVideoBytes">): Promise<{ images: TurnImageInput[]; videos: TurnVideoInput[] }> {
-  const videos = nativeClips(lines.flatMap((line) => line.videos), engine, lines.flatMap((line) => line.images));
-  const images: TurnImageInput[] = [];
-  for (const line of lines) images.push(...line.images, ...await videoFramesWithin(images.length + line.images.length, line.videos, videos));
+  const pictures = lines.flatMap((line) => line.images);
+  const videos = nativeClips(lines.flatMap((line) => line.videos), engine, pictures);
+  const images: TurnImageInput[] = [], frames: TurnImageInput[] = [];
+  for (const line of lines) {
+    const sampled = await videoFramesWithin(images.length + line.images.length, line.videos, videos, [...pictures, ...frames]);
+    frames.push(...sampled);
+    images.push(...line.images, ...sampled);
+  }
   return { images, videos };
 }
 
@@ -230,9 +245,11 @@ export function extractReplayImages<T extends { role: "user" | "assistant"; text
   transcript: readonly T[],
   current: readonly TurnImageInput[],
   options: ExtractTurnImagesOptions = {},
+  clips: readonly TurnVideoInput[] = [],
 ): { transcript: T[]; images: TurnImageInput[] } {
   let maxCount = (options.maxCount ?? TURN_IMAGE_MAX_COUNT) - current.length;
   let maxBytes = (options.maxBytes ?? TURN_IMAGE_MAX_BYTES) - current.reduce((total, image) => total + image.bytes, 0);
+  let room = clips.length ? CHAT_IMAGE_BUDGET - mediaUrlBytes([...clips, ...current]) : Infinity;
   const replayed = [...transcript];
   const images: TurnImageInput[] = [];
   for (let index = replayed.length - 1; index >= 0 && maxCount > 0; index -= 1) {
@@ -241,11 +258,13 @@ export function extractReplayImages<T extends { role: "user" | "assistant"; text
     const item = extractTurnImages(entry.text, { ...options, maxCount: Infinity, maxBytes: Infinity, imageNote: REPLAYED_IMAGE_NOTE });
     if (!item.images.length) continue;
     const bytes = item.images.reduce((total, image) => total + image.bytes, 0);
-    if (item.images.length > maxCount || bytes > maxBytes) break;
+    const encoded = mediaUrlBytes(item.images);
+    if (item.images.length > maxCount || bytes > maxBytes || encoded > room) break;
     replayed[index] = { ...entry, text: item.text };
     images.unshift(...item.images);
     maxCount -= item.images.length;
     maxBytes -= bytes;
+    room -= encoded;
   }
   return { transcript: replayed, images };
 }

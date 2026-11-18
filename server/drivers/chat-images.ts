@@ -7,6 +7,12 @@ export type ChatContentPart = ChatTextPart | ChatImagePart;
 const IMAGE_BYTES = 20 * 1024 * 1024;
 const MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 export const CHAT_IMAGE_BUDGET = 32 * 1024 * 1024;
+// Gemini, the one engine sent clips, names QuickTime video/mov.
+const VIDEO_MIME: Readonly<Record<TurnVideoInput["mime"], string>> = { "video/mp4": "video/mp4", "video/webm": "video/webm", "video/quicktime": "video/mov" };
+const urlPrefix = (mime: string) => `data:${VIDEO_MIME[mime as TurnVideoInput["mime"]] ?? mime};base64,`;
+
+/** Length of the data URL a turn's image or clip of `bytes` becomes, which is what `chatImageBudget` counts. */
+export const chatMediaUrlBytes = (media: { mime: string; bytes: number }) => urlPrefix(media.mime).length + Math.ceil(media.bytes / 3) * 4;
 
 /** Bound retained base64 before JSON serialization or another model call. */
 export function chatImageBudget() {
@@ -40,11 +46,8 @@ export function chatImage(item: { mimeType?: unknown; data?: unknown }): ChatIma
     : mimeType === "image/gif" ? bytes.length >= 13 && ["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6))
     : bytes.length >= 16 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP";
   if (bytes.length > IMAGE_BYTES || bytes.toString("base64") !== data || !matches) throw new Error("Image bytes do not match the declared MIME type");
-  return { type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } };
+  return { type: "image_url", image_url: { url: urlPrefix(mimeType) + data } };
 }
-
-// Gemini, the one engine sent clips, names QuickTime video/mov.
-const VIDEO_MIME: Readonly<Record<TurnVideoInput["mime"], string>> = { "video/mp4": "video/mp4", "video/webm": "video/webm", "video/quicktime": "video/mov" };
 
 /** Stands in for a clip removed from disk after it was attached, so the rest of the turn still goes. */
 export const UNREADABLE_CLIP_NOTE = "[An attached video could no longer be read and was left out. Tell the person to attach it again.]";
@@ -64,7 +67,7 @@ export function chatUserContent(turn: SendTurnInput): string | ChatContentPart[]
       parts.push({ type: "text", text: UNREADABLE_CLIP_NOTE });
       continue;
     }
-    const part: ChatImagePart = { type: "image_url", image_url: { url: `data:${VIDEO_MIME[video.mime]};base64,${data}` } };
+    const part: ChatImagePart = { type: "image_url", image_url: { url: urlPrefix(video.mime) + data } };
     budget([part]);
     parts.push(part);
   }
