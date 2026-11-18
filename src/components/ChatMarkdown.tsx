@@ -1,5 +1,5 @@
 // Security: model output never reaches the DOM as raw HTML (no rehype-raw); Shiki's output is generator-escaped.
-import { createContext, Fragment, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, Fragment, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -11,7 +11,8 @@ import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
 import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
-import { closedFence, openFence, splitMarkdownBlocks } from "@/lib/markdown-stream-blocks";
+import { closedFence, openFence, splitMarkdownBlocks, splitStreamingBlock, type StreamPieces } from "@/lib/markdown-stream-blocks";
+import { stitchPieces } from "./markdown-pieces";
 import { StreamingReplyContext } from "@/state/live-reply";
 
 import { parseFenceInfo } from "../lib/code-block";
@@ -478,7 +479,10 @@ function escapeLiteralDollars(text: string): string {
   return escaped;
 }
 
+const MATH_MARKER = /\$|\\[([]/;
+
 export function normalizeMathDelimiters(text: string, imageOffsets?: Map<number, number>): string {
+  if (!MATH_MARKER.test(text)) return text;
   const protectedCode: Array<{ value: string; sourceOffset: number }> = [];
   const protect = (value: string, sourceOffset: number): string => {
     const token = `\u0000OMB_CODE_${protectedCode.length}\u0000`;
@@ -804,16 +808,21 @@ interface MarkdownPart {
   finished: boolean;
   /** A code fence still being written, drawn without parsing. */
   fence?: { lang: string; wrap: boolean; code: string };
+  /** A list or table still being written, drawn item by item or row by row. */
+  pieces?: StreamPieces;
 }
 
 /** A finished message is one part. A streaming one is its blocks: the finished ones are parsed once and kept, and only
  * the last is parsed again as text arrives. */
 function markdownParts(text: string, streaming: boolean): MarkdownPart[] {
   if (!streaming) return [{ text, ...normalizeMessageMarkdown(text), finished: true }];
-  const blocks = splitMarkdownBlocks(text) ?? [text];
+  const split = splitMarkdownBlocks(text);
+  const blocks = split ?? [text];
   return blocks.map((block, index): MarkdownPart => {
     if (index < blocks.length - 1) return { text: block, ...normalizeMessageMarkdown(block), finished: true };
     const fence = openFence(block);
+    const pieces = split && !fence ? splitStreamingBlock(block) : null;
+    if (pieces) return { text: block, source: block, finished: false, pieces };
     if (!fence) return { text: block, ...normalizeMarkdown(block), finished: false };
     const [info = "", ...meta] = fence.info.split(/\s+/);
     return { text: block, source: block, finished: false, fence: { ...parseFenceInfo(info, meta.join(" ")), code: fence.code } };
@@ -849,18 +858,33 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   }, [needsMath]);
   const mathPlugin = needsMath && katexReady ? katexPlugin : null;
   const linksThreads = threads.length > 0;
-  const draw = ({ text: partText, source, finished }: MarkdownPart) => {
-    const mentions = source.includes("@");
-    const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
-    // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
-    const render = () => {
-      const remarkPlugins = [...BASE_REMARK_PLUGINS];
-      if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
-      if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
-      return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
-    };
+  const variantOf = (source: string) => `${mathPlugin ? "math" : ""}\u0003${source.includes("@") ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
+  // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
+  const render = (source: string) => {
+    const remarkPlugins = [...BASE_REMARK_PLUGINS];
+    if (source.includes("@")) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
+    if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
+    return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
+  };
+  const draw = ({ text: partText, source, finished }: Pick<MarkdownPart, "text" | "source" | "finished">) =>
     // Streamed text grows each render; keeping its drawing would only fill the cache with prefixes.
-    return finished ? markdownCache.render(partText, variant, render) : <StreamSourceContext value={source}>{render()}</StreamSourceContext>;
+    finished ? markdownCache.render(partText, variantOf(source), () => render(source)) : <StreamSourceContext value={source}>{render(source)}</StreamSourceContext>;
+  // A growing list or table's items and rows, kept while they are drawn.
+  const pieceDrawings = useRef(new Map<string, ReactElement>());
+  const drawPieces = (part: MarkdownPart & { pieces: StreamPieces }) => {
+    const { kind, head, lead, pieces } = part.pieces;
+    const kept = new Map<string, ReactElement>();
+    const sources = pieces.map((piece) => lead + piece);
+    const drawn = sources.map((source) => {
+      const key = `${variantOf(source)}\u0004${source}`;
+      const element = kept.get(key) ?? pieceDrawings.current.get(key) ?? render(source);
+      kept.set(key, element);
+      return element;
+    });
+    pieceDrawings.current = kept;
+    const stitched = stitchPieces(kind, drawn, (children, index) => <StreamSourceContext key={index} value={sources[index]!}>{children}</StreamSourceContext>);
+    if (!stitched) return draw({ text: part.text, ...normalizeMarkdown(part.text), finished: false });
+    return head ? <>{draw({ text: head, ...normalizeMessageMarkdown(head), finished: true })}{"\n"}{stitched}</> : stitched;
   };
   // A message still streaming has no saved files to fetch yet.
   const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals };
@@ -869,7 +893,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
       <div data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
         {parts.map((part, index) => (
           // The whole text's tree puts a line break between its top-level blocks; the parts keep it.
-          <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <CodeBlock code={part.fence.code} lang={part.fence.lang} initialWrap={part.fence.wrap} open /> : draw(part)}</Fragment>
+          <Fragment key={index}>{index > 0 && "\n"}{part.fence ? <CodeBlock code={part.fence.code} lang={part.fence.lang} initialWrap={part.fence.wrap} open /> : part.pieces ? drawPieces({ ...part, pieces: part.pieces }) : draw(part)}</Fragment>
         ))}
       </div>
     </MessageScopeContext.Provider>

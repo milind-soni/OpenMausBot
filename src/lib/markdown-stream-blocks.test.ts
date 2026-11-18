@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { closedFence, openFence, splitMarkdownBlocks } from "./markdown-stream-blocks";
+import { closedFence, openFence, splitMarkdownBlocks, splitStreamingBlock } from "./markdown-stream-blocks";
 
 describe("splitting streamed Markdown into blocks", () => {
   it("cuts at blank lines that close every block, and the pieces join back to the text", () => {
@@ -33,13 +33,56 @@ describe("splitting streamed Markdown into blocks", () => {
   it("falls back to the whole text when syntax ties blocks together", () => {
     for (const text of [
       "See [the docs][1].\n\n[1]: https://example.com",
-      "A claim.[^1]\n\n[^1]: The source.",
-      "<details>\n\nhidden\n\n</details>",
-      "$$\nx^2\n\n$$",
+      "<!-- note\n\nstill a comment -->",
+      "<pre>\n\nkept\n\n</pre>",
+      "Total $$$5",
+      "An odd $$ pair\n\nx $$",
       "\\[\na\n\\]",
       "::: note\n\nbody\n:::",
       "Line\r\n\r\nother",
     ]) expect(splitMarkdownBlocks(text), text).toBeNull();
+  });
+
+  it("cuts around HTML that a blank line ends", () => {
+    expect(splitMarkdownBlocks("<details>\n\nhidden\n\n</details>")).toEqual(["<details>\n\n", "hidden\n\n", "</details>"]);
+  });
+
+  it("never cuts inside display math, and cuts around it and around pairs on one line", () => {
+    expect(splitMarkdownBlocks("Intro\n\n$$\nx^2\n\n= y\n$$\n\nAnd $$a$$ b\n\nEnd")).toEqual(["Intro\n\n", "$$\nx^2\n\n= y\n$$\n\n", "And $$a$$ b\n\n", "End"]);
+  });
+
+  it("keeps everything from a reply's first footnote in one block", () => {
+    expect(splitMarkdownBlocks("Intro\n\nA claim.[^1]\n\nMore\n\n[^1]: The source.")).toEqual(["Intro\n\n", "A claim.[^1]\n\nMore\n\n[^1]: The source."]);
+  });
+});
+
+describe("cutting a growing list or table", () => {
+  it("cuts a tight list between its column-0 items, after the text above it", () => {
+    expect(splitStreamingBlock("Plan:\n- one\n  - nested\n- two\n- th")).toEqual({ kind: "list", head: "Plan:\n", lead: "", pieces: ["- one\n  - nested", "- two", "- th"] });
+    expect(splitStreamingBlock("Steps:\n\n1. one\n2. two\n3.")).toEqual({ kind: "list", head: "Steps:\n\n", lead: "", pieces: ["1. one", "2. two\n3."] });
+  });
+
+  it("cuts a table between its rows, each parsed after the header and delimiter", () => {
+    expect(splitStreamingBlock("| a | b |\n| - | :-: |\n| 1 | 2 |\n| 3\n")).toEqual({ kind: "table", head: "", lead: "| a | b |\n| - | :-: |\n", pieces: ["| 1 | 2 |", "| 3"] });
+  });
+
+  it("leaves whole any shape it cannot prove", () => {
+    for (const text of [
+      "- one\n\n- two",
+      "- one\nlazy\n- two",
+      "- one\n* two",
+      "- one\n- - -",
+      "- one\n# Heading",
+      "Intro\n2. two\n3. three",
+      "- costs $5\n- and $10",
+      "- a claim[^1]\n- b",
+      "- ![image](a.png)\n- b",
+      "| a | b |\n| - | - |\n| 1 | 2 |\nbar",
+      "| a | b |\n| - | - |",
+      "Intro\n| a | b |\n| - | - |\n| 1 | 2 |",
+      "- one",
+      "Just prose\nover two lines",
+    ]) expect(splitStreamingBlock(text), text).toBeNull();
   });
 });
 
