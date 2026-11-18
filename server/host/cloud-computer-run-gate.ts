@@ -18,7 +18,8 @@ const MAX_ROUTINES = 500;
 const ENDED = new Set<CloudComputerRecoveryState>(["needs-person", "unreachable", "capped"]);
 const SLEEPING = new Set(["archived", "archiving"]);
 
-interface RunLike { routineId: string; botId: string; target: string; runOn?: string }
+/** `wakeRetries`: how often the run was queued again because its computer did not wake (routine-wake-retry.ts). */
+interface RunLike { routineId: string; botId: string; target: string; runOn?: string; wakeRetries?: number }
 interface Machine { id: string; state: string }
 
 export interface RunComputerGateDeps {
@@ -66,13 +67,17 @@ export function createRunComputerGate(deps: RunComputerGateDeps) {
   const startedFull = new Set<string>();
   const fullThreads = new Set<string>();
 
-  async function ready(owner: string, routineId: string, signal?: AbortSignal): Promise<string | null> {
+  async function ready(owner: string, routineId: string, retrying: boolean, signal?: AbortSignal): Promise<string | null> {
     const began = now();
-    let machine = await deps.find(owner).catch(() => null);
+    // A lookup that fails lets the run start, and its turn reports the trouble; but a run tried again because its computer
+    // did not wake already found it asleep, and a lookup the provider does not answer now is the same outage.
+    const found = await deps.find(owner).then((machine) => machine, () => retrying ? RUN_COMPUTER_LINES.noWake : null);
+    if (typeof found === "string") return found;
+    let machine = found;
     if (!machine || signal?.aborted) return null;
     let woke = false;
     if (SLEEPING.has(machine.state)) {
-      const woken = await deps.wake(owner, WAKE_BUDGET_MS).then((found) => found ?? RUN_COMPUTER_LINES.noWake,
+      const woken = await deps.wake(owner, WAKE_BUDGET_MS).then((up) => up ?? RUN_COMPUTER_LINES.noWake,
         (error: unknown) => refusedWake(error) ? RUN_COMPUTER_LINES.wakeRefused : RUN_COMPUTER_LINES.noWake);
       if (typeof woken === "string") return woken;
       machine = woken;
@@ -108,7 +113,7 @@ export function createRunComputerGate(deps: RunComputerGateDeps) {
       const owner = deps.computerOf(run);
       if (!owner) return null;
       startedFull.delete(run.routineId);
-      return ready(owner, run.routineId, signal).then((reason) => {
+      return ready(owner, run.routineId, (run.wakeRetries ?? 0) > 0, signal).then((reason) => {
         if (reason) deps.log(`routine ${run.routineId}: its cloud computer (${owner}) was not ready: ${reason}`);
         return reason;
       }, (error) => {

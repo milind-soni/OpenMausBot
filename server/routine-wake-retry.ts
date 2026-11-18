@@ -46,8 +46,10 @@ export function wakeRetry(run: Run, reason: string, routine: Pick<Routine, "enab
   return line.text;
 }
 
-/** A run queued again by wakeRetry, which gives way when its routine's next occurrence comes due. */
-export const waitsToWakeAgain = (run: Pick<RoutineRun, "status"> & WakeRetryMark): boolean => run.status === "queued" && (run.wakeRetries ?? 0) > 0;
+/** A run queued again by wakeRetry and not started since, which gives way when its routine's next occurrence comes due. A
+ * run that started and was queued again for another reason (a restart, a failure's one retry) keeps its own rules. */
+export const waitsToWakeAgain = (run: Pick<RoutineRun, "status" | "startedAt" | "retried"> & WakeRetryMark): boolean =>
+  run.status === "queued" && (run.wakeRetries ?? 0) > 0 && run.startedAt == null && run.retried === undefined;
 
 /** `wakeRetries` as routines.json may hold it: a small whole count, or nothing. */
 export const loadWakeRetries = (value: unknown): number | undefined =>

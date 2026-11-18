@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RUN_COMPUTER_LINES } from "../shared/cloud-computer-recovery.ts";
 import { ROUTINE_SUPERSEDED } from "./routine-execution.ts";
-import { WAKE_RETRY_AFTER_MS, wakeRetry } from "./routine-wake-retry.ts";
+import { WAKE_RETRY_AFTER_MS, waitsToWakeAgain, wakeRetry } from "./routine-wake-retry.ts";
 import { RoutineManager, type RoutineManagerOptions } from "./routines.ts";
 
 const MINUTE = 60_000;
@@ -16,7 +16,6 @@ afterEach(() => {
   for (const manager of managers.splice(0)) manager.close();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
-const settle = () => new Promise((resolve) => setTimeout(resolve, 5));
 
 /** A cloud bot's routine whose computer answers each wake from `wakes`, in order: a reason it did not start, or null. */
 function harness(wakes: Array<string | null | "hang">, everyMinutes = 60) {
@@ -39,12 +38,17 @@ function harness(wakes: Array<string | null | "hang">, everyMinutes = 60) {
     world, options,
     manager: new RoutineManager(options),
     restart() { h.manager.close(); h.manager = new RoutineManager(options); managers.push(h.manager); return h.manager; },
+    /** Until the computer's answer is in and the pass it set off has ended. */
+    async idle() {
+      do await new Promise((resolve) => setImmediate(resolve)); while (h.manager.isTicking);
+    },
     /** A scheduler pass at `at`, then one more once the computer's answer is in. */
     async passAt(at: number) {
       world.at = at;
       await h.manager.tick();
-      await settle();
+      await h.idle();
       await h.manager.tick();
+      await h.idle();
     },
     runs: () => h.manager.listRuns(),
   };
@@ -91,7 +95,6 @@ describe("a scheduled run whose cloud computer did not wake", () => {
     const h = harness([RUN_COMPUTER_LINES.noWake, null]);
     await h.passAt(h.due);
     const [before] = h.runs();
-    await settle();
     h.restart();
     expect(h.runs()).toMatchObject([{ id: before!.id, status: "queued", retryAt: before!.retryAt, wakeRetries: 1 }]);
     await h.passAt(before!.retryAt!);
@@ -164,6 +167,13 @@ describe("whether a run that did not wake is tried again", () => {
     const late = run();
     expect(wakeRetry(late, RUN_COMPUTER_LINES.noWake, hourly, START + 30 * MINUTE)).toBe(true);
     expect(late).toMatchObject({ retryAt: START + 32 * MINUTE, wakeRetries: 1 });
+  });
+
+  it("gives way to the next occurrence only while the run has not started since", () => {
+    expect(waitsToWakeAgain({ status: "queued", wakeRetries: 1 })).toBe(true);
+    expect(waitsToWakeAgain({ status: "queued" })).toBe(false);
+    expect(waitsToWakeAgain({ status: "queued", wakeRetries: 1, startedAt: START + 5 * MINUTE, retried: "restarted" })).toBe(false);
+    expect(waitsToWakeAgain({ status: "running", wakeRetries: 1, startedAt: START + 5 * MINUTE })).toBe(false);
   });
 
   it("ends a once-only routine's tries without promising a next run", () => {
