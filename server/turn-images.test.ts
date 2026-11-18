@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { chatUserContent } from "./drivers/chat-images.ts";
-import { extractReplayImages, extractSteerImages, extractTurnImages, nativeClips, REPLAYED_IMAGE_NOTE, turnMedia } from "./turn-images.ts";
+import { extractReplayImages, extractSteerImages, extractTurnImages, nativeClips, REPLAYED_IMAGE_NOTE, turnMedia, videoFramesWithin } from "./turn-images.ts";
 import { videoFrameImages } from "./turn-video.ts";
 
 vi.mock("./turn-video.ts", async (original) => {
@@ -319,7 +319,8 @@ describe("native video clips", () => {
       const fits = [png(root, "c.png", 6 * MiB - 30), png(root, "d.png", 6 * MiB - 30)];
       const videos = nativeClips([video], gemini, fits);
       expect(videos).toEqual([video]);
-      expect(() => chatUserContent({ text: "look", images: fits, videos } as Parameters<typeof chatUserContent>[0])).not.toThrow();
+      const content = chatUserContent({ text: "look", images: fits, videos } as Parameters<typeof chatUserContent>[0]);
+      expect(content).toContainEqual({ type: "image_url", image_url: { url: `data:video/mp4;base64,${Buffer.alloc(12 * MiB).toString("base64")}` } });
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
@@ -345,6 +346,27 @@ describe("native video clips", () => {
       expect(media.videos).toEqual([clip(12 * MiB)]);
       expect(media.images).toEqual([image(8 * MiB), frame(2 * MiB), frame(MiB)]);
       expect((await turnMedia(lines, { nativeImageInput: true })).images).toEqual([...frames, image(8 * MiB), ...frames]);
+    } finally { sampler.mockImplementation(actual); }
+  });
+
+  it("samples no frames from a clip that is sent, even when its record is a copy", async () => {
+    const sampler = vi.mocked(videoFrameImages), actual = sampler.getMockImplementation()!;
+    sampler.mockImplementation(async (videos) => videos?.length ? [{ path: "/tmp/f.jpg", mime: "image/jpeg", bytes: 1, source: "video-frame" }] : []);
+    try {
+      expect(await videoFramesWithin(0, [clip(MiB)], [{ ...clip(MiB) }])).toEqual([]);
+    } finally { sampler.mockImplementation(actual); }
+  });
+
+  it("keeps a burst's frames and pictures within the turn's picture count, counting later lines' pictures", async () => {
+    const frame = (n: number) => ({ path: `/tmp/frame-${n}.jpg`, mime: "image/jpeg" as const, bytes: 1, source: "video-frame" as const });
+    const frames = Array.from({ length: 10 }, (_, n) => frame(n));
+    const sampler = vi.mocked(videoFrameImages), actual = sampler.getMockImplementation()!;
+    sampler.mockImplementation(async (videos, limit = Infinity) => videos?.length ? frames.slice(0, Math.max(0, limit)) : []);
+    try {
+      const pictures = Array.from({ length: 6 }, (_, n) => image(n + 1));
+      const media = await turnMedia([{ images: [], videos: [clip(20 * MiB)] }, { images: pictures, videos: [] }], gemini);
+      expect(media.images).toHaveLength(10);
+      expect(media.images.slice(-6)).toEqual(pictures);
     } finally { sampler.mockImplementation(actual); }
   });
 

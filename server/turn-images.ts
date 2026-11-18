@@ -194,7 +194,8 @@ export function nativeClips(videos: readonly TurnVideoInput[], engine: Pick<Prov
  *  beside a sent clip, only the frames that still fit the request's media budget with the clips and the turn's other pictures (`alongside`). */
 export async function videoFramesWithin(earlier: number, videos: readonly TurnVideoInput[], sent: readonly TurnVideoInput[] = [],
   alongside: readonly TurnImageInput[] = []): Promise<TurnImageInput[]> {
-  const frames = await videoFrameImages(videos.filter((video) => !sent.includes(video)), TURN_IMAGE_MAX_COUNT - earlier);
+  const sentPaths = new Set(sent.map((clip) => clip.path));
+  const frames = await videoFrameImages(videos.filter((video) => !sentPaths.has(video.path)), TURN_IMAGE_MAX_COUNT - earlier);
   if (!sent.length) return frames;
   let room = CHAT_IMAGE_BUDGET - mediaUrlBytes([...sent, ...alongside]);
   return frames.filter((frame) => {
@@ -205,14 +206,14 @@ export async function videoFramesWithin(earlier: number, videos: readonly TurnVi
   });
 }
 
-/** A burst's media: clips chosen once for all its lines against every line's pictures, so it fits one request, then each line's pictures and the frames of its clips not sent. */
+/** A burst's media: clips chosen once for all its lines against every line's pictures, then each line's pictures and the frames of its clips not sent. */
 export async function turnMedia(lines: readonly { images: readonly TurnImageInput[]; videos: readonly TurnVideoInput[] }[],
   engine: Pick<ProviderAdapter["capabilities"], "nativeImageInput" | "nativeVideoBytes">): Promise<{ images: TurnImageInput[]; videos: TurnVideoInput[] }> {
   const pictures = lines.flatMap((line) => line.images);
   const videos = nativeClips(lines.flatMap((line) => line.videos), engine, pictures);
   const images: TurnImageInput[] = [], frames: TurnImageInput[] = [];
   for (const line of lines) {
-    const sampled = await videoFramesWithin(images.length + line.images.length, line.videos, videos, [...pictures, ...frames]);
+    const sampled = await videoFramesWithin(pictures.length + frames.length, line.videos, videos, [...pictures, ...frames]);
     frames.push(...sampled);
     images.push(...line.images, ...sampled);
   }
