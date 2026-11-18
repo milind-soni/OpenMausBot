@@ -47,6 +47,8 @@ export interface PlanWindows {
   weekly: PlanWindow;
   extra: PlanExtra[];
   models: PlanModelUsage[];
+  /** Codex only: the ChatGPT account has credits to spend past a full window, or has no limit. */
+  codexCredits?: true;
 }
 
 export interface PlanProviderRow {
@@ -60,6 +62,7 @@ export interface PlanProviderRow {
   weekly: PlanWindow;
   extra: PlanExtra[];
   models: PlanModelUsage[];
+  codexCredits?: true;
 }
 
 export interface PlanUsageReport {
@@ -203,7 +206,23 @@ export function parseCodexUsage(body: unknown): PlanWindows {
   const extra = [...assigned.extra];
   if (root) collectCodexNamedLimits(root, models, extra);
   sortModelWindows(models);
-  return { ...assigned, extra, models, plan: planLabel(root?.plan_type ?? root?.plan) };
+  return { ...assigned, extra, models, plan: planLabel(root?.plan_type ?? root?.plan), ...(codexHasCredits(root?.credits) ? { codexCredits: true as const } : {}) };
+}
+
+/** The ChatGPT usage endpoint's `credits` object: `has_credits`, `unlimited` and a `balance` string. Anything else
+ * reads as no credits, so a full window keeps holding. */
+function codexHasCredits(value: unknown): boolean {
+  const credits = asRecord(value);
+  if (!credits) return false;
+  if (credits.unlimited === true) return true;
+  if (credits.has_credits !== true) return false;
+  const balance = typeof credits.balance === "string" ? Number(credits.balance) : credits.balance;
+  return !(typeof balance === "number" && balance <= 0);
+}
+
+/** Whether Codex's ChatGPT credits are on and not used up: sends then go on past a full window and are paid from them. */
+export function codexHasCreditRoom(row: Pick<PlanProviderRow, "driver" | "codexCredits">): boolean {
+  return row.driver === "codex" && row.codexCredits === true;
 }
 
 export function parseGrokUsage(credits: unknown, billing?: unknown, settings?: unknown): PlanWindows {
@@ -914,6 +933,7 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
     weekly: windows.weekly,
     extra: windows.extra,
     models: windows.models,
+    ...(windows.codexCredits ? { codexCredits: true as const } : {}),
   };
 }
 
