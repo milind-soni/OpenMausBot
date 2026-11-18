@@ -98,7 +98,7 @@ it("saving and replacing a workspace key reaches an existing bot's next request 
   }
 });
 
-/** #6436: an OpenAI-compatible model with no listed efforts offers the manual levels. */
+/** An OpenAI-compatible model with no listed efforts offers the manual levels. */
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"].map((id) => ({ id, label: id }));
 
 it("switching the workspace endpoint moves discovery and existing chats without changing a private connection", async () => {
