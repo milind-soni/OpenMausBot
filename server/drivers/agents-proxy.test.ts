@@ -49,6 +49,7 @@ let assignmentStatusCode = 200;
 let lastThreadBody: any = null;
 let threadCalls = 0;
 let threadsList: unknown = { threads: [] };
+let lastThreadsUrl = "";
 let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
 let computerRequests: { method: string; url: string; body: unknown }[] = [];
 let computerResponse: unknown = { current: "local", available: ["local", "vm"] };
@@ -269,6 +270,7 @@ beforeAll(async () => {
       return;
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/threads?")) {
+      lastThreadsUrl = req.url;
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(threadsList));
       return;
@@ -1337,6 +1339,24 @@ describe("agents-proxy MCP surface", () => {
       expect((await callTool("list_threads", {})).result.content[0].text).toContain(`#Export CSV (on @Ops, queued: ${waiting}) [thread id: t-q] [delegation id: asg-q]`);
     } finally {
       assignmentStatusResponse = DONE_ASSIGNMENT;
+      threadsList = { threads: [] };
+    }
+  });
+
+  it("list_threads names the next page when more threads are left, and asks for the page it is given", async () => {
+    const row = { threadId: "t-1", botId: "bot-a", botName: "A", title: "Event 1", state: "idle", own: true, unread: false, openedAt: 1 };
+    threadsList = { threads: [row], total: 101, page: 1, pageSize: 100 };
+    try {
+      expect((await callTool("list_threads", {})).result.content[0].text).toContain("Showing 1-1 of 101. For older ones call list_threads with page 2.");
+      threadsList = { threads: [row], total: 101, page: 2, pageSize: 100 };
+      const last = (await callTool("list_threads", { page: 2 })).result.content[0].text;
+      expect(new URL(lastThreadsUrl, "http://x").searchParams.get("page")).toBe("2");
+      expect(last).toContain("#Event 1");
+      expect(last).not.toContain("Showing");
+      threadsList = { threads: [], total: 101, page: 3, pageSize: 100 };
+      expect((await callTool("list_threads", { page: 3 })).result.content[0].text).toBe("No threads on page 3: there are 101, 100 to a page.");
+      expect((await callTool("list_threads", { page: 0 })).result.content[0].text).toContain("was not run");
+    } finally {
       threadsList = { threads: [] };
     }
   });
