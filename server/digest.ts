@@ -18,6 +18,14 @@ export function toolEvidence(activities: readonly Message[], turnId: string): bo
   return rows.length > 0 && rows.every((m) => m.tool?.fullResult === true);
 }
 
+/** A turn's digest marked "preview" that full results arriving after it have since completed; null when none did. */
+export function digestCompletedLate(activities: readonly Message[], turnId: string): { id: string; digest: TurnDigest; text: string } | null {
+  const message = activities.findLast((m) => m.kind === "digest" && m.turnId === turnId && m.digest?.hookCoverage === "preview");
+  if (!message?.digest || !toolEvidence(activities, turnId)) return null;
+  const digest: TurnDigest = { ...message.digest, hookCoverage: "full" };
+  return { id: message.id, digest, text: renderDigest(digest) };
+}
+
 export const MAX_TOOLS = 8;
 export const MAX_FILES = 20;
 export const MAX_MEMORY = 20;

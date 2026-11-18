@@ -899,8 +899,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, lo
       if (lent?.enabled !== true || !Array.isArray(lent.folders)) return { off: true };
       return { lendingId: lent.id, folders: lent.folders.map(({ id, path: where, name, write }) => ({ id, path: where, name, write: write === true })), protectedPaths: protectedRoots, ...(paused ? { paused: true } : {}) };
     },
-    /** Lending to My Cloud is running, so it calls My Cloud whenever it is awake. */
-    lendingToCloud: () => [...running.keys()].some(id => Boolean(records[id]?.cloud)),
+    /** Lending to My Cloud is running, so it calls My Cloud whenever it is awake. `lendingSomewhere`: anything is lent now. */
+    lendingToCloud: () => [...running.keys()].some(id => Boolean(records[id]?.cloud)), lendingSomewhere: () => summary().lending.length > 0,
     /** A server is using this computer now: a job running on it, or its browsing going through this computer. */
     busy: () => summary().busy !== null,
     saveCloud,

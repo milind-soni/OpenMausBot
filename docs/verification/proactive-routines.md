@@ -38,6 +38,10 @@ Expected:
   dismissed sender as records.
 - A Gmail error is a failed check, never "nothing new": the routine shows
   `checkTrouble` and the brief says to reconnect Gmail.
+- A MausBot limited to some Gmail accounts names one of them in every Gmail
+  read. While the service's account list fails after the connected check, the
+  reads name the first allowed account; once it answers again, the next check
+  asks it afresh and reads the allowed account that is active.
 - A routine of the person's own runs as before: at the bot's own level, as a
   line in the chat.
 - In a read-and-draft run, the fake CLI tries to send, post to another app,

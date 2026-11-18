@@ -161,7 +161,10 @@ const SECRET_NAMES_SHOWN = 40;
 const SECRET_NAME_SHOWN_MAX = 80;
 
 /** Names only, never a value. */
-export function savedSecretsPrompt(secrets: ReadonlyArray<{ name: string; refOnly?: true }>): string {
+const REFERENCE_FORMS: Record<string, string> = { "1password": "a 1Password reference (op://vault/item/field)", bitwarden: "a Bitwarden reference (bw://item/field)" };
+
+/** `references`: the password managers whose secrets the bot may use, so a reference a person gives works as a label too. */
+export function savedSecretsPrompt(secrets: ReadonlyArray<{ name: string; refOnly?: true }>, references: readonly string[] = []): string {
   const names = new Map<string, string>();
   for (const secret of [...secrets].sort((a, b) => Number(Boolean(a.refOnly)) - Number(Boolean(b.refOnly)))) {
     const name = secret.name.replace(/[\p{Cc}\s]+/gu, " ").trim().slice(0, SECRET_NAME_SHOWN_MAX);
@@ -171,7 +174,9 @@ export function savedSecretsPrompt(secrets: ReadonlyArray<{ name: string; refOnl
   if (!names.size) return "";
   const shown = [...names.values()].slice(0, SECRET_NAMES_SHOWN);
   const more = names.size > shown.length ? ` and ${names.size - shown.length} more` : "";
-  return ` Secrets in the Vault you may use: ${shown.join(", ")}${more}. To use one, call request_credential with its name as the label: OpenMausBot hands it over at once with no card, and you never see the value.`;
+  const forms = references.flatMap((id) => REFERENCE_FORMS[id] ?? []);
+  const reference = forms.length ? ` ${forms.join(" or ").replace(/^a/u, "A")} the person gives you works as the label too.` : "";
+  return ` Secrets in the Vault you may use: ${shown.join(", ")}${more}. To use one, call request_credential with its name as the label: OpenMausBot hands it over at once with no card, and you never see the value.${reference}`;
 }
 
 export function computerPrompt(kind: ComputerPromptKind | null): string {
@@ -267,10 +272,10 @@ export function customMcpPrompt(names: string[], off: ReadonlyArray<{ name: stri
     : ` The MCP server "${name}" is off for you because it doesn't start for you (${error}); it is tried again on its own.`)).join("");
   return mounted + left;
 }
-/** At Full access ("Just do it") nothing a bot can settle waits on the person; the cheapest way to find something out
+/** At Full access nothing a bot can settle waits on the person; the cheapest way to find something out
  * comes first, and the person last. */
 export const JUST_DO_IT_PROMPT =
-  " Just do it is on: do not stop to ask the person to confirm a step or choose between options. Find out from what you know, a connected app, the web, a signed-in browser, then the computer; take sensible defaults for the rest, carry on, and say in one line what you chose. Ask only for what only they can do: a sign-in, payment, secret or account of theirs. If they ask (here or in your instructions) that you check with them first, ask clarifying questions or not assume, do that instead: ask everything in one message and wait for their answers before starting.";
+  " Full access is on: do not stop to ask the person to confirm a step or choose between options. Find out from what you know, a connected app, the web, a signed-in browser, then the computer; take sensible defaults for the rest, carry on, and say in one line what you chose. Ask only for what only they can do: a sign-in, payment, secret or account of theirs. If they ask (here or in your instructions) that you check with them first, ask clarifying questions or not assume, do that instead: ask everything in one message and wait for their answers before starting.";
 
 export const CREDENTIAL_PROMPT =
   " Missing a supported API key the task needs? request_credential makes a secure credential request (a 1Password service account token too: credential_id onePasswordToken). Before requesting a computer-provider key, check configured targets with select_computer (an existing self-hosted VPS needs no Boat credentials); never request another provider's key just because a task mentions cloud. Any other secret (Stripe or npm token, webhook signing secret): give request_credential a label, reason and delivery (ref for mcp_server, file for your own commands). mcp_server sets up MCP servers in chat: suggest one when a task needs a service you can't reach; add, turn on or change one once the person asks or agrees. The secure card shows in the desktop app or a freshly QR-paired mobile app; never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";

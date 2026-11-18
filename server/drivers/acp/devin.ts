@@ -14,6 +14,7 @@ import { join } from "node:path";
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { userHome } from "../../env-path.ts";
 import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
+import type { AcpPromptSteer } from "./steer.ts";
 import { discoverAcpModels, type AcpDiscoveryOptions } from "./custom-model-catalog.ts";
 
 /** Leaves the session on the model the person set in Devin itself. */
@@ -43,8 +44,9 @@ export function devinSignedIn(env: Record<string, string | undefined>, platform:
 }
 
 /** No exit grace: devin 3000.12.57 exits on EOF but orphans the MCP servers it started from its own config, which then
- * hold the discovery folder for seconds where the tree kill would have stopped them. */
-const DISCOVERY: AcpDiscoveryOptions = { passthrough: AGENT_DEFAULT };
+ * hold the discovery folder for seconds where the tree kill would have stopped them. A Devin Pro account advertises
+ * 145 models, past discovery's default cap of 128; above 128 the per-model variant switches are skipped, as for OMP. */
+const DISCOVERY: AcpDiscoveryOptions = { passthrough: AGENT_DEFAULT, variantLimit: 128, maxModels: 4096 };
 
 export function resolveDevinModels(env: Record<string, string | undefined>, config: Pick<AcpConfig, "cli">): Promise<ModelCatalog> {
   return discoverAcpModels(env, config.cli, SPAWN_ARGS, DISCOVERY);
@@ -75,6 +77,18 @@ export function describeDevinAccountError(code: AccountErrorCode): string {
   return code === "invalid_credentials" ? LOGIN_NOTE
     : "Devin refused this request for the signed-in account. Check its Devin plan and credits, then try again.";
 }
+
+/** devin 3000.12.57 reports `agentInfo.version` "0.0.0-dev", so only `agentCapabilities._meta["cognition.ai/midTurnPrompts"]`
+ * tells that a second session/prompt joins the running turn. Both prompts then end with `end_turn`, the same usage and the same
+ * `_meta["cognition.ai/userMessageId"]`. */
+export const DEVIN_STEER: AcpPromptSteer = {
+  kind: "prompt",
+  capability: "cognition.ai/midTurnPrompts",
+  run: (response) => {
+    const run = (response as { _meta?: Record<string, unknown> } | null)?._meta?.["cognition.ai/userMessageId"];
+    return typeof run === "string" ? run : undefined;
+  },
+};
 
 const SUPPORT: AcpSupport = {
   driverKind: "devinAgent",
@@ -108,6 +122,7 @@ const SUPPORT: AcpSupport = {
   accountErrorText: (code) => code === "invalid_credentials" ? undefined : { key: "chat.notice.devinAccountRefused" },
   permissionRequest: devinPermissionRequest,
   sessionScopedApproval: true,
+  steer: DEVIN_STEER,
   async configureSession({ request, sessionId, config }) {
     const value = config.fullAuto ? DEVIN_MODE.full : DEVIN_MODE.ask;
     let confirmed: unknown;

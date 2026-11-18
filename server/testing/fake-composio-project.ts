@@ -45,7 +45,7 @@ export async function startFakeComposioProject(apiKey: string): Promise<FakeComp
   let origin = "";
   const session = (id: string) => ({
     session_id: id, mcp: { type: "http", url: `${origin}/mcp/${id}` },
-    config: { user_id: fake.sessions.get(id), multi_account: { enable: true, max_accounts_per_toolkit: 5, require_explicit_selection: true } },
+    config: { user_id: fake.sessions.get(id), multi_account: { enable: true, max_accounts_per_toolkit: 10, require_explicit_selection: true } },
   });
 
   const server = createServer(async (req, res) => {

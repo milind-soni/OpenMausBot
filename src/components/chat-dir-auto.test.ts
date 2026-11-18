@@ -27,7 +27,6 @@ describe("chat text follows the writer's direction", () => {
 
     const quotes = source("CitationUI.tsx").match(/<pre dir="auto"[^>]*>\{citation\.quote\}/g) ?? [];
     expect(quotes).toHaveLength(2);
-    const pins = [source("ChatPinnedBanner.tsx"), source("GroupView.tsx")].map((text) => text.includes('dir="auto" className="truncate text-[13px] text-ink-secondary"'));
-    expect(pins).toEqual([true, true]);
+    expectDirAuto("PinnedMessagesMenu.tsx", "{pin.text}");
   });
 });

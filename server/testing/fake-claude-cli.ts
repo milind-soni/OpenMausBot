@@ -15,6 +15,9 @@
 //   FAKE_CLAUDE_DUMP  path for the latest turn's {argv, env, cwd, prompt, systemPrompt, mcpConfig}
 //   FAKE_CLAUDE_ELICIT  JSON request body: a "hang" turn (or a failing FAKE_CLAUDE_TRANSIENTS launch) first asks it
 //     as control_request "elicit-1"
+//   FAKE_CLAUDE_CONTEXT_USAGE  JSON answered to a get_context_usage control_request; unset, the request is refused as
+//     unsupported, like any other control_request
+//   FAKE_CLAUDE_CONTEXT_USAGE_LATE  1: the first get_context_usage is answered only when the next control_request arrives
 //   FAKE_CLAUDE_CONTROL_LOG  JSON-lines file every control_response the host writes is appended to
 //   FAKE_CLAUDE_EXIT_AFTER_TURN  1: exit once the turn is answered, so later turns relaunch with --resume
 //   FAKE_CLAUDE_AUTH_AFTER_TURN  1: from the second turn, answer as not-logged-in; FAKE_CLAUDE_AUTH_AFTER_WORK  1: not-logged-in
@@ -48,6 +51,8 @@
 //   FAKE_CLAUDE_CONNECT_APPS  toolkits (gmail,slack): first call COMPOSIO_MANAGE_CONNECTIONS via `composio`
 //   FAKE_CLAUDE_HOOKS  1: run the --settings hooks like the CLI (PostToolUse per tool_result, PostToolUseFailure for
 //     an ok:false call with its additionalContext echoed into the reply, Stop at the end)
+//   FAKE_CLAUDE_HOOKS_AFTER_TURN_MS  with FAKE_CLAUDE_HOOKS: run each `async` hook this many ms after its turn's result,
+//     as the CLI does when a hook's start outlasts the model's last reply (unset: async hooks run in place, like the rest)
 //   FAKE_CLAUDE_COMPACT  1: from the second turn, play a compaction (PreCompact, compact_boundary, then SessionStart "compact")
 //   FAKE_CLAUDE_TURN_STATE  counter file keeping FAKE_CLAUDE_COMPACT's turn count across respawns
 //   FAKE_CLAUDE_CONTEXT_GROWTH  "<start>:<per turn>": a session starts at <start> tokens and each turn's work adds <per turn>,
@@ -96,6 +101,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { hookMatches, type FakeHookEvent } from "./claude-hook-matcher.ts";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 import { playStreamScript, streamScript } from "./stream-script.ts";
 
@@ -243,7 +249,7 @@ const replyForPrompt = (prompt: JsonValue): string[] | null => {
 };
 
 const argv = process.argv.slice(2);
-const settingsHooks: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string; args?: string[]; timeout?: number }> }>> = (() => {
+const settingsHooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ type?: string; command?: string; args?: string[]; timeout?: number; async?: boolean }> }>> = (() => {
   if (process.env.FAKE_CLAUDE_HOOKS !== "1") return {};
   const i = argv.indexOf("--settings");
   if (i === -1) return {};
@@ -254,21 +260,36 @@ const settingsHooks: Record<string, Array<{ hooks?: Array<{ type?: string; comma
     return {};
   }
 })();
-function runHooks(event: string, payload: Record<string, unknown>): string {
+const hooksAfterTurnMs = Number(process.env.FAKE_CLAUDE_HOOKS_AFTER_TURN_MS);
+const hooksAfterTurn: Array<() => Promise<unknown>> = [];
+let hookBatchesWaiting = 0;
+const runHooksAfterTurn = () => {
+  const due = hooksAfterTurn.splice(0);
+  if (!due.length) return;
+  hookBatchesWaiting += 1;
+  setTimeout(() => {
+    void Promise.all(due.map((run) => run())).then(() => {
+      hookBatchesWaiting -= 1;
+      finishIfDone();
+    });
+  }, hooksAfterTurnMs);
+};
+function runHooks(event: FakeHookEvent, payload: Record<string, unknown>): string {
   let stdout = "";
   for (const entry of settingsHooks[event] ?? []) {
+    if (!hookMatches(event, entry.matcher, payload)) continue;
     for (const hook of entry.hooks ?? []) {
       if (hook.type !== "command" || !hook.command) continue;
       // Like Claude Code: a hook with `args` starts `command` itself; otherwise `command` is a shell line.
-      const result = spawnSync(hook.command, hook.args ?? [], {
-        shell: !hook.args,
-        input: JSON.stringify({ hook_event_name: event, session_id: "fake-session", cwd: process.cwd(), ...payload }),
-        env: process.env,
-        timeout: ((hook.timeout ?? 5) + 1) * 1000,
-        stdio: ["pipe", "pipe", "pipe"],
-        encoding: "utf8",
-      });
-      stdout += result.stdout ?? "";
+      const input = JSON.stringify({ hook_event_name: event, session_id: "fake-session", cwd: process.cwd(), ...payload });
+      const options = { shell: !hook.args, env: process.env, timeout: ((hook.timeout ?? 5) + 1) * 1000 };
+      if (hook.async && hooksAfterTurnMs >= 0) {
+        hooksAfterTurn.push(() => new Promise((settled) => {
+          const child = spawn(hook.command!, hook.args ?? [], { ...options, stdio: ["pipe", "ignore", "ignore"] });
+          child.on("error", settled).on("close", settled);
+          child.stdin!.on("error", () => {}).end(input);
+        }));
+      } else stdout += spawnSync(hook.command, hook.args ?? [], { ...options, input, stdio: ["pipe", "pipe", "pipe"], encoding: "utf8" }).stdout ?? "";
     }
   }
   return stdout;
@@ -564,6 +585,7 @@ const tools = [...new Set([...(toolsFlag ? toolsFlag.split(",") : ["Bash", "Read
   ...(process.env.FAKE_CLAUDE_KEEP_BASH === "1" ? ["Bash"] : [])])];
 let launchFiles: Record<string, unknown> | null = null;
 let turnRunning = false;
+let lateContextAnswer: object | true | null = null;
 let steered: string[] = [];
 let steeredMessages: JsonValue[] = [];
 const replayUserMessages = argv.includes("--replay-user-messages");
@@ -643,7 +665,9 @@ const startLateTurn = (): boolean => {
 
 const finishIfDone = () => {
   if (turnRunning) return;
+  runHooksAfterTurn();
   if (startLateTurn()) return;
+  if (hookBatchesWaiting > 0) return;
   if (stdinEnded) process.exit(0);
   if (process.env.FAKE_CLAUDE_EXIT_AFTER_TURN === "1") process.stdout.write("", () => process.exit(0));
   const gone = process.env.FAKE_CLAUDE_GONE_AFTER_TURN;
@@ -1347,6 +1371,17 @@ process.stdin.on("data", (c) => {
     }
     if ((prompt as { type?: unknown } | null)?.type === "control_response") {
       if (process.env.FAKE_CLAUDE_CONTROL_LOG) appendFileSync(process.env.FAKE_CLAUDE_CONTROL_LOG, `${line}\n`);
+      continue;
+    }
+    const control = prompt as { type?: unknown; request_id?: unknown; request?: { subtype?: unknown } } | null;
+    if (control?.type === "control_request") {
+      const usage = control.request?.subtype === "get_context_usage" ? process.env.FAKE_CLAUDE_CONTEXT_USAGE : undefined;
+      const answer = { type: "control_response", response: usage
+        ? { subtype: "success", request_id: control.request_id, response: JSON.parse(usage) }
+        : { subtype: "error", request_id: control.request_id, error: `Unsupported control request subtype: ${String(control.request?.subtype)}`, error_code: "unsupported_request" } };
+      if (usage && process.env.FAKE_CLAUDE_CONTEXT_USAGE_LATE === "1" && !lateContextAnswer) { lateContextAnswer = answer; continue; }
+      if (lateContextAnswer && lateContextAnswer !== true) { out(lateContextAnswer); lateContextAnswer = true; }
+      out(answer);
       continue;
     }
     if (turnRunning || lateTurnWaiting) {

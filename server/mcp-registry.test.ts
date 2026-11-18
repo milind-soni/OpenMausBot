@@ -7,10 +7,22 @@ import {
   mcpServerLimitError,
   mcpSharedServerRoom,
   mcpServerNameError,
+  mcpServerProblemFor,
   parseMcpServerMutation,
   parseMcpServersImport,
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
+
+describe("a team setup plan's MCP server", () => {
+  it("knows only configured names and refuses another bot's own server", () => {
+    const servers = { hindsight: {}, notes: { bot: "clive" } };
+    expect(mcpServerProblemFor(servers, "hindsight", "ada")).toBeNull();
+    expect(mcpServerProblemFor(servers, "notes", "clive")).toBeNull();
+    expect(mcpServerProblemFor(servers, "notes", "ada")).toBe("that server belongs to another bot");
+    expect(mcpServerProblemFor(servers, "constructor", "ada")).toBe("no such server");
+    expect(mcpServerProblemFor(undefined, "hindsight", "ada")).toBe("no such server");
+  });
+});
 
 describe("custom MCP registry", () => {
   it("parses stdio servers and keeps newly added commands disabled", () => {

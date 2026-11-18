@@ -9,7 +9,7 @@ import { toolCountLimitFromError } from "../tool-count-limit.ts";
 import { MODEL_NO_ROUTE, USAGE_LIMIT } from "./retry.ts";
 
 /** How long an engine may stay quiet after a model request failed on a limit before the turn is ended as a usage limit,
- * so the bot carries on with another AI: longer than any retry an engine makes without a provider's retry-after
+ * so a backup the person chose carries on (or the bot waits for the reset): longer than any retry an engine makes without a provider's retry-after
  * (OMB_ACP_LIMIT_QUIET_MS overrides). */
 export const DEFAULT_LIMIT_QUIET_MS = 2 * 60_000;
 export const limitQuietMs = (): number => {

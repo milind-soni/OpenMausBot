@@ -3,6 +3,7 @@ export { HEADLESS_VERBS as HEADLESS_VERB_NAMES } from "./headless/args.ts";
 export const HEADLESS_USAGE = `Drive a running workspace (scripts, CI, other agents):
   openmausbot doctor                    check the server answers and an engine is ready
   openmausbot doctor --host             check this Linux machine can run a server (exit 7 if not)
+  openmausbot doctor --data [--fix]     check (and safely repair) this computer's data folder (exit 8 if a problem is left)
   openmausbot bots | channels | models  your bots, your rooms, the engines and their models
   openmausbot run BOT "do this"         give a bot one job and wait until it and every teammate it asked are done
   openmausbot send BOT "text"           send one message and return at once

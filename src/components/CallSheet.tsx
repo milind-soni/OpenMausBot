@@ -66,13 +66,13 @@ export function CallLineItem({ line, busy }: { line: CallRecordLine; busy: boole
 }
 
 type Block =
-  | Extract<CallConversationEntry, { kind: "said" | "answer" }>
+  | Extract<CallConversationEntry, { kind: "said" | "answer" | "spoken" }>
   | { kind: "lines"; id: string; lines: CallRecordLine[] };
 
 function blocksOf(entries: readonly CallConversationEntry[]): Block[] {
   const blocks: Block[] = [];
   for (const entry of entries) {
-    if (entry.kind === "said" || entry.kind === "answer") {
+    if (entry.kind === "said" || entry.kind === "answer" || entry.kind === "spoken") {
       blocks.push(entry);
       continue;
     }
@@ -96,7 +96,8 @@ export function CallSheet({ message, transcript, botName, threadId, busy, partia
   useModalDialog(dialog, onClose);
   const call = message.call;
   const callId = call?.callId;
-  const blocks = useMemo(() => (callId === undefined ? [] : blocksOf(callConversation(transcript, callId))), [transcript, callId]);
+  const spoken = call?.spoken;
+  const blocks = useMemo(() => (callId === undefined ? [] : blocksOf(callConversation(transcript, callId, spoken))), [transcript, callId, spoken]);
   if (!call) return null;
   const title = call.title?.trim() || t("chat.callRecord.title", { name: botName });
   const when = new Date(call.startedAt || call.endedAt).toLocaleString(intlLocale(), { dateStyle: "medium", timeStyle: "short" });
@@ -144,7 +145,7 @@ export function CallSheet({ message, transcript, botName, threadId, busy, partia
           )}
         </div>
         <footer className="border-t border-hairline/40 px-5 py-3 text-[12px] text-ink-tertiary">
-          {t("chat.callSheet.kept", { name: botName })}
+          {t(spoken?.length ? "chat.callSheet.keptSpoken" : "chat.callSheet.kept", { name: botName })}
         </footer>
       </div>
     </div>,
@@ -165,6 +166,15 @@ function SheetBlock({ block, busy, threadId }: { block: Block; busy: boolean; th
       <div className="flex justify-end">
         <div className="w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl bg-bubble-user px-3.5 py-2 text-[14px] leading-relaxed text-ink">
           {block.message.text}
+        </div>
+      </div>
+    );
+  }
+  if (block.kind === "spoken") {
+    return (
+      <div className="flex justify-start">
+        <div className="w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl bg-card px-3.5 py-2 text-[14px] leading-relaxed text-ink">
+          {block.text}
         </div>
       </div>
     );

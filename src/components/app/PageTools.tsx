@@ -315,8 +315,8 @@ function fullScreenLabel({ open, pane }: PageToolsProps["fullScreen"]): string {
 /** The chat's page pane: the messages area, above the transcript and below the message box. null outside a bot chat. */
 export const PagePaneContext = createContext<HTMLElement | null>(null);
 
-/** How tall the compact card in the chat is when a page opens in the pane. */
-export const PAGE_PREVIEW_HEIGHT = 220;
+/** How tall the preview on a page's compact card is, at most. */
+export const PAGE_PREVIEW_HEIGHT = 296;
 
 function typing(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || target.matches("input, textarea, select"));

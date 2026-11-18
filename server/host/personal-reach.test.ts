@@ -50,7 +50,9 @@ describe("a person's own MausBot reaching the team's bots", () => {
     const unknown = resolveTeammate(bots, mausbot, "Nobody", undefined, undefined, wider());
     expect(resolveTeammate(bots, mausbot, "Payroll", undefined, undefined, wider())).toEqual({ error: (unknown as { error: string }).error.replaceAll("Nobody", "Payroll") });
     expect(resolveTeammate(bots, mausbot, "payroll", undefined, undefined, wider())).not.toEqual({ id: "payroll", byName: false });
-    expect(resolveTeammate(bots, mausbot, "Sales", undefined, undefined, wider())).toEqual({ id: "sales", byName: true });
+    // "Sales" is this bot's id in another case, which names it as its id would (byName false).
+    expect(resolveTeammate(bots, mausbot, "Sales", undefined, undefined, wider())).toEqual({ id: "sales", byName: false });
+    expect(resolveTeammate(bots, mausbot, "@sales", undefined, undefined, wider())).toEqual({ id: "sales", byName: true });
   });
 
   it("refuses a bot its person can only view, and says so", () => {

@@ -13,7 +13,7 @@ export function isFormattedReply(text: string): boolean {
 }
 
 /** A formatted reply reads at prose width; one with a table takes the message's full width so every column shows,
- * and its prose stays at reading width (`.chat-wide` in styles.css). */
+ * and its prose runs to the same edge as its widest table. */
 export function formattedReplyWidth(text: string): string {
   return TABLE_DIVIDER.test(text)
     ? "chat-wide w-full max-w-[var(--chat-card-pct)]"

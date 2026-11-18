@@ -12,6 +12,14 @@ export type ResponseItem = Record<string, unknown>;
 export type ModelRoute = "chat" | "responses" | "chat-reasoning-off";
 export type RouteRefusal = "tools-need-responses" | "responses-unavailable" | "summaries-refused";
 
+export function selectedReasoningEffort(body: Record<string, unknown>, route: ModelRoute, variant?: string, selectedWithoutEffort = false): unknown {
+  const effort = body.reasoning_effort ?? object(body.reasoning)?.effort;
+  if (route === "chat-reasoning-off" && variant && (effort === undefined ? selectedWithoutEffort : effort !== "none")) {
+    throw new ChatProtocolError("This endpoint requires disabling reasoning to use tools. Your selected effort was not changed; use the provider default or choose another endpoint.");
+  }
+  return effort;
+}
+
 export class ModelRouteRefused extends Error {
   readonly refusal: RouteRefusal;
   constructor(refusal: RouteRefusal, message: string) {
@@ -193,7 +201,9 @@ export async function readResponsesStream(body: ReadableStream<Uint8Array> | nul
       for (const [position, item] of response.output.entries()) if (object(item)) finishItem(item as ResponseItem, position);
     }
     const used = object(response?.usage);
-    if (used) usage = { input: Number(used.input_tokens) || 0, output: Number(used.output_tokens) || 0 };
+    const cachedInput = object(used?.input_tokens_details)?.cached_tokens;
+    if (used) usage = { input: Number(used.input_tokens) || 0, output: Number(used.output_tokens) || 0,
+      ...(typeof cachedInput === "number" && Number.isFinite(cachedInput) && cachedInput >= 0 ? { cachedInput } : {}) };
   };
   const failure = (error: Record<string, unknown> | undefined) => {
     const code = typeof error?.code === "string" ? error.code : "";

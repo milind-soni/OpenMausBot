@@ -24,6 +24,7 @@ import { BotApiCard } from "./BotApiCard";
 import { ToolBudgetLine } from "./ToolBudgetLine";
 import { useCloudPlan } from "../ProIntroduction";
 import { xResearchAction } from "@/lib/cloud-plan";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useBotApps } from "./useBotApps";
 import {
   classifyConnectorTool,
@@ -35,6 +36,7 @@ import { inputCls } from "./field";
 import { openKeySettings } from "../keys/key-focus";
 import { KeysLink } from "../keys/KeysLink";
 import type { ConnectorScope, ConnectorScopes } from "../../../shared/connector-scopes";
+import type { ConnectorAccount } from "@/lib/connector-status";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 
 /**
@@ -136,7 +138,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
   const usesAll = bot.mcpServers == null;
 
   const toggle = (name: string) => {
-    if (!servers || bot.busy || error) return;
+    if (!servers || error) return;
     patch({ mcpServers: mcpSwitch(servers, bot.mcpServers, name) });
   };
   const openPlugins = () => {
@@ -175,7 +177,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
               </div>
               <Switch
                 checked={mounted.has(server.name)}
-                disabled={!server.enabled || !!bot.busy || error}
+                disabled={!server.enabled || error}
                 aria-label={t("botAccess.mcpAllow", { name: server.name })}
                 onClick={() => toggle(server.name)}
                 className="disabled:cursor-not-allowed"
@@ -190,12 +192,12 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
           <Plus size={14} /> {t("botAccess.mcpAdd")}
         </button>
         {!usesAll && servers && servers.length > 0 && (
-          <button type="button" disabled={!!bot.busy || error} onClick={() => { if (!bot.busy && !error) patch({ mcpServers: null }); }} className="rounded-lg px-2 py-2 text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50">
+          <button type="button" disabled={error} onClick={() => { if (!error) patch({ mcpServers: null }); }} className="rounded-lg px-2 py-2 text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50">
             {t("botAccess.mcpUseAll")}
           </button>
         )}
       </div>
-      {bot.busy && <p className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.mcpBusy")}</p>}
+      {bot.busy && <p className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.nextTurn")}</p>}
     </div>
   );
 }
@@ -507,6 +509,28 @@ function ResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: bo
   );
 }
 
+/** On a Team Cloud: whether this bot may add and change the team's shared files, from any chat (an admin's to set). */
+function TeamFilesCard({ bot, patch }: { bot: Bot; patch: (patch: { teamFilesEdit: boolean }) => void }) {
+  const admin = useOwnerOrAdmin();
+  const on = bot.teamFilesEdit === true;
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4" data-testid="access-team-files">
+      <div>
+        <div className="text-[15px] font-medium text-ink">{t("botAccess.teamFiles.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">{t(on ? "botAccess.teamFiles.on" : "botAccess.teamFiles.off")}</div>
+        {!admin && <div className="mt-0.5 text-[12px] text-ink-secondary">{t("botAccess.teamFiles.adminsOnly")}</div>}
+      </div>
+      <Switch
+        checked={on}
+        aria-label={t("botAccess.teamFiles.title")}
+        disabled={!admin}
+        onClick={() => patch({ teamFilesEdit: !on })}
+        className="disabled:cursor-not-allowed"
+      />
+    </div>
+  );
+}
+
 function RecordStepsRow({ on, browserOn, myChrome, onChange }: { on: boolean; browserOn: boolean; myChrome: boolean; onChange: (on: boolean) => void }) {
   return (
     <div className="mt-3 flex items-center justify-between gap-4 border-t border-hairline/40 pt-3">
@@ -664,7 +688,7 @@ function DraftWorksOn({ bot, patch, seat }: { bot: Bot; patch: ReturnType<typeof
   </>;
 }
 
-export type AccessPart = "worksOn" | "folder" | "apps" | "phone" | "xResearch" | "mcp" | "tools" | "browser" | "webhooks" | "always";
+export type AccessPart = "worksOn" | "folder" | "apps" | "phone" | "xResearch" | "teamFiles" | "mcp" | "tools" | "browser" | "webhooks" | "always";
 
 export function AccessSection({
   bot,
@@ -701,6 +725,7 @@ export function AccessSection({
   const inventoryReady = apps.phase === "ready";
   const connectedSlugs = apps.connectedSlugs;
   const appLabels = Object.fromEntries(apps.apps.map((app) => [app.slug, app.label]));
+  const appAccounts = Object.fromEntries(apps.apps.map((app) => [app.slug, app.accounts ?? []]));
 
   const webhooks = state.webhooks.filter((webhook) => webhook.botId === bot.id);
   const alwaysAllow = bot.alwaysAllow ?? [];
@@ -766,7 +791,7 @@ export function AccessSection({
         </div>
         {connectedAppsEnabled && inventoryReady && (
           <>
-            {!draft && <ConnectorScopesControl connectedSlugs={connectedSlugs} labels={appLabels} scopes={bot.connectorScopes} onChange={(connectorScopes) => patch({ connectorScopes })} />}
+            {!draft && <ConnectorScopesControl connectedSlugs={connectedSlugs} labels={appLabels} accounts={appAccounts} scopes={bot.connectorScopes} onChange={(connectorScopes) => patch({ connectorScopes })} />}
             <ConnectorToolsGrants bot={bot} patch={patch} slugs={connectedSlugs} />
           </>
         )}
@@ -834,6 +859,8 @@ export function AccessSection({
 
       {!draft && shows("xResearch") && <ResearchCard bot={bot} patch={patch} />}
 
+      {!draft && shows("teamFiles") && state.config?.team && <TeamFilesCard bot={bot} patch={patch} />}
+
       {!draft && shows("webhooks") && <BotApiCard bot={bot} />}
 
       {!draft && shows("webhooks") && <div className="rounded-xl bg-card p-4">
@@ -893,20 +920,36 @@ export function AccessSection({
   );
 }
 
-function ConnectorScopesControl({ connectedSlugs, labels = {}, scopes, onChange }: {
+export function ConnectorScopesControl({ connectedSlugs, labels = {}, accounts = {}, scopes, onChange }: {
   connectedSlugs: string[];
   /** display names by slug; a slug without one shows as itself */
   labels?: Record<string, string>;
+  /** each app's connected accounts; an app with two or more can be limited to some of them */
+  accounts?: Record<string, ConnectorAccount[]>;
   scopes: ConnectorScopes | undefined;
   onChange: (scopes: ConnectorScopes | null) => void;
 }) {
   const limited = scopes !== undefined;
   const slugs = [...new Set([...connectedSlugs, ...Object.keys(scopes?.apps ?? {})])].sort();
+  const emit = (apps: ConnectorScopes["apps"], limits: Record<string, string[]>) =>
+    onChange(Object.keys(limits).length ? { apps, accounts: limits } : { apps });
   const setScope = (slug: string, scope: ConnectorScope | null) => {
     const apps = { ...scopes?.apps };
+    const limits = { ...scopes?.accounts };
     if (scope) apps[slug] = scope;
-    else delete apps[slug];
-    onChange({ apps });
+    else {
+      delete apps[slug];
+      delete limits[slug];
+    }
+    emit(apps, limits);
+  };
+  // No limit means every account, also ones connected later; once a box is changed the ticked ids stay a limit, so a
+  // later account is allowed only when it is ticked too. Ids no longer connected are dropped.
+  const connectedIds = (slug: string) => (accounts[slug] ?? []).map((account) => account.id);
+  const allowedIds = (slug: string) => scopes?.accounts?.[slug]?.filter((id) => connectedIds(slug).includes(id)) ?? connectedIds(slug);
+  const setAccount = (slug: string, id: string, on: boolean) => {
+    const ids = allowedIds(slug).filter((one) => one !== id).concat(on ? [id] : []);
+    emit({ ...scopes?.apps }, { ...scopes?.accounts, [slug]: ids });
   };
   return <div className="mt-3">
     <div className="flex items-center justify-between gap-4">
@@ -924,6 +967,18 @@ function ConnectorScopesControl({ connectedSlugs, labels = {}, scopes, onChange 
             <button key={label} type="button" title={hint} aria-pressed={(scopes?.apps[slug] ?? null) === value} onClick={() => setScope(slug, value)}
               className={cn("rounded px-2 py-0.5 text-[12px] font-medium", (scopes?.apps[slug] ?? null) === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink")}>{label}</button>)}
         </div>
+        {scopes?.apps[slug] && ((accounts[slug]?.length ?? 0) > 1 || scopes.accounts?.[slug]) && <fieldset className="flex w-full flex-wrap items-center gap-x-3 gap-y-1">
+          <legend className="sr-only">{t("botAccess.scopes.accountsLabel")}</legend>
+          <span aria-hidden className="text-[12px] text-ink-secondary">{t("botAccess.scopes.accountsLabel")}</span>
+          {(accounts[slug] ?? []).map((account) => {
+            const allowed = allowedIds(slug);
+            const on = allowed.includes(account.id);
+            return <label key={account.id} className="flex items-center gap-1.5 text-[12px] text-ink">
+              <input type="checkbox" checked={on} disabled={on && allowed.length === 1} onChange={(event) => setAccount(slug, account.id, event.target.checked)} />
+              {account.alias ?? account.id}
+            </label>;
+          })}
+        </fieldset>}
       </div>)}
     </div>}
   </div>;

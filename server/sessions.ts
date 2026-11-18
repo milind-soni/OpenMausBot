@@ -107,6 +107,8 @@ export interface PublicSession {
   owner?: string;
   teamRole?: TeamRole;
   token?: true;
+  /** Who this device belongs to, when the server can tell and it is not just the device's own label. */
+  person?: string;
 }
 
 export interface PairingCode {
@@ -177,7 +179,7 @@ export function isPairingCredential(value: string): boolean {
   return value.startsWith(PAIRING_CREDENTIAL_PREFIX);
 }
 
-function publicSession(record: SessionRecord): PublicSession {
+function publicSession(record: SessionRecord, personName?: (record: SessionRecord) => string): PublicSession {
   const view: PublicSession = {
     id: record.id,
     label: record.label,
@@ -190,6 +192,8 @@ function publicSession(record: SessionRecord): PublicSession {
   if (record.owner) view.owner = record.owner;
   if (record.teamRole) view.teamRole = record.teamRole;
   if (record.token) view.token = true;
+  const person = personName?.(record).trim();
+  if (person && person !== record.label) view.person = person;
   return view;
 }
 
@@ -704,9 +708,10 @@ export class SessionRegistry {
     return this.sessions.find((s) => s.id === sessionId && s.expiresAt > this.now() && !this.personal(s.scopes)) ?? null;
   }
 
-  list(): PublicSession[] {
+  /** `personName` names each device's person (server/index.ts sessionPersonName), so the device list can lead with it. */
+  list(personName?: (record: SessionRecord) => string): PublicSession[] {
     this.prune();
-    return this.sessions.map(publicSession);
+    return this.sessions.map((record) => publicSession(record, personName));
   }
 
   /** The stored digest of each live bearer session among `ids`: the phone relay derives a phone's keys from it. */
@@ -724,7 +729,7 @@ export class SessionRegistry {
   /** The live sessions a Team Cloud member's own codes opened: their phones. Never an Admin-signed pairing (an app). */
   memberPhones(): PublicSession[] {
     this.prune();
-    return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map(publicSession);
+    return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map((record) => publicSession(record));
   }
 
   /** Every code a member made for a phone stops working, and every phone such a code opened signs out. Never an Admin-signed pairing (an app). */

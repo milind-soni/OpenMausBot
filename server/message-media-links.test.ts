@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { MESSAGE_MEDIA_IDLE_MS, MESSAGE_MEDIA_MAX_AGE_MS, MessageMediaLinks } from "./message-media-links.ts";
+import { parseAudioRange } from "./attachments.ts";
+import { cappedMediaRange, MESSAGE_MEDIA_IDLE_MS, MESSAGE_MEDIA_MAX_AGE_MS, MESSAGE_MEDIA_RANGE_MAX_BYTES, MessageMediaLinks, STREAMABLE_MEDIA_MIMES } from "./message-media-links.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { SessionRecord } from "./sessions.ts";
 
@@ -50,5 +51,21 @@ describe("MessageMediaLinks", () => {
     const first = links.issue(grant, owner);
     for (let i = 0; i < 600; i++) links.issue(grant, owner);
     expect(links.use(first, "t1", "m1", owner)).toBeNull();
+  });
+
+  it("caps a player's range at one chunk and leaves small, suffix and missing ranges alone", () => {
+    const size = 500 * 1024 * 1024;
+    const capped = (header?: string) => cappedMediaRange(parseAudioRange(header, size));
+    expect(capped("bytes=0-")).toEqual({ kind: "range", start: 0, end: MESSAGE_MEDIA_RANGE_MAX_BYTES - 1 });
+    expect(capped(`bytes=100-${size - 1}`)).toEqual({ kind: "range", start: 100, end: 100 + MESSAGE_MEDIA_RANGE_MAX_BYTES - 1 });
+    expect(capped("bytes=10-19")).toEqual({ kind: "range", start: 10, end: 19 });
+    expect(capped("bytes=-4")).toEqual({ kind: "range", start: size - 4, end: size - 1 });
+    expect(capped(`bytes=${size}-`)).toEqual({ kind: "unsatisfiable" });
+    expect(capped(undefined)).toEqual({ kind: "none" });
+  });
+
+  it("links audio as well as video, and nothing else", () => {
+    for (const mime of ["video/mp4", "video/quicktime", "audio/mpeg", "audio/mp4", "audio/flac"]) expect(STREAMABLE_MEDIA_MIMES.has(mime), mime).toBe(true);
+    for (const mime of ["text/html", "image/png", "application/pdf"]) expect(STREAMABLE_MEDIA_MIMES.has(mime), mime).toBe(false);
   });
 });

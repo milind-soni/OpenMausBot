@@ -36,9 +36,26 @@ export interface CloudComputerDisk {
   spaceClearedAt?: number;
 }
 
-/** What the bot is told, in place of a computer call, while its computer is being restarted or replaced. */
+/** What the bot is told, in place of a computer call, while its computer is not answering and MausBot is bringing it
+ * back, and the call waited for that as long as it could. Says nothing of a replacement, which may be switched off. */
 export const CLOUD_COMPUTER_NOT_RESPONDING =
-  "This bot's cloud computer isn't responding; MausBot is replacing it. Try again in a minute. Do not retry now.";
+  "This bot's cloud computer isn't responding yet. MausBot keeps trying to bring it back by itself, and this turn can go on once it answers. This call was not performed. Repeat it in a minute.";
+/** The same, for a call that was sent and got no answer. */
+export const CLOUD_COMPUTER_NOT_RESPONDING_UNANSWERED =
+  "This bot's cloud computer isn't responding yet, so this call got no answer and most likely did not run. MausBot keeps trying to bring it back by itself. Take a fresh screenshot in a minute before repeating it.";
+/** Every guard passed: the silent computer is being set aside and a new one made for this turn. */
+export const CLOUD_COMPUTER_REPLACING =
+  "This bot's cloud computer still did not answer after a restart, so MausBot is setting it aside, with its files, and giving this bot a new one. This call was not performed. Repeat it in a minute.";
+/** The turn's computer was set aside while this call waited, and the new one is not up yet. */
+export const CLOUD_COMPUTER_REPLACEMENT_STARTING =
+  "This bot's cloud computer stopped responding and was set aside; its new one is still starting. This call was not performed. Repeat it in a minute.";
+/** A call that waited out its computer's restart or replacement: only a look at the screen is made after such a wait,
+ * since the bot has not seen what the computer is like now. */
+export const CLOUD_COMPUTER_ANSWERS_AGAIN =
+  "The cloud computer answers again. This call was not performed while MausBot waited for it: take a fresh screenshot, then repeat it.";
+/** Woken and not answering yet, inside the wake's patience: the call is not counted against the computer. */
+export const CLOUD_COMPUTER_WAKING =
+  "The cloud computer is awake but not answering yet; MausBot keeps waiting for it. This call was not performed. Repeat it in a moment.";
 /** While it is being stopped and started again, which keeps its files. */
 export const CLOUD_COMPUTER_RESTARTING =
   "This bot's cloud computer stopped responding and MausBot is restarting it; its files are kept. This call was not performed. Try again in a minute.";
@@ -47,9 +64,15 @@ export const CLOUD_COMPUTER_RESTARTING_UNANSWERED =
 /** While the provider is still putting its disk back after a wake. */
 export const CLOUD_COMPUTER_RESTORING =
   "This bot's cloud computer is awake but still restoring its disk, so it is not answering yet. This call was not performed. Try again in a minute.";
-/** Told once, on the bot's first computer call after the replacement. */
+/** Told once, on the bot's first computer call after the replacement: one the provider reported broken and that could
+ * not even be stopped, so it was deleted. */
 export const CLOUD_COMPUTER_REPLACED =
-  "This bot's cloud computer stopped responding and was replaced with a new one. Files that were only on the old computer are gone.";
+  "This bot's cloud computer stopped working and was replaced with a new one. Files, programs and sign-ins that were only on the old computer are gone: clone, download or install again, and sign in again, as this task needs.";
+/** Told once, on the bot's first computer call after its silent computer was set aside, kept until `date`. */
+export const cloudComputerSetAsideNotice = (date: string): string =>
+  `This bot's cloud computer stopped responding, so MausBot set it aside and gave this bot a new one. The old computer is kept, stopped and with its files, until ${date}; `
+  + "the person finds it in Settings → Desktops & browser → Desktops. Files, programs and sign-ins that were only on the old computer are not on the new one: "
+  + "clone, download or install again, and sign in again, as this task needs.";
 export const CLOUD_COMPUTER_REPLACED_BY_PERSON =
   "This bot's cloud computer was replaced with a new one. Files that were only on the old computer are gone.";
 export const CLOUD_COMPUTER_RESTARTED =
@@ -99,6 +122,8 @@ export const RUN_COMPUTER_LINES = {
 /** The person's one line in the chat and the Inbox, by its language pack key; each takes the bot's `{name}`. */
 export const CLOUD_COMPUTER_PERSON_LINES = {
   replaced: "server.cloudComputer.replaced",
+  setAside: "server.cloudComputer.setAside",
+  noRoom: "server.cloudComputer.noRoom",
   restarted: "server.cloudComputer.restarted",
   capped: "server.cloudComputer.capped",
   unreachable: "server.cloudComputer.unreachable",

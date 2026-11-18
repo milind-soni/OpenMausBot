@@ -15,6 +15,11 @@ const turnsNeedFishKey = (): CallCapabilityHelp => ({
   reason: t("call.capability.turnsNeedFishKeyReason"),
 });
 
+const turnsNeedDeepSeekKey = (): CallCapabilityHelp => ({
+  label: t("call.capability.turnsNeedDeepSeekKey"),
+  reason: t("call.capability.turnsNeedDeepSeekKeyReason"),
+});
+
 const turnsOnThisComputerAnyOs = (): CallCapabilityHelp => ({
   label: t("call.capability.turnsOnThisComputerAnyOs"),
   reason: t("call.capability.turnsOnThisComputerAnyOsReason"),
@@ -28,7 +33,7 @@ const turnsOnThisComputer = (): CallCapabilityHelp => ({
 export function callCapabilityHelp(
   capabilities: DesktopCapabilities,
   speechServiceAvailable: boolean,
-  fishKeySaved: boolean,
+  missingKey: "fish" | "deepseek" | null,
 ): CallCapabilityHelp | null {
   if (!capabilities.dictation.available) {
     switch (capabilities.dictation.reasonCode) {
@@ -44,7 +49,8 @@ export function callCapabilityHelp(
         };
     }
   }
-  if (capabilities.dictation.engine === "fish-audio" && !fishKeySaved) return turnsNeedFishKey();
+  if (missingKey === "fish") return turnsNeedFishKey();
+  if (missingKey === "deepseek") return turnsNeedDeepSeekKey();
   if (!speechServiceAvailable) {
     return {
       label: t("call.capability.serviceUnavailable"),

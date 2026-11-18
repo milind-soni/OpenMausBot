@@ -22,7 +22,13 @@ export const VERB_HELP: Record<string, string> = {
 openmausbot doctor --host [--data-dir DIR] [--port 8799] [--domain HOST]
   Check this Linux machine can run the server and the bots' sandbox: the system, Docker or Podman, user
   namespaces, seccomp, cgroup v2, free disk, size, ports and the clock. Each problem says its fix.
-  Exit 0 ready (warnings allowed), 7 something is missing. On macOS and Windows it says it is for Linux.`,
+  Exit 0 ready (warnings allowed), 7 something is missing. On macOS and Windows it says it is for Linux.
+openmausbot doctor --data [--fix] [--data-dir DIR]
+  Check this computer's data folder without the server: the data format, the folder's lease, folders, bots.json and
+  groups.json, saves that did not finish, engine-run records, messages.db, private files' modes and config.json.
+  --fix applies the repairs that cannot lose data, only while no server uses the folder; whatever a repair changes is
+  copied to DIR/doctor-backups/<time>/ first. Anything else is reported with what to do.
+  Exit 0 fine (after --fix: fine now), 8 a problem is left.`,
   bots: "openmausbot bots\n  Your bots and what each is doing.",
   channels: "openmausbot channels\n  Your rooms (group chats) and who is in them.",
   models: "openmausbot models\n  The engines and the models each offers (use them as INSTANCE/MODEL).",

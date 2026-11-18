@@ -108,16 +108,16 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+legacy-switches": 57945,
   "default+mausbot": 58596,
   "skills+shared+voice+mausbot": 63728,
-  "skills+shared+voice+x": 65605,
-  "skills+shared+voice+x+team": 65605,
+  "skills+shared+voice+x": 67179,
+  "skills+shared+voice+x+team": 67179,
   "default+no-computer-pick": 56733,
   "default+room": 53729,
   "non-chief+room": 45312,
-  "skills+shared+voice+x+team+images": 66378,
-  "default+images": 58718,
-  "skills+shared+voice+x+team+images+hosting": 68241,
+  "skills+shared+voice+x+team+images": 69244,
+  "default+images": 60010,
+  "skills+shared+voice+x+team+images+hosting": 71107,
   "default+hosting": 59808,
-  "default+tools-off": 53040,
+  "default+tools-off": 53081,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -277,9 +277,9 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("mounts generate_image only when an image provider is set up, and adds nothing else", () => {
+  it("mounts generate_image and edit_image only when an image provider is set up, and adds nothing else", () => {
     const names = (wire: string) => toolsOf(wire).map((tool) => tool.name);
-    expect(names(wires["default+images"]!).filter((tool) => tool !== "generate_image")).toEqual(names(wires.default!));
+    expect(names(wires["default+images"]!).filter((tool) => tool !== "generate_image" && tool !== "edit_image")).toEqual(names(wires.default!));
     for (const [name, profile] of Object.entries(PROFILES)) {
       expect(names(wires[name]!).includes("generate_image"), name).toBe(profile.env.OMB_IMAGE_GENERATION === "1");
     }

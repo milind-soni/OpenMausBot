@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { engineInstallRoots } from "../engine-roots.ts";
-import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
+import { BOX_MUTATIONS, CPU_LIST_FILES, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, under, visibleInBox, type BoxAudience, type BoxMutation, type BoxRequest, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
 const dataDir = "/data/.openmausbot";
@@ -280,6 +280,80 @@ linuxBox("the box plan", () => {
     expect(flips["share-pid"](turn(["bind-otherws"]))).toBe(false);
     expect(flips["tmp-shared"](turn(["bind-data"]))).toBe(false);
     expect(flips["share-net"](turn(["share-pid"]))).toBe(false);
+  });
+
+  describe("on a Team Cloud, by the conversation's audience", () => {
+    const team = join(dataDir, "workspaces", "bot-a"), miraLayer = join(dataDir, "workspaces", "bot-a--member-p_mira");
+    const ask = (audience: BoxAudience, more: Partial<BoxRequest> = {}) => planBox(setup(), { command: "/usr/local/bin/claude", args: [], cwd, env: { HOME: home }, audience, ...more });
+    const writesTeamThings = (plan: ReturnType<typeof ask>) => ["MEMORY.md", "memory/2026-11-17.md", "skills/report/SKILL.md", "notes.md"].map((file) => visibleInBox(plan, join(team, file)));
+
+    it("the team's chat writes the bot's own folder, as on any other server", () => {
+      const plan = ask({ teamReadOnly: false });
+      expect(writesTeamThings(plan)).toEqual(["rw", "rw", "rw", "rw"]);
+      expect(visibleInBox(plan, cwd)).toBe("rw");
+    });
+
+    it("a member's private chat reads the team's folder but writes only its own folder and its own layer", () => {
+      const plan = ask({ teamReadOnly: true }, { rw: [miraLayer] });
+      expect(writesTeamThings(plan)).toEqual(["ro", "ro", "ro", "ro"]);
+      expect(visibleInBox(plan, join(miraLayer, "MEMORY.md"))).toBe("rw");
+      expect(visibleInBox(plan, join(cwd, "draft.md"))).toBe("rw");
+      expect(visibleInBox(plan, join(dataDir, "bots", "bot-a", "SOUL.md"))).toBe("ro");
+      expect(plan.writable.filter((path) => under(path, team))).toEqual([]);
+      // Read-only after every read-write line, so nothing the caller lends can make it writable again.
+      const args = bwrapArgs(plan);
+      const readOnly = args.findIndex((arg, i) => arg === "--ro-bind-try" && args[i + 1] === team && args[i + 2] === team);
+      const lastWritable = args.reduce((last, arg, i) => (arg === "--bind" || arg === "--bind-try") && !args[i + 2]!.startsWith("/run/omb/") ? i : last, -1);
+      expect(readOnly).toBeGreaterThan(lastWritable);
+      expect(visibleInBox(ask({ teamReadOnly: true }, { rw: [team, join(team, "skills")] }), join(team, "skills", "x", "SKILL.md"))).toBe("ro");
+    });
+
+    it("a room's turn in the bot's own folder still makes files there, but the team's notes and skills stay read-only", () => {
+      const plan = ask({ teamReadOnly: true }, { cwd: team, rw: [join(dataDir, "workspaces", "bot-a--room-g1")] });
+      expect(writesTeamThings(plan)).toEqual(["ro", "ro", "ro", "rw"]);
+      expect(visibleInBox(plan, join(dataDir, "workspaces", "bot-a--room-g1", "MEMORY.md"))).toBe("rw");
+      expect(writesTeamThings(planBox(setup(), { command: "/usr/local/bin/claude", args: [], cwd: team, env: { HOME: home } }))).toEqual(["rw", "rw", "rw", "rw"]);
+    });
+
+    it("a turn in a project folder of its own changes nothing there", () => {
+      const plan = ask({ teamReadOnly: true }, { cwd: "/data/projects/site" });
+      expect(visibleInBox(plan, "/data/projects/site/index.html")).toBe("rw");
+      expect(visibleInBox(plan, join(team, "MEMORY.md"))).toBe("none");
+      expect(visibleInBox(ask({ teamReadOnly: true }, { cwd: "/data/projects/site", botId: "bot-a" }), join(team, "MEMORY.md"))).toBe("ro");
+    });
+
+    it("every turn has the team's shared folder at /team-files: read-only, or read-write for a bot that may edit it", () => {
+      const source = join(dataDir, "team-files");
+      const read = ask({ teamReadOnly: true, teamFiles: { source, write: false } });
+      expect(visibleInBox(read, "/team-files/payroll/nov.csv")).toBe("ro");
+      expect(visibleInBox(read, join(source, "payroll", "nov.csv")), "only at its own path, never where the server keeps it").toBe("none");
+      const edit = ask({ teamReadOnly: true, teamFiles: { source, write: true } });
+      expect(visibleInBox(edit, "/team-files/payroll/nov.csv")).toBe("rw");
+      expect(edit.writable).toContain("/team-files");
+      expect(writesTeamThings(edit), "editing team files is not writing the bot's own folder").toEqual(["ro", "ro", "ro", "ro"]);
+      expect(bwrapArgs(edit).join(" ")).toContain(`--bind-try ${source} /team-files`);
+      expect(visibleInBox(edit, "/team-files/templates/reporter/bot.yaml"), "the team's template library stays the admins'").toBe("ro");
+      expect(visibleInBox(ask({ teamReadOnly: false }), "/team-files/x")).toBe("none");
+    });
+
+    it("a process the bot's conversations share has only the conversations its audience may read", () => {
+      const threads = (rw: string[], ro: string[]) => planBox(setup(), { command: "opencode", args: ["acp"], cwd, env: { HOME: home }, botThreads: true, audience: { teamReadOnly: ro.length > 0, threads: { rw, ro } } });
+      const mira = threads(["thread-1", "thread-3"], ["thread-team"]);
+      const at = (plan: ReturnType<typeof threads>, path: string) => visibleInBox(plan, join(dataDir, path));
+      expect(at(mira, "task-workspaces/bot-a/thread-1/a.md")).toBe("rw");
+      expect(at(mira, "task-workspaces/bot-a/thread-3/a.md")).toBe("rw");
+      expect(at(mira, "task-workspaces/bot-a/thread-team/a.md")).toBe("ro");
+      expect(at(mira, "box-uploads/bot-a/thread-team/photo.png")).toBe("ro");
+      expect(at(mira, "box-uploads/bot-a/thread-3/photo.png")).toBe("ro");
+      for (const ben of ["task-workspaces/bot-a/thread-ben/notes.md", "box-uploads/bot-a/thread-ben/photo.png", "task-workspaces/bot-b/thread-9/x"]) expect(at(mira, ben), ben).toBe("none");
+      expect(at(mira, "workspaces/bot-a/MEMORY.md")).toBe("ro");
+      const shared = threads(["thread-1", "thread-team"], []);
+      expect(at(shared, "task-workspaces/bot-a/thread-team/a.md")).toBe("rw");
+      expect(at(shared, "task-workspaces/bot-a/thread-ben/notes.md")).toBe("none");
+      expect(at(shared, "workspaces/bot-a/MEMORY.md")).toBe("rw");
+      // Ids that are not a conversation's are never put back.
+      expect(at(threads(["thread-1", "../bot-b"], ["../../config"]), "task-workspaces/bot-b/thread-9/x")).toBe("none");
+    });
   });
 
   it("reads the bot and conversation off a task workspace, and absolute paths off the command line", () => {

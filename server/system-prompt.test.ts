@@ -307,6 +307,10 @@ describe("computerPrompt", () => {
     const many = Array.from({ length: 45 }, (_, index) => ({ name: `key ${index}` }));
     expect(savedSecretsPrompt(many)).toContain('"key 39" and 5 more.');
     expect(savedSecretsPrompt([{ name: "x".repeat(200) }])).toContain(`"${"x".repeat(80)}"`);
+    expect(savedSecretsPrompt([{ name: "Stripe key" }], ["1password"])).toMatch(/value\. A 1Password reference \(op:\/\/vault\/item\/field\) the person gives you works as the label too\.$/u);
+    expect(savedSecretsPrompt([{ name: "Stripe key" }], ["1password", "bitwarden"]))
+      .toMatch(/ A 1Password reference \(op:\/\/vault\/item\/field\) or a Bitwarden reference \(bw:\/\/item\/field\) the person gives you works as the label too\.$/u);
+    expect(savedSecretsPrompt([{ name: "Stripe key" }])).not.toContain("op://");
   });
 });
 

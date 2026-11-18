@@ -370,11 +370,14 @@ export interface ThreadRows {
   activeLeafId: string | null;
 }
 
+export function readStoredActiveLeaf(threadId: string): string | null {
+  return (prepared(ACTIVE_LEAF).get(threadId) as { active_leaf_id: string | null } | undefined)?.active_leaf_id ?? null;
+}
+
 export function readThread(threadId: string, legacyFile: string): ThreadRows {
   const rows = prepared("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid").all(threadId) as Array<{ json: string }>;
   if (rows.length) {
-    const state = prepared(ACTIVE_LEAF).get(threadId) as { active_leaf_id: string | null } | undefined;
-    return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null };
+    return { messages: rows.map(rowToMessage), activeLeafId: readStoredActiveLeaf(threadId) };
   }
   return importLegacy(threadId, legacyFile);
 }
@@ -388,16 +391,16 @@ export interface ThreadTailRows extends ThreadRows {
   hasMore?: boolean;
 }
 
+export function decodeMessagePage(rows: Array<{ json: string }>, limit: number): { messages: Message[]; hasMore: boolean } {
+  const hasMore = rows.length > limit;
+  if (hasMore) rows.length = limit;
+  return { messages: rows.reverse().map(rowToMessage), hasMore };
+}
+
 export function readThreadTail(threadId: string, legacyFile: string, limit: number): ThreadTailRows {
   const rows = prepared("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?").all(threadId, limit + 1) as Array<{ json: string }>;
-  if (rows.length) {
-    const hasMore = rows.length > limit;
-    if (hasMore) rows.length = limit;
-    rows.reverse();
-    const state = prepared(ACTIVE_LEAF).get(threadId) as { active_leaf_id: string | null } | undefined;
-    return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null, hasMore };
-  }
-  return importLegacy(threadId, legacyFile);
+  if (!rows.length) return importLegacy(threadId, legacyFile);
+  return { ...decodeMessagePage(rows, limit), activeLeafId: readStoredActiveLeaf(threadId) };
 }
 
 function importLegacy(threadId: string, legacyFile: string): ThreadRows {
@@ -899,20 +902,22 @@ export interface ThreadLatest {
   head: string;
 }
 
+/** CROSS JOIN pins the order: the list, then messages_thread_at per thread, then the primary key (thread_id, id). `id` alone has no index. */
+export const LATEST_SAID_BY_BOT_SQL =
+  "WITH latest(thread_id, id) AS MATERIALIZED (" +
+  "SELECT j.value, (SELECT m2.id FROM messages m2 " +
+  "WHERE m2.thread_id = j.value AND m2.kind = 'text' AND m2.role = 'bot' AND m2.text IS NOT NULL AND m2.at >= ? " +
+  "AND (json_extract(m2.json, '$.from.botId') IS NULL OR json_extract(m2.json, '$.from.botId') = ?) " +
+  "ORDER BY m2.at DESC LIMIT 1) FROM json_each(?) j) " +
+  "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head " +
+  "FROM latest CROSS JOIN messages m ON m.thread_id = latest.thread_id AND m.id = latest.id " +
+  "WHERE latest.id IS NOT NULL ORDER BY m.at DESC LIMIT ?";
+
 export function latestSaidByBot(threadIds: readonly string[], botId: string, since: number, limit = 20): ThreadLatest[] {
   if (!threadIds.length) return [];
-  const placeholders = threadIds.map(() => "?").join(", ");
   const rows = db()
-    .prepare(
-      "SELECT thread_id, id, at, head FROM (" +
-        "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head, " +
-        "ROW_NUMBER() OVER (PARTITION BY m.thread_id ORDER BY m.at DESC) AS rn " +
-        "FROM messages m " +
-        `WHERE m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (${placeholders}) ` +
-        "AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)" +
-        ") WHERE rn = 1 ORDER BY at DESC LIMIT ?",
-    )
-    .all(since, ...threadIds, botId, limit) as Array<{ thread_id: string; id: string; at: number; head: string }>;
+    .prepare(LATEST_SAID_BY_BOT_SQL)
+    .all(since, botId, JSON.stringify([...new Set(threadIds)]), limit) as Array<{ thread_id: string; id: string; at: number; head: string }>;
   return rows.map((row) => ({
     threadId: row.thread_id,
     messageId: row.id,
