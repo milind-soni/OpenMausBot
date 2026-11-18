@@ -172,7 +172,7 @@ describe("augmentedPath", () => {
     const finished = join(homedir(), "flood-finished");
     writeFileSync(
       shell,
-      `#!/bin/sh\necho $$ > '${shellPid}'\nprintf '__OMB_PATH__%s__OMB_END__\\n' '${rcOnlyBin}'\nhead -c 2000000 /dev/zero\n: > '${finished}'\n`,
+      `#!/bin/sh\necho $$ > '${shellPid}'\nprintf '__OMB_PATH__%s__OMB_END__\\n' '${rcOnlyBin}'\nhead -c 2000000 /dev/zero && : > '${finished}'\n`,
     );
     chmodSync(shell, 0o755);
     // /proc/<pid>/stat: a killed process its parent has not reaped yet (state Z) still answers kill(pid, 0).
