@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { engineMemory } from "../engine-memory.ts";
 import { forgetPresence, personAsks, sawThread, seenWithin } from "../thread-presence.ts";
 import {
   armedIdleCount, armIdleClose, closeIdleEngines, engineIdleMs, idleEnginesAllowed, keepWarm, sessionIdlePolicy, SMALL_BOX_IDLE_MS, stopIdleClose, UNWATCHED_IDLE_MS,
@@ -8,6 +9,13 @@ import {
 
 const GB = 1024 ** 3;
 const DESKTOP = 16 * GB;
+
+// The host's own memory never decides a test: the box is a desktop unless a test passes another.
+vi.mock("../box-memory.ts", async (original) => ({
+  ...await original<typeof import("../box-memory.ts")>(),
+  boxMemory: () => ({ bytes: 16 * 1024 ** 3, cgroupLimit: null }),
+  availableMemory: () => 8 * 1024 ** 3,
+}));
 
 describe("sessionIdlePolicy", () => {
   it("defaults to ten minutes with a ten-second floor", () => {
@@ -166,21 +174,23 @@ describe("idle engines on a small box", () => {
 describe("closing a conversation's idle engine now", () => {
   it("closes only that conversation's idle engines, never a busy one, and stops their timers", () => {
     vi.useFakeTimers();
+    vi.spyOn(engineMemory, "idleEnginesAllowed").mockReturnValue(Infinity);
+    const timers: Array<[string, ReturnType<typeof setTimeout>]> = [];
     try {
       const closed: string[] = [];
       const engine = (key: string, threadId: string, idle = true) => ({ idle: () => idle, close: () => { closed.push(key); }, threadId });
       const before = armedIdleCount();
-      armIdleClose("claude\0t1", 600_000, engine("claude\0t1", "t1"));
-      armIdleClose("acp\0t1", 600_000, engine("acp\0t1", "t1"));
-      armIdleClose("claude\0t2", 600_000, engine("claude\0t2", "t2"));
-      const busy = armIdleClose("codex\0t1", 600_000, engine("codex\0t1", "t1", false));
+      for (const [key, threadId, idle] of [["claude\0t1", "t1", true], ["acp\0t1", "t1", true], ["claude\0t2", "t2", true], ["codex\0t1", "t1", false]] as const) {
+        timers.push([key, armIdleClose(key, 600_000, engine(key, threadId, idle))]);
+      }
       expect(closeIdleEngines("t1")).toBe(2);
       expect(closed).toEqual(["claude\0t1", "acp\0t1"]);
       expect(armedIdleCount()).toBe(before + 2);
       vi.advanceTimersByTime(600_000);
       expect(closed).toEqual(["claude\0t1", "acp\0t1", "claude\0t2", "codex\0t1"]);
-      stopIdleClose("codex\0t1", busy);
     } finally {
+      for (const [key, timer] of timers) stopIdleClose(key, timer);
+      vi.restoreAllMocks();
       vi.useRealTimers();
     }
   });

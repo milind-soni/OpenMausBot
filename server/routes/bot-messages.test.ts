@@ -219,7 +219,8 @@ describe("POST /api/bots/:id/seat/handoff and /seat/close", () => {
     expect((await seat("handoff")).status).toBe(202);
     expect(state.accepted.map((send) => send.text)).toEqual([HANDOFF_REQUEST]);
     expect(sent().at(-1)?.text).toBe(HANDOFF_REQUEST);
-    store.appendMessage(threadId, { role: "bot", kind: "text", text: NOTE });
+    const asked = sent().at(-1)!;
+    store.appendMessage(threadId, { role: "bot", kind: "text", text: NOTE, turnId: "turn-1", requestMessageId: asked.id, turnTerminal: true, turnSucceeded: true });
     const closed = await seat("close");
     expect(closed).toMatchObject({ status: 200, body: { ok: true, threadId, note: { kind: "compaction", compaction: { summary: NOTE } } } });
   });
@@ -236,8 +237,8 @@ describe("POST /api/bots/:id/seat/handoff and /seat/close", () => {
     const second = store.createTask(bot.id, "Import screen", false)!.threadId;
     for (const thread of [threadId, second]) store.patchTask(bot.id, thread, { resumeCursors: { claude: `session-${thread}` } });
     const answer = (thread: string) => {
-      store.appendMessage(thread, { role: "user", kind: "text", text: HANDOFF_REQUEST });
-      store.appendMessage(thread, { role: "bot", kind: "text", text: NOTE });
+      const asked = store.appendMessage(thread, { role: "user", kind: "text", text: HANDOFF_REQUEST });
+      store.appendMessage(thread, { role: "bot", kind: "text", text: NOTE, turnId: `turn-${thread}`, requestMessageId: asked.id, turnTerminal: true, turnSucceeded: true });
     };
     answer(threadId);
 
