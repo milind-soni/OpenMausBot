@@ -15,3 +15,8 @@ change there: the numbers are lowered at each release.
 - `RouteContext` carries `req`, `res`, `url`, `path`, `method`, `auth`, `json`, `readBody`; the rest is `deps`.
 - Type-only imports must be `import type` (or an inline `type`): the server runs on type stripping, so
   a bare type import passes `tsc` and crashes at boot.
+- The server publishes its own route list at `GET /api/openapi.json` (and `/openapi.json`), read from the code
+  that matches requests by `scripts/route-list.ts` into `route-list.generated.ts`. After adding, moving or
+  removing a route, run `pnpm routes:list`; `scripts/testing/route-list.test.ts` fails while the file is stale,
+  and fails on a request-path test the reader cannot place (match the path with a literal, a template of
+  constants or an anchored pattern, and test the method with `===`, so it can).

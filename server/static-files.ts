@@ -19,12 +19,16 @@ const MIME: Record<string, string> = {
 /** Never framed (a hidden frame could act on a pair or sign-in page unseen), and no Referer. */
 const PAGE_HEADERS = { "content-security-policy": "frame-ancestors 'none'", "x-frame-options": "DENY", "referrer-policy": "no-referrer" } as const;
 
+/** Documents answered by a route behind the sign-in gate, never by the page: GET /openapi.json is the route list
+ * (routes/openapi.ts OPENAPI_ROOT_PATH), so a client that asks for it gets JSON or a refusal, not the app's HTML. */
+export const NOT_PAGES: ReadonlySet<string> = new Set(["/openapi.json"]);
+
 /** Pages with an entry of their own: the app, and the desktop window's rail of places. */
 const PAGES: Record<string, string> = { "/": "/index.html", "/rail": "/rail.html" };
 
 /** Public by design: the same bundle anyone can download, with no secrets, and /pair must load before a session exists. */
 export function serveStatic(res: ServerResponse, path: string, staticDir: string | null): boolean {
-  if (!staticDir) return false;
+  if (!staticDir || NOT_PAGES.has(path)) return false;
   const safe = PAGES[path] ?? path.replace(/\.\./g, "");
   const file = join(staticDir, safe);
   try {

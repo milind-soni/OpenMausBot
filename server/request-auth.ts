@@ -437,6 +437,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/today$/ },
   // configured-or-not booleans; the handler strips the few identifying fields for clients
   { methods: ["GET"], path: /^\/api\/config$/ },
+  // the route list: which paths and methods this server answers, the same for everyone (routes/openapi.ts)
+  { methods: ["GET"], path: /^\/(?:api\/)?openapi\.json$/ },
   // a person's own "About you" on a Team Cloud
   { methods: ["GET", "PUT"], path: /^\/api\/me$/ },
   // whether the person saw their own welcome to the team, and its steps they finished (team-welcome.ts)

@@ -35,4 +35,11 @@ describe("serveStatic", () => {
     expect(get("/rail/more").body).toBe("app");
     expect(get("/assets/rail-1a2b.js").headers["cache-control"]).toBe("public, max-age=31536000, immutable");
   });
+
+  it("leaves /openapi.json to the route list behind the sign-in gate instead of answering it with the app", () => {
+    const asked = get("/openapi.json");
+    expect(asked.served).toBe(false);
+    expect(asked.body).toBeUndefined();
+    expect(get("/openapi.json/x").body).toBe("app");
+  });
 });
