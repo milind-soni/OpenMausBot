@@ -115,6 +115,7 @@ describe("local computer UI eligibility", () => {
     expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(
       "Bots can't use this Mac: local desktop control needs macOS 13 Ventura or later. Update macOS to use it.",
     );
+    expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(false);
   });
 
   it("preserves the ready local fallback on supported non-Linux hosts", () => {

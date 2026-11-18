@@ -486,7 +486,7 @@ function restartCua() {
       return {
         enabled: ready,
         status: ready ? "ready" : "error",
-        reasonCode: ready ? undefined : "permissions-required",
+        reasonCode: ready ? undefined : connection?.reasonCode ?? "permissions-required",
         message: connection?.reason,
       };
     } catch (error) {

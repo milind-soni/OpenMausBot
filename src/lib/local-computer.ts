@@ -25,6 +25,7 @@ export function localComputerSelectable({
   if (!providerSupportsLocal) return false;
   if (capabilities.localComputer.available) return true;
   if (pageOnRemoteServer(capabilities)) return false;
+  if (capabilities.localComputer.reasonCode === "macos-version-unsupported") return false;
   return capabilities.host.platform === "darwin" || capabilities.host.platform === "win32";
 }
 
