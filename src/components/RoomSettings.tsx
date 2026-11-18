@@ -17,7 +17,9 @@ const IDLE_OPTIONS: { value: number | null; label: string }[] = [
   { value: 45, label: "45 min" },
   { value: 90, label: "90 min" },
 ];
-const HOP_OPTIONS = [1, 2, 3];
+// a safety cap on bots looping, not a depth: mentions are answered below it
+const HOP_OPTIONS = [5, 10, 25];
+const DEFAULT_HOPS = 10;
 
 type RoomPatch = Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "handoffs" | "defaultResponderId" | "maxHops" | "turnIdleMinutes" | "projectId">>;
 
@@ -202,11 +204,11 @@ export function RoomSettings({ groupId, onClose }: { groupId: string; onClose: (
                 onChange={(handoffs) => patch({ handoffs })}
               />
             </Field>
-            <Field group label="Handoff depth" hint="How many bots in a row can hand work on from one message.">
+            <Field group label="Handoffs in a row" hint="A mentioned bot always answers. After this many bot-to-bot handoffs without you, the room pauses until you step in.">
               <Segmented
-                label="Handoff depth"
+                label="Handoffs in a row"
                 options={HOP_OPTIONS.map((n) => ({ value: n, label: String(n) }))}
-                value={group.maxHops ?? 1}
+                value={group.maxHops ?? DEFAULT_HOPS}
                 onChange={(maxHops) => patch({ maxHops })}
               />
             </Field>

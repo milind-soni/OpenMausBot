@@ -43,6 +43,11 @@ describe("mentionedBots", () => {
   it("matches mentions wrapped in common Markdown punctuation", () => {
     expect(mentionedBots("**@Milind** and [@New Bot]", peers).map((b) => b.id)).toEqual(["3", "1"]);
   });
+  it("matches mentions after quotes and punctuation", () => {
+    expect(mentionedBots(`"@Milind" over to you`, peers).map((b) => b.id)).toEqual(["3"]);
+    expect(mentionedBots("thanks,@Milind — and “@New Bot”", peers).map((b) => b.id)).toEqual(["3", "1"]);
+    expect(mentionedBots("done.\n—@Milind", peers).map((b) => b.id)).toEqual(["3"]);
+  });
   it("ignores emails, hidden bots, and mid-word @", () => {
     expect(mentionedBots("mail milind@milind.dev please", peers)).toEqual([]);
     expect(mentionedBots("prefix@Milind and path/@New Bot", peers)).toEqual([]);

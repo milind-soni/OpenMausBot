@@ -73,6 +73,11 @@ posixOnly("room activity runtime", () => {
           environment: { FAKE_ACP_MODE: "mention-beta", FAKE_ACP_MENTION: "Gamma" },
           config: { cli: fakeCli, fullAuto: false },
         },
+        "mentions-alpha": {
+          driver: "grokAgent",
+          environment: { FAKE_ACP_MODE: "mention-beta", FAKE_ACP_MENTION: "Alpha" },
+          config: { cli: fakeCli, fullAuto: false },
+        },
         slow: {
           driver: "grokAgent",
           environment: { FAKE_ACP_MODE: "slow", FAKE_ACP_TICKS: "6", FAKE_ACP_TICK_MS: "400" },
@@ -330,6 +335,9 @@ posixOnly("room activity runtime", () => {
     let alphaTurns = 0;
     await waitForFrame((frame) => turnFrame(alpha.id, "turn.completed")(frame) && ++alphaTurns === 2, "two Alpha turns", 12_000, offStart);
     expect(frames.slice(offStart).some(turnFrame(beta.id, "turn.started"))).toBe(false);
+    // the dropped mention is announced, not silent
+    expect(frames.slice(offStart).some((f) => f.kind === "message" && f.threadId === group.threadId
+      && f.message.tool?.name === "Auto handoffs are off. Mention Beta to continue.")).toBe(true);
 
     // app off, room on: the handoff runs
     await api("PUT", "/api/config", { autoHandoffs: false });
@@ -351,6 +359,22 @@ posixOnly("room activity runtime", () => {
     await api("POST", `/api/groups/${group.id}/messages`, { text: "@Alpha begin" });
     await waitForFrame(turnFrame(gamma.id, "turn.completed"), "second-hop Gamma turn", 15_000, start);
   }, 30_000);
+
+  it("lets bots hand work back and forth until the room's cap, then says so", async () => {
+    const alpha = await makeBot("Alpha", "mentions");
+    const beta = await makeBot("Beta", "mentions-alpha");
+    const group = (await api("POST", "/api/groups", { name: "Ping-pong room", memberIds: [alpha.id, beta.id] })).body.group;
+    await api("PATCH", `/api/groups/${group.id}`, { handoffs: "on", maxHops: 5 });
+
+    const start = frames.length;
+    await api("POST", `/api/groups/${group.id}/messages`, { text: "@Alpha begin" });
+    const paused = (f: any) => f.kind === "message" && f.threadId === group.threadId && /^Paused after 5 handoffs\. Mention Alpha to continue\.$/.test(f.message.tool?.name ?? "");
+    await waitForFrame(paused, "pause notice", 30_000, start);
+    const turns = (id: string) => frames.slice(start).filter(turnFrame(id, "turn.completed")).length;
+    // user → Alpha, then five handoffs: Beta, Alpha, Beta, Alpha, Beta
+    expect(turns(alpha.id)).toBe(3);
+    expect(turns(beta.id)).toBe(3);
+  }, 40_000);
 
   it("routes unmentioned messages to the room's default responder", async () => {
     const alpha = await makeBot("Alpha", "happy");
@@ -391,7 +415,8 @@ posixOnly("room activity runtime", () => {
     const group = (await api("POST", "/api/groups", { name: "Valid room", memberIds: [solo.id] })).body.group;
     const patch = (body: unknown) => api("PATCH", `/api/groups/${group.id}`, body);
 
-    expect((await patch({ maxHops: 4 })).status).toBe(400);
+    expect((await patch({ maxHops: 26 })).status).toBe(400);
+    expect((await patch({ maxHops: 0 })).status).toBe(400);
     expect((await patch({ maxHops: 1.5 })).status).toBe(400);
     expect((await patch({ handoffs: "sometimes" })).status).toBe(400);
     expect((await patch({ turnIdleMinutes: 0 })).status).toBe(400);
@@ -399,8 +424,8 @@ posixOnly("room activity runtime", () => {
     expect((await patch({ memberIds: [] })).status).toBe(400);
     expect((await patch({ name: "  " })).status).toBe(400);
     expect((await patch({ autoHandoffs: false })).body.group.handoffs).toBe("off");
-    expect((await patch({ turnIdleMinutes: 45, maxHops: 3, name: " Renamed " })).body.group)
-      .toMatchObject({ turnIdleMinutes: 45, maxHops: 3, name: "Renamed" });
+    expect((await patch({ turnIdleMinutes: 45, maxHops: 25, name: " Renamed " })).body.group)
+      .toMatchObject({ turnIdleMinutes: 45, maxHops: 25, name: "Renamed" });
     expect((await patch({ turnIdleMinutes: null })).body.group.turnIdleMinutes).toBeNull();
   });
 });

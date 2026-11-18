@@ -31,7 +31,7 @@ import type { ModelSelection, RuntimeEvent, SendTurnInput } from "./contracts.ts
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
-import { automaticHandoffBots, mentionedBots, ROOM_IDLE_MINUTES_MAX, ROOM_MAX_HOPS, Store, type Attachment, type GroupRecord, type Message } from "./store.ts";
+import { handoffMentions, mentionedBots, ROOM_DEFAULT_HOPS, ROOM_IDLE_MINUTES_MAX, ROOM_MAX_HOPS, Store, type Attachment, type GroupRecord, type Message } from "./store.ts";
 import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContext } from "./projects.ts";
 import { CHAT_FORMATTING_HINT } from "./chat-formatting.ts";
 import { createTurnWatchdog, formatDuration, type TurnExpiry } from "./turn-watchdog.ts";
@@ -794,7 +794,7 @@ async function startTurn(
 // members run SEQUENTIALLY (one speaker at a time — the transcript and the
 // streaming bubble stay coherent), each on a fresh session with the recent
 // room conversation serialized into its prompt. A member's reply may
-// @mention teammates; those get chained turns up to the room's maxHops.
+// @mention teammates; each gets a chained turn, up to the room's safety cap.
 const groupQueues = new Map<string, Promise<void>>();
 const groupQueueEpoch = new Map<string, number>();
 // A room turn is stopped only when the bot goes quiet for GROUP_TURN_IDLE_MS
@@ -878,7 +878,8 @@ async function runGroupMemberTurn(
   botId: string,
   hop: number,
   // bots that already spoke for this user message — "@Scout ask @Pixel"
-  // must not run Pixel twice (once chained, once as a direct responder)
+  // must not run Pixel twice (once chained, once as a direct responder).
+  // Only the direct-responder loop reads it; chained mentions always run.
   spoken: Set<string> = new Set(),
   epoch = groupQueueEpoch.get(groupId) ?? 0,
   retry?: { selection: ModelSelection; context: ActiveTurnContext },
@@ -1032,17 +1033,36 @@ async function runGroupMemberTurn(
   store.patchGroup(group.id, { busyBotId: null, unread: true });
   broadcastGroup(group.id);
 
-  // chained mentions: a member's reply can summon teammates, up to the
-  // room's hop depth
+  // chained mentions: every teammate a reply @mentions gets a turn, including
+  // one who already spoke — handing work back is the point. The room's cap
+  // only stops a runaway loop, and a mention it can't answer is announced.
   const latestGroup = store.group(groupId);
-  if (latestGroup && hop < (latestGroup.maxHops ?? 1) && replyText.trim() && (groupQueueEpoch.get(groupId) ?? 0) === epoch) {
+  if (latestGroup && replyText.trim() && (groupQueueEpoch.get(groupId) ?? 0) === epoch) {
     const members = latestGroup.memberIds
       .map((id) => store.bot(id))
       .filter((b): b is NonNullable<typeof b> => Boolean(b) && b!.id !== bot.id);
-    for (const next of automaticHandoffBots(roomHandoffsEnabled(latestGroup), replyText, members)) {
-      if (spoken.has(next.id)) continue;
-      queueGroupResponders(groupId, [next.id]);
-      await runGroupMemberTurn(groupId, next.id, hop + 1, spoken, epoch);
+    const mentioned = handoffMentions(replyText, members);
+    const limit = latestGroup.maxHops ?? ROOM_DEFAULT_HOPS;
+    if (mentioned.length && (!roomHandoffsEnabled(latestGroup) || hop >= limit)) {
+      const names = mentioned.map((b) => b.name).join(" and ");
+      const line = store.appendMessage(group.threadId, {
+        role: "bot",
+        kind: "activity",
+        from: { botId: bot.id, name: bot.name, color: bot.color },
+        tool: {
+          name: roomHandoffsEnabled(latestGroup)
+            ? `Paused after ${limit} handoffs. Mention ${names} to continue.`
+            : `Auto handoffs are off. Mention ${names} to continue.`,
+          ok: true,
+        },
+      });
+      broadcast({ kind: "message", threadId: group.threadId, message: line });
+    } else {
+      for (const next of mentioned) {
+        if ((groupQueueEpoch.get(groupId) ?? 0) !== epoch) break;
+        queueGroupResponders(groupId, [next.id]);
+        await runGroupMemberTurn(groupId, next.id, hop + 1, spoken, epoch);
+      }
     }
   }
 }

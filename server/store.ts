@@ -74,7 +74,12 @@ export interface Message {
  * only when @mentioned (the Buzz rule). The bulletin is the room's shared
  * instructions — every member's turn gets it as part of its system prompt. */
 export type RoomHandoffs = "inherit" | "on" | "off";
-export const ROOM_MAX_HOPS = 3;
+/** Handoffs in a row before a room pauses for the user. Mentions are always
+ * answered below this; it only stops two bots looping on each other. */
+export const ROOM_MAX_HOPS = 25;
+export const ROOM_DEFAULT_HOPS = 10;
+/** The 1–3 "handoff depth" setting this replaced; such values are dropped. */
+const LEGACY_MAX_HOPS = 3;
 export const ROOM_IDLE_MINUTES_MAX = 180;
 
 export interface GroupRecord {
@@ -88,7 +93,7 @@ export interface GroupRecord {
   handoffs: RoomHandoffs;
   /** Member who answers a user message with no @mention (null = nobody). */
   defaultResponderId?: string | null;
-  /** How many chained bot→bot handoffs one user message may trigger (1–3). */
+  /** Safety cap on chained bot→bot handoffs from one user message (default ROOM_DEFAULT_HOPS). */
   maxHops?: number;
   /** Per-room inactivity window for a turn, in minutes (null = app default). */
   turnIdleMinutes?: number | null;
@@ -162,7 +167,7 @@ export function mentionedBots<T extends { name: string; hidden?: boolean }>(text
   const found: T[] = [];
   let at = -1;
   while ((at = lower.indexOf("@", at + 1)) !== -1) {
-    if (at > 0 && !/[\s*_~([>{]/.test(text[at - 1])) continue; // user@host and mid-word @ are not tags
+    if (at > 0 && /[\w.@/\\]/.test(text[at - 1])) continue; // user@host, URLs and mid-word @ are not tags
     const rest = lower.slice(at + 1);
     const hit = candidates.find((p) => rest.startsWith(p.name.toLowerCase()));
     if (hit && !found.includes(hit)) found.push(hit);
@@ -170,14 +175,18 @@ export function mentionedBots<T extends { name: string; hidden?: boolean }>(text
   return found;
 }
 
+/** Teammates a bot's reply hands off to: its @mentions outside code. */
+export function handoffMentions<T extends { name: string; hidden?: boolean }>(text: string, peers: T[]): T[] {
+  const textWithoutCode = text.replace(/```[\s\S]*?```/g, "").replace(/`[^`]+`/g, "");
+  return mentionedBots(textWithoutCode, peers);
+}
+
 export function automaticHandoffBots<T extends { name: string; hidden?: boolean }>(
   enabled: boolean,
   text: string,
   peers: T[],
 ): T[] {
-  if (!enabled) return [];
-  const textWithoutCode = text.replace(/```[\s\S]*?```/g, "").replace(/`[^`]+`/g, "");
-  return mentionedBots(textWithoutCode, peers);
+  return enabled ? handoffMentions(text, peers) : [];
 }
 
 const onboardingCard = (): OptionCardData => ({
@@ -233,6 +242,8 @@ export class Store {
         groupsMigrated = true;
       }
       if ("autoHandoffs" in legacy) { delete legacy.autoHandoffs; groupsMigrated = true; }
+      // the old depth cut real back-and-forth short; fall back to the default cap
+      if (g.maxHops !== undefined && g.maxHops <= LEGACY_MAX_HOPS) { delete g.maxHops; groupsMigrated = true; }
       if (g.defaultResponderId && !g.memberIds.includes(g.defaultResponderId)) g.defaultResponderId = null;
       g.busyBotId = null;
       g.queuedBotIds = [];

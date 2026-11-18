@@ -319,6 +319,19 @@ describe("Store", () => {
     expect(new Store(selection).group(off.id)?.handoffs).toBe("off");
   });
 
+  it("drops the old 1–3 handoff depth so rooms get the default cap", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const old = store.createGroup("Old depth", [bot.id]);
+    const chosen = store.createGroup("New cap", [bot.id]);
+    store.patchGroup(old.id, { maxHops: 3 });
+    store.patchGroup(chosen.id, { maxHops: 25 });
+
+    const migrated = new Store(selection);
+    expect(migrated.group(old.id)?.maxHops).toBeUndefined();
+    expect(migrated.group(chosen.id)?.maxHops).toBe(25);
+  });
+
   it("drops a default responder that is no longer a member on load", () => {
     const store = new Store(selection);
     const a = store.createBot();
