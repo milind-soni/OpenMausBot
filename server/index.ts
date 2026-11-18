@@ -299,7 +299,7 @@ import { createDelegatedLevel } from "./host/delegated-level.ts";
 import { createLiveApprovalMode } from "./host/live-approval.ts";
 import { CONSENT_RULE, continuedOrigin, escapeNotes, labelledLine, OUTSIDE, peerLineText, peerProvenanceNote, quoteInNote, reportNote, requestWorkOrigin, type WorkOrigin } from "./peer-provenance.ts"; import { lineNote, PROVENANCE_PROMPT } from "./provenance-label.ts"; import { openRoomThread } from "./host/room-new-thread.ts"; import { createLineLabels } from "./host/line-labels.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
-import { messagePages, pageSize, slimMessage } from "./host/message-pages.ts";
+import { messagePages, pageSize, slimMessage } from "./host/message-pages.ts"; import { suggestedSelection } from "./host/suggested-selection.ts";
 import { coordinateResultMessage, createAsksActingPerson, createTeammatePrompts } from "./host/teammate-prompts.ts"; import { createPersonalReach } from "./host/personal-reach.ts"; import { createMausBotOwnChat } from "./host/mausbot-own-chat.ts"; import { moveMemoryLayer } from "./memory-move.ts";
 import { createQueuedReason } from "./host/queued-reason.ts";
 import { ReplayBuffer } from "./host/sse-replay.ts";
@@ -14641,7 +14641,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === "GET" && path === "/api/bot-defaults") {
       return json(res, 200, {
         defaults: structuredClone(cfg.newBotDefaults ?? newBotDefaultsSchema.parse({})),
-        modelSelection: await defaultSelection(),
+        modelSelection: await suggestedSelection({ reused: (age) => registry.describe({ reuse: { ...age, changed: () => broadcast({ kind: "config", ...configStatus() }) } }), fresh: () => registry.describe(), select: (instances) => defaultSelection(undefined, instances) }),
         suggestedName: pickBotName(store.bots.map(bot => bot.name)),
       });
     }
