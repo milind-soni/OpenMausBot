@@ -659,8 +659,8 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   if (localPath) {
     const copy = delivered && Object.hasOwn(delivered, fileName(localPath)) ? delivered[fileName(localPath)] : undefined;
     const source = copy && originals && Object.hasOwn(originals, copy) ? originals[copy] : undefined;
-    // localFilePath already decodes a file:// URL; a plain path link is still encoded and gets the server's single decode.
-    const shownName = fileName(/^file:\/\//i.test(href) ? localPath : decodedLinkPath(localPath));
+    // A delivered copy keeps its literal name; localFilePath already decodes a file:// URL; a plain path link is still encoded and gets the server's single decode.
+    const shownName = copy || /^file:\/\//i.test(href) ? fileName(localPath) : fileName(decodedLinkPath(localPath));
     return <LocalFileLink filePath={copy ?? localPath} shownName={shownName} name={copy ? fileName(localPath) : undefined} source={source} message={message}>{children}</LocalFileLink>;
   }
   if (!/^https?:\/\//i.test(href)) {

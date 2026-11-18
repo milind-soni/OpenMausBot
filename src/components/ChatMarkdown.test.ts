@@ -839,6 +839,15 @@ describe("ChatMarkdown attachments", () => {
     expect(html).toContain('title="Preview page: 100%41 report.html"');
   });
 
+  it("names a delivered copy by its literal file name, without decoding it", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "[Report](/old/100%41.html)", message: { threadId: "thread-1", messageId: "message-1" },
+      delivered: { "100%41.html": "/store/delivered-100.html" },
+    }));
+    expect(html).toContain('title="Preview page: 100%41.html"');
+    expect(html).not.toContain("100A.html");
+  });
+
   it("preserves dollar signs in Windows file destinations", () => {
     const save = vi.spyOn(AttachmentPreview, "useLocalFileSave");
     const filePath = "C:\\Users\\Maus\\R$5\\receipt.pdf";
