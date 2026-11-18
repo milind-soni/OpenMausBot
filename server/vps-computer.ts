@@ -23,8 +23,8 @@ import { desktopCapArgs, dockerSecurityIsHardened, type DockerHardeningConfig } 
 import { PIDS_LIMIT, raisePidsLimit } from "./container-limits.ts";
 import { DATA_DIR, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath } from "./env-path.ts";
-import { COMMAND_TIMEOUT_KILL_GRACE_MS, defaultRunner, type VpsCommandRunner } from "./vps-command.ts";
-export { defaultRunner, type VpsCommandOptions, type VpsCommandRunner } from "./vps-command.ts";
+import { COMMAND_TIMEOUT_KILL_GRACE_MS, defaultRunner, VpsHostUnreachableError, type VpsCommandRunner } from "./vps-command.ts";
+export { defaultRunner, VpsHostUnreachableError, type VpsCommandOptions, type VpsCommandRunner } from "./vps-command.ts";
 import { prepareVpsSsh } from "./vps-ssh.ts";
 import { loadEnvironmentId } from "./environment.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
@@ -144,7 +144,7 @@ export interface ManagedVpsInventory {
   vpsAliases: string[];
   problem: string | null;
   instances: ManagedVpsInventoryInstance[];
-  /** Set when every host that failed gave no list at all (SSH or Docker did not answer), rather than one that could not be verified. */
+  /** Set when every host that failed could not be reached over SSH or timed out, rather than one that answered with a refusal or a list that can't be verified. */
   unreachable?: true;
 }
 
@@ -616,7 +616,7 @@ async function scanManagedVpsAlias(
   try {
     listed = await runner(vpsDockerArgs(alias, ["container", "ls", "--all", "--filter", `label=${VPS_MANAGED_LABEL}=1`, "--format", "{{.ID}}"]), { timeoutMs: 20_000 });
   } catch (error) {
-    return { ...inventoryFailure(alias, error), ...(dockerCliMissing(error) ? {} : { unreachable: true as const }) };
+    return { ...inventoryFailure(alias, error), ...(error instanceof VpsHostUnreachableError ? { unreachable: true as const } : {}) };
   }
   try {
     const ids = [...new Set(listed.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))];

@@ -11157,6 +11157,7 @@ describe("harness HTTP API", () => {
       expect(cleared.body.notice).toContain(`docker -H ssh://fixture-vps ps -a --filter label=com.openmausbot.environment=${environmentId} `);
       expect(cleared.body.notice).toContain("docker -H ssh://fixture-vps rm -f <name>");
       expect(cleared.body.notice).toContain("docker -H ssh://fixture-vps ps -a --filter label=com.openmausbot.vps=1 lists every managed one");
+      expect(cleared.body.notice).toContain("does not prove it is this installation's: if you have nothing more, leave it");
       expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("");
       expect(existsSync(fakeVpsFixture)).toBe(true);
     } finally {

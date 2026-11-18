@@ -21,6 +21,12 @@ export type VpsCommandRunner = (
 
 const STREAM_CAP_CHARS = 16 * 1024 * 1024;
 
+/** SSH never got through (or the command ran out of time): unlike a Docker refusal, nothing on the host answered. */
+export class VpsHostUnreachableError extends Error {}
+
+// OpenSSH exits 255 for its own failures; Docker's SSH transport quotes that status when the connection drops.
+const SSH_EXIT_255 = /exit(?:ed with exit)? status 255\b/i;
+
 function tailCollector() {
   const chunks: string[] = [];
   let total = 0;
@@ -46,8 +52,11 @@ export async function defaultRunner(args: string[], options: VpsCommandOptions =
   let deadline = Date.now() + (options.timeoutMs ?? 120_000);
   const destination = args[0] === "-H" && args[1]?.startsWith("ssh://") ? args[1].slice(6) : null;
   // Time spent waking a paused host does not count against the command's own timeout.
-  if (destination) deadline += await ensureVpsSshMaster(ssh, destination, Math.min(30_000, deadline - Date.now()));
-  if (Date.now() >= deadline) throw new Error("Docker-over-SSH command timed out");
+  if (destination) {
+    try { deadline += await ensureVpsSshMaster(ssh, destination, Math.min(30_000, deadline - Date.now())); }
+    catch (error) { throw new VpsHostUnreachableError(error instanceof Error ? error.message : String(error)); }
+  }
+  if (Date.now() >= deadline) throw new VpsHostUnreachableError("Docker-over-SSH command timed out");
   return new Promise((resolve, reject) => {
     // Docker's SSH transport runs the first `ssh` on PATH: the app's shim, which shares one connection.
     const child = spawnCli("docker", args, {
@@ -79,7 +88,7 @@ export async function defaultRunner(args: string[], options: VpsCommandOptions =
       };
       void killCliTree(child, COMMAND_TIMEOUT_TERM_GRACE_MS).then(cleaned, cleaned);
     };
-    timeout = setTimeout(() => fail(new Error("Docker-over-SSH command timed out")), Math.max(1, deadline - Date.now()));
+    timeout = setTimeout(() => fail(new VpsHostUnreachableError("Docker-over-SSH command timed out")), Math.max(1, deadline - Date.now()));
     timeout.unref?.();
 
     child.stdout.setEncoding("utf8");
@@ -101,7 +110,8 @@ export async function defaultRunner(args: string[], options: VpsCommandOptions =
       settle(() => {
         if (code === 0) return resolve({ stdout: stdout.text(), stderr: stderr.text() });
         const detail = stderr.text().trim().slice(-1000);
-        reject(new Error(detail || `Docker-over-SSH exited ${code ?? signal ?? "without a status"}`));
+        const message = detail || `Docker-over-SSH exited ${code ?? signal ?? "without a status"}`;
+        reject(SSH_EXIT_255.test(message) ? new VpsHostUnreachableError(message) : new Error(message));
       });
     });
     try {

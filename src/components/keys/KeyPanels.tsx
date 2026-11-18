@@ -157,14 +157,18 @@ export function VpsConnection() {
     if (saving || (!alias.trim() && !configured) || unchanged) return;
     setSaving(true);
     setError(null);
-    setNotice(null);
     api("/api/config", { method: "PUT", body: JSON.stringify({ vps: { sshAlias: alias.trim() } }) })
       .then(({ notice: savedNotice, ...status }: ConfigStatus & { notice?: string }) => {
         dispatch({ type: "configStatus", config: status });
         setAlias(status.vps?.sshAlias ?? "");
         setNotice(savedNotice ?? null);
       })
-      .catch((e) => setError(e.message))
+      .catch((e) => {
+        setError(e.message);
+        // A save that failed after the alias changed still says what the old server may hold.
+        const failedNotice = (e as { body?: { notice?: unknown } }).body?.notice;
+        if (typeof failedNotice === "string") setNotice(failedNotice);
+      })
       .finally(() => setSaving(false));
   };
 

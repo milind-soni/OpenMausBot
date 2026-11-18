@@ -270,6 +270,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       providerConfigBusy.set(true);
       const changingLocalVmMode = patch.localVm?.mode !== undefined && patch.localVm.mode !== localVmMode(cfg);
       if (changingLocalVmMode) localVmModeChangeBusy.set(true);
+      // Set once the alias change is saved: every reply after that, a failed one too, must carry it.
+      let savedVpsNotice: string | null = null;
       try {
         for (const provider of transitioningProviders) {
           const conflict = providerOperationConflict(provider);
@@ -652,6 +654,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const changedEngines = new Set(changedInstanceIds(enginesBefore, engineLaunches(providerConfigs())));
       // Revoked before any await: a changed engine's old children are invalid at once.
       revokeEngineCapabilities(changedEngines);
+      if (vpsLeftOn) savedVpsNotice = vpsAliasLeftBehindNotice(nextVpsAlias ? "Saved" : "Removed", vpsLeftOn, `label=${vps.VPS_ENVIRONMENT_LABEL}=${vps.vpsEnvironmentId()}`, `label=${vps.VPS_MANAGED_LABEL}=1`);
       // Commit failures wait until every mandatory effect has run: no journal failure may leave a bearer or stale engines active.
       const finalized = await finalizeBrowserCleanupMutation({
         requests: browserCleanupRequests,
@@ -687,10 +690,12 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         finalized.acknowledgements.every(Boolean),
         removedBrowserProfileIds.length === 1 ? "The browser profile" : "The browser profiles",
       );
-      return json(res, 200, {
-        ...(configForAccess(finalized.value, auth) as object),
-        ...(vpsLeftOn ? { notice: vpsAliasLeftBehindNotice(nextVpsAlias ? "Saved" : "Removed", vpsLeftOn, `label=${vps.VPS_ENVIRONMENT_LABEL}=${vps.vpsEnvironmentId()}`, `label=${vps.VPS_MANAGED_LABEL}=1`) } : {}),
-      });
+      return json(res, 200, { ...(configForAccess(finalized.value, auth) as object), ...(savedVpsNotice ? { notice: savedVpsNotice } : {}) });
+      } catch (error) {
+        if (!savedVpsNotice) throw error;
+        // The alias change is already saved, so this reply is the only place left to say what the old server may still hold.
+        const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
+        return json(res, status, { error: error instanceof Error ? error.message : String(error), notice: savedVpsNotice });
       } finally {
         for (const provider of transitioningProviders) computerProviderConfigTransitions.delete(provider);
         if (changingLocalVmMode) localVmModeChangeBusy.set(false);
