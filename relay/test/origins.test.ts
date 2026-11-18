@@ -23,6 +23,12 @@ describe("RELAY_PHONE_ORIGINS", () => {
     assert.deepEqual([...loadConfig({ ...base, RELAY_PHONE_ORIGINS: value }).phoneOrigins], value.split(","));
   });
 
+  test("accepts a fully qualified name with a trailing dot as its own origin", () => {
+    const { phoneOrigins } = loadConfig({ ...base, RELAY_PHONE_ORIGINS: "https://app.example.com." });
+    assert.deepEqual([...phoneOrigins], ["https://app.example.com."]);
+    assert.equal(phoneOrigins.has(APP), false);
+  });
+
   test("refuses anything that is not an exact https:// origin, and never repeats it", () => {
     const bad = [
       "http://app.example.com",
@@ -60,7 +66,7 @@ describe("RELAY_PHONE_ORIGINS", () => {
 describe("a relay without RELAY_PHONE_ORIGINS", () => {
   let relay: TestRelay;
   before(async () => {
-    relay = await startTestRelay();
+    relay = await startTestRelay({}, { phoneOrigins: [...loadConfig(base).phoneOrigins] });
   });
   after(() => relay.stop());
 
