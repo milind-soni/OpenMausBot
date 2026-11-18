@@ -293,7 +293,12 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "page": {
+            "type": "integer",
+            "description": "100 per page; default 1."
+          }
+        }
       },
       "annotations": {
         "readOnlyHint": true,
@@ -1290,6 +1295,7 @@
               "xai",
               "gemini",
               "openrouter",
+              "higgsfield",
               "custom"
             ],
             "description": "Only when the person named one; it must be their base or backup."

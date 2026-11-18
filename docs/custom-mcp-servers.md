@@ -92,6 +92,7 @@ so each service bills you directly and OpenMausBot pays for none of it.
 | --- | --- | --- |
 | **AgentMail**, email inboxes | `https://mcp.agentmail.to/mcp` | Browser sign-in |
 | **AgentPhone**, US and Canadian numbers, texts and calls | `https://mcp.agentphone.ai/mcp` | Browser sign-in |
+| **Higgsfield**, AI images and videos | `https://mcp.higgsfield.ai/mcp` | Browser sign-in |
 | **Vapi**, phone calls | `https://mcp.vapi.ai/mcp` | A private API key from the Vapi dashboard |
 | **Telnyx**, numbers in many countries, texts and calls | `https://api.telnyx.com/v2/mcp` | An API key from the Telnyx portal |
 

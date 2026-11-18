@@ -191,6 +191,13 @@ async function postForm(
   return { status: response.status, body };
 }
 
+/** Failures before the connection opened: the request never left, so nothing was presented. */
+const NOT_CONNECTED = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "ENETDOWN", "UND_ERR_CONNECT_TIMEOUT"]);
+function neverSent(error: unknown): boolean {
+  const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+  return typeof code === "string" && NOT_CONNECTED.has(code);
+}
+
 function tokensFrom(body: Record<string, unknown>, previous?: McpOAuthTokens): McpOAuthTokens | null {
   if (typeof body.access_token !== "string" || !body.access_token) return null;
   const refresh = typeof body.refresh_token === "string" && body.refresh_token ? body.refresh_token : previous?.refresh;
@@ -269,6 +276,8 @@ export class McpOAuthManager {
     if (current && this.authState(name, url) === "signed-in" && !replaces?.(current)) return "kept";
     this.cancel(name);
     this.store.put(name, { ...record, url, state: record.tokens ? "signed-in" : "needs-sign-in" });
+    // The sign-in that was replaced brought its own token: the mark of the old one no longer means anything.
+    this.store.forgetSpentRefresh(name);
     return "adopted";
   }
 
@@ -456,6 +465,18 @@ export class McpOAuthManager {
       this.markNeedsSignIn(name, record.url);
       return { token: null, outcome: "expired" };
     }
+    // A refresh token the server may already have rotated must never be presented again: such a server revokes the
+    // whole grant when it sees one of them a second time. A token this server already sent is therefore spent, whatever
+    // the answer was, and the sign-in ends rather than being refreshed a second time with it.
+    // The mark lives in the store, not in memory: a restart must not present the token either.
+    if (this.store.spentRefreshFor(name) === tokens.refresh) {
+      this.markNeedsSignIn(name, record.url);
+      return { token: null, outcome: "expired" };
+    }
+    // Remember it before the request leaves: if the answer is lost the server may have rotated it, and the next
+    // attempt must not send it again.
+    const sent = tokens.refresh;
+    this.store.markSpentRefresh(name, sent);
     let answer: Awaited<ReturnType<typeof postForm>>;
     try {
       answer = await postForm(record.tokenEndpoint, {
@@ -463,7 +484,10 @@ export class McpOAuthManager {
         refresh_token: tokens.refresh,
         resource: record.url,
       }, client);
-    } catch {
+    } catch (error) {
+      // A connection that never opened sent nothing, so the token is still good. Any other lost answer keeps it spent,
+      // because the server may have rotated it.
+      if (neverSent(error)) this.store.clearSpentRefresh(name, sent);
       if (!isDeepStrictEqual(this.store.get(name, record.url), record)) return { token: null, outcome: null };
       return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
     }
@@ -472,10 +496,18 @@ export class McpOAuthManager {
     if (!next) {
       const dead = (answer.status === 400 || answer.status === 401)
         && (answer.body.error === "invalid_grant" || answer.body.error === "invalid_client");
-      if (!dead) return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
+      // The server answered without a token (busy, rate-limited, down for a moment): it issued nothing, so the token is
+      // still good and the next attempt may present it.
+      if (!dead) {
+        this.store.clearSpentRefresh(name, sent);
+        return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
+      }
       this.markNeedsSignIn(name, record.url);
       return { token: null, outcome: "rejected" };
     }
+    // The server answered and kept the same refresh token: it is still valid (RFC 6749 section 6), so it may be
+    // presented again later. A rotated token leaves its mark: the one that was sent is dead for good.
+    if (next.refresh === sent) this.store.clearSpentRefresh(name, sent);
     this.store.put(name, { ...record, state: "signed-in", tokens: next });
     return { token: next.access, outcome: "refreshed" };
   }

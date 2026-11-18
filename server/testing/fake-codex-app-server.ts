@@ -6,6 +6,7 @@
 //     empty-question | malformed-question | config-profile | config-profile-unsupported | config-read-error |
 //     image | logged-in-stdout | logged-out | unauthorized | late-request | retry-then-complete | signin-refused |
 //     auth-recovery | mcp-401 | mcp-image | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
+//     | plan-unsupported-input (a resumed thread's turns fail as a ChatGPT plan refuses saved audio; a new thread works)
 //     | async-question (an agentMessage with delivery async and questions, as codex 0.160 sends request_user_input_async)
 //   FAKE_CODEX_MISSING_BEARER  the first N launches fail their turn as codex-cli 0.160.1 holding no login does (count in FAKE_CODEX_STATE)
 //   FAKE_CODEX_LAUNCH_CRASHES  the first N launches die pre-ack at turn/start, transient stderr, exit 1 (count in FAKE_CODEX_STATE)
@@ -654,7 +655,7 @@ process.stdin.on("data", (chunk) => {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
-        } else if (mode === "resume" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
+        } else if (mode === "resume" || mode === "plan-unsupported-input" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
             (mode === "resume-then-missing" && !existsSync(process.env.FAKE_CODEX_STATE ?? ""))) {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId, ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}) }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else {
@@ -854,6 +855,14 @@ process.stdin.on("data", (chunk) => {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
           // The reporter's words (2026-11-03): ChatGPT lists gpt-6.1-sol, then refuses it for a ChatGPT account.
           const error = { message: "unexpected status 400 Bad Request: invalid_request_error model_not_found: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.", codexErrorInfo: null, additionalDetails: null };
+          notify("error", { willRetry: false, error });
+          notify("turn/completed", { turn: { status: "failed", error } });
+          break;
+        }
+        if (mode === "plan-unsupported-input" && resumedThread) {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          // The reporter's words (2026-11-17): the resumed session holds an mp3 a ChatGPT plan will not take.
+          const error = { message: "unexpected status 400 Bad Request: {\"error\":{\"message\":\"User subscription sharing supports text, image, and file input. Remove unsupported content or use an API key instead.\",\"type\":\"invalid_request_error\",\"param\":\"input\",\"code\":\"subscription_sharing_unsupported_capability\"}}", codexErrorInfo: null, additionalDetails: null };
           notify("error", { willRetry: false, error });
           notify("turn/completed", { turn: { status: "failed", error } });
           break;

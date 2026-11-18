@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
 import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { ChatMcpClient, ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatMcpEnvironment, chatToolNotices, directServers, joinLateChatTools, mcpStartupMs, mountChatTools, trimmedToolsNotice, type ChatToolDefinition, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { ChatMcpClient, ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, agentsStartupMs, chatMcpEnvironment, chatToolNotices, directServers, joinLateChatTools, mcpStartupMs, mountChatTools, trimmedToolsNotice, type ChatToolDefinition, type ChatToolSession } from "./chat-mcp-tools.ts";
 import { EXECUTOR_LIKE_TOOLS } from "../testing/executor-like-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
 import type { SendTurnInput } from "../contracts.ts";
@@ -468,6 +468,13 @@ describe("Chat MCP session", () => {
       expect(mcpStartupMs({}, "win32", false)).toBe(8_000);
       expect(mcpStartupMs({}, "darwin")).toBe(8_000);
       expect(mcpStartupMs({}, "linux")).toBe(8_000);
+    });
+
+    it("gives the agents server twenty seconds on every desktop and never less than a Cloud home's half minute", () => {
+      expect(agentsStartupMs({}, "darwin")).toBe(20_000);
+      expect(agentsStartupMs({}, "linux")).toBe(20_000);
+      expect(agentsStartupMs({}, "win32")).toBe(20_000);
+      expect(agentsStartupMs({ OMB_CLOUD_ROLE: "home" }, "linux")).toBe(30_000);
     });
 
     // tools/list needs a budget that outlasts the child's own start, or the overrun would land in initialize.
@@ -1153,6 +1160,24 @@ describe("Chat MCP startup budgets", () => {
       vi.useRealTimers();
       await remote.close();
     }
+  });
+
+  it("keeps waiting for a slow agents server past the eight seconds other servers get", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // Lists its tools only once the test says so, like an agents server still loading on a busy older Mac.
+      const f = fixture(`if (message.method === "tools/list") { const wait = setInterval(() => { if (!existsSync(receipt + ".go")) return; clearInterval(wait);
+        reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}]}); }, 20); continue; }`);
+      const mounting = watch(mountChatTools({ agents: f.server } as SendTurnInput["integrations"], f.controller.signal));
+      const listed = () => { try { return f.read().calls.some((call) => call.method === "tools/list"); } catch { return false; } };
+      await untilReal(listed);
+      await vi.advanceTimersByTimeAsync(17_000);
+      writeFileSync(`${f.receipt}.go`, "");
+      await untilReal(() => mounting.done);
+      expect(mounting.error).toBeUndefined();
+      sessions.push(mounting.value!);
+      expect(mounting.value!.definitions.map((definition) => definition.function.name)).toEqual(["agents_write"]);
+    } finally { vi.useRealTimers(); }
   });
 
   it("still gives a configured command server 8 seconds, on Windows too", async () => {

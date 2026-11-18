@@ -1,6 +1,41 @@
 import { describe, expect, it } from "vitest";
 
-import { clampAppend, commentaryChunks, formatCallDuration, FULL_ANSWER_IN_CHAT, joinFragments, LiveTranscript, liveCallRowText } from "./live-call.ts";
+import { clampAppend, commentaryChunks, formatCallDuration, FULL_ANSWER_IN_CHAT, joinFragments, LiveTranscript, liveCallRowText, SpokenLines } from "./live-call.ts";
+
+describe("SpokenLines", () => {
+  it("keeps each stretch of the voice's speech as one line, stamped when it began", () => {
+    const lines = new SpokenLines();
+    lines.add("You have ", 10, 1_000, 1_400);
+    lines.add("two meet", 11, 1_400, 1_800);
+    lines.add("ings.", 12, 1_800, 2_000);
+    lines.add(" Anything else?", 13, 2_500, 3_000);
+    lines.add("Bye!", 40, 9_000, 9_400);
+    expect(lines.list()).toEqual([
+      { at: 10, text: "You have two meetings. Anything else?" },
+      { at: 40, text: "Bye!" },
+    ]);
+  });
+
+  it("adds a delta without timing to the current line, and skips empty ones", () => {
+    const lines = new SpokenLines();
+    lines.add("", 1, 0, 100);
+    lines.add("Sure", 2, Number.NaN, Number.NaN);
+    lines.add(", on it.", 3, Number.NaN, Number.NaN);
+    lines.add("Done.", 9, 5_000, 5_300);
+    lines.add("  ", 10, 20_000, 20_100);
+    expect(lines.list()).toEqual([{ at: 2, text: "Sure, on it." }, { at: 9, text: "Done." }]);
+  });
+
+  it("scrubs each line as it grows, so a word split across deltas is masked and stays masked", () => {
+    let known = true;
+    const lines = new SpokenLines((text) => (known ? text.replaceAll("4417", "****") : text));
+    lines.add("The code is 44", 1, 0, 300);
+    lines.add("17.", 2, 300, 600);
+    known = false;
+    lines.add(" Anything else?", 3, 600, 900);
+    expect(lines.list()).toEqual([{ at: 1, text: "The code is ****. Anything else?" }]);
+  });
+});
 
 describe("LiveTranscript", () => {
   it("rebuilds each delegated request from the words spoken since the previous one", () => {

@@ -35,7 +35,7 @@ import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
-import { FETCH_LIMIT_MS, fetchPastLimit } from "./openai-chat-fetch.ts";
+import { FETCH_LIMIT_MS, fetchPastLimit, prepareChatModel } from "./openai-chat-fetch.ts";
 import { announcesAction } from "./chat-announcement.ts";
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -46,10 +46,10 @@ export interface OpenAIChatMessage {
   reasoning?: string;
   reasoning_details?: Record<string, unknown>[];
 }
-
 interface Usage {
   input: number;
   output: number;
+  cachedInput?: number;
 }
 export interface Completion {
   text: string;
@@ -62,7 +62,6 @@ export interface Completion {
   /** Every output item of a Responses API reply, encrypted reasoning included, for the next round of this turn only. */
   responseOutput?: ResponseItem[];
 }
-
 interface CompletionJson extends ProviderBody {
   model?: string;
   choices?: Array<{
@@ -75,7 +74,6 @@ interface CompletionJson extends ProviderBody {
   /** Groq reports streaming usage in its final x_groq envelope. */
   x_groq?: { usage?: CompletionJson["usage"] };
 }
-
 interface NativeLog {
   source: string;
   outgoing(turn: SendTurnInput, messages: OpenAIChatMessage[], model: string, tools: ChatToolDefinition[]): unknown;
@@ -129,11 +127,13 @@ interface RuntimeOptions<Config> {
    * to fix a failed call instead of ending the turn on it. */
   localModel?: boolean;
 }
-
-const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
-  usage
-    ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0 }
+const usageFrom = (usage: CompletionJson["usage"]): Usage | null => {
+  const cachedInput = usage?.prompt_tokens_details?.cached_tokens;
+  return usage
+    ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0,
+        ...(typeof cachedInput === "number" && Number.isFinite(cachedInput) && cachedInput >= 0 ? { cachedInput } : {}) }
     : null;
+};
 
 const completionUsage = (json: CompletionJson) => json.usage ?? json.x_groq?.usage;
 
@@ -276,7 +276,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ? AbortSignal.any([signal, timeoutController.signal])
         : timeoutController.signal;
 
-      const served = options.servedModel ? await options.servedModel(model) : model;
+      const served = options.servedModel ? await prepareChatModel(() => options.servedModel!(model), activeSignal) : model;
       const requestBody = options.requestBody(served, messages, stream, variant, threadId, model);
       const effort = selectedReasoningEffort(requestBody, route, variant, options.selectedReasoning?.(model, variant));
       const payload = JSON.stringify(route === "responses"
@@ -735,6 +735,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           if (completion.usage) {
             usage.input += completion.usage.input;
             usage.output += completion.usage.output;
+            if (completion.usage.cachedInput !== undefined) usage.cachedInput = (usage.cachedInput ?? 0) + completion.usage.cachedInput;
             hasUsage = true;
             const contextWindow = options.models().options.find((entry) => entry.id === model)?.contextWindow;
             // Accounting sums the turn; context occupancy is the latest round only.

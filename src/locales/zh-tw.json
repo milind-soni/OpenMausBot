@@ -10178,5 +10178,14 @@
   "call.capability.turnsNeedDeepSeekKey": "新增 DeepSeek 金鑰即可在通話中輪流對話",
   "alwaysOn.section": "常開的家",
   "alwaysOn.title": "將這台電腦當作常開的家",
-  "alwaysOn.add.title": "加入 Mac mini 或其他常開的電腦"
+  "alwaysOn.add.title": "加入 Mac mini 或其他常開的電腦",
+  "call.capability.turnsNeedDeepSeekKeyReason": "你的聲音是 DeepSeek，因此「輪流對話」會透過 DeepSeek 語音轉文字聽你說話。請在「設定 → API 金鑰」中新增 DeepSeek 金鑰。",
+  "serverError.voice.deepseekKeyRequired": "請在「設定 → API 金鑰」中新增 DeepSeek API 金鑰，才能用 DeepSeek 聲音和機器人對話。",
+  "higgsfield.description": "你的機器人用 Higgsfield 模型產生的 AI 圖片和影片，使用你自己的 Higgsfield 帳號。",
+  "higgsfield.notice": "請使用你的 Higgsfield 帳號登入。不需要 API 金鑰。能使用 Higgsfield 的機器人可以發起圖片和影片產生，這會消耗你帳號的額度，所以請在「機器人存取權」中選擇哪些機器人可以使用。",
+  "imageGen.slot.needsHiggsfield": "需要連接 Higgsfield：請在下方連接。",
+  "imageGen.higgsfield.connected": "已連接到你的 Higgsfield 帳號",
+  "imageGen.higgsfield.notConnected": "未連接，或登入已失效",
+  "imageGen.higgsfield.help": "{app} 使用你在「外掛」中登入的 Higgsfield 帳號產生圖片。每張圖片都會消耗該帳號的額度。",
+  "imageGen.higgsfield.open": "開啟外掛"
 }

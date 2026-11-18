@@ -48,12 +48,12 @@ export async function listVoices(key: string): Promise<Voice[]> {
   }));
 }
 
-export async function synthesize(text: string, voiceId: string, key: string): Promise<Audio> {
+export async function synthesize(text: string, voiceId: string, key: string, signal?: AbortSignal): Promise<Audio> {
   const response = await request("/tts", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json", accept: "audio/mpeg" },
     body: JSON.stringify({ text, voice_id: voiceId, language: "auto", output_format: { codec: "mp3" } }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),
   });
   const mime = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
   if (mime !== "audio/mpeg" && mime !== "audio/mp3") {
