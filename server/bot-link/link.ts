@@ -21,6 +21,7 @@ import { writeFileAtomic } from "../atomic.ts";
 import type { CoordinateBotsCall, Coordinator, CoordinatorHost, HandoffView, HostTurnResult } from "../coordinator.ts";
 import type { PassedFile } from "../host/handoff-files.ts";
 import type { PeerDeliveryReceipt } from "../peer-delivery.ts";
+import { isIdStart } from "../peer-roster.ts";
 import type { Level } from "../runtime/types.ts";
 import { BRIEF_MAX, EXCHANGE_BYTES, FILES_MAX, LINK_EXPIRES_MS, PEERS_MAX, frameSchema, handoffOfRoot, isLinkedId, linkRoot, linkedBotSchema, linkedId, parseLinked, peerKey, placeSchema,
   type FileMeta, type FileWay, type Frame, type HandoffFrame, type LinkedBot, type Numbered, type Place, type ResultFrame } from "./protocol.ts";
@@ -312,13 +313,17 @@ export function createBotLink(deps: BotLinkDeps) {
     return address && bot ? { peer: address.peer, bot } : undefined;
   };
   const fold = (value: string) => value.replace(/^@/u, "").replace(/[-_]+/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase();
-  /** The bot of another place `raw` names: by its address here, or by a name no bot here has and only one bot elsewhere has. */
+  /** The bot of another place `raw` names: by its address here, or by a name no bot here answers to. A spelling that is a
+   * bot's id here — in any case — or the start of one, is local identity and is left to the local resolver, so a bot
+   * elsewhere named after that id, or after its first eight characters, never takes that bot's work or its files. */
   function resolve(raw: string): Remote | undefined {
     if (!state) return undefined;
     const wanted = raw.trim();
+    const lower = wanted.toLowerCase();
     if (isLinkedId(wanted)) return remoteOf(wanted);
     const local = deps.bots();
-    if (local.some((bot) => bot.id === wanted)) return undefined;
+    if (local.some((bot) => bot.id === wanted || bot.id.toLowerCase() === lower)) return undefined;
+    if (isIdStart(wanted) && local.some((bot) => bot.id.toLowerCase().startsWith(lower))) return undefined;
     const named = fold(wanted);
     if (!named || local.some((bot) => !bot.hidden && fold(bot.name) === named)) return undefined;
     const matches = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => fold(bot.name) === named).map((bot) => ({ peer, bot })));

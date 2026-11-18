@@ -186,7 +186,11 @@ export interface WiderReach<T extends RosterMember> {
 }
 
 /** The fewest characters of an id that name it: a model retyping a 36-character id drops one, and the first 8 have to agree. */
-const ID_PREFIX_MIN = 8;
+export const ID_PREFIX_MIN = 8;
+
+/** Whether a spelling can be the start of an id at all. One rule, here, for the local resolver and for anything that
+ * settles identity before it: a spelling that begins a bot's id here must never be answered by a bot elsewhere. */
+export const isIdStart = (value: string): boolean => value.length >= ID_PREFIX_MIN && !/\s/u.test(value);
 
 /** In this order, and identity before any name: the id, exactly as written; the id in any case when exactly one bot's
  * id matches it that way; then the start of an id, before either kind of name matching; then a name that only one
@@ -267,7 +271,7 @@ export function resolveTeammate<T extends RosterMember>(
   // named after the first 8 characters of another bot's id would otherwise take that bot's brief, and every file
   // attached to it. One candidate the caller can see: that bot. More than one candidate, or any candidate the caller
   // cannot see: the generic unknown-target answer, which names nobody it may not name and lists only what it may show.
-  const started = wanted.length >= ID_PREFIX_MIN && !/\s/u.test(wanted)
+  const started = isIdStart(wanted)
     ? bots.filter(bot => bot.id.toLowerCase().startsWith(wanted.toLowerCase())) : [];
   if (started.length) {
     if (started.length === 1 && exposed(started[0]!)) return { id: started[0]!.id, byName: false };
