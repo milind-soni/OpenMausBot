@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, openBot, type Action } from "@/state/store";
 import { openComputerPanelOn } from "@/lib/computer-panel-focus";
 import type { MapBrowsingPayload } from "../../shared/map-computer";
@@ -16,6 +16,13 @@ export function keepWorking(sites: Readonly<Record<string, string>>, busyBotIds:
   return Object.keys(sites).every((id) => busy.has(id)) ? sites : Object.fromEntries(Object.entries(sites).filter(([id]) => busy.has(id)));
 }
 
+/** One read of the bots' sites, in the background so it never wakes a Cloud home that went to sleep. A bot that stopped
+ * working while the read was out is left out: `busyBotIds` is asked once the answer is back. */
+export async function readMapBrowsing(busyBotIds: () => string): Promise<Readonly<Record<string, string>>> {
+  const next: MapBrowsingPayload = await api("/api/computers/browsing", { background: true, timeoutMs: 10_000 });
+  return keepWorking(Object.fromEntries(next.bots.map((entry) => [entry.botId, entry.site])), busyBotIds());
+}
+
 /** The chip's click: the bot's chat, with the Browser view of its panel open. */
 export function openBotBrowser(dispatch: (action: Action) => void, bot: Parameters<typeof openBot>[1], threadsShown: boolean, opener: HTMLElement, keyboard: boolean): void {
   openBot(dispatch, bot, threadsShown);
@@ -26,7 +33,11 @@ export function openBotBrowser(dispatch: (action: Action) => void, bot: Paramete
  * `busyBotIds` is the working bots' ids, space-separated. */
 export function useMapBrowsing(enabled: boolean, busyBotIds: string): Readonly<Record<string, string>> {
   const [sites, setSites] = useState<Readonly<Record<string, string>>>({});
-  useEffect(() => setSites((current) => keepWorking(current, busyBotIds)), [busyBotIds]);
+  const busy = useRef(busyBotIds);
+  useEffect(() => {
+    busy.current = busyBotIds;
+    setSites((current) => keepWorking(current, busyBotIds));
+  }, [busyBotIds]);
   useEffect(() => {
     if (!enabled) return;
     let stopped = false;
@@ -35,8 +46,8 @@ export function useMapBrowsing(enabled: boolean, busyBotIds: string): Readonly<R
       if (stopped || inFlight || document.visibilityState !== "visible") return;
       inFlight = true;
       try {
-        const next: MapBrowsingPayload = await api("/api/computers/browsing", { signal: AbortSignal.timeout(10_000) });
-        if (!stopped) setSites(Object.fromEntries(next.bots.map((entry) => [entry.botId, entry.site])));
+        const next = await readMapBrowsing(() => busy.current);
+        if (!stopped) setSites(next);
       } catch {
         // A read that fails confirms nothing: no chip until one succeeds.
         if (!stopped) setSites({});

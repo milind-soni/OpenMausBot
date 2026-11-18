@@ -647,10 +647,10 @@ export class BrowserService {
     return this.#bySession(session)?.control.owner ?? null;
   }
 
-  /** The address of the tab in front of this session's running browser; never starts one, and none while it closes. */
+  /** The address of the tab in front of this session's running browser; never starts one, and none while it closes or is cut off. */
   pageUrl(session: string): string | null {
     const profile = this.#bySession(session);
-    const tab = profile?.run && !profile.run.closing ? profile.active() : null;
+    const tab = profile?.run && !profile.run.closing && profile.run.browser.connected ? profile.active() : null;
     return tab ? tab.page.url() : null;
   }
 

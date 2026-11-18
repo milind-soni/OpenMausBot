@@ -216,6 +216,14 @@ describe("the bots' browser tools", () => {
     expect(service.pageUrl("bot-a")).toBeNull();
   });
 
+  it("tells no address once the connection to the browser is gone", async () => {
+    const { service, target, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const run = await service.running(service.profile(target));
+    run.browser.disconnect();
+    expect(service.pageUrl("bot-a")).toBeNull();
+  });
+
   it("keeps eight tabs in one browser at most", async () => {
     const { call, text } = setup();
     await call("agent_browser_open", { url: "https://example.com/1" });
