@@ -951,6 +951,8 @@
   "voice.yourVoice": "Your {provider} voice",
   "voice.usesYours": "This bot speaks in your {provider} voice. Pick another above to give it its own.",
   "voice.usesOwn": "This bot speaks in its own voice.",
+  "voice.liveCall.title": "Live call voice",
+  "voice.liveCall.help": "Live calls use their own voices, apart from the read-aloud voice above.",
   "voice.notifications.title": "Notifications",
   "voice.notifications.help": "Get notified when this agent finishes or needs input",
   "voice.notifications.label": "Agent notifications",

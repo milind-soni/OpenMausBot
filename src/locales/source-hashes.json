@@ -2,6 +2,8 @@
   "version": 1,
   "locales": {
     "de": {
+      "voice.liveCall.title": "6a6ee8a294afe0ff1a41725f21d387df14e4b2fdf05e4e2f133eb6d4071fafb7",
+      "voice.liveCall.help": "0c934ada95f15e1ff015e08d48cffdd4760ce6471ae72b35f23de4ac63392332",
       "server.incidents.folded": "0f3510347ddace2c9fb06627f1759a1358aba45e82546e98aca8e968a5789105",
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
       "pro.seePlans": "30d9abfd7c7af513814bdfadcafe7ec4a90bc6bcee519086dc513f63f2cd7384",
@@ -26613,6 +26615,8 @@
       "voice.yourVoice": "7a1c7b98060eeaaa9ae1a6497ce8b957d5c64ff3e9d539f831ee4028471d0f7b",
       "voice.usesYours": "7789c3be6667be68106104f5f381cf978b8fb2dfd7a6671d8cb852c3252432c3",
       "voice.usesOwn": "805f5a74876e0cc769993734566d59f1d984bb861651419d9765ae458b4da91f",
+      "voice.liveCall.title": "6a6ee8a294afe0ff1a41725f21d387df14e4b2fdf05e4e2f133eb6d4071fafb7",
+      "voice.liveCall.help": "0c934ada95f15e1ff015e08d48cffdd4760ce6471ae72b35f23de4ac63392332",
       "voice.notifications.title": "788011833a5a0f22db90c91e8eb7bd8e9f5cd423354ff5ef8c338e7895f44ba9",
       "voice.notifications.help": "5be559487eacb98ef0a9cb372c81efc3a515a97e325708952bb2c99665d560de",
       "voice.notifications.label": "50c151611ca9af24c87f7a3cfefc7d5a2a74037c5b38aedaaecfdd9ad54644d9",
