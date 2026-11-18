@@ -22,8 +22,8 @@ function normalise(body: unknown): ThreadState {
 }
 
 export class Bot {
-  private readonly http: HttpConfig;
-  private readonly path: string;
+  readonly #http: HttpConfig;
+  readonly #path: string;
 
   constructor(options: BotOptions = {}) {
     const key = (options.key ?? env("MAUSBOT_BOT_KEY"))?.trim();
@@ -43,50 +43,74 @@ export class Bot {
       baseUrl = origin + match[1];
       botId = decodeURIComponent(match[2]);
     }
-    this.path = `/hooks/api/v1/bots/${encodeURIComponent(botId)}/messages`;
-    this.http = { baseUrl, key, maxRetries: options.maxRetries ?? 2, retryDelay: options.retryDelay ?? 0.5, fetch: options.fetch ?? globalThis.fetch.bind(globalThis) };
+    this.#path = `/hooks/api/v1/bots/${encodeURIComponent(botId)}/messages`;
+    this.#http = { baseUrl, key, maxRetries: options.maxRetries ?? 2, retryDelay: options.retryDelay ?? 0.5, fetch: options.fetch ?? globalThis.fetch.bind(globalThis) };
   }
 
   async send(message: string, options: SendOptions = {}): Promise<ThreadState> {
     const body: Record<string, unknown> = { message };
     if (options.thread !== undefined) body.thread = options.thread;
     if (options.wait !== undefined) body.wait = options.wait;
-    return normalise((await request(this.http, { method: "POST", path: this.path, body })).body);
+    return normalise((await request(this.#http, { method: "POST", path: this.#path, body })).body);
   }
 
   async thread(id: string): Promise<ThreadState> {
-    return normalise((await request(this.http, { method: "GET", path: this.path, query: { thread: id } })).body);
+    return this.#read(id);
+  }
+
+  async #read(id: string, signal?: AbortSignal): Promise<ThreadState> {
+    return normalise((await request(this.#http, { method: "GET", path: this.#path, query: { thread: id }, signal })).body);
   }
 
   async wait(id: string, options: WaitOptions = {}): Promise<Answer> {
-    const deadline = Date.now() + (options.timeout ?? 600) * 1000;
-    let interval = options.pollInterval ?? 2;
+    const expire = () => new WaitTimeoutError("Still working when the wait ran out. Call wait again with this thread.", id);
+    return this.#waitUntil(id, Date.now() + (options.timeout ?? 600) * 1000, options.pollInterval ?? 2, expire);
+  }
+
+  /** Reads the thread until it isn't working; `deadline` (ms) bounds the polls and each single read. */
+  async #waitUntil(id: string, deadline: number, pollInterval: number, expire: () => Error): Promise<Answer> {
+    let interval = pollInterval;
     for (;;) {
-      const state = await this.thread(id);
+      const signal = AbortSignal.timeout(Math.max(deadline - Date.now(), 1));
+      let state: ThreadState;
+      try {
+        state = await this.#read(id, signal);
+      } catch (error) {
+        throw signal.aborted ? expire() : error;
+      }
       if (state.status === "failed") throw new JobFailedError(state.error, id);
       if (state.status !== "working") return state;
-      if (Date.now() >= deadline) throw new WaitTimeoutError("Still working when the wait ran out. Call wait again with this thread.", id);
-      await sleep(interval);
+      const left = deadline - Date.now();
+      if (left <= 0) throw expire();
+      await sleep(Math.min(interval, left / 1000));
       interval = Math.min(interval * 1.5, 10);
     }
   }
 
   async ask(message: string, options: SendOptions & WaitOptions = {}): Promise<Answer> {
-    const { timeout, pollInterval, ...sendOptions } = options;
-    const waitOptions = { timeout, pollInterval };
+    const { timeout, pollInterval = 2, ...sendOptions } = options;
+    const deadline = Date.now() + (timeout ?? 600) * 1000;
     let state: ThreadState;
     try {
       state = await this.send(message, sendOptions);
     } catch (error) {
       const busy = error instanceof ConflictError ? (error.body as { thread?: unknown; status?: unknown; error?: unknown } | undefined) : undefined;
       if (!busy || busy.status !== "working" || busy.error !== undefined || typeof busy.thread !== "string") throw error;
-      const earlier = await this.wait(busy.thread, waitOptions);
-      if (earlier.status === "needs_approval") {
-        throw new NotSentError("The message was not sent: the thread is waiting for an approval in the app.", busy.thread);
+      const thread = busy.thread;
+      const stillBusy = () => new NotSentError("The message was not sent: the thread was still busy when the wait ran out.", thread);
+      try {
+        const earlier = await this.#waitUntil(thread, deadline, pollInterval, stillBusy);
+        if (earlier.status === "needs_approval") {
+          throw new NotSentError("The message was not sent: the thread is waiting for an approval in the app.", thread);
+        }
+      } catch (earlierError) {
+        // An earlier turn that failed leaves the thread free.
+        if (!(earlierError instanceof JobFailedError)) throw earlierError;
       }
       state = await this.send(message, sendOptions);
     }
     if (state.status === "failed") throw new JobFailedError(state.error, state.thread);
-    return state.status === "working" ? this.wait(state.thread, waitOptions) : state;
+    if (state.status !== "working") return state;
+    return this.#waitUntil(state.thread, deadline, pollInterval, () => new WaitTimeoutError("Still working when the wait ran out. Call wait again with this thread.", state.thread));
   }
 }

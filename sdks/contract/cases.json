@@ -986,6 +986,122 @@
     "type": "MausBotError",
     "messageContains": "queued"
    }
+  },
+  {
+   "name": "busy-earlier-failed",
+   "call": {
+    "method": "ask",
+    "message": "Next",
+    "options": {
+     "thread": "t1",
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Next",
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 409,
+      "body": {
+       "thread": "t1",
+       "status": "working"
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "thread": "t1",
+       "status": "failed",
+       "error": "The bot could not answer. Open this thread in the app to see why."
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Next",
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 200,
+      "body": {
+       "reply": "Later",
+       "thread": "t1"
+      }
+     }
+    }
+   ],
+   "result": {
+    "status": "replied",
+    "reply": "Later",
+    "thread": "t1"
+   }
+  },
+  {
+   "name": "busy-times-out",
+   "call": {
+    "method": "ask",
+    "message": "Next",
+    "options": {
+     "thread": "t1",
+     "timeout": 0.1,
+     "pollInterval": 0.01
+    }
+   },
+   "exchanges": [
+    {
+     "request": {
+      "method": "POST",
+      "body": {
+       "message": "Next",
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 409,
+      "body": {
+       "thread": "t1",
+       "status": "working"
+      }
+     }
+    },
+    {
+     "request": {
+      "method": "GET",
+      "query": {
+       "thread": "t1"
+      }
+     },
+     "response": {
+      "status": 202,
+      "body": {
+       "thread": "t1",
+       "status": "working"
+      }
+     },
+     "repeat": true
+    }
+   ],
+   "error": {
+    "type": "NotSentError",
+    "thread": "t1"
+   }
   }
  ]
 }

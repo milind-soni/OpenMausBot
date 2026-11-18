@@ -1,5 +1,8 @@
+import { inspect } from "node:util";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
-import { AuthenticationError, Bot, MausBotError } from "../src/index.js";
+import { AuthenticationError, Bot, MausBotError, WaitTimeoutError } from "../src/index.js";
 
 const replied = () => new Response(JSON.stringify({ reply: "hi", thread: "t1" }), { status: 200, headers: { "content-type": "application/json" } });
 const recorder = (make: () => Response = replied) => {
@@ -56,5 +59,25 @@ describe("Bot config", () => {
     expect(error).toBeInstanceOf(AuthenticationError);
     expect(String(error)).not.toContain("k_secret_123");
     expect(JSON.stringify(error)).not.toContain("k_secret_123");
+  });
+
+  it("keeps the key out of inspect and JSON output", () => {
+    const bot = new Bot({ endpoint: "https://x.example/hooks/api/bots/b1/messages", key: "k_secret_123" });
+    expect(inspect(bot, { depth: 5, showHidden: true })).not.toContain("k_secret_123");
+    expect(JSON.stringify(bot)).not.toContain("k_secret_123");
+  });
+
+  it("stops a wait on a server that never answers once the timeout passes", async () => {
+    const server = createServer(() => {});
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const bot = new Bot({ baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, botId: "b1", key: "k" });
+      const started = Date.now();
+      await expect(bot.wait("t1", { timeout: 0.2 })).rejects.toBeInstanceOf(WaitTimeoutError);
+      expect(Date.now() - started).toBeLessThan(1000);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });
