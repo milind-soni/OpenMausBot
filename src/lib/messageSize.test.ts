@@ -14,13 +14,13 @@ describe("message size", () => {
   });
 
   it("explains an oversized prompt", () => {
-    const reason = messageTooLargeReason("x".repeat(2_000_000));
-    expect(reason).toMatch(/too large to send \(2\.0 MB; the limit is 1\.0 MB\)/);
+    const reason = messageTooLargeReason("x".repeat(30_000_000));
+    expect(reason).toMatch(/too large to send \(30.0 MB; the limit is 25.0 MB\)/);
     expect(reason).toMatch(/Shorten it/);
   });
 
   it("counts attachment data and suggests removing it", () => {
-    const reason = messageTooLargeReason("see screenshot", [image(1_200_000)]);
+    const reason = messageTooLargeReason("see screenshot", [image(26_000_000)]);
     expect(reason).toMatch(/Remove or shrink an attachment/);
   });
 });

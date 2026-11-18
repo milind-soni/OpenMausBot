@@ -29,6 +29,8 @@ export interface Attachment {
   dataUrl?: string;
   textContent?: string;
   path?: string;
+  /** server route for the saved file; history attachments carry this instead of dataUrl */
+  url?: string;
 }
 
 export interface OptionCardData {
@@ -746,7 +748,7 @@ export async function api(path: string, init?: RequestInit): Promise<any> {
   });
   const body = await res.json().catch(() => ({}));
   // the server's 413 says "body too large"; say what the user sent was refused
-  if (res.status === 413 && body.error === "body too large") throw new ApiError(413, { ...body, error: "That was too large to send (the limit is about 1 MB, attachments included). Nothing was sent." }, "");
+  if (res.status === 413 && body.error === "body too large") throw new ApiError(413, { ...body, error: "That was too large to send (the limit is about 25 MB, attachments included). Nothing was sent." }, "");
   if (!res.ok) throw new ApiError(res.status, body, `${res.status} ${res.statusText}`);
   return body;
 }

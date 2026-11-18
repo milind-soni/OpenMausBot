@@ -96,6 +96,8 @@ export interface Attachment {
   textContent?: string;
   /** Saved local path on disk in the thread's workspace */
   path?: string;
+  /** Server route serving the saved file; replaces dataUrl once it's on disk */
+  url?: string;
 }
 
 // ── adapter contract (upstream ProviderAdapterShape, promise-flavored) ──

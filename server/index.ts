@@ -434,24 +434,38 @@ function saveAttachmentsToWorkspace(threadId: string, attachments?: Attachment[]
   return attachments.map((att) => {
     const rawName = typeof att.name === "string" ? att.name : "attachment";
     const base = basename(rawName).replace(/[^\w.-]/g, "_") || "attachment";
-    const filename = `${(att.id || "att").slice(0, 8)}_${base}`;
+    const filename = `${String(att.id || "att").replace(/[^\w-]/g, "").slice(0, 8) || "att"}_${base}`;
     const filePath = join(workspaceAttachmentsDir, filename);
+    // once the bytes are on disk, history keeps a link instead of the base64 —
+    // a multi-MB data URL would otherwise be rewritten on every thread save
+    const url = `/api/attachments/${tag}/${encodeURIComponent(filename)}`;
+    const { dataUrl, ...rest } = att;
 
-    if (att.dataUrl && typeof att.dataUrl === "string") {
+    if (dataUrl && typeof dataUrl === "string") {
       try {
-        const commaIdx = att.dataUrl.indexOf(",");
+        const commaIdx = dataUrl.indexOf(",");
         if (commaIdx !== -1) {
-          const base64Data = att.dataUrl.slice(commaIdx + 1);
-          const buffer = Buffer.from(base64Data, "base64");
-          writeFileSync(filePath, buffer);
-          return { ...att, path: filePath };
+          writeFileSync(filePath, Buffer.from(dataUrl.slice(commaIdx + 1), "base64"));
+          return { ...rest, path: filePath, url };
         }
       } catch (err) {
         console.error(`Failed to save attachment ${att.name} to ${filePath}:`, err);
       }
+      return { ...att, path: filePath };
     }
-    return { ...att, path: filePath };
+    // edits and regenerations resend history attachments, which already live on disk
+    return existsSync(filePath) ? { ...rest, path: filePath, url } : { ...att, path: filePath };
   });
+}
+
+const ATTACHMENT_TYPES: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon", svg: "image/svg+xml",
+  pdf: "application/pdf", txt: "text/plain; charset=utf-8", md: "text/plain; charset=utf-8", json: "text/plain; charset=utf-8", csv: "text/plain; charset=utf-8",
+};
+
+/** Known safe types by extension; everything else downloads as bytes. */
+function attachmentContentType(name: string): string {
+  return ATTACHMENT_TYPES[name.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";
 }
 
 function formatAttachmentContext(attachments?: Attachment[]): string {
@@ -1266,6 +1280,10 @@ function httpError(status: number, message: string) {
   return Object.assign(new Error(message), { status });
 }
 
+// messages carry attachments as base64, so they get more room than other routes;
+// keep src/lib/messageSize.ts in step
+const MAX_MESSAGE_BODY_CHARS = 25_000_000;
+
 function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -1275,9 +1293,10 @@ function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
       data += c;
       if (data.length > limit) {
         tooLarge = true;
+        data = "";
         reject(httpError(413, "body too large"));
-        // stop buffering; the 413 is written before the socket goes away
-        req.pause();
+        // keep draining (and discarding) the upload: pausing leaves the client
+        // mid-write, and a big body then sees ECONNRESET instead of the 413
       }
     });
     req.on("end", () => {
@@ -1737,7 +1756,7 @@ const server = createServer(async (req, res) => {
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/messages$/);
     if (m && method === "POST") {
-      const body = await readBody(req);
+      const body = await readBody(req, MAX_MESSAGE_BODY_CHARS);
       const text = String(body.text ?? "").trim();
       const attachments = Array.isArray(body.attachments) ? (body.attachments as Attachment[]) : undefined;
       if (!text && (!attachments || attachments.length === 0)) {
@@ -1875,9 +1894,26 @@ const server = createServer(async (req, res) => {
       broadcast({ kind: "message.patch", threadId: bot.threadId, message: patched });
       return json(res, 200, { message: patched });
     }
+    // saved chat attachments. Served sandboxed so an uploaded .html/.svg
+    // opened from the chat can't run script in the app's origin.
+    m = path.match(/^\/api\/attachments\/([\w-]+)\/([^/]+)$/);
+    if (m && method === "GET") {
+      const name = decodeURIComponent(m[2]);
+      if (!/^[\w-]+_[\w.-]+$/.test(name) || name.includes("..")) return json(res, 400, { error: "bad attachment name" });
+      const file = join(DATA_DIR, "workspaces", m[1], "attachments", name);
+      if (!existsSync(file)) return json(res, 404, { error: "no such attachment" });
+      res.writeHead(200, {
+        "content-type": attachmentContentType(name),
+        "content-security-policy": "sandbox",
+        "x-content-type-options": "nosniff",
+        "cache-control": "private, max-age=31536000, immutable",
+      });
+      res.end(readFileSync(file));
+      return;
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages$/);
     if (m && method === "POST") {
-      const body = await readBody(req);
+      const body = await readBody(req, MAX_MESSAGE_BODY_CHARS);
       const text = String(body.text ?? "").trim();
       const attachments = Array.isArray(body.attachments) ? (body.attachments as Attachment[]) : undefined;
       if (!text && (!attachments || attachments.length === 0)) {
@@ -1896,7 +1932,7 @@ const server = createServer(async (req, res) => {
       const messageId = m[2];
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      const body = await readBody(req);
+      const body = await readBody(req, MAX_MESSAGE_BODY_CHARS);
       const text = String(body.text ?? "").trim();
       const attachments = Array.isArray(body.attachments) ? (body.attachments as Attachment[]) : undefined;
       if (!text && (!attachments || attachments.length === 0)) {

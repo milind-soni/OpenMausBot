@@ -50,9 +50,9 @@ export function ImageModal({
             <span className="text-xs text-ink-secondary">({formatFileSize(attachment.size)})</span>
           </div>
           <div className="flex items-center gap-2">
-            {attachment.dataUrl && (
+            {(attachment.dataUrl ?? attachment.url) && (
               <a
-                href={attachment.dataUrl}
+                href={attachment.dataUrl ?? attachment.url}
                 download={attachment.name}
                 className="flex items-center gap-1.5 rounded-lg border border-hairline/40 bg-raised px-2.5 py-1 text-xs font-medium text-ink hover:bg-raised-hover"
                 title="Download image"
@@ -72,7 +72,7 @@ export function ImageModal({
         </div>
         <div className="flex max-h-[calc(90vh-50px)] max-w-full items-center justify-center overflow-auto p-2">
           <img
-            src={attachment.dataUrl}
+            src={attachment.dataUrl ?? attachment.url}
             alt={attachment.name}
             className="max-h-[80vh] max-w-full rounded-lg object-contain shadow-sm"
           />
@@ -113,7 +113,7 @@ export function AttachmentList({
               className="group relative cursor-pointer overflow-hidden rounded-xl border border-hairline/40 bg-panel transition-all hover:border-hairline hover:shadow-md"
             >
               <img
-                src={img.dataUrl}
+                src={img.dataUrl ?? img.url}
                 alt={img.name}
                 className="h-36 w-full object-cover transition-transform duration-200 group-hover:scale-105"
               />
@@ -148,9 +148,9 @@ export function AttachmentList({
                     <p className="text-[11px] text-ink-secondary">{formatFileSize(file.size)}</p>
                   </div>
                 </div>
-                {file.dataUrl && (
+                {(file.dataUrl ?? file.url) && (
                   <a
-                    href={file.dataUrl}
+                    href={file.dataUrl ?? file.url}
                     download={file.name}
                     className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary transition-colors hover:bg-raised hover:text-ink"
                     title={`Download ${file.name}`}
@@ -188,8 +188,8 @@ export function StagedAttachmentsTray({
             key={att.id}
             className="group relative flex items-center gap-2 rounded-xl border border-hairline/40 bg-raised py-1.5 pl-2 pr-1.5 text-xs text-ink transition-all hover:border-hairline shadow-sm"
           >
-            {isImg && att.dataUrl ? (
-              <img src={att.dataUrl} alt={att.name} className="size-6 shrink-0 rounded object-cover" />
+            {isImg && (att.dataUrl ?? att.url) ? (
+              <img src={att.dataUrl ?? att.url} alt={att.name} className="size-6 shrink-0 rounded object-cover" />
             ) : (
               <Icon size={15} className="shrink-0 text-ink-secondary" />
             )}

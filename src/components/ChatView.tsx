@@ -41,6 +41,7 @@ import { HeaderMoreMenu } from "./HeaderMoreMenu";
 import { SHARED_HEADER_HEIGHT_CLASS } from "@/lib/layoutTokens";
 import { getStoredPanelWidth } from "@/lib/usePanelResize";
 import type { Attachment } from "@/state/store";
+import { messageTooLargeReason } from "@/lib/messageSize";
 
 /** Long user messages collapse behind a fade so pasted walls of text don't
  * bury the conversation; bots get full markdown. */
@@ -189,17 +190,30 @@ function BubbleEditor({
     ref.current?.focus();
     ref.current?.setSelectionRange(draft.length, draft.length);
   }, []);
+  // refuse here, not after the editor closes, so an oversized edit isn't lost
+  const [sizeError, setSizeError] = useState<string | null>(null);
   const submit = () => {
     const t = draft.trim();
-    if (t || (attachments && attachments.length > 0)) onSubmit(t, attachments);
+    if (!t && !(attachments && attachments.length > 0)) return;
+    const tooLarge = messageTooLargeReason(t, attachments);
+    if (tooLarge) return setSizeError(tooLarge);
+    onSubmit(t, attachments);
   };
   return (
     <div className="w-full max-w-[70%] rounded-2xl border border-hairline/40 bg-bubble-user px-4 py-3">
       <AttachmentList attachments={attachments} />
+      {sizeError && (
+        <div role="alert" className="mb-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
+          {sizeError}
+        </div>
+      )}
       <textarea
         ref={ref}
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          setSizeError(null);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();

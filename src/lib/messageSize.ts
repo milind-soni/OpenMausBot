@@ -1,9 +1,9 @@
 import type { Attachment } from "@/state/store";
 
-/** Mirrors readBody's default limit in server/index.ts, which counts the
+/** Mirrors MAX_MESSAGE_BODY_CHARS in server/index.ts; readBody counts the
  * decoded JSON body's string length. Attachments travel as base64 data URLs
- * inside that body, so a ~750 KB image already fills it. */
-export const MAX_MESSAGE_BODY_CHARS = 1_000_000;
+ * inside that body, so ~18 MB of files fills it. */
+export const MAX_MESSAGE_BODY_CHARS = 25_000_000;
 
 export function messageBodySize(text: string, attachments?: Attachment[]): number {
   return JSON.stringify({ text, attachments }).length;

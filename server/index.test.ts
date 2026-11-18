@@ -638,6 +638,32 @@ describe("harness HTTP API", () => {
     const userGroupMsg = updatedGroup.messages.find((m: any) => m.role === "user");
     expect(userGroupMsg).toBeDefined();
     expect(userGroupMsg.attachments[0].name).toBe("sample.txt");
+
+    // history keeps a link to the saved file, not the base64
+    const saved = userGroupMsg.attachments[0];
+    expect(saved.dataUrl).toBeUndefined();
+    expect(saved.url).toMatch(/^\/api\/attachments\/[\w-]+\/att-smok_sample\.txt$/);
+    const served = await fetch(`${BASE}${saved.url}`);
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe("Hello World!\n");
+    expect(served.headers.get("content-security-policy")).toBe("sandbox");
+    expect((await fetch(`${BASE}/api/attachments/x/..%2F..%2Fbots.json`)).status).toBe(400);
+  });
+
+  it("takes multi-MB attachments, refuses past the message limit, and keeps ids out of paths", async () => {
+    const { body } = await api("GET", "/api/bots");
+    const group = (await api("POST", "/api/groups", { memberIds: [body.bots[0].id], name: "Big Room" })).body.group;
+    const image = (chars: number, id = "big-shot") => ({ id, name: "shot.png", mimeType: "image/png", size: chars, dataUrl: `data:image/png;base64,${"A".repeat(chars)}` });
+
+    expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "", attachments: [image(4_000_000)] })).status).toBe(202);
+    const tooBig = await api("POST", `/api/groups/${group.id}/messages`, { text: "", attachments: [image(26_000_000)] });
+    expect(tooBig.status).toBe(413);
+
+    expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "", attachments: [image(8, "../../x")] })).status).toBe(202);
+    const msgs = (await api("GET", "/api/bots")).body.groups.find((g: { id: string }) => g.id === group.id).messages;
+    const paths = msgs.flatMap((m: any) => m.attachments ?? []).map((a: any) => a.path);
+    expect(paths.some((p: string) => p.endsWith("/attachments/x_shot.png"))).toBe(true);
+    expect(paths.every((p: string) => !p.includes(".."))).toBe(true);
   });
 
   it("404s unknown routes with the route in the error", async () => {
