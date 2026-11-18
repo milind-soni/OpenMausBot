@@ -11160,5 +11160,12 @@
   "alwaysOn.added.screen": "Os bots de lá usam a tela, o navegador e os arquivos daquele computador, depois que o {app} tiver permissão para usá-lo.",
   "alwaysOn.windowClosed": "Continua rodando quando a janela é fechada",
   "alwaysOn.windowClosedLinux": "Continua rodando quando a janela é fechada. Abra o {app} de novo para trazer a janela de volta; para sair, pressione Alt e escolha Arquivo → Sair do OpenMausBot.",
-  "alwaysOn.status.noWay": "Casa ligada · nenhum celular ou computador consegue alcançá-la ainda"
+  "alwaysOn.status.noWay": "Casa ligada · nenhum celular ou computador consegue alcançá-la ainda",
+  "higgsfield.description": "Imagens e vídeos de IA que seus bots criam com os modelos da Higgsfield, na sua própria conta da Higgsfield.",
+  "higgsfield.notice": "Entre com a sua conta da Higgsfield. Não é preciso chave de API. Um bot que pode usar a Higgsfield pode iniciar gerações de imagens e vídeos que gastam créditos da sua conta, então escolha quais bots recebem esse acesso em Acesso dos bots.",
+  "imageGen.slot.needsHiggsfield": "Precisa da Higgsfield conectada: conecte abaixo.",
+  "imageGen.higgsfield.connected": "Conectado à sua conta da Higgsfield",
+  "imageGen.higgsfield.notConnected": "Não conectado, ou o login expirou",
+  "imageGen.higgsfield.help": "O {app} cria imagens com a conta da Higgsfield em que você entra em Plugins. Cada imagem gasta créditos dessa conta.",
+  "imageGen.higgsfield.open": "Abrir Plugins"
 }

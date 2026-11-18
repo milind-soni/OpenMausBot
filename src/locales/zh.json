@@ -10074,5 +10074,14 @@
   "call.capability.turnsNeedDeepSeekKey": "添加 DeepSeek 密钥即可在通话中轮流说话",
   "alwaysOn.section": "常开的家",
   "alwaysOn.title": "将这台电脑用作常开的家",
-  "alwaysOn.add.title": "添加 Mac mini 或其他常开的电脑"
+  "alwaysOn.add.title": "添加 Mac mini 或其他常开的电脑",
+  "call.capability.turnsNeedDeepSeekKeyReason": "你的声音是 DeepSeek，所以“轮流说话”会通过 DeepSeek 语音转文字来听你说话。请在设置 → API 密钥中添加 DeepSeek 密钥。",
+  "serverError.voice.deepseekKeyRequired": "要用 DeepSeek 声音和机器人说话，请在设置 → API 密钥中添加 DeepSeek API 密钥。",
+  "higgsfield.description": "你的机器人用 Higgsfield 模型生成的 AI 图片和视频，使用你自己的 Higgsfield 账号。",
+  "higgsfield.notice": "请使用你的 Higgsfield 账号登录。无需 API 密钥。能使用 Higgsfield 的机器人可以发起图片和视频生成，这会消耗你账号的额度，所以请在“机器人访问权限”中选择哪些机器人可以使用。",
+  "imageGen.slot.needsHiggsfield": "需要连接 Higgsfield：请在下方连接。",
+  "imageGen.higgsfield.connected": "已连接到你的 Higgsfield 账号",
+  "imageGen.higgsfield.notConnected": "未连接，或登录已失效",
+  "imageGen.higgsfield.help": "{app} 使用你在“插件”中登录的 Higgsfield 账号生成图片。每张图片都会消耗该账号的额度。",
+  "imageGen.higgsfield.open": "打开插件"
 }
