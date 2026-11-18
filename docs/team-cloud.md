@@ -86,6 +86,21 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   see and delete it in Settings → Vault, which shows a member their own secrets only; an Admin's Vault, exports and
   backups never list it, and leaving the team deletes it. A secret an Admin saves in Settings → Vault, or one typed into a
   card in a shared chat or a group chat, is the team's. One saved before this rule is the team's.
+- **1Password for the team.** An Admin connecting 1Password in Settings → Vault connects it for the whole team: the row
+  says so, with the setup to use (*Use a dedicated vault and a read-only service account.*). Its secrets serve every
+  team bot the vault (or item) is kept to, in shared, group and private chats alike, the same way a secret an Admin
+  saved does: a bot asks `request_credential` by the item's name ("Stripe secret key", "Acme OAuth client_secret") or
+  by its 1Password reference, `op://<vault>/<item>[/<section>]/<field>`, with vault and item by title or id (a bot that
+  may use any 1Password secret is told a reference works as a label; references longer than a label's 80 characters
+  don't resolve). The value
+  is read from 1Password at that moment and handed over as a ref or a file, never as text, and masked in transcripts.
+  A reference reaches only what a name does: a Login's username, password and one-time code never, an item two items'
+  titles fit is refused, and one kept to other bots is not found. A member sees and changes none of it: their Vault
+  shows only their own secrets and `onePassword: { connected: false }`, and every `/api/logins` route answers them 403.
+- **Bitwarden for the team** ([bitwarden.md](bitwarden.md)). The same rules: an Admin connects a dedicated Bitwarden
+  account (*Use a dedicated Bitwarden account that can only see one collection.*) for the whole team, its logins and
+  secrets serve the team's bots in every chat, by name or by `bw://<item>/<field>` reference, and a member sees and
+  changes none of it (`bitwarden: { connected: false }`).
 - **Browsers.** Each private chat with a bot drives that person's own browser of the bot, each group chat the group
   chat's, and the bot's main chat the team's: separate Chrome profiles, saved sign-ins and live views, so a site one
   member signed in to in their chat never opens signed in for another member. The live view shows the browser of the
@@ -129,7 +144,8 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   `people/<person>/welcome.json` (`GET /api/me` `welcome: { invitedBy, welcomedAt, hints }`, `PUT /api/me/welcome {
   welcomed: true }`). Only the Owner, who set the team up, gets the Cloud's own welcome and its setup list (the session's
   `team.role`); its record (shown, done, hidden: `TEAM_PERSONAL_HINTS`) is each person's, kept in the same file (the Owner
-  also keeps what the team's record said before). An empty team starts fresh: the Owner's own MausBot and the team's first
+  also keeps what the team's record said before). So are whether they saw the Teams What's new and when they last opened
+  Announcements (`announcements-read-<ms>`, the newest kept), which every member saves with `PUT /api/me/welcome { hints }`. An empty team starts fresh: the Owner's own MausBot and the team's first
   bot don't count as bots already there. The finished list ("Acme is ready") shows once: it is recorded as done as it
   shows, names the first bot ("Say hi to Poppy", never a Chief of Staff) and offers Invite people, the team's People page
   on MausBot Cloud.
@@ -264,6 +280,14 @@ this server shares with every bot. It exists only on a Team Cloud.
     `state` `connected` | `needs-sign-in` | `not-connected`, for every member the Admin paired here and only for those
     connections: whether they connected what an admin asked everyone to connect, never when or how they used it, nor
     any other connection of theirs. A member who left is not listed.
+- **The team's Vault** (`server/host/team-vault-report.ts`), additive: `vault: { secrets: [{ name, addedAt, usedBy }],
+  providers: [{ kind: "1password" | "bitwarden", connected, label, lastError? }] }`. `secrets` are the team's saved secrets (an
+  Admin's, or a shared or group chat's card), never a member's own; `usedBy` names the team bots that may use each (each
+  member's own MausBot left out). `label` is the 1Password vaults the token reads, or Bitwarden's server host ("" while
+  not connected); `lastError`
+  a fixed class (`refused`, `rate-limited`, `cant-connect`, `unavailable`, `unreadable`). 1Password's own items and
+  saved logins are not listed. Never a value, the token or a header. The Admin's Apps page shows it as *Keys &
+  passwords*, read-only, with *Manage in the app* opening Settings → Vault here (`/?connect=vault`, an admin's only).
 - Changes are never signed calls of their own. The Admin pairs as the admin making the change (the usual signed pairing
   with their `member` claim: an `owner` or `admin` gets the admin scope) and uses that session with the routes the app
   uses: `PATCH /api/config` for a key, `/api/mcp/servers` to add, test, sign in to and remove a server,
@@ -443,6 +467,27 @@ work, `session_search` (memory of the layer and the team's; conversations the tu
 turn's layer folder back read-write for that conversation's boxes only (`botBox.lend`). Member layers are sibling
 folders of the bot's own, never inside it, so no other turn of that bot can read them.
 
+**In the bot box.** The box is where the rule holds against a bot with a shell (`server/host/team-box-scope.ts`, which
+the Team Cloud host registers with the box; `BoxAudience` in `server/bot-box/plan.ts`). It learns each spawn's
+conversation from its working folder or, for one that runs elsewhere (a room's turn), from the conversation its engine
+home runs in, and:
+
+- **A turn that is not the team's** (a member's private chat, a conversation shared with one person, a room) has the
+  bot's own folder (`workspaces/<bot>`: the team's MEMORY.md, `memory/`, `skills/`) **read-only**, bound after every
+  read-write line so nothing the turn is lent makes it writable. Its own layer stays read-write (`botBox.lend`), and so
+  does its conversation folder. A write to the team's folder fails with *Read-only file system*; the turn goes on, and
+  its system prompt says so beforehand (*"Your shared folder (…) holds Acme's notes and skills: in this conversation they
+  are read-only…"*, `sharedNotesPrompt`). A room's turn works in the bot's own folder unless the room has a folder of
+  its own: there it can still make files, and only MEMORY.md, `memory/` and `skills/` are read-only.
+- **The team's chat** (the bot's main chat, a conversation nobody or a routine opened) writes the bot's own folder as
+  before.
+- **A process the bot's conversations share** (OpenCode's, `botThreads`) has only the conversation folders, and their
+  uploads, whose audience its own may read: its own audience's read-write, the team's read-only, another person's or
+  room's not at all. A conversation made after the process started is in no running box, so it gets a process of its
+  own (the shared-process key carries the set, `sharedBoxScope`).
+- What the server writes for a turn is not the box's: **Save to team memory** (below) and `skill_manage` go through the
+  server and keep their own rules.
+
 The same request to one bot from two requesters is answered once only where the same people see both conversations
 (`shareAnswer`, see `docs/runtime-contract.md`): two bots working for Mira get one answer, while Mira's private work
 never gets the answer Ben's got, so each of them is answered on its own.
@@ -506,6 +551,29 @@ holds the session's saved-state key and talks to the server's runtime by its own
 On a My Cloud and on a desktop there is one person: every audience is the team's, every layer is the bot's own folder,
 every browser keeps its old name and Chrome its old launcher, every engine keeps the server's HOME, and nothing here
 changes what those do.
+
+## Team files
+
+One shared folder per Team Cloud, `team-files/` in its data folder, for everyone on the team and every bot (details in
+[team-files.md](team-files.md); `server/host/team-files.ts`, `server/host/team-files-host.ts`,
+`server/routes/team-files.ts`). Its audience is `team`: every turn reads it, from a private chat too. People use it from
+**Team files** in the Tools menu: upload (100 MB a file, 5 GB in all), folders, download, rename, delete (an admin
+anything, a member what they uploaded) and a preview of text and pictures.
+
+- **In the bot box** it is at `/team-files` in every turn's box (`BoxAudience.teamFiles`), read-only, and each turn's
+  prompt says where and whether it may write. A bot an admin marked **Can edit team files** (`teamFilesEdit`, a bot
+  setting only an admin changes) has it read-write in every chat, members' private chats included: a record written
+  from Mira's private chat with Payroll lands in the team's folder, and its line says *"Changed by Mira with Payroll"*.
+  This is the one place a private chat writes into the team's audience, by an admin's choice; the conversation itself
+  never goes there. The audience rule otherwise holds: the bot's own folder stays read-only in that chat (above).
+- **The template library** (`templates/`, `server/team-templates.ts`) is one folder of it: everyone reads it, only an
+  admin changes it from the page, and it is read-only in every box. It counts toward the 5 GB.
+- **Who changed what** is kept in `team-files-activity.json`: the page's changes as they happen, a bot's after each turn
+  that could write (the folder's sizes and times compared before and after), with the person the turn worked for (whoever
+  asked, else the person whose private chat it is).
+- **Backups and exports** carry `team-files/` and its activity, as the team's; a link a bot left in the folder is skipped,
+  never followed. **A member who leaves** takes nothing of it: what they uploaded or had a bot write stays the team's.
+- **Off a Team Cloud** there is no folder, no menu entry, no prompt line, and the routes answer 404.
 
 ## Routines
 
@@ -870,13 +938,13 @@ inbox is unread.
 An ask in the person's own private chat, where they are, stays only there. The Admins' asks (a bot nobody owns) are not
 anyone's inbox. A member without any bot of their own gets the notification where it was written, as before.
 
-**A teammate's question.** At Full access ("Just do it", every bot's default) a question from work the person started
+**A teammate's question.** At Full access (every bot's default) a question from work the person started
 and a bot handed on never reaches them unless only they can give what it asks (a sign-in or code, a payment, a secret or
 an account of theirs; work a webhook or another outside event started still asks them, and so does work in their
 private chat, whose question's words stay there): the bot that handed the work on answers it, and with no answer from it the bot goes on with the default it
 named and says so; its card in the bot's conversation shows who picked what, waits on nobody, and still takes the
 person's own answer. What only the person can do is asked for exactly, once, while the rest of the work moves on. On
-"Ask me first" work handed on that needs the person asks them with a card: a decision with a few set answers through the
+"Ask for approval" work handed on that needs the person asks them with a card: a decision with a few set answers through the
 bot's question tool, the bot's own choices as buttons, and anything else as a card with a reply field in place of its
 `NEEDS INPUT:` line (docs/runtime-contract.md). It waits however long they take. Its copy reaches their inbox with the
 same buttons, and the conversation that handed the work on gets no chip about it when that conversation is the inbox
@@ -1026,6 +1094,15 @@ opens the team's page on the Cloud site (`/cloud/team/<id>`), not a chat. Nothin
 - **Someone invited who never opened the team.** The machine first learns of a member at their first pairing, so until
   then they are in no People list, and nothing says they joined (`team.people`): the Admin sends no roster and no
   "joined" of its own.
+- **Team files without a box, and the cap for bots.** Without the bot box nothing keeps Team files read-only for a bot:
+  any bot's shell can write it, and its changes are still recorded. The 5 GB cap holds for the page at every upload, but
+  for a bot only when its turn starts (the folder is then read-only for every bot until someone removes files), so one
+  turn can write past it.
+- **The team's folder without a box, and outside a conversation.** Without the bot box a shell in any chat writes the
+  bot's own folder and reads every conversation folder, as it reads engine homes (next). A bot's MCP server the server
+  starts outside any conversation (a configured server's probe or its app connections) keeps the bot's own folder
+  read-write. A room's turn that works in the bot's own folder can still add files beside the team's notes, which every
+  turn of that bot can then read.
 - **Engine homes without a box, and engines outside the list.** Without the bot box (bubblewrap refused, or switched
   off) a shell reaches every file of the server's user, engine homes included; only the box keeps them apart. An engine
   whose sign-in file is not named in `engine-homes/layout.ts` starts signed out in every audience's home. Engines

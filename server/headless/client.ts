@@ -3,6 +3,8 @@
 import { readFileSync } from "node:fs";
 
 import { EXIT, flag, HeadlessError, usageError, type Flags } from "./args.ts";
+import { BOT_SHELL_HINT } from "./bot-shell.ts";
+import type { SavedServers } from "./saved-servers.ts";
 
 type McpModule = typeof import("../../scripts/mcp-server.ts");
 export type ToolCaller = McpModule["handleToolCall"];
@@ -15,6 +17,8 @@ export interface ClientDeps {
   requireExplicitForMutations?: boolean;
   callTool?: ToolCaller;
   request?: Requester;
+  /** What `openmausbot login` saved; absent in a bot's shell, which never uses the person's sign-in. */
+  saved?: SavedServers;
 }
 
 const DISCOVERY_PORTS = [8799, 18799, 28799];
@@ -31,9 +35,13 @@ export async function loadMcp(): Promise<McpModule> {
   }
 }
 
+/** Who the requests go as: a token given for this command, a saved sign-in, or none (this computer, unsigned). */
+export type ClientIdentity = { kind: "token" } | { kind: "saved"; name: string; label: string; scopes: string[]; expiresAt: number } | { kind: "none" };
+
 export interface HeadlessClient {
   baseUrl: string;
   explicit: boolean;
+  identity: ClientIdentity;
   json<T = any>(path: string, init?: RequestInit): Promise<T>;
   /** `stream` lifts the request timeout. */
   raw(path: string, init?: RequestInit & { stream?: boolean }): Promise<Response>;
@@ -67,10 +75,14 @@ export function namedServer(flags: Flags, env: NodeJS.ProcessEnv): { url: string
 
 export async function openClient(flags: Flags, deps: ClientDeps, mutating: boolean): Promise<HeadlessClient> {
   const mcp = await loadMcp();
-  const token = readToken(flags, deps.env);
+  let token = readToken(flags, deps.env);
+  let identity: ClientIdentity = token ? { kind: "token" } : { kind: "none" };
   const named = namedServer(flags, deps.env);
+  const current = !named && !token ? deps.saved?.current() ?? null : null;
   let baseUrl: string;
-  if (named && "url" in named) {
+  if (current) {
+    baseUrl = current.url;
+  } else if (named && "url" in named) {
     try {
       baseUrl = mcp.validateBaseUrl(named.url);
     } catch (error) {
@@ -95,7 +107,20 @@ export async function openClient(flags: Flags, deps: ClientDeps, mutating: boole
         "start one with `openmausbot serve`, or name one with --url or OPENMAUSBOT_URL");
     }
   }
+  // A saved sign-in goes only to the exact address it was made at: the current server, or a named one that is the same.
+  const signedIn = !token ? current ?? (named ? deps.saved?.at(baseUrl) ?? null : null) : null;
+  const savedToken = signedIn ? deps.saved!.token(signedIn.name) : null;
   const request = deps.request ?? mcp.request;
+  if (signedIn && savedToken) {
+    // Another server can take the same port later (the app closed, `serve` started): the sign-in is not for it.
+    const live = await request("/.well-known/openmausbot/environment", {}, baseUrl).catch(() => null) as { environmentId?: unknown } | null;
+    if (typeof live?.environmentId === "string" && live.environmentId !== signedIn.environmentId) {
+      throw new HeadlessError(`the server at ${baseUrl} is not "${signedIn.label}", the one you signed in to`, EXIT.needsLogin,
+        "sign in to it with openmausbot login, or name another server with --url");
+    }
+    token = savedToken;
+    identity = { kind: "saved", name: signedIn.name, label: signedIn.label, scopes: signedIn.scopes, expiresAt: signedIn.expiresAt };
+  }
   const callTool = deps.callTool ?? mcp.handleToolCall;
   const withAuth = (init: RequestInit = {}): RequestInit => {
     if (!token) return init;
@@ -106,7 +131,8 @@ export async function openClient(flags: Flags, deps: ClientDeps, mutating: boole
   const fetcher = (path: string, init: RequestInit = {}) => request(path, withAuth(init), baseUrl);
   return {
     baseUrl,
-    explicit: named !== undefined,
+    explicit: named !== undefined || current !== null,
+    identity,
     json: (path, init) => fetcher(path, init),
     async raw(path, init = {}) {
       const { stream, ...rest } = init;
@@ -129,23 +155,42 @@ export function serverWords(message: string): string {
   }
 }
 
-export async function explain(error: unknown, baseUrl?: string): Promise<HeadlessError> {
+/** What the command knew when the server refused it, for a hint that leads somewhere. */
+export interface RefusalContext {
+  botShell?: boolean;
+  identity?: ClientIdentity;
+}
+
+function signInHint(context: RefusalContext): string {
+  if (context.botShell) return BOT_SHELL_HINT;
+  if (context.identity?.kind === "token") return "the token given was not accepted, or lacks the scope: make a new one with openmausbot token create";
+  if (context.identity?.kind === "saved" && !context.identity.scopes.includes("admin")) {
+    return "this sign-in is chat only: run openmausbot login again without --scope chat";
+  }
+  return "sign in once with `openmausbot login` (the app shows a card to allow it)";
+}
+
+export async function explain(error: unknown, baseUrl?: string, context: RefusalContext = {}): Promise<HeadlessError> {
   if (error instanceof HeadlessError) return error;
   const mcp = await loadMcp().catch(() => undefined);
-  const message = serverWords(error instanceof Error ? error.message : String(error));
+  const raw = error instanceof Error ? error.message : String(error);
+  const message = serverWords(raw);
   if (mcp && error instanceof mcp.ToolInputError) return usageError(message);
   const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : undefined;
   if (status === 401) {
-    return new HeadlessError("this server needs a credential and did not accept the one given", EXIT.unreachable,
-      "get one with `openmausbot connect URL --out FILE`, then pass --token-file FILE or set OPENMAUSBOT_TOKEN");
+    const said = context.identity?.kind === "saved" ? "your sign-in to this server ended" : context.identity?.kind === "token" ? "this server did not accept the token given" : "this server needs you signed in";
+    return new HeadlessError(said, EXIT.needsLogin,
+      context.botShell ? BOT_SHELL_HINT : context.identity?.kind === "token" ? signInHint(context) : "run `openmausbot login`");
   }
   if (status === 403) {
-    return new HeadlessError(`not allowed: ${message}`, EXIT.unreachable,
-      "this needs a paired session with the right scope: `openmausbot connect` mints one on this computer");
+    const said = message === raw && /paired session token/.test(raw) ? "a change from a program on this computer needs you signed in" : message;
+    const unsigned = !context.botShell && (context.identity === undefined || context.identity.kind === "none");
+    return new HeadlessError(`not allowed: ${said.replace(/^forbidden: /, "")}`, unsigned ? EXIT.needsLogin : EXIT.notAllowed, signInHint(context));
   }
   if (status === 404 && /^no such (bot|channel|conversation|task|message)\b/i.test(message)) {
-    return usageError(message, "openmausbot bots and openmausbot channels list the ids");
+    return new HeadlessError(message, EXIT.notFound, "openmausbot bots and openmausbot channels list the ids");
   }
+  if (status === 409) return new HeadlessError(message, EXIT.conflict, "it is busy: stop it first (openmausbot stop BOT), or try again when it finishes");
   if (/cannot report a conversation's job/.test(message)) return new HeadlessError(message, EXIT.unreachable, "update OpenMausBot on the server");
   const cause = (error as { cause?: { code?: unknown } })?.cause?.code;
   if ((error instanceof TypeError && /fetch failed/i.test(message)) || cause === "ECONNREFUSED" || cause === "ENOTFOUND"

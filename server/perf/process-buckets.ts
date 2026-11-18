@@ -17,6 +17,10 @@ export interface ProcessRow {
   /** Linux: the process's threads, and its state letter ("Z": exited, not yet collected). */
   threads?: number;
   state?: string;
+  /** Its process group (Linux and macOS) and POSIX session (Linux): an engine leads both, and what it starts stays in them
+   * even once its parent has gone. */
+  pgid?: number;
+  sid?: number;
 }
 
 /** Engine CLIs by executable name, as the drivers' kinds name them. */
@@ -89,9 +93,10 @@ export function parseProcStat(pid: number, text: string): ProcessRow | null {
   const fields = text.slice(close + 2).split(" ");
   const ppid = Number(fields[1]), user = Number(fields[11]), system = Number(fields[12]), start = fields[19], rss = Number(fields[21]);
   if (!Number.isInteger(ppid) || !Number.isFinite(user) || !Number.isFinite(system) || !start) return null;
-  const threads = Number(fields[17]);
+  const threads = Number(fields[17]), pgid = Number(fields[2]), sid = Number(fields[3]);
   return { pid, ppid, name: text.slice(open + 1, close).toLowerCase(), cpuMs: ((user + system) * 1000) / CLOCK_TICKS, rssBytes: (Number.isFinite(rss) ? rss : 0) * PAGE_BYTES, start,
-    ...(Number.isInteger(threads) && /^[A-Za-z]$/.test(fields[0] ?? "") ? { threads, state: fields[0]! } : {}) };
+    ...(Number.isInteger(threads) && /^[A-Za-z]$/.test(fields[0] ?? "") ? { threads, state: fields[0]! } : {}),
+    ...(Number.isInteger(pgid) && pgid > 0 ? { pgid } : {}), ...(Number.isInteger(sid) && sid > 0 ? { sid } : {}) };
 }
 
 /** `/proc/self/stat`'s CPU time of children this process waited for, ms. */
@@ -109,15 +114,17 @@ export function parsePsTime(text: string): number | null {
   return ((Number(days ?? 0) * 24 + Number(hours ?? 0)) * 60 + Number(minutes)) * 60_000 + Number(seconds) * 1000;
 }
 
-/** One line of `ps -axo pid=,ppid=,rss=,time=,comm=`: rss in KiB, comm the executable's path (macOS), last so it may hold spaces. */
+/** One line of `ps -axo pid=,ppid=,pgid=,rss=,time=,comm=`: rss in KiB, comm the executable's path (macOS), last so it may
+ * hold spaces. The older five-column form (no pgid) is read too. */
 export function parsePsLine(line: string): ProcessRow | null {
-  const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
+  const match = /^\s*(\d+)\s+(\d+)\s+(?:(\d+)\s+)?(\d+)\s+(\d\S*)\s+(.+?)\s*$/.exec(line);
   if (!match) return null;
-  const cpuMs = parsePsTime(match[4]!);
+  const cpuMs = parsePsTime(match[5]!);
   if (cpuMs === null) return null;
-  const path = match[5]!;
-  const pid = Number(match[1]);
-  return { pid, ppid: Number(match[2]), name: path.slice(path.lastIndexOf("/") + 1).toLowerCase(), cpuMs, rssBytes: Number(match[3]) * 1024, start: `ps:${pid}` };
+  const path = match[6]!;
+  const pid = Number(match[1]), pgid = match[3] === undefined ? 0 : Number(match[3]);
+  return { pid, ppid: Number(match[2]), name: path.slice(path.lastIndexOf("/") + 1).toLowerCase(), cpuMs, rssBytes: Number(match[4]) * 1024, start: `ps:${pid}`,
+    ...(pgid > 0 ? { pgid } : {}) };
 }
 
 /** The cgroup's (or, outside one, the machine's) CPU time so far, ms: cgroup v2's usage_usec, else v1's cpuacct.usage. */

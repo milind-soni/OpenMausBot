@@ -52,3 +52,42 @@ describe("doctor on a shared server, without a session", () => {
     expect(code).not.toBe(0);
   });
 });
+
+describe("doctor --data", () => {
+  async function local(argv: string[], dataDir?: string) {
+    const out: string[] = [], err: string[] = [];
+    const io: HeadlessIo = { out: (text) => out.push(text), err: (text) => err.push(text), readStdin: async () => "" };
+    const callTool = vi.fn(async () => { throw new Error("doctor --data must not reach a server"); });
+    const code = await runHeadless(argv, { env: dataDir ? { OMB_DATA_DIR: dataDir } : {}, io, callTool: callTool as any });
+    return { code, out, err, callTool };
+  }
+
+  it("checks this computer's data folder without a server, and --fix alone means --data", async () => {
+    const { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const data = mkdtempSync(join(tmpdir(), "omb-doctor-cli-"));
+    try {
+      for (const name of ["events", "native"]) mkdirSync(join(data, name));
+      const stray = join(data, "config.json.999999.0b4d8f7a-3c2e-4f1a-9b6d-5e7c8a9f0d1e.tmp");
+      writeFileSync(stray, "{}");
+      const looked = await local(["doctor", "--data", "--json"], data);
+      expect(looked.code).toBe(8);
+      expect(JSON.parse(looked.out.at(-1)!)).toMatchObject({ ok: false, dataDir: data, fix: { asked: false } });
+      expect(existsSync(stray)).toBe(true);
+      const fixed = await local(["doctor", "--fix", "--data-dir", data]);
+      expect(fixed.code).toBe(0);
+      expect(fixed.out.at(-1)).toBe("All fine now: 1 fixed.");
+      expect(existsSync(stray)).toBe(false);
+      expect(looked.callTool).not.toHaveBeenCalled();
+    } finally {
+      rmSync(data, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses options that are about a server, and mixing it with --host", async () => {
+    expect((await local(["doctor", "--data", "--url", "http://127.0.0.1:1"])).code).toBe(2);
+    expect((await local(["doctor", "--fix", "--wait", "1m"])).code).toBe(2);
+    expect((await local(["doctor", "--host", "--data"])).code).toBe(2);
+  });
+});

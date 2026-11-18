@@ -124,6 +124,7 @@ async function writeFile(home: string, args: Record<string, unknown>): Promise<R
   const temp = path.join(path.dirname(target), `.${path.basename(target)}.${randomUUID().slice(0, 8)}.tmp`);
   try {
     await fs.writeFile(temp, data, { flag: "wx", flush: true, ...(existing ? { mode: existing.mode & 0o777 } : {}) });
+    if (existing && process.platform !== "win32") await fs.chmod(temp, existing.mode & 0o777);
     if (existing) await renameWithRetry(temp, target);
     else await placeNew(temp, target);
   } catch (error) {

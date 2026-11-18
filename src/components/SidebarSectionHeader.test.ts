@@ -97,19 +97,19 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     name: "Work", collapsed: false, onToggle: () => {}, reorderable: true, dragging: false, line: true, ...props,
   }) as ReactElement<Props>;
 
-  it("draws a quiet 12px name with no hairline, and a ⋯ team menu button that shows on hover, with no trash or grip", () => {
+  it("draws a quiet 13px name with no hairline, and a ⋯ team menu button that shows on hover, with no trash or grip", () => {
     const onMenu = vi.fn();
     const element = line({ onMenu, onDelete: () => {} });
     const html = renderToStaticMarkup(element);
     expect(html).toContain('data-sidebar-section-line=""');
-    expect(html).toMatch(/text-\[12px\][^"]*text-ink-secondary/);
+    expect(html).toMatch(/text-\[13px\] leading-\[18px\] text-ink-secondary/);
     expect(html).not.toContain("bg-hairline");
     expect(html).toContain('aria-label="Actions for Work department" title="Actions for Work department" aria-haspopup="menu" aria-expanded="false"');
     expect(html).toMatch(/aria-label="Actions for Work department"[^>]*class="[^"]*\bopacity-0\b[^"]*\bgroup-hover\/section:opacity-100\b[^"]*\baria-expanded:opacity-100\b/);
     expect(html).not.toContain("Delete Work department");
     expect(html).not.toContain("lucide-grip-vertical");
     expect(html).not.toContain("lucide-trash");
-    expect(html).toMatch(/lucide-chevron-down absolute text-ink-secondary opacity-0 transition-opacity group-hover\/section:opacity-100 group-focus-within\/section:opacity-100 touch:opacity-100/);
+    expect(html).toMatch(/lucide-chevron-down shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover\/section:opacity-100 group-focus-within\/section:opacity-100 touch:opacity-100/);
     expect(html.indexOf(">Work</span>")).toBeLessThan(html.indexOf("Actions for Work department"));
     const button = { id: "dots" };
     const dots = nodes(element.props.children).find((node) => node.props["aria-label"] === "Actions for Work department")!;
@@ -119,26 +119,26 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(renderToStaticMarkup(line())).not.toContain("Actions for Work department");
   });
 
-  it("shows how many rows the section holds at rest, crossfading to the chevron on hover or focus", () => {
-    const html = renderToStaticMarkup(line({ count: 3 }));
-    expect(html).toMatch(/class="h-\[30px\]|group\/section flex h-\[30px\] items-center gap-1\.5 rounded-\[6px\] px-2 pb-1\.5 pt-2 hover:bg-raised\/50/);
-    expect(html).toMatch(/<span class="text-\[12px\] tabular-nums leading-4 text-ink-secondary transition-opacity group-hover\/section:opacity-0 group-focus-within\/section:opacity-0 touch:opacity-0">3<\/span>/);
+  it("shows no row count, only the chevron on hover or focus", () => {
+    const html = renderToStaticMarkup(line());
+    expect(html).not.toContain("tabular-nums");
+    expect(html.replace(/<svg.*?<\/svg>/g, "")).not.toMatch(/>\d+</);
   });
 
-  it("keeps the count in the same column whether or not the line has a ⋯ menu", () => {
-    const slot = /<span aria-hidden="true" class="w-\[22px\] shrink-0"><\/span>/;
-    expect(renderToStaticMarkup(line({ count: 1, reserveMenu: true }))).toMatch(slot);
-    expect(renderToStaticMarkup(line({ count: 4, reserveMenu: true, onMenu: () => {} }))).not.toMatch(slot);
-    expect(renderToStaticMarkup(line({ count: 1 }))).not.toMatch(slot);
+  it("keeps the chevron in the same column whether or not the line has a ⋯ menu", () => {
+    const slot = /<span aria-hidden="true" class="w-6 shrink-0"><\/span>/;
+    expect(renderToStaticMarkup(line({ reserveMenu: true }))).toMatch(slot);
+    expect(renderToStaticMarkup(line({ reserveMenu: true, onMenu: () => {} }))).not.toMatch(slot);
+    expect(renderToStaticMarkup(line())).not.toMatch(slot);
     expect(renderToStaticMarkup(line({ reserveMenu: true, naming: { value: "", label: "Name", onCommit: () => {}, onCancel: () => {} } }))).not.toMatch(slot);
     const top = (props: Parameters<typeof line>[0]) => Children.toArray(line(props).props.children).filter(isValidElement) as ReactElement<Props>[];
-    const reserved = top({ count: 1, reserveMenu: true });
-    const withMenu = top({ count: 4, onMenu: () => {} });
+    const reserved = top({ reserveMenu: true });
+    const withMenu = top({ onMenu: () => {} });
     expect(reserved.map((node) => node.type)).toEqual(["button", "span"]);
-    expect(reserved[1].props).toMatchObject({ "aria-hidden": "true", className: "w-[22px] shrink-0" });
+    expect(reserved[1].props).toMatchObject({ "aria-hidden": "true", className: "w-6 shrink-0" });
     expect(withMenu.map((node) => node.type)).toEqual(["button", "button"]);
     expect(withMenu[1].props["aria-label"]).toBe("Actions for Work department");
-    expect(String(withMenu[1].props.className).split(" ")).toEqual(expect.arrayContaining(["w-[22px]", "shrink-0"]));
+    expect(String(withMenu[1].props.className).split(" ")).toEqual(expect.arrayContaining(["size-6", "shrink-0"]));
   });
 
   it("is dragged by the line itself, and only when it can be reordered", () => {
@@ -180,5 +180,30 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     expect(html).toContain("2 unread");
     expect(html).toContain("1 working");
     expect(renderToStaticMarkup(line())).not.toContain("lucide-chevron-right");
+  });
+
+  it("marks a collapsed line with one dot, the most urgent of waiting, unread and working, and no number", () => {
+    const marks = (attention: { waiting: number; unread: number; working: number }) =>
+      renderToStaticMarkup(line({ collapsed: true, attention })).match(/data-section-mark="(\w+)"/g) ?? [];
+    expect(marks({ waiting: 1, unread: 2, working: 1 })).toEqual(['data-section-mark="waiting"']);
+    expect(marks({ waiting: 0, unread: 2, working: 1 })).toEqual(['data-section-mark="unread"']);
+    expect(marks({ waiting: 0, unread: 0, working: 3 })).toEqual(['data-section-mark="working"']);
+    expect(marks({ waiting: 0, unread: 0, working: 0 })).toEqual([]);
+    const html = renderToStaticMarkup(line({ collapsed: true, attention: { waiting: 0, unread: 12, working: 0 } }));
+    expect(html).not.toContain(">12<");
+    expect(html).not.toContain("text-[9px]");
+    expect(html).toContain('title="12 unread"');
+    expect(renderToStaticMarkup(line({ collapsed: false, attention: { waiting: 1, unread: 0, working: 0 } }))).not.toContain("data-section-mark");
+  });
+
+  it("draws the working pulse still when motion is reduced", () => {
+    const html = renderToStaticMarkup(line({ collapsed: true, attention: { waiting: 0, unread: 0, working: 1 } }));
+    expect(html).toMatch(/animate-pulse[^"]*motion-reduce:animate-none/);
+  });
+
+  it("lets a routine alert stand alone instead of a second dot", () => {
+    const html = renderToStaticMarkup(line({ collapsed: true, alert: true, attention: { waiting: 1, unread: 0, working: 0 } }));
+    expect(html).toContain('data-testid="section-alert"');
+    expect(html).not.toContain("data-section-mark");
   });
 });

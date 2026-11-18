@@ -46,3 +46,8 @@ resumed for each in its own place.
 - `POST /api/paused` with `{ "kind": "bot" | "department", "id": "<bot id or department name>", "paused": true | false }`:
   answers with the new state and `stopped`, how many conversations it stopped.
 - `POST /api/paused` with `{ "kind": "all", "paused": true | false }` pauses or resumes every bot, with the same answer.
+- `POST /api/turns/stop` with `{ "all": true }` or `{ "botIds": [...] }` stops the work those bots are doing now and
+  pauses nothing; it answers `{ botIds, stopped }`.
+
+All of these are admin requests. From a terminal: `openmausbot bots pause | resume (BOT… | --team NAME | --all)` and
+`openmausbot stop (BOT… | --team NAME | --all)` ([the command line](headless-cli.md)).

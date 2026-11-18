@@ -10,8 +10,10 @@ import { z } from "zod";
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "./bot-profile.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { normalizeCronSchedule } from "./routine-schedule.ts";
+import { isToolGroup } from "./tool-groups.ts";
 import { MAUS_COLOR_NAMES } from "./wire.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES } from "./skill-md.ts";
+import { skillFilesSchema } from "./skill-files.ts";
 
 export const PACKAGE_FORMAT = "openmaus.package";
 /** The newest version this module reads and writes. */
@@ -33,6 +35,8 @@ export const TEAM_BRIEF_MAX_BYTES = 24_000, RELEASE_NOTES_MAX = 4_000;
 export const PACKAGE_V1_VERSION = 1;
 export const PACKAGE_V1_MAX_SKILLS = 20;
 export const BOTMRR_MARKDOWN_VERSION = 1;
+/** A template folder's bot.md or team.md (shared/share-folder.ts): v2 package fields, with skills and pictures in files. */
+export const BOTMRR_FOLDER_VERSION = 2;
 const BOTMRR_MARKDOWN_MAX_BYTES = 1_000_000;
 
 export const NEWER_PACKAGE_MESSAGE = "This file was made by a newer OpenMausBot. Update the app, then import it again.";
@@ -57,7 +61,6 @@ const encoder = new TextEncoder();
 export function utf8Bytes(value: string): number {
   return encoder.encode(value).length;
 }
-
 
 export const requiredText = (max: number) =>
   z.string({ error: "must be text" }).trim().min(1, { message: "is required" }).max(max, { message: "is too long" });
@@ -95,6 +98,7 @@ const portableSkillSchema = z.object({
   license: optionalText(200),
   compatibility: optionalText(200),
   instructions: skillInstructions,
+  files: skillFilesSchema,
 });
 const soulSchema = z.string().refine((value) => utf8Bytes(value) <= BOT_PROFILE_LIMITS.soul, {
   error: "standing instructions must be at most 24000 bytes",
@@ -162,7 +166,7 @@ const playbookSchema = z.object({
 });
 const requirementsSchema = z.object({
   apps: z.array(z.object({
-    slug: key,
+    slug: requiredText(64).regex(/^(?!__proto__$)[a-z0-9_][a-z0-9_-]*$/, { message: "may only contain lowercase letters, numbers, - and _" }),
     label: requiredText(100),
     reason: requiredText(240),
     optional: z.boolean().optional(),
@@ -258,7 +262,6 @@ const packageDocumentV1Schema = z.object({
 });
 
 export type PackageDocumentV1 = z.output<typeof packageDocumentV1Schema>;
-
 
 const semver = z.string({ error: "must be text" }).regex(/^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/, {
   message: "must be a version like 1.2.3",
@@ -357,6 +360,10 @@ const agentSchema = z.object({
   skills: z.array(skillName).max(AGENT_MAX_SKILLS).optional(),
   connections: z.array(connKey).max(PACKAGE_MAX_CONNECTIONS).optional(),
   seed: seedSchema.optional(),
+  /** Tool groups the bot has switched off. It only narrows what the bot is shown; a group this app doesn't know is dropped. */
+  tools: z.object({
+    off: z.array(z.string({ error: "must be text" }).max(40)).max(20).transform((groups) => [...new Set(groups.filter(isToolGroup))]),
+  }).optional(),
 });
 
 const routineSchema = z.object({
@@ -815,7 +822,8 @@ export function downgradeToV1(document: PackageDocument):
   for (const preset of pkg.presets ?? []) dropped.push(`presets[${preset.key}]`);
   for (const connection of pkg.connections ?? []) dropped.push(`connections[${connection.key}]`);
   const agents = pkg.agents.map((agent) => {
-    const { approval, connections, seed, appearance, ...kept } = agent;
+    const { approval, connections, seed, appearance, tools, ...kept } = agent;
+    if (tools?.off.length) dropped.push(`agents[${agent.key}].tools`);
     const { avatar, ...look } = appearance;
     if (avatar) dropped.push(`agents[${agent.key}].appearance.avatar`);
     if (approval !== undefined) dropped.push(`agents[${agent.key}].approval`);
@@ -875,7 +883,7 @@ function visitText(document: PackageDocument, visit: TextVisitor): void {
     if (!value || typeof value !== "object") return;
     const record = value as Record<string, unknown>;
     for (const name of Object.keys(record)) {
-      if (part.endsWith(".appearance.avatar") && name === "data") continue;
+      if ((part.endsWith(".appearance.avatar") && name === "data") || (name === "content" && /^skills\[[^\]]*\]\.files\[\d+\]$/.test(part))) continue;
       walk(record, name, part.endsWith(".seed.memory") ? `${part}[${JSON.stringify(name)}]` : `${part}.${name}`);
     }
   };

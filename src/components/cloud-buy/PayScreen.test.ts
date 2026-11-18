@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 import { PayScreen } from "./PayScreen";
 
 const pay = (trialDays?: number) => renderToStaticMarkup(createElement(PayScreen, {
-  plan: "team", offer: { plans: [{ tier: "team", label: "Team", amount: 16900, ...(trialDays ? { trialDays } : {}) }], recommended: "team" }, browser: "checkout", late: false, link: false,
+  plan: "team", offer: { plans: [{ tier: "team", label: "Team", amount: 4000, ...(trialDays ? { trialDays } : {}) }], recommended: "team" }, browser: "checkout", late: false, link: false,
   email: null, busy: false, copied: false, failed: false, onReopen: vi.fn(), onCopy: vi.fn(), onChangePlan: vi.fn(),
 }));
 

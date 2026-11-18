@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parseArgs } from "./cli.ts";
 import { browserSignInLines, formatSessions, pairingBlock } from "./cli-pairing.ts";
 import { noRouteLines, reachLines } from "./cli-reach.ts";
-import { HEADLESS_VERB_NAMES, usage } from "./cli-usage.ts";
+import { HEADLESS_VERB_NAMES, routeCli, usage } from "./cli-usage.ts";
 
 const PLACEHOLDERS: Record<string, string> = {
   "https://…": "https://maus.example.com", "<id>": "a1", ID: "a1", NAME: "kitchen", FILE: "team.yaml", EMAIL: "you@example.com",
@@ -23,9 +23,11 @@ function printedCommands(text: string): string[][] {
   return found;
 }
 
+/** `account` takes login, logout or status; a flag the usage lists beside it is login's. */
 function accepted(words: string[]): string | null {
-  if (HEADLESS_VERB_NAMES.has(words[0]!)) return null;
-  const parsed = parseArgs(words, {});
+  const routed = routeCli(words[0] === "account" && words[1]?.startsWith("--") ? ["account", "login", ...words.slice(1)] : words);
+  if (routed.headless) return null;
+  const parsed = parseArgs(routed.argv, {});
   return "error" in parsed ? parsed.error : null;
 }
 
@@ -42,7 +44,7 @@ describe("printed commands", () => {
 
   it("finds the commands in what serve, pair and devices print", () => {
     const commands = outputs.flatMap(printedCommands);
-    expect(commands.map((words) => words[0])).toEqual(expect.arrayContaining(["pair", "serve", "status", "devices"]));
+    expect(commands.map((words) => words[0])).toEqual(expect.arrayContaining(["pair", "serve", "account", "devices"]));
     for (const words of commands) expect([words.join(" "), accepted(words)]).toEqual([words.join(" "), null]);
   });
 
@@ -62,7 +64,7 @@ describe("printed commands", () => {
         checked.push(`${command} ${flag}`);
       }
     }
-    expect(checked).toEqual(expect.arrayContaining(["serve --lan", "serve --public-url", "pair --phone", "pair --ttl"]));
+    expect(checked).toEqual(expect.arrayContaining(["serve --lan", "serve --public-url", "pair --phone", "pair --ttl", "account --email", "account --relay"]));
   });
 
   it("writes commands the way the CLI was started", () => {

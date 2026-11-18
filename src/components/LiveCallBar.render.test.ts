@@ -151,13 +151,13 @@ describe("LiveCallSettings", () => {
     };
     const base = { voice: "marin", readTypedReplies: true, idleMinutes: 5 };
     const fromApiKeys = withLive({ ...base, configured: true, keySource: "openai" });
-    expect(fromApiKeys).toContain("Uses your OpenAI API key from Settings → API keys.");
+    expect(fromApiKeys).toContain("Uses your OpenAI API key from Settings → AI → Other services.");
     expect(fromApiKeys).not.toContain("Remove key");
     const own = withLive({ ...base, configured: true, keySource: "live" });
     expect(own).toContain("Remove key");
     expect(own).not.toContain("Settings → API keys");
     const none = withLive({ ...base, configured: false });
-    expect(none).toContain("Live calls use your own OpenAI key. Add it in Settings → API keys.");
+    expect(none).toContain("Live calls use your own OpenAI key. Add it in Settings → AI → Other services.");
     expect(none).not.toContain("Remove key");
   });
 

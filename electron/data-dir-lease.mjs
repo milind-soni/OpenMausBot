@@ -415,11 +415,20 @@ function windowsProcessListed(pid) {
   return tasklistHasPid(pid) ?? cimHasPid(pid);
 }
 
+/**
+ * `tasklist /FI "PID eq <pid>" /FO CSV /NH`: a quoted CSV row when the pid runs, an INFO line (in the system's language)
+ * when it does not; null for no output at all, which proves nothing, so the next probe answers.
+ */
+export function tasklistListsPid(output) {
+  const lines = String(output).replace(/^﻿/, "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  return lines.some((line) => line.startsWith('"'));
+}
+
 /** tasklist ships with every Windows and lists every running process, whatever account or session owns it. */
 function tasklistHasPid(pid) {
   try {
-    const output = commandOutput("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], 5_000);
-    return output.split(/\r?\n/).some((line) => line.startsWith('"'));
+    return tasklistListsPid(commandOutput("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], 5_000));
   } catch {
     return null;
   }
@@ -446,9 +455,22 @@ function ownerIdentityMatches(owner) {
     return started === null || started === owner.start;
   }
   if (process.platform !== "win32") return true;
-  const created = processCreationTimeMs(owner.pid);
-  if (created === null) return true;
-  return created < owner.createdAt;
+  return windowsCreationFitsLease(processCreationTimeMs(owner.pid), owner.createdAt);
+}
+
+/**
+ * How far a process' creation time, as Windows reports it, may run past the createdAt its own Date.now() wrote. The two
+ * clocks are read differently (the kernel's stamp at creation, JavaScript's clock in the process), so they disagree by
+ * up to a timer tick or more, and NTP may step the wall clock between the two readings. Without slack a live owner that
+ * wrote its lease moments after starting reads as a reused pid and its lease is taken over: two servers on one folder.
+ * Erring this way only keeps a lease whose pid was reused within these seconds blocked while that process lives.
+ */
+const WINDOWS_CREATION_SLACK_MS = 5_000;
+
+/** Windows: whether the process now holding the pid can be the lease's owner; unknown (null) creation time counts as yes. */
+export function windowsCreationFitsLease(createdMs, leaseCreatedAt) {
+  if (createdMs === null) return true;
+  return createdMs < leaseCreatedAt + WINDOWS_CREATION_SLACK_MS;
 }
 
 function unlinkExact(path, message) {
@@ -767,6 +789,30 @@ function clearRecords(dataDir, stale) {
     cleared.push({ path, host: record.host, pid: record.pid });
   }
   return cleared;
+}
+
+/**
+ * Who holds the data directory's lease, read only (`openmausbot doctor`): "none"; "alive", a running process on this
+ * machine; "dead", a process of this machine that is gone, which the next acquireDataDirLease() retires; "other-machine";
+ * or "invalid", a record that cannot be read, which acquireDataDirLease() refuses. Never changes a file.
+ */
+export function describeDataDirLease(dataDir) {
+  const path = join(validateDataDir(dataDir), LEASE_NAME);
+  let owner;
+  try {
+    owner = readOwner(path);
+  } catch {
+    return { state: "invalid", path };
+  }
+  if (!owner) return { state: "none", path };
+  const holder = { path, pid: owner.pid, host: owner.host, createdAt: owner.createdAt };
+  if (!sameMachine(owner, dataDir)) return { state: "other-machine", ...holder };
+  try {
+    return { state: ownerIsAlive(owner) ? "alive" : "dead", ...holder };
+  } catch {
+    // Liveness that cannot be told is taken as alive, as acquiring would refuse it.
+    return { state: "alive", ...holder };
+  }
 }
 
 export function acquireDataDirLeaseForProcess(dataDir, environment = process.env) {

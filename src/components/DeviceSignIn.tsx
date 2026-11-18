@@ -151,12 +151,14 @@ export function DeviceSignInProgress({ auth, browserPkce = false, provider = "co
 }
 
 /** `autoStart` begins at once; `onDone` hears the outcome so an account list can close the panel. */
-export function DeviceSignIn({ instanceId, browserPkce = false, provider = "codex", autoStart = false, onDone }: {
+export function DeviceSignIn({ instanceId, browserPkce = false, provider = "codex", autoStart = false, onDone, onStart }: {
   instanceId: string;
   browserPkce?: boolean;
   provider?: DeviceSignInProvider;
   autoStart?: boolean;
   onDone?: (signedIn: boolean) => void;
+  /** A sign-in is starting. */
+  onStart?: () => void;
 }) {
   const { refreshInstances, refreshModels } = useStore();
   const [auth, setAuth] = useState<DeviceSignInStatus | null>(null);
@@ -211,6 +213,7 @@ export function DeviceSignIn({ instanceId, browserPkce = false, provider = "code
   const start = async () => {
     setBusy(true);
     setError(null);
+    onStart?.();
     try {
       const { auth: next }: { auth: DeviceSignInStatus } = await api(`${base}/start`, { method: "POST" });
       setAuth(next);

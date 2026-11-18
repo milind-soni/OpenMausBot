@@ -14,17 +14,17 @@ import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQu
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
-import { ChatToolSessionError, chatToolNotices, mountChatTools, refitChatTools, withHostFileTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
+import { ChatToolSessionError, chatToolNotices, joinLateChatTools, mountChatTools, refitChatTools, withHostFileTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
 import { noteToolBudget } from "../tool-budgets.ts";
 import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
-import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
+import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
-import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
+import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, selectedReasoningEffort, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { plainFailure } from "./engine-errors.ts";
@@ -35,9 +35,8 @@ import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
-import { FETCH_LIMIT_MS, fetchPastLimit } from "./openai-chat-fetch.ts";
+import { FETCH_LIMIT_MS, fetchPastLimit, prepareChatModel } from "./openai-chat-fetch.ts";
 import { announcesAction } from "./chat-announcement.ts";
-
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | ChatContentPart[] | null;
@@ -47,12 +46,11 @@ export interface OpenAIChatMessage {
   reasoning?: string;
   reasoning_details?: Record<string, unknown>[];
 }
-
 interface Usage {
   input: number;
   output: number;
+  cachedInput?: number;
 }
-
 export interface Completion {
   text: string;
   reasoning: string;
@@ -64,7 +62,6 @@ export interface Completion {
   /** Every output item of a Responses API reply, encrypted reasoning included, for the next round of this turn only. */
   responseOutput?: ResponseItem[];
 }
-
 interface CompletionJson extends ProviderBody {
   model?: string;
   choices?: Array<{
@@ -77,13 +74,11 @@ interface CompletionJson extends ProviderBody {
   /** Groq reports streaming usage in its final x_groq envelope. */
   x_groq?: { usage?: CompletionJson["usage"] };
 }
-
 interface NativeLog {
   source: string;
   outgoing(turn: SendTurnInput, messages: OpenAIChatMessage[], model: string, tools: ChatToolDefinition[]): unknown;
   incoming(completion: Completion): unknown;
 }
-
 const LIVENESS_MISSES = 3;
 
 interface RuntimeOptions<Config> {
@@ -92,7 +87,9 @@ interface RuntimeOptions<Config> {
   apiKey: string;
   apiUrl: string;
   models: () => ModelCatalog;
-  requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean, variant?: string, threadId?: string): Record<string, unknown>;
+  prepareTurn?: (turn: SendTurnInput, signal: AbortSignal) => Promise<void> | undefined;
+  selectedReasoning?: (model: string, variant?: string) => boolean;
+  requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean, variant?: string, threadId?: string, selectedModel?: string): Record<string, unknown>;
   httpErrorLabel: string;
   /** A refusal this provider words itself: the sentence the person sees instead of the HTTP line, or undefined. */
   plainRefusal?: (status: number, body: string) => string | undefined;
@@ -130,22 +127,21 @@ interface RuntimeOptions<Config> {
    * to fix a failed call instead of ending the turn on it. */
   localModel?: boolean;
 }
-
-const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
-  usage
-    ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0 }
+const usageFrom = (usage: CompletionJson["usage"]): Usage | null => {
+  const cachedInput = usage?.prompt_tokens_details?.cached_tokens;
+  return usage
+    ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0,
+        ...(typeof cachedInput === "number" && Number.isFinite(cachedInput) && cachedInput >= 0 ? { cachedInput } : {}) }
     : null;
+};
 
 const completionUsage = (json: CompletionJson) => json.usage ?? json.x_groq?.usage;
 
 const asError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
 
-const MAX_CHAT_ROUNDS = 64;
 const MAX_TURN_TOOL_CALLS = 200;
 const MAX_ANNOUNCEMENT_NUDGES = 3;
-const stoppedAfter = (count: string) =>
-  `Stopped after ${count} without a final answer. The steps so far already ran, so ask only for what's left.`;
 
 interface DeliveredUserMessage {
   text: string;
@@ -280,11 +276,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ? AbortSignal.any([signal, timeoutController.signal])
         : timeoutController.signal;
 
-      const served = options.servedModel ? await options.servedModel(model) : model;
+      const served = options.servedModel ? await prepareChatModel(() => options.servedModel!(model), activeSignal) : model;
+      const requestBody = options.requestBody(served, messages, stream, variant, threadId, model);
+      const effort = selectedReasoningEffort(requestBody, route, variant, options.selectedReasoning?.(model, variant));
       const payload = JSON.stringify(route === "responses"
-        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort: options.requestBody(served, messages, stream, variant).reasoning_effort })
+        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort })
         : {
-          ...options.requestBody(served, messages, stream, variant, threadId),
+          ...requestBody,
           ...(route === "chat-reasoning-off" ? (options.reasoningOffBody?.(served) ?? { reasoning_effort: "none" }) : {}),
           ...(tools.length ? { tools } : {}),
         });
@@ -518,15 +516,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
   const sendTurn = async (turn: SendTurnInput) => {
     if (!options.apiKey) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
-    if (options.computerUse && ((turn.images?.length && seesImages(turn)) || turn.integrations?.localComputer || turn.integrations?.browser)) assertImageTransport(options.apiUrl);
-
+    if (options.computerUse && (turn.integrations?.localComputer || turn.integrations?.browser)) assertImageTransport(options.apiUrl);
     const turnId = newId();
     const abort = new AbortController();
-    const messages = messagesFor(turn);
-    const request = messages.at(-1)!;
+    let messages: OpenAIChatMessage[] = [];
+    let request: OpenAIChatMessage | undefined;
     const retainImages = chatImageBudget();
-    for (const message of messages) retainImages(message.content);
-    const model = turn.model || options.models().default;
+    let model = turn.model || options.models().default;
     const maskable = (value: unknown): value is string => typeof value === "string" && value.length >= 8; // a short placeholder key ("1") would redact every match
     const secrets = [options.apiKey].filter(maskable);
     for (const integration of Object.values(turn.integrations ?? {})) {
@@ -583,7 +579,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const turnEntry = { abort, turnId, done, approval, asides: [] as string[], ending: false };
     active.set(turn.threadId, turnEntry);
     emit({ ...base(turn.threadId, turnId), type: "turn.started" });
-    emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
 
     void (async () => {
       let tools: ChatToolSession | undefined;
@@ -604,21 +599,28 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const repeats = options.localModel ? new ChatRepeatGuard() : undefined;
       let unreadable = false, askedAgain = false;
       try {
+        const preparation = options.prepareTurn?.(turn, abort.signal);
+        if (preparation) { await preparation; model = turn.model || options.models().default; }
+        abort.signal.throwIfAborted();
+        if (options.computerUse && turn.images?.length && seesImages(turn)) assertImageTransport(options.apiUrl);
+        messages = messagesFor(turn);
+        request = messages.at(-1)!;
+        for (const message of messages) retainImages(message.content);
+        emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
         const toolsOff = options.tools === false || options.toolUse?.(model) === false;
         tools = await mountChatTools(toolsOff ? undefined : withHostFileTools(turn.integrations), abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
-          toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText, chatToolLimitFor(options.apiUrl, model), { conversation: turn.threadId, notice: ({ message, text }) => emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message), text }) });
+          toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText, chatToolLimitFor(options.apiUrl, model), { background: true, conversation: turn.threadId, notice: ({ message, text }) => emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message), text }) });
         noteToolBudget(turn.botId, tools.budget);
         for (const message of chatToolNotices(tools)) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
         const questionAllowed = !toolsOff && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
-        let optionalQuestionOnly = questionAllowed && tools.definitions.length === 0;
           // An MCP server squatting ask_user cannot shadow it (dispatch intercepts the name); skip its definition.
         if (questionAllowed && !tools.definitions.some((definition) => definition.function.name === ASK_USER_TOOL)) {
           tools.definitions.push(ASK_USER_TOOL_DEFINITION);
         }
-        for (let round = 0; round < MAX_CHAT_ROUNDS; round++) {
+        for (let round = 0; ; round++) {
           abort.signal.throwIfAborted();
             // Between rounds, never inside a tool batch.
           unread = turnEntry.asides.splice(0);
@@ -626,7 +628,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             messages.push({ role: "user", content: unread.join("\n\n") });
             deliveredAsides.push(...unread);
           }
-          turnEntry.ending = round === MAX_CHAT_ROUNDS - 1;
+          // Servers still starting join between rounds, never once the tools were dropped (none left while ask_user is allowed).
+          const joined = !questionAllowed || tools.definitions.length ? await joinLateChatTools(tools, [ASK_USER_TOOL_DEFINITION]) : undefined;
+          for (const message of joined ?? []) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
           native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
           let attempt = 0;
           let resized = false;
@@ -677,9 +681,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             } catch (value) {
               const error = asError(value);
               const verdict = classifyError(error);
-              // A provider refuses a request with too many tools before running anything: learn its limit and list fewer.
-              const refit = streamed || seenCalls.size || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
-              if (refit) {
+              // Refused for too many tools, nothing ran: learn the limit and list fewer (after a call only when servers just joined).
+              const listedBefore = tools.definitions.length, refit = streamed || (seenCalls.size && !joined) || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
+              if (refit && tools.definitions.length < listedBefore) {
                 for (const message of refit) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
                 noteToolBudget(turn.botId, tools.budget);
                 emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt: 1, delayMs: 0, reason: "tool_limit" });
@@ -712,9 +716,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 if (!abort.signal.aborted) throw new ChatProtocolError(refusedToolCallFailure(error, seenCalls.size > 0));
               }
               // A structured parameter rejection executed nothing; never downgrade mounted tools or a handled call.
-              if (optionalQuestionOnly && round === 0 && !streamed && !seenCalls.size && !abort.signal.aborted &&
+              if (questionAllowed && round === 0 && tools.definitions.length && tools.definitions.every((definition) => definition === ASK_USER_TOOL_DEFINITION) && !streamed && !seenCalls.size && !abort.signal.aborted &&
                   error instanceof UnsupportedChatToolsError && verdict.reason === "invalid_request") {
-                optionalQuestionOnly = false;
                 tools.definitions.length = 0;
                 continue;
               }
@@ -732,6 +735,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           if (completion.usage) {
             usage.input += completion.usage.input;
             usage.output += completion.usage.output;
+            if (completion.usage.cachedInput !== undefined) usage.cachedInput = (usage.cachedInput ?? 0) + completion.usage.cachedInput;
             hasUsage = true;
             const contextWindow = options.models().options.find((entry) => entry.id === model)?.contextWindow;
             // Accounting sums the turn; context occupancy is the latest round only.
@@ -754,7 +758,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             }
             if (toolFailed) {
               // A person's "no" is never answered with another attempt; a failure may first get the configured corrective rounds.
-              if (!denials.length && !turnEntry.ending && correctiveRounds < Math.max(turn.toolErrorCorrectiveRounds ?? 0, options.localModel ? LOCAL_CORRECTIVE_ROUNDS : 0)) {
+              if (!denials.length && correctiveRounds < Math.max(turn.toolErrorCorrectiveRounds ?? 0, options.localModel ? LOCAL_CORRECTIVE_ROUNDS : 0)) {
                 correctiveRounds += 1;
                 messages.push({ role: "user", content: CORRECTIVE_ROUND });
                 continue;
@@ -763,9 +767,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               throw new ChatProtocolError(toolFailureMessage(failedCalls, denials.filter((name) => name !== ASK_USER_TOOL)));
             }
             if (options.nudgeAnnouncedAction && tools.definitions.length && announcesAction(completion.text)) {
-              if (nudges >= MAX_ANNOUNCEMENT_NUDGES || turnEntry.ending) {
+              if (nudges >= MAX_ANNOUNCEMENT_NUDGES) {
                 stopReason = "incomplete_action";
-                throw new ChatProtocolError(`Stopped after ${turnEntry.ending ? `${MAX_CHAT_ROUNDS} steps` : `${MAX_ANNOUNCEMENT_NUDGES} announcement nudges`} without a verified final answer. Earlier operations may have taken effect; inspect their state and continue only the remaining work.`);
+                throw new ChatProtocolError(`Stopped after ${MAX_ANNOUNCEMENT_NUDGES} announcement nudges without a verified final answer. Earlier operations may have taken effect; inspect their state and continue only the remaining work.`);
               }
               if (callsAtNudge === seenCalls.size) {
                 stopReason = "incomplete_action";
@@ -789,8 +793,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             if (seenCalls.has(call.id)) throw new ChatProtocolError("provider reused a tool-call ID; refusing to repeat an operation");
             seenCalls.add(call.id);
           }
-          if (seenCalls.size > MAX_TURN_TOOL_CALLS) throw new ChatProtocolError(stoppedAfter(`${MAX_TURN_TOOL_CALLS} tool calls`));
-          messages.push(assistantReply(model, completion, completion.text || null, completion.toolCalls));
+          if (seenCalls.size > MAX_TURN_TOOL_CALLS) throw new ChatProtocolError(`Stopped after ${MAX_TURN_TOOL_CALLS} tool calls without a final answer. The steps so far already ran, so ask only for what's left.`);
+          messages.push(assistantReply(model, completion, completion.text || null, replayableToolCalls(completion.toolCalls)));
           // A failure stays pending only until the bot runs tools again: one that went on to use more tools has read the error
           // and reacted (a wrong guess, a bad query, then the right call), so its turn is not failed for it, on any model. The
           // failed step still shows as failed; a failure in the last calls before the answer, or a person's no, still ends it.
@@ -802,10 +806,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             let started = false;
             let fatal: Error | undefined, title = call.function.name, skipRepeatCount = false;
             try {
-              let args: unknown;
-              try { args = JSON.parse(call.function.arguments.trim() || "{}"); } // An empty argument string is a tool with no arguments.
-              catch { throw new ChatProtocolError("tool arguments are not complete JSON"); }
-              if (!object(args)) throw new ChatProtocolError("tool arguments must be a JSON object");
+              const args = toolArguments(call.function.arguments, safeText);
               const inputPreview = preview(args);
               if (call.function.name === ASK_USER_TOOL) {
                 if (!questionAllowed || !allowsTool(scope, { kind: "native", name: ASK_USER_TOOL })) throw new Error("Tool selection excludes this tool");
@@ -832,7 +833,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 const refused = repeats?.refuses(call.function.name, call.function.arguments);
                 if (refused) { skipRepeatCount = true; throw new Error(refused); }
                 tools.validate(call.function.name, args);
-                const shown = tools.view(call.function.name, args as Record<string, unknown>); title = shown.title;
+                const shown = tools.view(call.function.name, args); title = shown.title;
                 const shownPreview = shown.input === args ? inputPreview : preview(shown.input);
                 // This runtime has no provider reviewer, so Full access is honoured here.
                 const full = (turn.approvalModeNow?.() ?? turn.approvalMode) === "full";
@@ -845,7 +846,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 });
                 started = true;
                 if (allowed) {
-                  result = await tools.execute(call.function.name, args as Record<string, unknown>, abort.signal);
+                  result = await tools.execute(call.function.name, args, abort.signal);
                   if (result.images?.length && !seesImages(turn)) {
                     const { images: _dropped, ...rest } = result;
                     result = { ...rest, text: `${rest.text}\n${TEXT_ONLY_SCREENSHOT_NOTE}` };
@@ -883,7 +884,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           }
           if (screenshotParts.length) messages.push({ role: "user", content: screenshotParts });
         }
-        if (!ok) throw new ChatProtocolError(stoppedAfter(`${MAX_CHAT_ROUNDS} steps`));
       } catch (value) {
         stopReason = abort.signal.aborted ? "interrupted" : stopReason ?? "error";
         failure = safeText(asError(value).message).slice(0, 2_000);
@@ -914,7 +914,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               threadId: turn.threadId, turnId, model,
               usage, hasUsage, failure, toolCalls: seenCalls.size,
               task: turn.text, updates: deliveredAsides,
-              messages: messages.slice(messages.indexOf(request) + 1),
+              messages: request ? messages.slice(messages.indexOf(request) + 1) : [],
             });
             if (handoffPath) emit({ ...base(turn.threadId, turnId), type: "cap.exhausted", handoffPath, reason: continuable });
           }

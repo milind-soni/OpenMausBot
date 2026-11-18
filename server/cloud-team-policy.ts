@@ -13,6 +13,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import type { CloudHomeConfig } from "./cloud-home.ts";
 import type { CloudTeam } from "./cloud-team.ts";
 import type { ManagedDesktopPolicy, ManagedPolicy } from "./managed-policy.ts";
+import { CLI_LOGIN_PATH } from "../shared/cli-login.ts";
 import { TEAM_PHONE_PAIRING_PATH } from "./routes/team-phone.ts";
 import type { SessionRegistry } from "./sessions.ts";
 
@@ -32,7 +33,7 @@ const allowed = <T extends z.ZodType>(entry: T, max: number) => z.union([z.liter
 /** Omitted, or a permissive value: allowed. Only an explicit restriction restricts, and nothing can force anything on. */
 const limitsSchema = z.object({
   allowedEngines: allowed(z.string().regex(/^[A-Za-z][A-Za-z0-9-]{0,63}$/), 64).optional(),
-  allowedApps: allowed(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/), 200).optional(),
+  allowedApps: allowed(z.string().regex(/^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,63}$/), 200).optional(),
   /** `"team"`: only what the team's admins add; a list: only those, whoever adds them. */
   allowedMcpServers: z.union([z.literal("team"), allowed(z.string().trim().min(1).max(200), 100)]).optional(),
   allowedComputers: allowed(z.enum(["cloudDesktop", "vps", "memberComputer"]), 3).optional(),
@@ -87,7 +88,7 @@ export function teamManagedPolicy(document: TeamPolicyDocument, team: Pick<Cloud
  * the Admin itself, reach it, so refusing `/api/auth/pair` would lock the whole team out: there, only what a member's own
  * code opens counts as remote access (the sessions of those codes end when the limit lands: `closeMemberPhones`). */
 export function remoteAccessPaths(team: boolean): readonly string[] {
-  return team ? ["/api/auth/pairing", TEAM_PHONE_PAIRING_PATH] : ["/api/auth/pair", "/api/pair", "/api/auth/pairing", "/api/auth/email/start", "/api/auth/email/verify"];
+  return team ? ["/api/auth/pairing", TEAM_PHONE_PAIRING_PATH, CLI_LOGIN_PATH] : ["/api/auth/pair", "/api/pair", "/api/auth/pairing", "/api/auth/email/start", "/api/auth/email/verify", CLI_LOGIN_PATH];
 }
 
 /** What a document's refusal says of itself, for the Rules page: which key, never a value. */

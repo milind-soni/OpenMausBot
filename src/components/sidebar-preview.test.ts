@@ -33,6 +33,8 @@ describe("sidebar previews", () => {
   it("keeps a failed step's error line and a recovery or notice line as they are", () => {
     const failed = [message({ role: "user", text: "Tidy my inbox" }), message({ text: "On it." }), message({ kind: "activity", tool: { name: "error: Gmail is not connected", ok: false } } as Partial<Message>)];
     expect(botPreview(bot, failed, [], false)).toContain("Gmail is not connected");
+    const failedTool = [message({ role: "user", text: "Tidy my inbox" }), message({ text: "On it." }), message({ kind: "activity", tool: { name: "Bash", ok: false } } as Partial<Message>)];
+    expect(botPreview(bot, failedTool, [], false)).not.toBe("On it.");
     const notice = [message({ role: "user", text: "Tidy my inbox" }), message({ text: "On it." }), step("notice: Switched to a backup model")];
     expect(botPreview(bot, notice, [], false)).toBe("Switched to a backup model");
   });

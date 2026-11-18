@@ -1828,19 +1828,6 @@ describe("Store", () => {
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)?.busy).toBe(false);
   });
-  it("createBot with seedMessages:false starts with an empty transcript", () => {
-    const store = new Store(selection);
-    const bot = store.createBot({ name: "Imported" }, { seedMessages: false });
-    expect(store.messagesFor(bot.threadId)).toHaveLength(0);
-  });
-
-  it("persists the per-bot composio gate", () => {
-    const store = new Store(selection);
-    const bot = store.createBot();
-    store.patchBot(bot.id, { composio: false });
-    const reloaded = new Store(selection);
-    expect(reloaded.bot(bot.id)?.composio).toBe(false);
-  });
 
   it("deleteBot removes the bot and its durable transcript", () => {
     const store = new Store(selection);

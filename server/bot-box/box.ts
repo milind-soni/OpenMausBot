@@ -4,7 +4,7 @@
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
 import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { engineInstallRoots } from "../engine-roots.ts";
 import { homeProgramDirs, resetPathCache } from "../env-path.ts";
@@ -19,7 +19,7 @@ import { openHarnessGate, type HarnessGate } from "./harness-gate.ts";
 import { distrustHomePrograms } from "./program-trust.ts";
 import { procHidepid } from "./hidepid.ts";
 import { DENIED_SYSCALLS, seccompBytes, seccompSupported } from "./seccomp.ts";
-import { RELAY_SOCKET_NAME, boxUploadsDir, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
+import { RELAY_SOCKET_NAME, TEAM_FOLDER_KEPT, boxUploadsDir, teamFolderOf, under, bwrapArgs, inBoxSocket, planBox, taskWorkspaceIds, type BoxAudience, type BoxBridge, type BoxPlan, type BoxRequest, type BoxSetup } from "./plan.ts";
 import { openBoxRelay, type BoxRelay } from "./relay.ts";
 
 /** The loopback port inside a box that reaches the egress gate. The harness gate sits at the server's own port. */
@@ -46,6 +46,10 @@ export interface WrappedSpawn {
   /** Descriptors to hand the child after stdio (the seccomp filter), in order from 3; the caller closes them after the spawn. */
   extraFds: number[];
 }
+
+/** On a Team Cloud, the audience side of a conversation's boxes (server/host/team-box-scope.ts): null for a conversation
+ * it does not place. `sharedProcess`: the box is for a process the bot's conversations share (BoxRequest.botThreads). */
+export type BoxAudienceScope = (input: { threadId: string; botId: string | null; sharedProcess: boolean }) => BoxAudience | null;
 
 /** What the box runtime offers the broker's callers: mint a conversation-bound grant (an MCP server's headers). */
 export interface BoxBroker {
@@ -74,8 +78,29 @@ export class BoxRunner {
   private readonly options: RunnerOptions;
   /** Paths a conversation's turns may write besides the bot's own folder (a member's or a room's memory layer on a Team Cloud). */
   private readonly lent = new Map<string, readonly string[]>();
+  private audiences: BoxAudienceScope | null = null;
 
   constructor(options: RunnerOptions) { this.options = options; }
+
+  /** A Team Cloud's audience rule for every box from now on; null takes it away. */
+  scopeAudiences(scope: BoxAudienceScope | null): void { this.audiences = scope; }
+
+  /** The conversation and bot a spawn is for: its conversation folder's, else the conversation it runs in (a Team
+   * Cloud's engine homes say) with the bot whose own folder it works in or names. */
+  private conversation(request: BoxRequest): { botId: string | null; threadId: string | null; folder: boolean } {
+    const ids = request.cwd ? taskWorkspaceIds(request.cwd, this.options.setup.dataDir) : null;
+    if (ids) return { ...ids, folder: true };
+    if (!request.cwd && request.conversationBot) return { botId: request.conversationBot, threadId: request.threadId ?? null, folder: false };
+    const inWorkspaces = request.cwd ? relative(join(this.options.setup.dataDir, "workspaces"), resolve(request.cwd)).split(sep)[0] : undefined;
+    const botId = request.botId ?? (inWorkspaces && /^[A-Za-z0-9_-]{1,128}$/.test(inWorkspaces) ? inWorkspaces : null) ?? request.conversationBot ?? null;
+    return { botId, threadId: request.threadId ?? null, folder: false };
+  }
+
+  /** What the audience rule gives this box, or null off a team (and for a spawn of no conversation). */
+  audienceFor(request: BoxRequest): BoxAudience | null {
+    const { botId, threadId, folder } = this.conversation(request);
+    return this.audiences && threadId ? this.audiences({ threadId, botId, sharedProcess: Boolean(request.botThreads) && folder }) : null;
+  }
 
   get setup(): BoxSetup { return this.options.setup; }
 
@@ -90,13 +115,21 @@ export class BoxRunner {
 
   wrap(given: BoxRequest): WrappedSpawn {
     const ids = given.cwd ? taskWorkspaceIds(given.cwd, this.options.setup.dataDir) : null;
-    const lent = ids ? this.lentTo(ids.botId, ids.threadId) : [];
+    const { botId, threadId } = this.conversation(given);
+    const lent = botId && threadId ? this.lentTo(botId, threadId) : [];
+    const audience = this.audienceFor(given);
     // Made before the box starts, so an upload a later turn adds shows up in a box that is still running.
     if (ids) try { mkdirSync(boxUploadsDir(this.options.setup.dataDir, ids.botId, ids.threadId), { recursive: true, mode: 0o700 }); } catch (error) {
       // The bind stays optional, but an upload named later would then be unreadable in this box: say so.
       console.error(`bot box: could not make the uploads folder, so uploads stay unreadable in this box: ${error instanceof Error ? error.message : String(error)}`);
     }
-    const request: BoxRequest = lent.length ? { ...given, rw: [...(given.rw ?? []), ...lent] } : given;
+    // A room's turn in the bot's own folder: the team's notes and skills are bound read-only only where they exist, so
+    // they are made first, or the turn could make them.
+    const team = audience?.teamReadOnly && given.cwd ? teamFolderOf(botId, resolve(given.cwd), this.options.setup.dataDir) : null;
+    if (team && under(resolve(given.cwd!), team) && existsSync(team)) {
+      for (const name of TEAM_FOLDER_KEPT) if (name !== "MEMORY.md") try { mkdirSync(join(team, name), { recursive: true, mode: 0o700 }); } catch {}
+    }
+    const request: BoxRequest = { ...given, ...(lent.length ? { rw: [...(given.rw ?? []), ...lent] } : {}), ...(audience ? { audience } : {}) };
     const extraFds: number[] = [];
     const seccomp = this.options.seccompFile && !this.options.setup.mutate?.has("no-seccomp") ? this.options.seccompFile : null;
     const plan = planBox({ ...this.options.setup, seccompFd: seccomp ? BOX_SECCOMP_FD : undefined }, request);
@@ -209,6 +242,7 @@ export class BotBox {
   private boxed = 0;
   private unbrokered = new Set<string>();
   private started: StartOptions | null = null;
+  private audiences: BoxAudienceScope | null = null;
 
   /** Detects, and when the box is on opens the gates. Safe to call once; returns what it decided. */
   async start(options: StartOptions): Promise<BoxDetection> {
@@ -240,7 +274,8 @@ export class BotBox {
       denyEnv: options.denyEnv, seccompFile: this.seccompFile,
       broker: { port: BOX_BROKER_PORT, mintForProcess: this.credentials.mintForProcess, revoke: this.credentials.revoke },
     });
-    distrustHomePrograms(options.home, [options.dataDir], ["workspaces", "task-workspaces", "engine-homes"].map((name) => join(options.dataDir, name)));
+    this.runner.scopeAudiences(this.audiences);
+    distrustHomePrograms(options.home, [options.dataDir], ["workspaces", "task-workspaces", "engine-homes", "team-files"].map((name) => join(options.dataDir, name)));
     resetPathCache();
     log(`bot box: on (bubblewrap, ${this.detection.tools.socat ? "socat" : "node"} bridges, credential broker, seccomp ${this.seccompFile ? "on" : "unsupported here"})`);
     return this.detection;
@@ -286,6 +321,22 @@ export class BotBox {
     const home = resolve(setup.home), dataDir = resolve(setup.dataDir);
     const mounts = plan.mounts.filter((mount) => !(mount.kind === "bind" && mount.target === home) && !(mount.kind === "tmpfs" && mount.target === dataDir));
     return { bwrap: this.detection.tools.bwrap, options: bwrapArgs({ ...plan, mounts }), seccomp };
+  }
+
+  /** On a Team Cloud: the audience rule for every box (server/host/team-box-scope.ts). Kept for a box started later. */
+  scopeAudiences(scope: BoxAudienceScope | null): void { this.audiences = scope; this.runner?.scopeAudiences(scope); }
+
+  /** What a process the bot's conversations share is boxed with, as a key: the conversations its box puts back on a
+   * Team Cloud, so a conversation made after it started gets a process whose box has its folder. Null elsewhere. */
+  sharedThreadsKey(request: Pick<BoxRequest, "cwd" | "threadId" | "conversationBot">): string | null {
+    const audience = this.runner?.audienceFor({ command: "", args: [], env: {}, ...request, botThreads: true });
+    return audience?.threads ? JSON.stringify([audience.threads.rw, audience.threads.ro, audience.teamFiles?.write ?? null]) : null;
+  }
+
+  /** What the audience rule gives one box now, as a key: what a process kept between turns is started again on. */
+  audienceKey(request: Pick<BoxRequest, "cwd" | "threadId" | "conversationBot">): string | null {
+    const audience = this.runner?.audienceFor({ command: "", args: [], env: {}, ...request });
+    return audience ? JSON.stringify([audience.teamReadOnly, audience.teamFiles?.write ?? null]) : null;
   }
 
   /** More read-write folders for one conversation's boxes (a memory layer); nothing without a runner. */

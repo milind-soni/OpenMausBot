@@ -298,6 +298,130 @@ describe("OpenCode catalog", () => {
     }
   });
 
+  describe("work OpenCode goes on with after its turn", () => {
+    // OpenCode 2.3+ moves a shell command still running at its timeout to the background, and its finish wakes a turn
+    // that no session/prompt asked for. Only deleting the session ends its background jobs.
+    const scratches: string[] = [];
+    afterEach(async () => { for (const dir of scratches.splice(0)) await removeTempDir(dir); });
+    const start = async (id: string, extra: Record<string, string> = {}) => {
+      const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-background-"));
+      scratches.push(scratch);
+      mkdirSync(join(scratch, "opencode"), { recursive: true });
+      writeFileSync(join(scratch, "opencode", "auth.json"), JSON.stringify({ opencode: { type: "api", key: "zen-secret" } }));
+      const files = { woken: join(scratch, "woken"), rpc: join(scratch, "rpc.jsonl"), dump: join(scratch, "dump.json") };
+      const instance = await createOpenCodeDriver(async () => catalog("opencode/big-pickle")).create({
+        instanceId: id,
+        displayName: "OpenCode",
+        environment: { XDG_DATA_HOME: scratch, OPENCODE_API_KEY: "", FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_MODE: "background-wake",
+          FAKE_ACP_WOKEN_FILE: files.woken, FAKE_ACP_RPC_APPEND_FILE: files.rpc, FAKE_ACP_DUMP: files.dump, FAKE_ACP_STEP_MS: "100", ...extra },
+        enabled: true,
+        config: { cli: FAKE_CLI, fullAuto: true },
+      });
+      const calls = () => existsSync(files.rpc)
+        ? readFileSync(files.rpc, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { pid: number; method: string; sessionId?: string }) : [];
+      const steps = () => existsSync(files.woken) ? readFileSync(files.woken, "utf8").trim().split("\n").length : 0;
+      const ask = async (threadId: string, text: string) => {
+        const { turnId } = await instance.adapter.sendTurn({ threadId, text, model: "opencode/big-pickle" });
+        return recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      };
+      const recorder = recordEvents(instance.adapter);
+      return { instance, recorder, files, calls, steps, ask };
+    };
+    const until = async (check: () => boolean) => {
+      for (let i = 0; i < 400 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(check()).toBe(true);
+    };
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const promptedSession = (calls: () => Array<{ method: string; sessionId?: string }>) =>
+      calls().filter((call) => call.method === "session/prompt").at(-1)?.sessionId;
+
+    it("ends a turn its background command wakes between ours, keeps the history in a fork, and drops its output", async () => {
+      const { instance, recorder, calls, steps, ask } = await start("opencode-background-wake");
+      const threadId = "t-opencode-background-wake";
+      try {
+        expect(await ask(threadId, "build it")).toMatchObject({ ok: true });
+        expect(JSON.stringify(recorder.events)).toContain("build started");
+        const session = promptedSession(calls)!;
+        await until(() => calls().some((call) => call.method === "session/close" && call.sessionId === `${session}-fork`));
+        const methods = calls().map((call) => `${call.method} ${call.sessionId ?? ""}`.trim());
+        expect(methods.slice(methods.indexOf(`session/fork ${session}`))).toEqual(expect.arrayContaining([
+          `session/delete ${session}`, `session/close ${session}-fork`]));
+        // The woken turn stops once its session is deleted, and nothing of it reached the chat.
+        const woken = steps();
+        expect(woken).toBeGreaterThan(0);
+        await pause(400);
+        expect(steps()).toBe(woken);
+        expect(JSON.stringify(recorder.events)).not.toContain("WOKEN");
+        expect(recorder.events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+
+        const second = await ask(threadId, "and now?");
+        expect(second).toMatchObject({ ok: true });
+        expect(JSON.stringify(recorder.events.filter((event) => "turnId" in event && event.turnId === second.turnId))).toContain("second answer");
+        // The thread goes on in the fork, loaded again with the bot's own MCP servers.
+        expect(calls().filter((call) => call.method === "session/load").at(-1)?.sessionId).toBe(`${session}-fork`);
+        expect(promptedSession(calls)).toBe(`${session}-fork`);
+        expect(recorder.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: "session.started", turnId: second.turnId, sessionId: `${session}-fork` })]));
+        expect(JSON.stringify(recorder.events)).not.toContain("WOKEN");
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+      }
+    });
+
+    it("ends the session's background work when the person stops the turn, before it can wake a turn", async () => {
+      // The job wakes its turn 1.5 s after it starts, unless its session is deleted first.
+      const { instance, recorder, calls, steps, ask } = await start("opencode-background-stop", { FAKE_ACP_WAKE_MS: "1500" });
+      const threadId = "t-opencode-background-stop";
+      try {
+        const { turnId } = await instance.adapter.sendTurn({ threadId, text: "build it STOP_ME", model: "opencode/big-pickle" });
+        await until(() => JSON.stringify(recorder.events).includes("build started"));
+        const startedAt = Date.now();
+        await instance.adapter.interruptTurn(threadId);
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ stopReason: "cancelled" });
+        const session = promptedSession(calls)!;
+        await until(() => calls().some((call) => call.method === "session/delete" && call.sessionId === session));
+        expect(calls().some((call) => call.method === "session/fork" && call.sessionId === session)).toBe(true);
+        await pause(Math.max(0, 1_800 - (Date.now() - startedAt)));
+        expect(steps()).toBe(0);
+        // The next message goes on in the fork.
+        expect(await ask(threadId, "go on")).toMatchObject({ ok: true });
+        expect(promptedSession(calls)).toBe(`${session}-fork`);
+        expect(JSON.stringify(recorder.events)).not.toContain("WOKEN");
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+      }
+    });
+
+    it("leaves an OpenCode that cannot fork and delete sessions as it is", async () => {
+      const { instance, recorder, calls, steps, ask } = await start("opencode-background-no-fork", { FAKE_ACP_NO_FORK: "1" });
+      const threadId = "t-opencode-background-no-fork";
+      try {
+        expect(await ask(threadId, "build it")).toMatchObject({ ok: true });
+        const session = promptedSession(calls)!;
+        await until(() => steps() > 0);
+        expect(await ask(threadId, "and now?")).toMatchObject({ ok: true });
+        expect(promptedSession(calls)).toBe(session);
+        expect(calls().filter((call) => ["session/fork", "session/delete", "session/close"].includes(call.method))).toEqual([]);
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+      }
+    });
+
+    it("starts OpenCode without the person's own CLAUDE.md instructions", async () => {
+      const { instance, recorder, files, ask } = await start("opencode-no-claude-md");
+      try {
+        expect(await ask("t-opencode-no-claude-md", "hello")).toMatchObject({ ok: true });
+        const env = (JSON.parse(readFileSync(files.dump, "utf8")) as { env: Record<string, string> }).env;
+        expect(env.OPENCODE_DISABLE_CLAUDE_CODE_PROMPT).toBe("1");
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+      }
+    });
+  });
+
   it("classifies ACP's standard authentication error", () => {
     expect(classifyOpenCodeError({ code: -32000 })).toBe("invalid_credentials");
   });

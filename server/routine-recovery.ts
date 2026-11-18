@@ -140,7 +140,7 @@ function when(at: number): string {
   return whenParams(at).resets;
 }
 
-function whenParams(at: number): { resets: string; resetsAt?: number; timeZone?: string } {
+export function whenParams(at: number): { resets: string; resetsAt?: number; timeZone?: string } {
   const timeZone = hostTimeZone();
   try {
     return { resets: `${new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone })} (${timeZone})`, resetsAt: at, timeZone };

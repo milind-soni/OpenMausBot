@@ -5,7 +5,7 @@ import { useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 
 const INPUT_CLASS = "w-full min-w-0 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none disabled:opacity-50";
-const PROVIDER_LABEL = { openai: "OpenAI", xai: "Grok (xAI)", gemini: "Gemini", openrouter: "OpenRouter", custom: "Custom" } as const;
+const PROVIDER_LABEL = { openai: "OpenAI", xai: "Grok (xAI)", gemini: "Gemini", openrouter: "OpenRouter", higgsfield: "Higgsfield", custom: "Custom" } as const;
 
 export function AvatarImageGenerator({
   botLabel,

@@ -6,6 +6,7 @@ import type { CloudColor } from "../../electron/cloud-buy.mjs";
 import type { CloudAccountState, CloudCheckoutOutcome } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
 import { track } from "@/lib/analytics";
+import { cloudAccountBridge } from "@/lib/cloud-add-web";
 import { cn } from "@/lib/cn";
 import { cloudColor, cloudNameShown, DEFAULT_CLOUD_COLOR } from "@/lib/cloud-look";
 import { cloudAddView, offerPlan, sameTerms, startedSleeps, type CloudAddView, type CloudSignInPhase } from "@/lib/cloud-plan";
@@ -112,7 +113,7 @@ type Note = "copied" | "pay-failed" | "interest-sent" | "interest-failed" | null
 export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   const { state, dispatch } = useStore();
   const request = state.cloudAdd;
-  const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
+  const bridge = cloudAccountBridge();
   const [account, setAccount] = useState<CloudAccountState | null>(null);
   const [offer, setOffer] = useState<CloudOffer | null | undefined>(undefined);
   const [chosen, setChosen] = useState<string | null>(null);

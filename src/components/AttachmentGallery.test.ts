@@ -65,16 +65,41 @@ describe("audio attachments", () => {
     expect(isAudioAttachment("/store/a.mp4")).toBe(false);
   });
 
+  const route = "/api/threads/thread%2Fone/messages/message%20two/file";
+  const asks = (body: unknown) => [route, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: expect.any(AbortSignal),
+  }];
+
+  it("streams audio of any size through this message's own link", async () => {
+    const url = `${route}?media=${"c".repeat(43)}`;
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ url, mime: "audio/mpeg", bytes: PREVIEW_MAX_BYTES * 8 }), {
+      headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+    }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await loadMessageAudio(clip, message, new AbortController().signal)).toBe(url);
+    expect(fetcher.mock.calls).toEqual([asks({ path: clip.path, media: true })]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ url, mime: "video/mp4" }), {
+      headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+    })));
+    await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("cannot be played");
+  });
+
   it("loads audio through the message-scoped file endpoint and keeps the server's MIME type", async () => {
     const fetcher = vi.fn(async () => new Response("audio bytes", { headers: { "content-type": "audio/mpeg" } }));
     vi.stubGlobal("fetch", fetcher);
-    const signal = new AbortController().signal;
-    const blob = await loadMessageAudio(clip, message, signal);
-    expect(fetcher).toHaveBeenCalledWith("/api/threads/thread%2Fone/messages/message%20two/file", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: clip.path }), signal: expect.any(AbortSignal),
-    });
+    const blob = await loadMessageAudio(clip, message, new AbortController().signal) as Blob;
+    expect(fetcher.mock.calls).toEqual([asks({ path: clip.path, media: true })]);
     expect(blob.type).toBe("audio/mpeg");
     expect(await blob.text()).toBe("audio bytes");
+  });
+
+  it("asks again for the bytes when the server links only videos", async () => {
+    const fetcher = vi.fn(async (_url: string, init: RequestInit) => String(init.body).includes("media")
+      ? new Response(JSON.stringify({ error: "only videos can be played here" }), { status: 415 })
+      : new Response("audio bytes", { headers: { "content-type": "audio/mpeg" } }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await (await loadMessageAudio(clip, message, new AbortController().signal) as Blob).text()).toBe("audio bytes");
+    expect(fetcher.mock.calls).toEqual([asks({ path: clip.path, media: true }), asks({ path: clip.path })]);
   });
 
   it("refuses anything the server does not call audio, and keeps authorization failures", async () => {
@@ -82,8 +107,10 @@ describe("audio attachments", () => {
       vi.stubGlobal("fetch", vi.fn(async () => new Response("not audio", { headers: { "content-type": mime } })));
       await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("cannot be played");
     }
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "outside this conversation" }), { status: 403 })));
+    const refused = vi.fn(async () => new Response(JSON.stringify({ error: "outside this conversation" }), { status: 403 }));
+    vi.stubGlobal("fetch", refused);
     await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("outside this conversation");
+    expect(refused).toHaveBeenCalledOnce();
   });
 
   it("enforces the size limit with and without Content-Length", async () => {

@@ -21,7 +21,7 @@ export function startupScreenHtml(iconPath, { t = nativeText.englishText.t, lang
 
 export function createStartupScreen({
   BrowserWindow, iconPath, platform = process.platform, isQuitting, onQuit,
-  onHide, isHidden = () => false, onShow, onFinished, t, lang,
+  onHide, isHidden = () => false, onShow, onFinished, onReveal, t, lang,
 }) {
   let disposed = false, revealed = false, fallback, resolveReady;
   const ready = new Promise(resolve => { resolveReady = resolve; });
@@ -80,9 +80,10 @@ export function createStartupScreen({
   void splash.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(startupScreenHtml(iconPath, { t, lang })))
     .catch(resolveReady);
   const attach = (win, { maximized = false } = {}) => {
-    const reveal = () => {
+    const reveal = (via) => {
       if (revealed || win.isDestroyed() || isQuitting()) return;
       revealed = true;
+      onReveal?.(isHidden() ? "hidden" : via);
       const minimized = !splash.isDestroyed() && splash.isMinimized();
       if (isHidden()) {
         win.setSkipTaskbar(true);
@@ -104,12 +105,12 @@ export function createStartupScreen({
           if (root.childElementCount) { observer.disconnect(); resolve(); }
         });
         observer.observe(root, { childList: true });
-      })`).then(reveal).catch(reveal);
+      })`).then(() => reveal("painted"), () => reveal("shown"));
     });
-    win.webContents.once("render-process-gone", reveal);
-    win.once("show", () => { if (!revealed) { revealed = true; dispose(); } });
+    win.webContents.once("render-process-gone", () => reveal("crashed"));
+    win.once("show", () => { if (!revealed) { revealed = true; onReveal?.("shown"); dispose(); } });
     win.once("closed", dispose);
-    fallback = setTimeout(reveal, 10_000);
+    fallback = setTimeout(() => reveal("timeout"), 10_000);
     fallback.unref?.();
   };
   /** The line under the name, in place of "Opening your workspace…". */

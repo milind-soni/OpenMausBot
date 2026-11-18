@@ -19,6 +19,7 @@ const EDIT_LABEL = "flex flex-col gap-1 text-[12px] leading-4 text-ink-secondary
 const ICON_BUTTON = "ui-icon-button shrink-0 hover:text-ink";
 /** Google's Gemini API speaks the OpenAI protocol here; the key comes from Google AI Studio. */
 export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai" } as const;
+const GEMINI_KEY_URL = "https://aistudio.google.com/api-keys";
 
 /** The server accepts at most this many model IDs per server, each up to this many characters. */
 const MODEL_ID_LIMITS = { count: 64, length: 200 } as const;
@@ -271,6 +272,31 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
   );
 }
 
+/** Adds one OpenAI-compatible server from a preset panel (LM Studio, Google AI Studio); add resolves true once it is saved. */
+function useAddServer() {
+  const { dispatch, refreshInstances } = useStore();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const add = (body: { displayName: string; url: string; key: string; catalog?: string }): Promise<boolean> => {
+    setBusy(true);
+    setError(null);
+    return api("/api/instances/openai-compat", { method: "POST", body: JSON.stringify(body) }).then(
+      async (created) => {
+        keySaved("custom_endpoint", "settings", "unverified");
+        if (Array.isArray(created.instances)) dispatch({ type: "instances", instances: created.instances as InstanceInfo[] });
+        else await refreshInstances({ reportErrors: true });
+        return true;
+      },
+      (cause: unknown) => {
+        keySaved("custom_endpoint", "settings", "error");
+        setError(cause instanceof Error && cause.message ? cause.message : t("apiInstances.failed"));
+        return false;
+      },
+    ).finally(() => setBusy(false));
+  };
+  return { busy, error, add };
+}
+
 export const LM_STUDIO_PLACEHOLDER_KEY = "lm-studio";
 
 export function lmStudioBaseUrl(port: string): string | null {
@@ -282,39 +308,18 @@ export function lmStudioBaseUrl(port: string): string | null {
 }
 
 export function LmStudioServer({ heading = true }: { heading?: boolean } = {}) {
-  const { state, dispatch, refreshInstances } = useStore();
+  const { state } = useStore();
   const added = addedServers(state.instances);
   const [port, setPort] = useState("1234");
   const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, add: addServer } = useAddServer();
   const url = lmStudioBaseUrl(port);
   const present = Boolean(url && added.some((server) => server.url === url));
 
   const add = () => {
     if (busy || !url || present) return;
-    setBusy(true);
-    setError(null);
-    void api("/api/instances/openai-compat", {
-      method: "POST",
-      body: JSON.stringify({
-        displayName: "LM Studio",
-        url,
-        key: token.trim() || LM_STUDIO_PLACEHOLDER_KEY,
-        catalog: "lmstudio",
-      }),
-    }).then(
-      async (created) => {
-        keySaved("custom_endpoint", "settings", "unverified");
-        if (Array.isArray(created.instances)) dispatch({ type: "instances", instances: created.instances as InstanceInfo[] });
-        else await refreshInstances({ reportErrors: true });
-        setToken("");
-      },
-      (cause: unknown) => {
-        keySaved("custom_endpoint", "settings", "error");
-        setError(cause instanceof Error && cause.message ? cause.message : t("apiInstances.failed"));
-      },
-    ).finally(() => setBusy(false));
+    void addServer({ displayName: "LM Studio", url, key: token.trim() || LM_STUDIO_PLACEHOLDER_KEY, catalog: "lmstudio" })
+      .then((added) => { if (added) setToken(""); });
   };
 
   return (
@@ -355,6 +360,44 @@ export function LmStudioServer({ heading = true }: { heading?: boolean } = {}) {
           {busy ? t("lmStudio.adding") : t("lmStudio.add")}
         </button>
         {present && <p className="text-[12px] text-ink-secondary">{t("lmStudio.added")}</p>}
+      </div>
+      {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+/** True once a server at Google's Gemini address (any path, as the server checks it) is added, so the Providers list stops offering Google AI Studio. */
+export function hasGeminiServer(instances: readonly InstanceInfo[]): boolean {
+  const origin = new URL(GEMINI_PRESET.url).origin;
+  return addedServers(instances).some((server) => {
+    try {
+      return server.url !== undefined && new URL(server.url).origin === origin;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Google AI Studio in the Providers list: a Gemini API key, added as an OpenAI-compatible server at Google's address. */
+export function GeminiServer() {
+  const [key, setKey] = useState("");
+  const { busy, error, add: addServer } = useAddServer();
+  const add = () => {
+    if (busy || !key.trim()) return;
+    void addServer({ displayName: GEMINI_PRESET.name, url: GEMINI_PRESET.url, key: key.trim() })
+      .then((added) => { if (added) setKey(""); });
+  };
+
+  return (
+    <div data-gemini-server="">
+      <p className="text-[12px] leading-4 text-ink-secondary">{t("geminiServer.desc")}</p>
+      <a href={GEMINI_KEY_URL} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-[12px] leading-4 text-accent-text hover:underline">{t("geminiServer.getKey")}</a>
+      <div className="mt-2 flex flex-col gap-1.5">
+        <input type="password" value={key} onChange={(event) => setKey(event.target.value)} placeholder={t("geminiServer.key")} aria-label={t("geminiServer.key")}
+          autoComplete="off" disabled={busy} className={INPUT} />
+        <button type="button" onClick={add} disabled={busy || !key.trim()} className="ui-button self-end">
+          {busy ? t("apiInstances.adding") : t("geminiServer.add")}
+        </button>
       </div>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
     </div>

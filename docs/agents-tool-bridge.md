@@ -99,6 +99,10 @@ one line is logged naming the kind of error and nothing of what was read.
 
 Claude Code is not bridged when any of these holds:
 
+- Its tool search is on (the default): the agents server then sends a few tools
+  whole and the rest as names, which costs less than the bridge. For a proxy or
+  model without tool search, set `ENABLE_TOOL_SEARCH=false` in the instance's
+  environment to get the bridge back.
 - The bot inherits this machine's own Claude Code setup
   (`OMB_CLAUDE_INHERIT_USER_CONFIG=1`, or **Also use my Claude Code MCP
   servers**).
@@ -113,8 +117,8 @@ Claude Code is not bridged when any of these holds:
   whatever it matches: an empty or wildcard matcher sees every call, and a
   hook's own script can test the tool's name. OpenMausBot's own hooks are none
   of these and are in none of these files: it registers `PostToolUse`,
-  `PreCompact`, `SessionStart` and `Stop` through a private settings file
-  written for each launch.
+  `PostToolUseFailure`, `PreCompact` and `SessionStart` through a private
+  settings file written for each launch.
 - A settings file's `permissions.deny` or `permissions.ask` list (keys in any
   case) holds a rule with a wildcard in a tool's name, even one about another
   server (`mcp__github__*`, `*exec*`). Claude Code matches a deny or ask

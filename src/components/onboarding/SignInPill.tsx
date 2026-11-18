@@ -2,8 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, Copy, LoaderCircle } from "lucide-react";
 import { claudeSignInLink } from "@/components/ClaudeSignIn";
 import { chatgptPlanLink, deviceSignInProvider, type DeviceSignInStatus } from "@/components/DeviceSignIn";
+import { engineReady } from "@/components/EngineLibrary";
 import { needsSignIn } from "@/components/EngineSetup";
 import { openExternalLink } from "@/lib/app-links";
+import type { ConnectAiPlace } from "@/lib/analytics-allowlist";
+import { connectAiStep, useConnectAiPlace, useConnectAiSteps } from "@/lib/connect-ai-events";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { plainSignIn } from "@/lib/onboarding";
@@ -16,6 +19,7 @@ const POLL_MAX_MS = 30_000;
 const POLL_STALLS = 3;
 const POLL_TIMEOUT_MS = 10_000;
 export const PILL = "ui-button ui-button-pill ui-button-lg ui-button-primary w-[288px] max-w-full";
+const QUIET_PILL = "ui-button ui-button-pill ui-button-lg w-[288px] max-w-full";
 
 type Slot =
   | { kind: "start" }
@@ -35,8 +39,8 @@ export function pillWay(instance: InstanceInfo | undefined): "install" | "sign-i
 
 /** One AI connected from the first screen's pill: installed (when the app installs it), signed in on the provider's
  * page, and the code pasted or shown in the same place. A finished sign-in refreshes the AIs, where the welcome's test
- * message takes over. */
-export function useSignInPill(instance: InstanceInfo | undefined) {
+ * message takes over. `place` names the first-run flow for usage analytics. */
+export function useSignInPill(instance: InstanceInfo | undefined, place: ConnectAiPlace | null = null) {
   const { refreshInstances, refreshModels } = useStore();
   const [slot, setSlot] = useState<Slot>({ kind: "start" });
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +71,7 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
     try {
       await api(`${base}/install`, { method: "POST" });
       try { await refreshInstances(); } catch {}
+      try { await refreshModels(id); } catch {}
       if (live.current) setSlot({ kind: "start" });
     } catch (cause) { fail(cause); }
   };
@@ -74,6 +79,7 @@ export function useSignInPill(instance: InstanceInfo | undefined) {
   const start = async () => {
     setSlot({ kind: "busy" });
     setError(null);
+    if (place) connectAiStep("sign_in_started", place, { driverKind: instance?.driverKind ?? "" });
     try {
       const { auth }: { auth: DeviceSignInStatus } = await api(`${base}/auth/start`, { method: "POST" });
       if (auth.phase === "succeeded") return void await done();
@@ -185,20 +191,28 @@ function PasteSlot({ name, onSubmit }: { name: string; onSubmit: (code: string) 
 }
 
 /** The first screen's 288×36 slot while an AI is still to connect: its one button, the field for the code a provider
- * shows, or the code to enter on the provider's page. */
-export function SignInPill({ pill, instance, waiting, onDialog }: {
+ * shows, or the code to enter on the provider's page. A `quiet` pill is one of the choices under the first, and one
+ * that already works (OpenCode's free backup) is used as it is once picked. */
+export function SignInPill({ pill, instance, name = instance?.displayName ?? "", quiet = false, setUp = false, waiting, onDialog, onPick }: {
   pill: PillState;
   instance: InstanceInfo | undefined;
+  name?: string;
+  quiet?: boolean;
+  /** Its command-line app isn't here yet: the pill says Set up, not Install or Connect. */
+  setUp?: boolean;
   /** The test message after a sign-in is under way: the pill waits with it. */
   waiting: boolean;
   onDialog: () => void;
+  /** The person picked this AI. */
+  onPick?: () => void;
 }) {
   const { slot, install, start, submit } = pill;
-  const name = instance?.displayName ?? "";
+  const step = useConnectAiSteps(useConnectAiPlace());
+  const look = quiet ? QUIET_PILL : PILL;
   if (waiting || slot.kind === "busy" || slot.kind === "waiting") {
     const link = slot.kind === "waiting" ? slot.link : null;
     return (
-      <button type="button" data-sign-in="waiting" className={PILL} aria-disabled={!link}
+      <button type="button" data-sign-in="waiting" className={look} aria-disabled={!link}
         onClick={() => link && void openExternalLink(link).catch(() => {})}>
         <LoaderCircle size={14} aria-hidden="true" className="shrink-0 animate-spin" />{t("onboarding.meet.waiting", { name })}
       </button>
@@ -206,13 +220,20 @@ export function SignInPill({ pill, instance, waiting, onDialog }: {
   }
   if (slot.kind === "paste") return <PasteSlot name={name} onSubmit={(code) => void submit(code)} />;
   if (slot.kind === "code") return <CodeSlot code={slot.code} />;
-  const way = pillWay(instance);
-  const label = way === "install" ? t("onboarding.meet.install", { name })
+  const way = instance && engineReady(instance) ? "use" : pillWay(instance);
+  const label = setUp && (way === "install" || way === "dialog") ? t("onboarding.meet.setUp", { name })
+    : way === "install" ? t("onboarding.meet.install", { name })
     : way === "sign-in" ? t("onboarding.meet.signIn", { name })
     : instance ? t("onboarding.meet.connectNamed", { name }) : t("onboarding.meet.connectAi");
   return (
-    <button type="button" data-primary="" data-sign-in={way} className={PILL}
-      onClick={() => (way === "install" ? void install() : way === "sign-in" ? void start() : onDialog())}>
+    <button type="button" data-primary={quiet ? undefined : ""} data-sign-in={way} className={look}
+      onClick={() => {
+        step("chosen", { driverKind: instance?.driverKind ?? "" });
+        onPick?.();
+        if (way === "install") void install();
+        else if (way === "sign-in") void start();
+        else if (way === "dialog") onDialog();
+      }}>
       {label}
     </button>
   );

@@ -20,7 +20,7 @@ export function PointedChips({ threadId }: { threadId: string }) {
           const label = pointedLabel(chip) ?? t("chat.preview.pointedPart");
           return (
             <span key={chip.id} data-pointed-chip={chip.selector} title={`${chip.title} · <${chip.tag}> ${chip.selector}${chip.note ? `\n${chip.note}` : ""}`}
-              className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 ps-2.5 pe-1 text-[13px] text-ink">
+              className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--color-composer),var(--color-accent)_40%)] bg-[color-mix(in_srgb,var(--color-composer),var(--color-accent)_10%)] ps-2.5 pe-1 text-[13px] text-ink">
               <Crosshair size={13} aria-hidden="true" className="shrink-0 text-accent-text" />
               <button type="button" data-pointed-note-for={chip.id} onClick={() => setEditing(editing === chip.id ? null : chip.id)} aria-expanded={editing === chip.id}
                 aria-label={t("chat.preview.notePoint", { label })} className="flex min-w-0 items-center gap-1.5">
@@ -48,7 +48,7 @@ export function PointedChips({ threadId }: { threadId: string }) {
             list.current?.querySelector<HTMLButtonElement>(`[data-pointed-note-for="${CSS.escape(open.id)}"]`)?.focus();
           }}
           placeholder={t("chat.preview.pointNote", { label: openLabel })} aria-label={t("chat.preview.pointNote", { label: openLabel })}
-          className="mt-1.5 h-8 w-full rounded-lg border border-ink/[0.12] bg-transparent px-2.5 text-[13px] text-ink outline-none focus:border-accent/60" />
+          className="mt-1.5 h-8 w-full rounded-lg border border-ink/[0.12] bg-composer px-2.5 text-[13px] text-ink outline-none focus:border-accent/60" />
       ) : null}
     </div>
   );

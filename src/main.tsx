@@ -18,6 +18,7 @@ import { TEAM_LEFT_REFUSAL } from "../shared/cloud-hints";
 import { HomeScreen, SignedOutAtHome } from "./components/HomeScreen";
 import { PageBoundary } from "./components/PageBoundary";
 import { endedBeforeReload, forgetEndedSession } from "./lib/session-ended";
+import { signInGateShown } from "./lib/sign-in-gate";
 import "./styles.css";
 
 // Before first paint; settleInterfaceMode must run before applySkin writes omb-skin.
@@ -54,13 +55,18 @@ async function chooseRoot(): Promise<React.ReactNode> {
   const session = await readSessionState();
   if (session.kind === "unauthenticated") {
     await pageLanguage;
-    if (session.error === TEAM_LEFT_REFUSAL) return <TeamLeftPage team={await teamName()} />;
+    if (session.error === TEAM_LEFT_REFUSAL) {
+      signInGateShown("team_left");
+      return <TeamLeftPage team={await teamName()} />;
+    }
+    signInGateShown(endedBeforeReload() ? "session_ended" : "signed_out");
     const pair = <PairPage initialCode={null} reason={endedBeforeReload() ? t("pair.sessionEnded") : session.error} />;
     return home ? <SignedOutAtHome bridge={home} fallback={pair} /> : pair;
   }
   forgetEndedSession();
   if (session.kind === "session") rememberTeamSignIn(session.teamSignIn);
   if (session.kind === "loopback" && session.trust === "service") {
+    signInGateShown("service_trust");
     await pageLanguage;
     return <PairPage initialCode={null} reason={t("pair.serviceTrust")} />;
   }

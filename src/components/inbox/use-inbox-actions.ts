@@ -1,8 +1,9 @@
 import { useCallback } from "react";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { openThread, useStore } from "@/state/store";
-import { doneInboxRow, openInbox, readInboxRow, refreshInbox } from "@/state/inbox";
+import { closeInbox, doneInboxRow, openInbox, readInboxRow, refreshInbox } from "@/state/inbox";
 import type { CardResponse } from "@/lib/card-answer";
 import { answerThread, closeResponse, type QuickAction } from "./inbox-view";
 
@@ -11,6 +12,7 @@ import { answerThread, closeResponse, type QuickAction } from "./inbox-view";
 export function useInboxActions(view: InboxView | null) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
+  const phone = useMediaQuery(PHONE_LAYOUT);
 
   const answer = useCallback((row: InboxRow, response: CardResponse, failed?: () => void) => {
     const threadId = answerThread(view, row);
@@ -27,7 +29,9 @@ export function useInboxActions(view: InboxView | null) {
     if (!target) return;
     openThread(dispatch, { botId: target.botId, threadId: target.threadId }, state, showThreads);
     if (target.messageId) dispatch({ type: "focusMessage", threadId: target.threadId, messageId: target.messageId });
-  }, [view, state, dispatch, showThreads]);
+    // The conversation is in the main window; on a phone the inbox is a sheet over it.
+    if (phone) closeInbox();
+  }, [view, state, dispatch, showThreads, phone]);
 
   const run = useCallback((row: InboxRow, action: QuickAction) => {
     if (action === "allow" || action === "deny") answer(row, { behavior: action });
