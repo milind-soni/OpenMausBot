@@ -11,7 +11,7 @@ import { z } from "zod";
 
 import { redactSecretsInText } from "../shared/redact.ts";
 import { BOT_API_UPGRADE, botApiEndpoint, type BotApiV1Reply } from "../shared/bot-api.ts";
-import { isStoppedTurnName } from "../shared/client-cancel.ts";
+import { isStoppedTurnName, PERSON_STOPPED_TURN_NAME } from "../shared/client-cancel.ts";
 import { failedTurnCause } from "../shared/failed-turn.ts";
 import type { AdminActionRow } from "./admin-activity.ts";
 import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiOwnerPrompt, botApiPrompt, withoutAttachedImages, type BotApiAttempt, type BotApiStatus } from "./bot-api.ts";
@@ -123,7 +123,8 @@ function endedWithout(lines: readonly Message[]): "failed" | "stopped" | null {
   const row = lines.findLastIndex((line) => line.kind === "activity" && line.tool !== undefined
     && (isStoppedTurnName(line.tool.name) || (line.tool.ok === false && failedTurnCause(line.tool.name) !== null && line.tool.partial !== true)));
   if (row === -1 || lines.slice(row + 1).some((line) => line.role === "bot" && line.kind === "text" && line.text?.trim())) return null;
-  return isStoppedTurnName(lines[row]!.tool!.name) ? "stopped" : "failed";
+  // Only a person's own Stop is "stopped"; a client abort they did not trigger reads as a failure.
+  return lines[row]!.tool!.name === PERSON_STOPPED_TURN_NAME ? "stopped" : "failed";
 }
 
 function replyText(lines: readonly Message[]): string {
@@ -215,7 +216,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     }
     turnStarted();
     // On /v1 a failed turn is a 200 the caller can read; `cause` lets the door keep the same 502 row on the card.
-    const failedAnswer = (cause: string) => v1 ? { status: 200, body: { thread: threadId!, status: "failed" as const, error: COULD_NOT_ANSWER }, cause } : fail(502, COULD_NOT_ANSWER, cause);
+    const failedAnswer = (cause: string, error = COULD_NOT_ANSWER) => v1 ? { status: 200, body: { thread: threadId!, status: "failed" as const, error }, cause } : fail(502, COULD_NOT_ANSWER, cause);
     const deadline = Date.now() + (call.wait === undefined ? waitMs : call.wait * 1000);
     for (;;) {
       if (dispatchError !== undefined) return failedAnswer(dispatchError);
@@ -225,8 +226,8 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
     if (pendingCard(after())) return { status: 202, body: { thread: threadId, status: "needs_approval" } };
-    if (!settled.ok) return failedAnswer(settled.text);
     const ended = v1 ? endedWithout(after()) : null;
+    if (!settled.ok) return failedAnswer(settled.text, ended === "stopped" ? STOPPED_IN_APP : COULD_NOT_ANSWER);
     if (ended) return { status: 200, body: { thread: threadId, status: "failed", error: ended === "stopped" ? STOPPED_IN_APP : COULD_NOT_ANSWER } };
     return { status: 200, body: { reply: replyText(after()), thread: threadId } };
   }
@@ -308,7 +309,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         const owned = deps.store.taskByThread(botId, answer.body.thread)?.botApiAsOwner ? { asOwner: true as const } : {};
         if (answer.cause !== undefined) manager.record(botId, { outcome: "rejected", statusCode: 502, reason: redactSecretsInText(answer.cause), preview: call.message });
         else manager.record(botId, { outcome: "accepted", statusCode: answer.status, threadId: answer.body.thread, preview: call.message, ...owned,
-          reason: "reply" in answer.body ? "Replied" : answer.body.status === "needs_approval" ? "Stopped at an approval" : answer.body.status === "failed" ? "Stopped without a reply" : "Still working" });
+          reason: "reply" in answer.body || answer.body.status === "failed" ? "Replied" : answer.body.status === "needs_approval" ? "Stopped at an approval" : "Still working" });
         json(res, answer.status, answer.body);
       } catch (error) {
         manager.record(botId, { outcome: "rejected", statusCode: statusOf(error), reason: detailOf(error), preview: call.message });

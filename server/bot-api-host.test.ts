@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { PERSON_STOPPED_TURN_NAME } from "../shared/client-cancel.ts";
+import { PERSON_STOPPED_TURN_NAME, STOPPED_TURN_NAME } from "../shared/client-cancel.ts";
 import { failedTurnTool } from "../shared/failed-turn.ts";
 import { BotApiManager } from "./bot-api.ts";
 import { BOT_API_DEFAULT_WAIT_MS, createBotApiHost, type BotApiHostDeps, type BotApiTurnOptions } from "./bot-api-host.ts";
@@ -293,10 +293,21 @@ describe("the Bot API door on the webhook receiver", () => {
     expect((await h.call("b1", key, undefined, { method: "GET", query: `?thread=${working.body.thread}`, v1: true })).body).toEqual({ thread: working.body.thread, status: "failed", error: STOPPED });
   });
 
-  it("on /v1 a stop inside the wait answers failed with the stop words", async () => {
-    const h = await harness(endsWith([stop]));
+  it("on /v1 a stop inside the wait answers failed with the stop words, though the driver settles it ok:false", async () => {
+    const h = await harness(endsWith([stop], false));
     const answer = await h.call("b1", await v1Key(h), { message: "Hi" }, { v1: true });
     expect(answer).toEqual({ status: 200, body: { thread: expect.any(String), status: "failed", error: STOPPED } });
+  });
+
+  it("on /v1 a stop the person didn't make reads as a failure", async () => {
+    const h = await harness(endsWith([{ role: "bot", kind: "activity", tool: { name: STOPPED_TURN_NAME, ok: true } } as never]));
+    expect((await h.call("b1", await v1Key(h), { message: "Hi" }, { v1: true })).body).toMatchObject({ status: "failed", error: COULD_NOT });
+  });
+
+  it("on /v1 a turn that settles ok:false with no stop row answers failed, and the card keeps the 502 row", async () => {
+    const h = await harness(endsWith([], false));
+    expect((await h.call("b1", await v1Key(h), { message: "Hi" }, { v1: true })).body).toMatchObject({ status: "failed", error: COULD_NOT });
+    expect(h.manager.listAttempts("b1").at(-1)).toMatchObject({ outcome: "rejected", statusCode: 502, reason: "the engine is gone" });
   });
 
   it("on /v1 a failure the person retried, which then replied, reads as the reply", async () => {
