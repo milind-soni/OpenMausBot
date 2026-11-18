@@ -11140,11 +11140,23 @@ describe("harness HTTP API", () => {
         (candidate: { id: string }) => candidate.id === bot.id,
       )).toBe(false);
 
+      // A server that answers with a list that can't be verified still keeps the alias.
+      rmSync(fakeSshUnavailable, { force: true });
+      writeFileSync(fakeVpsFixture, JSON.stringify({ id: "z".repeat(64), name: containerName }));
+      const unverified = await api("PUT", "/api/config", { vps: { sshAlias: "" } });
+      expect(unverified.status, JSON.stringify(unverified.body)).toBe(503);
+      expect(unverified.body.error).toContain("Keep the current SSH config alias");
+      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("fixture-vps");
+      writeFileSync(fakeSshUnavailable, "");
+      writeFileSync(fakeVpsFixture, JSON.stringify({ id: "a".repeat(64), name: containerName }));
+
+      const environmentId = readFileSync(join(home, ".openmausbot", "environment-id"), "utf8").trim();
       const cleared = await api("PUT", "/api/config", { vps: { sshAlias: "" } });
       expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
       expect(cleared.body.notice).toContain("Removed. fixture-vps could not be reached");
-      expect(cleared.body.notice).toContain("docker -H ssh://fixture-vps ps -a --filter label=com.openmausbot.environment=");
+      expect(cleared.body.notice).toContain(`docker -H ssh://fixture-vps ps -a --filter label=com.openmausbot.environment=${environmentId} `);
       expect(cleared.body.notice).toContain("docker -H ssh://fixture-vps rm -f <name>");
+      expect(cleared.body.notice).toContain("docker -H ssh://fixture-vps ps -a --filter label=com.openmausbot.vps=1 lists every managed one");
       expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("");
       expect(existsSync(fakeVpsFixture)).toBe(true);
     } finally {

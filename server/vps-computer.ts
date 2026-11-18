@@ -144,6 +144,8 @@ export interface ManagedVpsInventory {
   vpsAliases: string[];
   problem: string | null;
   instances: ManagedVpsInventoryInstance[];
+  /** Set when every host that failed gave no list at all (SSH or Docker did not answer), rather than one that could not be verified. */
+  unreachable?: true;
 }
 
 function containerNamePart(botId: string): string {
@@ -579,7 +581,7 @@ const VPS_INVENTORY_STATES = new Set<ManagedVpsInventoryInstance["state"]>([
   "dead",
 ]);
 
-type ManagedVpsAliasScan = Pick<ManagedVpsInventory, "available" | "problem" | "instances"> & { containerIds: Map<string, string> };
+type ManagedVpsAliasScan = Pick<ManagedVpsInventory, "available" | "problem" | "instances" | "unreachable"> & { containerIds: Map<string, string> };
 
 function inventoryFailure(alias: string, error: unknown): ManagedVpsAliasScan {
   if (dockerCliMissing(error)) return { available: false, problem: `${dockerCliMissingProblem()} (VPS host: ${alias})`, instances: [], containerIds: new Map() };
@@ -610,16 +612,13 @@ async function scanManagedVpsAlias(
   owners: ManagedVpsOwner[],
   runner: VpsCommandRunner,
 ): Promise<ManagedVpsAliasScan> {
+  let listed: { stdout: string };
   try {
-    const listed = await runner(vpsDockerArgs(alias, [
-      "container",
-      "ls",
-      "--all",
-      "--filter",
-      `label=${VPS_MANAGED_LABEL}=1`,
-      "--format",
-      "{{.ID}}",
-    ]), { timeoutMs: 20_000 });
+    listed = await runner(vpsDockerArgs(alias, ["container", "ls", "--all", "--filter", `label=${VPS_MANAGED_LABEL}=1`, "--format", "{{.ID}}"]), { timeoutMs: 20_000 });
+  } catch (error) {
+    return { ...inventoryFailure(alias, error), ...(dockerCliMissing(error) ? {} : { unreachable: true as const }) };
+  }
+  try {
     const ids = [...new Set(listed.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))];
     if (ids.length > VPS_INVENTORY_LIMIT || ids.some((id) => !CONTAINER_ID.test(id))) {
       throw new Error("the VPS returned an invalid or unexpectedly large managed-container list");
@@ -715,7 +714,8 @@ export async function listManagedVpsComputers(
     (left.ownerName ?? left.name).localeCompare(right.ownerName ?? right.name) ||
     left.vpsAlias.localeCompare(right.vpsAlias),
   );
-  return { configured: true, available: scans.every((scan) => scan.available), vpsAliases: scanning, problem, instances };
+  const unreachable = scans.some((scan) => scan.unreachable) && scans.every((scan) => scan.available || scan.unreachable);
+  return { configured: true, available: scans.every((scan) => scan.available), vpsAliases: scanning, problem, instances, ...(unreachable ? { unreachable } : {}) };
 }
 
 export function vpsContainerRunArgs(

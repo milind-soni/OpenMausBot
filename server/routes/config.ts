@@ -283,8 +283,12 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
             { vps: { sshAlias: currentVpsAlias } },
             managedBoatOwners(),
           );
-          if (!inventory.available) {
+          if (inventory.unreachable) {
             vpsLeftOn = currentVpsAlias;
+          } else if (!inventory.available) {
+            return json(res, 503, {
+              error: `${inventory.problem ?? "VPS computer inventory is unavailable"}. Keep the current SSH config alias and retry`,
+            });
           } else {
             const resourceError = vpsAliasResourceChangeError(inventory.instances.length);
             if (resourceError) return json(res, 409, { error: resourceError });
@@ -685,7 +689,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       );
       return json(res, 200, {
         ...(configForAccess(finalized.value, auth) as object),
-        ...(vpsLeftOn ? { notice: vpsAliasLeftBehindNotice(nextVpsAlias ? "Saved" : "Removed", vpsLeftOn, `label=${vps.VPS_ENVIRONMENT_LABEL}=${vps.vpsEnvironmentId()}`) } : {}),
+        ...(vpsLeftOn ? { notice: vpsAliasLeftBehindNotice(nextVpsAlias ? "Saved" : "Removed", vpsLeftOn, `label=${vps.VPS_ENVIRONMENT_LABEL}=${vps.vpsEnvironmentId()}`, `label=${vps.VPS_MANAGED_LABEL}=1`) } : {}),
       });
       } finally {
         for (const provider of transitioningProviders) computerProviderConfigTransitions.delete(provider);

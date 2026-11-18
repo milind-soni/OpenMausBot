@@ -16,10 +16,12 @@ export function vpsLeftBehindNotice(done: "Moved" | "Deleted", alias: string, co
 }
 
 /** What an unreachable old default alias may still run for this installation, and how to find and remove it. */
-export function vpsAliasLeftBehindNotice(done: "Saved" | "Removed", alias: string, environmentFilter: string): string {
+export function vpsAliasLeftBehindNotice(done: "Saved" | "Removed", alias: string, environmentFilter: string, managedFilter: string): string {
   return `${done}. ${alias} could not be reached, so this installation's computers there, if any are still there, were left as they are. ` +
     `When ${alias} is back, list them with: docker -H ssh://${alias} ps -a --filter ${environmentFilter} ` +
-    `and remove any you no longer need with: docker -H ssh://${alias} rm -f <name>`;
+    `and remove any you no longer need with: docker -H ssh://${alias} rm -f <name>. ` +
+    `Computers made by older versions have no installation label: docker -H ssh://${alias} ps -a --filter ${managedFilter} lists every managed one, ` +
+    `so remove one of those only once you know it is this installation's (named openmausbot-vps-<bot>-… for one of its bots).`;
 }
 
 /** Why a bot that gets its cloud computer from Boat can't have one while a self-hosted VPS is saved but not chosen for it. */

@@ -147,13 +147,14 @@ export function VpsConnection() {
   const [notice, setNotice] = useState<string | null>(null);
   const configured = Boolean(state.config?.vps?.configured);
   const clearing = !alias.trim() && configured;
+  const unchanged = alias.trim() === (state.config?.vps?.sshAlias ?? "");
 
   useEffect(() => {
     setAlias(state.config?.vps?.sshAlias ?? "");
   }, [state.config?.vps?.sshAlias]);
 
   const save = () => {
-    if (saving || (!alias.trim() && !configured)) return;
+    if (saving || (!alias.trim() && !configured) || unchanged) return;
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -193,7 +194,7 @@ export function VpsConnection() {
         <button
           type="button"
           onClick={save}
-          disabled={saving || (!alias.trim() && !configured) || alias.trim() === (state.config?.vps?.sshAlias ?? "")}
+          disabled={saving || (!alias.trim() && !configured) || unchanged}
           className={cn("ui-button shrink-0", !clearing && "ui-button-primary")}
           title={clearing ? t("keys.vps.removeAlias") : undefined}
         >

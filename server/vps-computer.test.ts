@@ -1363,11 +1363,33 @@ describe("a missing Docker CLI", () => {
     const command = dockerCliInstallCommand(process.platform)!;
     const inventory = await listManagedVpsComputers(CONFIG, [], runner);
     expect(inventory.available).toBe(false);
+    expect(inventory.unreachable).toBeUndefined();
     expect(inventory.problem).toContain(command);
     expect(inventory.problem).not.toMatch(/ENOENT/);
 
     const status = await vpsComputerStatus(CONFIG, BOT_ID, runner);
     expect(status.problem).toContain(command);
     expect(status.problem).not.toMatch(/ENOENT/);
+  });
+});
+
+describe("a VPS inventory that fails", () => {
+  it("is unreachable only when the host gave no list at all", async () => {
+    const silent: VpsCommandRunner = async () => {
+      throw new Error("ssh: connect to host fixture port 22: Connection timed out");
+    };
+    expect(await listManagedVpsComputers(CONFIG, [], silent)).toMatchObject({ available: false, unreachable: true });
+
+    const garbled: VpsCommandRunner = async () => ({ stdout: "not-a-container-id\n", stderr: "" });
+    const unverified = await listManagedVpsComputers(CONFIG, [], garbled);
+    expect(unverified.available).toBe(false);
+    expect(unverified.unreachable).toBeUndefined();
+
+    const answers: VpsCommandRunner = async () => ({ stdout: "", stderr: "" });
+    const both = await listManagedVpsComputers(CONFIG, [], async (args, options) =>
+      args.includes("ssh://other") ? garbled(args, options) : silent(args, options), ["fixture", "other"]);
+    expect(both.available).toBe(false);
+    expect(both.unreachable).toBeUndefined();
+    expect((await listManagedVpsComputers(CONFIG, [], answers)).unreachable).toBeUndefined();
   });
 });
