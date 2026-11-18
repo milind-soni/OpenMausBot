@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 // Shadow repos live under DATA_DIR, which server/testing/setup.ts points at a disposable home before config.ts loads.
-import { CHECKPOINTS_DIR, GC_EVERY_COMMITS, diffWorkingTree, refusalReason, release, snapshot } from "./checkpoints.ts";
+import { CHECKPOINTS_DIR, GC_EVERY_COMMITS, diffWorkingTree, prime, refusalReason, release, snapshot } from "./checkpoints.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 const scratchDirs: string[] = [];
@@ -448,4 +448,140 @@ describe("diffWorkingTree", () => {
     expect(await diffWorkingTree(bot, cwd, hash!)).toEqual({ changed: [], added: [], deleted: [] });
     expect(await diffWorkingTree(bot, homedir(), hash!)).toBeNull();
   });
+});
+
+describe("prime", () => {
+  it("reads the folder ahead of a turn without moving the last snapshot, and the turn still snapshots what it finds", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "before the last turn");
+    const last = await snapshot(bot, cwd, "last turn");
+    writeFileSync(join(cwd, "a.txt"), "after the last turn");
+    writeFileSync(join(cwd, "b.txt"), "made by the last turn");
+    expect(await prime(bot, cwd)).toBe(true);
+    // The state before the last turn is still the newest snapshot, and nothing is pinned.
+    expect(snapshotsIn(bot, cwd).map(c => c.hash)).toEqual([last]);
+    expect(userGit(shadow, "show", `${last}:a.txt`)).toBe("before the last turn");
+    expect(userGit(shadow, "for-each-ref", "refs/omb-live/").trim()).toBe("");
+    // The person edits the folder outside the app, after the folder was read.
+    writeFileSync(join(cwd, "a.txt"), "edited outside the app");
+    const turn = await snapshot(bot, cwd, "next turn", undefined, { pin: "dispatch-P" });
+    expect(userGit(shadow, "show", `${turn}:a.txt`)).toBe("edited outside the app");
+    expect(userGit(shadow, "show", `${turn}:b.txt`)).toBe("made by the last turn");
+    writeFileSync(join(cwd, "a.txt"), "edited by the turn");
+    expect(await diffWorkingTree(bot, cwd, turn!)).toEqual({ changed: ["a.txt"], added: [], deleted: [] });
+    await release(bot, cwd, "dispatch-P");
+  });
+
+  it("reads a folder no turn has run in, and that folder's first turn is checkpointed as the turn found it", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    mkdirSync(join(cwd, "src"));
+    for (let n = 0; n < 40; n += 1) writeFileSync(join(cwd, "src", `file${n}.txt`), `file ${n}`);
+    expect(await prime(bot, cwd)).toBe(true);
+    expect(snapshotsIn(bot, cwd)).toEqual([]);
+    writeFileSync(join(cwd, "src", "file0.txt"), "edited before the first message");
+    const first = await snapshot(bot, cwd, "first turn", undefined, { pin: "dispatch-Q" });
+    expect(userGit(shadow, "show", `${first}:src/file0.txt`)).toBe("edited before the first message");
+    expect(userGit(shadow, "ls-tree", "-r", "--name-only", first!).trim().split("\n")).toHaveLength(40);
+    unlinkSync(join(cwd, "src", "file1.txt"));
+    expect(await diffWorkingTree(bot, cwd, first!)).toEqual({ changed: [], added: [], deleted: ["src/file1.txt"] });
+    await release(bot, cwd, "dispatch-Q");
+  });
+
+  it("stopped before it ends, or refused, changes nothing for the turns after it", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    for (let n = 0; n < 200; n += 1) writeFileSync(join(cwd, `file${n}.txt`), `file ${n}`);
+    const stopped = new AbortController();
+    const reading = prime(bot, cwd, stopped.signal);
+    // A message sent while the folder is still being read waits for that read, never beside it.
+    const sent = snapshot(bot, cwd, "sent while reading", undefined, { pin: "dispatch-R" });
+    stopped.abort();
+    expect(await reading).toBe(false);
+    const turn = await sent;
+    expect(turn).toMatch(/^[0-9a-f]{40}$/);
+    expect(userGit(shadow, "ls-tree", "-r", "--name-only", turn!).trim().split("\n")).toHaveLength(200);
+    expect(existsSync(join(shadow, ".git", "index.lock"))).toBe(false);
+    await release(bot, cwd, "dispatch-R");
+    expect(await prime(bot, homedir())).toBe(false);
+    expect(await prime(bot, join(cwd, "missing"))).toBe(false);
+  });
+
+  it("puts a new folder's files into a pack, so the first snapshot leaves nothing to collect", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    for (let n = 0; n < 300; n += 1) writeFileSync(join(cwd, `file${n}.txt`), `file ${n} `.repeat(40));
+    const first = await snapshot(bot, cwd, "first turn");
+    await drain(bot, cwd);
+    const counted = userGit(shadow, "count-objects", "-v");
+    expect(Number(/^in-pack: (\d+)$/m.exec(counted)?.[1])).toBeGreaterThanOrEqual(300);
+    expect(Number(/^count: (\d+)$/m.exec(counted)?.[1])).toBeLessThan(20);
+    expect(userGit(shadow, "show", `${first}:file299.txt`)).toBe("file 299 ".repeat(40));
+    // Later edits go in as single objects again.
+    writeFileSync(join(cwd, "file0.txt"), "edited");
+    const second = await snapshot(bot, cwd, "second turn");
+    expect(userGit(shadow, "show", `${second}:file0.txt`)).toBe("edited");
+    expect(Number(/^packs: (\d+)$/m.exec(userGit(shadow, "count-objects", "-v"))?.[1])).toBe(1);
+  });
+});
+
+describe("a restart in the middle of a snapshot", () => {
+  it("finds the index locked by the git it cut off, and checkpoints the next turns on a copy", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "before the restart");
+    writeFileSync(join(cwd, "b.txt"), "kept");
+    await snapshot(bot, cwd, "turn X");
+    // What a git that was killed, or is still running after its server died, leaves on the index.
+    writeFileSync(join(shadow, ".git", "index.lock"), "");
+    for (const round of ["first start", "second start"]) {
+      vi.resetModules();
+      const fresh = await import("./checkpoints.ts");
+      writeFileSync(join(cwd, "a.txt"), round);
+      const turn = await fresh.snapshot(bot, cwd, round, undefined, { pin: `dispatch-${round}` });
+      expect(turn).toMatch(/^[0-9a-f]{40}$/);
+      expect(userGit(shadow, "show", `${turn}:a.txt`)).toBe(round);
+      expect(userGit(shadow, "show", `${turn}:b.txt`)).toBe("kept");
+      writeFileSync(join(cwd, "b.txt"), `edited after ${round}`);
+      expect(await fresh.diffWorkingTree(bot, cwd, turn!)).toEqual({ changed: ["b.txt"], added: [], deleted: [] });
+      writeFileSync(join(cwd, "b.txt"), "kept");
+      await fresh.release(bot, cwd, `dispatch-${round}`);
+    }
+    // The lock was never this process's to remove.
+    expect(existsSync(join(shadow, ".git", "index.lock"))).toBe(true);
+  });
+});
+
+describe("a collection cut short", () => {
+  it("by the next turn's snapshot leaves HEAD, the running turn's commit and every object they need readable", async () => {
+    const { bot, cwd } = workspace();
+    const shadow = shadowOf(bot, cwd);
+    for (let d = 0; d < 20; d += 1) {
+      mkdirSync(join(cwd, `dir${d}`));
+      for (let f = 0; f < 50; f += 1) writeFileSync(join(cwd, `dir${d}`, `file${f}.txt`), `dir ${d} file ${f}\n`.repeat(20));
+    }
+    const running = await snapshot(bot, cwd, "a turn still running", undefined, { pin: "dispatch-S" });
+    let last: string | null = null;
+    for (let turn = 0; turn < GC_EVERY_COMMITS; turn += 1) {
+      for (let f = 0; f < 50; f += 1) writeFileSync(join(cwd, "dir0", `file${f}.txt`), `turn ${turn} file ${f}\n`.repeat(20));
+      last = await snapshot(bot, cwd, `churn ${turn}`);
+    }
+    // The settled diff lets the collection start; the next message arrives while it runs.
+    await diffWorkingTree(bot, cwd, last!);
+    writeFileSync(join(cwd, "dir1", "file0.txt"), "the next turn's folder");
+    const next = await snapshot(bot, cwd, "next turn", undefined, { pin: "dispatch-T" });
+    expect(userGit(shadow, "rev-parse", "HEAD").trim()).toBe(next);
+    expect(userGit(shadow, "show", `${next}:dir1/file0.txt`)).toBe("the next turn's folder");
+    expect(userGit(shadow, "show", `${running}:dir0/file0.txt`)).toBe("dir 0 file 0\n".repeat(20));
+    expect(() => userGit(shadow, "fsck", "--connectivity-only", "--no-dangling")).not.toThrow();
+    expect(await diffWorkingTree(bot, cwd, next!)).toEqual({ changed: [], added: [], deleted: [] });
+    await release(bot, cwd, "dispatch-T");
+    await drain(bot, cwd);
+    // The collection ran to its end behind that turn: the running turn's commit is still held by its pin.
+    expect(userGit(shadow, "show", `${running}:dir0/file0.txt`)).toBe("dir 0 file 0\n".repeat(20));
+    expect(() => userGit(shadow, "cat-file", "-e", `${last}^{commit}`)).toThrow();
+    expect(() => userGit(shadow, "fsck", "--connectivity-only", "--no-dangling")).not.toThrow();
+    await release(bot, cwd, "dispatch-S");
+  }, process.platform === "win32" ? 120_000 : 60_000);
 });

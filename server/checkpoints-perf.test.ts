@@ -1,18 +1,18 @@
 // Real git does the work; execFile is wrapped only to record calls and inject a timeout or object counts, readdirSync only to record calls.
 import { createHash } from "node:crypto";
 import { execFile as realExecFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 // Shadow repos live under DATA_DIR, which server/testing/setup.ts points at a
 // disposable test home before any test module imports config.ts.
-import { CHECKPOINTS_DIR, diffWorkingTree, release, snapshot } from "./checkpoints.ts";
+import { CHECKPOINTS_DIR, diffWorkingTree, prime, release, snapshot } from "./checkpoints.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
-type Injected = { error: Error; stdout?: string; stderr?: string } | { stdout: string };
+type Injected = { error: Error; stdout?: string; stderr?: string } | { stdout: string } | { until: Promise<unknown> };
 const hooks = vi.hoisted(() => ({
   calls: [] as string[][],
   inject: null as null | ((args: string[]) => Injected | undefined),
@@ -34,6 +34,20 @@ vi.mock("node:child_process", async (importOriginal) => {
     if (file === "git") {
       hooks.calls.push(args);
       const injected = hooks.inject?.(args);
+      if (injected && "until" in injected) {
+        // Held like a slow git: it runs once `until` settles, or ends as Node ends a child whose signal fired.
+        const signal = (options as { signal?: AbortSignal }).signal;
+        let over = false;
+        const end = (error: Error | null) => {
+          if (over) return;
+          over = true;
+          if (error) callback(error, "", "");
+          else actual.execFile(file, args, options, callback);
+        };
+        signal?.addEventListener("abort", () => end(Object.assign(new Error("The operation was aborted"), { name: "AbortError", code: "ABORT_ERR" })), { once: true });
+        void injected.until.then(() => end(null));
+        return {};
+      }
       if (injected) {
         setImmediate(() => callback("error" in injected ? injected.error : null, injected.stdout ?? "", "stderr" in injected ? injected.stderr ?? "" : ""));
         return {};
@@ -144,17 +158,77 @@ describe("incremental shadow index", () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "one");
     await snapshot(bot, cwd, "first");
+    await drain(bot, cwd);
     writeFileSync(join(cwd, "a.txt"), "two");
     hooks.calls = [];
     const changed = await snapshot(bot, cwd, "changed", undefined, { pin: "dispatch-1" });
     expect(changed).toMatch(/^[0-9a-f]{40}$/);
-    expect(subcommands()).toEqual(["ls-files", "log", "ls-files", "ls-files", "add", "write-tree", "commit-tree", "update-ref", "count-objects"]);
+    // The four reads start together; the pin goes on the old HEAD beside the add, then moves with HEAD.
+    expect(subcommands()).toEqual(["ls-files", "log", "ls-files", "ls-files", "update-ref", "add", "write-tree", "commit-tree", "update-ref"]);
     expect(shadowGit(bot, cwd, "rev-parse", "HEAD").trim()).toBe(changed);
     expect(shadowGit(bot, cwd, "for-each-ref", "--format=%(objectname)", "refs/omb-live/").trim()).toBe(changed);
-    hooks.calls = [];
-    expect(await snapshot(bot, cwd, "unchanged")).toBe(changed);
-    expect(subcommands()).toEqual(["ls-files", "log", "ls-files", "ls-files", "add", "write-tree"]);
+    // The loose-object count is taken behind the snapshot, not inside it.
+    await drain(bot, cwd);
+    expect(subcommands().slice(9)).toEqual(["count-objects", "update-ref"]);
     await release(bot, cwd, "dispatch-1");
+  });
+
+  it("takes an unchanged folder's snapshot in two rounds of git calls, without writing the tree again", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    // Git reads a file again while it is as new as the index itself, and rewrites the index for it: this one is older.
+    const earlier = new Date(Date.now() - 60_000);
+    utimesSync(join(cwd, "a.txt"), earlier, earlier);
+    const first = await snapshot(bot, cwd, "first");
+    await drain(bot, cwd);
+    hooks.calls = [];
+    expect(await snapshot(bot, cwd, "unchanged", undefined, { pin: "dispatch-2" })).toBe(first);
+    expect(subcommands()).toEqual(["ls-files", "log", "ls-files", "ls-files", "update-ref", "add"]);
+    expect(shadowGit(bot, cwd, "for-each-ref", "--format=%(objectname)", "refs/omb-live/").trim()).toBe(first);
+    await drain(bot, cwd);
+    expect(subcommands()).not.toContain("count-objects");
+    // An edit made outside the app between two turns is in the next snapshot.
+    writeFileSync(join(cwd, "a.txt"), "edited outside the app");
+    hooks.calls = [];
+    const edited = await snapshot(bot, cwd, "edited", undefined, { pin: "dispatch-3" });
+    expect(edited).not.toBe(first);
+    expect(subcommands()).toContain("write-tree");
+    expect(shadowGit(bot, cwd, "show", `${edited}:a.txt`)).toBe("edited outside the app");
+    // The earlier turn's pin still holds its own commit.
+    expect(shadowGit(bot, cwd, "for-each-ref", "--format=%(objectname)", "refs/omb-live/").trim().split("\n").sort()).toEqual([first, edited].sort());
+    await release(bot, cwd, "dispatch-2");
+    await release(bot, cwd, "dispatch-3");
+  });
+
+  it("reads a folder ahead of a turn with the same reads and one add, and writes no ref", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    const first = await snapshot(bot, cwd, "first");
+    await drain(bot, cwd);
+    writeFileSync(join(cwd, "a.txt"), "two");
+    hooks.calls = [];
+    expect(await prime(bot, cwd)).toBe(true);
+    expect(subcommands()).toEqual(["ls-files", "log", "ls-files", "ls-files", "add", "write-tree"]);
+    expect(shadowGit(bot, cwd, "rev-parse", "HEAD").trim()).toBe(first);
+    // A failure while reading ahead turns nothing off: the turn's own snapshot still runs.
+    hooks.inject = args => args[0] === "add" ? { error: timeoutError("add") } : undefined;
+    expect(await prime(bot, cwd)).toBe(false);
+    hooks.inject = null;
+    hooks.calls = [];
+    expect(await snapshot(bot, cwd, "the turn")).not.toBe(first);
+    expect(subcommands()).toContain("add");
+  });
+
+  it("leaves no pin behind when the folder cannot be staged", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    const first = await snapshot(bot, cwd, "first");
+    hooks.inject = args => args[0] === "add" ? { error: new Error("Command failed: git add"), stderr: "fatal: unable to stat" } : undefined;
+    expect(await snapshot(bot, cwd, "cannot stage", undefined, { pin: "dispatch-4" })).toBeNull();
+    hooks.inject = null;
+    await drain(bot, cwd);
+    expect(shadowGit(bot, cwd, "for-each-ref", "--format=%(objectname)", "refs/omb-live/").trim()).toBe("");
+    expect(await snapshot(bot, cwd, "later")).toBe(first);
   });
 
   it("falls back to a full rebuild when the index cannot be listed", async () => {
@@ -232,6 +306,7 @@ describe("incremental shadow index", () => {
     writeFileSync(join(cwd, "a.txt"), "two");
     hooks.calls = [];
     const before = await snapshot(bot, cwd, "collection due");
+    await drain(bot, cwd);
     hooks.inject = null;
     expect(subcommands()).not.toContain("gc");
     // the turn writes a file; its settled diff must not queue behind GC
@@ -245,7 +320,7 @@ describe("incremental shadow index", () => {
     expect(snapshotHashes(bot, cwd)).toEqual([before]);
   });
 
-  it("runs a collection left by a turn without a diff ahead of the next snapshot, once", async () => {
+  it("holds a collection left by a turn without a diff for the next turn's settled diff, never ahead of its snapshot", async () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "one");
     await snapshot(bot, cwd, "first");
@@ -258,15 +333,63 @@ describe("incremental shadow index", () => {
     hooks.calls = [];
     writeFileSync(join(cwd, "a.txt"), "three");
     const next = await snapshot(bot, cwd, "next turn");
-    const collected = subcommands().indexOf("gc");
-    expect(collected).toBeGreaterThanOrEqual(0);
-    expect(subcommands().indexOf("reflog")).toBeLessThan(collected);
-    expect(subcommands().indexOf("add")).toBeGreaterThan(collected);
+    await drain(bot, cwd);
+    expect(subcommands()).not.toContain("gc");
     writeFileSync(join(cwd, "b.txt"), "made by the turn");
     expect(await diffWorkingTree(bot, cwd, next!)).toEqual({ changed: [], added: ["b.txt"], deleted: [] });
     await drain(bot, cwd);
     expect(subcommands().filter(command => command === "gc")).toHaveLength(1);
+    expect(subcommands().indexOf("gc")).toBeGreaterThan(hooks.calls.findIndex(args => args[0] === "diff"));
     expect(snapshotHashes(bot, cwd)).toEqual([next]);
+  });
+
+  it("runs the collection of a turn that ended without a diff once its pin is released", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    await snapshot(bot, cwd, "first");
+    hooks.inject = args => args[0] === "count-objects" ? { stdout: countObjects({ count: 7000 }) } : undefined;
+    writeFileSync(join(cwd, "a.txt"), "two");
+    const stopped = await snapshot(bot, cwd, "stopped during setup", undefined, { pin: "dispatch-5" });
+    await drain(bot, cwd);
+    hooks.inject = null;
+    expect(subcommands()).not.toContain("gc");
+    await release(bot, cwd, "dispatch-5");
+    await drain(bot, cwd);
+    expect(subcommands().filter(command => command === "gc")).toHaveLength(1);
+    expect(snapshotHashes(bot, cwd)).toEqual([stopped]);
+  });
+
+  it("stops a running collection for a new turn's snapshot, and runs it again behind that turn", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    await snapshot(bot, cwd, "first");
+    let collections = 0;
+    hooks.inject = (args) => {
+      if (args[0] === "count-objects") return collections === 0 ? { stdout: countObjects({ count: 7000 }) } : undefined;
+      // The first collection never ends by itself.
+      if (args[0] === "gc") return (collections += 1) === 1 ? { until: new Promise(() => {}) } : undefined;
+      return undefined;
+    };
+    writeFileSync(join(cwd, "a.txt"), "two");
+    const before = await snapshot(bot, cwd, "collection due", undefined, { pin: "dispatch-6" });
+    expect(await diffWorkingTree(bot, cwd, before!)).toEqual({ changed: [], added: [], deleted: [] });
+    void release(bot, cwd, "dispatch-6");
+    await vi.waitFor(() => expect(collections).toBe(1));
+    // The next message arrives while that collection runs: its snapshot and its digest wait for neither it nor a new one.
+    writeFileSync(join(cwd, "a.txt"), "three");
+    hooks.calls = [];
+    const next = await snapshot(bot, cwd, "next turn", undefined, { pin: "dispatch-7" });
+    expect(next).toMatch(/^[0-9a-f]{40}$/);
+    expect(subcommands()).not.toContain("gc");
+    expect(commitExists(bot, cwd, next!)).toBe(true);
+    writeFileSync(join(cwd, "b.txt"), "made by the turn");
+    expect(await diffWorkingTree(bot, cwd, next!)).toEqual({ changed: [], added: ["b.txt"], deleted: [] });
+    expect(subcommands()).not.toContain("gc");
+    await release(bot, cwd, "dispatch-7");
+    await drain(bot, cwd);
+    expect(collections).toBe(2);
+    expect(snapshotHashes(bot, cwd)).toEqual([next]);
+    expect(commitExists(bot, cwd, before!)).toBe(false);
   });
 
   it("keeps a pinned commit through a collection and reclaims it once released", async () => {
@@ -281,6 +404,7 @@ describe("incremental shadow index", () => {
     collectionDue();
     hooks.calls = [];
     const hashB = await snapshot(bot, cwd, "turn B", undefined, { pin: "dispatch-B" });
+    await drain(bot, cwd);
     hooks.inject = null;
     expect(await diffWorkingTree(bot, cwd, hashA!)).toEqual({ changed: ["a.txt"], added: [], deleted: [] });
     await release(bot, cwd, "dispatch-A");
@@ -292,6 +416,7 @@ describe("incremental shadow index", () => {
     collectionDue();
     hooks.calls = [];
     const hashC = await snapshot(bot, cwd, "turn C");
+    await drain(bot, cwd);
     hooks.inject = null;
     await diffWorkingTree(bot, cwd, hashC!);
     await drain(bot, cwd);
