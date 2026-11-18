@@ -5,14 +5,16 @@ import { namesTeammate, unreachableTeammate, type RosterMember } from "../peer-r
 import { serverLine } from "../server-lines.ts";
 import type { Delivery } from "./person-inbox.ts";
 
-type Refused = { target: RosterMember; from: RosterMember };
+/** The run that made a call, as it was before the call went out: a call can outlive it. */
+type Run = { id: string; routineId: string; botId: string };
+type Refused = { target: RosterMember; from: RosterMember; run: string };
 
 export interface RefusedHandoffDeps {
   bots(): readonly RosterMember[];
   /** A bot `from` may never be told of (personal-reach.ts hides). */
   hides?(from: RosterMember, target: RosterMember): boolean;
   /** The run this conversation is, when it is one. */
-  runOf(threadId: string): { routineId: string; botId: string } | undefined;
+  runOf(threadId: string): Run | undefined;
   /** The person key of who wrote this routine; absent off a Cloud and for a routine nobody wrote. */
   writerOf(routineId: string): string | undefined;
   /** Who this bot's failures in this conversation are for. */
@@ -36,25 +38,25 @@ export function createRefusedHandoffs(deps: RefusedHandoffDeps) {
   }
 
   return {
-    /** A coordinate_bots call in a routine's run came back: remembers the bots it could not reach, and forgets one it has reached since. */
-    settled(threadId: string, from: RosterMember, named: readonly string[], status: number): void {
-      if (!deps.runOf(threadId)) return;
+    /** A coordinate_bots call came back: remembers the bots the run that made it could not reach, and forgets one it has reached since. */
+    settled(threadId: string, from: RosterMember, named: readonly string[], status: number, run: Run | undefined): void {
+      if (!run) return;
       const seen = refused.get(threadId) ?? new Map<string, Refused>();
       for (const raw of named) {
         const target = status >= 400 ? unreachableTeammate(deps.bots(), from, raw, (bot) => deps.hides?.(from, bot) === true) : null;
-        if (target) seen.set(target.id, { target, from });
+        if (target) seen.set(target.id, { target, from, run: run.id });
         if (status < 400) for (const [id, was] of seen) if (namesTeammate(was.target, raw)) seen.delete(id);
       }
       if (seen.size) refused.set(threadId, seen);
       else refused.delete(threadId);
     },
-    /** The run in this conversation is ending well: what it must say instead, once; null when nothing was refused. */
+    /** The run in this conversation is ending well: what it must say instead, once; null when nothing was refused, or another run was. */
     take(threadId: string): string | null {
-      const seen = [...refused.get(threadId)?.values() ?? []];
-      if (!seen.length) return null;
+      const run = deps.runOf(threadId), seen = [...refused.get(threadId)?.values() ?? []].filter((was) => was.run === run?.id);
       refused.delete(threadId);
+      if (!seen.length) return null;
       const said = words(threadId, seen);
-      const run = deps.runOf(threadId), writer = run && deps.writerOf(run.routineId);
+      const writer = run && deps.writerOf(run.routineId);
       const asked = run ? deps.askedPerson(run.botId, threadId) : null, inboxedAnyway = writer === asked && !deps.theirOwn(threadId, asked!);
       if (run && writer && !inboxedAnyway && toldWriter.get(run.routineId) !== said) {
         toldWriter.set(run.routineId, said);
