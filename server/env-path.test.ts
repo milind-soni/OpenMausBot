@@ -112,6 +112,30 @@ describe("augmentedPath", () => {
     }
   });
 
+  posixIt("runs the login-shell probe in its own session, so an interactive shell cannot take over the terminal", async () => {
+    const shell = join(homedir(), "fake-login-shell");
+    const rcOnlyBin = join(homedir(), "rc-only", "bin");
+    // Answers only when it leads its own process group, as a detached (setsid) child does; an attached one shares the server's.
+    writeFileSync(shell, `#!/bin/sh\n[ "$(ps -o pgid= -p $$ | tr -d ' ')" = "$$" ] && printf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
+    chmodSync(shell, 0o755);
+
+    const saved = { SHELL: process.env.SHELL, VITEST: process.env.VITEST };
+    try {
+      process.env.SHELL = shell;
+      delete process.env.VITEST;
+      resetPathCacheForTests();
+
+      augmentedPath();
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin));
+    } finally {
+      if (saved.SHELL === undefined) delete process.env.SHELL;
+      else process.env.SHELL = saved.SHELL;
+      if (saved.VITEST === undefined) delete process.env.VITEST;
+      else process.env.VITEST = saved.VITEST;
+      resetPathCacheForTests();
+    }
+  });
+
   posixIt("keeps the login-shell PATH in the same order after a rescan", async () => {
     const knownBin = join(homedir(), ".local", "bin");
     mkdirSync(knownBin, { recursive: true });

@@ -1,6 +1,6 @@
 // A macOS app launched from Finder inherits a bare PATH (no ~/.local/bin, /opt/homebrew/bin or nvm/volta/asdf shims),
 // so every agent CLI spawn goes through augmentedPath().
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, join } from "node:path";
@@ -137,18 +137,24 @@ function mergePaths(parts: string[]): string {
 function probeLoginShellPath(): void {
   const shell = process.env.SHELL || "/bin/zsh";
   // -l -i: nvm and friends live in .zshrc/.bashrc, which only interactive shells read; a marker isolates $PATH from rc noise.
-  execFile(
-    shell,
-    ["-l", "-i", "-c", 'printf "__OMB_PATH__%s" "$PATH"'],
-    { timeout: 5000 },
-    (err, stdout) => {
-      if (err || !stdout) return;
-      const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
-      if (!m || !m[1]) return;
-      loginShellPath = m[1];
-      cached = buildPath();
-    },
-  );
+  // detached: an interactive shell makes its job the terminal's foreground, which stops `openmausbot setup` and its sign-in CLI (SIGTTOU).
+  const child = spawn(shell, ["-l", "-i", "-c", 'printf "__OMB_PATH__%s" "$PATH"'], {
+    detached: true,
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: 5000,
+  });
+  let stdout = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  child.on("error", () => {});
+  child.on("close", (code) => {
+    if (code !== 0 || !stdout) return;
+    const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
+    if (!m || !m[1]) return;
+    loginShellPath = m[1];
+    cached = buildPath();
+  });
 }
 
 export function resetPathCacheForTests(): void {
