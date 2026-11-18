@@ -75,6 +75,31 @@ afterAll(() => {
 });
 
 describe("an automation's line in the chat", () => {
+  it("lets Advanced mode hide routine updates and open the bot's run history", async () => {
+    localStorage.setItem("omb-advanced-mode", "1");
+    try {
+      await draw(transcript([
+        { id: "routine", parentId: "m2", role: "bot", kind: "text", text: "No new calls.", at: at(3), automation: line("run-1") },
+        { id: "approval", parentId: "routine", role: "bot", kind: "text", text: "Please confirm.", at: at(4), automation: line("run-2", { needsYou: true }) },
+      ]));
+      const button = (name: string) => [...document.querySelectorAll("button")].find((item) => item.textContent?.trim() === name)!;
+      flushSync(() => button(t("routines.logs")).click());
+      flushSync(() => button(t("chat.automation.showInChat")).click());
+      expect(document.querySelector('[data-mid="routine"]')).toBeNull();
+      expect(document.querySelector('[data-mid="approval"]')?.textContent).toContain("Please confirm.");
+      expect(document.querySelector('[data-mid="m2"]')?.textContent).toContain("Here is the draft.");
+      expect(localStorage.getItem("omb-advanced-chat-automation")).toBe("hide");
+      dispatch.mockClear();
+      flushSync(() => button(t("chat.automation.openLogs")).click());
+      expect(dispatch).toHaveBeenCalledWith({ type: "showRoutines", section: "logs", botId: "pepper" });
+      flushSync(() => button(t("chat.automation.showInChat")).click());
+      expect(document.querySelector('[data-mid="routine"]')?.textContent).toContain("No new calls.");
+    } finally {
+      localStorage.removeItem("omb-advanced-mode");
+      localStorage.removeItem("omb-advanced-chat-automation");
+    }
+  });
+
   it("is the bot's own message under the automation's name, with its run one click away", async () => {
     await draw(transcript([{ id: "r1", parentId: "m2", role: "bot", kind: "text", text: "Acme replied about the order.", at: at(3), automation: line("run-1") }]));
     const label = caption("run-1");

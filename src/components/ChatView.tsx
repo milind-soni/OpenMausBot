@@ -3,7 +3,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { AlertTriangle, ChevronLeft, ChevronRight, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, List, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
 import { ChatBusyContext, CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "@/components/MessageActions";
 import { ReactAction, ReactionChips } from "@/components/Reactions";
@@ -806,6 +806,18 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   // An opened page fills the messages area, between the header and the message box, which stays usable.
   const [pagePane, setPagePane] = useState<HTMLDivElement | null>(null);
   const advanced = useAdvancedMode();
+  const [automationLogsOpen, setAutomationLogsOpen] = useState(false);
+  const [showAutomationInChat, setShowAutomationInChat] = useState(() => {
+    try { return localStorage.getItem("omb-advanced-chat-automation") !== "hide"; }
+    catch { return true; }
+  });
+  const toggleAutomationInChat = () => {
+    const next = !showAutomationInChat;
+    setShowAutomationInChat(next);
+    try { localStorage.setItem("omb-advanced-chat-automation", next ? "show" : "hide"); }
+    catch { /* The preference still works for this visit. */ }
+  };
+  useEffect(() => setAutomationLogsOpen(false), [bot.threadId]);
   const phone = useMediaQuery(PHONE_LAYOUT);
   const phoneMenu = phone && !remoteClient;
   const simpleHead = !advanced && !remoteClient;
@@ -825,6 +837,14 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
 
   const { messages: allMessages, activeLeafId } = bot;
   const messages = useMemo(() => visibleMessages({ messages: allMessages, activeLeafId }), [allMessages, activeLeafId]);
+  const chatMessages = useMemo(() => {
+    if (!advanced || showAutomationInChat) return messages;
+    return messages.filter((message) => {
+      if (message.role !== "bot" || message.id === bot.pinnedMessageId) return true;
+      if (message.kind === "routine.run") return message.routineRun?.status === "waiting" || message.routineRun?.status === "failed";
+      return !message.automation || Boolean(message.automation.needsYou || message.automation.failed || message.automation.partial || message.automation.copyOf);
+    });
+  }, [advanced, showAutomationInChat, messages, bot.pinnedMessageId]);
   const lookups = useMemo(() => transcriptLookups(allMessages, messages), [allMessages, messages]);
   const liveTools = useLiveToolIds(messages, bot);
   const recordedRun = useMemo(() => runSteps(messages, liveTools), [messages, liveTools]);
@@ -854,7 +874,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   } = useTranscriptViewport({
     ownerId: bot.id,
     threadId: bot.threadId,
-    messages,
+    messages: chatMessages,
     pinOn: [bot.busy, composerDock.pad],
     hasMore: bot.hasMore, rests: staysInView,
   });
@@ -863,7 +883,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
     () => [...messages].reverse().find((m) => m.role === "bot" && m.kind === "text")?.id,
     [messages],
   );
-  const unreadDivider = useUnreadDivider({ threadId: bot.threadId, messages, following });
+  const unreadDivider = useUnreadDivider({ threadId: bot.threadId, messages: chatMessages, following });
 
   const bots = useStoreSelector((s) => s.bots, sameDrawnBots);
   const teammates = useTeammates(); const mentionPeers = useMemo(() => [...bots.filter((peer) => peer.id !== bot.id), ...teammates.peers], [bots, bot.id, teammates]);
@@ -994,6 +1014,26 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
         )}
       >
         <div data-chathead-row className={cn("flex items-center justify-between", phone ? "gap-2" : "@max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:gap-y-1 @min-[30rem]/chathead:grid @min-[30rem]/chathead:grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)]")}>
+        {advanced && !inForkPanel && (
+          <section aria-label={t("routines.logs")} className="flex min-w-0 flex-wrap items-center gap-1.5" style={headerNoDragStyle}>
+            <button
+              type="button"
+              aria-expanded={automationLogsOpen}
+              onClick={() => setAutomationLogsOpen((open) => !open)}
+              className="ui-pill shrink-0"
+            ><List size={14} aria-hidden="true" />{t("routines.logs")}</button>
+            {automationLogsOpen && (
+              <section className="chat-run-log-actions flex min-w-0 flex-wrap items-center gap-1.5">
+                <button type="button" className="ui-pill" aria-pressed={showAutomationInChat} onClick={toggleAutomationInChat}>
+                  {t("chat.automation.showInChat")}
+                </button>
+                <button type="button" className="ui-pill" onClick={() => dispatch({ type: "showRoutines", section: "logs", botId: bot.id })}>
+                  {t("chat.automation.openLogs")}
+                </button>
+              </section>
+            )}
+          </section>
+        )}
         <div data-chathead-identity className={cn("flex min-w-0 items-center gap-2", phone ? "flex-1" : "@max-[30rem]/chathead:basis-full @min-[30rem]/chathead:col-start-2 @min-[30rem]/chathead:justify-self-center", simpleHead && phone && "justify-center")} style={headerNoDragStyle}>
           {simpleHead ? (
             <ChatHeadPill
