@@ -270,6 +270,22 @@ function CarvedAvatarComponent(
 
   const fills = carvedFills(body, color);
   const resolve = (fill: string) => (fill === "body" ? fills.body : fill === "accent" ? fills.accent : fill);
+  const cutFace = !faceInk;
+  const ink = faceInk ?? "black";
+  const face = (
+    <>
+      <g clipPath={`url(#carved-${uid})`}>
+        {initial.eyes.map((rect, i) => <rect key={i} ref={eyes[i]} {...rect} fill={ink} />)}
+      </g>
+      {body.eyes.mouth && (
+        <g>
+          <path ref={smile} d={initial.smile.d} transform={initial.smile.transform} opacity={initial.smile.opacity}
+            fill="none" stroke={ink} strokeWidth={body.eyes.w * 0.36} strokeLinecap="round" />
+          <ellipse ref={open} {...initial.open} fill={ink} />
+        </g>
+      )}
+    </>
+  );
   return (
     <span
       {...avatarMarks(kind, "mascot")}
@@ -289,19 +305,18 @@ function CarvedAvatarComponent(
       >
         <defs>
           <clipPath id={`carved-${uid}`}><path d={body.clip} /></clipPath>
+          {cutFace && (
+            <mask id={`carved-face-${uid}`} maskUnits="userSpaceOnUse" x="-300" y="-300" width="900" height="900">
+              <rect x="-300" y="-300" width="900" height="900" fill="white" />
+              {face}
+            </mask>
+          )}
         </defs>
         <g ref={group} transform={initial.body}>
-          {body.parts.map((part, i) => <path key={i} d={part.d} fill={resolve(part.fill)} />)}
-          <g clipPath={`url(#carved-${uid})`}>
-            {initial.eyes.map((rect, i) => <rect key={i} ref={eyes[i]} {...rect} fill={faceInk ?? body.eyes.ink} />)}
+          <g mask={cutFace ? `url(#carved-face-${uid})` : undefined}>
+            {body.parts.map((part, i) => <path key={i} d={part.d} fill={resolve(part.fill)} />)}
           </g>
-          {body.eyes.mouth && (
-            <g>
-              <path ref={smile} d={initial.smile.d} transform={initial.smile.transform} opacity={initial.smile.opacity}
-                fill="none" stroke={faceInk ?? body.eyes.mouthInk} strokeWidth={body.eyes.w * 0.36} strokeLinecap="round" />
-              <ellipse ref={open} {...initial.open} fill={faceInk ?? body.eyes.mouthInk} />
-            </g>
-          )}
+          {!cutFace && face}
         </g>
       </svg>
     </span>
