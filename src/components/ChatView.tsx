@@ -1034,13 +1034,13 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
             ><List size={14} aria-hidden="true" />{t("chat.automation.activity")}</button>
             {automationLogsOpen && (
               <section className="chat-run-log-actions flex min-w-0 flex-wrap items-center gap-1.5">
-                <label className="flex items-center gap-2 rounded-full px-2 py-1 text-xs text-ink-secondary">
+                <label className="ui-pill shrink-0">
                   {t("chat.automation.showInChat")}
-                  <Switch aria-label={t("chat.automation.showInChat")} checked={showAutomationInChat} onClick={toggleAutomationInChat} />
+                  <Switch compact aria-label={t("chat.automation.showInChat")} checked={showAutomationInChat} onClick={toggleAutomationInChat} />
                 </label>
-                <label className="flex items-center gap-2 rounded-full px-2 py-1 text-xs text-ink-secondary">
+                <label className="ui-pill shrink-0">
                   {t("chat.automation.showTools")}
-                  <Switch aria-label={t("chat.automation.showTools")} checked={showToolsInChat} onClick={toggleToolsInChat} />
+                  <Switch compact aria-label={t("chat.automation.showTools")} checked={showToolsInChat} onClick={toggleToolsInChat} />
                 </label>
                 <button type="button" className="ui-pill" onClick={() => dispatch({ type: "showRoutines", section: "logs", botId: bot.id })}>
                   {t("chat.automation.openLogs")}
