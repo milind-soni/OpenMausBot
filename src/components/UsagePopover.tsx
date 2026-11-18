@@ -154,7 +154,7 @@ export function UsagePopover({
               </p>
             )}
             <div className="border-b border-hairline/40 py-3">
-              <p className="text-[11px] text-ink-secondary">Bots using {instance.displayName}</p>
+              <p className="text-[11px] text-ink-secondary">Buddies using {instance.displayName}</p>
               <div className="mt-1.5 flex flex-wrap gap-2">
                 {bots.map((bot) => (
                   <span key={bot.id} className="flex items-center gap-1 text-[12px] text-ink">

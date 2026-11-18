@@ -567,7 +567,7 @@ async function handleUsageFailure(botId: string, context: ActiveTurnContext, fai
       return true;
     }
   }
-  if (behavior === "stop") { postActivity(threadId, `${failedName}’s usage ran out, so I stopped here. You can choose another AI model in bot settings.`); return false; }
+  if (behavior === "stop") { postActivity(threadId, `${failedName}’s usage ran out, so I stopped here. You can choose another AI model in Buddy settings.`); return false; }
   // If a backup is missing, unavailable, or also exhausted, wait rather than loop through models.
   const resume: ResumeContext = { botId, threadId, userMessageId: context.originalMessageId, request: context.request, attempt: context.attempt };
   const resetsAt = failure.resetsAt ?? usageLimitReset(usageStore.get(context.selection.instanceId).windows);
@@ -1807,7 +1807,7 @@ const server = createServer(async (req, res) => {
       const memberIds = (Array.isArray(body.memberIds) ? body.memberIds : []).filter(
         (id: unknown): id is string => typeof id === "string" && Boolean(store.bot(id)),
       );
-      if (memberIds.length === 0) return json(res, 400, { error: "a room needs at least one bot" });
+      if (memberIds.length === 0) return json(res, 400, { error: "a room needs at least one Buddy" });
       const name =
         typeof body.name === "string" && body.name.trim()
           ? body.name.trim()
@@ -1855,7 +1855,7 @@ const server = createServer(async (req, res) => {
       if (body.memberIds !== undefined) {
         if (!Array.isArray(body.memberIds)) return json(res, 400, { error: "memberIds must be an array" });
         const ids = [...new Set(body.memberIds.filter((id: unknown): id is string => typeof id === "string" && Boolean(store.bot(id))))] as string[];
-        if (!ids.length) return json(res, 400, { error: "a room needs at least one bot" });
+        if (!ids.length) return json(res, 400, { error: "a room needs at least one Buddy" });
         patch.memberIds = ids;
       }
       const memberIds = patch.memberIds ?? current.memberIds;
@@ -1998,7 +1998,7 @@ const server = createServer(async (req, res) => {
       const current = store.bot(m[1]);
       if (!current) return json(res, 404, { error: "no such bot" });
       if ((patch.modelSelection !== undefined || patch.backupModelSelection !== undefined || patch.onUsageLimit !== undefined) &&
-        (current.busy || store.groups.some(g => g.busyBotId === current.id))) return json(res, 409, { error: "Wait for this bot to finish before changing its AI model." });
+        (current.busy || store.groups.some(g => g.busyBotId === current.id))) return json(res, 409, { error: "Wait for this Buddy to finish before changing its AI model." });
       if (patch.onUsageLimit !== undefined && !["backup", "wait", "stop"].includes(String(patch.onUsageLimit))) return json(res, 400, { error: "Choose what should happen when usage runs out." });
       for (const key of ["modelSelection", "backupModelSelection"] as const) {
         const value = patch[key];
@@ -2100,7 +2100,7 @@ const server = createServer(async (req, res) => {
       // everything from here down is synchronous, so two racing edits can
       // never both get past this check: startTurn flips busy before the
       // next request is handled
-      if (bot.busy) return json(res, 409, { error: "the bot is working — stop it before editing" });
+      if (bot.busy) return json(res, 409, { error: "the Buddy is working — stop it before editing" });
       const source = store.messagesFor(bot.threadId).find((msg) => msg.id === messageId);
       if (!source || source.role !== "user" || source.kind !== "text") {
         return json(res, 404, { error: "only user messages can be edited" });
@@ -2125,7 +2125,7 @@ const server = createServer(async (req, res) => {
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
-      if (bot.busy) return json(res, 409, { error: "the bot is working — stop it before switching versions" });
+      if (bot.busy) return json(res, 409, { error: "the Buddy is working — stop it before switching versions" });
       const body = await readBody(req);
       const leaf = store.setActiveLeaf(bot.threadId, String(body.messageId ?? ""));
       if (!leaf) return json(res, 404, { error: "no such message" });

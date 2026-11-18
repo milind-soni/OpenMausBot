@@ -23,7 +23,7 @@ import {
 import { useStore, useStreaming, formatTime, messageVersions, visibleMessages, type Bot, type Message } from "@/state/store";
 import { TasksPanel } from "./TasksPanel";
 import { MausAvatar } from "./Avatar";
-import { stateForBot } from "@/lib/mascot";
+import { LiveBuddyAvatar } from "./LiveBuddyAvatar";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { OPEN_PREVIEW_EVENT } from "@/lib/chatLinks";
 import { SHOW_TESTING_EVENT, type ShowTestingDetail } from "@/lib/previewTestingStore";
@@ -442,7 +442,7 @@ function ScreenFrame({ png, mime }: { png: string; mime?: string }) {
     <div className="flex justify-start">
       <img
         src={`data:${mime ?? "image/png"};base64,${png}`}
-        alt="Bot's screen"
+        alt="Buddy's screen"
         className="max-w-[70%] rounded-2xl border border-hairline/40"
       />
     </div>
@@ -820,12 +820,12 @@ export function ChatView({ bot }: { bot: Bot }) {
           ref={nameRef}
           onClick={() => dispatch({ type: "toggleSettings" })}
           className="flex min-w-0 shrink items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-raised/50"
-          title="Bot settings"
+          title="Buddy settings"
           style={noDrag}
         >
-          <MausAvatar
-            color={bot.color}
-            state={stateForBot({ ...bot, messages })}
+          <LiveBuddyAvatar
+            bot={bot}
+            messages={messages}
             size={28}
             motion={mascotMotion?.kind ?? "none"}
             motionKey={mascotMotion?.nonce ?? 0}
@@ -875,8 +875,8 @@ export function ChatView({ bot }: { bot: Bot }) {
                 "rounded-md p-1.5 hover:bg-raised",
                 state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
               )}
-              title="Bot's computer"
-              aria-label="Bot's computer"
+              title="Buddy's computer"
+              aria-label="Buddy's computer"
             >
               <Monitor size={18} />
             </button>
@@ -893,7 +893,7 @@ export function ChatView({ bot }: { bot: Bot }) {
                 },
                 {
                   id: "computer",
-                  label: "Bot's computer",
+                  label: "Buddy's computer",
                   icon: <Monitor size={14} />,
                   onClick: () => dispatch({ type: "toggleComputer" }),
                 },

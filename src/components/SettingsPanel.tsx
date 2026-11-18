@@ -3,8 +3,10 @@ import { BackupSettings } from "./BackupSettings";
 import { ChevronLeft, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
 import { MausAvatar } from "./Avatar";
+import { LiveBuddyAvatar } from "./LiveBuddyAvatar";
 import {
   PICKABLE_STATES,
+  normalizeState,
   stateForBot,
   MAUS_COLORS,
   MAUS_COLOR_NAMES,
@@ -40,7 +42,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
       Pick<Bot, "name" | "title" | "description" | "notifications" | "computer" | "color" | "mascotExpression">
     >,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
-  const activeState = stateForBot(bot);
+  // The picker marks the resting look, not whatever the Buddy is doing right now.
+  const activeState = normalizeState(bot.mascotExpression) ?? stateForBot({ ...bot, busy: false, unread: false, messages: [] });
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const triggerRef = useRef<HTMLElement | null>(null);
 
@@ -104,9 +107,8 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
 
       <div className="flex-1 overflow-y-auto px-5 pb-5">
         <div className="flex justify-center py-5">
-          <MausAvatar
-            color={bot.color}
-            state={activeState}
+          <LiveBuddyAvatar
+            bot={bot}
             size={112}
             motion={mascotMotion?.kind ?? "none"}
             motionKey={mascotMotion?.nonce ?? 0}
@@ -117,7 +119,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           <div className="overflow-hidden rounded-xl border border-hairline/40 bg-card">
             <div className="flex items-center justify-between border-b border-hairline/40 px-3 py-2.5">
               <span className="rounded-lg bg-raised px-3 py-1.5 text-[14px] font-medium text-ink">
-                Bot
+                Buddy
               </span>
               <button
                 onClick={() => patch({ color: "green", mascotExpression: null })}
@@ -197,7 +199,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
             <div>
               <div className="text-[15px] font-medium text-ink">Model</div>
               <div className="mt-0.5 text-[13px] text-ink-secondary">
-                Which provider and model this bot runs on
+                Which provider and model this Buddy runs on
               </div>
             </div>
             <ModelPicker bot={bot} />
@@ -207,7 +209,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
           <div className="rounded-xl bg-card p-4">
             <div className="text-[15px] font-medium text-ink">Computer</div>
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              Allow this bot to use this computer in the desktop app
+              Allow this Buddy to use this computer in the desktop app
             </div>
             <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
               {(["local", "off"] as const).map((mode, i) => (

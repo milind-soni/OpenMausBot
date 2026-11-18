@@ -354,7 +354,7 @@ export default function PreviewScreen() {
     if (testing.tab !== null) { testingStore.setTab(null); return; }
     if (activeSource?.kind !== "url" || mode !== "single") {
       attachTried.current.add(pending.id);
-      void api.register({ sessionId: pending.id, unavailable: activeSource?.kind !== "url" ? "Preview is not showing a web page. Bots can attach to web pages only; use target \"new\"." : "Preview is in Canvas layout. Ask the user to switch to Single, or use target \"new\"." });
+      void api.register({ sessionId: pending.id, unavailable: activeSource?.kind !== "url" ? "Preview is not showing a web page. Buddies can attach to web pages only; use target \"new\"." : "Preview is in Canvas layout. Ask the user to switch to Single, or use target \"new\"." });
       return;
     }
     if (ownFrameStatus === "loading" || ownFrameStatus === "empty") return;

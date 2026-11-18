@@ -17,7 +17,7 @@ export function startScheduleNotifications(baseUrl, Notification) {
           const data = frame.split("\n").find(line => line.startsWith("data: "));
           if (!data) continue;
           let event; try { event = JSON.parse(data.slice(6)); } catch { continue; }
-          if (event.kind === "schedule.started" && event.notify === true && Notification.isSupported()) new Notification({ title: "Scheduled task started", body: `${String(event.name ?? "Your bot").slice(0, 200)} started its scheduled task.` }).show();
+          if (event.kind === "schedule.started" && event.notify === true && Notification.isSupported()) new Notification({ title: "Scheduled task started", body: `${String(event.name ?? "Your Buddy").slice(0, 200)} started its scheduled task.` }).show();
         }
       }
     } catch { /* reconnect while the app is running */ }

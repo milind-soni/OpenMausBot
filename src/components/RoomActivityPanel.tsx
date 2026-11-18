@@ -3,8 +3,7 @@ import { Check, Circle, Clock3, ListTodo, Loader2, ShieldAlert, Square, X, XCirc
 import { cn } from "@/lib/cn";
 import type { RoomActivityEntry, RoomActivityStatus } from "@/lib/roomActivity";
 import { useRoomActivity, useStore, type Bot, type Group, type Message } from "@/state/store";
-import { MausAvatar } from "./Avatar";
-import { normalizeState } from "@/lib/mascot";
+import { RoomBuddyAvatar } from "./LiveBuddyAvatar";
 
 type DisplayStatus = RoomActivityStatus | "queued";
 
@@ -88,13 +87,7 @@ function AgentActivityCard({
   return (
     <article className="rounded-xl border border-hairline/40 bg-card p-3">
       <div className="flex items-center gap-2.5">
-        <MausAvatar
-          color={bot.color}
-          state={normalizeState(bot.mascotExpression) ?? "happy"}
-          size={28}
-          motion={status === "running" ? "working" : "none"}
-          motionKey={status === "running" ? 1 : 0}
-        />
+        <RoomBuddyAvatar bot={bot} group={group} size={28} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium text-ink">{bot.name}</div>
           <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-ink-secondary">

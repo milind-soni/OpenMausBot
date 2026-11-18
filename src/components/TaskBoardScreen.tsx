@@ -255,7 +255,7 @@ function TaskModal({
             </div>
             <div className="space-y-3">
               <label className="block"><span className={label}>Status</span><select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as TaskStatus })} className={input}>{TASK_STATUSES.map((status) => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}</select></label>
-              <label className="block"><span className={label}>Assigned bot</span><select value={draft.assigneeBotId} onChange={(event) => setDraft({ ...draft, assigneeBotId: event.target.value })} className={input}><option value="">Unassigned</option>{state.bots.filter((bot) => !bot.hidden).map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}{task?.assignee && !task.assignee.available && <option value={task.assignee.id}>{task.assignee.name}</option>}</select></label>
+              <label className="block"><span className={label}>Assigned Buddy</span><select value={draft.assigneeBotId} onChange={(event) => setDraft({ ...draft, assigneeBotId: event.target.value })} className={input}><option value="">Unassigned</option>{state.bots.filter((bot) => !bot.hidden).map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}{task?.assignee && !task.assignee.available && <option value={task.assignee.id}>{task.assignee.name}</option>}</select></label>
               <label className="block"><span className={label}>Project</span><select value={draft.projectId} onChange={(event) => setDraft({ ...draft, projectId: event.target.value })} className={input}><option value="">No project folder</option>{state.taskProjects.map((project) => <option key={project.id} value={project.id}>#{project.mention} · {project.name}{project.available ? "" : " (unavailable)"}</option>)}</select></label>
               <div className="grid grid-cols-2 gap-2">
                 <label className="block"><span className={label}>Category</span><select value={draft.type} onChange={(event) => setDraft({ ...draft, type: event.target.value as TaskType })} className={input}>{TASK_TYPES.map((type) => <option key={type} value={type}>{type[0].toUpperCase() + type.slice(1)}</option>)}</select></label>
@@ -727,7 +727,7 @@ export function TaskBoardScreen() {
           <ClipboardCheck size={20} className="text-accent" />
           <div>
             <h1 className="text-[16px] font-semibold text-ink">Task Board</h1>
-            <p className="text-[11px] text-ink-secondary">Shared work for you and your bots.</p>
+            <p className="text-[11px] text-ink-secondary">Shared work for you and your Buddies.</p>
           </div>
         </div>
         <div className="flex items-center gap-2" style={{ WebkitAppRegion: "no-drag" } as CSSProperties}>
@@ -780,9 +780,9 @@ export function TaskBoardScreen() {
             value={filters.assigneeBotId}
             onChange={(event) => setFilters({ ...filters, assigneeBotId: event.target.value })}
             className={cn(selectClass, "max-w-[116px] xl:max-w-[160px]")}
-            aria-label="Filter by bot"
+            aria-label="Filter by Buddy"
           >
-            <option value="">All bots</option>
+            <option value="">All Buddies</option>
             <option value="unassigned">Unassigned</option>
             {state.bots.map((bot) => (
               <option key={bot.id} value={bot.id}>
@@ -946,7 +946,7 @@ export function TaskBoardScreen() {
             </div>
             <h2 className="mt-4 text-[16px] font-semibold text-ink">Give the team something to do</h2>
             <p className="mx-auto mt-2 max-w-sm text-[13px] leading-5 text-ink-secondary">
-              Create a task here, or ask a bot in chat to add and delegate work on the shared board.
+              Create a task here, or ask a Buddy in chat to add and delegate work on the shared board.
             </p>
             <button
               onClick={() => openNewTask("todo")}

@@ -42,7 +42,7 @@ export function ReactionChips({
   const grouped = new Map<string, string[]>();
   for (const r of reactions) grouped.set(r.emoji, [...(grouped.get(r.emoji) ?? []), r.by]);
   const nameOf = (by: string) =>
-    by === "user" ? "You" : (members?.find((b) => b.id === by)?.name ?? "Bot");
+    by === "user" ? "You" : (members?.find((b) => b.id === by)?.name ?? "Buddy");
   return (
     <div className={cn("mt-1 flex flex-wrap gap-1", align === "right" ? "justify-end" : "justify-start")}>
       {[...grouped].map(([emoji, bys]) => (

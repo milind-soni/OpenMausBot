@@ -52,7 +52,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
       }
       // 4. Header name / fallback
       const fallback = document.querySelector<HTMLElement>(
-        'main button[title="Bot settings"], main header button, main header',
+        'main button[title="Buddy settings"], main header button, main header',
       );
       if (fallback) {
         fallback.focus();
@@ -134,7 +134,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         <button
           onClick={() => dispatch({ type: "toggleSettings", open: true })}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
-          title="Bot settings"
+          title="Buddy settings"
         >
           <Settings size={18} />
         </button>
@@ -171,7 +171,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
                     ? localMisses >= 3
                       ? "Screen preview needs Screen Recording permission. Allow it in Settings, then reopen the app."
                       : `Capturing ${localShort}'s screen…`
-                    : phase === "off" ? "This bot’s computer is off" : "Open the desktop app to use this computer"}
+                    : phase === "off" ? "This Buddy’s computer is off" : "Open the desktop app to use this computer"}
               </span>
               {phase === "local" && localMisses >= 3 && (
                 <button
@@ -189,7 +189,7 @@ export function ComputerPanel({ bot }: { bot: Bot }) {
         <div className="mt-4 rounded-xl bg-card p-4">
           <div className="text-[15px] font-medium text-ink">Runs on</div>
           <div className="mt-0.5 text-[13px] text-ink-secondary">
-            Allow this bot to use this computer in the desktop app.
+            Allow this Buddy to use this computer in the desktop app.
           </div>
           <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
             {(

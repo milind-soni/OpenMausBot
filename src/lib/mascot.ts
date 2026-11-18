@@ -1,48 +1,76 @@
-import { CURSOR_STATES, type CursorState } from "@/components/CursorAvatar";
+/**
+ * Buddy states. The first group is live: Studio derives it from what a Buddy
+ * is doing right now. The rest are resting expressions a Buddy can be given,
+ * kept under the names earlier avatars stored so saved appearances still load.
+ */
+export const LIVE_STATES = [
+  "working",
+  "thinking",
+  "writing",
+  "searching",
+  "preview",
+  "testing",
+  "listening",
+  "queued",
+  "connecting",
+  "attention",
+  "notifying",
+  "error",
+  "limited",
+  "paused",
+  "success",
+  "celebrate",
+] as const;
 
-/** The mascot's behaviour vocabulary — CursorAvatar's 39 states, under the
- * app's historical names. */
-export type MausState = CursorState;
-export const MAUS_STATES = CURSOR_STATES;
+export const EXPRESSION_STATES = [
+  "idle",
+  "happy",
+  "curious",
+  "excited",
+  "proud",
+  "playful",
+  "shy",
+  "drowsy",
+  "sleeping",
+  "suspicious",
+  "confused",
+  "sad",
+  "surprised",
+] as const;
 
-/** CursorAvatar ships French group labels; the app shows these instead. The
- * memberships mirror its STATE_GROUPS exactly. */
+/** Names earlier avatar engines stored; each still renders, as its nearest Buddy look. */
+const RETIRED_STATES = [
+  "waking",
+  "angry",
+  "bored",
+  "laughing",
+  "scared",
+  "orbit",
+  "radar",
+  "progress",
+  "spawning",
+  "humming",
+  "loading",
+  "dictating",
+  "sending",
+  "receiving",
+  "uploading",
+  "alerting",
+  "bouncing",
+  "dragging",
+  "powering-down",
+] as const;
+
+export type MausState =
+  | (typeof LIVE_STATES)[number]
+  | (typeof EXPRESSION_STATES)[number]
+  | (typeof RETIRED_STATES)[number];
+
+export const MAUS_STATES: MausState[] = [...LIVE_STATES, ...EXPRESSION_STATES, ...RETIRED_STATES];
+
 export const STATE_GROUPS: Record<string, MausState[]> = {
-  Lifecycle: ["sleeping", "waking", "idle", "listening", "thinking", "searching", "working"],
-  Reactions: [
-    "excited",
-    "surprised",
-    "suspicious",
-    "angry",
-    "drowsy",
-    "happy",
-    "curious",
-    "confused",
-    "bored",
-    "proud",
-    "shy",
-    "sad",
-    "laughing",
-    "scared",
-    "playful",
-    "celebrate",
-  ],
-  "Agent morphs": ["orbit", "radar", "progress"],
-  "Product cycle": [
-    "spawning",
-    "humming",
-    "loading",
-    "dictating",
-    "writing",
-    "sending",
-    "receiving",
-    "uploading",
-    "notifying",
-    "alerting",
-    "dragging",
-    "bouncing",
-    "powering-down",
-  ],
+  Live: [...LIVE_STATES],
+  Expressions: [...EXPRESSION_STATES],
 };
 
 export const MAUS_COLOR_NAMES = [
@@ -56,6 +84,7 @@ export const MAUS_COLOR_NAMES = [
   "yellow",
   "teal",
   "coral",
+  "mint",
 ] as const;
 
 export type MausColor = (typeof MAUS_COLOR_NAMES)[number];
@@ -71,6 +100,8 @@ export const MAUS_COLORS: Record<MausColor, string> = {
   yellow: "#D8A729",
   teal: "#01A492",
   coral: "#E5634E",
+  /** the color the Buddy artwork ships in */
+  mint: "#00C9A8",
 };
 
 export const MAUS_MOTIONS = [
@@ -91,10 +122,9 @@ export const MAUS_MOTIONS = [
 export type MausMotion = "none" | (typeof MAUS_MOTIONS)[number];
 
 /**
- * The face used to be ten hand-drawn SVGs; it is now the engine's 39 states.
- * Bots saved under the old vocabulary still carry one of these ten names, so
- * they are translated on read rather than migrated in place — a bot's stored
- * face should survive a downgrade too.
+ * The first avatar had ten hand-drawn faces. Buddies saved under that
+ * vocabulary still carry one of these names, so they are translated on read
+ * rather than migrated in place — a stored face should survive a downgrade too.
  */
 const LEGACY_STATES: Record<string, MausState> = {
   deadpan: "idle",
@@ -105,7 +135,7 @@ const LEGACY_STATES: Record<string, MausState> = {
   sleepy: "drowsy",
   surprised: "surprised",
   skeptical: "suspicious",
-  worried: "scared",
+  worried: "sad",
   mischievous: "playful",
 };
 
@@ -118,38 +148,29 @@ export function normalizeState(value: string | null | undefined): MausState | nu
   return LEGACY_STATES[value] ?? null;
 }
 
-/**
- * The states worth offering in the appearance picker.
- *
- * The engine carries 39, but many are transient beats the app drives itself
- * (`sending`, `alerting`, `powering-down`) and make no sense as a bot's resting
- * face. More importantly, states share resting faces: `happy`, `excited` and
- * `playful` all rest on expression 2, and `curious`, `surprised` and `scared`
- * all rest on 3 — they differ in which faces they *drift* to, which a static
- * swatch cannot show. Offering them all gave 15 buttons showing 8 pictures.
- *
- * Across all 39 states there are only 11 distinct resting faces, so this is one
- * state per face, chosen for the clearest name. Every swatch looks different.
- */
+/** Resting expressions offered in the appearance picker; each one looks distinct. */
 export const PICKABLE_STATES: MausState[] = [
-  "idle", // expression 0
-  "happy", // 2
-  "curious", // 3
-  "drowsy", // 4
-  "working", // 7
-  "thinking", // 8
-  "listening", // 10
-  "sleeping", // 13
-  "suspicious", // 14
-  "proud", // 15
+  "idle",
+  "happy",
+  "curious",
+  "excited",
+  "proud",
+  "playful",
+  "shy",
+  "drowsy",
+  "sleeping",
+  "suspicious",
 ];
 
 type MascotMessage = {
   kind: string;
-  tool?: { ok?: boolean };
+  role?: string;
+  tool?: { name?: string; ok?: boolean };
+  card?: { requestId?: string; answered?: string; dismissed?: boolean };
 };
 
 export type MascotBotProfile = {
+  id?: string;
   name: string;
   title?: string;
   description?: string;
@@ -159,30 +180,89 @@ export type MascotBotProfile = {
   messages?: MascotMessage[];
 };
 
+/** What a Buddy is doing right now, beyond what its own record carries. */
+export type MascotLiveContext = {
+  /** reply text is streaming in */
+  writing?: boolean;
+  /** extended thinking is streaming in, before any reply text */
+  reasoning?: boolean;
+  /** this Buddy's Preview session, if it has one open */
+  preview?: { state: "opening" | "ready" | "paused" | "closed" | "error" } | null;
+  /** rooms: this member is the one running */
+  roomBusy?: boolean;
+  /** rooms: this member is waiting its turn */
+  queued?: boolean;
+  /** rooms: this member's latest activity status */
+  roomStatus?: "waiting" | "running" | "approval" | "completed" | "cancelled" | "failed";
+};
+
+const PREVIEW_TOOL = /(^|_)preview_|\bpreview\b/i;
+const TEST_TOOL = /\b(test|tests|vitest|jest|pytest|playwright|cypress|typecheck|tsc|lint|check-[\w-]+)\b/i;
+const SEARCH_TOOL = /^(grep|glob|websearch|webfetch|toolsearch|search|list_files|read|read_file)\b|\b(rg|grep|find|search)\s/i;
+const USAGE_LIMIT = /usage (ran out|limit)/i;
+
+/** The live state a tool run implies, if it implies one. */
+export function stateForTool(name: string | undefined): MausState | null {
+  if (!name) return null;
+  if (PREVIEW_TOOL.test(name)) return "preview";
+  if (TEST_TOOL.test(name)) return "testing";
+  if (SEARCH_TOOL.test(name)) return "searching";
+  return null;
+}
+
 /**
- * Selects a state from live state first, then from what the bot is about.
- * The keyword groups deliberately overlap as little as possible so a bot's
- * visual identity stays stable while its title and description are edited.
+ * Picks a Buddy's state. Live activity always wins over the resting
+ * expression the user chose, so a Buddy with a saved face still shows that
+ * it is working, stuck or waiting on you. Then the chosen face, then one
+ * inferred from what the Buddy is about.
  */
-export function stateForBot(bot: MascotBotProfile): MausState {
+export function stateForBot(bot: MascotBotProfile, live: MascotLiveContext = {}): MausState {
+  const messages = bot.messages ?? [];
+  const last = messages[messages.length - 1];
+  const busy = Boolean(bot.busy || live.roomBusy);
+
+  const waitingOnUser = messages.some(
+    (m) => m.kind === "options" && m.card?.requestId && !m.card.answered && !m.card.dismissed,
+  );
+  if (waitingOnUser || live.roomStatus === "approval") return "attention";
+  if (busy && live.preview?.state === "error") return "attention";
+
+  // A turn can end with a notice after the step that failed, so look at the whole latest turn.
+  let failed: MascotMessage | undefined;
+  for (let i = messages.length - 1; i >= 0 && messages[i].role !== "user"; i--) {
+    if (messages[i].kind === "activity" && messages[i].tool?.ok === false) {
+      failed = messages[i];
+      break;
+    }
+  }
+  if (failed && !busy) return USAGE_LIMIT.test(failed.tool?.name ?? "") ? "limited" : "error";
+  if (!busy && live.roomStatus === "failed") return "error";
+
+  if (busy) {
+    if (live.writing) return "writing";
+    const tool = last?.kind === "activity" && last.tool?.ok === undefined ? stateForTool(last.tool?.name) : null;
+    if (tool === "testing") return "testing";
+    if (tool === "preview" || live.preview?.state === "ready") return "preview";
+    if (live.preview?.state === "opening") return "connecting";
+    if (tool) return tool;
+    if (live.reasoning) return "thinking";
+    return "working";
+  }
+
+  if (live.queued) return "queued";
+  if (bot.unread) return "notifying";
+
   const pinned = normalizeState(bot.mascotExpression);
   if (pinned) return pinned;
-
-  const last = bot.messages?.[bot.messages.length - 1];
-
-  if (last?.kind === "activity" && last.tool?.ok === false) return "alerting";
-  if (bot.busy) return "working";
-  if (bot.unread) return "notifying";
-  if (last?.kind === "options") return "curious";
 
   const profile = `${bot.name} ${bot.title ?? ""} ${bot.description ?? ""}`.toLowerCase();
   const matches = (words: RegExp) => words.test(profile);
 
   if (matches(/\b(code|coding|developer|development|engineer|engineering|build|debug|program|software)\b/)) {
-    return "working";
+    return "proud";
   }
   if (matches(/\b(research|researcher|search|investigate|strategy|strategist|study|learn|knowledge)\b/)) {
-    return "searching";
+    return "curious";
   }
   if (matches(/\b(marketing|growth|launch|campaign|social|sales|outreach|brand)\b/)) {
     return "excited";
@@ -190,14 +270,8 @@ export function stateForBot(bot: MascotBotProfile): MausState {
   if (matches(/\b(overnight|night|background|async|queue|batch|long-running)\b/)) {
     return "drowsy";
   }
-  if (matches(/\b(monitor|monitoring|incident|alert|watch|status|uptime)\b/)) {
-    return "radar";
-  }
-  if (matches(/\b(review|reviewer|audit|critic|critique|quality|qa|test|legal)\b/)) {
+  if (matches(/\b(review|reviewer|audit|critic|critique|quality|qa|test|legal|monitor|security|compliance|risk)\b/)) {
     return "suspicious";
-  }
-  if (matches(/\b(security|secure|compliance|risk|privacy|finance|financial)\b/)) {
-    return "scared";
   }
   if (matches(/\b(design|designer|creative|brainstorm|art|illustration|music|story)\b/)) {
     return "playful";

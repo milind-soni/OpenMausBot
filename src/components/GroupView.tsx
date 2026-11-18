@@ -9,6 +9,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { Activity, ArrowDown, ClipboardList, Pin, Smartphone, AlarmClock, Settings2 } from "lucide-react";
 import { useStore, useStreaming, formatTime, type Attachment, type Bot, type Group } from "@/state/store";
 import { MausAvatar } from "./Avatar";
+import { RoomBuddyAvatar } from "./LiveBuddyAvatar";
 import { normalizeState } from "@/lib/mascot";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { OPEN_PREVIEW_EVENT } from "@/lib/chatLinks";
@@ -364,13 +365,7 @@ export function GroupView({ group }: { group: Group }) {
             <div className="flex items-center -space-x-1.5 pr-1 shrink-0">
               {members.slice(0, 2).map((b) => (
                 <span key={b.id} title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}>
-                  <MausAvatar
-                    color={b.color}
-                    state={normalizeState(b.mascotExpression) ?? "happy"}
-                    size={24}
-                    motion={group.busyBotId === b.id ? "working" : "none"}
-                    motionKey={group.busyBotId === b.id ? 1 : 0}
-                  />
+                  <RoomBuddyAvatar bot={b} group={group} size={24} />
                 </span>
               ))}
               <span className="flex h-6 items-center justify-center rounded-full bg-raised px-1.5 text-[10px] font-medium text-ink-secondary border border-hairline/60">
@@ -381,13 +376,7 @@ export function GroupView({ group }: { group: Group }) {
             <div className="flex items-center gap-1.5 shrink-0">
               {members.map((b) => (
                 <span key={b.id} title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}>
-                  <MausAvatar
-                    color={b.color}
-                    state={normalizeState(b.mascotExpression) ?? "happy"}
-                    size={24}
-                    motion={group.busyBotId === b.id ? "working" : "none"}
-                    motionKey={group.busyBotId === b.id ? 1 : 0}
-                  />
+                  <RoomBuddyAvatar bot={b} group={group} size={24} />
                 </span>
               ))}
             </div>
@@ -516,7 +505,7 @@ export function GroupView({ group }: { group: Group }) {
                   setBulletinOpen(false);
                 }
               }}
-              placeholder="Room instructions — use # to give every bot project context"
+              placeholder="Room instructions — use # to give every Buddy project context"
               rows={4}
               className="w-full resize-none bg-transparent text-[13px] leading-relaxed text-ink placeholder:text-ink-secondary focus:outline-none"
             />
@@ -533,7 +522,7 @@ export function GroupView({ group }: { group: Group }) {
               }
             }}
             className="mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-raised/40"
-            title="Room bulletin — shared instructions for every bot here"
+            title="Room bulletin — shared instructions for every Buddy here"
           >
             <Pin size={12} className="shrink-0 text-ink-secondary" />
             <span className={cn("truncate text-[12.5px]", group.bulletin ? "text-ink-secondary" : "text-ink-secondary/60")}>
@@ -585,7 +574,7 @@ export function GroupView({ group }: { group: Group }) {
               </div>
               <div className="text-[17px] font-semibold text-ink">{group.name}</div>
               <div className="max-w-[380px] text-[14px] text-ink-secondary">
-                Mention a bot with @ to bring them in, and a project with # to share its workspace.
+                Mention a Buddy with @ to bring them in, and a project with # to share its workspace.
               </div>
             </div>
           )}

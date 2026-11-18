@@ -254,7 +254,7 @@ function AppDetailsModal({
         <div className="min-h-0 flex-1 overflow-y-auto p-5 space-y-4 text-[13px]">
           <div>
             <h3 className="font-medium text-ink">About {card.label}</h3>
-            <p className="mt-1.5 leading-relaxed text-ink-secondary">{card.blurb || "Integrate this service to enable automated actions and context retrieval for all your bots."}</p>
+            <p className="mt-1.5 leading-relaxed text-ink-secondary">{card.blurb || "Integrate this service to enable automated actions and context retrieval for all your Buddies."}</p>
           </div>
 
           <div className="rounded-xl border border-hairline/40 bg-card p-4 space-y-2.5">
@@ -274,7 +274,7 @@ function AppDetailsModal({
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 size={14} className="text-accent shrink-0" />
-                <span>Bot Automation</span>
+                <span>Buddy Automation</span>
               </div>
             </div>
           </div>
@@ -600,7 +600,7 @@ export function AppsScreen() {
               <div className="flex items-center gap-3">
                 <AlertTriangle size={20} className="shrink-0 text-warning" />
                 <div>
-                  <span className="font-semibold text-ink">Composio Connect key required.</span> Add your key in App Settings to authorize and connect apps with your AI bots.
+                  <span className="font-semibold text-ink">Composio Connect key required.</span> Add your key in App Settings to authorize and connect apps with your AI Buddies.
                 </div>
               </div>
               <button
@@ -784,7 +784,7 @@ export function AppsScreen() {
                             </h3>
                           </div>
                           <p className="mt-1 line-clamp-2 text-[12px] leading-relaxed text-ink-secondary">
-                            {card.blurb || "Integrate external automation and data capabilities for bots."}
+                            {card.blurb || "Integrate external automation and data capabilities for Buddies."}
                           </p>
                         </div>
                       </div>

@@ -190,7 +190,7 @@ export function ModelPicker({
                         setBackupOpen(false);
                         backupTriggerRef.current?.focus();
                       })
-                      .catch(() => setBackupError("Couldn’t keep this model. Wait for the bot to finish and try again."));
+                      .catch(() => setBackupError("Couldn’t keep this model. Wait for the Buddy to finish and try again."));
                   }}
                 >
                   Keep this model
@@ -208,7 +208,7 @@ export function ModelPicker({
                         setBackupOpen(false);
                         backupTriggerRef.current?.focus();
                       })
-                      .catch(() => setBackupError("Couldn’t switch back. Wait for the bot to finish and try again."));
+                      .catch(() => setBackupError("Couldn’t switch back. Wait for the Buddy to finish and try again."));
                   }}
                 >
                   Switch back now

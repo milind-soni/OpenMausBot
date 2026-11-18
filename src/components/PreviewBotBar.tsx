@@ -57,7 +57,7 @@ export function PreviewBotBar({ botTabs, botTab, attached, controlSession, error
           {controlSession.state === "paused"
             ? controlSession.canResume && (
                 <button type="button" onClick={() => void testingStore.control(controlSession.id, "resume")} className="flex shrink-0 items-center gap-1 rounded-md bg-accent px-2 py-1 text-[11px] text-white">
-                  <Play className="h-3 w-3" />Resume bot
+                  <Play className="h-3 w-3" />Resume Buddy
                 </button>
               )
             : controlSession.state !== "error" && (

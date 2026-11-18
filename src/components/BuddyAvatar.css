@@ -1,0 +1,324 @@
+/* Buddy motion. Layers, outside in:
+ *   .buddy-float  hover drift (and squash) — the whole Buddy
+ *   .buddy-shake  side-to-side bursts when busy, nudges when it needs you
+ *   .buddy-beat   one-shot beats (pop, hop, wiggle, nudge)
+ *   .buddy-spin   the body's turn; only the body turns
+ *   .buddy-face   where the eyes look; .buddy-eye their pose; .buddy-lid blinks
+ * Each mood sets the custom properties below; the keyframes read them. */
+
+.buddy {
+  --spin: 26s;
+  --bob: 5.2s;
+  --lift: -3.5%;
+  --shake: 0%;
+  --shake-every: 2.6s;
+  --blink: 6.4s;
+  --look: buddy-glance 7s ease-in-out infinite;
+  --eye-a: none;
+  --eye-b: none;
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  line-height: 0;
+  vertical-align: middle;
+}
+
+.buddy svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.buddy-float,
+.buddy-shake,
+.buddy-beat {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.buddy-float { animation: buddy-hover var(--bob) ease-in-out infinite; }
+.buddy-shake { animation: buddy-shake var(--shake-every) ease-in-out infinite; }
+
+.buddy-spin {
+  transform-origin: 512px 512px;
+  animation: buddy-spin var(--spin) linear infinite;
+}
+.buddy-extra-spin { transform-origin: 512px 512px; }
+.buddy-extra-spin[data-on] { animation: buddy-spin 800ms cubic-bezier(0.3, 0.7, 0.2, 1) 1; }
+
+.buddy-look { transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.buddy-face { animation: var(--look); }
+
+.buddy-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 320ms cubic-bezier(0.3, 1.4, 0.5, 1);
+  scale: var(--buddy-eye-scale, 1);
+}
+.buddy-eye-a { transform: var(--eye-a); }
+.buddy-eye-b { transform: var(--eye-b); }
+
+.buddy-lid {
+  transform-box: fill-box;
+  transform-origin: 50% 60%;
+  animation: buddy-blink var(--blink) linear infinite;
+}
+.buddy-eye-b .buddy-lid { animation-delay: 40ms; }
+.buddy-lid[data-blink] { animation: buddy-blink-once 240ms ease-in-out 1, buddy-blink var(--blink) linear 240ms infinite; }
+
+/* ---------------------------------------------------------------- ornaments */
+
+.buddy-halo {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 14;
+  opacity: 0;
+  transform-origin: 512px 512px;
+}
+.buddy-brackets {
+  fill: none;
+  stroke: #fbeaff;
+  stroke-width: 26;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: buddy-bracket 3.2s ease-in-out infinite;
+}
+.buddy-testdots { fill: #fbeaff; }
+.buddy-testdots circle { animation: buddy-dot 1.2s ease-in-out infinite; }
+.buddy-testdots circle:nth-child(2) { animation-delay: 0.18s; }
+.buddy-testdots circle:nth-child(3) { animation-delay: 0.36s; }
+.buddy-caret {
+  stroke: #fbeaff;
+  stroke-width: 26;
+  stroke-linecap: round;
+  stroke-dasharray: 300;
+  animation: buddy-type 1.8s steps(6, end) infinite;
+}
+.buddy-thought { fill: currentColor; opacity: 0.55; }
+.buddy-thought circle { animation: buddy-dot 2.4s ease-in-out infinite; }
+.buddy-thought circle:nth-child(2) { animation-delay: 0.4s; }
+.buddy-zzz {
+  fill: currentColor;
+  font: 700 200px/1 system-ui, sans-serif;
+  animation: buddy-zzz 3.6s ease-in-out infinite;
+}
+.buddy-badge circle { fill: #fff3d6; stroke: #e2a12d; stroke-width: 22; }
+.buddy-badge text { fill: #8a5a06; font: 800 140px/1 system-ui, sans-serif; text-anchor: middle; }
+.buddy-badge {
+  transform-origin: 872px 848px;
+  animation: buddy-badge-in 420ms cubic-bezier(0.3, 1.6, 0.5, 1) 1;
+}
+.buddy[data-mood="error"] .buddy-badge circle { fill: #ffe1e4; stroke: #d94b52; }
+.buddy[data-mood="error"] .buddy-badge text { fill: #9c1f2a; }
+.buddy[data-mood="limited"] .buddy-badge circle { fill: #e7ecf4; stroke: #6b7a92; }
+.buddy[data-mood="limited"] .buddy-badge text { fill: #34405a; font-size: 150px; }
+.buddy-sparkles {
+  fill: #ffe9a8;
+  opacity: 0;
+  transform-origin: 512px 512px;
+  animation: buddy-spark 1.5s ease-out 1;
+}
+
+/* ------------------------------------------------------------------- moods */
+
+/* Busy: a quicker turn, a livelier bob, and a little shake. */
+.buddy[data-mood="working"] { --spin: 3.6s; --bob: 1.7s; --lift: -6%; --shake: 2.4%; --shake-every: 1.9s; --look: buddy-glance 3s ease-in-out infinite; }
+.buddy[data-mood="testing"] { --spin: 4.4s; --bob: 2.3s; --lift: -5%; --shake: 1.6%; --shake-every: 1.5s; --look: buddy-scan 2.4s steps(3, end) infinite; --eye-a: scale(1, 0.86); --eye-b: scale(1, 0.86); }
+.buddy[data-mood="preview"] { --spin: 7s; --bob: 3s; --lift: -4.5%; --look: buddy-scan 3.4s ease-in-out infinite; --eye-a: scale(1.06); --eye-b: scale(1.06); }
+.buddy[data-mood="writing"] { --spin: 6.2s; --bob: 2.8s; --lift: -4.5%; --look: buddy-write 2.4s ease-in-out infinite; }
+.buddy[data-mood="searching"] { --spin: 9s; --bob: 3.4s; --lift: -4%; --look: buddy-scan 4.6s ease-in-out infinite; --eye-a: scale(1.1, 1.04); --eye-b: scale(0.94); }
+.buddy[data-mood="thinking"] { --spin: 13s; --bob: 4s; --look: buddy-ponder 5.5s ease-in-out infinite; --eye-a: scale(0.94, 0.9); --eye-b: scale(0.94, 0.9); }
+
+.buddy[data-mood="listening"] { --spin: 18s; --bob: 3.6s; --look: none; --eye-a: scale(1.08); --eye-b: scale(1.08); }
+.buddy[data-mood="listening"] .buddy-halo { animation: buddy-listen 2.6s ease-out infinite; }
+.buddy[data-mood="connecting"] { --spin: 7.5s; --bob: 2.8s; --look: buddy-glance 3s ease-in-out infinite; }
+.buddy[data-mood="connecting"] .buddy-halo { stroke-dasharray: 90 70; opacity: 0.4; animation: buddy-spin 2.8s linear infinite; }
+.buddy[data-mood="queued"] { --spin: 36s; --bob: 6s; --lift: -1.5%; --look: buddy-side 8s ease-in-out infinite; --eye-a: scale(1, 0.82); --eye-b: scale(1, 0.82); }
+
+/* Needs you: two nudges, then a rest, and a badge. */
+.buddy[data-mood="attention"] { --spin: 28s; --bob: 4.4s; --look: buddy-up 4.6s ease-in-out infinite; --eye-a: scale(1.1); --eye-b: scale(1.1); }
+.buddy[data-mood="attention"] .buddy-shake { animation: buddy-nudge 4.6s ease-in-out infinite; }
+.buddy[data-mood="notifying"] { --spin: 22s; --bob: 3.6s; --look: buddy-up 6s ease-in-out infinite; --eye-a: scale(1.05); --eye-b: scale(1.05); }
+.buddy[data-mood="notifying"] .buddy-shake { animation: buddy-nudge 6s ease-in-out infinite; }
+
+/* Trouble: a slow concerned rock, never a frantic shake. */
+.buddy[data-mood="error"] { --bob: 7s; --lift: -1%; --look: none; --blink: 9s; --eye-a: translateY(4%) rotate(-10deg) scale(1, 0.74); --eye-b: translateY(4%) rotate(10deg) scale(1, 0.74); }
+.buddy[data-mood="error"] .buddy-spin { animation: buddy-rock 6s ease-in-out infinite; }
+.buddy[data-mood="limited"] { --spin: 60s; --bob: 8s; --lift: -1%; --look: buddy-side 10s ease-in-out infinite; --blink: 10s; --eye-a: scale(1, 0.5); --eye-b: scale(1, 0.5); }
+.buddy[data-mood="paused"] { --eye-a: scale(1, 0.66); --eye-b: scale(1, 0.66); }
+.buddy[data-mood="paused"] .buddy-float,
+.buddy[data-mood="paused"] .buddy-spin,
+.buddy[data-mood="paused"] .buddy-face { animation: none; }
+
+/* Wins: one pop, then back to an easy hover. */
+.buddy[data-mood="success"] { --look: none; --eye-a: scale(1.04, 0.6); --eye-b: scale(1.04, 0.6); }
+.buddy[data-mood="success"] .buddy-float { animation: buddy-yay 0.85s cubic-bezier(0.2, 0.8, 0.2, 1) 1, buddy-hover var(--bob) ease-in-out 0.85s infinite; }
+.buddy[data-mood="celebrate"] { --spin: 8s; --look: none; --eye-a: scale(1.04, 0.58); --eye-b: scale(1.04, 0.58); }
+.buddy[data-mood="celebrate"] .buddy-float { animation: buddy-party 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) 1, buddy-hover var(--bob) ease-in-out 1.6s infinite; }
+
+/* Resting expressions: idle's motion, their own eyes. */
+.buddy[data-mood="happy"] { --eye-a: scale(1.04, 0.62); --eye-b: scale(1.04, 0.62); --bob: 4.2s; }
+.buddy[data-mood="curious"] { --look: buddy-side 6s ease-in-out infinite; --eye-a: scale(0.9); --eye-b: scale(1.1, 1.12); }
+.buddy[data-mood="excited"] { --spin: 14s; --bob: 2.6s; --lift: -6%; --eye-a: scale(1.14); --eye-b: scale(1.14); }
+.buddy[data-mood="proud"] { --look: buddy-up 9s ease-in-out infinite; --eye-a: scale(1, 0.72); --eye-b: scale(1, 0.72); }
+.buddy[data-mood="playful"] { --spin: 16s; --bob: 3.2s; --eye-a: scale(1, 0.14); --eye-b: rotate(6deg) scale(1.06); }
+.buddy[data-mood="playful"] .buddy-eye-a .buddy-lid { animation: none; }
+.buddy[data-mood="shy"] { --look: buddy-down 8s ease-in-out infinite; --eye-a: scale(0.84); --eye-b: scale(0.84); }
+.buddy[data-mood="drowsy"] { --spin: 40s; --bob: 6.5s; --lift: -2%; --blink: 4s; --eye-a: scale(1, 0.45); --eye-b: scale(1, 0.45); }
+.buddy[data-mood="sleeping"] { --spin: 55s; --bob: 7s; --lift: -1.5%; --look: none; --eye-a: scale(1, 0.12); --eye-b: scale(1, 0.12); }
+.buddy[data-mood="sleeping"] .buddy-lid { animation: none; }
+.buddy[data-mood="suspicious"] { --look: buddy-side 7s ease-in-out infinite; --eye-a: scale(1, 0.42); --eye-b: scale(1, 0.48); }
+.buddy[data-mood="confused"] { --look: buddy-side 5s ease-in-out infinite; --eye-a: rotate(-8deg) scale(0.82); --eye-b: rotate(6deg) scale(1.08); }
+.buddy[data-mood="sad"] { --bob: 7s; --lift: -1%; --look: buddy-down 9s ease-in-out infinite; --eye-a: translateY(5%) rotate(10deg) scale(0.94, 0.8); --eye-b: translateY(5%) rotate(-10deg) scale(0.94, 0.8); }
+.buddy[data-mood="surprised"] { --eye-a: scale(1.18, 1.14); --eye-b: scale(1.18, 1.14); }
+
+/* ------------------------------------------------------------------- beats */
+
+.buddy[data-beat="pop"] .buddy-beat { animation: buddy-pop 700ms cubic-bezier(0.3, 1.5, 0.5, 1) 1; }
+.buddy[data-beat="hop"] .buddy-beat { animation: buddy-yay 900ms cubic-bezier(0.2, 0.8, 0.2, 1) 1; }
+.buddy[data-beat="wiggle"] .buddy-beat { animation: buddy-wiggle 650ms ease-in-out 1; }
+.buddy[data-beat="nudge"] .buddy-beat { animation: buddy-wiggle 450ms ease-in-out 2; }
+
+/* ------------------------------------------------------------------- still */
+
+.buddy[data-still] *,
+:root[data-buddies-hidden] .buddy * {
+  animation-play-state: paused !important;
+}
+.buddy[data-still] .buddy-float,
+.buddy[data-still] .buddy-shake,
+.buddy[data-still] .buddy-beat,
+.buddy[data-still] .buddy-spin,
+.buddy[data-still] .buddy-face,
+.buddy[data-still] .buddy-lid {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .buddy *,
+  .buddy *::before,
+  .buddy *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  /* Ornaments still need to read as on. */
+  .buddy-sparkles { opacity: 0.8; }
+  .buddy[data-mood="listening"] .buddy-halo { opacity: 0.25; }
+}
+
+/* --------------------------------------------------------------- keyframes */
+
+@keyframes buddy-spin { to { transform: rotate(360deg); } }
+@keyframes buddy-hover {
+  0%, 100% { transform: translateY(1.5%) scale(1.015, 0.985); }
+  50% { transform: translateY(var(--lift)) scale(0.99, 1.01); }
+}
+@keyframes buddy-shake {
+  0%, 10%, 32%, 100% { transform: translateX(0); }
+  13%, 21%, 29% { transform: translateX(var(--shake)) rotate(1.2deg); }
+  17%, 25% { transform: translateX(calc(-1 * var(--shake))) rotate(-1.2deg); }
+}
+@keyframes buddy-blink {
+  0%, 44%, 47.5%, 100% { scale: 1 1; }
+  45.8% { scale: 1.04 0.08; }
+}
+@keyframes buddy-blink-once {
+  0%, 100% { scale: 1 1; }
+  45% { scale: 1.04 0.08; }
+}
+@keyframes buddy-glance {
+  0%, 22%, 72%, 100% { translate: 0 0; }
+  34%, 48% { translate: 16px -10px; }
+  56%, 64% { translate: -12px 4px; }
+}
+@keyframes buddy-ponder {
+  0%, 100% { translate: 0 0; rotate: 0deg; }
+  35%, 65% { translate: 22px -34px; rotate: -3deg; }
+}
+@keyframes buddy-scan {
+  0%, 100% { translate: -30px 0; }
+  50% { translate: 36px 8px; }
+}
+@keyframes buddy-write {
+  0%, 100% { translate: -18px 24px; }
+  70% { translate: 28px 24px; }
+  82% { translate: -18px 36px; }
+}
+@keyframes buddy-side {
+  0%, 30%, 100% { translate: 0 0; }
+  42%, 70% { translate: 28px 2px; }
+}
+@keyframes buddy-up {
+  0%, 30%, 100% { translate: 0 0; }
+  40%, 70% { translate: 8px -26px; }
+}
+@keyframes buddy-down {
+  0%, 30%, 100% { translate: -6px 14px; }
+  42%, 70% { translate: -28px 30px; }
+}
+@keyframes buddy-nudge {
+  0%, 8%, 24%, 100% { transform: rotate(0) translateY(0); }
+  11%, 19% { transform: rotate(-7deg) translateY(-3%); }
+  15%, 22% { transform: rotate(7deg) translateY(-3%); }
+}
+@keyframes buddy-rock {
+  0%, 100% { transform: rotate(-5deg); }
+  50% { transform: rotate(5deg); }
+}
+@keyframes buddy-yay {
+  0%, 100% { transform: translateY(0) scale(1); }
+  28% { transform: translateY(5%) scale(1.1, 0.88); }
+  62% { transform: translateY(-16%) scale(0.93, 1.08); }
+  84% { transform: translateY(1%) scale(1.03, 0.97); }
+}
+@keyframes buddy-party {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  20% { transform: translateY(4%) scale(1.08, 0.9); }
+  40% { transform: translateY(-14%) rotate(-14deg); }
+  62% { transform: translateY(-9%) rotate(16deg); }
+  82% { transform: translateY(-3%) rotate(-6deg); }
+}
+@keyframes buddy-pop {
+  0% { transform: scale(0.4) rotate(-30deg); opacity: 0; }
+  60% { transform: scale(1.12) rotate(6deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); }
+}
+@keyframes buddy-wiggle {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(-9deg) scale(1.04); }
+  75% { transform: rotate(9deg) scale(1.04); }
+}
+@keyframes buddy-bracket {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.02); }
+}
+@keyframes buddy-dot {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-14px); }
+}
+@keyframes buddy-type {
+  0% { stroke-dashoffset: 300; }
+  100% { stroke-dashoffset: 0; }
+}
+@keyframes buddy-zzz {
+  0% { opacity: 0; transform: translate(0, 20px); }
+  40% { opacity: 0.8; }
+  100% { opacity: 0; transform: translate(60px, -90px); }
+}
+@keyframes buddy-listen {
+  0% { opacity: 0.35; transform: scale(0.92); }
+  100% { opacity: 0; transform: scale(1.1); }
+}
+@keyframes buddy-badge-in {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+@keyframes buddy-spark {
+  0% { opacity: 0; scale: 0.6; }
+  20% { opacity: 0.95; }
+  100% { opacity: 0; scale: 1.18; }
+}

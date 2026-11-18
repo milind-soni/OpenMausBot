@@ -18,6 +18,6 @@ export function messageTooLargeReason(text: string, attachments?: Attachment[]):
   const size = messageBodySize(text, attachments);
   if (size <= MAX_MESSAGE_BODY_CHARS) return null;
   const hasFiles = Boolean(attachments?.length);
-  const fix = hasFiles ? "Remove or shrink an attachment, or shorten the text." : "Shorten it, or save it to a file in the project and point the bot at it.";
+  const fix = hasFiles ? "Remove or shrink an attachment, or shorten the text." : "Shorten it, or save it to a file in the project and point the Buddy at it.";
   return `This message is too large to send (${formatSize(size)}; the limit is ${formatSize(MAX_MESSAGE_BODY_CHARS)}). ${fix}`;
 }

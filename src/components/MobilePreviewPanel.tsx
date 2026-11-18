@@ -320,7 +320,7 @@ export function MobilePreviewPanel({
     if (testing.tab !== null) { testingStore.setTab(null); return; }
     if (!ownSource || ownSource.kind !== "url") {
       attachTried.current.add(pending.id);
-      void api.register({ sessionId: pending.id, unavailable: ownSource ? "Quick Preview is showing a project file. Bots can attach to web pages only; use target \"new\"." : "No page is open in Quick Preview. Ask the user to open one, or use target \"new\"." });
+      void api.register({ sessionId: pending.id, unavailable: ownSource ? "Quick Preview is showing a project file. Buddies can attach to web pages only; use target \"new\"." : "No page is open in Quick Preview. Ask the user to open one, or use target \"new\"." });
       return;
     }
     if (ownFrameStatus === "loading" || ownFrameStatus === "empty") return;
@@ -966,7 +966,7 @@ export function MobilePreviewPanel({
             }}
           />
         )}
-        {/* The user's own page stays mounted (hidden) while a bot tab is shown. */}
+        {/* The user's own page stays mounted (hidden) while a Buddy tab is shown. */}
         <div className="contents" style={{ visibility: botTab ? "hidden" : undefined }} aria-hidden={botTab ? true : undefined}>
         <PreviewFrame
           ref={frameRef}

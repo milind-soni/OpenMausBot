@@ -23,7 +23,8 @@ export type MausColor =
   | "pink"
   | "yellow"
   | "teal"
-  | "coral";
+  | "coral"
+  | "mint";
 
 /**
  * The face a bot rests on, as one of the engine's state names. Kept as a plain
@@ -154,6 +155,7 @@ const COLORS: MausColor[] = [
   "yellow",
   "teal",
   "coral",
+  "mint",
 ];
 
 /** Resolve @mentions in a message against a bot roster: `@` must start a
@@ -227,7 +229,7 @@ export class Store {
         b.modelSelection = this.defaultSelection();
         this.appendMessage(b.threadId, {
           role: "bot", kind: "text",
-          text: `This bot used the cloud computer, which has been removed. It now uses ${b.modelSelection.label ?? b.modelSelection.model}.`,
+          text: `This Buddy used the cloud computer, which has been removed. It now uses ${b.modelSelection.label ?? b.modelSelection.model}.`,
         });
         migrated = true;
       }

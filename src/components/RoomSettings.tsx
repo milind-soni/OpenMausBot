@@ -113,7 +113,7 @@ export function RoomSettings({ groupId, onClose }: { groupId: string; onClose: (
                 className={fieldClass}
               />
             </Field>
-            <Field label="Bulletin" hint="Shared instructions every bot in this room reads.">
+            <Field label="Bulletin" hint="Shared instructions every Buddy in this room reads.">
               <textarea
                 value={bulletin}
                 rows={3}
@@ -154,7 +154,7 @@ export function RoomSettings({ groupId, onClose }: { groupId: string; onClose: (
                   <button
                     type="button"
                     disabled={members.length <= 1}
-                    title={members.length <= 1 ? "A room needs at least one bot" : `Remove ${bot.name}`}
+                    title={members.length <= 1 ? "A room needs at least one Buddy" : `Remove ${bot.name}`}
                     aria-label={`Remove ${bot.name}`}
                     onClick={() => requestRemove(bot)}
                     className="rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-raised hover:text-danger disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-secondary"
@@ -186,17 +186,17 @@ export function RoomSettings({ groupId, onClose }: { groupId: string; onClose: (
               <button
                 type="button"
                 disabled={!candidates.length}
-                title={candidates.length ? undefined : "Every bot is already in this room"}
+                title={candidates.length ? undefined : "Every Buddy is already in this room"}
                 onClick={() => setAdding(true)}
                 className="mt-1 flex items-center gap-1.5 self-start rounded-lg px-2 py-1.5 text-[13px] text-accent hover:bg-raised/60 disabled:opacity-40 disabled:hover:bg-transparent"
               >
-                <Plus size={14} /> Add bots
+                <Plus size={14} /> Add Buddies
               </button>
             )}
           </Section>
 
           <Section title="Behaviour">
-            <Field group label="Auto handoffs" hint="When a bot @mentions a teammate, the teammate picks up the work.">
+            <Field group label="Auto handoffs" hint="When a Buddy @mentions a teammate, the teammate picks up the work.">
               <Segmented
                 label="Auto handoffs"
                 options={HANDOFF_OPTIONS}
@@ -204,7 +204,7 @@ export function RoomSettings({ groupId, onClose }: { groupId: string; onClose: (
                 onChange={(handoffs) => patch({ handoffs })}
               />
             </Field>
-            <Field group label="Handoffs in a row" hint="A mentioned bot always answers. After this many bot-to-bot handoffs without you, the room pauses until you step in.">
+            <Field group label="Handoffs in a row" hint="A mentioned Buddy always answers. After this many Buddy-to-Buddy handoffs without you, the room pauses until you step in.">
               <Segmented
                 label="Handoffs in a row"
                 options={HOP_OPTIONS.map((n) => ({ value: n, label: String(n) }))}
@@ -218,13 +218,13 @@ export function RoomSettings({ groupId, onClose }: { groupId: string; onClose: (
                 onChange={(e) => patch({ defaultResponderId: e.target.value || null })}
                 className={fieldClass}
               >
-                <option value="">{members.length === 1 ? `${members[0].name} (only member)` : "Nobody — @mention a bot"}</option>
+                <option value="">{members.length === 1 ? `${members[0].name} (only member)` : "Nobody — @mention a Buddy"}</option>
                 {members.length > 1 && members.map((bot) => (
                   <option key={bot.id} value={bot.id}>{bot.name}</option>
                 ))}
               </select>
             </Field>
-            <Field label="Stop a bot after it goes quiet for" hint="Active bots keep working; this only stops a stuck turn. Hard limit: 3 h.">
+            <Field label="Stop a Buddy after it goes quiet for" hint="Active Buddies keep working; this only stops a stuck turn. Hard limit: 3 h.">
               <select
                 value={group.turnIdleMinutes ?? ""}
                 onChange={(e) => patch({ turnIdleMinutes: e.target.value ? Number(e.target.value) : null })}

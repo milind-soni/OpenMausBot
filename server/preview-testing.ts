@@ -115,6 +115,6 @@ export class PreviewTestingBroker {
     }
     this.changed(); return { ...s };
   }
-  stopOwner(botId: string, reason = "Bot stopped") { for (const s of this.views()) if (s.botId === botId) this.control(s.id, "pause", reason); }
+  stopOwner(botId: string, reason = "Buddy stopped") { for (const s of this.views()) if (s.botId === botId) this.control(s.id, "pause", reason); }
   disconnect() { this.lastHeartbeat = 0; for (const s of this.views()) this.control(s.id, "pause", "Desktop Preview disconnected"); }
 }

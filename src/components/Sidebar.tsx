@@ -1,5 +1,5 @@
 import { track } from "@/lib/analytics";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   BellDot,
@@ -29,7 +29,7 @@ import {
 import { RoomSettings } from "./RoomSettings";
 import { useStore, formatTime, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
 import { MausAvatar, InitialsAvatar } from "./Avatar";
-import { stateForBot } from "@/lib/mascot";
+import { LiveBuddyAvatar } from "./LiveBuddyAvatar";
 import { taskSummary } from "@/lib/taskSummary";
 import { cn } from "@/lib/cn";
 import { usePanelResize } from "@/lib/usePanelResize";
@@ -310,7 +310,7 @@ function NewRoomPanel({ onClose }: { onClose: () => void }) {
         />
         <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
           {bots.length === 0 && (
-            <div className="px-2 py-4 text-center text-[13px] text-ink-secondary">Create a bot first — rooms are made of bots.</div>
+            <div className="px-2 py-4 text-center text-[13px] text-ink-secondary">Create a Buddy first — rooms are made of Buddies.</div>
           )}
           {bots.map((b) => (
             <button
@@ -464,6 +464,13 @@ function BotListItem({
   collapsed?: boolean;
 }) {
   const { state, dispatch } = useStore();
+  // A Buddy working or waiting in a room shows it here too.
+  const roomBusy = state.groups.some((g) => g.busyBotId === bot.id);
+  const roomQueued = state.groups.some((g) => g.queuedBotIds?.includes(bot.id));
+  const roomWork = useMemo(
+    () => (roomBusy || roomQueued ? { roomBusy, queued: roomQueued } : undefined),
+    [roomBusy, roomQueued],
+  );
   const selected = state.selectedId === bot.id;
   const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   // the visible branch, so a version switch changes the row with the chat
@@ -487,9 +494,10 @@ function BotListItem({
         selected ? "border-accent/20 bg-accent/10" : "border-transparent hover:bg-raised/50",
       )}
     >
-      <span className="relative shrink-0"><MausAvatar
-        color={bot.color}
-        state={stateForBot({ ...bot, messages: visible })}
+      <span className="relative shrink-0"><LiveBuddyAvatar
+        bot={bot}
+        messages={visible}
+        room={roomWork}
         size={40}
         motion={mascotMotion?.kind ?? "none"}
         motionKey={mascotMotion?.nonce ?? 0}
@@ -731,10 +739,10 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
         <div className="relative" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
           <button
             onClick={() => setPlusOpen((o) => !o)}
-            aria-label="New bot or room"
+            aria-label="New Buddy or room"
             aria-expanded={plusOpen}
             className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
-            title="New bot or room"
+            title="New Buddy or room"
           >
             <Plus size={20} strokeWidth={2} aria-hidden="true" />
           </button>
@@ -752,7 +760,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
                   <BotIcon size={16} className="text-ink-secondary" aria-hidden="true" />
-                  <span>New Bot</span>
+                  <span>New Buddy</span>
                 </button>
                 <button
                   role="menuitem"
@@ -791,7 +799,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
       {/* Conversations */}
       <div className="min-h-0 w-full flex-1 overflow-y-auto px-2 pb-2" aria-label="Conversations">
         {visibleBots.length === 0 && visibleGroups.length === 0 && !collapsed && (
-          <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{q ? `Nothing matches “${query}”` : "Create a bot or room to get started."}</div>
+          <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{q ? `Nothing matches “${query}”` : "Create a Buddy or room to get started."}</div>
         )}
         <ConversationSection label="Pinned" count={pinnedBots.length} unread={pinnedBots.filter(b => b.unread).length} collapsed={collapsed} searching={Boolean(q)}>
           {pinnedBots.map(b => <BotListItem key={b.id} bot={b} onMenu={setMenu} collapsed={collapsed} />)}
@@ -799,7 +807,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
         <ConversationSection label="Rooms" count={visibleGroups.length} unread={visibleGroups.filter(g => g.unread).length} collapsed={collapsed} searching={Boolean(q)}>
           {visibleGroups.map(g => <GroupListItem key={g.id} group={g} onMenu={setRoomMenu} collapsed={collapsed} />)}
         </ConversationSection>
-        <ConversationSection label="Bots" count={unpinnedBots.length} unread={unpinnedBots.filter(b => b.unread).length} collapsed={collapsed} searching={Boolean(q)}>
+        <ConversationSection label="Buddies" count={unpinnedBots.length} unread={unpinnedBots.filter(b => b.unread).length} collapsed={collapsed} searching={Boolean(q)}>
           {unpinnedBots.map(b => <BotListItem key={b.id} bot={b} onMenu={setMenu} collapsed={collapsed} />)}
         </ConversationSection>
       </div>

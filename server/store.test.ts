@@ -41,7 +41,7 @@ describe("Store", () => {
       expect(reloaded.bot(bot.id)?.modelSelection).toEqual(selection());
       const notices = () => new Store(selection, removed).messagesFor(bot.threadId).filter(m => m.text?.includes("cloud computer, which has been removed"));
       expect(notices()).toHaveLength(1);
-      expect(notices()[0].text).toBe(`This bot used the cloud computer, which has been removed. It now uses ${selection().model}.`);
+      expect(notices()[0].text).toBe(`This Buddy used the cloud computer, which has been removed. It now uses ${selection().model}.`);
     }
     const persisted = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
     expect(persisted.find((b: BotRecord) => b.id === legacy.id)).not.toHaveProperty("computer");

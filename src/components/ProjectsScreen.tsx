@@ -497,7 +497,7 @@ export function ProjectsScreen() {
           <div className="min-w-0">
             <h1 className="truncate text-[16px] font-semibold text-ink">Projects</h1>
             <p className="hidden truncate text-[12px] text-ink-secondary sm:block">
-              Workspaces where your bots read, write, and create files.
+              Workspaces where your Buddies read, write, and create files.
             </p>
           </div>
         </div>
@@ -556,7 +556,7 @@ export function ProjectsScreen() {
                 Bring your first project in
               </h2>
               <p className="mx-auto mt-2 max-w-md text-[13px] leading-5 text-ink-secondary">
-                Add a folder from your computer, create a new one, or copy a project from GitHub to give your bots a workspace.
+                Add a folder from your computer, create a new one, or copy a project from GitHub to give your Buddies a workspace.
               </p>
               {!projectsApi && (
                 <p className="mx-auto mt-1.5 text-[12px] text-ink-tertiary">

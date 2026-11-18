@@ -224,7 +224,7 @@ function ConnectionsSection() {
         <div className="border-b border-hairline/40 pb-4">
           <h2 className="text-[16px] font-semibold text-ink">API Keys & Integrations</h2>
           <p className="mt-1 text-[13px] text-ink-secondary">
-            Shared across all bots and workspaces. Stored locally in write-only storage; saving instantly hot-reloads provider drivers.
+            Shared across all Buddies and workspaces. Stored locally in write-only storage; saving instantly hot-reloads provider drivers.
           </p>
         </div>
 
@@ -681,7 +681,7 @@ function SystemSection() {
           <div>
             <h2 className="text-[16px] font-semibold text-ink">Automatic Agent Handoffs</h2>
             <p className="mt-1 text-[13px] text-ink-secondary">
-              Automatically dispatch messages to mentioned team bots across all multi-agent rooms. Enabled by default for all rooms.
+              Automatically dispatch messages to mentioned Buddies across all multi-agent rooms. Enabled by default for all rooms.
             </p>
           </div>
           <button
@@ -782,7 +782,7 @@ function SystemSection() {
       <div className="rounded-2xl border border-hairline/50 bg-card p-6 shadow-sm">
         <h2 className="text-[16px] font-semibold text-ink">System Diagnostics & Storage</h2>
         <p className="mt-1 text-[13px] text-ink-secondary">
-          Local services and data stores driving your bots and tasks.
+          Local services and data stores driving your Buddies and tasks.
         </p>
 
         <div className="mt-5 space-y-3">
@@ -818,7 +818,7 @@ function SystemSection() {
 
           <div className="grid grid-cols-3 gap-3 pt-2">
             <div className="rounded-xl border border-hairline/40 bg-panel/60 p-3 text-center">
-              <div className="text-[11px] text-ink-secondary">Configured Bots</div>
+              <div className="text-[11px] text-ink-secondary">Configured Buddies</div>
               <div className="mt-1 text-[18px] font-semibold text-ink">{state.bots.length}</div>
             </div>
             <div className="rounded-xl border border-hairline/40 bg-panel/60 p-3 text-center">
@@ -843,15 +843,15 @@ function SystemSection() {
 
         <div className="mt-4 divide-y divide-hairline/40 rounded-xl border border-hairline/40 bg-panel overflow-hidden text-[13px]">
           <div className="flex items-center justify-between px-4 py-2.5">
-            <span className="text-ink">Create new bot</span>
+            <span className="text-ink">Create new Buddy</span>
             <kbd className="rounded bg-raised px-2 py-0.5 font-mono text-[12px] text-ink">⌘N</kbd>
           </div>
           <div className="flex items-center justify-between px-4 py-2.5">
-            <span className="text-ink">Jump to bot 1 – 9</span>
+            <span className="text-ink">Jump to Buddy 1 – 9</span>
             <kbd className="rounded bg-raised px-2 py-0.5 font-mono text-[12px] text-ink">⌘1 – ⌘9</kbd>
           </div>
           <div className="flex items-center justify-between px-4 py-2.5">
-            <span className="text-ink">Previous / Next bot</span>
+            <span className="text-ink">Previous / Next Buddy</span>
             <kbd className="rounded bg-raised px-2 py-0.5 font-mono text-[12px] text-ink">⌘⇧[ / ⌘⇧]</kbd>
           </div>
           <div className="flex items-center justify-between px-4 py-2.5">

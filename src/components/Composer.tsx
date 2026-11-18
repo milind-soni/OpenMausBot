@@ -61,8 +61,8 @@ export function Composer({
   const driver = state.instances.find(i => i.instanceId === activeSelection?.instanceId)?.driverKind;
   const nativeSteering = driver === "claudeAgent" || driver === "codex";
   const busyName = group
-    ? (members?.find((b) => b.id === group.busyBotId)?.name ?? "A bot")
-    : (bot?.name ?? "The bot");
+    ? (members?.find((b) => b.id === group.busyBotId)?.name ?? "A Buddy")
+    : (bot?.name ?? "The Buddy");
   // Drafts are kept per conversation, so switching away and back restores them.
   const draftId = draftKey({ botId: bot?.id, groupId: group?.id });
   const [initialDraft] = useState(() => loadDraft(draftId));
@@ -413,7 +413,7 @@ export function Composer({
         {pickerOpen && mentionKind === "bot" && (
           <div
             role="listbox"
-            aria-label="Tag a bot"
+            aria-label="Tag a Buddy"
             className="absolute bottom-full left-2 z-20 mb-2 w-72 max-w-[calc(100%-1rem)] overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
           >
             {botCandidates.map((peer, i) => (
@@ -504,7 +504,7 @@ export function Composer({
                 : busy
                   ? `${busyName} is working — Enter to steer, ⌥Enter to queue`
                   : group
-                    ? `Message ${group.name} — @ for bots, # for projects`
+                    ? `Message ${group.name} — @ for Buddies, # for projects`
                     : `Message ${bot?.name ?? ""} — # for projects`
           }
           aria-label={`Message ${group ? group.name : (bot?.name ?? "")}`}
@@ -542,7 +542,7 @@ export function Composer({
         {hasContent && (
           <button
             onClick={() => send()}
-            aria-label={busy ? "Steer bot" : "Send message"}
+            aria-label={busy ? "Steer Buddy" : "Send message"}
             title={busy ? nativeSteering ? "Steer — picked up at the next step. Alt+Enter queues instead." : "Steer — stops the current turn and restarts with your correction. Alt+Enter queues instead." : "Send"}
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full text-white",

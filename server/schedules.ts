@@ -12,7 +12,7 @@ export function validateSchedule(input: ScheduleInput) {
   if (keys.length !== 1 || !["botId", "groupId"].includes(keys[0]) ||
       typeof target[keys[0] as keyof typeof target] !== "string" ||
       !target[keys[0] as keyof typeof target]?.trim()) {
-    throw new Error("Choose a bot or room.");
+    throw new Error("Choose a Buddy or room.");
   }
   if (typeof input.prompt !== "string" || !input.prompt.trim() || input.prompt.length > 30_000) throw new Error("Write instructions of up to 30,000 characters.");
   if (typeof input.timezone !== "string") throw new Error("Choose a timezone.");
@@ -49,7 +49,7 @@ export class ScheduleStore {
   create(input: ScheduleInput, origin: Schedule["origin"] = "user", createdBy?: string): Schedule {
     validateSchedule(input);
     const owner = createdBy ?? input.target.botId;
-    if (owner && this.data.schedules.filter(s => (s.createdBy ?? s.target.botId) === owner && s.enabled).length >= 20) throw new Error("Each bot can have up to 20 active schedules.");
+    if (owner && this.data.schedules.filter(s => (s.createdBy ?? s.target.botId) === owner && s.enabled).length >= 20) throw new Error("Each Buddy can have up to 20 active schedules.");
     const now = this.now(), nextRunAt = nextScheduleRun(input.repeat, input.timezone, now);
     if (!nextRunAt) throw new Error("Choose a future run time.");
     const schedule: Schedule = { id: newId(), target: input.target, prompt: input.prompt.trim(), repeat: input.repeat, timezone: input.timezone, enabled: input.enabled ?? true, graceMinutes: input.graceMinutes ?? 120, origin, createdBy, nextRunAt, createdAt: new Date(now).toISOString() };
@@ -60,7 +60,7 @@ export class ScheduleStore {
     if (old.origin === "auto-resume") throw new Error("Cancel this automatic retry and create a new schedule instead.");
     const input = { ...old, ...patch }; validateSchedule(input);
     const owner = old.createdBy ?? input.target.botId;
-    if (input.enabled && owner && this.data.schedules.filter(s => s.id !== id && s.enabled && (s.createdBy ?? s.target.botId) === owner).length >= 20) throw new Error("Each bot can have up to 20 active schedules.");
+    if (input.enabled && owner && this.data.schedules.filter(s => s.id !== id && s.enabled && (s.createdBy ?? s.target.botId) === owner).length >= 20) throw new Error("Each Buddy can have up to 20 active schedules.");
     const timingChanged = patch.repeat !== undefined || patch.timezone !== undefined || (!old.enabled && input.enabled);
     const anchor = timingChanged ? this.now() : Date.parse(old.anchorAt ?? old.createdAt);
     const nextRunAt = nextScheduleRun(input.repeat, input.timezone, this.now(), anchor);
@@ -79,7 +79,7 @@ export class ScheduleStore {
     const now = this.now(), at = resetsAt && Date.parse(resetsAt) > now ? Date.parse(resetsAt) + 120_000 : now + resumeDelay(attempt);
     const input: ScheduleInput = { target, prompt: `Continue where you left off. The interrupted request was:\n\n${resume.request}`, repeat: { kind: "once", at: new Date(at).toISOString() }, timezone: "UTC" };
     if (!old) { const made = this.create(input, "auto-resume", resume.botId); old = this.get(made.id)!; }
-    if (!old.enabled && this.data.schedules.filter(s => (s.createdBy ?? s.target.botId) === resume.botId && s.enabled).length >= 20) throw new Error("Each bot can have up to 20 active schedules.");
+    if (!old.enabled && this.data.schedules.filter(s => (s.createdBy ?? s.target.botId) === resume.botId && s.enabled).length >= 20) throw new Error("Each Buddy can have up to 20 active schedules.");
     Object.assign(old, input, { enabled: true, nextRunAt: new Date(at).toISOString(), resume: { ...resume, attempt } });
     this.data.deliveries = this.data.deliveries.filter(j => j.scheduleId !== old!.id || j.state === "dispatching");
     this.save(); return structuredClone(old);

@@ -1227,7 +1227,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const bot = stateRef.current.bots.find(b => b.id === target?.botId);
           const group = stateRef.current.groups.find(g => g.id === target?.groupId);
           const notify = bot?.notifications || group?.memberIds.some(id => stateRef.current.bots.find(b => b.id === id)?.notifications);
-          if (!window.gbs && notify && "Notification" in window && Notification.permission === "granted") new Notification("Scheduled task started", { body: `${bot?.name ?? group?.name ?? "Your bot"} started its scheduled task.` });
+          if (!window.gbs && notify && "Notification" in window && Notification.permission === "granted") new Notification("Scheduled task started", { body: `${bot?.name ?? group?.name ?? "Your Buddy"} started its scheduled task.` });
           break;
         }
         case "usage":

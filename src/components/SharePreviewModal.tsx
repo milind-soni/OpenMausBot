@@ -261,7 +261,7 @@ export function SharePreviewModal({
               className="h-9 w-full rounded-xl border border-hairline/70 bg-inset px-3 text-[12.5px] text-ink focus:border-accent/60 focus:outline-none"
             >
               {visibleBots.length > 0 && (
-                <optgroup label="Bots">
+                <optgroup label="Buddies">
                   {visibleBots.map((bot) => (
                     <option key={bot.id} value={`bot:${bot.id}`}>
                       {bot.name} {bot.title ? `— ${bot.title}` : ""}
@@ -294,7 +294,7 @@ export function SharePreviewModal({
               rows={3}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Add a note for the bot or room (e.g., 'Check the header spacing on tablet')…"
+              placeholder="Add a note for the Buddy or room (e.g., 'Check the header spacing on tablet')…"
               className="w-full resize-none rounded-xl border border-hairline/70 bg-inset p-2.5 text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-accent/60 focus:outline-none"
             />
           </div>

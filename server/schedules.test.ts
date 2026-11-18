@@ -47,8 +47,8 @@ describe("schedule target validation", () => {
     const good = input({ kind: "once", at: new Date(now + 3600_000).toISOString() });
     const invalid = { ...good, target } as unknown as ScheduleInput;
     const before = store.snapshot();
-    expect(() => validateSchedule(invalid)).toThrow("Choose a bot or room.");
-    expect(() => store.create(invalid)).toThrow("Choose a bot or room.");
+    expect(() => validateSchedule(invalid)).toThrow("Choose a Buddy or room.");
+    expect(() => store.create(invalid)).toThrow("Choose a Buddy or room.");
     expect(store.snapshot()).toEqual(before);
   });
   it("preserves the saved schedule after an invalid update and accepts either single target", () => {
@@ -56,7 +56,7 @@ describe("schedule target validation", () => {
     const store = new ScheduleStore(folder, () => now);
     const good = input({ kind: "once", at: new Date(now + 3600_000).toISOString() });
     const schedule = store.create(good), before = store.snapshot();
-    expect(() => store.update(schedule.id, { target: { botId: "bot", groupId: null } as unknown as ScheduleInput["target"] })).toThrow("Choose a bot or room.");
+    expect(() => store.update(schedule.id, { target: { botId: "bot", groupId: null } as unknown as ScheduleInput["target"] })).toThrow("Choose a Buddy or room.");
     expect(store.snapshot()).toEqual(before);
     expect(new ScheduleStore(folder, () => now).snapshot()).toEqual(before);
     expect(() => validateSchedule({ ...good, target: { groupId: "room" } })).not.toThrow();

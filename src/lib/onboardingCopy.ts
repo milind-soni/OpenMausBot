@@ -30,16 +30,16 @@ export type OnboardingEnginePresentation = {
 
 export const ONBOARDING_WELCOME_TITLE = "Welcome to Gerer Build Studio";
 export const ONBOARDING_WELCOME_SUBTITLE =
-  "Bots that do real work on your computer. Tell us who you are to personalize your workspace.";
+  "Buddies that do real work on your computer. Tell us who you are to personalize your workspace.";
 export const ONBOARDING_LOCAL_GUARANTEE =
-  "Studio stores your chats and project folders on the computer running Studio. When you message a bot, the connected AI app receives your messages and the relevant content needed for the requested work under that service's policy.";
+  "Studio stores your chats and project folders on the computer running Studio. When you message a Buddy, the connected AI app receives your messages and the relevant content needed for the requested work under that service's policy.";
 export const ONBOARDING_EMAIL_HELPER =
   "Optional — only used if you want occasional product updates.";
 export const ONBOARDING_CONTINUE_WITHOUT_EMAIL = "Continue without email";
 
 export const ONBOARDING_ENGINES_TITLE = "Your AI apps";
 export function onboardingEnginesSubtitle(hostLabel: string): string {
-  return `Bots run on the AI apps already installed on ${hostLabel} — here’s what we found.`;
+  return `Buddies run on the AI apps already installed on ${hostLabel} — here’s what we found.`;
 }
 
 export const ONBOARDING_PERMISSIONS_TITLE = "Studio permissions";
@@ -88,7 +88,7 @@ export function describeOnboardingEngine(
           warn: needsSignIn,
           title: `Claude Code${versionTag}`,
           detail: ready
-            ? "Installed and ready to power your bots."
+            ? "Installed and ready to power your Buddies."
             : "Installed. Sign in to your Claude account to connect.",
           command: ready ? undefined : "claude",
         };
@@ -99,7 +99,7 @@ export function describeOnboardingEngine(
         warn: noEngines,
         title: "Claude Code",
         detail:
-          "Not installed yet. Claude gives your bots deep writing and reasoning capabilities.",
+          "Not installed yet. Claude gives your Buddies deep writing and reasoning capabilities.",
         command: "npm i -g @anthropic-ai/claude-code",
       };
     }
@@ -112,7 +112,7 @@ export function describeOnboardingEngine(
           ok: ready,
           warn: needsSignIn,
           title: `Codex${versionTag}`,
-          detail: "Installed — your bots can use OpenAI Codex models.",
+          detail: "Installed — your Buddies can use OpenAI Codex models.",
         };
       }
       return {
@@ -120,7 +120,7 @@ export function describeOnboardingEngine(
         ok: false,
         warn: false,
         title: "Codex",
-        detail: "Optional. Gives your bots access to OpenAI models.",
+        detail: "Optional. Gives your Buddies access to OpenAI models.",
         command: "npm i -g @openai/codex",
       };
     }
@@ -135,7 +135,7 @@ export function describeOnboardingEngine(
           warn: needsSignIn,
           title: `Grok Build${versionTag}`,
           detail: ready
-            ? "Installed and ready — your bots can use xAI Grok."
+            ? "Installed and ready — your Buddies can use xAI Grok."
             : "Installed. Sign in to your xAI account to connect.",
           command: ready ? undefined : "grok login",
         };
@@ -145,7 +145,7 @@ export function describeOnboardingEngine(
         ok: false,
         warn: false,
         title: "Grok Build",
-        detail: "Optional. Gives your bots access to xAI Grok models.",
+        detail: "Optional. Gives your Buddies access to xAI Grok models.",
         command: "curl -fsSL https://x.ai/cli/install.sh | bash",
       };
     }
@@ -158,7 +158,7 @@ export function describeOnboardingEngine(
           ok: ready,
           warn: needsSignIn,
           title: `Antigravity${versionTag}`,
-          detail: "Installed — your bots can use Google Antigravity.",
+          detail: "Installed — your Buddies can use Google Antigravity.",
         };
       }
       return {

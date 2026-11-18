@@ -43,7 +43,7 @@ describe("onboarding copy and profile helpers", () => {
     expect(ONBOARDING_CONTINUE_WITHOUT_EMAIL).toBe("Continue without email");
     expect(ONBOARDING_ENGINES_TITLE).toBe("Your AI apps");
     expect(onboardingEnginesSubtitle("this Mac")).toBe(
-      "Bots run on the AI apps already installed on this Mac — here’s what we found.",
+      "Buddies run on the AI apps already installed on this Mac — here’s what we found.",
     );
     expect(ONBOARDING_PERMISSIONS_TITLE).toBe("Studio permissions");
     expect(ONBOARDING_PERMISSIONS_SUBTITLE).toContain("Optional device access");
@@ -101,7 +101,7 @@ describe("onboarding copy and profile helpers", () => {
       ok: true,
       warn: false,
       title: "Claude Code · 1.0.24",
-      detail: "Installed and ready to power your bots.",
+      detail: "Installed and ready to power your Buddies.",
       command: undefined,
     });
 
@@ -121,7 +121,7 @@ describe("onboarding copy and profile helpers", () => {
     expect(claudeMissing).toMatchObject({
       ok: false,
       warn: true,
-      detail: "Not installed yet. Claude gives your bots deep writing and reasoning capabilities.",
+      detail: "Not installed yet. Claude gives your Buddies deep writing and reasoning capabilities.",
       command: "npm i -g @anthropic-ai/claude-code",
     });
 
@@ -129,7 +129,7 @@ describe("onboarding copy and profile helpers", () => {
     expect(codexMissing).toMatchObject({
       ok: false,
       warn: false,
-      detail: "Optional. Gives your bots access to OpenAI models.",
+      detail: "Optional. Gives your Buddies access to OpenAI models.",
       command: "npm i -g @openai/codex",
     });
 
@@ -137,7 +137,7 @@ describe("onboarding copy and profile helpers", () => {
     expect(grokMissing).toMatchObject({
       ok: false,
       warn: false,
-      detail: "Optional. Gives your bots access to xAI Grok models.",
+      detail: "Optional. Gives your Buddies access to xAI Grok models.",
       command: "curl -fsSL https://x.ai/cli/install.sh | bash",
     });
 
