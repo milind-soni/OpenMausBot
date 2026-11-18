@@ -14,7 +14,7 @@ import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } fr
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
-import { boundedAgentResult } from "./agents-result.ts";
+import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
@@ -314,7 +314,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         isError: true,
       };
     }
-    const { ok: accepted, status, body: r } = await apiResponse("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
+    const answer = await apiResponse("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
       groupId: typeof canonical.group_id === "string" && canonical.group_id.trim() ? canonical.group_id.trim() : undefined, botIds: ids, message: canonical.message,
       reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
       rework: canonical.rework,
@@ -323,9 +323,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
       answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined, files: Array.isArray(canonical.files) && canonical.files.some((path) => path.trim()) ? canonical.files.filter((path) => path.trim()) : undefined,
     }) });
-    // A refusal that only says there is nothing left for this message to do is an instruction to finish, not a failure.
-    if (!accepted) return { text: String(r.error ?? `HTTP ${status}`), ...(r.instructionOnly === true ? {} : { isError: true }) };
-    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+    return apiAnswer(answer.ok, answer.status, answer.body);
   }
   if (name === "assignment_status") {
     const id = args.id === undefined || args.id === null || args.id === "" ? "" : String(args.id).trim();

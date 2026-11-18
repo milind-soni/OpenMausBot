@@ -14,6 +14,13 @@ type Refused = { target: RosterMember; from: RosterMember; shown: boolean };
  * text the model wrote is never used to decide that, since an id prefix can be shared. */
 export interface HandoffReceipt { botId: string; outcome: string }
 
+/** The receipts in a coordinate_bots answer, narrowed to the two fields the bookkeeping reads. The answer is the route's
+ * own JSON, so nothing here asserts a shape it did not check or reads the text the model wrote. */
+export function handoffReceipts(value: unknown): HandoffReceipt[] {
+  return (Array.isArray(value) ? value as Array<{ botId?: unknown; outcome?: unknown }> : [])
+    .flatMap((receipt) => typeof receipt.botId === "string" && typeof receipt.outcome === "string" ? [{ botId: receipt.botId, outcome: receipt.outcome }] : []);
+}
+
 export interface RefusedHandoffDeps {
   bots(): readonly RosterMember[];
   /** A bot `from` may never be told of (personal-reach.ts hides). */
