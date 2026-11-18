@@ -33,3 +33,12 @@ export function effectiveApprovalPolicy(value: unknown): unknown {
 export function effectiveApprovalsReviewer(value: unknown): string {
   return value === "auto_review" || value === "guardian_subagent" ? value : "user";
 }
+
+const SANDBOX_ACCESS_ORDER: readonly unknown[] = ["readOnly", "workspaceWrite", "dangerFullAccess"];
+
+/** Codex may resolve a stricter sandbox than asked (read-only on Windows without its own sandbox), never a looser or unknown one. */
+export function resolvedSandboxAllowed(requested: unknown, resolved: unknown): boolean {
+  if (resolved === requested) return true;
+  const access = SANDBOX_ACCESS_ORDER.indexOf(resolved);
+  return access >= 0 && access < SANDBOX_ACCESS_ORDER.indexOf(requested);
+}

@@ -951,6 +951,39 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(calls.find((call: { method: string }) => call.method === "turn/start").params.sandboxPolicy).toEqual(sandbox);
   });
 
+  it.each([
+    { resumed: false, approvalMode: "ask", sandbox: { type: "readOnly" } },
+    { resumed: true, approvalMode: "ask", sandbox: { type: "readOnly" } },
+    { resumed: false, approvalMode: "full", sandbox: { type: "workspaceWrite" } },
+    { resumed: false, approvalMode: "full", sandbox: { type: "readOnly" } },
+  ] as const)("starts the turn in a stricter sandbox Codex chose itself, as on Windows: %j", async ({ resumed, approvalMode, sandbox }) => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "stricter-sandbox.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_RESOLVED_SANDBOX = JSON.stringify(sandbox);
+    await instance.adapter.sendTurn({ threadId: "t-stricter-sandbox", text: "continue", approvalMode,
+      ...(resumed ? { resumeCursor: "codex-thread-1" } : {}) });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.at(-1)).toMatchObject({ ok: true });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.find((call: { method: string }) => call.method === "turn/start").params.sandboxPolicy).toEqual(sandbox);
+  });
+
+  it.each([
+    { approvalMode: "ask", sandbox: { type: "externalSandbox" } },
+    { approvalMode: "full", sandbox: { type: "externalSandbox" } },
+  ] as const)("refuses a resolved sandbox it cannot rank: %j", async ({ approvalMode, sandbox }) => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "unranked-sandbox.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_RESOLVED_SANDBOX = JSON.stringify(sandbox);
+    await instance.adapter.sendTurn({ threadId: "t-unranked-sandbox", text: "continue", approvalMode });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.at(-1)).toMatchObject({ ok: false });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.some((call: { method: string }) => call.method === "turn/start")).toBe(false);
+  });
+
   it.each([false, true].flatMap(resumed => [null, {}, { type: "dangerFullAccess" }].map(sandbox => ({ resumed, sandbox }))))("refuses an absent or mismatched resolved sandbox: %j", async ({ resumed, sandbox }) => {
     await create({ mode: "resume" });
     const dump = join(scratch, "invalid-sandbox.json");

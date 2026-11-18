@@ -65,7 +65,7 @@ import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-que
 import { codexQuestionReply, openAsyncQuestion, type CodexAsk } from "./codex-questions.ts";
 import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
 export { codexUpdateCommand };
-import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts"; import { COMPUTER_PROXY_TIMEOUT_MS } from "../harness-budget.ts";
+import { effectiveApprovalPolicy, effectiveApprovalsReviewer, resolvedSandboxAllowed } from "./codex-approval-config.ts"; import { AGENTS_TOOL_TIMEOUT_SECONDS } from "./agents-tool-limit.ts"; import { COMPUTER_PROXY_TIMEOUT_MS } from "../harness-budget.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
@@ -195,7 +195,7 @@ function withResolvedSandbox(params: CodexApprovalParams, session: unknown): Cod
   if (!sandbox || typeof sandbox.type !== "string") {
     throw new Error("Codex did not return its resolved sandbox policy. Update Codex, then retry; the turn was not started because its permissions could not be verified.");
   }
-  if (sandbox.type !== requested.type) {
+  if (!resolvedSandboxAllowed(requested.type, sandbox.type)) {
     throw new Error("Codex did not apply the requested sandbox mode; cannot safely start the turn.");
   }
   return { ...params, turn: { ...params.turn, sandboxPolicy: sandbox } };
