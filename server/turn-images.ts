@@ -4,7 +4,7 @@ import { dirname, extname, resolve } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { ATTACHMENTS_DIR, FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
-import type { TurnImageInput, TurnVideoInput } from "./contracts.ts";
+import type { ProviderAdapter, TurnImageInput, TurnVideoInput } from "./contracts.ts";
 import { decodeAttachmentAttribute } from "./message-file.ts";
 import { videoFrameImages } from "./turn-video.ts";
 
@@ -173,9 +173,21 @@ export function extractTurnImages(
   return { text: providerText, images: admittedImages.map((item) => item.image), videos };
 }
 
-/** Stills sampled from a message's video, never taking a turn that already carries `earlier` images past its image count. */
-export function videoFramesWithin(earlier: number, videos: readonly TurnVideoInput[]): Promise<TurnImageInput[]> {
-  return videoFrameImages(videos, TURN_IMAGE_MAX_COUNT - earlier);
+/** The clips an engine that takes video gets as they are: those that fit its byte limit alongside the `taken` ones. */
+export function nativeClips(videos: readonly TurnVideoInput[], engine: Pick<ProviderAdapter["capabilities"], "nativeImageInput" | "nativeVideoBytes">,
+  taken: readonly TurnVideoInput[] = []): TurnVideoInput[] {
+  const limit = engine.nativeImageInput ? engine.nativeVideoBytes ?? 0 : 0;
+  let used = taken.reduce((total, clip) => total + clip.bytes, 0);
+  return videos.filter((clip) => {
+    if (used + clip.bytes > limit) return false;
+    used += clip.bytes;
+    return true;
+  });
+}
+
+/** Stills sampled from a message's videos not `sent` as clips, never taking a turn that already carries `earlier` images past its image count. */
+export function videoFramesWithin(earlier: number, videos: readonly TurnVideoInput[], sent: readonly TurnVideoInput[] = []): Promise<TurnImageInput[]> {
+  return videoFrameImages(videos.filter((video) => !sent.includes(video)), TURN_IMAGE_MAX_COUNT - earlier);
 }
 
 export function extractSteerImages(

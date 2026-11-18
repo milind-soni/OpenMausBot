@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { extractReplayImages, extractSteerImages, extractTurnImages, REPLAYED_IMAGE_NOTE } from "./turn-images.ts";
+import { extractReplayImages, extractSteerImages, extractTurnImages, nativeClips, REPLAYED_IMAGE_NOTE } from "./turn-images.ts";
 
 const IDS = [
   "123e4567-e89b-42d3-a456-426614174000",
@@ -266,5 +266,20 @@ describe("turn image admission", () => {
 
     expect(result.images.map((entry) => entry.path)).toEqual([join(root, `${IDS[2]}.png`)]);
     expect(result.transcript.slice(0, 2)).toEqual(transcript.slice(0, 2));
+  });
+});
+
+describe("native video clips", () => {
+  const clip = (bytes: number) => ({ path: `/attachments/${bytes}.mp4`, mime: "video/mp4" as const, bytes });
+
+  it("gives an engine that takes video the clips that fit its limit, counting clips already chosen", () => {
+    const engine = { nativeImageInput: true, nativeVideoBytes: 100 };
+    expect(nativeClips([clip(60), clip(50), clip(40)], engine)).toEqual([clip(60), clip(40)]);
+    expect(nativeClips([clip(50), clip(30)], engine, [clip(60)])).toEqual([clip(30)]);
+  });
+
+  it("gives no clip to an engine without a video limit, so it keeps getting frames", () => {
+    expect(nativeClips([clip(10)], { nativeImageInput: true })).toEqual([]);
+    expect(nativeClips([clip(10)], { nativeVideoBytes: 100 })).toEqual([]);
   });
 });

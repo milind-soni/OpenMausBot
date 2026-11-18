@@ -1,5 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
-import type { SendTurnInput } from "../contracts.ts";
+import type { SendTurnInput, TurnVideoInput } from "../contracts.ts";
 
 export interface ChatImagePart { type: "image_url"; image_url: { url: string } }
 export interface ChatTextPart { type: "text"; text: string }
@@ -43,15 +43,23 @@ export function chatImage(item: { mimeType?: unknown; data?: unknown }): ChatIma
   return { type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } };
 }
 
+// Gemini, the one engine sent clips, names QuickTime video/mov.
+const VIDEO_MIME: Readonly<Record<TurnVideoInput["mime"], string>> = { "video/mp4": "video/mp4", "video/webm": "video/webm", "video/quicktime": "video/mov" };
+
 export function chatUserContent(turn: SendTurnInput): string | ChatContentPart[] {
-  if (!turn.images?.length) return turn.text;
+  if (!turn.images?.length && !turn.videos?.length) return turn.text;
   const budget = chatImageBudget();
-  return [{ type: "text", text: turn.text }, ...turn.images.map(image => {
+  const parts = [...(turn.images ?? []).map(image => {
     if (statSync(image.path).size > IMAGE_BYTES) throw new Error("Image exceeds 20 MB");
     const part = chatImage({ mimeType: image.mime, data: readFileSync(image.path).toString("base64") });
     budget([part]);
     return part;
+  }), ...(turn.videos ?? []).map((video): ChatImagePart => {
+    const part: ChatImagePart = { type: "image_url", image_url: { url: `data:${VIDEO_MIME[video.mime]};base64,${readFileSync(video.path).toString("base64")}` } };
+    budget([part]);
+    return part;
   })];
+  return [{ type: "text", text: turn.text }, ...parts];
 }
 
 export function chatToolImages(callId: string, images?: ChatImagePart[]): ChatContentPart[] {
