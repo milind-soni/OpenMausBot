@@ -9,6 +9,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 // Shadow repos live under DATA_DIR, which server/testing/setup.ts points at a
 // disposable test home before any test module imports config.ts.
 import { CHECKPOINTS_DIR, diffWorkingTree, prime, release, snapshot } from "./checkpoints.ts";
+import { checkpointGitSlots } from "./job-slots.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 
@@ -17,6 +18,8 @@ const hooks = vi.hoisted(() => ({
   calls: [] as string[][],
   inject: null as null | ((args: string[]) => Injected | undefined),
   readdirSync: [] as string[],
+  running: 0,
+  mostRunning: 0,
 }));
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -53,7 +56,13 @@ vi.mock("node:child_process", async (importOriginal) => {
         return {};
       }
     }
-    return actual.execFile(file, args, options, callback);
+    if (file !== "git") return actual.execFile(file, args, options, callback);
+    hooks.running += 1;
+    hooks.mostRunning = Math.max(hooks.mostRunning, hooks.running);
+    return actual.execFile(file, args, options, (...rest: unknown[]) => {
+      hooks.running -= 1;
+      callback(...rest);
+    });
   };
   return { ...actual, execFile };
 });
@@ -211,12 +220,48 @@ describe("incremental shadow index", () => {
     expect(subcommands()).toEqual(["ls-files", "log", "ls-files", "ls-files", "add", "write-tree"]);
     expect(shadowGit(bot, cwd, "rev-parse", "HEAD").trim()).toBe(first);
     // A failure while reading ahead turns nothing off: the turn's own snapshot still runs.
-    hooks.inject = args => args[0] === "add" ? { error: timeoutError("add") } : undefined;
+    hooks.inject = args => args[0] === "add" ? { error: new Error("Command failed: git add"), stderr: "fatal: unable to stat" } : undefined;
     expect(await prime(bot, cwd)).toBe(false);
     hooks.inject = null;
     hooks.calls = [];
     expect(await snapshot(bot, cwd, "the turn")).not.toBe(first);
     expect(subcommands()).toContain("add");
+  });
+
+  it("gives up on a folder too big to read ahead in a turn's time, so no turn waits that long again", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    hooks.inject = args => args[0] === "add" ? { error: timeoutError("add") } : undefined;
+    expect(await prime(bot, cwd)).toBe(false);
+    hooks.inject = null;
+    expect(warn).toHaveBeenCalledTimes(1);
+    hooks.calls = [];
+    expect(await snapshot(bot, cwd, "the turn")).toBeNull();
+    expect(await prime(bot, cwd)).toBe(false);
+    expect(hooks.calls).toEqual([]);
+    // Stopped by its caller is not a timeout: nothing is turned off.
+    const other = workspace();
+    writeFileSync(join(other.cwd, "a.txt"), "one");
+    const stop = new AbortController();
+    stop.abort();
+    expect(await prime(other.bot, other.cwd, stop.signal)).toBe(false);
+    expect(await snapshot(other.bot, other.cwd, "the turn")).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it("keeps every git it starts, for turns and for reading ahead alike, within the checkpoint git limit", async () => {
+    const folders = Array.from({ length: 6 }, () => {
+      const one = workspace();
+      for (let n = 0; n < 20; n += 1) writeFileSync(join(one.cwd, `file${n}.txt`), `file ${n}`);
+      return one;
+    });
+    hooks.mostRunning = 0;
+    const results = await Promise.all(folders.map(({ bot, cwd }, at) => at % 2 ? prime(bot, cwd) : snapshot(bot, cwd, "turn", undefined, { pin: `dispatch-${at}` })));
+    expect(results.every(Boolean)).toBe(true);
+    await Promise.all(folders.map(({ bot, cwd }) => snapshot(bot, cwd, "again")));
+    expect(hooks.mostRunning).toBeGreaterThan(1);
+    expect(hooks.mostRunning).toBeLessThanOrEqual(checkpointGitSlots.limit);
+    for (const [at, { bot, cwd }] of folders.entries()) if (at % 2 === 0) await release(bot, cwd, `dispatch-${at}`);
   });
 
   it("leaves no pin behind when the folder cannot be staged", async () => {

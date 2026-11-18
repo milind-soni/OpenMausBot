@@ -330,6 +330,12 @@ async function readHead(cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSigna
   return { hash, tree, base };
 }
 
+/** The empty commit every snapshot is made on. */
+async function baseHead(cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<Head> {
+  await runGit(["commit", "--no-verify", "--allow-empty", "-m", "checkpoint base"], cwd, env, signal);
+  return readHead(cwd, env, signal);
+}
+
 const CACHE_TAG = "CACHEDIR.TAG";
 const TAG_LISTING = ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", `**/${CACHE_TAG}`];
 const STAGED_LISTING = ["ls-files", "--stage", "-z"];
@@ -386,7 +392,8 @@ async function prepare(cwd: string, env: NodeJS.ProcessEnv, shadow: string, sign
   });
   const known = excludedCacheDirs.get(shadow);
   if (known !== undefined) {
-    const [tags, head, staged, ignored] = await Promise.all([runGit(TAG_LISTING, cwd, env, signal), readHead(cwd, env, signal), list(STAGED_LISTING), list(IGNORED_LISTING)]);
+    const [tags, read, staged, ignored] = await Promise.all([runGit(TAG_LISTING, cwd, env, signal), readHead(cwd, env, signal).catch(() => null), list(STAGED_LISTING), list(IGNORED_LISTING)]);
+    const head = read ?? (await baseHead(cwd, env, signal));
     // The scan skips what the file already excludes, so those are checked where they stand.
     const dirs = [...new Set([...cacheDirsIn(cwd, tags), ...known.filter((directory) => cacheTagged(cwd, directory))])].sort();
     if (dirs.length === known.length && dirs.every((directory, at) => directory === known[at])) return { head, staged, ignored };
@@ -405,11 +412,7 @@ async function prepare(cwd: string, env: NodeJS.ProcessEnv, shadow: string, sign
   mkdirSync(join(shadow, ".git", "info"), { recursive: true });
   const headRead = readHead(cwd, env, signal).catch(() => null);
   const dirs = await scanCacheDirs(cwd, env, shadow, signal);
-  let head = await headRead;
-  if (!head) {
-    await runGit(["commit", "--no-verify", "--allow-empty", "-m", "checkpoint base"], cwd, env, signal);
-    head = await readHead(cwd, env, signal);
-  }
+  const head = (await headRead) ?? (await baseHead(cwd, env, signal));
   await sweepLiveRefs(cwd, env, shadow, signal);
   const [staged, ignored] = await Promise.all([list(STAGED_LISTING), list(IGNORED_LISTING)]);
   excludedCacheDirs.set(shadow, dirs);
@@ -582,7 +585,7 @@ function releaseCollection(shadow: string): void {
     } finally {
       if (collecting.get(shadow) === stop) collecting.delete(shadow);
     }
-  });
+  }).catch(() => {});
 }
 
 /** Nobody's message or digest waits for a collection: one queued or running makes way, and is held again. */
@@ -645,7 +648,7 @@ export async function snapshot(botId: string, cwd: string, label: string, signal
       // Counted behind this snapshot, off the turn's path, and held for the turn's settled diff: GC never eats into the digest's capture window.
       void serialize(shadow, async () => {
         if (await collectionDue(shadow, result, worktree, env)) pendingCollections.set(shadow, (stop) => collectObsolete(shadow, worktree, env, stop));
-      });
+      }).catch(() => {});
       return result.hash;
     });
     if (hash !== null && opts?.pin !== undefined) heldPins.set(shadow, (heldPins.get(shadow) ?? new Set()).add(opts.pin));
@@ -660,23 +663,25 @@ export async function snapshot(botId: string, cwd: string, label: string, signal
 }
 
 /** Ahead of a turn: reads the folder into the shadow's index, so the turn's own snapshot finds its files already read.
- * Moves no ref, so the last snapshot stays the newest; a failure changes nothing for later snapshots. Never throws. */
+ * Moves no ref, so the last snapshot stays the newest. Never throws; only a timeout changes anything for later snapshots. */
 export async function prime(botId: string, cwd: string, signal?: AbortSignal): Promise<boolean> {
   if (signal?.aborted || !(await gitAvailable())) return false;
   const folder = usableFolder(botId, cwd);
   if (folder === null) return false;
   const { worktree, shadow } = folder;
   const env = gitEnv(shadow, worktree);
-  try {
-    return await serialize(shadow, async () => {
+  return serialize(shadow, async () => {
+    try {
       await stageWorkTree(worktree, env, await prepare(worktree, env, shadow, signal), signal);
       await runGit(["write-tree"], worktree, env, signal);
       return true;
-    });
-  } catch {
-    await serialize(shadow, async () => dropIndexLock(env));
-    return false;
-  }
+    } catch (e) {
+      dropIndexLock(env);
+      // Too big to read in the time a turn would give it: the turn must not wait that long again.
+      if (e instanceof GitTimeoutError && !signal?.aborted) disableFolder(shadow, botId, worktree, e.message);
+      return false;
+    }
+  });
 }
 
 /** Queued behind the shadow's pending operations, so a diff already queued still finds its commit. */
