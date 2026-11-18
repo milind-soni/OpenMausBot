@@ -2,6 +2,8 @@
 // *that* it wants help, never *what*: `session.delegation.created` carries an id
 // and a timeline offset, so the request is rebuilt from the input transcript.
 
+import type { LiveSpokenLine } from "./live-call-wire.ts";
+
 export interface TranscriptSegment {
   text: string;
   startMs: number;
@@ -72,6 +74,65 @@ export class LiveTranscript {
   /** Mark everything heard so far as handled (e.g. after a spoken decision). */
   consumeAll(): void {
     for (const segment of this.input) this.cutoffMs = Math.max(this.cutoffMs, segment.startMs);
+  }
+}
+
+/** A pause on the session timeline longer than this starts a new spoken line. */
+const SPOKEN_LINE_GAP_MS = 1_000;
+const MAX_SPOKEN_LINES = 2_000;
+/** Held values said across pauses are looked for over this many characters of the latest lines. */
+const SPOKEN_JOIN_WINDOW = 512;
+
+type SpokenLineState = { at: number; text: string; endMs: number };
+
+/** The bot's own words on a call (`session.output_transcript.delta` text), one
+ * line per stretch of speech, for the call record. A delta without timing
+ * continues the current line. */
+export class SpokenLines {
+  private lines: SpokenLineState[] = [];
+  private readonly scrub: (text: string) => string;
+
+  /** `scrub` masks known values (held one-time codes) in each line as it grows, while they are still known to it.
+   * It must only replace exact values: a mask it leaves stays, so a value it forgets later stays masked. */
+  constructor(scrub: (text: string) => string = (text) => text) {
+    this.scrub = scrub;
+  }
+
+  add(text: string, at: number, startMs: number, endMs: number): void {
+    if (!text) return;
+    const timed = Number.isFinite(startMs) && Number.isFinite(endMs);
+    const last = this.lines.at(-1);
+    if (last && (!timed || startMs <= last.endMs + SPOKEN_LINE_GAP_MS)) {
+      last.text = this.scrub(last.text + text);
+      if (timed) last.endMs = Math.max(last.endMs, endMs);
+    } else {
+      if (this.lines.length >= MAX_SPOKEN_LINES) return;
+      this.lines.push({ at, text: this.scrub(text), endMs: timed ? endMs : Number.NEGATIVE_INFINITY });
+    }
+    this.joinAcrossPauses();
+  }
+
+  /** A value said across pauses is split over several lines, none of which holds all of it: when the scrub
+   * masks something in the last lines joined, they become one line. Looks back while the earlier lines it has
+   * joined are shorter than SPOKEN_JOIN_WINDOW, however long the newest line is, so any held value up to that
+   * length is caught. */
+  private joinAcrossPauses(): void {
+    let joined = this.lines.at(-1)?.text ?? "";
+    let earlier = 0;
+    for (let start = this.lines.length - 2; start >= 0 && earlier < SPOKEN_JOIN_WINDOW; start--) {
+      joined = this.lines[start]!.text + joined;
+      earlier += this.lines[start]!.text.length;
+      const scrubbed = this.scrub(joined);
+      if (scrubbed === joined) continue;
+      const merged = this.lines.splice(start);
+      this.lines.push({ at: merged[0]!.at, text: scrubbed, endMs: Math.max(...merged.map((line) => line.endMs)) });
+      this.joinAcrossPauses();
+      return;
+    }
+  }
+
+  list(): LiveSpokenLine[] {
+    return this.lines.map((line) => ({ at: line.at, text: joinFragments([line.text]) })).filter((line) => line.text);
   }
 }
 
