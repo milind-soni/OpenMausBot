@@ -298,7 +298,8 @@ export function TeamMapPage() {
   const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null);
   const { show: showComputers, loaded: computersChoiceLoaded, choose: setShowComputers } = useShowComputers(anyComputer);
   const mapComputers = useMapComputers(!remoteClient && computersChoiceLoaded && showComputers);
-  const browsingSites = useMapBrowsing(!remoteClient && admin === true && bots.some((bot) => bot.busy));
+  const busyBotIds = bots.filter((bot) => bot.busy).map((bot) => bot.id).join(" ");
+  const browsingSites = useMapBrowsing(!remoteClient && admin === true && busyBotIds !== "", busyBotIds);
   const [taggedBotIds, setTaggedBotIds] = useState<string[]>([]);
   const [sent, setSent] = useState<{ botIds: string[]; key: number } | null>(null);
   const sentTimer = useRef<number | undefined>(undefined);

@@ -69,7 +69,7 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, brows
     </button>
     {browsing && <button data-browsing-chip aria-label={t("canvas.browsingOpen", { name, site: browsing })} title={t("canvas.browsingOpen", { name, site: browsing })}
       onClick={(event) => openBotBrowser(dispatch, bot, showThreads, event.currentTarget, event.detail === 0)}
-      className="absolute -top-2.5 right-3 flex h-5 max-w-[170px] items-center gap-1 rounded-full border border-accent/40 bg-card px-2 text-[10px] text-ink-secondary shadow-sm hover:border-accent hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
+      className="absolute -top-2.5 right-3 flex h-5 max-w-[170px] items-center gap-1 rounded-full border border-accent/40 bg-card px-2 text-[11px] text-ink-secondary shadow-sm hover:border-accent hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
       <Globe size={10} className="shrink-0 text-accent" aria-hidden />
       <span className="truncate">{t("canvas.browsing", { site: browsing })}</span>
     </button>}

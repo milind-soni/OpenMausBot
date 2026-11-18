@@ -210,7 +210,9 @@ describe("the bots' browser tools", () => {
     await call("agent_browser_tabs", { action: "new", url: "https://example.com/two" });
     expect(service.pageUrl("bot-a")).toBe("https://example.com/two");
     expect(service.pageUrl("bot-b")).toBeNull();
-    await service.closeAll();
+    const closing = service.closeAll();
+    expect(service.pageUrl("bot-a")).toBeNull();
+    await closing;
     expect(service.pageUrl("bot-a")).toBeNull();
   });
 
