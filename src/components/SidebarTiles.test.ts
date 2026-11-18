@@ -62,7 +62,7 @@ describe("the sidebar tiles", () => {
   it("fills the selected tile and marks it current, and shows working, waiting and unread as a dot on the avatar", () => {
     const selected = renderToStaticMarkup(createElement(SidebarBotTile, { ...props(bot(), true), primary: true }));
     expect(selected).toContain('aria-current="page"');
-    expect(selected).toContain("[--tile:color-mix(in_srgb,var(--color-accent)_15%,var(--color-panel))]");
+    expect(selected).toContain("[--tile:var(--color-raised)]");
     expect(renderToStaticMarkup(createElement(SidebarBotTile, props(bot({ busy: true }))))).toContain('data-testid="working-dot"');
     expect(renderToStaticMarkup(createElement(SidebarBotTile, props(bot({ activity: "waiting-on-you" }))))).toContain('data-testid="waiting-dot"');
     const unread = renderToStaticMarkup(createElement(SidebarBotTile, props(bot({ unread: true }))));
