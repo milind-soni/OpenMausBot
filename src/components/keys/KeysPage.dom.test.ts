@@ -381,6 +381,11 @@ describe("the Ollama row", () => {
     openServers();
     await found("ready");
     expect(fx.refreshModels).not.toHaveBeenCalled();
+    const [here, elsewhere] = fx.instances as Array<ReturnType<typeof served>>;
+    fx.instances = [{ ...here!, models: { ...here!.models, options: here!.models.options.slice(0, 1) } }, elsewhere!];
+    setConfig({ ...fx.config });
+    await Promise.resolve();
+    expect(fx.refreshModels, "a list that changes after a check that needed no reload is not reloaded from that old check").not.toHaveBeenCalled();
     answer("ready", undefined, [{ name: "qwen3.5:9b" }, { name: "bonsai-2:9b" }, { name: "nemotron-3.5-bolt:e4b" }]);
     flushSync(() => button("Check again").click());
     await vi.waitFor(() => expect(row("ollama")!.textContent).toContain("Pulled models: 3."));

@@ -48,12 +48,11 @@ export function OllamaServer({ visible }: { visible: boolean }) {
   const reloaded = useRef<OllamaStatus | null>(null);
   useEffect(() => {
     if (status?.state !== "ready" || reloaded.current === status) return;
+    reloaded.current = status;
     const base = ollamaBaseUrl(status.url);
     const stale = state.instances.filter((instance) =>
       (isAddedServer(instance) ? instance.url === base : instance.instanceId === "openaiCompat" && sameBase(compatUrl, base))
       && status.models.some((model) => !instance.models.options.some((option) => option.id === model.name)));
-    if (!stale.length) return;
-    reloaded.current = status;
     for (const instance of stale) void refreshModels(instance.instanceId).catch(() => {});
   }, [status, state.instances, compatUrl, refreshModels]);
 
