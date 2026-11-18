@@ -3676,5 +3676,7 @@
   "imageGen.higgsfield.connected": "आपके Higgsfield खाते से कनेक्ट है",
   "imageGen.higgsfield.notConnected": "कनेक्ट नहीं है, या साइन-इन खत्म हो गया",
   "imageGen.higgsfield.help": "{app} उस Higgsfield खाते से तस्वीरें बनाता है जिससे आप प्लगइन में साइन इन करते हैं। हर तस्वीर उस खाते के क्रेडिट खर्च करती है।",
-  "imageGen.higgsfield.open": "प्लगइन खोलें"
+  "imageGen.higgsfield.open": "प्लगइन खोलें",
+  "inbox.settled.title": "पूर्ण",
+  "inbox.settled.read": "पढ़ा गया"
 }

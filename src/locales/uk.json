@@ -4096,5 +4096,7 @@
   "imageGen.higgsfield.connected": "Підключено до вашого акаунта Higgsfield",
   "imageGen.higgsfield.notConnected": "Не підключено, або вхід завершився",
   "imageGen.higgsfield.help": "{app} створює зображення через акаунт Higgsfield, у який ви входите в розділі «Плагіни». Кожне зображення витрачає кредити цього акаунта.",
-  "imageGen.higgsfield.open": "Відкрити «Плагіни»"
+  "imageGen.higgsfield.open": "Відкрити «Плагіни»",
+  "inbox.settled.title": "Завершено",
+  "inbox.settled.read": "Прочитано"
 }

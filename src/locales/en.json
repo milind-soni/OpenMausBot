@@ -11177,5 +11177,11 @@
   "alwaysOn.added.screen": "Bots there use its screen, browser and files, once {app} is allowed to use that computer.",
   "alwaysOn.windowClosed": "Keeps running when its window is closed",
   "alwaysOn.windowClosedLinux": "Keeps running when its window is closed. Open {app} again to bring the window back; to quit, press Alt and choose File → Quit.",
-  "alwaysOn.status.noWay": "Home is on · no phone or computer can reach it yet"
+  "alwaysOn.status.noWay": "Home is on · no phone or computer can reach it yet",
+  "inbox.settled.title": "Finished",
+  "chat.unreadContext.title": "Previous message",
+  "chat.unreadContext.images": "Image",
+  "chat.unreadContext.files": "File",
+  "chat.unreadContext.moreCitations": "and {count} more",
+  "inbox.settled.read": "Read"
 }
