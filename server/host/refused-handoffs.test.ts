@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RosterMember } from "../peer-roster.ts";
+import type { RoutineRunStatus } from "../../shared/routines.ts";
 import { createRefusedHandoffs } from "./refused-handoffs.ts";
 import type { Delivery } from "./person-inbox.ts";
 
@@ -13,13 +14,14 @@ const mausbot: RosterMember = { id: "maus", name: "MausBot", visibility: { peopl
 const bots = [rooms, hours, books, ledger, mausbot];
 
 const SAID = "Rooms couldn't hand this to Bookkeeping, because they're shared with different people. Nothing was sent.";
+const LEDGER_SAID = "Rooms couldn't hand this to Ledger, because they're shared with different people. Nothing was sent.";
 const r1 = { id: "run_1", routineId: "r1", botId: "rooms" }, r2 = { id: "run_2", routineId: "r2", botId: "rooms" };
 
-function fixture(over: { writer?: string; asked?: string | null; run?: boolean; own?: boolean } = {}) {
+function fixture(over: { writer?: string; asked?: string | null; run?: boolean; own?: boolean; status?: (id: string) => RoutineRunStatus | undefined } = {}) {
   const lines: Array<{ to: string; delivery: Delivery }> = [];
   let current: typeof r1 | undefined = over.run === false ? undefined : r1;
   const refused = createRefusedHandoffs({
-    bots: () => bots, runOf: () => current, writerOf: () => over.writer,
+    bots: () => bots, runOf: () => current, statusOf: (id) => over.status?.(id) ?? "running", writerOf: () => over.writer,
     askedPerson: () => over.asked ?? null, theirOwn: () => over.own === true, inbox: () => ({ deliver: (to, delivery) => { lines.push({ to, delivery }); } }), language: () => undefined,
   });
   return { refused, lines, now: (run: typeof r1 | undefined) => { current = run; } };
@@ -73,17 +75,49 @@ describe("a routine's refused hand-off", () => {
     expect(refused.take("t"), "the run that started since never made that call").toBeNull();
   });
 
-  it("keeps nothing for a run that recorded a refusal and never took it, once another run holds the conversation", () => {
-    const { refused, now } = fixture({ writer: "p_olive", asked: "p_mara" });
-    refused.settled("t", rooms, ["Ledger"], 403, r1);
+  it("keeps a queued run's refusal when another run uses the conversation meanwhile and ends without taking", () => {
+    const status = new Map<string, RoutineRunStatus>([["run_1", "queued"], ["run_2", "running"]]);
+    const { refused, lines, now } = fixture({ writer: "p_olive", asked: "p_mara", status: (id) => status.get(id) });
+    refused.settled("t", rooms, ["Bookkeeping"], 403, r1); // its first start failed: it keeps its id and conversation to start again
     now(r2);
-    refused.settled("t", rooms, ["Bookkeeping"], 403, r2);
+    refused.settled("t", rooms, ["Ledger"], 403, r2);
+    status.set("run_2", "cancelled"); // cancelled without taking: nothing of its own is ever said
+    status.set("run_1", "running");
     now(r1);
-    expect(refused.take("t"), "the run that failed or was cancelled before saying it kept nothing to say").toBeNull();
+    expect(refused.take("t"), "the run still to finish says what it was refused").toBe(SAID);
+    expect(lines.map((line) => line.to), "and its writer hears it, once").toEqual(["p_olive"]);
+    expect(refused.take("t")).toBeNull();
+  });
+
+  it("says the ending run's refusal and leaves a run still queued its own for when it resumes", () => {
+    const status = new Map<string, RoutineRunStatus>([["run_1", "running"], ["run_2", "queued"]]);
+    const { refused, now } = fixture({ writer: "p_olive", asked: "p_mara", status: (id) => status.get(id) });
+    refused.settled("t", rooms, ["Bookkeeping"], 403, r1);
+    now(r2);
+    refused.settled("t", rooms, ["Ledger"], 403, r2);
+    now(r1);
+    expect(refused.take("t"), "the run ending here says only its own").toBe(SAID);
+    status.set("run_2", "running");
+    now(r2);
+    expect(refused.take("t"), "the run that was queued still says its own with the conversation back").toBe(LEDGER_SAID);
+  });
+
+  it("drops a finished run's refusal and never says it", () => {
+    const status = new Map<string, RoutineRunStatus>([["run_1", "failed"]]);
+    const { refused, lines, now } = fixture({ writer: "p_olive", asked: "p_mara", status: (id) => status.get(id) });
+    refused.settled("t", rooms, ["Bookkeeping"], 403, r1);
+    now(r2);
+    status.set("run_2", "running");
+    refused.settled("t", rooms, ["Ledger"], 403, r2);
+    status.set("run_1", "running");
+    now(r1);
+    expect(refused.take("t"), "the run that finished before saying it kept nothing to say").toBeNull();
+    expect(lines).toEqual([]);
   });
 
   it("says only the refusal of the run that holds the conversation after an abandoned run's is dropped", () => {
-    const { refused, lines, now } = fixture({ writer: "p_olive", asked: "p_mara" });
+    const status = new Map<string, RoutineRunStatus>([["run_1", "failed"], ["run_2", "running"]]);
+    const { refused, lines, now } = fixture({ writer: "p_olive", asked: "p_mara", status: (id) => status.get(id) });
     refused.settled("t", rooms, ["Ledger"], 403, r1);
     now(r2);
     refused.settled("t", rooms, ["Bookkeeping"], 403, r2);
