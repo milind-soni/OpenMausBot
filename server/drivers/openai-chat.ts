@@ -516,14 +516,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
   const sendTurn = async (turn: SendTurnInput) => {
     if (!options.apiKey) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
-    if (options.computerUse && ((turn.images?.length && seesImages(turn)) || turn.integrations?.localComputer || turn.integrations?.browser)) assertImageTransport(options.apiUrl);
-
+    if (options.computerUse && (turn.integrations?.localComputer || turn.integrations?.browser)) assertImageTransport(options.apiUrl);
     const turnId = newId();
     const abort = new AbortController();
-    const messages = messagesFor(turn);
-    const request = messages.at(-1)!;
+    let messages: OpenAIChatMessage[] = [];
+    let request: OpenAIChatMessage | undefined;
     const retainImages = chatImageBudget();
-    for (const message of messages) retainImages(message.content);
     let model = turn.model || options.models().default;
     const maskable = (value: unknown): value is string => typeof value === "string" && value.length >= 8; // a short placeholder key ("1") would redact every match
     const secrets = [options.apiKey].filter(maskable);
@@ -602,11 +600,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let unreadable = false, askedAgain = false;
       try {
         const preparation = options.prepareTurn?.(turn, abort.signal);
-        if (preparation) {
-          await preparation;
-          abort.signal.throwIfAborted();
-          model = turn.model || options.models().default;
-        }
+        if (preparation) { await preparation; model = turn.model || options.models().default; }
+        abort.signal.throwIfAborted();
+        if (options.computerUse && turn.images?.length && seesImages(turn)) assertImageTransport(options.apiUrl);
+        messages = messagesFor(turn);
+        request = messages.at(-1)!;
+        for (const message of messages) retainImages(message.content);
         emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
@@ -914,7 +913,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               threadId: turn.threadId, turnId, model,
               usage, hasUsage, failure, toolCalls: seenCalls.size,
               task: turn.text, updates: deliveredAsides,
-              messages: messages.slice(messages.indexOf(request) + 1),
+              messages: request ? messages.slice(messages.indexOf(request) + 1) : [],
             });
             if (handoffPath) emit({ ...base(turn.threadId, turnId), type: "cap.exhausted", handoffPath, reason: continuable });
           }

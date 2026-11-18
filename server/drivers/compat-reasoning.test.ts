@@ -180,7 +180,7 @@ describe("OpenAI-compatible reasoning choices", () => {
     });
     const recorder = recordEvents(instance.adapter);
     try {
-      const { turnId } = await instance.adapter.sendTurn({ threadId: "startup", text: "hi", model: "vendor/future", variant: "max" });
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "startup", text: "hi", model: "vendor/future", variant: "max", images: [{ path: "/not-read.png", mime: "image/png", bytes: 1 }] });
       await instance.adapter.interruptTurn("startup", turnId);
       expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: false, stopReason: "interrupted" });
       release(Response.json({ data: [{ id: "vendor/future" }] }));

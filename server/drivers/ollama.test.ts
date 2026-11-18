@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -309,12 +310,41 @@ describe("the chat engine on Ollama", () => {
     const recorder = recordEvents(instance.adapter);
     try {
       const threadId = randomUUID();
-      const started = instance.adapter.sendTurn({ threadId, text: "hi", model: "gemma2:2b" });
+      const started = instance.adapter.sendTurn({ threadId, text: "hi", model: "gemma2:2b", images: [{ path: "/not-read.png", mime: "image/png", bytes: 1 }] });
       release();
       await started;
-      await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId)).toMatchObject({ ok: true });
       expect(chats[0]!.tools).toBeUndefined();
+      expect(JSON.stringify(chats[0])).toContain("this model cannot see images");
+      expect(JSON.stringify(chats[0])).not.toContain("image_url");
     } finally {
+      recorder.stop();
+      await instance.dispose();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("sends an image when the initial catalog discovers vision support", async () => {
+    const vision: FakeModel = { name: "vision:latest", size: GB, capabilities: ["completion", "vision"] };
+    const { url, chats } = await fakeOllama({ models: [vision] });
+    const real = globalThis.fetch;
+    let release = () => {};
+    const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
+    vi.stubGlobal("fetch", (async (input, init) => {
+      if (String(input).endsWith("/api/show")) await held;
+      return real(input, init);
+    }) as typeof fetch);
+    const instance = await create({ url: `${url}/v1`, catalog: "ollama" });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      const threadId = randomUUID();
+      const started = instance.adapter.sendTurn({ threadId, text: "hi", model: "vision:latest", images: [{ path: resolve("server/testing/fixtures/banner-metadata.png"), mime: "image/png", bytes: 1 }] });
+      release();
+      await started;
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId)).toMatchObject({ ok: true });
+      expect(JSON.stringify(chats[0])).toContain("image_url");
+    } finally {
+      release();
       recorder.stop();
       await instance.dispose();
       vi.unstubAllGlobals();
@@ -364,13 +394,19 @@ describe("the chat engine on Ollama", () => {
     }
   });
 
-  it("tells a text-only model on the network about an attachment instead of refusing the turn", async () => {
+  it.each([
+    ["text-only", ["completion"], true],
+    ["vision-capable", ["completion", "vision"], false],
+  ])("checks image transport after discovering a %s model on the network", async (_name, capabilities, canSend) => {
     const replies: Record<string, unknown> = {
-      "/api/tags": { models: [GEMMA] }, "/api/version": { version: "0.12.6" }, "/api/show": { capabilities: ["completion"] }, "/api/ps": { models: [] }, "/api/create": { status: "success" },
+      "/api/tags": { models: [GEMMA] }, "/api/version": { version: "0.12.6" }, "/api/show": { capabilities }, "/api/ps": { models: [] }, "/api/create": { status: "success" },
     };
     const bodies: string[] = [];
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (url, init) => {
       const path = new URL(String(url)).pathname;
+      if (path === "/api/show") await held;
       if (path === "/v1/chat/completions") {
         bodies.push(String(init!.body));
         return new Response(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Hi." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -380,12 +416,20 @@ describe("the chat engine on Ollama", () => {
     const instance = await create({ url: "http://192.168.1.20:11434/v1", catalog: "ollama" });
     const recorder = recordEvents(instance.adapter);
     try {
-      await instance.refreshModels?.();
       const threadId = randomUUID();
-      await instance.adapter.sendTurn({ threadId, text: "what is this?", model: "gemma2:2b", images: [{ path: "/not-read.png", mime: "image/png", bytes: 1 }] });
-      await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
-      expect(bodies[0]).toContain("this model cannot see images");
+      const started = instance.adapter.sendTurn({ threadId, text: "what is this?", model: "gemma2:2b", images: [{ path: "/not-read.png", mime: "image/png", bytes: 1 }] });
+      release();
+      await started;
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId)).toMatchObject({ ok: canSend });
+      if (canSend) {
+        expect(bodies[0]).toContain("this model cannot see images");
+        expect(bodies[0]).not.toContain("image_url");
+      } else {
+        expect(bodies).toHaveLength(0);
+        expect(recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringContaining("require HTTPS") }));
+      }
     } finally {
+      release();
       recorder.stop();
       await instance.dispose();
       vi.unstubAllGlobals();
