@@ -80,8 +80,8 @@ const GLYPH_HEIGHT = 14;
 const BASELINE_INSET = 2;
 const TALLEST = GLYPH_HEIGHT - BASELINE_INSET;
 const GLYPH_WIDTH = BAR_STEP * USAGE_BARS - (BAR_STEP - BAR_WIDTH);
-const TONE_INK: Record<UsageTone, string> = { fine: "text-success", near: "text-warning", out: "text-danger" };
-const TONE_TRACK: Record<UsageTone, string> = { fine: "bg-success", near: "bg-warning", out: "bg-danger" };
+const TONE_INK: Record<UsageTone, string> = { fine: "text-ink-tertiary", near: "text-warning", out: "text-danger" };
+const TONE_TRACK: Record<UsageTone, string> = { fine: "bg-ink-tertiary", near: "bg-warning", out: "bg-danger" };
 
 /** Four rising bars on whole pixels, filled for the usage left; at the limit every bar is empty and struck through. */
 export function UsageGlyph({ limit, className }: { limit: EngineLimit; className?: string }) {
