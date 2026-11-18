@@ -28,6 +28,9 @@ describe("openmausbot-docs skill guide", () => {
       "Build a bot settings form for my Discord bot",
       "send this photo to my phone",
       "compare prices on more than one site",
+      "Send this photo to my other computer",
+      "copy the report to my second computer",
+      "run this script on more than one computer",
     ]) {
       expect(ids(text), text).not.toContain("openmausbot-docs");
     }
@@ -52,6 +55,7 @@ describe("openmausbot-docs skill guide", () => {
       "using it on multiple devices",
       "How can I use the same bots on more than one computer?",
       "How can I use my bots on my phone?",
+      "Can I use my bots on my other computer too?",
     ]) {
       expect(ids(text), text).toContain("openmausbot-docs");
     }
