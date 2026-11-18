@@ -101,7 +101,6 @@
   "server.runs.didNotFinish": "To uruchomienie się nie zakończyło.",
   "server.runs.didNotFinishWhy": "To uruchomienie się nie zakończyło: {detail}",
   "server.runs.partlyDoneWhy": "To uruchomienie zostało wykonane częściowo: {detail}",
-  "server.runs.handoffApart": "{bot} nie może przekazać tego do {target}, bo są udostępnione różnym osobom. Nic nie wysłano.",
   "server.runs.handoffRefusedTitle": "Rutyna bota {bot} nie może przekazać swojej pracy",
   "server.runs.recovered": "Znowu działa: rutyna „{name}” zakończyła się poprawnie o {time}",
   "server.runs.card.line": "Rutyna „{name}” {state}",
