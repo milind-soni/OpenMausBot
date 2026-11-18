@@ -21,6 +21,7 @@ import { writeFileAtomic } from "../atomic.ts";
 import type { CoordinateBotsCall, Coordinator, CoordinatorHost, HandoffView, HostTurnResult } from "../coordinator.ts";
 import type { PassedFile } from "../host/handoff-files.ts";
 import type { PeerDeliveryReceipt } from "../peer-delivery.ts";
+import { isIdStart } from "../peer-roster.ts";
 import type { Level } from "../runtime/types.ts";
 import { BRIEF_MAX, EXCHANGE_BYTES, FILES_MAX, LINK_EXPIRES_MS, PEERS_MAX, frameSchema, handoffOfRoot, isLinkedId, linkRoot, linkedBotSchema, linkedId, parseLinked, peerKey, placeSchema,
   type FileMeta, type FileWay, type Frame, type HandoffFrame, type LinkedBot, type Numbered, type Place, type ResultFrame } from "./protocol.ts";
@@ -312,13 +313,16 @@ export function createBotLink(deps: BotLinkDeps) {
     return address && bot ? { peer: address.peer, bot } : undefined;
   };
   const fold = (value: string) => value.replace(/^@/u, "").replace(/[-_]+/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase();
-  /** The bot of another place `raw` names: by its address here, or by a name no bot here has and only one bot elsewhere has. */
+  /** The bot of another place `raw` names: by its address here, or by a name no bot here has and only one bot elsewhere has.
+   * A bot's id here, in any case, or the start of one (8+ characters), stays with the local resolver, so a bot elsewhere
+   * named after it never takes that bot's work or its files. */
   function resolve(raw: string): Remote | undefined {
     if (!state) return undefined;
-    const wanted = raw.trim();
-    if (isLinkedId(wanted)) return remoteOf(wanted);
+    const wanted = raw.trim(), lower = wanted.toLowerCase();
     const local = deps.bots();
-    if (local.some((bot) => bot.id === wanted)) return undefined;
+    if (local.some((bot) => bot.id.toLowerCase() === lower)) return undefined;
+    if (isLinkedId(wanted)) return remoteOf(wanted);
+    if (isIdStart(wanted) && local.some((bot) => bot.id.toLowerCase().startsWith(lower))) return undefined;
     const named = fold(wanted);
     if (!named || local.some((bot) => !bot.hidden && fold(bot.name) === named)) return undefined;
     const matches = Object.entries(state.peers).flatMap(([peer, known]) => known.bots.filter((bot) => fold(bot.name) === named).map((bot) => ({ peer, bot })));
@@ -674,8 +678,13 @@ export function createBotLink(deps: BotLinkDeps) {
     const theirs = Array.isArray(rest.body.receipts) ? rest.body.receipts as PeerDeliveryReceipt[] : [];
     const ok = sent || rest.status === 200;
     const errors = [...refused, ...(typeof rest.body.error === "string" ? [rest.body.error] : [])];
-    return { status: ok ? 200 : rest.status, body: { ...rest.body, receipts: [...receipts, ...theirs],
-      ...(ok ? { message: [mine, rest.body.message].filter(Boolean).join(" "), ...(errors.length ? { notSent: errors.join("; ") } : {}) } : { error: errors.join("; ") }) } };
+    // Instruction-only is the whole call's verdict: nothing was delivered anywhere and no refusal of another place is a
+    // real failure. One genuine refusal, or a delivery, keeps this a failed call however the local part answered.
+    const { instructionOnly: localInstructionOnly, ...restBody } = rest.body;
+    const instructionOnly = !ok && refused.length === 0 && localInstructionOnly === true;
+    return { status: ok ? 200 : rest.status, body: { ...restBody, receipts: [...receipts, ...theirs],
+      ...(ok ? { message: [mine, rest.body.message].filter(Boolean).join(" "), ...(errors.length ? { notSent: errors.join("; ") } : {}) } : { error: errors.join("; ") }),
+      ...(instructionOnly ? { instructionOnly: true } : {}) } };
   }
   /** Why this call cannot go to another place at all, or null. */
   function unsupportedHere(call: CoordinateBotsCall, context: CoordinateContext, place: string): string | null {

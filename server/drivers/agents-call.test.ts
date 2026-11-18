@@ -554,11 +554,11 @@ describe("coordinate_bots", () => {
     const calls: Array<{ path: string; body: any }> = [];
     const result = await callTool("coordinate_bots", args, context({
       client: {
-        api: async (path, init) => {
+        apiResponse: async (path, init) => {
           calls.push({ path, body: JSON.parse(String(init?.body)) });
-          return { id: "a1" };
+          return { ok: true, status: 200, body: { receipts: [{ botId: "bot-scout", outcome: "queued", detail: "handed to the coordinator", requestId: "a1" }] } };
         },
-        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+        api: async () => { throw new Error("coordinate_bots reads its answer through apiResponse"); },
       },
     }));
     return { result, calls };
@@ -574,6 +574,47 @@ describe("coordinate_bots", () => {
       expect(refused.result.isError, JSON.stringify(files)).toBe(true);
       expect(refused.calls).toEqual([]);
     }
+  });
+
+  it("sends a 6,000-character brief whole, and refuses only past the engine's limit", async () => {
+    const brief = "x".repeat(6_000);
+    const { result, calls } = await coordinate({ ...BASE, message: brief });
+    expect(result.isError).toBeFalsy();
+    expect(calls[0]!.body.message).toBe(brief);
+    const long = await coordinate({ ...BASE, message: "x".repeat(12_001) });
+    expect(long.result.isError).toBe(true);
+    expect(long.result.text).toContain("message takes at most 12000 characters");
+    expect(long.calls).toEqual([]);
+  });
+
+  it("reads a refusal that only says nothing is left to do as a result, not as a failed call", async () => {
+    const detail = "nothing of Scout's waits on an answer as a1: it was answered or its work ended. Send it without answers if it still needs doing";
+    const body = { receipts: [{ botId: "bot-scout", outcome: "failed", detail, instructionOnly: true }], error: detail, instructionOnly: true };
+    const result = await callTool("coordinate_bots", { ...BASE, answers: "a1" }, context({
+      client: { apiResponse: async () => ({ ok: false, status: 409, body }), api: async () => ({}) },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(result.text).toBe(detail);
+  });
+
+  it("does not fail the call when every refusal in the batch only says there is nothing left to do", async () => {
+    const one = "nothing of Scout's waits on an answer as a1: it was answered or its work ended. Send it without answers if it still needs doing";
+    const two = "nothing of Atlas's waits on an answer as a2: it was answered or its work ended. Send it without answers if it still needs doing";
+    const receipts = [{ botId: "bot-scout", outcome: "failed", detail: one, instructionOnly: true }, { botId: "bot-atlas", outcome: "failed", detail: two, instructionOnly: true }];
+    const result = await callTool("coordinate_bots", { ...BASE, bot_ids: ["bot-scout", "bot-atlas"], answers: "a1" }, context({
+      client: { apiResponse: async () => ({ ok: false, status: 409, body: { receipts, error: `${one}; ${two}`, instructionOnly: true } }), api: async () => ({}) },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(result.text).toBe(`${one}; ${two}`);
+  });
+
+  it("still fails the call on a refusal that says something went wrong", async () => {
+    const detail = 'No bot with id "bot-ghost" — call list_bots and copy the exact id from the result';
+    const result = await callTool("coordinate_bots", BASE, context({
+      client: { apiResponse: async () => ({ ok: false, status: 403, body: { receipts: [], error: detail } }), api: async () => ({}) },
+    }));
+    expect(result.isError).toBe(true);
+    expect(result.text).toBe(detail);
   });
 
   it("drops an empty-string group_id instead of posting it", async () => {
