@@ -7,14 +7,14 @@ import { createRunComputerGate, RUN_COMPUTER_WAIT_MS } from "./cloud-computer-ru
 
 const RUN = { routineId: "routine-1", botId: "bot-1", target: "bot", runOn: "cloud" };
 
-function harness(over: { state?: string; answers?: (wait: number) => boolean; wakes?: boolean; disk?: (boxId: string, signal?: AbortSignal) => Promise<number | null | void>; remember?: { load(): string[]; save(ids: string[]): void } } = {}) {
+function harness(over: { state?: string; answers?: (wait: number) => boolean; wakes?: boolean; wakeThrows?: unknown; findThrows?: unknown; disk?: (boxId: string, signal?: AbortSignal) => Promise<number | null | void>; remember?: { load(): string[]; save(ids: string[]): void } } = {}) {
   let at = 0;
   const seen = { finds: 0, wakes: 0, waits: [] as boolean[], signals: [] as Array<AbortSignal | undefined>, used: 0 };
   const world = { verdict: null as RecoveryVerdict | null, verdictAt: 0, routine: "routine-1" as string | null, recovery: null as CloudComputerRecoveryState | null, machine: { id: "bx_23456789", state: over.state ?? "idle" } as { id: string; state: string } | null };
   const gate = createRunComputerGate({
     computerOf: () => "bot-1",
-    find: async () => { seen.finds++; return world.machine; },
-    wake: async () => { seen.wakes++; return over.wakes === false ? null : { id: "bx_23456789", state: "idle" }; },
+    find: async () => { seen.finds++; if (over.findThrows !== undefined) throw over.findThrows; return world.machine; },
+    wake: async () => { seen.wakes++; if (over.wakeThrows !== undefined) throw over.wakeThrows; return over.wakes === false ? null : { id: "bx_23456789", state: "idle" }; },
     awaitAnswer: async (_boxId, opts): Promise<BoatAnswer> => {
       seen.waits.push(opts.woke);
       seen.signals.push(opts.signal);
@@ -149,6 +149,37 @@ describe("an unattended run and its cloud computer", () => {
     const h = harness({ state: "archived", wakes: false });
     h.used();
     await expect(h.gate.prepare(RUN)).resolves.toBe(RUN_COMPUTER_LINES.noWake);
+  });
+
+  it("lets a run start when its computer cannot be looked up, unless it is a retry of a run whose computer did not wake", async () => {
+    const unreachable = Object.assign(new Error("could not list cloud computers"), { status: 503, transient: true });
+    const h = harness({ findThrows: unreachable });
+    h.used();
+    await expect(h.gate.prepare(RUN)).resolves.toBeNull();
+    await expect(h.gate.prepare({ ...RUN, wakeRetries: 1 })).resolves.toBe(RUN_COMPUTER_LINES.noWake);
+    // A run that started since its wake retries is an ordinary run again.
+    await expect(h.gate.prepare({ ...RUN, wakeRetries: 1, startedAt: 1, retried: "restarted" })).resolves.toBeNull();
+    expect(h.seen.wakes).toBe(0);
+  });
+
+  it("leaves a lookup the provider refused to the turn, even on a retry", async () => {
+    const h = harness({ findThrows: Object.assign(new Error("boat.dev rejected the Boat API key"), { status: 503 }) });
+    h.used();
+    await expect(h.gate.prepare({ ...RUN, wakeRetries: 1 })).resolves.toBeNull();
+  });
+
+  it("tells a provider that refused the wake from one that did not answer: only the second is worth another try", async () => {
+    const refusal = (status: number) => Object.assign(new Error("refused"), { boatStatus: status });
+    for (const [thrown, line] of [
+      [refusal(402), RUN_COMPUTER_LINES.wakeRefused], [refusal(403), RUN_COMPUTER_LINES.wakeRefused],
+      [refusal(429), RUN_COMPUTER_LINES.noWake], [refusal(503), RUN_COMPUTER_LINES.noWake],
+      [Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }), RUN_COMPUTER_LINES.noWake],
+      [Object.assign(new Error("could not list cloud computers"), { status: 503, transient: true }), RUN_COMPUTER_LINES.noWake],
+    ] as const) {
+      const h = harness({ state: "archived", wakeThrows: thrown });
+      h.used();
+      await expect(h.gate.prepare(RUN)).resolves.toBe(line);
+    }
   });
 
   it("keeps waiting while the recovery works on a silent computer, and starts once it answers", async () => {

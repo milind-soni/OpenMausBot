@@ -106,10 +106,12 @@ export const CLOUD_COMPUTER_EXEC_ANSWER_LOST =
   "The cloud computer started this command, but its answer was lost on the way back, so it may still be running or may have finished. It was not "
   + "started a second time. Do not run it again blindly: check first, for example with exec `pgrep -af '<part of the command>'` or by looking at the files it writes.";
 
-/** Why an unattended run did not start because of its cloud computer, and the note on one that finished unsure of it. */
+/** Why an unattended run did not start because of its cloud computer, and the note on one that finished unsure of it. A
+ * scheduled run that met `noWake` is tried again a few times first (server/routine-wake-retry.ts). */
 export const RUN_COMPUTER_LINES = {
   waking: "Waiting for its cloud computer to wake and answer",
   noWake: "The cloud computer did not wake, so this run did not start. The next scheduled run tries again.",
+  wakeRefused: "The cloud computer did not wake because its provider refused to start it, so this run did not start. The next scheduled run tries again.",
   noAnswer: "The cloud computer did not answer in time, so this run did not start. The next scheduled run tries again.",
   afterRestart: "The cloud computer did not answer after a restart, so this run did not start. The next scheduled run tries again; Restart computer or Replace computer in the computer panel fixes it sooner.",
   personBusy: "The cloud computer is not answering, and it was not restarted because someone is using it, so this run did not start. The next scheduled run tries again.",
