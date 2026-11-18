@@ -11189,5 +11189,13 @@
   "imageGen.higgsfield.connected": "Conectado à sua conta da Higgsfield",
   "imageGen.higgsfield.notConnected": "Não conectado, ou o login expirou",
   "imageGen.higgsfield.help": "O {app} cria imagens com a conta da Higgsfield em que você entra em Plugins. Cada imagem gasta créditos dessa conta.",
-  "imageGen.higgsfield.open": "Abrir Plugins"
+  "imageGen.higgsfield.open": "Abrir Plugins",
+  "cliLogin.title": "Um terminal quer controlar o {app}",
+  "cliLogin.bodyHere": "Alguém rodou openmausbot login em um terminal neste computador.",
+  "cliLogin.bodyElsewhere": "Alguém rodou openmausbot login em outro computador ({source}).",
+  "cliLogin.match": "Só permita se o seu terminal mostrar este mesmo código.",
+  "cliLogin.scopeAll": "Controle total",
+  "cliLogin.scopeChat": "Só conversa",
+  "cliLogin.allow": "Permitir",
+  "cliLogin.deny": "Recusar"
 }

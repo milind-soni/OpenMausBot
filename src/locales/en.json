@@ -11189,5 +11189,13 @@
   "chat.unreadContext.images": "Image",
   "chat.unreadContext.files": "File",
   "chat.unreadContext.moreCitations": "and {count} more",
-  "inbox.settled.read": "Read"
+  "inbox.settled.read": "Read",
+  "cliLogin.title": "A terminal wants to control {app}",
+  "cliLogin.bodyHere": "Someone ran openmausbot login in a terminal on this computer.",
+  "cliLogin.bodyElsewhere": "Someone ran openmausbot login on another computer ({source}).",
+  "cliLogin.match": "Allow it only if your terminal shows this same code.",
+  "cliLogin.scopeAll": "Full control",
+  "cliLogin.scopeChat": "Chat only",
+  "cliLogin.allow": "Allow",
+  "cliLogin.deny": "Deny"
 }
