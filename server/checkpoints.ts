@@ -292,7 +292,9 @@ async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string,
   mkdirSync(join(shadow, ".git", "info"), { recursive: true });
   writeFileSync(join(shadow, ".git", "info", "exclude"), EXCLUDES);
   // Cargo and other tools put caches outside target/ or build/; honour the standard CACHEDIR.TAG.
-  const tags = (await runGit(["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "**/CACHEDIR.TAG"], cwd, env, signal)).split("\0");
+  const tagsRead = runGit(["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "**/CACHEDIR.TAG"], cwd, env, signal);
+  const headRead = readHead(cwd, env, signal).catch(() => null);
+  const tags = (await tagsRead).split("\0");
   const cachePatterns = new Set<string>();
   for (const tag of tags) {
     if (!tag.includes("/") || /[\r\n]/.test(tag)) continue;
@@ -307,10 +309,8 @@ async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string,
     }
   }
   writeFileSync(join(shadow, ".git", "info", "exclude"), EXCLUDES + [...cachePatterns].join("\n") + "\n");
-  let head: Head;
-  try {
-    head = await readHead(cwd, env, signal);
-  } catch {
+  let head = await headRead;
+  if (!head) {
     await runGit(["commit", "--no-verify", "--allow-empty", "-m", "checkpoint base"], cwd, env, signal);
     head = await readHead(cwd, env, signal);
   }
@@ -369,10 +369,8 @@ async function indexNeedsRebuild(cwd: string, env: NodeJS.ProcessEnv, signal?: A
     if (e instanceof GitTimeoutError || signal?.aborted) throw e;
     return null;
   });
-  const ignored = await list(["ls-files", "--cached", "--ignored", "--exclude-standard", "-z"]);
-  if (ignored === null || ignored.length > 0) return true;
-  const staged = await list(["ls-files", "--stage", "-z"]);
-  if (staged === null) return true;
+  const [ignored, staged] = await Promise.all([list(["ls-files", "--cached", "--ignored", "--exclude-standard", "-z"]), list(["ls-files", "--stage", "-z"])]);
+  if (ignored === null || ignored.length > 0 || staged === null) return true;
   const paths: string[] = [];
   const parents = new Set<string>();
   for (const entry of staged.split("\0")) {
