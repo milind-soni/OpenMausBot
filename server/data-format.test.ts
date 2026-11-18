@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { encryptBrowserState } from "./browser-sites.ts";
 import {
   checkDataFormat, DATA_FORMAT, DATA_FORMAT_FILE, DataFormatError, dataFormatStepProblem, readDataFormat, stampDataFormat, type ReleasedDataFormat,
 } from "./data-format.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { LOGINS_FILE, LOGINS_KEY_FILE } from "./vault-store.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const { version: VERSION } = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version: string };
@@ -91,7 +93,7 @@ describe("the data folder's format marker", () => {
       for (const text of GARBLED) {
         const dir = dataDir();
         writeFileSync(join(dir, DATA_FORMAT_FILE), text);
-        expect(() => checkDataFormat(dir, "0.1.152", 1, 1), JSON.stringify(text)).not.toThrow();
+        expect(() => checkDataFormat(dir, "0.1.152", 1), JSON.stringify(text)).not.toThrow();
         stampDataFormat(dir, "0.1.152", { writes: 1, reads: 1 });
         expect(readDataFormat(dir), JSON.stringify(text)).toMatchObject({ format: 1, writtenBy: "0.1.152" });
       }
@@ -101,11 +103,12 @@ describe("the data folder's format marker", () => {
     }
   });
 
-  it("refuses a marker it cannot read once a version writes a newer format, since the data may then be in it", () => {
+  it("refuses a marker it cannot read if the server can read format 2 data", () => {
     for (const text of GARBLED) {
       const dir = dataDir();
       writeFileSync(join(dir, DATA_FORMAT_FILE), text);
-      expect(() => checkDataFormat(dir, "0.1.160", 2, 2), JSON.stringify(text)).toThrow(/cannot be read, so this version cannot tell/);
+      expect(() => checkDataFormat(dir, "0.1.160", 2), JSON.stringify(text)).toThrow(/cannot be read, so this version cannot tell/);
+      expect(() => stampDataFormat(dir, "0.1.160", { reads: 2, writes: 1 })).toThrow(DataFormatError);
       expect(readFileSync(join(dir, DATA_FORMAT_FILE), "utf8")).toBe(text);
     }
   });
@@ -115,7 +118,7 @@ describe("the data folder's format marker", () => {
     writeFileSync(join(dir, DATA_FORMAT_FILE), `\uFEFF${JSON.stringify({ format: 1, writtenBy: "0.1.151", writtenAt: "" })}`);
     expect(readDataFormat(dir)).toMatchObject({ format: 1, writtenBy: "0.1.151" });
     writeFileSync(join(dir, DATA_FORMAT_FILE), `\uFEFF${JSON.stringify({ format: 3, writtenBy: "0.2.0", writtenAt: "" })}`);
-    expect(() => checkDataFormat(dir, "0.1.152", 1, 1)).toThrow("written by a newer OpenMausBot (0.2.0)");
+    expect(() => checkDataFormat(dir, "0.1.152", 1)).toThrow("written by a newer OpenMausBot (0.2.0)");
   });
 
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("starts on a marker this user cannot read, and on a folder it cannot write", () => {
@@ -125,7 +128,7 @@ describe("the data folder's format marker", () => {
     chmodSync(join(dir, DATA_FORMAT_FILE), 0o000);
     chmodSync(dir, 0o555);
     try {
-      expect(() => checkDataFormat(dir, "0.1.152", 1, 1)).not.toThrow();
+      expect(() => checkDataFormat(dir, "0.1.152", 1)).not.toThrow();
       // The stamp cannot replace it (EACCES): said in the log, and the start goes on.
       expect(() => stampDataFormat(dir, "0.1.152", { writes: 1, reads: 1 })).not.toThrow();
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/could not write .*data-format\.json .*starting without it/));
@@ -137,7 +140,7 @@ describe("the data folder's format marker", () => {
     }
   });
 
-  it("never ends a start over a marker it cannot write: a Windows file held open, a full disk", () => {
+  it("continues when writing a format 1 marker fails", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       for (const code of ["EPERM", "EACCES", "ENOSPC", "EROFS"]) {
@@ -145,7 +148,7 @@ describe("the data folder's format marker", () => {
         const failing = () => {
           throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
         };
-        expect(() => stampDataFormat(dir, "0.1.152", DATA_FORMAT, failing), code).not.toThrow();
+        expect(() => stampDataFormat(dir, "0.1.152", { writes: 1, reads: 2 }, failing), code).not.toThrow();
         expect(readDataFormat(dir)).toBeNull();
       }
     } finally {
@@ -157,12 +160,30 @@ describe("the data folder's format marker", () => {
     expect(readdirSync(dir)).toEqual([DATA_FORMAT_FILE]);
   });
 
+  it.each([false, true])("requires a successful format 2 stamp (existing format 1 marker: %s)", (hasMarker) => {
+    const dir = dataDir();
+    const file = join(dir, DATA_FORMAT_FILE);
+    const marker = JSON.stringify({ format: 1, writtenBy: "0.1.170", writtenAt: "" });
+    if (hasMarker) writeFileSync(file, marker);
+    const format = { writes: 2, reads: 2 };
+    const fail = () => { throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" }); };
+
+    expect(() => stampDataFormat(dir, "0.1.171", format, fail)).toThrow(DataFormatError);
+    if (hasMarker) expect(readFileSync(file, "utf8")).toBe(marker);
+    else expect(existsSync(file)).toBe(false);
+
+    stampDataFormat(dir, "0.1.171", format);
+    expect(readDataFormat(dir)?.format).toBe(2);
+    expect(() => checkDataFormat(dir, "0.1.169", 1)).toThrow(DataFormatError);
+    expect(() => stampDataFormat(dir, "0.1.171", format, fail)).not.toThrow();
+  });
+
   it("lets the Admin roll a Cloud back one image, and forward again, on the same data", () => {
     const dir = dataDir();
     stampDataFormat(dir, VERSION, DATA_FORMAT);
     const stamped = readFileSync(join(dir, DATA_FORMAT_FILE), "utf8");
     // The image before: the last release, with the numbers it was released with.
-    expect(() => checkDataFormat(dir, `${released.version}-previous`, released.reads, released.writes)).not.toThrow();
+    expect(() => checkDataFormat(dir, `${released.version}-previous`, released.reads)).not.toThrow();
     stampDataFormat(dir, `${released.version}-previous`, released);
     expect(readFileSync(join(dir, DATA_FORMAT_FILE), "utf8")).toBe(stamped);
     stampDataFormat(dir, VERSION, DATA_FORMAT);
@@ -206,16 +227,27 @@ describe("a server starting on a data folder", () => {
     expect(readdirSync(data)).toEqual([DATA_FORMAT_FILE]);
   }, 60_000);
 
-  it("starts, and puts a good marker back, on a marker a power loss left empty or full of NULs", async () => {
+  it("refuses to open a Vault with a large value and an unreadable format marker", async () => {
     for (const text of ["", "\0".repeat(64)]) {
       const dir = dataDir();
       const data = join(dir, "data");
       mkdirSync(data);
-      writeFileSync(join(data, DATA_FORMAT_FILE), text);
       const marker = join(data, DATA_FORMAT_FILE);
-      const { stderr } = await start(dir, () => existsSync(join(data, "environment-id")) && readFileSync(marker, "utf8").includes('"format"'));
-      expect(stderr).not.toContain("startup failed");
-      expect(JSON.parse(readFileSync(marker, "utf8"))).toMatchObject({ format: DATA_FORMAT.writes, writtenBy: VERSION });
+      writeFileSync(marker, text);
+      const key = "ab".repeat(32);
+      const vault = join(data, LOGINS_FILE);
+      const sealed = encryptBrowserState(JSON.stringify({ version: 1, logins: [], secrets: [
+        { id: "small-fixture", name: "Small fixture", value: "fixture-only", source: "settings", bots: "all", createdAt: 1, updatedAt: 1 },
+        { id: "large-fixture", name: "Large fixture", value: "x".repeat(65_536), source: "settings", bots: "all", createdAt: 1, updatedAt: 1 },
+      ] }), key);
+      writeFileSync(join(data, LOGINS_KEY_FILE), key);
+      writeFileSync(vault, sealed);
+      const { code, stderr } = await start(dir, () => existsSync(join(data, "environment-id")) && readFileSync(marker, "utf8").includes('"format"'));
+      expect(code).toBe(1);
+      expect(stderr).toContain("cannot be read, so this version cannot tell");
+      expect(readFileSync(marker, "utf8")).toBe(text);
+      expect(readFileSync(vault).equals(sealed)).toBe(true);
+      expect(existsSync(join(data, "environment-id"))).toBe(false);
     }
   }, 120_000);
 
@@ -223,7 +255,7 @@ describe("a server starting on a data folder", () => {
     const dir = dataDir();
     const data = join(dir, "data");
     mkdirSync(data);
-    const marker = `${JSON.stringify({ format: DATA_FORMAT.writes, writtenBy: "99.0.0", writtenAt: "2027-01-01T00:00:00.000Z" }, null, 2)}\n`;
+    const marker = `${JSON.stringify({ format: DATA_FORMAT.reads, writtenBy: "99.0.0", writtenAt: "2027-01-01T00:00:00.000Z" }, null, 2)}\n`;
     writeFileSync(join(data, DATA_FORMAT_FILE), marker);
     const { stderr } = await start(dir, () => existsSync(join(data, "environment-id")));
     expect(stderr).not.toContain("startup failed");

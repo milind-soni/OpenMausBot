@@ -2,6 +2,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { DATA_FORMAT } from "../../data-format.ts";
 import { context, dataFolder, NOW, UUID } from "../../testing/doctor-folders.ts";
 import { DOCTOR_BACKUPS_DIR } from "../backup.ts";
 import { runDoctor } from "../run.ts";
@@ -16,9 +17,15 @@ describe("data-format check", () => {
     expect(dataFormatCheck().check(context(data)).status).toBe("ok");
   });
 
+  it("blocks repair when the format 2 reader cannot read the marker", () => {
+    const data = dataFolder();
+    writeFileSync(join(data, "data-format.json"), "\0".repeat(64));
+    expect(dataFormatCheck(2).check(context(data))).toMatchObject({ status: "problem", blocking: true });
+  });
+
   it("refuses a newer format, never fixes it, and then lets no other fix run", () => {
     const data = dataFolder();
-    writeFileSync(join(data, "data-format.json"), JSON.stringify({ format: 2, writtenBy: "0.2.0", writtenAt: "" }));
+    writeFileSync(join(data, "data-format.json"), JSON.stringify({ format: DATA_FORMAT.reads + 1, writtenBy: "0.2.0", writtenAt: "" }));
     const finding = dataFormatCheck().check(context(data));
     expect(finding).toMatchObject({ status: "problem", blocking: true });
     expect(finding.fixable).toBeFalsy();

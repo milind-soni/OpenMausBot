@@ -1,7 +1,7 @@
 // The data folder's format marker, and the rule that makes an update safe to roll back: what version N writes, version
 // N-1 can still read (CONTRIBUTING.md, "Changing how data is stored"). A server that finds data in a format it cannot
 // read refuses to start before it touches a file.
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
 
@@ -10,7 +10,7 @@ import { writeFileAtomic } from "./atomic.ts";
  * one ahead. A change the previous release cannot read takes two releases: raise `reads` (and ship the code that reads
  * the new format) in one, raise `writes` in the next. server/data-format.test.ts fails on any other step.
  */
-export const DATA_FORMAT = { writes: 1, reads: 1 } as const;
+export const DATA_FORMAT = { writes: 1, reads: 2 } as const;
 
 export const DATA_FORMAT_FILE = "data-format.json";
 
@@ -30,38 +30,36 @@ export class DataFormatError extends Error {
 /** The marker in the folder; null when there is none, "unreadable" when there is one whose format cannot be told. */
 function markerIn(dataDir: string): DataFormatMarker | null | "unreadable" {
   const file = join(dataDir, DATA_FORMAT_FILE);
-  if (!existsSync(file)) return null;
   try {
     // A byte-order mark is what some editors put in front of JSON; the format behind it is still readable.
     const marker = JSON.parse(readFileSync(file, "utf8").replace(/^\uFEFF/, "")) as Partial<DataFormatMarker> | null;
     if (marker && typeof marker.format === "number" && Number.isInteger(marker.format) && marker.format >= 1) {
       return { format: marker.format, writtenBy: typeof marker.writtenBy === "string" ? marker.writtenBy : "unknown", writtenAt: typeof marker.writtenAt === "string" ? marker.writtenAt : "" };
     }
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
   }
   return "unreadable";
 }
 
 /**
- * Null when the folder has no marker. A marker that cannot be read (empty or NUL-filled after a power loss, not
- * readable by this user) is format 1 while no version writes anything newer (`writes` 1): there is then no newer format
- * it could have recorded, and refusing would stop a healthy install. Once a version writes format 2 its format is
- * unknown, and this throws.
+ * Null when the folder has no marker. A reader that understands a newer format may be opening data after rollback
+ * from a newer writer. If the marker is unreadable, restamping it as format 1 could expose that data to an older reader.
  */
-export function readDataFormat(dataDir: string, writes: number = DATA_FORMAT.writes): DataFormatMarker | null {
+export function readDataFormat(dataDir: string, reads: number = DATA_FORMAT.reads): DataFormatMarker | null {
   const marker = markerIn(dataDir);
   if (marker !== "unreadable") return marker;
   const file = join(dataDir, DATA_FORMAT_FILE);
-  if (writes <= 1) {
+  if (reads <= 1) {
     console.warn(`[data-format] ${file} cannot be read; taking the data as format 1, the only format any version has written.`);
     return null;
   }
-  throw new DataFormatError(`OpenMausBot startup failed: ${file} cannot be read, so this version cannot tell whether it understands the data in ${dataDir}. Nothing was changed. Restore that file from a backup, or the whole folder from the copy taken before the last update.`);
+  throw new DataFormatError(`OpenMausBot startup failed: ${file} cannot be read, so this version cannot tell whether it understands the data in ${dataDir}. Nothing was changed. Restore the marker from the same snapshot as the data, or restore the whole data folder from a backup.`);
 }
 
 /** Throws, having changed nothing, when a newer version left the data in a format `reads` does not cover. */
-export function checkDataFormat(dataDir: string, version: string, reads: number = DATA_FORMAT.reads, writes: number = DATA_FORMAT.writes): void {
-  const marker = readDataFormat(dataDir, writes);
+export function checkDataFormat(dataDir: string, version: string, reads: number = DATA_FORMAT.reads): void {
+  const marker = readDataFormat(dataDir, reads);
   if (marker && marker.format > reads) throw newerData(dataDir, version, marker);
 }
 
@@ -74,8 +72,8 @@ function newerData(dataDir: string, version: string, marker: DataFormatMarker): 
 
 /**
  * Records that this version has run on the folder. Never lowers a marker: an older version that could read the data
- * leaves it. Throws only DataFormatError, for data it cannot read; a marker it cannot write (a read-only folder, a file
- * Windows holds open past the retries) is said in the log and the start goes on, since the data itself is fine.
+ * leaves it. A marker is optional for format 1. A server writing a newer format needs the marker to protect that data
+ * against rollback, so a failed write throws DataFormatError before stores can open.
  */
 export function stampDataFormat(
   dataDir: string,
@@ -83,7 +81,7 @@ export function stampDataFormat(
   format: { writes: number; reads: number } = DATA_FORMAT,
   write: (path: string, text: string) => void = writeFileAtomic,
 ): void {
-  const marker = readDataFormat(dataDir, format.writes);
+  const marker = readDataFormat(dataDir, format.reads);
   if (marker && marker.format > format.reads) throw newerData(dataDir, version, marker);
   if (marker && marker.format >= format.writes) return;
   const file = join(dataDir, DATA_FORMAT_FILE);
@@ -91,7 +89,11 @@ export function stampDataFormat(
   try {
     write(file, `${JSON.stringify(next, null, 2)}\n`);
   } catch (error) {
-    console.warn(`[data-format] could not write ${file} (${error instanceof Error ? error.message : String(error)}); starting without it.`);
+    const detail = error instanceof Error ? error.message : String(error);
+    if (format.writes > 1) {
+      throw new DataFormatError(`OpenMausBot startup failed: could not write data format ${format.writes} to ${file} (${detail}). Fix the marker write error, then restart.`);
+    }
+    console.warn(`[data-format] could not write ${file} (${detail}); starting without it.`);
   }
 }
 

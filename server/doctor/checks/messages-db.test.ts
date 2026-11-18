@@ -76,9 +76,10 @@ describe("messages-db check", () => {
   it("reports what SQLite's own check finds damaged inside a database it can open", () => {
     const data = dataFolder();
     const db = new DatabaseSync(join(data, "messages.db"));
-    db.exec("CREATE TABLE messages (id TEXT, text TEXT); CREATE INDEX by_text ON messages (text)");
+    db.exec("CREATE TABLE messages (id TEXT, text TEXT); CREATE INDEX by_text ON messages (text); BEGIN");
     const insert = db.prepare("INSERT INTO messages VALUES (?, ?)");
     for (let n = 0; n < 500; n += 1) insert.run(String(n), `${"y".repeat(200)}${n}`);
+    db.exec("COMMIT");
     db.close();
     // Overwrite part of a page in the middle: the header still reads, the tree does not.
     const bytes = readFileSync(join(data, "messages.db"));
