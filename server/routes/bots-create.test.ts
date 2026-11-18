@@ -62,7 +62,7 @@ function fixture(options: { newBotComputer?: BotCreateRouteDeps["newBotComputer"
     expect(sent[0]!.status, JSON.stringify(sent[0]!.body)).toBe(201);
     return store.bot(sent[0]!.body.bot.id)!;
   };
-  return { create, asked };
+  return { create, asked, store };
 }
 
 describe("where a new bot works", () => {
@@ -91,6 +91,26 @@ describe("where a new bot works", () => {
 });
 
 describe("saving a new bot", () => {
+  const botsFileWrites = async (run: () => unknown) => {
+    const write = vi.spyOn(OwnedFile.prototype, "write");
+    try {
+      await run();
+      return write.mock.results.filter((result, call) => result.value === true && (write.mock.contexts[call] as OwnedFile).path === BOTS_FILE).length;
+    } finally {
+      write.mockRestore();
+    }
+  };
+
+  it("writes bots.json once for the POST and not again for a PATCH that changes nothing", async () => {
+    const fx = fixture({ newBotComputer: () => "local" });
+    await fx.create({ name: "Warm" });
+    let bot = await fx.create({ name: "Other" });
+    expect(await botsFileWrites(async () => { bot = await fx.create({ name: "Ada", modelSelection: sonnet, requireAvailableModel: true, useDefaults: false }); })).toBe(1);
+    expect(await botsFileWrites(() => fx.store.patchBot(bot.id, { name: bot.name, notifications: bot.notifications }))).toBe(0);
+    expect(new Store(() => sonnet).bot(bot.id)!.tasks).toEqual(fx.store.bot(bot.id)!.tasks!.map(({ busy: _busy, activity: _activity, ...task }) => expect.objectContaining(task)));
+  });
+
+
   it("writes bots.json once, with the request's settings already in it", async () => {
     const fx = fixture({ newBotComputer: () => "local" });
     await fx.create({ name: "Warm" });

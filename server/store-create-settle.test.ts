@@ -44,6 +44,20 @@ describe("Store.createBot with settle", () => {
     expect(readFileSync(soulFile(made), "utf8")).toBe("Be brief.");
   });
 
+  it("leaves nothing of a greeted bot for a later save: its one write holds what memory holds", () => {
+    const store = new Store(selection);
+    for (const settle of [undefined, (fresh: { id: string }) => { store.patchBot(fresh.id, { cwd: "/work" }); }]) {
+      let bot = store.bots[0]!;
+      expect(botsFileWrites(() => { bot = store.createBot({ name: "Greeted" }, { settle }); })).toBe(1);
+      const greeting = store.messagesFor(bot.threadId);
+      expect(greeting).toHaveLength(1);
+      expect(greeting[0]!.at).toBe(bot.createdAt);
+      const { busy: _busy, activity: _activity, ...task } = bot.tasks![0]!;
+      expect((savedBots().find((saved) => saved.id === bot.id) as unknown as typeof bot).tasks![0]).toEqual(task);
+      expect(botsFileWrites(() => { store.patchBot(bot.id, { name: bot.name }); })).toBe(0);
+    }
+  });
+
   it("writes bots.json once without settle too", () => {
     const store = new Store(selection);
     expect(botsFileWrites(() => { store.createBot({ name: "Scout" }, { seedMessages: false }); })).toBe(1);

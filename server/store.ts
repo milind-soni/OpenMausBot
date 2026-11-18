@@ -1312,7 +1312,7 @@ export class Store {
       threadId: bot.threadId,
       title: UNTITLED_THREAD,
       createdAt: bot.createdAt,
-      updatedAt: bot.createdAt,
+      updatedAt: bot.createdAt, ...(opts.seedMessages !== false ? { lastThreadOrderAt: bot.createdAt } : {}),
       resumeCursors: {},
       unread: false,
       activity: "idle",
@@ -1328,7 +1328,7 @@ export class Store {
     // Before its transcript: clients need the bot/thread mapping to place either message.
     opts.beforeShown?.(bot); this.emit({ type: "bot", botId: bot.id });
     if (opts.seedMessages !== false) {
-      this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage, !bot.soul?.trim() && !bot.description.trim(), this.personName()));
+      this.appendMessage(bot.threadId, { ...initialGreetingMessage(name, this.initialLanguage, !bot.soul?.trim() && !bot.description.trim(), this.personName()), at: bot.createdAt });
     }
     return bot;
   }
