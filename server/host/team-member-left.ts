@@ -9,6 +9,8 @@
 // restores nothing, and one admin activity row says who left, in counts. The Admin tells this machine with a signed
 // request (`POST /api/cloud/team/member-left`, cloud-signed.ts).
 //
+// Team files (team-files/, host/team-files.ts) are the team's: what they uploaded, or had a bot write there, stays.
+//
 // Each conversation keeps its starter (thread-starters.json, a hash): what other records still name it (a decision's
 // row, a usage trace) stays someone else's, so no admin ever reads it there either.
 import { existsSync, readdirSync, rmSync } from "node:fs";

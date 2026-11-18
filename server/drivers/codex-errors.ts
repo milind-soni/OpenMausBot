@@ -13,7 +13,7 @@ export type CodexRoute = "plan" | "own" | "other";
 export const CODEX_MISSING_CREDENTIALS = /missing bearer or basic authentication/i;
 
 export function codexNotSignedIn(): string {
-  return `Codex isn't signed in on this computer.${cloudHomeConfigured() ? " Sign-ins don't copy over when you move to My Cloud." : ""} Sign in to Codex in Settings → Model providers → Codex.`;
+  return `Codex isn't signed in on this computer.${cloudHomeConfigured() ? " Sign-ins don't copy over when you move to My Cloud." : ""} Sign in to Codex in Settings → AI → Providers, on Codex.`;
 }
 
 /** Codex's own words name ChatGPT's plans ("Upgrade to Pro"), which read as MausBot's. codex-cli 0.160.1 ends them
@@ -67,6 +67,12 @@ export function codexLimitFacts(raw: string, route: CodexRoute, codexErrorInfo?:
 // "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."
 const PLAN_MODEL_REFUSED = /model is not supported when using Codex with a ChatGPT account/i;
 
+// A ChatGPT plan takes only text, image and file input (2026-11-17 report on OpenMausBot 0.1.169): it refuses a request
+// that carries audio with this code, and Codex keeps that audio in the saved session it resends every turn.
+export function codexPlanUnsupportedInput(raw: string, route: CodexRoute): boolean {
+  return route === "plan" && raw.includes("subscription_sharing_unsupported_capability");
+}
+
 /** A ChatGPT plan turn refused because the signed-in account can't use the selected model. */
 export function codexPlanModelRefused(value: string, route: CodexRoute): boolean {
   return route === "plan" && PLAN_MODEL_REFUSED.test(value);
@@ -88,7 +94,7 @@ export function codexUserError(value: string, route: CodexRoute, codexErrorInfo?
   if (value.includes("provider_not_configured")) {
     return route === "plan"
       ? "provider_not_configured: ChatGPT has not enabled this model for the selected account. Refresh models or reconnect ChatGPT plan in Settings. API billing will not be used."
-      : "provider_not_configured: This Codex account cannot use the selected route. For the new ChatGPT plan models, choose ChatGPT plan in Settings → Engines and Continue with ChatGPT, then select a model from that account.";
+      : "provider_not_configured: This Codex account cannot use the selected route. For the new ChatGPT plan models, choose ChatGPT plan in Settings → AI → Providers and Continue with ChatGPT, then select a model from that account.";
   }
   return value.slice(0, 400);
 }
@@ -107,7 +113,7 @@ export function codexSignInRefused(error: unknown): boolean {
   return typeof message === "string" && CODEX_SIGN_IN_REFUSED.test(message);
 }
 
-export const CODEX_SIGN_IN_EXPIRED = "Codex's ChatGPT sign-in has expired. Sign in again in Settings → Model providers → Codex.";
+export const CODEX_SIGN_IN_EXPIRED = "Codex's ChatGPT sign-in has expired. Sign in again in Settings → AI → Providers, on Codex.";
 
 export function codexSignInExpired(raw: string): string {
   return `${CODEX_SIGN_IN_EXPIRED} Codex said: ${raw.slice(0, 300)}`;

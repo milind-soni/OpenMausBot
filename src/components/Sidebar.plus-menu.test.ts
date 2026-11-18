@@ -73,13 +73,13 @@ function plusMenu(admin: boolean | null, team = false) {
 }
 
 describe("the sidebar's + menu", () => {
-  it("offers a new bot and templates to someone who can make one, and while that isn't known yet", () => {
-    for (const admin of [true, null]) expect(plusMenu(admin)).toEqual(["New bot", "New group chat", "Templates"]);
+  it("offers a new bot, a department, templates and Import… to someone who can make one, and while that isn't known yet", () => {
+    for (const admin of [true, null]) expect(plusMenu(admin)).toEqual(["New bot", "New group chat", "Add department", "Templates", "Import…"]);
   });
 
-  it("offers a team's User a new bot of their own, and templates only to its admins", () => {
+  it("offers a team's User a new bot of their own, and departments, templates and Import… only to its admins", () => {
     expect(plusMenu(false, true)).toEqual(["New bot", "New group chat"]);
-    expect(plusMenu(true, true)).toEqual(["New bot", "New group chat", "Templates"]);
+    expect(plusMenu(true, true)).toEqual(["New bot", "New group chat", "Add department", "Templates", "Import…"]);
   });
 
   it("offers neither to someone without the admin scope anywhere else, who keeps New group chat", () => {

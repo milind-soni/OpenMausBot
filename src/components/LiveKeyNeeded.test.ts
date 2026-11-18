@@ -21,7 +21,7 @@ const nodes = (value: ReactNode): Node[] => !isValidElement(value) ? [] : [value
 it("says one plain thing, names OpenAI, and offers only the way to Settings → API keys", () => {
   const html = renderToStaticMarkup(createElement(LiveKeyNeeded));
   expect(html).toContain('<h2 id="live-key-title"');
-  expect(html).toContain("Live calls use your own OpenAI key. Add it in Settings → API keys.");
+  expect(html).toContain("Live calls use your own OpenAI key. Add it in Settings → AI → Other services.");
   expect(html).toContain(">Open AI › Other services</button>");
   expect(html.match(/<button/g)).toHaveLength(1);
   expect(html).toContain("The OpenAI key stays on your computer.");

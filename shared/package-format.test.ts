@@ -306,3 +306,19 @@ describe("files for older apps", () => {
     expect(downgradeToV1(document)).toEqual({ error: expect.stringContaining("5 to 240 minutes") });
   });
 });
+
+it.each(["legacy-team.v1.json", "full-team.v2.json"])("accepts underscore app requirements without widening package keys in %s", (name) => {
+  for (const slug of ["_1password", "_" + "a".repeat(63)]) {
+    const value = fixture(name);
+    value.package.requirements.apps = [{ slug, label: "1Password", reason: "Read vault items." }];
+    expect(parsePackageDocument(value).package.requirements.apps[0]?.slug).toBe(slug);
+  }
+  for (const slug of ["", "-x", "Bad Slug", "a/b", "__proto__", "Uppercase", "a".repeat(65)]) {
+    const value = fixture(name);
+    value.package.requirements.apps = [{ slug, label: "Invalid", reason: "Test validation." }];
+    expect(() => parsePackageDocument(value)).toThrow();
+  }
+  const value = fixture(name);
+  value.package.agents[0].key = "_agent";
+  expect(() => parsePackageDocument(value)).toThrow();
+});

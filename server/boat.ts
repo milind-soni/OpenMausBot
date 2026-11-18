@@ -72,7 +72,7 @@ const BOAT_INVENTORY_PAGE_SIZE = 200;
 // Bounded: a broken or adversarial cursor must not hold Settings open.
 const MAX_BOAT_INVENTORY_PAGES = 10;
 const LEGACY_MANAGED_BOAT_NAME = /^ogb-[a-z0-9]{1,8}-[a-f0-9]{6}$/;
-const SCOPED_MANAGED_BOAT_NAME = /^ogb-[a-f0-9]{12}-[a-z0-9]{1,8}-[a-f0-9]{6}$/;
+const SCOPED_MANAGED_BOAT_NAME = /^ogb-[a-f0-9]{12}-[a-z0-9]{1,8}-[a-f0-9]{6}$/; /** Set aside (boat-set-aside.ts): this installation's, no bot's. */ export const SET_ASIDE_BOAT_NAME = /^ogb-[a-f0-9]{12}-[a-z0-9]{1,8}-[a-f0-9]{6}-set-aside-\d{4}-\d{2}-\d{2}$/;
 const BOAT_ID = /^bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}$/;
 /** Sandbox.state in v1, plus OpenMausBot's own `removing` for a sandbox whose deletion is under way. */
 const BOAT_STATES = new Set([
@@ -428,7 +428,7 @@ export const deadBoatOf = (owner: string) => deadBoats.get(owner) ?? null, boatI
 
 function boatInventoryProblem(status: number, body: any, included = false): string {
   if (status === 401 || status === 403) {
-    return included ? INCLUDED_BOAT_UNAVAILABLE : "boat.dev rejected the Boat API key — update it in Settings → API keys";
+    return included ? INCLUDED_BOAT_UNAVAILABLE : "boat.dev rejected the Boat API key — update it in Settings → AI → Other services";
   }
   const service = boatServiceName(included);
   if (status === 429) return `${service} is rate-limiting this account — wait a minute and refresh`;
@@ -642,7 +642,7 @@ export async function listManagedBoats(
     const name = typeof candidate.name === "string" ? candidate.name : "";
     let owner: ManagedBoatOwner | null = null;
     let legacyOwner = false;
-    if (SCOPED_MANAGED_BOAT_NAME.test(name)) {
+    if (SCOPED_MANAGED_BOAT_NAME.test(name) || SET_ASIDE_BOAT_NAME.test(name)) {
       if (!name.startsWith(scopedPrefix)) continue;
       owner = ownerByCurrentName.get(name) ?? null;
     } else if (LEGACY_MANAGED_BOAT_NAME.test(name)) {
@@ -720,7 +720,7 @@ export function inventoryFailure(inventory: ManagedBoatInventory): Error & { sta
   const error = new Error(
     inventory.configured
       ? (inventory.problem ?? "Cloud computer inventory is unavailable")
-      : "Boat is not configured — add its API key in Settings → API keys",
+      : "Boat is not configured — add its API key in Settings → AI → Other services",
   ) as Error & { status: number };
   error.status = inventory.configured ? 503 : 409;
   return error;
@@ -930,7 +930,7 @@ export function boatErrorMessage(status: number, what: string, body?: any, inclu
   }
   if (status === 401 || status === 403) {
     if (included) return INCLUDED_BOAT_UNAVAILABLE;
-    return "boat.dev rejected your Boat API key — paste a current one in Settings → API keys";
+    return "boat.dev rejected your Boat API key — paste a current one in Settings → AI → Other services";
   }
   if (status === 429) {
     return theirs || "boat.dev is rate-limiting this account — wait a minute and try again";
@@ -1066,7 +1066,7 @@ export async function boatStatus(cfg: AppConfig, botId: string) {
 export async function provisionBoat(cfg: AppConfig, botId: string, _botName: string) {
   cfg = snapshotBoatConfig(cfg);
   if (!boatConfigured(cfg)) {
-    throw new Error("Boat is not configured — add its API key in Settings → API keys");
+    throw new Error("Boat is not configured — add its API key in Settings → AI → Other services");
   }
   await finishPriorDeletionBeforeProvision(cfg, botId);
   const vmName = await boatNameFor(botId);

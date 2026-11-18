@@ -139,7 +139,7 @@ export function NewBotEffortRow() {
   );
 }
 
-export function NewBotDefaultsRow({ onEdit, onShare }: { onEdit: () => void; onShare: () => void }) {
+export function NewBotDefaultsRow({ onEdit }: { onEdit: () => void }) {
   const effort = useNewBotEffort();
   return (
     <SettingRow
@@ -149,7 +149,6 @@ export function NewBotDefaultsRow({ onEdit, onShare }: { onEdit: () => void; onS
     >
       <div className="flex items-center gap-2">
         <NewBotEffortSelect effort={effort} className="w-auto" />
-        <button type="button" className="ui-button" data-new-bot-share onClick={onShare}>{t("newBot.sharePreset")}</button>
         <button type="button" className="ui-button" data-new-bot-defaults onClick={onEdit}>{t("newBot.edit")}</button>
       </div>
     </SettingRow>

@@ -13,7 +13,7 @@ const { Spotlight } = await import("./onboarding/Spotlight");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const VIEW: WhatsNewView = { slides: ["pro", "team"], audience: "none", signedIn: false, staging: false,
-  plans: { pro: { name: "Pro", terms: "Pro · $49/month + tax" }, team: { name: "Team", terms: "Team · $169/month + tax" } } };
+  plans: { pro: { name: "Pro", terms: "Pro · $49/month + tax" }, team: { name: "Team", terms: "Team · $40/month + tax" } } };
 const done = vi.fn();
 let roots: Root[];
 const mount = async (element: ReturnType<typeof createElement>) => {

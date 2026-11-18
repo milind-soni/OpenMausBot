@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -12,6 +12,7 @@ import { CLOUD_HEALTH_MAX_BYTES, HEALTH_BUCKET_CAP, createCloudHealth, createClo
 import { DATA_DIR, EVENTS_DIR } from "./config.ts";
 import { memoryStallText, memoryStopText } from "./engine-memory.ts";
 import type { RuntimeEvent } from "./contracts.ts";
+import { doctorAtStart } from "./doctor/start.ts";
 import { toolFailureMessage } from "./drivers/tool-failure.ts";
 import { createCloudSignedRoutes } from "./routes/cloud-signed.ts";
 import { SessionRegistry } from "./sessions.ts";
@@ -54,6 +55,17 @@ describe("a Cloud home's memory pressure in its health report", () => {
     expect(world().health.report(undefined)).toMatchObject({ room: null });
     const room = { waits: 3, waitMs: 360_000, stopped: 1, killed: 2, stallMinutes: 4 };
     expect(world({ room: () => room }).health.report(undefined)).toMatchObject({ room });
+  });
+});
+
+describe("the doctor in a Cloud home's health report", () => {
+  it("carries the check ids and counts of this version's first start, and null before it ran", () => {
+    expect(world().health.report(undefined)).toMatchObject({ doctor: null });
+    writeFileSync(join(DATA_DIR, `config.json.31337.${"0b4d8f7a-3c2e-4f1a-9b6d-5e7c8a9f0d1e"}.tmp`), "{}");
+    doctorAtStart(DATA_DIR, "0.1.120", { now: () => START, pidAlive: () => false, log: () => {} });
+    const { doctor } = world().health.report(undefined);
+    expect(doctor).toMatchObject({ at: START, version: "0.1.120", fixed: expect.arrayContaining(["temp-files"]), problems: [], thisStart: true });
+    expect(JSON.stringify(doctor)).not.toContain(DATA_DIR);
   });
 });
 

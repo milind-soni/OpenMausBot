@@ -6,9 +6,9 @@
 //                     [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--relay] [--no-pair]
 //   openmausbot pair  [--label "My MacBook"] [--client] [--public-url https://host]
 //   openmausbot sessions [revoke <id>]
-//   openmausbot status
-//   openmausbot login [--email you@example.com] [--relay]
-//   openmausbot logout
+//   openmausbot account status
+//   openmausbot account login [--email you@example.com] [--relay]
+//   openmausbot account logout
 //   openmausbot run | send | wait | doctor | team apply | export | …
 //
 // This module only exports: openmausbot.ts runs main(), so bundling this file into other entries never runs it twice.
@@ -27,17 +27,18 @@ import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts"
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
 import { reportableServerVersion, serverVersion } from "./environment.ts";
 import { resolveLoopbackTrust } from "./request-auth.ts";
-import { restartPolicy } from "./restart.ts";
+import { CRASH_EXIT_CODE, crashed, restartLine, restartPolicy } from "./restart.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureCaddy, normalizeDomainOption, startCaddy, type RunningCaddy } from "./caddy.ts";
 import { runServiceCommand } from "./service-cli.ts";
 import { runSentinelCli } from "./sentinel/cli.ts";
+import { runConfigCli } from "./config-cli.ts";
 import { runFleetCommand, type FleetInput } from "./fleet-cli.ts";
 import { startFleetAgent } from "./fleet-agent.ts";
 import { fleetLayout } from "./fleet.ts";
 import { clearLeftoverTailscaleServe, explainTailscaleFailure, tailnetListenFallback, tailscaleServe, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
-import { HEADLESS_VERB_NAMES, usage } from "./cli-usage.ts";
+import { routeCli, usage } from "./cli-usage.ts"; import { savedSessionHeaders } from "./headless/saved-servers.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
 import { browserSignInLines, desktopOwnedRefusal, formatSessions, pairingBlock, RELAY_NOT_WITH_TUNNEL, relayPairingBlock, showRelayPairing } from "./cli-pairing.ts";
 import { cliCommand, cliPrefix } from "./cli-invocation.ts";
@@ -254,13 +255,13 @@ let serveOwnerToken: string | undefined;
 
 async function api(port: number, path: string, init: { method?: string; body?: string } = {}): Promise<{ status: number; body: any }> {
   // x-openmausbot-cli names the tool in the activity log; on loopback it grants nothing.
-  const headers: Record<string, string> = { "content-type": "application/json", "x-openmausbot-cli": "1", ...(serveOwnerToken ? { "x-openmausbot-cli-owner": serveOwnerToken } : {}) };
+  const headers: Record<string, string> = { "content-type": "application/json", "x-openmausbot-cli": "1", ...(serveOwnerToken ? { "x-openmausbot-cli-owner": serveOwnerToken } : path.startsWith("/api/auth/") ? await savedSessionHeaders(`http://127.0.0.1:${port}`) : {}) };
   const res = await fetch(`http://127.0.0.1:${port}${path}`, { method: init.method, body: init.body, headers, signal: AbortSignal.timeout(3000) });
   const body: unknown = await res.json().catch(() => ({}));
   return { status: res.status, body };
 }
 
-export const SERVICE_TRUST_HELP = "This server does not treat commands on this computer as its owner (OMB_LOOPBACK_TRUST=service, or a hosted workspace), so it will not pair devices or list sessions for them. Sign in as an admin and use Settings → Remote access, let people sign in with their email (openmausbot access add you@example.com), or restart the server with OMB_LOOPBACK_TRUST=owner.";
+export const SERVICE_TRUST_HELP = "This server does not treat commands on this computer as its owner (OMB_LOOPBACK_TRUST=service, or a hosted workspace), so it will not pair devices or list sessions for them. Sign in as an admin and use Settings → Phone & devices, let people sign in with their email (openmausbot access add you@example.com), or restart the server with OMB_LOOPBACK_TRUST=owner.";
 
 function refusedAsService(status: number, body: any): boolean {
   return status === 403 && typeof body?.error === "string" && /shared server|Sign in through the workspace portal/.test(body.error);
@@ -270,9 +271,7 @@ async function serverUp(port: number, pid?: number): Promise<boolean> {
   try {
     const { status, body } = await api(port, "/api/health");
     return status === 200 && body?.app === "openmausbot" && (pid === undefined || body.pid === pid);
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
 /** Never attach to another workspace just because it listens on the requested port. */
@@ -389,7 +388,7 @@ export async function runSessions(options: CliOptions): Promise<number> {
       return 1;
     }
     if (status !== 200) {
-      console.error(`could not revoke: ${typeof body?.error === "string" ? body.error : status}`);
+      console.error(desktopOwnedRefusal(status, body) ?? `could not revoke: ${typeof body?.error === "string" ? body.error : status}`);
       return 1;
     }
     console.log(`revoked ${options.revoke}: that device is signed out and its stream is closed`);
@@ -597,7 +596,7 @@ export async function runBrowser(options: CliOptions, io: CliIo = defaultIo()): 
     if (process.platform === "linux" && !options.withDeps) io.error(`on Linux, install Chrome's system libraries with: sudo ${cliCommand("browser install --with-deps")}, then retry ${cliCommand("browser install")} as the user running serve`);
     return 1;
   }
-  io.log("browser installed for this user and data directory; run serve as the same user, then enable it under Settings → Computers and per bot");
+  io.log("browser installed for this user and data directory; run serve as the same user, then turn it on in Settings → Desktops & browser and for each bot");
   if (process.platform === "linux" && options.withDeps) io.log(`if serve runs as another user, run ${cliCommand("browser install")} from that user's login shell too`);
   return 0;
 }
@@ -643,18 +642,18 @@ async function planTunnel(options: CliOptions, log: (line: string) => void, reco
     account = createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion(), recovery, log: (line) => log(`tunnel: ${line}`) });
     if (account.credentials.status === "unavailable") return fail(`${account.credentials.file} exists but could not be read; fix or remove it`);
     if (!describeTunnelAccount(account.credentials.read()).email) {
-      return fail(`no account on this machine yet: run ${cliCommand("login")} first, then ${cliCommand("serve --tunnel")}`);
+      return fail(`no account on this machine yet: run ${cliCommand("account login")} first, then ${cliCommand("serve --tunnel")}`);
     }
     try {
       const state = await account.service.retry();
       const saved = tunnelAccess(account.credentials.read()) !== null;
-      if (state.status === "signed-out") log(`tunnel: the sign-in on this machine expired; run ${cliCommand("login")} to renew it${saved ? " (serving the saved address until then)" : ""}`);
+      if (state.status === "signed-out") log(`tunnel: the sign-in on this machine expired; run ${cliCommand("account login")} to renew it${saved ? " (serving the saved address until then)" : ""}`);
       else if (state.message) log(`tunnel: ${state.message}${saved ? " Serving the saved address for now." : ""}`);
     } catch (error) {
       log(`tunnel: control plane not reachable right now (${message(error)}); using the saved address`);
     }
     access = tunnelAccess(account.credentials.read());
-    if (!access) return fail(`this machine has no public address; run ${cliCommand("login")} again`);
+    if (!access) return fail(`this machine has no public address; run ${cliCommand("account login")} again`);
   }
   let binary: string;
   try {
@@ -777,7 +776,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
   let exited: number | null = null;
   const childExit = new Promise<number>((done) => {
     child.once("error", () => { exited = 1; done(1); });
-    child.once("exit", (code, signal) => { exited = code ?? (signal === "SIGTERM" || signal === "SIGINT" ? 0 : 1); done(exited); });
+    child.once("exit", (code, signal) => { exited = code ?? (signal === "SIGTERM" || signal === "SIGINT" ? 0 : crashed(null, signal) ? CRASH_EXIT_CODE : 1); done(exited); });
   });
   let tunnel: RunningTunnel | null = null;
   let caddy: RunningCaddy | null = null;
@@ -901,7 +900,7 @@ export async function serveUntilStopped(options: CliOptions, run: (options: CliO
   for (;;) {
     const code = await run(launch);
     if (!policy.again(code)) return code;
-    console.log("\nOpenMausBot is starting again to finish installing a copy from the desktop app…");
+    console.log(`\n${restartLine(code, policy.delayMs())}`); if (policy.delayMs() > 0) await new Promise((resume) => setTimeout(resume, policy.delayMs()));
     launch = { ...options, pair: false, open: false };
   }
 }
@@ -975,7 +974,8 @@ export async function runOnboardingCommand(
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv[0] === "sentinel") return runSentinelCli(argv.slice(1));
-  if (HEADLESS_VERB_NAMES.has(argv[0] ?? "") || (argv[0] === "help" && HEADLESS_VERB_NAMES.has(argv[1] ?? ""))) return (await import("./headless/main.ts")).runHeadless(argv);
+  if (argv[0] === "config") return runConfigCli(argv.slice(1));
+  const routed = routeCli(argv); if (routed.headless) return (await import("./headless/main.ts")).runHeadless(routed.argv); argv = routed.argv;
   const options = parseArgs(argv);
   if ("error" in options) {
     console.error(`${options.error}\nAll commands and options: ${cliCommand("--help")}`);

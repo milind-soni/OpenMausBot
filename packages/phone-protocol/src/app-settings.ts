@@ -19,7 +19,7 @@ export interface AppSettingCardField {
 
 /** Settings a bot can ask the app to show in chat as the real control. Adding one here, in the server's SETTINGS_CARDS
  * and in the window's card list is the whole registration. */
-export const SETTINGS_CARD_IDS = ["other-computers"] as const;
+export const SETTINGS_CARD_IDS = ["other-computers", "ai-sign-in"] as const;
 export type SettingsCardId = (typeof SETTINGS_CARD_IDS)[number];
 export const isSettingsCardId = (id: unknown): id is SettingsCardId => typeof id === "string" && (SETTINGS_CARD_IDS as readonly string[]).includes(id);
 /** Security invariant: a settings card row names the setting only. What the control shows (a code, a link, an address)

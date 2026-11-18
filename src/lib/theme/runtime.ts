@@ -63,7 +63,9 @@ function paint(): void {
       wearSkin(readSkin());
       return;
     }
-    const base: SkinChoice | undefined = theme.skin ?? (theme.canvas ? THEME_SKINS[modeOf(theme.canvas)] : undefined);
+    const plainSkin = !theme.skin || theme.skin === "system" || theme.skin === THEME_SKINS.light || theme.skin === THEME_SKINS.dark;
+    const followsChoice = Boolean(theme.light && theme.dark) && plainSkin;
+    const base: SkinChoice | undefined = followsChoice ? undefined : theme.skin ?? (theme.canvas ? THEME_SKINS[modeOf(theme.canvas)] : undefined);
     wearSkin(base ? resolveSkin(base) : readSkin());
     const mode = readColorScheme(root);
     const variant = theme[mode];

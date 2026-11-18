@@ -1,6 +1,6 @@
 // What GET /api/config tells the app about the server and its settings (re-exported by store.tsx).
 import type { EffortLevel, LiveSettings } from "../../shared/wire";
-import type { ImageProvider } from "../../shared/image-generation";
+import type { ImageComplexity, ImageProvider } from "../../shared/image-generation";
 import type { ToolGroup } from "../../shared/tool-groups";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { ModelSelection } from "./store";
@@ -94,7 +94,7 @@ export interface ConfigStatus {
     configured: boolean;
     ready: boolean;
     voice: string;
-    provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai";
+    provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek";
     baseUrl?: string;
     model?: string;
     /** Voice note with every reply, for every bot without its own choice. Absent from older servers. */
@@ -146,6 +146,7 @@ export interface ConfigStatus {
     fallback?: ImageSlotStatus | null;
     ready?: boolean;
     maxPerTurn?: number;
+    complexity?: ImageComplexity;
     customUrl?: string;
     customModel?: string;
     openaiConfigured?: boolean;
@@ -163,7 +164,7 @@ export interface ConfigStatus {
   /** What a paired phone calls this computer; "" uses the default. */
   computerName?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean };
+  features?: { skillAuthoring: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; savedSteps?: boolean; savedStepsHere?: boolean; usbPhoneTakeover?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;

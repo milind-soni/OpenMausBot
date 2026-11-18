@@ -335,7 +335,7 @@ describe("a message sent while a one-to-one bot works", () => {
     type(textarea(), "start again with this");
     const choices = openChoices();
     expect(choices.map((choice) => choice.textContent)).toEqual([
-      "Steer nowInterrupt what Pepper is doingEnter",
+      "Steer nowSteer it into the running turnEnter",
       "QueueRun after the current turnCtrl+Enter",
       "Restart turnStart the turn over with this message. Also stops work it handed to other bots",
     ]);

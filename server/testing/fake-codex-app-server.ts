@@ -6,6 +6,7 @@
 //     empty-question | malformed-question | config-profile | config-profile-unsupported | config-read-error |
 //     image | logged-in-stdout | logged-out | unauthorized | late-request | retry-then-complete | signin-refused |
 //     auth-recovery | mcp-401 | mcp-image | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
+//     | plan-unsupported-input (a resumed thread's turns fail as a ChatGPT plan refuses saved audio; a new thread works)
 //     | async-question (an agentMessage with delivery async and questions, as codex 0.160 sends request_user_input_async)
 //   FAKE_CODEX_MISSING_BEARER  the first N launches fail their turn as codex-cli 0.160.1 holding no login does (count in FAKE_CODEX_STATE)
 //   FAKE_CODEX_LAUNCH_CRASHES  the first N launches die pre-ack at turn/start, transient stderr, exit 1 (count in FAKE_CODEX_STATE)
@@ -179,6 +180,10 @@ if (process.argv[2] === "exec") {
   process.exit(0);
 }
 const calls: Array<{ method: string; params: unknown }> = [];
+/** A `-c` value as codex-cli reads it: JSON-compatible TOML, or an inline table of strings (`env`, `http_headers`). */
+const tomlValue = (raw: string): unknown => raw.startsWith("{")
+  ? Object.fromEntries([...raw.matchAll(/("(?:[^"\\]|\\.)*")\s*=\s*("(?:[^"\\]|\\.)*")/g)].map((pair) => [JSON.parse(pair[1]!), JSON.parse(pair[2]!)]))
+  : JSON.parse(raw);
 const mcpOverrides: Record<string, Record<string, unknown>> = {};
 for (let index = 0; process.env.FAKE_CODEX_MCP_OVERRIDES === "1" && index < process.argv.length; index++) {
   if (process.argv[index - 1] === "-c" && process.argv[index]!.startsWith("mcp_servers=")) {
@@ -188,7 +193,7 @@ for (let index = 0; process.env.FAKE_CODEX_MCP_OVERRIDES === "1" && index < proc
     continue;
   }
   const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.]+)=(.*)$/.exec(process.argv[index]!) : null;
-  if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = JSON.parse(match[3]!);
+  if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = tomlValue(match[3]!);
 }
 // codex-cli 0.160 config/read reports every shell_environment_policy field, null when unset. A `-c
 // shell_environment_policy.exclude=[…]` override replaces the list and drops the lower `filters` (0.160.1).
@@ -245,11 +250,7 @@ const mcpMounts = (): Record<string, Record<string, unknown>> => {
   process.argv.forEach((arg, index) => {
     const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.=]+)=(.*)$/.exec(arg) : null;
     if (!match) return;
-    const raw = match[3]!;
-    const value = raw.startsWith("{")
-      ? Object.fromEntries([...raw.matchAll(/("(?:[^"\\]|\\.)*")\s*=\s*("(?:[^"\\]|\\.)*")/g)].map((pair) => [JSON.parse(pair[1]!), JSON.parse(pair[2]!)]))
-      : JSON.parse(raw);
-    (mounts[match[1]!] ??= {})[match[2]!] = value;
+    (mounts[match[1]!] ??= {})[match[2]!] = tomlValue(match[3]!);
   });
   return mounts;
 };
@@ -283,6 +284,7 @@ const startUrlMcp = async (mount: Record<string, unknown>, handshake: unknown): 
   const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream" };
   if (typeof mount.bearer_token_env_var === "string") headers.authorization = `Bearer ${process.env[mount.bearer_token_env_var] ?? ""}`;
   for (const [header, variable] of Object.entries((mount.env_http_headers ?? {}) as Record<string, string>)) headers[header] = process.env[variable] ?? "";
+  Object.assign(headers, mount.http_headers ?? {});
   const post = async (frame: object) => {
     const response = await fetch(mount.url as string, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...frame }), signal: AbortSignal.timeout(20_000) });
     const session = response.headers.get("mcp-session-id");
@@ -314,7 +316,8 @@ const announceMcpStartup = () => {
   const report = (name: string, status: string, error: string | null = null) =>
     out({ jsonrpc: "2.0", method: "mcpServer/startupStatus/updated", params: { threadId: null, name, status, error, failureReason: null } });
   mcpPending = Object.entries(mcpMounts())
-    .filter(([name, fields]) => "command" in fields && fields.enabled !== false && name !== process.env.FAKE_CODEX_MCP_FAILED)
+    // Every server it starts, by command or by URL (OpenMausBot's own, with OMB_OWN_MCP_HTTP=1).
+    .filter(([name, fields]) => ("command" in fields || "url" in fields) && fields.enabled !== false && name !== process.env.FAKE_CODEX_MCP_FAILED)
     .map(([name]) => name);
   for (const name of mcpPending) report(name, "starting");
   const settle = (name: string) => {
@@ -652,7 +655,7 @@ process.stdin.on("data", (chunk) => {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
-        } else if (mode === "resume" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
+        } else if (mode === "resume" || mode === "plan-unsupported-input" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
             (mode === "resume-then-missing" && !existsSync(process.env.FAKE_CODEX_STATE ?? ""))) {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId, ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}) }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else {
@@ -852,6 +855,14 @@ process.stdin.on("data", (chunk) => {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
           // The reporter's words (2026-11-03): ChatGPT lists gpt-6.1-sol, then refuses it for a ChatGPT account.
           const error = { message: "unexpected status 400 Bad Request: invalid_request_error model_not_found: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.", codexErrorInfo: null, additionalDetails: null };
+          notify("error", { willRetry: false, error });
+          notify("turn/completed", { turn: { status: "failed", error } });
+          break;
+        }
+        if (mode === "plan-unsupported-input" && resumedThread) {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          // The reporter's words (2026-11-17): the resumed session holds an mp3 a ChatGPT plan will not take.
+          const error = { message: "unexpected status 400 Bad Request: {\"error\":{\"message\":\"User subscription sharing supports text, image, and file input. Remove unsupported content or use an API key instead.\",\"type\":\"invalid_request_error\",\"param\":\"input\",\"code\":\"subscription_sharing_unsupported_capability\"}}", codexErrorInfo: null, additionalDetails: null };
           notify("error", { willRetry: false, error });
           notify("turn/completed", { turn: { status: "failed", error } });
           break;

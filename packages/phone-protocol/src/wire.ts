@@ -39,7 +39,7 @@ import type { CompanionEndpointsSnapshot } from "./responses.ts";
 /** What a team bot's main chat is called, beside each person's own chats. */
 export const SHARED_CHAT_TITLE = "Shared chat";
 
-export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveElevenLabsSession, LiveElevenLabsTransport, LiveEndReason, LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport, LiveGeminiSession, LiveGeminiTransport, LiveKeySource, LiveProvider, LiveSettings } from "./live-call-wire.ts";
+export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveElevenLabsSession, LiveElevenLabsTransport, LiveEndReason, LiveFishRelayCommand, LiveFishRelayEvent, LiveFishSessionToken, LiveFishTransport, LiveGeminiSession, LiveGeminiTransport, LiveKeySource, LiveProvider, LiveSettings, LiveSpokenLine } from "./live-call-wire.ts";
 export type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
 export type { AuthPairResponse, AuthSessionResponse, BotCreateResponse, BotsResponse, BotUpdateResponse, CompanionE2EDescriptor, CompanionEndpointsSnapshot, InstancesResponse, LoopbackSessionResponse, PairedDevice, PairedSession, PairRequest, PairResponse, RoomCreateResponse, RoomTaskCreateResponse, RoomTaskUpdateResponse, RoomUpdateResponse, SearchHit, SearchResponse, SignedInSessionResponse, TaskResponse, WireComputerControl, WireInstance, WireMessagePage, WireModelOption } from "./responses.ts";
 
@@ -132,7 +132,7 @@ export interface WireTask extends InboxTask {
   projectId?: string;
   /** Detached routine execution, reachable through its visible results card. */ routineRunId?: string;
   /** Work from outside (a webhook, an app's event) reached this conversation: what it starts or runs stays confined, for good. */ outside?: true;
-  /** An outside caller opened this thread through the bot's API, so only it may continue it; such a thread is outside too. */ botApi?: true;
+  /** An outside caller opened this thread through the bot's API, so only it may continue it; such a thread is outside too. */ botApi?: true; /** Opened with a key its owner marked as acting for them: at the bot's own level, not outside, while that key still does (server/bot-api-host.ts). */ botApiAsOwner?: true;
   /** Set when a bot, not a person, opened this thread. */ openedBy?: TaskOpenedBy;
   /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
@@ -251,9 +251,9 @@ export interface ConnectorToolGrant {
 }
 
 /** Lowercased Composio service slug, e.g. `gmail`. */
-export const CONNECTOR_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,80}$/;
-/** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`. */
-export const CONNECTOR_TOOL_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
+export const CONNECTOR_SLUG_PATTERN = /^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,80}$/;
+/** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`, or `_1PASSWORD_GET_ITEM` for a `_`-led toolkit. */
+export const CONNECTOR_TOOL_NAME_PATTERN = /^(?:[A-Z][A-Z0-9_]{0,127}|_[A-Z0-9][A-Z0-9_]{0,126})$/;
 
 /** Fails closed: only an absent switch or a strict true allows the helper model; a hand-edited "false" or 0 reads as never. */
 export const helperModelAllowed = (bot: { helperModel?: unknown }): boolean => bot.helperModel === undefined || bot.helperModel === true;
@@ -332,7 +332,7 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
   /** Whether this bot may use the X research tools (x_search and its
    * actions), which spend the workspace's treg balance.
    * Absent/false = off: the person turns it on per bot. */
-  xResearch?: boolean;
+  xResearch?: boolean; /** Team Cloud: an admin let it change the team's shared files from any chat. Absent: it reads them only. */ teamFilesEdit?: boolean;
   /** Whether this bot uses native memory. Absent/true = enabled. */
   memoryEnabled?: boolean;
   /** Built-in tool groups turned off for this bot (shared/tool-groups.ts). Absent or empty: all on. */
@@ -509,7 +509,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   aside?: boolean;
   /** A user-role message that arrived through the server's HTTP API
    * ("api"), or a request a person spoke on a Live call ("call"). */
-  via?: "api" | "call";
+  via?: "api" | "call"; /** A `via: "api"` line sent with a Bot API key its owner marked as acting for them: their request, at the bot's level. */ apiAsOwner?: true;
   /** The Live call a "call" line was spoken on (LiveCallState.callId). Set
    * only on user messages with `via: "call"`; a turn's own messages point
    * at their request through `requestMessageId` instead. */
@@ -589,8 +589,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** A "Sent to" row for work addressed into a room the bot `name` isn't in, so it went to the bot directly. `room`
    * names that room when this row is not in it. Clients say it in their own words; `tool.name` is the English. */
   sentDirectly?: { name: string; room?: string };
-  /** A page the bot published to a public link (publish_page), or why it couldn't. `text` carries the link too. */
-  publishedPage?: PublishedPageCard;
+  /** A page the bot published to a public link (publish_page), or why it couldn't; `template`, a shareable template of the bot or its department (the share tool). `text` says the same in words. */
+  publishedPage?: PublishedPageCard; template?: import("./share-card.ts").TemplateCard;
   /** A published Data result, linked to its bot's main viewer. */
   dataResult?: { botId: string; cardId: string; title: string; kind: "table" | "chart" | "text"; sql?: string };
   /** user messages: the Data result the person was viewing when they sent
@@ -701,7 +701,7 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   fixedOptions?: boolean;
   quotaSwitch?: QuotaSwitchCardData;
   /** Asks before a bot uses the person's own computer; what its first call names, for the question in their language. */
-  yourComputer?: { app?: string; site?: string };
+  yourComputer?: { app?: string; site?: string; files?: boolean };
 }
 
 /** Kept on the card so the offer survives a restart. `engines` follow the card's options; `messageId` is the
@@ -836,7 +836,7 @@ export interface GroupTask {
 /** A room as a client may see it: the record plus the computed working flag. */
 export interface WireGroup {
   /** Computed from the usage ledger, not stored in groups.json. */
-  usage?: GroupThreadUsage | null; /** Transient: the department's Chief of Staff, when this room is without it. Null clears an earlier value. */ chiefAbsent?: { botId: string; name: string } | null;
+  usage?: GroupThreadUsage | null; /** Transient: the department's Chief of Staff, when this room is without it. Null clears an earlier value. */ chiefAbsent?: { botId: string; name: string } | null; /** The room's members that live in another of the person's places: who each is, where it lives, and whether it can be reached now ("off": the link is off or its place is unlinked; "missing": its place no longer has it). Only on a room that has one. */ farMembers?: Array<{ id: string; name: string; place: string; state: "ok" | "off" | "missing" }>;
   /** transient: each member's context in the active thread, from its last
    * turn there, and whether its next turn there was asked to start
    * compacted. */
@@ -881,9 +881,9 @@ export interface WireGroup {
   /** True while any member (or hand-off) is mid-turn. Computed at
    * projection time, never persisted. */
   working: boolean;
-  /** A direct-message channel's turn limit (minutes without progress). Null on the wire means the
-   * global group limit. Channel conversations store theirs on each task. */
+  /** A direct-message channel's turn limit (minutes without progress). Null on the wire means the global group limit. Channel conversations store theirs on each task. */
   turnTimeoutMinutes?: number | null;
+  /** Turns each member who answers a person's message takes, in order, before the room waits again; absent = 1. The last of several is marked final. */ turnsPerMember?: number;
   /** Members the person stopped in this room ("stop @Bot"), by bot id. A
    * held member gets no turn until it is @mentioned again or resumed. */
   holds?: Record<string, RoomHold>;
@@ -901,8 +901,8 @@ export interface RoomQueueEntry {
   /** 1-based place in that thread's line; `of` counts the whole line. */
   position: number;
   of: number;
-  /** Who a queued member waits on: the member running now, else the one speaking (or the one ahead). */
-  waitingForBotId?: string;
+  /** Who a queued member waits on: the member running now, else the one speaking (or the one ahead). `busyIn`: where it runs now outside this room, another room's thread (`groupId` set) or a thread of its own; it starts here when that finishes. */
+  waitingForBotId?: string; busyIn?: { groupId?: string; threadId: string };
   assignmentId?: string;
 }
 
@@ -977,8 +977,8 @@ export type ServerFrame =
   | { kind: "app-trigger.deleted"; triggerId: string }
   | { kind: "app-trigger.service"; service: AppTriggerService }
   | { kind: "runtime"; event: RuntimeEvent }
-  /** An MCP server was added, changed or removed: a list of them is stale. */
-  | { kind: "mcp.changed" }
+  /** An MCP server was added, changed or removed: a list of them is stale. `cli-login`: a terminal sign-in waits or was answered (admins only). */
+  | { kind: "mcp.changed" } | { kind: "cli-login" }
   /** `surface` names what the frame shows: the bot's desktop (`computer`) or its built-in browser. */
   | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string; surface?: "browser" | "computer" }
   /** A bot's computer is being set up or woken for a turn; the chat shows

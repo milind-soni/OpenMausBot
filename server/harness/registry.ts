@@ -3,11 +3,13 @@ import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor, standaloneLookupPath } from "../engine-install.ts";
 import { installStandaloneEngine, isAppStandaloneCopy, type StandaloneInstalled } from "../engine-standalone.ts";
 import { pinnedNpmVersion } from "../engine-versions.ts";
+import { withBotMemoryCap } from "../bot-memory-cap.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
 import { withLocalContext } from "../drivers/local-inject.ts";
 import { engineStatusFile, snapshotFrom } from "./engine-status-file.ts";
 import { withUnaskedStops } from "./unasked-stop.ts";
+import { withTurnScope } from "../crash-guard.ts";
 import { withWslNotice } from "./wsl-launch.ts";
 import { modelManifest, startModelManifestRefresh } from "../model-manifest/manifest.ts";
 export { engineMemory } from "../engine-memory.ts";
@@ -193,13 +195,13 @@ export class ProviderRegistry {
       // The RAW config: decodeConfig fills in the driver default, which would flag every instance as overridden.
       const rawCli = cliOfRaw(entry.config);
       if (rawCli) this.cliByInstance.set(instanceId, rawCli);
-      const live = withLocalContext(withUnaskedStops(withEngineHomes(withEngineMemory(await driver.create({
+      const live = withLocalContext(withUnaskedStops(withEngineHomes(withBotMemoryCap(withEngineMemory(withTurnScope(await driver.create({
         instanceId,
         displayName: entry.displayName ?? driver.metadata.displayName,
         environment: entry.environment ?? {},
         enabled: entry.enabled ?? true,
         config,
-      })))));
+      })))))));
       this.shareSnapshot(live);
       return { instanceId, live: decorate ? decorate(live) : live };
     } catch (e) {

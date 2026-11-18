@@ -22,6 +22,7 @@ import { KimiAgentDriver } from "./kimi.ts";
 import { DroidAgentDriver } from "./droid.ts";
 import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
+import { antigravityUpdateFilter } from "../antigravity.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { TurnWatchdog } from "../../turn-watchdog.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
@@ -62,6 +63,10 @@ const EnvPolicyDriver = createAcpDriver({
   },
 });
 
+/** A CLI that needs a newer Node.js than any there is, and one that runs on every Node.js. */
+const NodeTooOldDriver = createAcpDriver({ ...SELECT_MODEL_SUPPORT, driverKind: "nodeTooOldTest", selectModel: undefined, minNodeVersion: "999.0.0" });
+const NodeOkDriver = createAcpDriver({ ...SELECT_MODEL_SUPPORT, driverKind: "nodeOkTest", selectModel: undefined, minNodeVersion: "1.0.0" });
+
 const AsyncAuthDriver = createAcpDriver({
   ...SELECT_MODEL_SUPPORT,
   driverKind: "asyncAuthTest",
@@ -84,6 +89,13 @@ const ClassifiedErrorDriver = createAcpDriver({
     error && typeof error === "object" && (error as { code?: unknown }).code === -32000
       ? "invalid_credentials"
       : undefined,
+});
+
+const TextStartDriver = createAcpDriver({
+  ...SELECT_MODEL_SUPPORT,
+  driverKind: "textStartTest",
+  selectModel: undefined,
+  updateFilter: antigravityUpdateFilter,
 });
 
 const CONTROL_PLANE_FIXTURE = {
@@ -834,6 +846,24 @@ describe("ACP turns (fake CLI)", () => {
     });
   });
 
+  it("drops the escape artifact a text run opens with, again after a tool call", async () => {
+    const { report, send, lastTurn } = await reportingThread("text-start", TextStartDriver);
+    const say = (text: string) => ({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+    report(
+      say("&_a_m_p_;_\n&_a_m_p_;_"),
+      say("Prepared the reply. A mid-run &_a_m_p_;_ stays."),
+      { sessionUpdate: "tool_call", toolCallId: "call-1", title: "Ran a thing", status: "completed" },
+      say("&_a_m_p_;_ Done."),
+    );
+    await send("turn");
+    const texts = lastTurn().flatMap((event) =>
+      event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []);
+    // the fake's own greeting is the first assistant_text of the turn
+    expect(texts.slice(1)).toEqual(["Prepared the reply. A mid-run &_a_m_p_;_ stays.", "Done."]);
+    const streamed = lastTurn().flatMap((event) => event.type === "content.delta" ? [event.delta] : []);
+    expect(streamed.some((delta) => delta.startsWith("&_a_m_p_;_"))).toBe(false);
+  });
+
   const plan = (...entries: Array<[status: string, content: string]>) => ({
     sessionUpdate: "plan",
     entries: entries.map(([status, content]) => ({ content, priority: "medium", status })),
@@ -1213,6 +1243,9 @@ describe("ACP turns (fake CLI)", () => {
       { type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`, headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }] },
       { name: "notes", command: process.execPath, args: ["/tmp/notes-mcp.js"], env: [] },
     ]);
+    // The agent reaches this server's loopback URL around any proxy it was given.
+    const { env } = JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> };
+    for (const name of ["NO_PROXY", "no_proxy"]) expect(env[name]!.split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
   });
 
   it.each([false, true])("mounts Data through the existing stdio transport unless excluded (excluded=%s)", async (excluded) => {
@@ -2103,6 +2136,25 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(true);
   });
 
+  it("an exit before result on a Node.js older than the engine needs names both versions", async () => {
+    await create(NodeTooOldDriver, "exit-early");
+    await instance.adapter.sendTurn({ threadId: "t-old-node", text: "go" });
+    const failed = await recorder.until((e) => e.type === "runtime.error") as { message: string; text?: unknown };
+    expect(failed.text).toEqual({ key: "chat.notice.acpNodeTooOld",
+      params: { provider: SELECT_MODEL_SUPPORT.displayName, needed: "999.0.0", found: expect.stringMatching(/^\d+\.\d+\.\d+$/) } });
+    expect(failed.message).toMatch(/ needs Node\.js 999\.0\.0 or newer, but this computer has Node\.js \d+\.\d+\.\d+\. Update Node\.js/);
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
+  });
+
+  it("an exit before result on a new enough Node.js keeps the exit words", async () => {
+    await create(NodeOkDriver, "exit-early");
+    await instance.adapter.sendTurn({ threadId: "t-ok-node", text: "go" });
+    const failed = await recorder.until((e) => e.type === "runtime.error") as { message: string; text?: unknown };
+    expect(failed.message).toMatch(/ exited 3 before the prompt result/);
+    expect(failed.text).toBeUndefined();
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
+  });
+
   it("an engine that aborts says so in plain words, with its last output masked", async () => {
     await create(GrokAgentDriver, "abort-in-prompt");
     await instance.adapter.sendTurn({ threadId: "t-abort", text: "go" });
@@ -2463,8 +2515,10 @@ describe("ACP turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: true });
   });
 
-  it("falls through to session/new when session/load returns null", async () => {
+  it("fails a resumed turn with no recovery text when session/load returns null", async () => {
     process.env.FAKE_ACP_LOAD_NULL = "1";
+    const rpcFile = join(scratch, "null-load-no-recovery.json");
+    process.env.FAKE_ACP_RPC_DUMP = rpcFile;
     await create(GrokAgentDriver);
     await instance.adapter.sendTurn({
       threadId: "t-resume-null",
@@ -2472,10 +2526,12 @@ describe("ACP turns (fake CLI)", () => {
       resumeCursor: "gone-cursor",
     });
 
-    const started = await recorder.until((e) => e.type === "session.started");
-    expect(started).toMatchObject({ sessionId: "fake-acp-session" });
-    const done = await recorder.until((e) => e.type === "turn.completed");
-    expect(done).toMatchObject({ ok: true });
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false });
+    expect(recorder.events.some((e) => e.type === "session.started")).toBe(false);
+    const methods = JSON.parse(readFileSync(rpcFile, "utf8"));
+    expect(methods).toContain("session/load");
+    expect(methods).not.toContain("session/new");
+    expect(methods).not.toContain("session/prompt");
   });
 
   it.each(["null", "opencode-not-found", "cursor-message"])("rebuilds a missing native session from the canonical recovery text once (%s)", async (failure) => {

@@ -70,6 +70,8 @@ export interface WebhookManagerOptions {
     deliveryId: string;
     receivedAt: number;
     sameConversation?: boolean;
+    /** The person's own Run now test, not an outside delivery. */
+    byPerson?: boolean;
   }) => { id: string };
   cancelQueued?: (webhookId: string, message: string) => void;
   pendingRuns?: (webhookId: string) => number;
@@ -694,17 +696,18 @@ export class WebhookManager {
     if (requestedDeliveryId) {
       const key = `${trigger.endpointId}:${requestedDeliveryId}`;
       const committed = this.options.findRun?.(trigger.id, requestedDeliveryId);
-      const duplicate = committed ? { runId: committed.id } : this.deliveries.find((delivery) => delivery.key === key);
+      const duplicate: Pick<DeliveryReceipt, "runId" | "threadId"> | undefined = committed ? { runId: committed.id } : this.deliveries.find((delivery) => delivery.key === key);
       if (duplicate) {
+        const destination = duplicate.threadId ? { threadId: duplicate.threadId } : { runId: duplicate.runId };
         this.appendAttempt(trigger, event, {
           outcome: "duplicate",
           statusCode: 202,
           deliveryId: requestedDeliveryId,
-          runId: duplicate.runId,
+          ...destination,
           reason: "Duplicate delivery ignored",
         });
         this.save();
-        return { receipt: { runId: duplicate.runId, deliveryId: requestedDeliveryId, duplicate: true } };
+        return { receipt: { ...destination, deliveryId: requestedDeliveryId, duplicate: true } };
       }
       if (this.roomInFlight.has(key)) fail(409, "This delivery is still being posted; retry shortly");
     }
@@ -826,6 +829,7 @@ export class WebhookManager {
       deliveryId,
       receivedAt: now,
       sameConversation: trigger.sameConversation,
+      ...(byPerson ? { byPerson: true } : {}),
     });
     this.deliveries.push({ key: `${trigger.endpointId}:${deliveryId}`, runId: run.id, at: now });
     if (this.deliveries.length > MAX_DELIVERIES) {

@@ -1,9 +1,10 @@
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
+import { getDefaultAutoSelectFamilyAttemptTimeout, setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 
 import { b64u, ed25519RawPublicKey, mintRelayToken } from "../../src/e2e/credentials.ts";
-import { RelayClient, type RelayClientOptions } from "../../src/e2e/relay-client.ts";
+import { allowFarRelay, RelayClient, type RelayClientOptions } from "../../src/e2e/relay-client.ts";
 import { startFakeRelay, type FakeRelay } from "./fake-relay.ts";
 
 const signingKey = generateKeyPairSync("ed25519").privateKey;
@@ -73,6 +74,26 @@ function client(relays: Record<string, Pick<FakeRelay, "url">>, overrides: Parti
   cleanup.push(() => instance.stop());
   return { instance, statuses, rejected };
 }
+
+describe("connecting to a far relay", () => {
+  const atAttemptTimeout = (ms: number) => {
+    const before = getDefaultAutoSelectFamilyAttemptTimeout();
+    cleanup.push(() => setDefaultAutoSelectFamilyAttemptTimeout(before));
+    setDefaultAutoSelectFamilyAttemptTimeout(ms);
+  };
+
+  it("gives each relay address longer than Node's 250 ms to connect", () => {
+    atAttemptTimeout(250);
+    allowFarRelay();
+    expect(getDefaultAutoSelectFamilyAttemptTimeout()).toBeGreaterThanOrEqual(2_000);
+  });
+
+  it("keeps a longer per-address connect time already set", () => {
+    atAttemptTimeout(5_000);
+    allowFarRelay();
+    expect(getDefaultAutoSelectFamilyAttemptTimeout()).toBe(5_000);
+  });
+});
 
 describe("the relay client", () => {
   it("authenticates, then sends the admission set, and again only when it changes", async () => {

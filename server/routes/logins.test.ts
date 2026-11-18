@@ -90,6 +90,20 @@ describe("Settings → Logins routes", () => {
     expect((await call("PATCH", `/api/logins/${id}`, { exactHost: "yes" })).body).toEqual({ error: LOGIN_ERRORS.exactHost });
     expect(store.get(id)?.exactHost).toBe(true);
 
+    expect((await call("PATCH", `/api/logins/${id}`, { site: "https://d1abc.cloudfront.net/sign-in" })).body.login)
+      .toMatchObject({ site: "d1abc.cloudfront.net", hosts: ["d1abc.cloudfront.net"], exactHost: true, username: "alice@example.com" });
+    expect(store.get(id)?.password).toBe(NEW_PASSWORD);
+    expect(store.usableFor("d1abc.cloudfront.net", "pepper").map((login) => login.id)).toEqual([id]);
+    expect(store.usableFor("accounts.example.com", "pepper")).toEqual([]);
+    expect((await call("PATCH", `/api/logins/${id}`, { site: "javascript:alert(1)" })).body).toEqual({ error: LOGIN_ERRORS.site });
+    expect(store.get(id)?.site).toBe("d1abc.cloudfront.net");
+    expect((await call("PATCH", `/api/logins/${id}`, { site: " " })).body).toEqual({ error: LOGIN_ERRORS.site });
+
+    const other = (await call("POST", "/api/logins", { site: "portal.example.edu", username: "ALICE@example.com", password: PASSWORD })).body.login.id;
+    expect(await call("PATCH", `/api/logins/${id}`, { site: "https://portal.example.edu/login" })).toMatchObject({ status: 409, body: { error: LOGIN_ERRORS.taken } });
+    expect(store.get(id)?.site).toBe("d1abc.cloudfront.net");
+    expect(await call("DELETE", `/api/logins/${other}`)).toMatchObject({ status: 200 });
+
     expect(await call("DELETE", `/api/logins/${id}`)).toMatchObject({ status: 200, body: { ok: true } });
     expect((await call("GET", "/api/logins")).body.logins).toEqual([]);
     expect((await call("DELETE", `/api/logins/${id}`)).status).toBe(404);

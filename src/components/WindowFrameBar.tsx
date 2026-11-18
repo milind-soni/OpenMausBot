@@ -7,6 +7,7 @@ import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 import { ChromeRailToggle } from "./ChromeRailToggle";
 import { captionChrome, useDesktopCapabilities, windowFrameable, windowFramed } from "./DesktopCapabilities";
+import { FrameBarPinnedPages } from "./FrameBarPinnedPages";
 import { NotificationBell } from "./NotificationsPanel";
 import { UpdateIndicator } from "./UpdateIndicator";
 import { WindowPlaceTitle } from "./WindowPlaceTitle";
@@ -37,6 +38,7 @@ export function WindowFrameBar({ notifications = false }: { notifications?: bool
       {/* macOS: the traffic lights span 12-72px of the window, so the first button starts at 80px. */}
       <div data-frame-bar-start className={cn("flex items-center gap-0.5", mac ? "pl-20" : "pl-[calc(var(--rail-beside,0px)+8px)]")}>
         <ChromeRailToggle bar={FRAME_BAR_BUTTON} />
+        <FrameBarPinnedPages />
       </div>
       <WindowPlaceTitle />
       <div data-frame-bar-end className={cn("flex items-center justify-end gap-0.5", mac ? "pr-2" : "pr-[140px]")}>

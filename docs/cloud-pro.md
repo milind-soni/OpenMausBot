@@ -632,8 +632,8 @@ The grant (`automaticGrant`) is the same for every Cloud of the person's own:
 - **Never the terminal**: no command runs on this computer for a Cloud, and a
   bot that asks is told not to run it another way.
 
-Nothing asks for a confirmation: each bot's own approval level (Ask first or
-Just do it) governs what it does with this computer, as with any tool. The move
+Nothing asks for a confirmation: each bot's own approval level (Ask for approval
+or Full access) governs what it does with this computer, as with any tool. The move
 to My Cloud lends each moved bot's own project folder with editing on top
 (`lendProjects`); while lending is paused, or before My Cloud is signed in, the
 move tries again later.
@@ -1122,9 +1122,11 @@ boot id while its pids start again from 1, so the lease names its pid
 namespace and its process's start time too), and runs two children as `maus`: the
 server on `127.0.0.1:8799` (webhooks on `127.0.0.1:8800`) and Caddy on
 `:8080`. It stays a small root supervisor: if either child exits, both stop
-and Fly restarts the machine. The one exception: after a restore commits
-(a backup restored in Settings), the server exits with code 75
-(`server/restart.ts`) and the launcher starts only the server again.
+and Fly restarts the machine. Two exceptions (`server/restart.ts`): after a restore
+commits (a backup restored in Settings), the server exits with code 75 and the
+launcher starts only the server again; after a crash (exit 70 from
+`server/crash-guard.ts`, or killed by the system, as out of memory) it starts the
+server again after 1, 2, 5, 15 and 30 s, then gives up so Fly restarts the machine.
 
 The machine's secrets (`OMB_CLOUD_BOOTSTRAP_SECRET` and the relay tokens
 `OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`,

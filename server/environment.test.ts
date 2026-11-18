@@ -133,6 +133,8 @@ describe("environment identity", () => {
     expect(serverInstall({}, "/app/dist-server/index.js", () => true)).toBe("docker");
     expect(serverInstall({}, "/repo/server/index.ts", none)).toBe("source");
     expect(serverInstall({}, "/usr/lib/node_modules/openmausbot/dist-server/index.js", none)).toBe("global");
+    // The rootless Podman service: its unit marks it, whatever its CLI prefix says.
+    expect(serverInstall({ OMB_PODMAN_SERVICE: "~/.local/share/openmausbot", OMB_CLI_PREFIX: "podman exec -it openmausbot openmausbot" }, "/app/dist-server/index.js", none)).toBe("podman-service");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: false }).capabilities)
       .not.toHaveProperty("sharedComputers");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities)

@@ -148,3 +148,16 @@ describe.each([
     }
   });
 });
+
+describe("newChatHintId", () => {
+  const summary = msg("sum", { kind: "compaction", compaction: { summary: "s", firstKeptId: "", foldedThroughId: "a", tokensBefore: 1, by: "harness" } });
+  const engine = msg("eng", { kind: "compaction", engineCompaction: true });
+  const fresh = msg("fresh", { kind: "compaction", compaction: { summary: "", firstKeptId: "", foldedThroughId: "a", tokensBefore: 0, by: "person", fresh: true } });
+  const reply = msg("r", { text: "hi" });
+  it("marks only the newest compaction, and none once the chat started fresh", () => {
+    expect(transcriptLookups([reply], [reply]).newChatHintId).toBeUndefined();
+    expect(transcriptLookups([summary, reply, engine, reply], [summary, reply, engine, reply]).newChatHintId).toBe("eng");
+    expect(transcriptLookups([engine, summary, reply], [engine, summary, reply]).newChatHintId).toBe("sum");
+    expect(transcriptLookups([summary, fresh, reply], [summary, fresh, reply]).newChatHintId).toBeUndefined();
+  });
+});

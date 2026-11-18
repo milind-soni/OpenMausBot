@@ -48,10 +48,10 @@ describe("the team's people in the sidebar", () => {
     expect(render(createElement(SidebarPeople, { compact: false }))).toBe("");
   });
 
-  it("gives a team's admins Invite someone under People, opening the team's People page, even alone on a new team", () => {
+  it("gives a team's admins Invite someone under People, opening the invite box on the team's People page, even alone on a new team", () => {
     const team = { id: "team-acme", name: "Acme", cloudPage: "https://cloud.example.test/cloud" };
     const config = { team } as AppState["config"];
-    const invite = 'href="https://cloud.example.test/cloud/team/team-acme/people"';
+    const invite = 'href="https://cloud.example.test/cloud/team/team-acme/people?do=invite"';
     setTeamPeople({ ...asBen, admin: true });
     const listed = render(createElement(SidebarPeople, { compact: false }), { config });
     expect(listed).toContain(invite);

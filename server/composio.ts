@@ -19,7 +19,7 @@ import {
   responseError,
   type ConnectedAccountResponse,
 } from "./composio-project.ts";
-import { MULTI_ACCOUNT_CONFIG, authConfigRefusal, ensureProjectSession, projectApiKey, sessionForToolkit } from "./composio-session.ts";
+import { MULTI_ACCOUNT_CONFIG, authConfigRefusal, ensureProjectSession, projectApiKey, raiseAccountCap, sessionForToolkit } from "./composio-session.ts";
 import { authConfigUseLine, noManagedAuthToolkit, withNoManagedAuthNote } from "./connector-auth-config-hint.ts";
 import { planAccountLink } from "../shared/connector-account-link.ts";
 import type { CuratedConnectorSlug } from "../shared/connector-curated.ts";
@@ -259,7 +259,7 @@ export async function relayMcp(
   cfg: AppConfig,
   payload: JsonValue,
   transportSessionId?: string,
-  beforeSend?: () => void, signal?: AbortSignal, as?: BrokerAccess,
+  beforeSend?: () => void | JsonValue | Promise<void | JsonValue>, signal?: AbortSignal, as?: BrokerAccess,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string; transportSessionId?: string }> {
   const apiKey = as ? null : projectApiKey(cfg);
   let url: string;
@@ -291,7 +291,7 @@ export async function relayMcp(
     headers.set("mcp-session-id", forwardedTransportSessionId);
   }
   // Discovery may await I/O: check turn authority and permissions after it, right before dispatch.
-  beforeSend?.();
+  const sent = await beforeSend?.(); if (sent !== undefined) payload = sent; // beforeSend may answer the frame to send instead (files it uploaded)
   const response = await withToolsListFallback(identity, payload, () => fetch(url, {
     method: "POST",
     headers,
@@ -807,8 +807,8 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
   const plan = planAccountLink(toolkit, serviceAccounts, alias, MULTI_ACCOUNT_CONFIG.max_accounts_per_toolkit, () => `omb-retry-${randomUUID()}`);
   if (!plan.ok) throw inputError(plan.error, plan.status);
   for (const id of plan.replace) await deleteConnectedAccount(apiKey, id);
-  const linkRequest: AccountLinkRequest = { toolkit };
-  if (plan.alias) linkRequest.alias = plan.alias;
+  await raiseAccountCap(apiKey, session);
+  const linkRequest: AccountLinkRequest = plan.alias ? { toolkit, alias: plan.alias } : { toolkit };
   const link = (sessionId: string) =>
     fetch(`${apiBase()}/tool_router/session/${encodeURIComponent(sessionId)}/link`, {
       method: "POST",

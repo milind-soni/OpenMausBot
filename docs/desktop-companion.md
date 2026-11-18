@@ -8,7 +8,8 @@ Any desktop build can be the host or the client: Windows, macOS or Ubuntu. Both 
 the same Tailscale account, with MagicDNS on. Nothing here is reachable from outside your Tailscale network.
 
 A phone uses a different path: **Settings → Phone & devices → Pair a phone**. A phone's code has six digits and only
-the phone app can use it. A computer needs the link below.
+the phone app can use it. The link a phone pairing creates is phone-only too: a desktop client that refuses it is
+behaving as expected. A computer needs the link below.
 
 ## Share the host
 
@@ -71,6 +72,8 @@ your own (`openmausbot serve`) is the other choice: see [self-hosting](self-host
 ## The earlier desktop companion connection
 
 Older versions paired one desktop app to another with a six-digit code and a managed `https://c-….` address, and the
-client restarted into a client mode. No new connection of that kind can be made. An installation still connected that
+client restarted into a client mode. No new connection of that kind can be made. Desktop Companion mode is marked in
+the app for sunset on December 7, and the log line `the secure address ended (retired)` is that shutdown being
+reported, not a failure. An installation still connected that
 way sees a notice in **Settings → This app** (Advanced mode) with **Disconnect and use this computer**; after disconnecting, connect again
 with the steps above.

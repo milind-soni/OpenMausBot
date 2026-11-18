@@ -1,7 +1,8 @@
 import { t } from "@/lib/i18n";
 import type { InstalledPackageMetadata } from "../../shared/wire";
 import type { PackageDocument } from "../../shared/package-format";
-import { teamImportPreview, type PendingTeamImport } from "./team-import";
+import { packageDetails } from "./template-details";
+import type { TemplateDetails } from "../../shared/share-card";
 
 export interface OrgLibraryPackage {
   packageId: string;
@@ -96,25 +97,7 @@ export function packageProvenance(
   };
 }
 
-export function orgPackagePreview(document: PackageDocument): PendingTeamImport {
-  if (document.package.agents.length) return teamImportPreview(document);
-  const pkg = document.package;
-  return {
-    manifest: document,
-    kind: "package",
-    version: 2,
-    name: pkg.name,
-    teamName: pkg.name,
-    description: pkg.summary,
-    members: [],
-    rooms: 0,
-    playbooks: pkg.playbooks?.length ?? 0,
-    routines: 0,
-    apps: pkg.requirements.apps.map((app) => ({ label: app.label, optional: app.optional === true })),
-    skills: [],
-    offeredSkills: (pkg.skills?.entries ?? []).map((skill) => skill.name),
-    connections: [],
-    notes: 0,
-    presets: (pkg.presets ?? []).map((preset) => preset.name),
-  };
+/** What an organization's package brings, for the Details sheet. */
+export function orgPackagePreview(document: PackageDocument): TemplateDetails {
+  return packageDetails(document);
 }

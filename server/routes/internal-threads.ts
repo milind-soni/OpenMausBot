@@ -5,6 +5,8 @@ import { threadTitleFrom, type BotRecord, type Store, type TaskRecord } from "..
 import { PASS, type RouteHandler } from "./table.ts";
 import { conversationLanguage, serverLine } from "../server-lines.ts";
 
+const THREADS_PAGE = 100;
+
 type ThreadState = "running" | "waiting-on-you" | "queued" | "idle" | "closed";
 
 interface ThreadRow {
@@ -33,7 +35,7 @@ export function createInternalThreadRoutes(deps: {
   readBody(): Promise<unknown>;
 }): RouteHandler {
   const { store, coordinator, from, fromThreadId } = deps;
-  return async ({ res, path, method, json }) => {
+  return async ({ res, url, path, method, json }) => {
     // list_threads: the caller's own threads plus, on reachable peers, only threads it opened; a peer's other threads are its own business.
     if (method === "GET" && path === "/api/internal/threads") {
       if (!deps.ownsThread(from.id, fromThreadId)) {
@@ -79,7 +81,10 @@ export function createInternalThreadRoutes(deps: {
         }
       }
       rows.sort((a, b) => b.openedAt - a.openedAt);
-      return json(res, 200, { threads: rows.slice(0, 100) });
+      const asked = Number(url.searchParams.get("page"));
+      const page = Number.isSafeInteger(asked) && asked > 0 ? asked : 1;
+      const start = (page - 1) * THREADS_PAGE;
+      return json(res, 200, { threads: rows.slice(start, start + THREADS_PAGE), total: rows.length, page, pageSize: THREADS_PAGE });
     }
     // rename_thread names only the conversation the turn speaks in. A room's thread is the room's, and an automation's
     // chat keeps the name its runs find it by.

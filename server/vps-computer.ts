@@ -2,7 +2,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createConnection, createServer, type AddressInfo } from "node:net";
-
+import { OWN_GROUP, stopGroup } from "./group-exec.ts";
 import {
   BASE_IMAGE,
   CUA_DRIVER_VERSION,
@@ -226,7 +226,7 @@ function stopDesktopTunnel(botId: string, expected?: DesktopTunnel): boolean {
     if (pending) {
       pending.start.cancelled = true;
       const child = pending.start.child;
-      if (child?.exitCode === null && !child.killed) child.kill("SIGTERM");
+      if (child) stopGroup(child);
       pendingDesktopTunnels.delete(botId);
     }
   }
@@ -234,7 +234,7 @@ function stopDesktopTunnel(botId: string, expected?: DesktopTunnel): boolean {
   if (!tunnel || desktopTunnels.get(botId) !== tunnel) return false;
   desktopTunnels.delete(botId);
   clearTimeout(tunnel.expiry);
-  if (tunnel.child.exitCode === null && !tunnel.child.killed) tunnel.child.kill("SIGTERM");
+  stopGroup(tunnel.child);
   return true;
 }
 
@@ -910,7 +910,7 @@ export async function removeManagedVpsComputer(
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
   if (!alias) {
-    throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Settings → API keys"), { status: 409 });
+    throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Settings → AI → Other services"), { status: 409 });
   }
   if (!MANAGED_VPS_CONTAINER_NAME.test(containerName)) {
     throw Object.assign(new Error("invalid managed VPS computer name"), { status: 400 });
@@ -964,7 +964,7 @@ export async function vpsComputerAction(
 ): Promise<VpsComputerStatus> {
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
-  if (!alias) throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Settings → API keys"), { status: 409 });
+  if (!alias) throw Object.assign(new Error("VPS is not configured — add an SSH config alias in Settings → AI → Other services"), { status: 409 });
   const key = `${alias}:${vpsContainerName(botId)}`;
   const pending = action === "provision" ? pendingProvisions.get(key) : undefined;
   if (pending) return pending;
@@ -1112,7 +1112,7 @@ async function startDesktopTunnel(cfg: AppConfig, botId: string, alias: string, 
     shell: false,
     env: { ...process.env, PATH: ssh.path },
     stdio: ["ignore", "ignore", "pipe"],
-    windowsHide: true,
+    ...OWN_GROUP, // with ssh's ProxyCommand, if any, so a stop reaches it
   });
   start.child = child;
   let failure: string | null = null;
@@ -1140,7 +1140,7 @@ async function startDesktopTunnel(cfg: AppConfig, botId: string, alias: string, 
   }
   const ready = !failure && await loopbackAnswers(localPort);
   if (start.cancelled || failure || !ready) {
-    if (child.exitCode === null && !child.killed) child.kill("SIGTERM");
+    stopGroup(child);
     assertOpen();
     const detail = failure || stderr.trim() || "the SSH port forward did not become ready";
     throw Object.assign(new Error(`Could not open the VPS live desktop: ${detail}`), { status: 502 });

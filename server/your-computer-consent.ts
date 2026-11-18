@@ -1,6 +1,6 @@
 // Asking before a bot uses the person's own computer. When a turn reaches this computer without the person having
 // picked it as the place, its first screen call waits on one plain card, Allow once or Deny, at every approval level
-// except Full access ("Just do it"), which is the person's grant to act without asking. The answer covers that turn
+// except Full access, which is the person's grant to act without asking. The answer covers that turn
 // only. Pending asks live in memory; a card left by a previous run is closed.
 import { newId } from "./contracts.ts";
 import { optionCardsForTools } from "./message-db.ts";
@@ -56,6 +56,7 @@ const pending = new Map<string, Pending>();
 export function yourComputerCallFrom(query: URLSearchParams): YourComputerCall | undefined {
   const app = cleanAppName(query.get("app"));
   const site = cleanSiteName(query.get("site"));
+  if (query.get("files") === "1") return { files: true };
   return app || site ? { ...(app ? { app } : {}), ...(site ? { site } : {}) } : undefined;
 }
 
@@ -94,7 +95,7 @@ export function askToUseYourComputer(
         requestId,
         requestType: "permission",
         tool: YOUR_COMPUTER_TOOL,
-        yourComputer: call ? { ...(call.app ? { app: call.app } : {}), ...(call.site ? { site: call.site } : {}) } : {},
+        yourComputer: call?.files ? { files: true } : call ? { ...(call.app ? { app: call.app } : {}), ...(call.site ? { site: call.site } : {}) } : {},
       },
     });
     pending.set(requestId, {

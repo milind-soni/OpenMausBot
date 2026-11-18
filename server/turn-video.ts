@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { TurnImageInput, TurnVideoInput } from "./contracts.ts";
+import { OWN_GROUP, stopGroup } from "./group-exec.ts";
 
 export const VIDEO_SAMPLE_FRAME_COUNT = 4;
 const FFPROBE_TIMEOUT_MS = 10_000;
@@ -23,14 +24,14 @@ const VIDEO_READER: Record<TurnVideoInput["mime"], readonly string[]> = {
 
 function run(command: string, args: readonly string[], timeoutMs: number): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], ...OWN_GROUP });
     let stdout = "";
     let stderr = "";
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill();
+      stopGroup(child);
       reject(new Error(`${command} timed out`));
     }, timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => { stdout += chunk; });

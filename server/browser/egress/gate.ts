@@ -33,6 +33,8 @@ export interface GateOptions {
   upstreamProxy?: () => { host: string; port: number } | null;
   /** This machine's own addresses, which never go upstream: its interfaces unless a test passes them. */
   own?(): BlockList;
+  /** The loopback port to listen on where it is free (the one an earlier gate of the same session had), else any. */
+  port?: number;
 }
 
 export interface EgressGate {
@@ -381,10 +383,18 @@ export function openGate(options: GateOptions): Promise<EgressGate> {
     client.on("data", onData);
   });
   return new Promise((done, fail) => {
-    // A failure to listen fails this browser; once listening, a server error must not reach Node unhandled.
-    server.once("error", fail);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", fail);
+    // A failure to listen fails this browser; once listening, a server error must not reach Node unhandled. A port that
+    // was free once but is taken now is given up for any free one.
+    let wanted = options.port ?? 0;
+    const failed = (error: NodeJS.ErrnoException) => {
+      if (wanted === 0 || error.code !== "EADDRINUSE") return fail(error);
+      wanted = 0;
+      server.listen(0, "127.0.0.1");
+    };
+    server.on("error", failed);
+    server.listen(wanted, "127.0.0.1");
+    server.once("listening", () => {
+      server.off("error", failed);
       server.on("error", () => {});
       const address = server.address();
       done({
