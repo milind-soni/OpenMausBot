@@ -79,27 +79,29 @@ export function foundExports(files: GrokLook["files"]): FoundExports {
 export interface GrokPreview {
   /** `addedAs`: the Bot's name here, numbered when it is taken. */
   plans: Array<GrokMovePlan & { addedAs: string }>;
-  moved: string[];
+  /** Bots moved before: `botId` is the bot here, so the move can still bring its chat. */
+  moved: Array<{ name: string; botId: string }>;
   unreadable: string[];
 }
 
 export interface GrokPreviewFacts {
-  bots: readonly Pick<Bot, "name" | "installedPackage">[];
+  bots: readonly Pick<Bot, "id" | "name" | "installedPackage">[];
   servers: ReadonlySet<string>;
   timeZone: string;
 }
 
 /** The whole plan, nothing written. A Bot already moved or that can't be read is named, and costs the others nothing. */
 export function previewGrokMove(bots: readonly GrokBot[], facts: GrokPreviewFacts): GrokPreview {
-  const installed = new Set(facts.bots.flatMap((bot) => bot.installedPackage?.id ?? []));
+  const installed = new Map(facts.bots.flatMap((bot) => bot.installedPackage ? [[bot.installedPackage.id, bot.id] as const] : []));
   const names = new Set(facts.bots.map((bot) => bot.name.trim().toLowerCase()));
   const servers = new Set(facts.servers);
   const preview: GrokPreview = { plans: [], moved: [], unreadable: [] };
   for (const bot of bots) {
     try {
       const plan = grokMovePlan(bot, { timeZone: facts.timeZone, takenServers: servers });
-      if (installed.has(plan.packageId)) {
-        preview.moved.push(plan.name);
+      const here = installed.get(plan.packageId);
+      if (here) {
+        preview.moved.push({ name: plan.name, botId: here });
         continue;
       }
       for (const connection of plan.document.package.connections ?? []) servers.add(connection.key);
@@ -136,7 +138,8 @@ export interface GrokMovedBot {
 
 export interface GrokReport {
   bots: GrokMovedBot[];
-  moved: string[];
+  /** Bots moved before; `history` is their chat, brought now on the desktop app. */
+  moved: Array<{ name: string; history?: GrokHistory }>;
   unreadable: string[];
   failed: string[];
 }
@@ -144,7 +147,11 @@ export interface GrokReport {
 /** Imports each plan through the package path, switches on its skills and, on the desktop app (`local`), brings its chat
  * over from the Grok Bot app there. One Bot failing is named and the rest carry on. */
 export async function runGrokMove(preview: GrokPreview, dispatch: (action: Action) => void, local = false): Promise<GrokReport> {
-  const report: GrokReport = { bots: [], moved: preview.moved, unreadable: preview.unreadable, failed: [] };
+  const report: GrokReport = { bots: [], moved: [], unreadable: preview.unreadable, failed: [] };
+  for (const { name, botId } of preview.moved) {
+    const history = local ? await bringHistory(botId, name) : undefined;
+    report.moved.push({ name, ...(history ? { history } : {}) });
+  }
   for (const plan of preview.plans) {
     try {
       const bot = (await addTemplate(plan.document, dispatch)).first;

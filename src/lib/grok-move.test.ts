@@ -59,10 +59,19 @@ describe("the preview", () => {
 
   it("names a Bot already moved instead of copying it; a taken name only renumbers", () => {
     const first = previewGrokMove(bots(DESK), facts()).plans[0]!;
-    const again = previewGrokMove(bots(DESK), facts({ bots: [{ name: "Desk", installedPackage: { id: first.packageId, name: "Desk" } as never }] }));
+    const again = previewGrokMove(bots(DESK), facts({ bots: [{ id: "here-Desk", name: "Desk", installedPackage: { id: first.packageId, name: "Desk" } as never }] }));
     expect(again.plans).toEqual([]);
-    expect(again.moved).toEqual(["Desk"]);
-    expect(previewGrokMove(bots(DESK), facts({ bots: [{ name: "Desk" }] })).plans[0]!.addedAs).toBe("Desk 2");
+    expect(again.moved).toEqual([{ name: "Desk", botId: "here-Desk" }]);
+    expect(previewGrokMove(bots(DESK), facts({ bots: [{ id: "other", name: "Desk" }] })).plans[0]!.addedAs).toBe("Desk 2");
+  });
+
+  it("a Bot moved before gets its chat on a second move, into the bot already here, and nothing else is imported", async () => {
+    const first = previewGrokMove(bots(DESK), facts()).plans[0]!;
+    fixture.history = { messages: 214 };
+    const report = await runGrokMove(previewGrokMove(bots(DESK), facts({ bots: [{ id: "here-Desk", name: "Desk", installedPackage: { id: first.packageId, name: "Desk" } as never }] })), vi.fn(), true);
+    expect(fixture.requests).toEqual([["/api/setup-import/grok/history", "POST", { botId: "here-Desk", grokName: "Desk" }]]);
+    expect(report.moved).toEqual([{ name: "Desk", history: { messages: 214 } }]);
+    expect(report.bots).toEqual([]);
   });
 });
 
