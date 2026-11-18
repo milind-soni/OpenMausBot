@@ -363,7 +363,7 @@ export function cancelledChatFollowup(kind: ChatFollowup["kind"], ownerId: strin
   ).get(kind, ownerId, threadId, sendId));
 }
 
-export const rowToMessage = (row: { json: string }): Message => JSON.parse(row.json) as Message;
+const rowToMessage = (row: { json: string }): Message => JSON.parse(row.json) as Message;
 
 export interface ThreadRows {
   messages: Message[];
@@ -391,15 +391,16 @@ export interface ThreadTailRows extends ThreadRows {
   hasMore?: boolean;
 }
 
+export function decodeMessagePage(rows: Array<{ json: string }>, limit: number): { messages: Message[]; hasMore: boolean } {
+  const hasMore = rows.length > limit;
+  if (hasMore) rows.length = limit;
+  return { messages: rows.reverse().map(rowToMessage), hasMore };
+}
+
 export function readThreadTail(threadId: string, legacyFile: string, limit: number): ThreadTailRows {
   const rows = prepared("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?").all(threadId, limit + 1) as Array<{ json: string }>;
-  if (rows.length) {
-    const hasMore = rows.length > limit;
-    if (hasMore) rows.length = limit;
-    rows.reverse();
-    return { messages: rows.map(rowToMessage), activeLeafId: readStoredActiveLeaf(threadId), hasMore };
-  }
-  return importLegacy(threadId, legacyFile);
+  if (!rows.length) return importLegacy(threadId, legacyFile);
+  return { ...decodeMessagePage(rows, limit), activeLeafId: readStoredActiveLeaf(threadId) };
 }
 
 function importLegacy(threadId: string, legacyFile: string): ThreadRows {

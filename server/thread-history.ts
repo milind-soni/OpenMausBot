@@ -1,4 +1,4 @@
-import { prepared, readStoredActiveLeaf, rowToMessage } from "./message-db.ts";
+import { decodeMessagePage, prepared, readStoredActiveLeaf } from "./message-db.ts";
 import type { Message } from "./store.ts";
 import type { ThreadState } from "./thread-cache.ts";
 
@@ -38,10 +38,8 @@ export function messagesBefore(
   }
 
   const rows = prepared(EARLIER_MESSAGES).all(threadId, cursor.rowid, limit + 1) as Array<{ json: string }>;
-  const hasMore = rows.length > limit;
-  if (hasMore) rows.pop();
-  const messages = rows.reverse().map(rowToMessage);
-  if (messages.some((message) => message.parentId === undefined)) return sliceBefore(loadThread(), before, limit);
+  const page = decodeMessagePage(rows, limit);
+  if (page.messages.some((message) => message.parentId === undefined)) return sliceBefore(loadThread(), before, limit);
 
-  return { messages, hasMore, activeLeafId: readStoredActiveLeaf(threadId) || lastMessageId(threadId) };
+  return { ...page, activeLeafId: readStoredActiveLeaf(threadId) || lastMessageId(threadId) };
 }
