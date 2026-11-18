@@ -27,6 +27,9 @@ const recordSchema = z.object({
 
 const fileSchema = z.object({
   servers: z.record(z.string(), recordSchema).default({}),
+  /** Refresh tokens already sent to a token endpoint, per server. Presenting one of them again can be a replay, so the
+   * mark is kept here and not in memory: a restart must not present it either. */
+  spentRefresh: z.record(z.string(), z.string().min(1)).default({}),
 });
 
 export type McpOAuthTokens = z.infer<typeof tokensSchema>;
@@ -59,8 +62,38 @@ export class McpOAuthStore {
 
   delete(name: string): void {
     const data = this.read();
-    if (!Object.hasOwn(data.servers, name)) return;
+    if (!Object.hasOwn(data.servers, name) && !Object.hasOwn(data.spentRefresh ?? {}, name)) return;
     delete data.servers[name];
+    delete data.spentRefresh?.[name];
+    this.write(data);
+  }
+
+  /** Forget the refresh token marked as spent for this server: a new sign-in brings a new token. */
+  forgetSpentRefresh(name: string): void {
+    const data = this.read();
+    if (!Object.hasOwn(data.spentRefresh ?? {}, name)) return;
+    delete data.spentRefresh?.[name];
+    this.write(data);
+  }
+
+  /** The refresh token already sent for this server, when presenting it again could be a replay. */
+  spentRefreshFor(name: string): string | undefined {
+    return this.read().spentRefresh?.[name];
+  }
+
+  /** Remember a refresh token that has been sent, before its answer arrives: a lost answer may mean the server
+   * rotated it, and a restart must not present it again. */
+  markSpentRefresh(name: string, token: string): void {
+    const data = this.read();
+    data.spentRefresh = { ...data.spentRefresh, [name]: token };
+    this.write(data);
+  }
+
+  /** Forget a sent refresh token once the server has answered and kept it: it is still valid. */
+  clearSpentRefresh(name: string, token: string): void {
+    const data = this.read();
+    if (data.spentRefresh?.[name] !== token) return;
+    delete data.spentRefresh?.[name];
     this.write(data);
   }
 

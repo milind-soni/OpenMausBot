@@ -221,10 +221,6 @@ export class McpOAuthManager {
   private readonly starting = new Map<string, StartingFlow>();
   private readonly refreshing = new Map<string, Promise<{ token: string | null; outcome: McpRefreshOutcome | null }>>();
   private readonly renewedAfterRefusal = new Map<string, number>();
-  /** Refresh tokens already sent to a token endpoint, per server name. A server that rotates refresh tokens revokes
-   * the whole grant when it sees one of them again, so a token is never presented twice, not even after a lost
-   * answer: the sign-in ends instead of being refreshed a second time with the same token. */
-  private readonly spentRefreshTokens = new Map<string, Set<string>>();
   private readonly clients: (name: string, url: string) => McpOAuthClientConfig | undefined;
   private readonly onSettled: (name: string, phase: McpSignInPhase, owner: string) => void;
   private readonly onRefresh: (name: string, outcome: McpRefreshOutcome) => void;
@@ -273,6 +269,8 @@ export class McpOAuthManager {
     if (current && this.authState(name, url) === "signed-in" && !replaces?.(current)) return "kept";
     this.cancel(name);
     this.store.put(name, { ...record, url, state: record.tokens ? "signed-in" : "needs-sign-in" });
+    // The sign-in that was replaced brought its own token: the mark of the old one no longer means anything.
+    this.store.forgetSpentRefresh(name);
     return "adopted";
   }
 
@@ -463,12 +461,15 @@ export class McpOAuthManager {
     // A refresh token the server may already have rotated must never be presented again: such a server revokes the
     // whole grant when it sees one of them a second time. A token this server already sent is therefore spent, whatever
     // the answer was, and the sign-in ends rather than being refreshed a second time with it.
-    const spent = this.spentRefreshTokens.get(name);
-    if (spent?.has(tokens.refresh)) {
+    // The mark lives in the store, not in memory: a restart must not present the token either.
+    if (this.store.spentRefreshFor(name) === tokens.refresh) {
       this.markNeedsSignIn(name, record.url);
       return { token: null, outcome: "expired" };
     }
-    this.spentRefreshTokens.set(name, new Set([...(spent ?? []), tokens.refresh]));
+    // Remember it before the request leaves: if the answer is lost the server may have rotated it, and the next
+    // attempt must not send it again.
+    const sent = tokens.refresh;
+    this.store.markSpentRefresh(name, sent);
     let answer: Awaited<ReturnType<typeof postForm>>;
     try {
       answer = await postForm(record.tokenEndpoint, {
@@ -477,6 +478,7 @@ export class McpOAuthManager {
         resource: record.url,
       }, client);
     } catch {
+      // The answer was lost: the token stays spent, because the server may have rotated it.
       if (!isDeepStrictEqual(this.store.get(name, record.url), record)) return { token: null, outcome: null };
       return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
     }
@@ -485,10 +487,14 @@ export class McpOAuthManager {
     if (!next) {
       const dead = (answer.status === 400 || answer.status === 401)
         && (answer.body.error === "invalid_grant" || answer.body.error === "invalid_client");
+      // The answer came, but it was no token: the server may have rotated the token anyway, so it stays spent.
       if (!dead) return { token: stillValid ? tokens.access : null, outcome: "unreachable" };
       this.markNeedsSignIn(name, record.url);
       return { token: null, outcome: "rejected" };
     }
+    // The server answered and kept the same refresh token: it is still valid (RFC 6749 section 6), so it may be
+    // presented again later. A rotated token leaves its mark: the one that was sent is dead for good.
+    if (next.refresh === sent) this.store.clearSpentRefresh(name, sent);
     this.store.put(name, { ...record, state: "signed-in", tokens: next });
     return { token: next.access, outcome: "refreshed" };
   }
