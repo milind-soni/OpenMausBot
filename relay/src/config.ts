@@ -81,11 +81,29 @@ export interface RelayConfig {
   tokenKeys: ReadonlyMap<string, KeyObject>;
   /** /metrics answers only with this bearer; without one /metrics is off. */
   metricsToken: string | undefined;
+  /** Browser pages allowed to open /v1/phone, as exact `https://` origins. Empty: every upgrade with an Origin is refused. */
+  phoneOrigins: ReadonlySet<string>;
   limits: Limits;
 }
 
 const NODE = /^relay[1-9][0-9]?$/;
 const MIN_METRICS_TOKEN = 32;
+const MAX_PHONE_ORIGINS = 8;
+const PHONE_ORIGINS_RULE = `RELAY_PHONE_ORIGINS must list exact https:// origins, comma-separated, at most ${MAX_PHONE_ORIGINS}`;
+
+const HOSTNAME = /^[a-z0-9-]+(\.[a-z0-9-]+)*$/;
+
+/** Exactly what a browser sends as Origin: `https://host[:port]`, lower case, no default port, path or credentials. No wildcards. */
+function isExactHttpsOrigin(value: string): boolean {
+  const url = URL.parse(value);
+  return url !== null && url.protocol === "https:" && url.origin === value && HOSTNAME.test(url.hostname);
+}
+
+function parsePhoneOrigins(value: string | undefined): ReadonlySet<string> {
+  const origins = (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+  if (origins.length > MAX_PHONE_ORIGINS || !origins.every(isExactHttpsOrigin)) throw new Error(PHONE_ORIGINS_RULE);
+  return new Set(origins);
+}
 
 /** Reads the deployment facts from the environment. Throws a message that never repeats a value it read. */
 export function loadConfig(env: NodeJS.ProcessEnv): RelayConfig {
@@ -99,5 +117,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): RelayConfig {
   }
   const port = Number(env.RELAY_PORT ?? 8080);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error("RELAY_PORT must be a port number");
-  return { node, host: env.RELAY_HOST ?? "127.0.0.1", port, tokenKeys, metricsToken, limits: { ...DEFAULT_LIMITS } };
+  const phoneOrigins = parsePhoneOrigins(env.RELAY_PHONE_ORIGINS);
+  return { node, host: env.RELAY_HOST ?? "127.0.0.1", port, tokenKeys, metricsToken, phoneOrigins, limits: { ...DEFAULT_LIMITS } };
 }
