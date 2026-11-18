@@ -82,6 +82,7 @@ describe("kept Codex app-servers", () => {
 
   it("close an idle process after the idle time, and stop counting one that is taken or gone", async () => {
     vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
+      if (child.exitCode !== null || child.signalCode !== null) return true;
       const exited = once(child, "exit");
       child.kill("SIGKILL");
       await exited;
