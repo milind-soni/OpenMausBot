@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { PERSON_STOPPED_TURN_NAME } from "../shared/client-cancel.ts";
+import { failedTurnTool } from "../shared/failed-turn.ts";
 import { BotApiManager } from "./bot-api.ts";
 import { BOT_API_DEFAULT_WAIT_MS, createBotApiHost, type BotApiHostDeps, type BotApiTurnOptions } from "./bot-api-host.ts";
 import type { RequestAuth } from "./request-auth.ts";
@@ -103,8 +105,8 @@ async function harness(script: Script, options: { waitMs?: number; full?: boolea
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
   const base = `http://127.0.0.1:${port}`;
-  const call = async (botId: string, key: string, body: unknown, init: { method?: string; query?: string; contentType?: string } = {}) => {
-    const response = await fetch(`${base}/hooks/api/bots/${botId}/messages${init.query ?? ""}`, {
+  const call = async (botId: string, key: string, body: unknown, init: { method?: string; query?: string; contentType?: string; v1?: boolean } = {}) => {
+    const response = await fetch(`${base}/hooks/api/${init.v1 ? "v1/" : ""}bots/${botId}/messages${init.query ?? ""}`, {
       method: init.method ?? "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": init.contentType ?? "application/json" },
       ...(init.method === "GET" ? {} : { body: typeof body === "string" ? body : JSON.stringify(body) }),
@@ -246,6 +248,68 @@ describe("the Bot API door on the webhook receiver", () => {
     expect((await h.call("b1", key, { text: "wrong field" })).status).toBe(400);
     expect((await h.call("b1", key, { message: "x".repeat(300 * 1024) })).status).toBe(413);
     expect((await h.call("b1", key, {}, { method: "PUT" })).status).toBe(405);
+  });
+
+  const COULD_NOT = "The bot could not answer. Open this thread in the app to see why.";
+  const STOPPED = "Someone stopped this in the app.";
+  const v1Key = async (h: Awaited<ReturnType<typeof harness>>) => (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
+  const endsWith = (rows: Array<Omit<Message, "id" | "at">>, ok = true): Script => (fake, _botId, _prompt, opts) => {
+    setTimeout(() => { for (const row of rows) fake.store.appendMessage(opts.threadId, row); opts.onSettled({ ok, text: ok ? "" : "the engine is gone" }); }, 20);
+  };
+  const failure: Omit<Message, "id" | "at"> = { role: "bot", kind: "activity", tool: failedTurnTool("the engine is gone") } as never;
+  const stop: Omit<Message, "id" | "at"> = { role: "bot", kind: "activity", tool: { name: PERSON_STOPPED_TURN_NAME, ok: true } } as never;
+
+  it("answers on /v1 exactly as on the old path", async () => {
+    const h = await harness(replies("Hello"));
+    const key = await v1Key(h);
+    const post = await h.call("b1", key, { message: "Hi" }, { v1: true });
+    expect(post).toEqual({ status: 200, body: { reply: "Hello", thread: expect.any(String) } });
+    const query = `?thread=${post.body.thread}`;
+    expect(await h.call("b1", key, undefined, { method: "GET", query, v1: true })).toEqual(post);
+  });
+
+  it("on /v1 a turn that fails after 'working' reads back as failed; the old path still reads it as a reply", async () => {
+    const finish: Array<() => void> = [];
+    const h = await harness((fake, _botId, _prompt, opts) => {
+      finish.push(() => { fake.store.appendMessage(opts.threadId, failure); opts.onSettled({ ok: false, text: "the engine is gone" }); });
+    });
+    const key = await v1Key(h);
+    const working = await h.call("b1", key, { message: "Hi", wait: 0 }, { v1: true });
+    expect(working.status).toBe(202);
+    finish.shift()!();
+    const query = `?thread=${working.body.thread}`;
+    expect(await h.call("b1", key, undefined, { method: "GET", query, v1: true })).toEqual({ status: 200, body: { thread: working.body.thread, status: "failed", error: COULD_NOT } });
+    expect(await h.call("b1", key, undefined, { method: "GET", query })).toEqual({ status: 200, body: { reply: "", thread: working.body.thread } });
+  });
+
+  it("on /v1 a turn someone stopped in the app reads back as failed with the stop words", async () => {
+    const finish: Array<() => void> = [];
+    const h = await harness((fake, _botId, _prompt, opts) => {
+      finish.push(() => { fake.store.appendMessage(opts.threadId, stop); opts.onSettled({ ok: true, text: "" }); });
+    });
+    const key = await v1Key(h);
+    const working = await h.call("b1", key, { message: "Hi", wait: 0 }, { v1: true });
+    finish.shift()!();
+    expect((await h.call("b1", key, undefined, { method: "GET", query: `?thread=${working.body.thread}`, v1: true })).body).toEqual({ thread: working.body.thread, status: "failed", error: STOPPED });
+  });
+
+  it("on /v1 a stop inside the wait answers failed with the stop words", async () => {
+    const h = await harness(endsWith([stop]));
+    const answer = await h.call("b1", await v1Key(h), { message: "Hi" }, { v1: true });
+    expect(answer).toEqual({ status: 200, body: { thread: expect.any(String), status: "failed", error: STOPPED } });
+  });
+
+  it("on /v1 a failure the person retried, which then replied, reads as the reply", async () => {
+    const h = await harness(endsWith([failure, { role: "bot", kind: "text", text: "Second go" }]));
+    const answer = await h.call("b1", await v1Key(h), { message: "Hi" }, { v1: true });
+    expect(answer).toEqual({ status: 200, body: { reply: "Second go", thread: expect.any(String) } });
+  });
+
+  it("on /v1 a turn that fails inside the wait answers failed, and the card keeps the cause", async () => {
+    const h = await harness((_fake, _botId, _prompt, opts) => { setTimeout(() => opts.onDispatchError("the engine is gone"), 20); });
+    const answer = await h.call("b1", await v1Key(h), { message: "Hi" }, { v1: true });
+    expect(answer).toEqual({ status: 200, body: { thread: expect.any(String), status: "failed", error: COULD_NOT } });
+    expect(h.manager.listAttempts("b1").at(-1)).toMatchObject({ outcome: "rejected", statusCode: 502, reason: "the engine is gone" });
   });
 
   it("refuses new calls while fifty are still being answered, and a failed turn answers 502", async () => {

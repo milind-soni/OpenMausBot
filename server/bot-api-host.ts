@@ -10,7 +10,9 @@
 import { z } from "zod";
 
 import { redactSecretsInText } from "../shared/redact.ts";
-import { BOT_API_UPGRADE, botApiEndpoint, type BotApiReply } from "../shared/bot-api.ts";
+import { BOT_API_UPGRADE, botApiEndpoint, type BotApiV1Reply } from "../shared/bot-api.ts";
+import { isStoppedTurnName } from "../shared/client-cancel.ts";
+import { failedTurnCause } from "../shared/failed-turn.ts";
 import type { AdminActionRow } from "./admin-activity.ts";
 import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiOwnerPrompt, botApiPrompt, withoutAttachedImages, type BotApiAttempt, type BotApiStatus } from "./bot-api.ts";
 import { personKey } from "./person-key.ts";
@@ -25,7 +27,7 @@ import { bearerSecret, header, json, readRawBody, type IngressDoor } from "./web
 export const BOT_API_DEFAULT_WAIT_MS = 50_000;
 const BOT_API_MAX_WAIT_MS = 5 * 60_000;
 const POLL_MS = 250;
-const PUBLIC_PATH = /^\/hooks\/api\/bots\/([\w-]{1,128})\/messages$/;
+const PUBLIC_PATH = /^\/hooks\/api\/(?:(v1)\/)?bots\/([\w-]{1,128})\/messages$/;
 const APP_PATH = /^\/api\/bots\/([\w-]{1,128})\/bot-api(?:\/(new-key|acts-as-owner))?$/;
 
 const callSchema = z.object({
@@ -92,6 +94,7 @@ function callerWords(error: unknown): string {
 }
 
 const COULD_NOT_ANSWER = "The bot could not answer. Open this thread in the app to see why.";
+const STOPPED_IN_APP = "Someone stopped this in the app.";
 const BUSY = "The bot is busy. Try again soon.";
 const CAPPED = "This bot has reached a usage cap its owner set, so it takes no new calls for now.";
 const CANNOT_CONFINE = "This bot's AI can't take Bot API calls. Choose another AI for this bot.";
@@ -113,6 +116,14 @@ function statusOf(error: unknown): number {
 /** A card the bot put to the person and nobody has answered: the call stops there. */
 function pendingCard(lines: readonly Message[]): boolean {
   return lines.some((line) => line.card?.requestId !== undefined && !line.card.answered && !line.card.dismissed);
+}
+
+/** How the turn ended when it left no reply: a failure row or a person's stop, unless a bot answer came after it (a retry). */
+function endedWithout(lines: readonly Message[]): "failed" | "stopped" | null {
+  const row = lines.findLastIndex((line) => line.kind === "activity" && line.tool !== undefined
+    && (isStoppedTurnName(line.tool.name) || (line.tool.ok === false && failedTurnCause(line.tool.name) !== null && line.tool.partial !== true)));
+  if (row === -1 || lines.slice(row + 1).some((line) => line.role === "bot" && line.kind === "text" && line.text?.trim())) return null;
+  return isStoppedTurnName(lines[row]!.tool!.name) ? "stopped" : "failed";
 }
 
 function replyText(lines: readonly Message[]): string {
@@ -143,7 +154,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
 
   /** The thread as the caller sees it now: only what answers the caller's own last message, up to the next thing anyone
    * else typed there. A person's words and the bot's answers to them stay in the app. */
-  function threadState(botId: string, threadId: string): BotApiReply {
+  function threadState(botId: string, threadId: string, v1: boolean): BotApiV1Reply {
     const lines = deps.store.messagesFor(threadId);
     const last = lines.findLastIndex((line) => line.role === "user" && line.via === "api");
     const rest = lines.slice(last + 1);
@@ -151,10 +162,13 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     const after = next === -1 ? rest : rest.slice(0, next);
     if (pendingCard(after)) return { thread: threadId, status: "needs_approval" };
     if (deps.threadBusy(botId, threadId)) return { thread: threadId, status: "working" };
+    // Only /v1 says a job failed or was stopped; the old path keeps answering the (empty) reply.
+    const ended = v1 ? endedWithout(after) : null;
+    if (ended) return { thread: threadId, status: "failed", error: ended === "stopped" ? STOPPED_IN_APP : COULD_NOT_ANSWER };
     return { reply: replyText(after), thread: threadId };
   }
 
-  async function runCall(botId: string, call: z.output<typeof callSchema>, turnStarted: () => void, keyAsOwner: boolean): Promise<{ status: number; body: BotApiReply }> {
+  async function runCall(botId: string, call: z.output<typeof callSchema>, turnStarted: () => void, keyAsOwner: boolean, v1: boolean): Promise<{ status: number; body: BotApiV1Reply; cause?: string }> {
     const store = deps.store;
     let threadId = call.thread;
     // A thread keeps what it was opened as: a fenced one stays fenced whatever the key does now.
@@ -200,23 +214,28 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       fail(busy ? 409 : 502, busy ? BUSY : COULD_NOT_ANSWER, error instanceof Error ? error.message : String(error));
     }
     turnStarted();
+    // On /v1 a failed turn is a 200 the caller can read; `cause` lets the door keep the same 502 row on the card.
+    const failedAnswer = (cause: string) => v1 ? { status: 200, body: { thread: threadId!, status: "failed" as const, error: COULD_NOT_ANSWER }, cause } : fail(502, COULD_NOT_ANSWER, cause);
     const deadline = Date.now() + (call.wait === undefined ? waitMs : call.wait * 1000);
     for (;;) {
-      if (dispatchError !== undefined) fail(502, COULD_NOT_ANSWER, dispatchError);
+      if (dispatchError !== undefined) return failedAnswer(dispatchError);
       if (settled) break;
       if (pendingCard(after())) return { status: 202, body: { thread: threadId, status: "needs_approval" } };
       if (Date.now() >= deadline) return { status: 202, body: { thread: threadId, status: "working" } };
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
     }
     if (pendingCard(after())) return { status: 202, body: { thread: threadId, status: "needs_approval" } };
-    if (!settled.ok) fail(502, COULD_NOT_ANSWER, settled.text);
+    if (!settled.ok) return failedAnswer(settled.text);
+    const ended = v1 ? endedWithout(after()) : null;
+    if (ended) return { status: 200, body: { thread: threadId, status: "failed", error: ended === "stopped" ? STOPPED_IN_APP : COULD_NOT_ANSWER } };
     return { status: 200, body: { reply: replyText(after()), thread: threadId } };
   }
 
   const door: IngressDoor = async (req, res, url) => {
     const match = PUBLIC_PATH.exec(url.pathname);
     if (!match) return false;
-    const botId = match[1]!;
+    const v1 = match[1] === "v1";
+    const botId = match[2]!;
     if (req.method !== "POST" && req.method !== "GET") { json(res, 405, { error: "The Bot API takes POST and GET" }); return true; }
     let claim: (() => void) | undefined;
     try {
@@ -255,8 +274,8 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         const threadId = url.searchParams.get("thread") ?? "";
         const task = /^[\w-]{1,128}$/.test(threadId) ? deps.store.taskByThread(botId, threadId) : undefined;
         if (!task || task.botApi !== true) { json(res, 404, { error: "no such thread" }); return true; }
-        const state = threadState(botId, threadId);
-        json(res, "reply" in state ? 200 : 202, state);
+        const state = threadState(botId, threadId, v1);
+        json(res, "reply" in state || state.status === "failed" ? 200 : 202, state);
         return true;
       }
       let call: z.output<typeof callSchema>;
@@ -285,10 +304,11 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         return true;
       }
       try {
-        const answer = await runCall(botId, call, release, keyAsOwner);
-        manager.record(botId, { outcome: "accepted", statusCode: answer.status, threadId: answer.body.thread, preview: call.message,
-          ...(deps.store.taskByThread(botId, answer.body.thread)?.botApiAsOwner ? { asOwner: true as const } : {}),
-          reason: "reply" in answer.body ? "Replied" : answer.body.status === "needs_approval" ? "Stopped at an approval" : "Still working" });
+        const answer = await runCall(botId, call, release, keyAsOwner, v1);
+        const owned = deps.store.taskByThread(botId, answer.body.thread)?.botApiAsOwner ? { asOwner: true as const } : {};
+        if (answer.cause !== undefined) manager.record(botId, { outcome: "rejected", statusCode: 502, reason: redactSecretsInText(answer.cause), preview: call.message });
+        else manager.record(botId, { outcome: "accepted", statusCode: answer.status, threadId: answer.body.thread, preview: call.message, ...owned,
+          reason: "reply" in answer.body ? "Replied" : answer.body.status === "needs_approval" ? "Stopped at an approval" : answer.body.status === "failed" ? "Stopped without a reply" : "Still working" });
         json(res, answer.status, answer.body);
       } catch (error) {
         manager.record(botId, { outcome: "rejected", statusCode: statusOf(error), reason: detailOf(error), preview: call.message });

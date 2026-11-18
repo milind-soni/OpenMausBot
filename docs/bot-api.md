@@ -34,6 +34,12 @@ bot's webhooks are reachable (a Cloud's public name, a self-hosted edge that
 forwards `/hooks/*` as [deploy/Caddyfile](../deploy/Caddyfile) does, or
 `OMB_WEBHOOK_PUBLIC_URL`) the API is too; nothing new to open.
 
+The same calls answer at `/hooks/api/v1/bots/<botId>/messages`. Use `/v1` for
+anything you keep: it is the address the MausBot SDKs use. Within `/v1` we only
+add optional request fields and new response fields. A new `status` value, a
+removed or renamed field, or a changed status code needs `/v2`. The address
+without `/v1` keeps answering as it always has.
+
 The JSON body takes:
 
 - `message` (required, up to 20,000 characters): what to tell the bot.
@@ -53,11 +59,19 @@ Answers:
   approval. Nobody outside can give it: the person opens the thread in the app
   and answers there; a later `GET` returns the reply.
 - `400` bad body, `401` wrong key, `403` the API is off for this bot (or there is
-  no such bot), `404` no such thread, `409` that thread is still working or the bot
-  is at its limit of conversations at once, or 50 API calls are being answered,
-  `413` body over 256 KB, `415` not JSON, `429` more than ten calls in a minute for
-  this key, `502` the bot could not answer (the reason is on the card, not in the
-  response).
+  no such bot), `404` no such thread, `405` not POST or GET, `409` that thread is
+  still working, the bot is at its limit of conversations at once, 50 API calls are
+  being answered, or the workspace has moved, `413` body over 256 KB, `415` not
+  JSON, `429` more than ten calls in a minute for this key, `502` the bot could
+  not answer (the reason is on the card, not in the response; on `/v1` see
+  `failed` below), `503` a backup or restore is in progress: try again soon.
+
+On `/v1`, a job that failed or that someone stopped in the app answers `200`
+with `{"thread": "<id>", "status": "failed", "error": "…"}`, to the call itself
+or to a later `GET`. `error` is one of two fixed sentences, never the engine's
+own words: "The bot could not answer. Open this thread in the app to see why."
+or "Someone stopped this in the app." If the person retries in the app and the
+bot then replies, the thread reads as that reply. The cause stays on the card.
 
 ## What a call may do
 

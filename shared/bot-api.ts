@@ -22,3 +22,6 @@ export function botApiCurl(endpoint: string, key: string = BOT_API_KEY_PLACEHOLD
 export type BotApiReply =
   | { reply: string; thread: string }
   | { thread: string; status: "working" | "needs_approval" };
+
+/** What `/v1` answers: the same, plus a job that failed or was stopped, as a 200 the caller can read. `error` is a fixed sentence. */
+export type BotApiV1Reply = BotApiReply | { thread: string; status: "failed"; error: string };
