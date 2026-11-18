@@ -156,7 +156,7 @@ export interface Synthesis {
   audio: Promise<Audio>;
 }
 
-export function synthesize(text: string, voiceId: string, key: string, api: string, included = false): Synthesis {
+export function synthesize(text: string, voiceId: string, key: string, api: string, included = false, signal?: AbortSignal): Synthesis {
   const firstAudio = withResolvers<Audio>();
   const audio = withResolvers<Audio>();
   // Callers may consume only `audio`: a failure before the first chunk must not become an unhandled rejection.
@@ -168,7 +168,7 @@ export function synthesize(text: string, voiceId: string, key: string, api: stri
         headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" },
         body: JSON.stringify({ text, model_id: speechModel(text, included) }),
         redirect: "error",
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),
       });
       if (!res.ok) throw new Error(message(res.status, "speaking", await safeJson(res)));
       if (!res.body) throw new Error("speaking failed: no audio came back");
