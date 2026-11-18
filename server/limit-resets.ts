@@ -37,8 +37,7 @@ export function engineLimitFromUsage(row: PlanProviderRow): EngineLimit | null {
   const full = windows.filter((line) => line.used >= 100);
   if (full.length) {
     const latest = full.reduce((left, right) => (right.resetsAt ?? 0) > (left.resetsAt ?? 0) ? right : left);
-    // Claude goes on past a full window on its paid extra usage while that has room, and Codex on its ChatGPT credits;
-    // the engine's own refusal still holds it.
+    // A full window is the meter only: the engine's own refusal still holds it.
     return { ...base, window: latest.window, usedPercent: 100, resetsAt: full.some((line) => line.resetsAt === null) ? null : latest.resetsAt, blocked: !claudeHasExtraUsageRoom(row) && !codexHasCreditRoom(row) };
   }
   const fullest = [...windows].sort((left, right) => right.used - left.used || (left.resetsAt ?? Infinity) - (right.resetsAt ?? Infinity))[0]!;
@@ -151,6 +150,11 @@ export class LimitResetClock {
 
   /** The engine's usage reading when its meter covers `model` (every model when none is named): OpenCode's meter is
    * the Go subscription's and never covers Zen's free models. */
+  /** Whether only the usage meter holds this engine now, with no refusal of its own. */
+  meterOnly(engine: string, model?: string): boolean {
+    return this.refusal(engine) === null && this.blockedUntil(engine, model) !== null;
+  }
+
   private meterFor(engine: string, model?: string): EngineLimit | undefined {
     const usage = this.reading(engine);
     return usage?.driver !== "opencode" || !model || (typedOpenCodeModel(model) ?? model).startsWith(OPENCODE_GO_MODEL_PREFIX) ? usage : undefined;

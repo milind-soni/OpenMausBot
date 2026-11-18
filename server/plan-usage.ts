@@ -209,8 +209,8 @@ export function parseCodexUsage(body: unknown): PlanWindows {
   return { ...assigned, extra, models, plan: planLabel(root?.plan_type ?? root?.plan), ...(codexHasCredits(root?.credits) ? { codexCredits: true as const } : {}) };
 }
 
-/** The ChatGPT usage endpoint's `credits` object: `has_credits`, `unlimited` and a `balance` string. Anything else
- * reads as no credits, so a full window keeps holding. */
+/** The ChatGPT usage endpoint's `credits` object: `has_credits`, `unlimited` and `balance`. Anything else reads as
+ * no credits. */
 function codexHasCredits(value: unknown): boolean {
   const credits = asRecord(value);
   if (!credits) return false;
@@ -220,7 +220,7 @@ function codexHasCredits(value: unknown): boolean {
   return typeof balance === "number" && Number.isFinite(balance) && balance > 0;
 }
 
-/** Whether Codex's ChatGPT credits are on and not used up: sends then go on past a full window and are paid from them. */
+/** A local signal that Codex's ChatGPT credits are on and not used up, so a full window does not stop a send here. */
 export function codexHasCreditRoom(row: Pick<PlanProviderRow, "driver" | "codexCredits">): boolean {
   return row.driver === "codex" && row.codexCredits === true;
 }

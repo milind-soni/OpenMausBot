@@ -54,6 +54,8 @@ export interface LimitTakeoverDeps {
   blockedUntil(instanceId: string, model?: string): number | null;
   /** When this engine's limit resets, when that is known. */
   resetAt?(instanceId: string, model?: string): number | null;
+  /** Only the usage meter holds this engine, with no refusal of its own. */
+  meterOnly?(instanceId: string, model?: string): boolean;
   /** The backups the person chose for this bot, or for every bot. */
   chosen(botId: string): ModelSelection[];
   /** The backups a signed-out AI's turns go to, as for a turn its AI never started: the bot's own list, or the
@@ -217,7 +219,8 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
   /** A conversation of `botId` moved from `from` to `to` because `from` was limited or signed out; it goes back once
    * that ends. */
   const moved = (botId: string, threadId: string, from: ModelSelection, to: ModelSelection, resetsAt?: number, scope?: TakeoverScope): void => {
-    deps.record({ botId, threadId, from, to, resetsAt: resetsAt ?? null, at: now(), ...(scope === "signed-out" ? { why: "signed-out" as const } : {}) });
+    deps.record({ botId, threadId, from, to, resetsAt: resetsAt ?? null, at: now(), ...(scope === "signed-out" ? { why: "signed-out" as const } : {}),
+      ...(scope === "engine" && deps.meterOnly?.(from.instanceId, from.model) ? { meter: true as const } : {}) });
   };
 
   /** A turn on `selection` worked for this bot: its engine's next limit is a new stretch, and it is plainly signed in. */
