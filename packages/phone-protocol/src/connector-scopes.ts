@@ -21,14 +21,16 @@ export interface ConnectorScopes {
   accounts?: Record<string, string[]>;
 }
 
-const TOOLKIT_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const TOOLKIT_SLUG = /^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,63}$/;
 const ACCOUNT_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
 /** The toolkit a Composio slug belongs to: the part before the first
- * underscore, lower-cased. A workbench API proxy belongs to no app. */
+ * underscore, lower-cased. A leading underscore is part of the toolkit
+ * (`_1PASSWORD_GET_ITEM` → `_1password`). A workbench API proxy belongs to no app. */
 export function toolkitOf(slug: string): string {
-  const cut = slug.indexOf("_");
-  return (cut > 0 ? slug.slice(0, cut) : slug).toLowerCase();
+  const start = slug.startsWith("_") ? 1 : 0;
+  const cut = slug.indexOf("_", start);
+  return (cut > start ? slug.slice(0, cut) : slug).toLowerCase();
 }
 
 /** Toolkits whose actions name a one-word resource before the verb
@@ -42,7 +44,7 @@ export function isReadOnlyAction(slug: string, toolkit?: string): boolean {
   if (slug === "COMPOSIO_PROXY_EXECUTE") return false;
   if (KNOWN_READ_SLUGS.has(slug)) return true;
   const resourceFirst = RESOURCE_FIRST_TOOLKITS.find((candidate) => (toolkit ?? candidate) === candidate && slug.startsWith(candidate.toUpperCase() + "_"));
-  const cut = resourceFirst ? resourceFirst.length : toolkit ? toolkit.length : slug.indexOf("_");
+  const cut = resourceFirst ? resourceFirst.length : toolkit ? toolkit.length : toolkitOf(slug).length;
   const action = cut > 0 ? slug.slice(cut + 1) : "";
   const verb = action.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean)[resourceFirst ? 1 : 0];
   return verb !== undefined && READ_VERBS.has(verb);

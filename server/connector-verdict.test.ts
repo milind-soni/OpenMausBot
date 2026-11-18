@@ -40,6 +40,8 @@ describe("connectorCallFromFrame", () => {
   it("reads a direct per-toolkit call", () => {
     expect(connectorCallFromFrame(toolsCall("GMAIL_SEND_EMAIL", { to: "a@b.c" })))
       .toEqual({ kind: "tools", invoked: "GMAIL_SEND_EMAIL", names: ["GMAIL_SEND_EMAIL"] });
+    expect(connectorCallFromFrame(toolsCall("_1PASSWORD_GET_ITEM", { item_id: "i1" })))
+      .toEqual({ kind: "tools", invoked: "_1PASSWORD_GET_ITEM", names: ["_1PASSWORD_GET_ITEM"] });
   });
 
   it("reads every target from MULTI_EXECUTE, single and batched", () => {
@@ -113,6 +115,7 @@ describe("serviceSlugFor", () => {
   it("maps a tool name to its service slug", () => {
     expect(serviceSlugFor("GMAIL_SEND_EMAIL")).toBe("gmail");
     expect(serviceSlugFor("SLACK_POST_MESSAGE")).toBe("slack");
+    expect(serviceSlugFor("_1PASSWORD_GET_ITEM")).toBe("_1password");
     expect(serviceSlugFor("GMAIL")).toBeNull();
     expect(serviceSlugFor("_SEND")).toBeNull();
   });
@@ -122,6 +125,7 @@ describe("serviceSlugForCandidates", () => {
   it("prefers the longest known slug across an underscore boundary", () => {
     expect(serviceSlugForCandidates("BLAND_AI_MAKE_CALL", ["bland", "bland_ai"])).toBe("bland_ai");
     expect(serviceSlugForCandidates("GITHUB_CREATE_ISSUE", ["git", "github"])).toBe("github");
+    expect(serviceSlugForCandidates("_1PASSWORD_GET_ITEM", ["_1password", "password"])).toBe("_1password");
   });
 
   it("matches whole slug segments only and reports no match for the caller's fallback", () => {
@@ -172,6 +176,10 @@ describe("evaluateConnectorTools", () => {
     const grants: Record<string, ConnectorToolGrant> = { gmail: { tools: "*" } };
     expect(evaluateConnectorTools(["GMAIL_SEND_EMAIL", "GMAIL_FETCH_EMAILS"], grants).allowed).toBe(true);
     expect(evaluateConnectorTools(["SLACK_POST_MESSAGE"], grants).allowed).toBe(false);
+    const onePassword: Record<string, ConnectorToolGrant> = { _1password: { tools: "*" } };
+    expect(evaluateConnectorTools(["_1PASSWORD_GET_ITEM", "_1PASSWORD_LIST_VAULTS"], onePassword).allowed).toBe(true);
+    expect(evaluateConnectorTools(["_1PASSWORD_GET_ITEM"], { _1password: { tools: ["_1PASSWORD_GET_ITEM"] } }).allowed).toBe(true);
+    expect(evaluateConnectorTools(["_1PASSWORD_DELETE_ITEM"], { _1password: { tools: ["_1PASSWORD_GET_ITEM"] } }).allowed).toBe(false);
   });
 
   it("keeps an underscored service's tools under its own grant", () => {

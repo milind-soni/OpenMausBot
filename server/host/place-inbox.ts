@@ -184,11 +184,18 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     return [...rows.values()];
   }
 
-  const lineRow = (line: Line): InboxRow => ({
-    id: line.id, kind: line.kind, tab: lineTab(line), from: { name: line.from, botId: line.botId }, ...(line.workingFor ? { workingFor: line.workingFor } : {}),
-    origin: { botId: line.botId, threadId: line.threadId, title: titleOf(line.botId, line.threadId), ...(line.groupId ? { groupId: line.groupId } : {}), messageId: line.id },
-    text: clip(line.text, ROW_TEXT_MAX), at: line.at, unread: !line.seen, ...(line.kind === "message" ? { replies: true as const } : {}),
-  });
+  /** The message a line points at: its own message, or the newest one in the conversation it came from, so a client
+   * can put the person at it. */
+  const focusOf = (line: Line): string | undefined => line.kind === "message" ? line.id : store.messagesFor(line.threadId).at(-1)?.id;
+
+  const lineRow = (line: Line): InboxRow => {
+    const focus = focusOf(line);
+    return {
+      id: line.id, kind: line.kind, tab: lineTab(line), from: { name: line.from, botId: line.botId }, ...(line.workingFor ? { workingFor: line.workingFor } : {}),
+      origin: { botId: line.botId, threadId: line.threadId, title: titleOf(line.botId, line.threadId), ...(line.groupId ? { groupId: line.groupId } : {}), ...(focus ? { messageId: focus } : {}) },
+      text: clip(line.text, ROW_TEXT_MAX), at: line.at, unread: !line.seen, ...(line.kind === "message" ? { replies: true as const } : {}),
+    };
+  };
 
   function view(auth: RequestAuth): InboxView {
     const rows = [...askRows(auth), ...lines.filter((line) => lineFor(auth, line)).map(lineRow)].sort((a, b) => b.at - a.at).slice(0, VIEW_ROWS);

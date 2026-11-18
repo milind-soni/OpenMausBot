@@ -32,7 +32,7 @@ const allowed = <T extends z.ZodType>(entry: T, max: number) => z.union([z.liter
 /** Omitted, or a permissive value: allowed. Only an explicit restriction restricts, and nothing can force anything on. */
 const limitsSchema = z.object({
   allowedEngines: allowed(z.string().regex(/^[A-Za-z][A-Za-z0-9-]{0,63}$/), 64).optional(),
-  allowedApps: allowed(z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/), 200).optional(),
+  allowedApps: allowed(z.string().regex(/^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,63}$/), 200).optional(),
   /** `"team"`: only what the team's admins add; a list: only those, whoever adds them. */
   allowedMcpServers: z.union([z.literal("team"), allowed(z.string().trim().min(1).max(200), 100)]).optional(),
   allowedComputers: allowed(z.enum(["cloudDesktop", "vps", "memberComputer"]), 3).optional(),
