@@ -100,9 +100,13 @@ jobs:
           git switch -c "release/v$VERSION"
           node scripts/tighten-ratchets.mjs
           published_format=()
-          if gh release view "v$PREVIOUS_VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '(.isDraft or .isPrerelease) | not' | grep -qx true &&
-            git show "refs/tags/v$PREVIOUS_VERSION:server/data-format-released.json" > "$RUNNER_TEMP/published-format.json"; then
-            published_format=("$RUNNER_TEMP/published-format.json")
+          previous_format=$(node -p 'const {reads, writes} = require("./server/data-format-released.json"); [reads, writes].join(":")')
+          if [[ "$previous_format" == "2:1" ]]; then
+            published_tag=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.tag_name == \"v$PREVIOUS_VERSION\" and .draft == false and .prerelease == false) | .tag_name")
+            if [[ -n "$published_tag" ]]; then
+              git show "refs/tags/v$PREVIOUS_VERSION:server/data-format-released.json" > "$RUNNER_TEMP/published-format.json"
+              published_format=("$RUNNER_TEMP/published-format.json")
+            fi
           fi
           node scripts/record-data-format.mjs "${published_format[@]}"
           node scripts/generate-locale.mjs --record-hashes
