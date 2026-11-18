@@ -3131,6 +3131,8 @@
   "canvas.moveConfirmTitle": "{name} nach {team} verschieben?",
   "canvas.moved": "{name} nach {team} verschoben.",
   "canvas.openBotChat": "Chat mit {name} öffnen",
+  "canvas.browsing": "Surft auf {site}",
+  "canvas.browsingOpen": "{name} surft auf {site}. Browser öffnen",
   "canvas.openChat": "Chat öffnen",
   "canvas.region": "Arbeitsfläche der Teamkarte",
   "canvas.reorderHint": "Zum Anordnen ziehen · Alt + ↑ / ↓ zum Umsortieren",

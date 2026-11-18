@@ -1,7 +1,6 @@
 import { Monitor } from "lucide-react";
 import { useStore, type Message } from "@/state/store";
-import { rememberComputerPanelOpen } from "@/lib/computer-panel-focus";
-import { writeComputerPanelView } from "@/lib/computer-panel-view";
+import { openComputerPanelOn } from "@/lib/computer-panel-focus";
 import { liveScreenPlace, type EffectivePlace } from "@/lib/place";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { cn } from "@/lib/cn";
@@ -17,7 +16,7 @@ export function WatchScreenButton({ botId, messages, liveTools, place }: { botId
   return (
     <button
       data-testid="watch-screen"
-      onClick={(event) => { writeComputerPanelView(botId, screen === "browser" ? "browser" : "computer"); rememberComputerPanelOpen({ botId, opener: event.currentTarget, tabs: event.detail === 0, browser: screen === "browser" }); dispatch({ type: "toggleComputer", open: true }); }}
+      onClick={(event) => openComputerPanelOn(dispatch, botId, screen === "browser" ? "browser" : "computer", event.currentTarget, event.detail === 0)}
       className={cn("flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink", COMPACT_BUBBLE)}
       title={t("chat.watchScreenHint")}
     >

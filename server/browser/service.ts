@@ -647,6 +647,13 @@ export class BrowserService {
     return this.#bySession(session)?.control.owner ?? null;
   }
 
+  /** The address of the tab in front of this session's running browser; never starts one. */
+  pageUrl(session: string): string | null {
+    const profile = this.#bySession(session);
+    const tab = profile?.run ? profile.active() : null;
+    return tab ? tab.page.url() : null;
+  }
+
   /** A bot call or a person's hold is under way in this session's browser. */
   working(session: string): boolean {
     const profile = this.#bySession(session);

@@ -327,6 +327,15 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       return session ? [session] : [];
     });
   }
+  /** The address in front of a bot's browser while a turn of that bot holds it, on the Chrome engine (the older engine has
+   * no cheap read). Only the team's browser: a member's private one never shows on an Admin's map, and a shared profile's
+   * one browser shows only on the card of the bot whose turn is using it, never one left open from an earlier turn. */
+  function browserPageUrl(bot: { id: string; browserProfile?: string }): string | null {
+    const session = bot.browserProfile === "guest" ? temporaryBrowserSessions.get(bot.id) : sessionFor(bot.id, bot.browserProfile, "");
+    if (!session || !chromeTarget(session, usedBrowserSessions.get(session))) return null;
+    const turn = turnResources.holder(`browser:${session}`);
+    return turn && store.botByThread(turn.threadId)?.id === bot.id ? chromeEngine.service.pageUrl(session) : null;
+  }
   async function forgetTemporaryBrowser(botId: string): Promise<void> {
     await Promise.all(audiences.variants().map((suffix) => forgetTemporaryKey(botId + suffix)));
   }
@@ -647,6 +656,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, lentChromeSummary, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,
-    eraseAudienceBrowsers, browserOwners, closeCapBrowsers,
+    eraseAudienceBrowsers, browserOwners, closeCapBrowsers, browserPageUrl,
   };
 }

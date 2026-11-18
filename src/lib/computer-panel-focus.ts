@@ -3,6 +3,7 @@
  * is a lazy screen, so the intent is recorded on open and taken by the panel's
  * first render, never by a timer on the opener's side. */
 import { useEffect, useRef, type RefObject } from "react";
+import { writeComputerPanelView } from "./computer-panel-view";
 
 export type ComputerPanelOpen = {
   botId: string;
@@ -21,6 +22,14 @@ export function rememberComputerPanelOpen(open: ComputerPanelOpen): void {
   opener = { botId: open.botId, element: open.opener };
   pendingTabFocus = open.tabs ? open.botId : null;
   pendingBrowserView = open.browser ? open.botId : null;
+}
+
+/** Opens the bot's panel on one view, whatever was viewed last. */
+export function openComputerPanelOn(dispatch: (action: { type: "toggleComputer"; open: true; botId: string }) => void, botId: string, view: "browser" | "computer", opener: HTMLElement, keyboard: boolean): void {
+  writeComputerPanelView(botId, view);
+  rememberComputerPanelOpen({ botId, opener, tabs: keyboard, browser: view === "browser" });
+  // The bot's own panel even when its chat opens later (a Team Cloud's own chat may still be loading).
+  dispatch({ type: "toggleComputer", open: true, botId });
 }
 
 /** One shot per open, like the tab focus: whether this open asked for the Browser view. */

@@ -21,3 +21,8 @@ export interface MapComputersPayload {
   now: number;
   computers: MapComputer[];
 }
+
+/** GET /api/computers/browsing: the site (host only) a working bot's built-in browser shows now. */
+export interface MapBrowsingPayload {
+  bots: Array<{ botId: string; site: string }>;
+}

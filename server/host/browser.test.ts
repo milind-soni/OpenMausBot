@@ -120,6 +120,35 @@ describe("the bots' browser host with browserEngine.engine set to chrome", () =>
     }
   });
 
+  it("tells the Team map the page of a bot's own team browser only while a turn of that bot holds it", async () => {
+    const backend = new FakeBackend();
+    const open = vi.spyOn(LocalBackend.prototype, "open").mockImplementation((request) => backend.open(request));
+    try {
+      const resources = new TurnResources();
+      // botByThread names the first bot, scout, for every thread: the turn below is scout's.
+      const { host } = setup("chrome", { turnResources: resources, bots: ["scout", "ranger"], audienceOf: teamAudiences });
+      const scout = { id: "scout", browserProfile: "work" }, ranger = { id: "ranger", browserProfile: "work" };
+      const browser = (await host.browserIntegration("scout", "work", turn))!;
+      await host.browserRuntime.agentRpc(browser.session, browser.spec, "tools/call", { name: "agent_browser_open", arguments: { url: "https://example.com/inbox" } }, () => {
+        expect(resources.claim(`browser:${browser.session}`, turn)).toBe(true);
+      });
+      expect(host.browserPageUrl(scout)).toBe("https://example.com/inbox");
+      expect(host.browserPageUrl(ranger), "the shared profile's browser is scout's turn's, not ranger's").toBeNull();
+      resources.release(turn);
+      expect(host.browserPageUrl(scout), "left open after the turn").toBeNull();
+
+      const mine = at("ada-chat");
+      const own = (await host.browserIntegration("scout", undefined, mine))!;
+      await host.browserRuntime.agentRpc(own.session, own.spec, "tools/call", { name: "agent_browser_open", arguments: { url: "https://bank.example/" } }, () => {
+        expect(resources.claim(`browser:${own.session}`, mine)).toBe(true);
+      });
+      expect(host.browserPageUrl({ id: "scout" }), "a member's private browser").toBeNull();
+    } finally {
+      open.mockRestore();
+      forgetAudiences();
+    }
+  });
+
   it("gives a bot's turn the browser MCP server over its own profile on the new engine", async () => {
     const { host, minted } = setup("chrome");
     const browser = await host.browserIntegration("scout", undefined, turn);
