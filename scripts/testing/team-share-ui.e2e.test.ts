@@ -55,7 +55,8 @@ describe("Share a department in the real renderer", () => {
     await click("Share");
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("Chats, memory and keys are never shared");
     const dialog = await snapshot();
-    for (const line of ["Share Sales desk", "Quote list prices only.", "Publishing isn't available here", "Upload on GitHub", "Save folder…"]) expect(dialog).toContain(line);
+    for (const line of ["Share Sales desk", "Publishing isn't available here", "Upload on GitHub", "Save folder…"]) expect(dialog).toContain(line);
+    expect(dialog, "shared instructions are not the card's line").not.toContain("Quote list prices only.");
     expect(await evaluate("document.querySelector('[data-share-department]').closest('[role=dialog]').querySelectorAll('input, textarea, select, [role=checkbox]').length")).toBe(0);
     await ui("screenshot", "--out", join(ROOT, ".omb-scratch", "verify-evidence", "share-department.png"));
     await click("Save folder…");
