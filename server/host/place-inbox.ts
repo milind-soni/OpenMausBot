@@ -128,9 +128,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     return false;
   }
 
-  /** Finished work the person has read needs nothing more from them: it leaves the inbox. */
-  const readWork = (line: Line): boolean => line.kind === "result" && line.seen === true;
-  const lineTab = (line: Line): InboxRow["tab"] => (line.done || answeredThere(line) || readWork(line) ? "done" : "info");
+  const lineTab = (line: Line): InboxRow["tab"] => (line.done || answeredThere(line) ? "done" : "info");
   const lineFor = (auth: RequestAuth, line: Line): boolean => {
     const viewer = deps.viewer(auth);
     if (viewer.kind === "nobody" || !deps.sees(auth, line.threadId)) return false;

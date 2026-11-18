@@ -184,17 +184,6 @@ describe("asks routed to a person", () => {
 describe("finished work in a person's inbox", () => {
   const report = (): Notification => ({ kind: "done", botId: "scout", botName: "Scout", threadId: "ben-private", title: "Scout finished", body: "Daily digest: 3 new leads." });
 
-  it("takes a routine's report out of the inbox once the person has read it", () => {
-    const f = fixture();
-    f.team.route(report(), { routine: true });
-    const person = key(BEN.email);
-    const row = f.team.inbox.view(person)!.rows[0]!;
-    expect(row).toMatchObject({ kind: "result", tab: "info" });
-    f.team.inbox.markRead(person, row.id);
-    expect(f.team.inbox.view(person)!.rows[0]!.tab).toBe("done");
-    expect(f.team.inbox.view(person)!.rows.filter((one) => one.tab === "info"), "the inbox holds only what needs them").toEqual([]);
-  });
-
   it("points the line at the message it came from, so a client can open the conversation there", () => {
     const f = fixture();
     const said = f.said("ben-private", "Can you look at the deck?", BEN);

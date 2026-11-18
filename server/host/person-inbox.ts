@@ -250,11 +250,10 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   const mark = (threadId: string) => { changedAt.set(threadId, Math.max(now(), (changedAt.get(threadId) ?? 0) + 1)); };
   const touch = (threadId: string) => { mark(threadId); deps.changed?.(threadId); };
 
-  /** The tab a line is listed in: an ask by its card where it was asked, anything else by its answer or the person's done.
-   * Finished work the person has read needs nothing more from them, so it leaves the inbox. */
+  /** The tab a line is listed in: an ask by its card where it was asked, anything else by its answer or the person's done. */
   function tabOf(item: Item, copy?: Message): InboxTab {
     if (item.kind === "ask" && item.requestId) return askWaits(item, copy) ? "needs-you" : "done";
-    return item.done || settled(item) || (item.kind === "result" && item.seen === true) ? "done" : "info";
+    return item.done || settled(item) ? "done" : "info";
   }
 
   /** How many asks in this inbox wait on its person: questions, approvals and work handed on, open here and where they

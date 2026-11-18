@@ -113,16 +113,6 @@ describe("finished work reaches the inbox once", () => {
     expect(infoRows(reopened).map((row) => row.text).sort()).toEqual(["All three pages are live.", "It stopped in eli-pricing."]);
   });
 
-  it("takes finished work out of the inbox once the person has read it", () => {
-    const f = setup();
-    f.inbox.route(routine, { routine: true });
-    expect(infoRows(f)).toHaveLength(1);
-    f.inbox.markRead(OWNER, f.inbox.view(OWNER).rows[0]!.id);
-    expect(infoRows(f), "finished work the person has read leaves the inbox").toEqual([]);
-    expect(f.inbox.view(OWNER).rows[0]!.tab).toBe("done");
-    expect(f.inbox.count(OWNER), "nothing waits on the person any more").toBe(0);
-  });
-
   it("keeps a message that waits for an answer listed after the person read it", () => {
     const f = setup();
     expect(f.inbox.message("eli", "eli-main", "Can you look at the deck?").status).toBe(200);

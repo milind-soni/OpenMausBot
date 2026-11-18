@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
-import { Check, Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
+import { Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
 import type { InboxRow } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
@@ -11,7 +11,7 @@ import { InboxActive } from "./InboxActive";
 import { InboxReading } from "./InboxReading";
 import { InboxRowItem } from "./InboxRow";
 import { matchesSearch, nextAfter } from "./inbox-answer";
-import { listedRows, rowsIn, waitingCount } from "./inbox-view";
+import { listedRows, waitingCount } from "./inbox-view";
 import { useInboxActions } from "./use-inbox-actions";
 import { roundButtonCls } from "../bot-panel/rows";
 
@@ -25,7 +25,6 @@ export function InboxPanel() {
   const { run, openInChat } = useInboxActions(view);
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
-  const [showDone, setShowDone] = useState(false);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -45,7 +44,6 @@ export function InboxPanel() {
     openInChat(row);
   };
   const rows = listedRows(view).filter((row) => matchesSearch(row, query));
-  const done = rowsIn(view, "done").filter((row) => matchesSearch(row, query)).sort((a, b) => b.at - a.at);
   const ids = rows.map((row) => row.id);
   const at = reading ? ids.indexOf(reading.id) : -1;
 
@@ -65,7 +63,7 @@ export function InboxPanel() {
 
   const step = (by: -1 | 1) => {
     const row = rows[at + by];
-    if (row) open(row);
+    if (row) { readInboxRow(row); readInboxLine(row.id); }
   };
   const count = waitingCount(view);
   const body = (
@@ -116,17 +114,6 @@ export function InboxPanel() {
                     )
                   : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
               </div>
-              {done.length > 0 && (
-                <section data-inbox-done className="px-1.5 pb-1.5">
-                  <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}
-                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-ink-tertiary hover:bg-raised/70 hover:text-ink-secondary">
-                    <Check size={13} aria-hidden="true" className="shrink-0" />
-                    <span className="font-medium">{t("common.done")}</span>
-                    <span className="tabular-nums">{done.length}</span>
-                  </button>
-                  {showDone && done.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
-                </section>
-              )}
               {!query.trim() && <InboxActive view={view} />}
             </div>
           </>
