@@ -127,11 +127,13 @@ describe("the browser phone side against the Node computer", () => {
   it("is refused with 4001 when the token is not one the computer knows", async () => {
     const { ws } = await handshake(ready.direct, "not-a-token-the-computer-knows", TRANSPORT_DIRECT);
     expect(await ws.closedWith()).toBe(4001);
+    await expect(ws.next()).rejects.toThrow("socket closed with 4001");
   });
 
   it("is refused when the prologue says relay but the route is direct", async () => {
     const { ws } = await handshake(ready.direct, ready.deviceToken, TRANSPORT_RELAY);
     expect(await ws.closedWith()).toBe(4001);
+    await expect(ws.next()).rejects.toThrow("socket closed with 4001");
   });
 
   it("stops hard on a message 2 from a party without the key", async () => {

@@ -152,6 +152,23 @@ describe("V6 must fail, phone side", () => {
     await expect(hello.finish(bytes(v.V2.message2))).rejects.toThrow("e2e: finished");
   });
 
+  it("opens the record as it was when open was called, even if the caller changes it afterwards", async () => {
+    const keys = await v2Session();
+    const first = v.V4.records.find((r: { direction: string }) => r.direction === "cp");
+    const record = bytes(first.record);
+    const pending = keys.receive.open(record);
+    record.fill(0);
+    expect(hex(await pending)).toBe(first.frame);
+  });
+
+  it("reads message 2 once when finish is called, even from a Buffer the caller changes afterwards", async () => {
+    const hello = await phone(1, "device");
+    const reply = Buffer.from(v.V2.message2, "hex");
+    const pending = hello.finish(reply as unknown as Uint8Array<ArrayBuffer>);
+    reply.fill(0);
+    await expect(pending).resolves.toBeDefined();
+  });
+
   it("refuses a genuine record opened before an earlier failed one settled", async () => {
     const keys = await v2Session();
     const [first, second] = v.V4.records.filter((r: { direction: string }) => r.direction === "cp");
@@ -174,6 +191,30 @@ describe("payload 1, phone side", () => {
 
   it("is refused when it carries no connection ID for message 2 to echo", async () => {
     await expect(phoneHello({ remoteStatic: T_PUB, psk: PSKS.device, transport: 1 }, utf8('{"v":1,"app":"web/1"}'))).rejects.toThrow("e2e: bad_payload1");
+  });
+
+  it.each([
+    ["v is not 1", '{"v":2,"conn":"XkCuA2LSB-yRqiCTmMwKqQ"}'],
+    ["it is an array", '[{"v":1,"conn":"XkCuA2LSB-yRqiCTmMwKqQ"}]'],
+    ["conn is 15 bytes", '{"v":1,"conn":"XkCuA2LSB-yRqiCTmMwK"}'],
+    ["conn is not canonical base64url", '{"v":1,"conn":"XkCuA2LSB-yRqiCTmMwKqR"}'],
+    ["app is not a string", '{"v":1,"conn":"XkCuA2LSB-yRqiCTmMwKqQ","app":7}'],
+    ["app is 41 characters", `{"v":1,"conn":"XkCuA2LSB-yRqiCTmMwKqQ","app":"${"a".repeat(41)}"}`],
+  ])("is refused as raw bytes when %s", async (_name, json) => {
+    await expect(phoneHello({ remoteStatic: T_PUB, psk: PSKS.device, transport: 1 }, utf8(json))).rejects.toThrow("e2e: bad_payload1");
+  });
+
+  it("takes raw bytes without app", async () => {
+    await expect(phoneHello({ remoteStatic: T_PUB, psk: PSKS.device, transport: 1 }, utf8('{"v":1,"conn":"XkCuA2LSB-yRqiCTmMwKqQ"}'))).resolves.toBeDefined();
+  });
+
+  it("is read once when the call is made: changing the caller's bytes afterwards changes nothing", async () => {
+    const payload1 = PAYLOAD1.slice();
+    const pending = phoneHello({ remoteStatic: T_PUB, psk: PSKS.device, transport: 1, ephemeral: await phoneEphemeral() }, payload1);
+    payload1.fill(0x20);
+    const hello = await pending;
+    expect(hex(hello.message1)).toBe(v.V2.message1);
+    await expect(hello.finish(bytes(v.V2.message2))).resolves.toBeDefined();
   });
 });
 

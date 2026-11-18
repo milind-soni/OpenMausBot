@@ -1,4 +1,4 @@
-import { b64u, concat, utf8, type Bytes } from "./bytes.ts";
+import { b64u, concat, fromB64u, utf8, type Bytes } from "./bytes.ts";
 import { hmacSha256, sha256 } from "./credentials.ts";
 
 const PROTOCOL_NAME = "Noise_NKpsk0_P256_AESGCM_SHA256";
@@ -205,15 +205,17 @@ export class RecordCipher {
   /** Any failure is a hard stop: after one, every later record is refused too. Opens run one at a time in call
    * order, so a record never opens while an earlier one could still fail. */
   open(record: Bytes): Promise<Bytes> {
-    const opened = this.#opening.then(() => this.#openNext(record));
+    const bytes = record.length > MAX_RECORD_BYTES ? null : new Uint8Array(record);
+    const opened = this.#opening.then(() => this.#openNext(bytes));
     this.#opening = opened.catch(() => undefined);
     return opened;
   }
 
-  async #openNext(record: Bytes): Promise<Bytes> {
+  /** `record` is the caller's bytes copied at the call, or null when they were too large to copy. */
+  async #openNext(record: Bytes | null): Promise<Bytes> {
     if (this.#failed) throw new NoiseError("failed");
     try {
-      if (record.length > MAX_RECORD_BYTES) throw new NoiseError("record_too_large");
+      if (!record) throw new NoiseError("record_too_large");
       return await this.#state.decryptWithAd(EMPTY, record);
     } catch (error) {
       this.#failed = true;
@@ -247,11 +249,14 @@ const parseJson = (bytes: Bytes): unknown => {
   }
 };
 
-/** The `conn` that message 2 must echo, read from the payload 1 bytes actually sent. */
+/** The `conn` that message 2 must echo, from payload 1 checked as the wire spec says (the computer refuses
+ * anything else). */
 function payload1Conn(bytes: Bytes): string {
   const value = parseJson(bytes);
-  const conn = value && typeof value === "object" ? (value as { conn?: unknown }).conn : undefined;
-  if (typeof conn !== "string") throw new NoiseError("bad_payload1");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new NoiseError("bad_payload1");
+  const { v, conn, app } = value as { v?: unknown; conn?: unknown; app?: unknown };
+  if (v !== 1 || typeof conn !== "string" || fromB64u(conn)?.length !== CONN_BYTES) throw new NoiseError("bad_payload1");
+  if (app !== undefined && (typeof app !== "string" || app.length > MAX_APP_CHARS)) throw new NoiseError("bad_payload1");
   return conn;
 }
 
@@ -278,12 +283,13 @@ export interface PhoneHello {
   finish(message2: Bytes): Promise<SessionKeys>;
 }
 
-/** `payload1` is exact bytes so vectors can pin them; message 2 must echo its `conn`. */
-export async function phoneHello(options: PhoneHandshakeOptions, payload1: Bytes): Promise<PhoneHello> {
+/** `payload1` is exact bytes so vectors can pin them, read once at the call; message 2 must echo its `conn`. */
+export async function phoneHello(options: PhoneHandshakeOptions, payload1Bytes: Bytes): Promise<PhoneHello> {
+  if (payload1Bytes.length > MAX_HANDSHAKE_PAYLOAD) throw new NoiseError("payload_too_large");
+  const payload1 = new Uint8Array(payload1Bytes);
+  const conn = payload1Conn(payload1);
   const remoteStatic = await publicKey(options.remoteStatic);
   if (options.psk.length !== 32) throw new NoiseError("bad_psk");
-  if (payload1.length > MAX_HANDSHAKE_PAYLOAD) throw new NoiseError("payload_too_large");
-  const conn = payload1Conn(payload1);
   const state = new SymmetricState(options.trace ?? null);
   state.mark("init");
   await state.mixHash(prologue(options.transport));
@@ -306,8 +312,8 @@ export async function phoneHello(options: PhoneHandshakeOptions, payload1: Bytes
     async finish(reply) {
       if (done) throw new NoiseError("finished");
       done = true;
-      const message2 = reply.slice();
-      if (message2.length < PUBLIC_KEY_BYTES + TAG_BYTES || message2.length > MAX_HANDSHAKE_MESSAGE) throw new NoiseError("message2_size");
+      if (reply.length < PUBLIC_KEY_BYTES + TAG_BYTES || reply.length > MAX_HANDSHAKE_MESSAGE) throw new NoiseError("message2_size");
+      const message2 = new Uint8Array(reply);
       const re = message2.subarray(0, PUBLIC_KEY_BYTES);
       const ee = await dh(e.privateKey, await publicKey(re));
       await state.mixHash(re);
