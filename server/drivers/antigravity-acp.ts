@@ -350,9 +350,15 @@ interface PendingRpc {
 export class AntigravityAcpClient {
   readonly child: ChildProcess;
   public credentialsWatcher?: GeminiCredentialsWatcher;
+  public readonly tokenPath: string;
 
   async handleQuotaExhausted(timeoutMs = 3000): Promise<boolean> {
-    return handleQuotaExhaustedWithAutoSwitch(this.credentialsWatcher, timeoutMs);
+    return handleQuotaExhaustedWithAutoSwitch(
+      this.credentialsWatcher,
+      timeoutMs,
+      undefined,
+      this.tokenPath,
+    );
   }
   private nextId = 1;
   private pending = new Map<number, PendingRpc>();
@@ -380,6 +386,7 @@ export class AntigravityAcpClient {
     relay?: BoxRelay,
   ) {
     this.onAuthorizationUrl = onAuthorizationUrl;
+    this.tokenPath = profile.tokenPath;
     this.tempDirectory = profile.tempDirectory;
     this.runtimeVersion = runtime.version;
     this.child = spawnCli(
@@ -859,20 +866,30 @@ export async function triggerAntigravityAccountSwitch(
 }
 
 export async function handleQuotaExhaustedWithAutoSwitch(
-  watcher?: { waitForNewToken: (timeoutMs?: number) => Promise<boolean> },
+  watcher?: { waitForNewToken: (timeoutMs?: number) => Promise<boolean>; targetTokenPath?: string },
   timeoutMs = 3000,
   toolsApiUrl?: string,
+  tokenPath?: string,
 ): Promise<boolean> {
+  let switched = false;
   if (watcher) {
     const tokenWait = watcher.waitForNewToken(timeoutMs);
     try {
       await triggerAntigravityAccountSwitch(toolsApiUrl);
     } catch {}
-    return await tokenWait;
+    switched = await tokenWait;
+  } else {
+    try {
+      switched = await triggerAntigravityAccountSwitch(toolsApiUrl);
+    } catch {
+      switched = false;
+    }
   }
-  try {
-    return await triggerAntigravityAccountSwitch(toolsApiUrl);
-  } catch {
-    return false;
+  if (switched) {
+    const resolvedPath = tokenPath ?? (watcher && "targetTokenPath" in watcher ? watcher.targetTokenPath : undefined);
+    if (resolvedPath) {
+      noteAntigravitySignedIn(resolvedPath);
+    }
   }
+  return switched;
 }

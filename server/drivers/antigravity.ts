@@ -282,36 +282,50 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
         tracked.suppressedEvents.push(outgoing);
 
         void (async () => {
-          try {
-            const finishCanceledRecovery = () => {
+          const tokenPath = antigravityTokenPath(input.instanceId);
+          const finishCanceledRecovery = () => {
+            if (activeTurns.get(threadId) === tracked) {
               activeTurns.delete(threadId);
-              const completion = tracked.suppressedEvents.find((e) => e.type === "turn.completed");
-              if (completion) {
-                broadcast(completion);
-              } else {
-                broadcast({
-                  type: "turn.completed",
-                  threadId,
-                  turnId: tracked.originalTurnId,
-                  createdAt: new Date().toISOString(),
-                  ok: false,
-                  stopReason: "cancelled",
-                } as any);
-              }
-            };
+            }
+            const completion = tracked.suppressedEvents.find((e) => e.type === "turn.completed");
+            if (completion) {
+              broadcast(completion);
+            } else {
+              broadcast({
+                type: "turn.completed",
+                threadId,
+                turnId: tracked.originalTurnId,
+                createdAt: new Date().toISOString(),
+                ok: false,
+                stopReason: "cancelled",
+              } as any);
+            }
+          };
 
-            const switched = await handleQuotaExhaustedWithAutoSwitch(watcher);
+          try {
+            const switched = await handleQuotaExhaustedWithAutoSwitch(
+              watcher,
+              3000,
+              undefined,
+              tokenPath,
+            );
             if (tracked.canceled) {
               finishCanceledRecovery();
               return;
             }
             if (switched) {
+              noteAntigravitySignedIn(tokenPath);
               await base.adapter.stopAll().catch(() => {});
               if (tracked.canceled) {
                 finishCanceledRecovery();
                 return;
               }
               const retriedAck = await base.adapter.sendTurn(tracked.turn);
+              if (tracked.canceled) {
+                await base.adapter.interruptTurn?.(threadId, retriedAck.turnId).catch(() => {});
+                finishCanceledRecovery();
+                return;
+              }
               turnIdRemap.set(retriedAck.turnId, tracked.originalTurnId);
               tracked.retrying = false;
               tracked.suppressedEvents = [];
@@ -319,7 +333,9 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
               for (const buffered of tracked.bufferedRetryEvents) {
                 broadcast(buffered);
                 if (buffered.type === "turn.completed") {
-                  activeTurns.delete(threadId);
+                  if (activeTurns.get(threadId) === tracked) {
+                    activeTurns.delete(threadId);
+                  }
                   turnIdRemap.delete(retriedAck.turnId);
                 }
               }
@@ -327,11 +343,17 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
               return;
             }
           } catch (switchErr) {
+            if (tracked.canceled) {
+              finishCanceledRecovery();
+              return;
+            }
             console.warn("[AntigravityDriver] Error during quota auto-switch and retry:", switchErr);
           }
 
           tracked.retrying = false;
-          activeTurns.delete(threadId);
+          if (activeTurns.get(threadId) === tracked) {
+            activeTurns.delete(threadId);
+          }
           const hasCompletion = tracked.suppressedEvents.some((e) => e.type === "turn.completed");
           if (!hasCompletion) {
             tracked.suppressedEvents.push({
@@ -353,7 +375,9 @@ export const AntigravityDriver: ProviderDriver<AcpConfig> = {
       }
 
       if (outgoing.type === "turn.completed") {
-        activeTurns.delete(threadId);
+        if (activeTurns.get(threadId) === tracked) {
+          activeTurns.delete(threadId);
+        }
         if (event.turnId && turnIdRemap.has(event.turnId)) {
           turnIdRemap.delete(event.turnId);
         }

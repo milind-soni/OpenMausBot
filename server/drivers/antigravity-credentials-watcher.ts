@@ -3,7 +3,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { writeFileAtomic } from "../atomic.ts";
-import { antigravityTokenPath } from "./antigravity-acp.ts";
+import { antigravityTokenPath, noteAntigravitySignedIn } from "./antigravity-acp.ts";
 
 export interface GlobalOAuthCreds {
   access_token?: string;
@@ -117,7 +117,7 @@ export class GeminiCredentialsWatcher {
   private lastRefreshToken: string | null = null;
   private lastRejectedRefreshToken: string | null = null;
   private readonly geminiDir: string;
-  private readonly targetTokenPath: string;
+  public readonly targetTokenPath: string;
   private readonly debounceMs: number;
   private readonly verifyToken?: (token: OmAcpToken) => Promise<TokenVerificationResult>;
   private readonly fetchImpl?: typeof fetch;
@@ -208,7 +208,10 @@ export class GeminiCredentialsWatcher {
 
   public async syncCredentials(): Promise<boolean> {
     if (this.isStopped) return false;
-    const nextSync = this.syncQueue.then(() => this.doSyncCredentials());
+    const nextSync = this.syncQueue.then(() => {
+      if (this.isStopped) return false;
+      return this.doSyncCredentials();
+    });
     this.syncQueue = nextSync.catch(() => false);
     return nextSync;
   }
@@ -285,9 +288,26 @@ export class GeminiCredentialsWatcher {
       }
     }
 
+    if (this.isStopped || this.syncGeneration !== currentGeneration) return false;
+
+    // Validate that the creds snapshot on disk is still current before committing
+    try {
+      const freshContent = await readFile(credsPath, "utf8");
+      const freshCreds = JSON.parse(freshContent) as GlobalOAuthCreds;
+      if (freshCreds.refresh_token !== globalCreds.refresh_token) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+
+    if (this.isStopped || this.syncGeneration !== currentGeneration) return false;
+
     try {
       await mkdir(dirname(this.targetTokenPath), { recursive: true });
+      if (this.isStopped || this.syncGeneration !== currentGeneration) return false;
       writeFileAtomic(this.targetTokenPath, JSON.stringify(updatedToken, null, 2), { mode: 0o600 });
+      noteAntigravitySignedIn(this.targetTokenPath);
     } catch (writeErr) {
       console.warn(`[GeminiCredentialsWatcher] Failed to write token file ${this.targetTokenPath}:`, writeErr);
       return false;
@@ -297,6 +317,10 @@ export class GeminiCredentialsWatcher {
 
     this.lastRefreshToken = globalCreds.refresh_token;
     this.lastRejectedRefreshToken = null;
+
+    noteAntigravitySignedIn(this.targetTokenPath);
+
+    if (this.isStopped || this.syncGeneration !== currentGeneration) return false;
 
     if (this.onAccountSwitched) {
       try {

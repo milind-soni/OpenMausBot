@@ -2,6 +2,7 @@
 import { mkdtemp, rm, writeFile, readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { noteAntigravitySignInRequired, antigravityProfileAuthenticated } from "./antigravity-acp.ts";
 import {
   GeminiCredentialsWatcher,
   REQUIRED_ACP_SCOPE,
@@ -264,5 +265,90 @@ describe("GeminiCredentialsWatcher", () => {
     expect(success).toBe(true);
 
     watcher.stop();
+  });
+  it("clears refusedTokens blacklist via noteAntigravitySignedIn when syncCredentials succeeds", async () => {
+    const existing: OmAcpToken = {
+      client_id: "custom-client-id",
+      client_secret: "custom-secret",
+      refresh_token: "1//old_rejected_token",
+      token_uri: "https://oauth2.googleapis.com/token",
+      scopes: [REQUIRED_ACP_SCOPE],
+      project_id: "aicode-consumers",
+    };
+    await writeFile(targetTokenPath, JSON.stringify(existing));
+    noteAntigravitySignInRequired(targetTokenPath);
+
+    const profile = { tokenPath: targetTokenPath } as any;
+    expect(await antigravityProfileAuthenticated(profile)).toBe(false);
+
+    const globalCreds: GlobalOAuthCreds = {
+      refresh_token: "1//new_good_token",
+    };
+    await writeFile(join(geminiDir, "oauth_creds.json"), JSON.stringify(globalCreds));
+
+    const watcher = new GeminiCredentialsWatcher("test-instance", undefined, {
+      geminiDir,
+      targetTokenPath,
+      verifyToken: async () => ({ ok: true }),
+    });
+
+    const synced = await watcher.syncCredentials();
+    expect(synced).toBe(true);
+
+    expect(await antigravityProfileAuthenticated(profile)).toBe(true);
+  });
+
+  it("stop() invalidates in-flight syncCredentials operations and prevents writing or invoking onAccountSwitched", async () => {
+    const globalCreds: GlobalOAuthCreds = {
+      refresh_token: "1//in_flight_token",
+    };
+    await writeFile(join(geminiDir, "oauth_creds.json"), JSON.stringify(globalCreds));
+
+    let verifyResolve: (res: any) => void = () => {};
+    const verifyPromise = new Promise((resolve) => {
+      verifyResolve = resolve;
+    });
+
+    const switched = vi.fn();
+    const watcher = new GeminiCredentialsWatcher("test-instance", switched, {
+      geminiDir,
+      targetTokenPath,
+      verifyToken: async () => {
+        return verifyPromise as any;
+      },
+    });
+
+    const syncPromise = watcher.syncCredentials();
+    watcher.stop();
+    verifyResolve({ ok: true });
+
+    const synced = await syncPromise;
+    expect(synced).toBe(false);
+    expect(switched).not.toHaveBeenCalled();
+
+    let written = false;
+    try {
+      const read = await readFile(targetTokenPath, "utf8");
+      written = JSON.parse(read).refresh_token === "1//in_flight_token";
+    } catch {}
+    expect(written).toBe(false);
+  });
+
+  it("prevents committing stale credential snapshot if oauth_creds.json changed during verification", async () => {
+    await writeFile(join(geminiDir, "oauth_creds.json"), JSON.stringify({ refresh_token: "1//stale_token" }));
+
+    const switched = vi.fn();
+    const watcher = new GeminiCredentialsWatcher("test-instance", switched, {
+      geminiDir,
+      targetTokenPath,
+      verifyToken: async () => {
+        await writeFile(join(geminiDir, "oauth_creds.json"), JSON.stringify({ refresh_token: "1//newer_token" }));
+        return { ok: true };
+      },
+    });
+
+    const synced = await watcher.syncCredentials();
+    expect(synced).toBe(false);
+    expect(switched).not.toHaveBeenCalled();
   });
 });

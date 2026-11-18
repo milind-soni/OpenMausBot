@@ -16,6 +16,8 @@ import {
 } from "./antigravity-runtime.ts";
 import { GeminiCredentialsWatcher } from "./antigravity-credentials-watcher.ts";
 import { AntigravityDriver, AcpAntigravityDriver } from "./antigravity.ts";
+import * as antigravityRuntime from "./antigravity-runtime.ts";
+import * as antigravityTemp from "./antigravity-temp.ts";
 import * as antigravityAcp from "./antigravity-acp.ts";
 import type { RuntimeEvent, RuntimeEventListener } from "../contracts.ts";
 
@@ -35,10 +37,12 @@ describe("Antigravity Proxy & Auto Switching", () => {
   });
 
   afterEach(async () => {
-    for (const inst of createdInstances) {
-      await inst.dispose?.().catch(() => {});
+    while (createdInstances.length > 0) {
+      const inst = createdInstances.pop();
+      try {
+        await inst.dispose?.();
+      } catch {}
     }
-    createdInstances.length = 0;
     vi.restoreAllMocks();
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -220,6 +224,17 @@ describe("Antigravity Proxy & Auto Switching", () => {
   });
 
   describe("AntigravityDriver 429 Retry, Event Swallowing, TurnId Remapping, and Cleanup", () => {
+    beforeEach(() => {
+      vi.spyOn(antigravityTemp, "scheduleAntigravityTempSweep").mockImplementation(() => {});
+      vi.spyOn(antigravityRuntime, "startAntigravityWatcher").mockImplementation((instanceId) => {
+        return {
+          waitForNewToken: vi.fn(async () => true),
+          stop: vi.fn(),
+          targetTokenPath: join(tempDir, `token-${instanceId}.json`),
+        } as any;
+      });
+      vi.spyOn(antigravityRuntime, "stopAntigravityWatcher").mockImplementation(() => {});
+    });
     it("swallows 429 runtime.error and immediate turn.completed, auto-switches, retries with remapped turnId, and cleans up activeTurns", async () => {
       let registeredListener: RuntimeEventListener | undefined;
       const baseSendTurn = vi.fn();
@@ -608,6 +623,163 @@ describe("Antigravity Proxy & Auto Switching", () => {
       expect(listener2Events).toHaveLength(2);
 
       unsub2();
+    });
+    it("preserves newer turn tracking if active turn is replaced on the same thread during canceled recovery", async () => {
+      let registeredListener: RuntimeEventListener | undefined;
+      const baseSendTurn = vi.fn();
+      const baseStopAll = vi.fn().mockResolvedValue(undefined);
+
+      const fakeBase = {
+        adapter: {
+          sendTurn: baseSendTurn,
+          onEvent: (l: RuntimeEventListener) => {
+            registeredListener = l;
+            return () => {};
+          },
+          stopAll: baseStopAll,
+          interruptTurn: vi.fn().mockResolvedValue(undefined),
+        },
+        dispose: vi.fn().mockResolvedValue(undefined),
+        models: { default: "test-model", options: [] },
+      };
+
+      vi.spyOn(AcpAntigravityDriver, "create").mockResolvedValue(fakeBase as any);
+
+      let switchResolve: (value: boolean) => void = () => {};
+      const switchPromise = new Promise<boolean>((resolve) => {
+        switchResolve = resolve;
+      });
+      vi.spyOn(antigravityAcp, "handleQuotaExhaustedWithAutoSwitch").mockImplementation(async () => switchPromise);
+
+      const driverInstance = await AntigravityDriver.create({
+        instanceId: "driver-replace-turn-test",
+        displayName: "Antigravity Test",
+        enabled: true,
+        config: { cli: "fake", fullAuto: false },
+        environment: {},
+      });
+      createdInstances.push(driverInstance);
+
+      // Turn 1 on thread-race
+      baseSendTurn.mockResolvedValueOnce({ turnId: "turn-1" });
+      await driverInstance.adapter.sendTurn({
+        threadId: "thread-race",
+        text: "first turn",
+      });
+
+      // 429 quota error begins recovery for Turn 1
+      registeredListener!({
+        type: "runtime.error",
+        threadId: "thread-race",
+        turnId: "turn-1",
+        createdAt: new Date().toISOString(),
+        acpUsageLimit: true,
+      } as any);
+
+      // Cancel Turn 1
+      await driverInstance.adapter.interruptTurn("thread-race", "turn-1");
+
+      // While recovery is still pending, Turn 2 is sent on the same thread
+      baseSendTurn.mockResolvedValueOnce({ turnId: "turn-2" });
+      await driverInstance.adapter.sendTurn({
+        threadId: "thread-race",
+        text: "second turn replacing first",
+      });
+
+      // Turn 1 recovery completes its cancellation cleanup
+      switchResolve(false);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Turn 2 progress arrives - must NOT be dropped or ignored as untracked
+      const events: RuntimeEvent[] = [];
+      driverInstance.adapter.onEvent((ev) => events.push(ev));
+
+      registeredListener!({
+        type: "turn.progress",
+        threadId: "thread-race",
+        turnId: "turn-2",
+        createdAt: new Date().toISOString(),
+        text: "turn 2 progress",
+      } as any);
+
+      expect(events).toHaveLength(1);
+      expect(events[0].turnId).toBe("turn-2");
+    });
+
+    it("checks cancellation after retried sendTurn settles and interrupts new turn without broadcasting retry events", async () => {
+      let registeredListener: RuntimeEventListener | undefined;
+      const baseSendTurn = vi.fn();
+      const baseStopAll = vi.fn().mockResolvedValue(undefined);
+      const baseInterruptTurn = vi.fn().mockResolvedValue(undefined);
+
+      const fakeBase = {
+        adapter: {
+          sendTurn: baseSendTurn,
+          onEvent: (l: RuntimeEventListener) => {
+            registeredListener = l;
+            return () => {};
+          },
+          stopAll: baseStopAll,
+          interruptTurn: baseInterruptTurn,
+        },
+        dispose: vi.fn().mockResolvedValue(undefined),
+        models: { default: "test-model", options: [] },
+      };
+
+      vi.spyOn(AcpAntigravityDriver, "create").mockResolvedValue(fakeBase as any);
+      vi.spyOn(antigravityAcp, "handleQuotaExhaustedWithAutoSwitch").mockResolvedValue(true);
+
+      const driverInstance = await AntigravityDriver.create({
+        instanceId: "driver-late-cancel-test",
+        displayName: "Antigravity Test",
+        enabled: true,
+        config: { cli: "fake", fullAuto: false },
+        environment: {},
+      });
+      createdInstances.push(driverInstance);
+
+      const events: RuntimeEvent[] = [];
+      driverInstance.adapter.onEvent((ev) => events.push(ev));
+
+      // First sendTurn returns turn-1
+      baseSendTurn.mockResolvedValueOnce({ turnId: "turn-1" });
+      await driverInstance.adapter.sendTurn({
+        threadId: "thread-late",
+        text: "first turn",
+      });
+
+      // Retried sendTurn will return turn-retry
+      let retryResolve: (val: any) => void = () => {};
+      const retryPromise = new Promise((resolve) => {
+        retryResolve = resolve;
+      });
+      baseSendTurn.mockImplementationOnce(async () => retryPromise);
+
+      // Trigger 429
+      registeredListener!({
+        type: "runtime.error",
+        threadId: "thread-late",
+        turnId: "turn-1",
+        createdAt: new Date().toISOString(),
+        acpUsageLimit: true,
+      } as any);
+
+      // Wait a tick for auto switch to pass and retry sendTurn to be invoked
+      await new Promise((r) => setTimeout(r, 50));
+      expect(baseSendTurn).toHaveBeenCalledTimes(2);
+
+      // Now interruptTurn is called before sendTurn settles
+      await driverInstance.adapter.interruptTurn("thread-late", "turn-1");
+
+      // Now retry sendTurn settles with new turnId
+      retryResolve({ turnId: "turn-retry-late" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Must have interrupted the newly spawned retry turn
+      expect(baseInterruptTurn).toHaveBeenCalledWith("thread-late", "turn-retry-late");
+
+      // Must have emitted cancelled completion for turn-1
+      expect(events.some((e) => e.type === "turn.completed" && e.turnId === "turn-1" && e.stopReason === "cancelled")).toBe(true);
     });
   });
 });
