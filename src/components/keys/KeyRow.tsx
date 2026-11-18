@@ -192,6 +192,7 @@ export function KeyRow({
       }
       return check.result;
     } catch (cause) {
+      if (mine === generation.current && checkedAt.current !== at) return await runCheck();
       if (mine === generation.current) setProblem(errorText(cause));
       return "unverified";
     }

@@ -355,6 +355,28 @@ describe("the OpenAI-compatible key check", () => {
     expect(row("openaiCompat")!.textContent).not.toContain("Didn't work");
   });
 
+  it("checks again when the base URL changes while a check that then fails is still running", async () => {
+    fx.config = { ...fx.config, openaiCompat: { configured: true, last4: "1234" } };
+    const tested: Array<string | undefined> = [];
+    let failFirst: (cause: Error) => void = () => {};
+    fx.api.mockImplementation((path: string) => {
+      if (path !== "/api/keys/test") return Promise.resolve({});
+      const url = (fx.config.openaiCompat as { url?: string }).url;
+      tested.push(url);
+      if (tested.length === 1) return new Promise((_resolve, reject) => { failFirst = reject; });
+      return Promise.resolve({ ok: true, check: "models", models: ["venice-uncensored"] });
+    });
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.example.test/v1" } }));
+    await vi.waitFor(() => expect(tested).toEqual(["https://api.example.test/v1"]));
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.venice.ai/api/v1" } }));
+    failFirst(new Error("network down"));
+    await vi.waitFor(() => expect(row("openaiCompat")!.textContent).toContain("venice-uncensored"));
+    expect(tested).toEqual(["https://api.example.test/v1", "https://api.venice.ai/api/v1"]);
+    expect(row("openaiCompat")!.textContent).not.toContain("network down");
+  });
+
   it("does not check the key when the page opens or nothing about the address changed", async () => {
     fx.config = { ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.venice.ai/api/v1" } };
     fx.api.mockResolvedValue({});
