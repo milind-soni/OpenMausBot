@@ -80,6 +80,7 @@ redaction the transcript uses). Durations are written `90`, `90s`, `5m`, `2h` or
 | 5 | Cannot reach the server, not allowed, or the server is too old |
 | 6 | `team apply --check` found changes |
 | 7 | `doctor --host`: this machine is missing something the server needs |
+| 8 | `doctor --data`: the data folder has a problem left (after `--fix`, one it could not repair) |
 | 130 | Ctrl-C (the work keeps running) |
 
 ## Commands
@@ -92,6 +93,7 @@ one of its conversations.
 |---|---|
 | `doctor [--wait 2m]` | Checks the server answers, is new enough, who you are to it (and when your session expires), that an engine is ready, and whether bots have a browser. On a shared server without a session (`docker compose exec omb openmausbot doctor`), it learns only how many engines are ready, not which (`GET /api/health/engines`). |
 | `doctor --host` | Checks this Linux machine can run the server and the bots' sandbox (below). |
+| `doctor --data [--fix] [--data-dir DIR]` | Checks this computer's data folder without the server; `--fix` applies the repairs that cannot lose data, while no server uses it ([self-hosting](self-hosting.md#the-doctor-checking-and-repairing-the-data)). |
 | `bots`, `channels`, `models` | Your bots and what each is doing, your rooms, the engines and the models each offers. |
 | `messages TARGET [--limit 30]` | The latest messages of a conversation. |
 | `send TARGET TEXT` | Sends one message and returns at once, to the conversation the bot or room has open. `--task new` starts a new conversation for it (`--title` names it, else the message's first line), and `--task ID` picks one. It says which conversation it went to. `--send-id ID` makes a retry safe: the same id never sends twice. |

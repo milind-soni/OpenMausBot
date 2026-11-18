@@ -6392,5 +6392,19 @@
   "remote.tailscale.needsApproval": "Este ordenador espera la aprobación en tu red de Tailscale. Apruébalo en la consola de administración de Tailscale y vuelve a intentarlo.",
   "together.switch.title": "Este equipo y My Cloud juntos",
   "together.switch.line": "Desactivado de forma predeterminada. Los bots del Cloud y los de este equipo aparecen en una sola lista, y cada uno se abre donde está.",
-  "together.switch.failed": "No se pudo guardar. Inténtalo de nuevo."
+  "together.switch.failed": "No se pudo guardar. Inténtalo de nuevo.",
+  "imageGen.complexity.label": "Nivel de detalle",
+  "imageGen.complexity.help": "Cuánto detalle tienen las imágenes de GPT-Image-2.6. Más bajo es más simple y rápido.",
+  "imageGen.complexity.low": "Bajo",
+  "imageGen.complexity.medium": "Medio",
+  "imageGen.complexity.high": "Alto",
+  "activity.tool.team.editImage": "Editar imagen",
+  "voice.deepseek.sharedKey": "DeepSeek usa la clave de DeepSeek que ya tiene esta instalación.",
+  "voice.deepseek.description": "Lee en voz alta las respuestas y los mensajes de voz con la voz Stella o Tide de DeepSeek. Al elegir DeepSeek, el dictado y el modo Por turnos también te escuchan con la transcripción de voz de DeepSeek, hasta unos dos minutos por grabación. Usa tu clave de API de DeepSeek y DeepSeek lo factura.",
+  "voice.deepseek.stella": "Stella (femenina)",
+  "voice.deepseek.tide": "Tide (masculina)",
+  "call.capability.turnsNeedDeepSeekKey": "Añade una clave de DeepSeek para hablar por turnos en las llamadas",
+  "alwaysOn.section": "Casa siempre encendida",
+  "alwaysOn.title": "Usar este ordenador como casa siempre encendida",
+  "alwaysOn.add.title": "Añadir un Mac mini u otro ordenador siempre encendido"
 }

@@ -7,10 +7,12 @@ export {
   clearRecordsFromEarlierRunOfThisContainer,
   clearRecordsFromOtherMachines,
   DataDirLeaseError,
+  describeDataDirLease,
 } from "../electron/data-dir-lease.mjs";
 
 export type {
   DataDirLease,
+  DataDirLeaseHolder,
   DelegatedDataDirLease,
   OwnedDataDirLease,
 } from "../electron/data-dir-lease.mjs";

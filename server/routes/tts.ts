@@ -4,6 +4,7 @@ import type { AppConfig } from "../config.ts";
 import { voiceCredential } from "../included-services.ts";
 import { redactSecretsInText } from "../redact.ts";
 import * as elevenlabs from "../tts/elevenlabs.ts";
+import * as deepseek from "../tts/deepseek.ts";
 import * as fish from "../tts/fish.ts";
 import { voiceFailure } from "../tts/errors.ts";
 import * as tts from "../tts/index.ts";
@@ -91,18 +92,25 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         req.resume();
         return json(res, 400, { error: "content-type must be audio/wav" });
       }
-      // Fish Audio first, as before; without it the person's own ElevenLabs key (never the plan's included voice).
-      const key = cfg.tts?.fishKey;
-      const own = key ? null : voiceCredential(cfg.tts?.key);
+      // DeepSeek voice hears with DeepSeek alone; otherwise Fish Audio first, then the person's own ElevenLabs key
+      // (never the plan's included voice).
+      const deepseekKey = tts.voiceProvider(cfg) === "deepseek" ? (cfg.deepseek?.key ?? "") : null;
+      const key = deepseekKey === null ? cfg.tts?.fishKey : undefined;
+      const own = key || deepseekKey !== null ? null : voiceCredential(cfg.tts?.key);
       const eleven = own?.included ? null : own;
-      if (!key && !eleven) {
+      if (deepseekKey === "") {
+        req.resume();
+        return json(res, 409, userError("serverError.voice.deepseekKeyRequired"));
+      }
+      if (deepseekKey === null && !key && !eleven) {
         req.resume();
         return json(res, 409, userError("serverError.voice.fishKeyRequired"));
       }
+      const maxBytes = deepseekKey ? deepseek.ASR_MAX_BYTES : TRANSCRIBE_MAX_BYTES;
       const declared = Number(req.headers["content-length"] ?? 0);
-      if (declared > TRANSCRIBE_MAX_BYTES) {
+      if (declared > maxBytes) {
         req.resume();
-        return json(res, 413, { error: `audio exceeds ${TRANSCRIBE_MAX_BYTES} bytes` });
+        return json(res, 413, { error: `audio exceeds ${maxBytes} bytes` });
       }
       const audio = await new Promise<Buffer | null>((resolve, reject) => {
         const chunks: Buffer[] = [];
@@ -110,17 +118,28 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         // Answering before the upload is read to its end resets the connection on Windows instead of delivering the 413.
         req.on("data", (chunk: Buffer) => {
           received += chunk.byteLength;
-          if (received <= TRANSCRIBE_MAX_BYTES) chunks.push(chunk);
+          if (received <= maxBytes) chunks.push(chunk);
         });
-        req.on("end", () => resolve(received > TRANSCRIBE_MAX_BYTES ? null : Buffer.concat(chunks)));
+        req.on("end", () => resolve(received > maxBytes ? null : Buffer.concat(chunks)));
         req.on("error", reject);
       });
-      if (!audio) return json(res, 413, { error: `audio exceeds ${TRANSCRIBE_MAX_BYTES} bytes` });
+      if (!audio) return json(res, 413, { error: `audio exceeds ${maxBytes} bytes` });
+      const controller = new AbortController();
+      const cancel = () => { if (!res.writableEnded) controller.abort(); };
+      res.on("close", cancel);
       try {
-        const text = key ? await fish.transcribe(audio, mime, key) : await elevenlabs.transcribe(audio, mime, eleven!.token, eleven!.api);
+        const text = deepseekKey
+          ? await deepseek.transcribe(audio, deepseekKey, controller.signal)
+          : key ? await fish.transcribe(audio, mime, key) : await elevenlabs.transcribe(audio, mime, eleven!.token, eleven!.api);
+        if (controller.signal.aborted) return;
         return json(res, 200, { text });
       } catch (e) {
+        if (controller.signal.aborted) return;
+        const failure = voiceFailure(e);
+        if (failure) return json(res, failure.status, failure.body);
         return json(res, 502, { error: e instanceof Error ? e.message : String(e), ...userErrorFields(e) });
+      } finally {
+        res.off("close", cancel);
       }
     }
     return PASS;

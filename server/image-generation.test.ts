@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { IMAGE_DEFAULT_MODELS } from "../shared/image-generation.ts";
-import { generateImage, imageGenerationReady, imageSlots } from "./image-generation.ts";
+import { generateImage, imageGenerationReady, imageSlots, markupProblem } from "./image-generation.ts";
 
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
 const BOTH = {
@@ -34,6 +34,88 @@ describe("image slots", () => {
 
   it("ignores a backup identical to the base", () => {
     expect(imageSlots({ imageGen: { primary: { provider: "xai" }, fallback: { provider: "xai" } } }).fallback).toBeNull();
+  });
+});
+
+describe("complexity", () => {
+  const sent = async (model: string, complexity?: "low" | "medium" | "high") => {
+    const fetchMock = vi.fn(async () => imageResponse());
+    const cfg = { imageGen: { key: "openai-secret", primary: { provider: "openai" as const, model }, ...(complexity && { complexity }) } };
+    await generateImage(cfg, { prompt: "owl" }, { fetchImpl: fetchMock });
+    return JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+  };
+
+  it("goes to GPT-Image-2.6 models when set", async () => {
+    expect((await sent("gpt-image-2.6-sunburst", "low")).complexity).toBe("low");
+    expect((await sent("gpt-image-2.6-flare", "medium")).complexity).toBe("medium");
+  });
+
+  it("is left out when unset, and never sent to other models", async () => {
+    expect(await sent("gpt-image-2.6-flare")).not.toHaveProperty("complexity");
+    expect(await sent("gpt-image-2", "low")).not.toHaveProperty("complexity");
+  });
+});
+
+describe("animated GIF", () => {
+  const GIF = Buffer.from("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", "base64");
+  const gifResponse = () => new Response(JSON.stringify({ data: [{ b64_json: GIF.toString("base64") }] }), { status: 200 });
+  const cfg = (model: string) => ({ imageGen: { key: "openai-secret", primary: { provider: "openai" as const, model } } });
+
+  it("asks a GPT-Image-2.6 model for a gif with its frame settings and returns it", async () => {
+    const fetchMock = vi.fn(async () => gifResponse());
+    const image = await generateImage(cfg("gpt-image-2.6-flare"), { prompt: "owl", gif: { frames: 6, frameDurationMs: 100 } }, { fetchImpl: fetchMock });
+    expect(image.mime).toBe("image/gif");
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body))).toMatchObject({ output_format: "gif", frame_count: 6, frame_duration_ms: 100 });
+  });
+
+  it("refuses other models before any request", async () => {
+    const fetchMock = vi.fn(async () => gifResponse());
+    await expect(generateImage(cfg("gpt-image-2"), { prompt: "owl", gif: {} }, { fetchImpl: fetchMock })).rejects.toThrow(/GPT-Image-2.6/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still rejects a gif nobody asked for", async () => {
+    await expect(generateImage(cfg("gpt-image-2.6-flare"), { prompt: "owl" }, { fetchImpl: vi.fn(async () => gifResponse()) })).rejects.toThrow(/invalid or oversized/);
+  });
+});
+
+describe("image edits", () => {
+  const png = (width: number, height: number, colorType: number) => {
+    const head = Buffer.alloc(26);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(head);
+    head.writeUInt32BE(width, 16); head.writeUInt32BE(height, 20); head[24] = 8; head[25] = colorType;
+    return { bytes: head, mime: "image/png" };
+  };
+  const cfg = (model: string) => ({ imageGen: { key: "openai-secret", primary: { provider: "openai" as const, model } } });
+
+  it("posts the image and the markup to /images/edits with no generated size", async () => {
+    const fetchMock = vi.fn(async () => imageResponse());
+    const image = png(64, 64, 2), markup = png(64, 64, 6);
+    await generateImage(cfg("gpt-image-2.6-sunburst"), { prompt: "remove the circled cup", edit: { image, markup } }, { fetchImpl: fetchMock });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const form = init.body as FormData;
+    expect(url).toBe("https://api.openai.com/v1/images/edits");
+    expect(init.headers).not.toHaveProperty("content-type");
+    expect(form.get("model")).toBe("gpt-image-2.6-sunburst");
+    expect(form.get("prompt")).toBe("remove the circled cup");
+    expect(Buffer.from(await (form.get("image") as Blob).arrayBuffer())).toEqual(image.bytes);
+    expect((form.get("markup") as Blob).type).toBe("image/png");
+    expect(Buffer.from(await (form.get("markup") as Blob).arrayBuffer())).toEqual(markup.bytes);
+    expect(form.has("size")).toBe(false);
+  });
+
+  it("refuses models that are not GPT-Image-2.6 before any request", async () => {
+    const fetchMock = vi.fn(async () => imageResponse());
+    await expect(generateImage(cfg("gpt-image-2"), { prompt: "x", edit: { image: png(8, 8, 2) } }, { fetchImpl: fetchMock })).rejects.toThrow(/GPT-Image-2.6/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("explains a markup that cannot be used", () => {
+    const image = png(64, 64, 2);
+    expect(markupProblem(image, png(64, 64, 6))).toBeNull();
+    expect(markupProblem(image, png(64, 64, 2))).toMatch(/transparent/);
+    expect(markupProblem(image, png(32, 64, 6))).toMatch(/same size/);
+    expect(markupProblem(image, { bytes: Buffer.from("not a png"), mime: "image/png" })).toMatch(/must be a PNG/);
   });
 });
 

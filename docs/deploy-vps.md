@@ -510,6 +510,11 @@ every file's owner and mode either way. The script then:
    before (the server's own count of ready engines, `GET /api/health/engines`,
    which a hardened server answers too; `openmausbot doctor` on a version
    without it), and Caddy runs again.
+   If it does not, the new version's doctor runs on the data
+   (`openmausbot doctor --data --fix`: in the server's container while it is up,
+   else in a one-off one with the server stopped). When the doctor repaired
+   something, the new version is started once more and step 4 is tried again.
+   [What the doctor checks and repairs](self-hosting.md#the-doctor-checking-and-repairing-the-data).
 5. If any of that fails: puts back the data from the copy, `.env` and the old
    image, starts the old version, and tells you what went wrong. Your server
    is as it was before step 1, `.env` included, byte for byte. Only when `.env`

@@ -54,6 +54,11 @@ function harness(caps?: Record<string, { driverKind: string; agentsMcp: boolean 
   const canPersist = vi.fn((): { ok: true } | { ok: false; status: number; error: string } => ({ ok: true }));
   const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, hasTeamAuthority,
     canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, deletionRefusal, autoApply, validateChange,
+    mcpServerProblem: (name, botId) => {
+      const servers: Record<string, { bot?: string }> = { hindsight: {}, linear: {}, "clive-notes": { bot: "Clive" } };
+      if (!servers[name]) return "no such server";
+      return !servers[name].bot || servers[name].bot === botId ? null : "that server belongs to another bot";
+    },
     validateModel: (selection, current) => {
       if (!({ claude: ["sonnet", "opus"], codex: ["gpt-fixture"] }[selection.instanceId]?.includes(selection.model))) return "Model is not in the current catalog";
       return current?.approvalMode === "full" && selection.instanceId !== current.modelSelection.instanceId ? "Existing permissions are incompatible" : null;
@@ -210,7 +215,7 @@ describe("reviewed Chief team setup", () => {
   it("names where an unknown key is and what that level takes", () => {
     const h = harness();
     expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { model: "gpt" } }]))
-      .toThrow(/^operations\.0\.fields: Unrecognized key: "model"\. It takes chiefOfStaff, name, title, description, soul, soulAppend, cwd, section, modelSelection\.$/);
+      .toThrow(/^operations\.0\.fields: Unrecognized key: "model"\. It takes chiefOfStaff, name, title, description, soul, soulAppend, cwd, section, modelSelection, mcpServers\.$/);
     expect(() => h.service.propose({ botId: h.chief.id, threadId: h.chief.threadId, plan: { reason: "Requested", operations: [{ action: "update", botId: h.peer.id, fields: { title: "Lead" } }], teams: [] } }))
       .toThrow(/^Unrecognized key: "teams"\. It takes reason, newTeams, operations\.$/);
   });
@@ -591,6 +596,44 @@ describe("team setup that applies on its own", () => {
     expect(await h.submit([specialist("Mira", "Work")])).toMatchObject({ state: "applied", applied: true, result: { error: expect.stringContaining("could not be added") } });
     expect(h.chief.lastTeamSetupReceipt?.result.state).toBe("applied");
     expect(h.apply).toHaveBeenCalledTimes(1);
+    expect(h.messages).toHaveLength(0);
+  });
+});
+
+describe("a bot's MCP servers in team setup", () => {
+  it("applies under Full Access like the plan's other changes, and Undo gives back every enabled server", async () => {
+    const h = harness(); h.autoApply.mockReturnValue("full-access");
+    const response = await h.submit([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["linear", "hindsight", "linear"] } }]);
+    expect(response).toMatchObject({ applied: true, state: "applied" });
+    expect(response.detail).toContain("MCP servers it can use: every enabled server → linear, hindsight");
+    expect(response.detail).toContain("Other execution permissions are unchanged.");
+    expect(h.peer.mcpServers).toEqual(["linear", "hindsight"]);
+    expect(await h.service.undo({ botId: h.chief.id, threadId: h.chief.threadId, requestId: response.requestId })).toMatchObject({ state: "undone" });
+    expect(Array.isArray(h.apply.mock.calls.at(-1)![0].operations[0].fields.mcpServers)).toBe(false);
+  });
+  it("waits on the person's card below Full Access, like the plan's other changes, then applies the list they confirmed", async () => {
+    const h = harness();
+    const response = await h.submit([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["hindsight"] } }]);
+    expect(response).toMatchObject({ applied: false, state: "pending" });
+    expect(h.apply).not.toHaveBeenCalled();
+    expect(h.messages[0].card?.options).toEqual(["Apply setup", "Cancel"]);
+    expect(await h.resolve(response.requestId)).toMatchObject({ result: { state: "applied" } });
+    expect(h.peer.mcpServers).toEqual(["hindsight"]);
+  });
+  it("cancels when the bot's list changed after the card was shown", async () => {
+    const h = harness();
+    const card = h.propose([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["hindsight"] } }]);
+    h.peer.mcpServers = ["linear"];
+    expect((await h.resolve(card.requestId))?.result.state).toBe("cancelled");
+    expect(h.peer.mcpServers).toEqual(["linear"]);
+  });
+  it("refuses a new bot, an unknown server, another bot's own server, and a busy bot", () => {
+    const h = harness();
+    expect(() => h.propose([{ ...specialist("Mira", "Work"), fields: { ...specialist("Mira", "Work").fields, mcpServers: ["hindsight"] } }])).toThrow(/existing bot/);
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["nope"] } }])).toThrow(/no such server/);
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["clive-notes"] } }])).toThrow(/another bot/);
+    h.peer.busy = true;
+    expect(() => h.propose([{ action: "update", botId: h.peer.id, fields: { mcpServers: ["hindsight"] } }])).toThrow(/Stop @Ada/);
     expect(h.messages).toHaveLength(0);
   });
 });

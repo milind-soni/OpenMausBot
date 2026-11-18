@@ -174,6 +174,51 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(tree(box.data)["started-by.txt"]).toBe("0.1.150\n0.1.150\n");
   });
 
+  it("runs the new version's doctor on data that stops it from starting, and keeps the update when it then starts", () => {
+    const box = install({ behaviour: "repairable", doctor: "repairs" });
+    const done = box.run();
+    expect(done.status, done.stdout + done.stderr).toBe(0);
+    expect(done.said).toEqual([
+      "Downloading 0.1.151…",
+      "Stopping the server and copying its data aside…",
+      "Starting 0.1.151…",
+      "Waiting for it to answer and to be able to start bots…",
+      "Running 0.1.151's doctor on the data before going back…",
+      expect.stringMatching(/^The doctor repaired the data \(see .*\)\. Starting 0\.1\.151 once more…$/),
+      "Updated from 0.1.150 to 0.1.151.",
+      `The data from before the update is kept in the Docker volume ${box.copies()[0]} until the next update.`,
+      "To go back to it: ./update.sh --rollback",
+    ]);
+    // It kept stopping as it started, so it ran in its own container with the server stopped.
+    expect(box.state().doctorRuns).toEqual(["run"]);
+    expect(box.calls()).toContain("compose run --rm --no-deps -T omb openmausbot doctor --data --fix --json");
+    expect(box.state().containers.omb).toMatchObject({ image: NEW.id, status: "running" });
+    expect(box.env()).toBe(`${ENV}OMB_IMAGE=${NEW.refs[0]}\n`);
+  });
+
+  it("rolls back as before when the doctor repairs nothing, or the new version has none", () => {
+    for (const target of [{ behaviour: "crashes", doctor: "nothing" }, { behaviour: "crashes" }, { behaviour: "silent", doctor: "nothing" }]) {
+      const box = install(target);
+      const failed = box.run();
+      expect(failed.status, JSON.stringify(target)).toBe(1);
+      expect(failed.said).toContain("Running 0.1.151's doctor on the data before going back…");
+      expect(failed.stdout).not.toContain("once more");
+      expect(failed.said.at(-1)).toBe("Your server runs 0.1.150 again, with its data as it was before the update.");
+      expect(box.state().containers.omb.image).toBe(OLD.id);
+      // A server still up is asked in its own container; one that stopped, in a one-off container.
+      expect(box.state().doctorRuns).toEqual([target.behaviour === "silent" ? "exec" : "run"]);
+    }
+  });
+
+  it("rolls back when the version the doctor repaired still does not start", () => {
+    const box = install({ behaviour: "crashes", doctor: "repairs", lastWords: "still broken" });
+    const failed = box.run();
+    expect(failed.status).toBe(1);
+    expect(failed.stdout).toContain("once more");
+    expect(failed.stdout).toContain("The update to 0.1.151 did not work: it kept stopping as it started (still broken).");
+    expect(box.state().containers.omb.image).toBe(OLD.id);
+  });
+
   it.each([
     [{ engine: false }, "no engine can start a bot on it, and one could before"],
     [{ behaviour: "no-caddy" }, "Caddy, which serves it to the internet, did not start again"],

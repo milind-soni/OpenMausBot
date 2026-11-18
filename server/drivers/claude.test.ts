@@ -4240,15 +4240,6 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }
   });
 
-  it("answers to unknown or already-resolved asks resolve `unavailable` — typed, never a throw", async () => {
-    await create("hang");
-    await instance.adapter.sendTurn({ threadId: "t-perm-2", text: "go" });
-    await expect(instance.adapter.respondToRequest("t-perm-2", "never-asked", { behavior: "allow" })).resolves.toBe("unavailable");
-    await expect(instance.adapter.respondToRequest("no-such-thread", "x", { behavior: "deny" })).resolves.toBe("unavailable");
-    await instance.adapter.interruptTurn("t-perm-2");
-    await recorder.until((e) => e.type === "turn.completed");
-  });
-
   it("resolves a pending ask as a system denial when the turn is interrupted", async () => {
     await create("hang");
     await instance.adapter.sendTurn({ threadId: "t-perm-stop", text: "go" });

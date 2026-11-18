@@ -7099,5 +7099,19 @@
   "remote.tailscale.needsApproval": "Ten komputer czeka na zatwierdzenie w Twojej sieci Tailscale. Zatwierdź go w konsoli administracyjnej Tailscale, a potem spróbuj ponownie.",
   "together.switch.title": "Ten komputer i My Cloud razem",
   "together.switch.line": "Domyślnie wyłączone. Boty z Cloud i boty z tego komputera są na jednej liście, a każdy otwiera się tam, gdzie działa.",
-  "together.switch.failed": "Nie udało się zapisać. Spróbuj ponownie."
+  "together.switch.failed": "Nie udało się zapisać. Spróbuj ponownie.",
+  "imageGen.complexity.label": "Poziom szczegółowości",
+  "imageGen.complexity.help": "Jak szczegółowe są obrazy GPT-Image-2.6. Niższy poziom jest prostszy i szybszy.",
+  "imageGen.complexity.low": "Niski",
+  "imageGen.complexity.medium": "Średni",
+  "imageGen.complexity.high": "Wysoki",
+  "activity.tool.team.editImage": "Edytuj obraz",
+  "voice.deepseek.sharedKey": "DeepSeek korzysta z istniejącego klucza DeepSeek tej instalacji.",
+  "voice.deepseek.description": "Czyta na głos odpowiedzi i wiadomości głosowe głosem Stella lub Tide od DeepSeek. Po wybraniu DeepSeek dyktowanie i tryb Po kolei też słyszą cię przez rozpoznawanie mowy DeepSeek, do około dwóch minut na nagranie. Używa twojego klucza API DeepSeek, a opłaty nalicza DeepSeek.",
+  "voice.deepseek.stella": "Stella (kobiecy)",
+  "voice.deepseek.tide": "Tide (męski)",
+  "call.capability.turnsNeedDeepSeekKey": "Dodaj klucz DeepSeek, aby rozmawiać po kolei w połączeniach",
+  "alwaysOn.section": "Zawsze włączony dom",
+  "alwaysOn.title": "Używaj tego komputera jako zawsze włączonego domu",
+  "alwaysOn.add.title": "Dodaj Maca mini lub inny zawsze włączony komputer"
 }

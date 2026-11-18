@@ -73,9 +73,14 @@ async function doctorOnce(ctx: VerbContext): Promise<VerbOutcome> {
 export async function doctor(ctx: VerbContext): Promise<VerbOutcome> {
   if (ctx.flags.host === true) {
     if (flag(ctx.flags, "wait") !== undefined || flag(ctx.flags, "url") !== undefined) throw usageError("doctor --host checks this machine: drop --wait and --url");
+    if (ctx.flags.data === true || ctx.flags.fix === true) throw usageError("doctor --host and doctor --data are two runs");
     return (await import("./host-doctor.ts")).hostDoctor(ctx);
   }
-  if (flag(ctx.flags, "data-dir") !== undefined || flag(ctx.flags, "domain") !== undefined) throw usageError("--data-dir and --domain go with doctor --host");
+  if (ctx.flags.data === true || ctx.flags.fix === true) {
+    if (["wait", "url", "port", "token-file", "domain"].some((name) => flag(ctx.flags, name) !== undefined)) throw usageError("doctor --data checks this computer's data folder: drop --wait, --url, --port, --token-file and --domain");
+    return (await import("../doctor/command.ts")).dataDoctor(ctx);
+  }
+  if (flag(ctx.flags, "data-dir") !== undefined || flag(ctx.flags, "domain") !== undefined) throw usageError("--data-dir goes with doctor --host or doctor --data, --domain with doctor --host");
   const raw = flag(ctx.flags, "wait");
   const deadline = Date.now() + (raw ? parseDuration(raw, "--wait") : 0);
   for (;;) {
