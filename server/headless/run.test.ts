@@ -228,7 +228,7 @@ describe("wait", () => {
     expect((await harness([waited("settled", "completed", job("completed", "v1"))], { drops: [proxy] }).run(["wait", "--thread", "t1", "--json"])).code).toBe(0);
     const refused = Object.assign(new Error("OpenMausBot API error (401): {\"error\":\"unauthorized\"}"), { status: 401 });
     const gone = harness([waited("settled", "completed", job("completed", "v1"))], { drops: [refused] });
-    expect((await gone.run(["wait", "--thread", "t1", "--json"])).code).toBe(5);
+    expect((await gone.run(["wait", "--thread", "t1", "--json"])).code).toBe(4);
     expect(gone.calls.filter((call) => call.name === "wait_for_conversation")).toHaveLength(1);
     // a bug's TypeError is not a dropped connection: it fails at once
     const bug = harness([waited("settled", "completed", job("completed", "v1"))], { drops: [new TypeError("Cannot read properties of undefined (reading 'job')")] });
