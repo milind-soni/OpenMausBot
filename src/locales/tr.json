@@ -5903,5 +5903,8 @@
   "voice.deepseek.description": "Yanıtları ve sesli mesajları DeepSeek’in Stella veya Tide sesiyle okur. DeepSeek’i seçtiğinde dikte ve Sırayla konuş da seni DeepSeek konuşmadan metne dönüştürme ile duyar; kayıt başına yaklaşık iki dakikaya kadar. DeepSeek API anahtarını kullanır ve ücreti DeepSeek tarafından alınır.",
   "voice.deepseek.stella": "Stella (kadın)",
   "voice.deepseek.tide": "Tide (erkek)",
-  "call.capability.turnsNeedDeepSeekKey": "Aramalarda sırayla konuşmak için bir DeepSeek anahtarı ekle"
+  "call.capability.turnsNeedDeepSeekKey": "Aramalarda sırayla konuşmak için bir DeepSeek anahtarı ekle",
+  "alwaysOn.section": "Her zaman açık ev",
+  "alwaysOn.title": "Bu bilgisayarı her zaman açık ev olarak kullan",
+  "alwaysOn.add.title": "Mac mini veya her zaman açık başka bir bilgisayar ekle"
 }

@@ -3664,5 +3664,8 @@
   "voice.deepseek.description": "जवाब और वॉइस मैसेज DeepSeek की Stella या Tide आवाज़ में पढ़कर सुनाता है। DeepSeek चुनने पर डिक्टेशन और बारी-बारी से बात करने वाले कॉल भी DeepSeek स्पीच-टू-टेक्स्ट से आपको सुनते हैं, हर रिकॉर्डिंग में लगभग दो मिनट तक। आपकी DeepSeek API कुंजी का उपयोग होता है और बिल DeepSeek देता है।",
   "voice.deepseek.stella": "Stella (महिला)",
   "voice.deepseek.tide": "Tide (पुरुष)",
-  "call.capability.turnsNeedDeepSeekKey": "कॉल में बारी-बारी से बात करने के लिए DeepSeek कुंजी जोड़ें"
+  "call.capability.turnsNeedDeepSeekKey": "कॉल में बारी-बारी से बात करने के लिए DeepSeek कुंजी जोड़ें",
+  "alwaysOn.section": "हमेशा चालू घर",
+  "alwaysOn.title": "इस कंप्यूटर को हमेशा चालू घर की तरह इस्तेमाल करें",
+  "alwaysOn.add.title": "Mac mini या कोई और हमेशा चालू कंप्यूटर जोड़ें"
 }

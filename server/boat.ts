@@ -72,7 +72,7 @@ const BOAT_INVENTORY_PAGE_SIZE = 200;
 // Bounded: a broken or adversarial cursor must not hold Settings open.
 const MAX_BOAT_INVENTORY_PAGES = 10;
 const LEGACY_MANAGED_BOAT_NAME = /^ogb-[a-z0-9]{1,8}-[a-f0-9]{6}$/;
-const SCOPED_MANAGED_BOAT_NAME = /^ogb-[a-f0-9]{12}-[a-z0-9]{1,8}-[a-f0-9]{6}$/;
+const SCOPED_MANAGED_BOAT_NAME = /^ogb-[a-f0-9]{12}-[a-z0-9]{1,8}-[a-f0-9]{6}$/; /** Set aside (boat-set-aside.ts): this installation's, no bot's. */ export const SET_ASIDE_BOAT_NAME = /^ogb-[a-f0-9]{12}-[a-z0-9]{1,8}-[a-f0-9]{6}-set-aside-\d{4}-\d{2}-\d{2}$/;
 const BOAT_ID = /^bx_[23456789abcdefghjkmnpqrstuvwxyz]{8}$/;
 /** Sandbox.state in v1, plus OpenMausBot's own `removing` for a sandbox whose deletion is under way. */
 const BOAT_STATES = new Set([
@@ -642,7 +642,7 @@ export async function listManagedBoats(
     const name = typeof candidate.name === "string" ? candidate.name : "";
     let owner: ManagedBoatOwner | null = null;
     let legacyOwner = false;
-    if (SCOPED_MANAGED_BOAT_NAME.test(name)) {
+    if (SCOPED_MANAGED_BOAT_NAME.test(name) || SET_ASIDE_BOAT_NAME.test(name)) {
       if (!name.startsWith(scopedPrefix)) continue;
       owner = ownerByCurrentName.get(name) ?? null;
     } else if (LEGACY_MANAGED_BOAT_NAME.test(name)) {

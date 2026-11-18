@@ -7164,5 +7164,8 @@
   "voice.deepseek.description": "Читает ответы и голосовые сообщения голосом Stella или Tide от DeepSeek. Если выбрать DeepSeek, диктовка и режим «По очереди» тоже слушают вас через распознавание речи DeepSeek — до двух минут на одну запись. Использует ваш API-ключ DeepSeek, оплата — через DeepSeek.",
   "voice.deepseek.stella": "Stella (женский)",
   "voice.deepseek.tide": "Tide (мужской)",
-  "call.capability.turnsNeedDeepSeekKey": "Добавьте ключ DeepSeek, чтобы говорить по очереди в звонках"
+  "call.capability.turnsNeedDeepSeekKey": "Добавьте ключ DeepSeek, чтобы говорить по очереди в звонках",
+  "alwaysOn.section": "Всегда включённый дом",
+  "alwaysOn.title": "Использовать этот компьютер как всегда включённый дом",
+  "alwaysOn.add.title": "Добавить Mac mini или другой всегда включённый компьютер"
 }

@@ -17,6 +17,7 @@ import { botBox, type WrappedSpawn } from "./bot-box/box.ts";
 import type { BoxRequest } from "./bot-box/plan.ts";
 import { homeProgramsDistrusted, serverMayRunFrom, serverPath } from "./bot-box/program-trust.ts";
 import { engineMemory } from "./engine-memory.ts";
+import { engineOwners } from "./engine-owners.ts";
 import { ENGINE_TAG_ENV, engineRunTag, engineStopped, recordEngine } from "./engine-records.ts";
 import { engineHomes } from "./engine-homes/engine-homes.ts";
 import type { HomedSpawn } from "./engine-homes/layout.ts";
@@ -360,6 +361,7 @@ export function spawnCli(
   if (process.platform !== "win32" && owner === "bot") {
     rememberEngineSession(child);
     engineMemory.track(child);
+    engineOwners.track(child, child.pid ? linuxTrees.get(child)?.get(child.pid) ?? null : null);
   }
 
   // On Windows a stdin write between taskkill and pipe close errors asynchronously; unlistened, that crashes the harness.

@@ -6,8 +6,10 @@ import type { EngineLimitsReport } from "../../shared/limit-reset.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import type { StoreChange } from "../store.ts";
 import { createLoopStalls, requestArrivedBefore, type LoopStalls } from "./loop-stalls.ts";
+import { createBotFootprints, type BotCapReport, type BotFootprintReport, type BotFootprints, type FootprintOwner } from "./bot-footprint.ts";
 import { duration, limitHolds, perfHealth, perfLines, turnLine, type PerfHealth } from "./perf-report.ts";
 import { createProcessHealth, type ProcessHealthRecorder } from "./process-health.ts";
+import type { ProcessRow } from "./process-buckets.ts";
 import { createProcessSampler, linuxProcessList, LINUX_SAMPLE_MS, nodeUtilization, OTHER_SAMPLE_MS, psProcessList, type ProcessSampler } from "./process-sampler.ts";
 import type { FailoverWhy } from "./turn-record.ts";
 import { createTurnTimings, type Refusal, type SlowNote, type TurnTimings } from "./turn-timings.ts";
@@ -36,7 +38,16 @@ export interface PerfHostDeps {
   processes?: ProcessHealthRecorder;
   /** The engine processes the server tracks, with the threads each runs (engine-memory, where turns wait for room). */
   engines?: () => ReadonlyArray<{ pid: number; threads: readonly string[] }>;
+  /** The engine and browser processes the server started for bots, with the bots each serves (bot-footprint.ts). */
+  owners?: () => readonly FootprintOwner[];
+  /** After each sample, with its process list: records of exited engines it no longer needs can go. */
+  pruneOwners?: (rows: readonly ProcessRow[]) => void;
+  /** The memory one bot may use and how it is enforced (bot-memory-cap.ts). */
+  cap?: () => BotCapReport;
 }
+
+/** The health report shows this many bots, the ones using the most memory first; the admin's read shows every one. */
+export const BOTS_IN_HEALTH = 10;
 
 /** What a report shows when the recorder failed: diagnostics never fail because of it. */
 export const PERF_UNAVAILABLE = ["## Performance", "(timings unavailable: the recorder failed; see the server log)"];
@@ -85,21 +96,27 @@ export function createPerfHost(deps: PerfHostDeps) {
   const linux = process.platform === "linux", windows = process.platform === "win32";
   /** Its two warnings are said once each for the life of the server. */
   const processes = deps.processes ?? createProcessHealth({ warn: (kind, line) => say(kind, line) });
+  const footprints: BotFootprints = createBotFootprints({ owners: () => deps.owners?.() ?? [], ...(deps.pruneOwners ? { prune: deps.pruneOwners } : {}), now });
+  const botReport = (limit?: number): BotFootprintReport => ({ ...footprints.report(limit), ...(deps.cap ? { cap: deps.cap() } : {}) });
   const sampler = deps.sampler ?? createProcessSampler({
     list: linux ? () => linuxProcessList() : psProcessList, intervalMs: linux ? LINUX_SAMPLE_MS : OTHER_SAMPLE_MS,
     scope: deps.wholeMachine && linux ? "all" : "tree", utilization: nodeUtilization(), now, engines: enginePids,
     stalled: (ms) => say("loop", `event loop stalled: the ${linux ? 60 : 300}s sampler fired ${duration(ms)} late`), afterSample: watchHolds,
-    seen: (rows, buckets) => processes.sample(rows, buckets),
+    seen: (rows, buckets) => { processes.sample(rows, buckets); guarded("bots", () => footprints.sample(rows), null); },
   });
   if (deps.timer !== false && !windows) sampler.start();
   const stalls = deps.stalls ?? createLoopStalls();
   if (deps.timer !== false) stalls.start();
   if (deps.timer !== false && linux) guarded("limits", () => (deps.log ?? ((line: string) => console.warn(line)))(processes.startLine()), undefined);
 
-  const sources = () => ({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: limits(), process: windows ? null : sampler.report(), stalls: guarded("stalls", () => stalls.report(), null), processes: processes.report() });
+  const sources = () => ({ hour: timings.window(), day: timings.day(), live: timings.live(), limits: limits(), process: windows ? null : sampler.report(), stalls: guarded("stalls", () => stalls.report(), null), processes: processes.report(),
+    bots: windows ? null : guarded("bots", () => botReport(BOTS_IN_HEALTH), null) });
   return {
     timings,
     sampler,
+    footprints,
+    /** Every bot's footprint at the last sample, for the admin's read (routes/perf-diagnostics.ts). */
+    bots: (): BotFootprintReport | null => (windows ? null : guarded("bots", () => botReport(), null)),
     noteHeld: (threadId: string, why: "plan-limit" | "memory") => guarded("held", () => timings.noteHeld(threadId, why), undefined),
     noteFailover: (threadId: string, why: FailoverWhy) => guarded("failover", () => timings.noteFailover(threadId, why), undefined),
     noteNotStarted: (threadId: string, turnId: string | null, refusal?: Refusal) => guarded("refused", () => timings.noteNotStarted(threadId, turnId, refusal), undefined),

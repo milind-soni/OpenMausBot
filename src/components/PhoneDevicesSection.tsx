@@ -22,6 +22,7 @@ import { showTunnelRetiredNotice } from "../lib/phone-link";
 import { PhonesList } from "./PhonesList";
 import { PairedPhones } from "./PairedPhones";
 import { TailnetComputers } from "./TailnetComputers";
+import { AlwaysOnHomeSection } from "./AlwaysOnHomeSection";
 import { RemoteAccessCheckRow } from "./RemoteAccessCheck";
 import { LearnMore, SettingRow, SettingsFoldRow, SettingsGroup, SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
 import { Layer } from "./Layer";
@@ -472,6 +473,8 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, simpl
           <PairedPhones c={c} state={state} onPairAgain={pairAgain} />
         </SettingsGroup>
       )}
+
+      <AlwaysOnHomeSection c={c} state={state} blocked={managedBy} onAddPhone={() => { if (!remoteBlocked) setPairing("device"); }} />
 
       {!reachOpen ? (
         <SettingsGroup block="reach" footnote={t("phone.reach.foot")}>
