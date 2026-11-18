@@ -5337,7 +5337,8 @@ describe("harness HTTP API", () => {
         text: expect.stringContaining("Describe this image"),
       });
       expect(JSON.stringify(dump.prompt)).not.toContain("attached-image");
-      expect(JSON.stringify(dump.prompt)).not.toContain(imagePath);
+      expect(JSON.stringify(dump.prompt)).toContain("<attached-file");
+      expect(JSON.stringify(dump.prompt)).toContain(imagePath);
 
       const current = (await api("GET", "/api/bots?messages=20")).body.groups.find(
         (candidate: { id: string }) => candidate.id === room.id,
@@ -5400,7 +5401,8 @@ describe("harness HTTP API", () => {
         expect.objectContaining({ source: expect.objectContaining({ data: png.toString("base64") }) }),
       ]);
       expect(JSON.stringify(rewound.prompt)).not.toContain("attached-image");
-      expect(JSON.stringify(rewound.prompt)).not.toContain(imagePath);
+      expect(JSON.stringify(rewound.prompt)).toContain("<attached-file");
+      expect(JSON.stringify(rewound.prompt)).toContain(imagePath);
       await releaseTurn(bot.id);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
