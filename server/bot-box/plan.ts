@@ -88,6 +88,9 @@ export interface BoxRequest {
   relay?: string;
   /** The conversation this spawn runs for, when the caller knows it (a Team Cloud's engine homes do). */
   threadId?: string;
+  /** With `botId`, for a turn working outside its conversation's folder (a configured project folder): that folder
+   * (task-workspaces/<botId>/<thread>, its handed-off files), put back read-write where it exists. */
+  conversationFolder?: string;
   /** The bot whose turn that is, for the audience rule only (BoxAudience); unlike `botId` it puts back nothing. */
   conversationBot?: string;
   /** On a Team Cloud: what the conversation's audience gives the box of the bot's team things (BoxAudience). */
@@ -249,6 +252,12 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     if (!covered(own) && own !== teamFolder) rw(own);
   }
   const ownFolders = botId && ID.test(botId) ? [join(dataDir, "workspaces", botId), join(dataDir, "task-workspaces", botId)] : [];
+  // Security: only a conversation folder of this box's own bot, and never in a process other conversations share.
+  const conversation = request.conversationFolder && !request.botThreads ? resolve(request.conversationFolder) : null;
+  if (conversation && botId && ID.test(botId) && taskWorkspaceIds(conversation, dataDir)?.botId === botId && !covered(conversation)) {
+    mounts.push({ kind: "bind", source: conversation, target: conversation, optional: true });
+    if (!writable.includes(conversation)) writable.push(conversation);
+  }
   if (mutate.has("bind-otherws")) {
     rw(join(dataDir, "workspaces"));
     rw(join(dataDir, "task-workspaces"));

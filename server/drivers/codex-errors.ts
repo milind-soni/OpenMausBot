@@ -67,6 +67,12 @@ export function codexLimitFacts(raw: string, route: CodexRoute, codexErrorInfo?:
 // "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."
 const PLAN_MODEL_REFUSED = /model is not supported when using Codex with a ChatGPT account/i;
 
+// A ChatGPT plan takes only text, image and file input (2026-11-17 report on OpenMausBot 0.1.169): it refuses a request
+// that carries audio with this code, and Codex keeps that audio in the saved session it resends every turn.
+export function codexPlanUnsupportedInput(raw: string, route: CodexRoute): boolean {
+  return route === "plan" && raw.includes("subscription_sharing_unsupported_capability");
+}
+
 /** A ChatGPT plan turn refused because the signed-in account can't use the selected model. */
 export function codexPlanModelRefused(value: string, route: CodexRoute): boolean {
   return route === "plan" && PLAN_MODEL_REFUSED.test(value);
