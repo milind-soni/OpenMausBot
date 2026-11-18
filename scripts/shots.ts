@@ -7,12 +7,14 @@
 //
 // PATH is the app's own page ("/") or a preview such as "/room-card-preview.html?state=memory". It fails when the page
 // does not wear the skin it was asked for, so a picture is never mislabelled.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
+import { removeTempDir } from "../server/testing/cleanup.ts";
 import { openHeadlessChrome } from "./testing/headless-chrome.ts";
 
 export const SIZES = [
@@ -97,8 +99,10 @@ async function main(argv: string[]): Promise<void> {
       console.log(shot.file);
     }
   } finally {
+    // Killing Chrome leaves its profile locked on Windows while its children wind down; closing it lets them go first.
+    await Promise.race([page.send("Browser.close").catch(() => undefined), delay(5_000)]);
     page.close();
-    rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    await removeTempDir(profile);
   }
 }
 
