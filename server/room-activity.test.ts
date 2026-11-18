@@ -48,11 +48,17 @@ posixOnly("room activity runtime", () => {
 
   beforeAll(async () => {
     chmodSync(fakeCli, 0o755);
+    for (const cli of ["fake-claude-cli.ts", "fake-codex-app-server.ts"]) chmodSync(join(serverDirectory, "testing", cli), 0o755);
     home = mkdtempSync(join(tmpdir(), "gbs-room-activity-"));
     const dataDirectory = join(home, ".gbs");
     mkdirSync(dataDirectory);
     writeFileSync(join(dataDirectory, "config.json"), JSON.stringify({
       instances: {
+        "steer-claude": { driver: "claudeAgent", environment: { FAKE_CLAUDE_MODE: "steer" }, config: { cli: join(serverDirectory, "testing", "fake-claude-cli.ts") } },
+        "steer-codex": { driver: "codex", environment: { FAKE_CODEX_MODE: "steer" }, config: { cli: join(serverDirectory, "testing", "fake-codex-app-server.ts") } },
+        "reject-codex": { driver: "codex", environment: { FAKE_CODEX_MODE: "steer-reject" }, config: { cli: join(serverDirectory, "testing", "fake-codex-app-server.ts") } },
+        "steer-usage": { driver: "codex", environment: { FAKE_CODEX_MODE: "steer-usage" }, config: { cli: join(serverDirectory, "testing", "fake-codex-app-server.ts") } },
+        "reject-hang": { driver: "codex", environment: { FAKE_CODEX_MODE: "steer-reject-hang" }, config: { cli: join(serverDirectory, "testing", "fake-codex-app-server.ts") } },
         permission: {
           driver: "grokAgent",
           environment: { FAKE_ACP_MODE: "permission" },
@@ -319,7 +325,7 @@ posixOnly("room activity runtime", () => {
 
   const makeBot = async (name: string, instanceId: string) => {
     const bot = (await api("POST", "/api/bots")).body.bot;
-    await api("PATCH", `/api/bots/${bot.id}`, { name, modelSelection: { instanceId, model: "fake-model" } });
+    await api("PATCH", `/api/bots/${bot.id}`, { name, modelSelection: { instanceId, model: instanceId === "steer-claude" ? "sonnet" : instanceId.includes("codex") || instanceId === "reject-hang" || instanceId === "steer-usage" ? "gpt-new" : "fake-model" } });
     return bot;
   };
   const turnFrame = (botId: string, type: string) => (frame: any) =>
@@ -392,7 +398,7 @@ posixOnly("room activity runtime", () => {
     await api("POST", `/api/groups/${group.id}/messages`, { text: opening });
     await waitForFrame(turnFrame(alpha.id, "turn.started"), "Alpha running", 12_000, start);
     // posted while Alpha works; Alpha's reply will @Beta
-    expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "@Gamma actually, you take it" })).status).toBe(202);
+    expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "@Gamma actually, you take it", steer: true })).status).toBe(202);
     await waitForFrame(turnFrame(gamma.id, "turn.completed"), "Gamma answers the cut-in", 12_000, start);
 
     const after = frames.slice(start);
@@ -403,6 +409,106 @@ posixOnly("room activity runtime", () => {
     expect(after.some((f) => f.kind === "message" && f.threadId === group.threadId
       && f.message.tool?.name === "Your message goes first; Beta wasn't called in.")).toBe(true);
   }, 30_000);
+
+
+  it.each(["steer-claude", "steer-codex"])("steers a running %s in a DM and a room, preserving text order", async instanceId => {
+    for (const room of [false, true]) {
+      const bot = await makeBot("Pilot", instanceId);
+      const group = room ? (await api("POST", "/api/groups", { name: "Steer room", memberIds: [bot.id] })).body.group : undefined;
+      const threadId = group?.threadId ?? bot.threadId;
+      const route = group ? `/api/groups/${group.id}/messages` : `/api/bots/${bot.id}/messages`;
+      const start = frames.length;
+      await api("POST", route, { text: "begin steering" });
+      await waitForFrame(f => f.kind === "runtime" && f.event.threadId === threadId && f.event.type === "content.delta", "partial text", 12_000, start);
+      expect((await api("POST", route, { text: "redirect-now", steer: true, attachments: [{ id: "note", name: "note.txt", mimeType: "text/plain", size: 9, dataUrl: "data:text/plain;base64," + Buffer.from("reference").toString("base64") }] })).status).toBe(202);
+      await waitForFrame(f => f.kind === "message.patch" && f.threadId === threadId && f.message.steered === "native", "native delivery", 12_000, start);
+      await waitForFrame(turnFrame(bot.id, "turn.completed"), "steered turn completes", 12_000, start);
+      const messages = frames.slice(start).filter(f => f.kind === "message" && f.threadId === threadId).map(f => f.message);
+      expect(messages.filter(m => m.role === "user" && m.text === "redirect-now")).toHaveLength(1);
+      const saved = messages.find(m => m.role === "user" && m.text === "redirect-now").attachments[0];
+      expect(await (await fetch(base + saved.url)).text()).toBe("reference");
+      const before = messages.findIndex(m => m.text === "Before correction. ");
+      const correction = messages.findIndex(m => m.text === "redirect-now");
+      expect(before).toBeGreaterThan(-1);
+      expect(before).toBeLessThan(correction);
+      const tail = messages.slice(correction + 1).filter(m => m.role === "bot" && m.kind === "text").map(m => m.text).join("");
+      expect(tail).toContain("redirect-now");
+      expect(tail).toContain("note.txt");
+      expect(tail).not.toContain("Before correction.");
+      expect(frames.slice(start).filter(turnFrame(bot.id, "turn.started"))).toHaveLength(1);
+    }
+  }, 40_000);
+
+  it("preserves a delivered correction when usage recovery switches to backup", async () => {
+    for (const room of [false, true]) {
+      const bot = await makeBot("Pilot", "steer-usage");
+      await api("PATCH", `/api/bots/${bot.id}`, { backupModelSelection: { instanceId: "happy", model: "fake-model" }, onUsageLimit: "backup" });
+      const group = room ? (await api("POST", "/api/groups", { name: "Recovery room", memberIds: [bot.id] })).body.group : undefined;
+      const threadId = group?.threadId ?? bot.threadId;
+      const route = group ? `/api/groups/${group.id}/messages` : `/api/bots/${bot.id}/messages`;
+      const start = frames.length;
+      await api("POST", route, { text: "begin" });
+      await waitForFrame(f => f.kind === "runtime" && f.event.threadId === threadId && f.event.type === "content.delta", "working", 12_000, start);
+      await api("POST", route, { text: "redirect-now", steer: true });
+      await waitForFrame(f => f.kind === "message.patch" && f.threadId === threadId && f.message.steered === "native", "delivered", 12_000, start);
+      await waitForFrame(f => f.kind === "runtime" && f.event.threadId === threadId && f.event.providerInstanceId === "happy" && f.event.type === "turn.completed", "backup completed", 12_000, start);
+      expect(frames.slice(start).filter(f => f.kind === "message" && f.threadId === threadId && f.message.text === "redirect-now")).toHaveLength(1);
+      expect(frames.slice(start).filter(turnFrame(bot.id, "turn.started"))).toHaveLength(2);
+    }
+  }, 30_000);
+
+  it("accepts successive corrections in one native turn", async () => {
+    const bot = await makeBot("Pilot", "steer-codex");
+    const start = frames.length;
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "begin" });
+    await waitForFrame(f => f.kind === "runtime" && f.event.threadId === bot.threadId && f.event.type === "content.delta", "working", 12_000, start);
+    for (const text of ["hold-for-more", "redirect-now"]) {
+      await api("POST", `/api/bots/${bot.id}/messages`, { text, steer: true });
+      await waitForFrame(f => f.kind === "message.patch" && f.threadId === bot.threadId && f.message.text === text && f.message.steered === "native", "native delivery", 12_000, start);
+    }
+    await waitForFrame(turnFrame(bot.id, "turn.completed"), "done", 12_000, start);
+    expect(frames.slice(start).filter(turnFrame(bot.id, "turn.started"))).toHaveLength(1);
+  });
+
+  it.each([false, true])("stops and redirects an unsupported provider (room=%s)", async room => {
+    const bot = await makeBot("Pilot", "slow");
+    const group = room ? (await api("POST", "/api/groups", { name: "Fallback room", memberIds: [bot.id] })).body.group : undefined;
+    const threadId = group?.threadId ?? bot.threadId;
+    const route = group ? `/api/groups/${group.id}/messages` : `/api/bots/${bot.id}/messages`;
+    const start = frames.length;
+    await api("POST", route, { text: "begin" });
+    await waitForFrame(f => f.kind === "runtime" && f.event.threadId === threadId && f.event.type === "content.delta", "working", 12_000, start);
+    await api("POST", route, { text: "redirect-now", steer: true });
+    await waitForFrame(f => f.kind === "message.patch" && f.threadId === threadId && f.message.steered === "restarted", "restart", 12_000, start);
+    await waitForFrame(f => f.kind === "runtime" && f.event.threadId === threadId && f.event.type === "turn.completed" && frames.slice(start).filter(turnFrame(bot.id, "turn.completed")).length === 2, "redirect completed", 12_000, start);
+    expect(frames.slice(start).filter(f => f.kind === "message" && f.threadId === threadId && f.message.text === "redirect-now")).toHaveLength(1);
+    expect(frames.slice(start).filter(turnFrame(bot.id, "turn.started"))).toHaveLength(2);
+  }, 30_000);
+
+  it("queues rejected native input once and respects Stop while delivery waits", async () => {
+    for (const stop of [false, true]) {
+      const bot = await makeBot("Pilot", stop ? "reject-hang" : "reject-codex");
+      const route = `/api/bots/${bot.id}/messages`;
+      const start = frames.length;
+      await api("POST", route, { text: "begin" });
+      await waitForFrame(f => f.kind === "runtime" && f.event.threadId === bot.threadId && f.event.type === "content.delta", "working", 12_000, start);
+      await api("POST", route, { text: "redirect-now", steer: true });
+      if (stop) await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await waitForFrame(f => f.kind === "message.patch" && f.threadId === bot.threadId && f.message.steered === (stop ? "cancelled" : "queued"), "delivery result", 12_000, start);
+      expect(frames.slice(start).filter(turnFrame(bot.id, "turn.started"))).toHaveLength(stop ? 1 : 2);
+      expect(frames.slice(start).filter(f => f.kind === "message" && f.threadId === bot.threadId && f.message.text === "redirect-now")).toHaveLength(1);
+    }
+  }, 30_000);
+
+  it("treats steering after a completed turn as an ordinary new request", async () => {
+    const bot = await makeBot("Pilot", "happy");
+    const start = frames.length;
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "begin" });
+    await waitForFrame(turnFrame(bot.id, "turn.completed"), "done", 12_000, start);
+    const next = frames.length;
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "late correction", steer: true })).status).toBe(202);
+    await waitForFrame(turnFrame(bot.id, "turn.completed"), "next done", 12_000, next);
+  });
 
   it("routes unmentioned messages to the room's default responder", async () => {
     const alpha = await makeBot("Alpha", "happy");

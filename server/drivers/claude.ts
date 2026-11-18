@@ -220,7 +220,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const { instanceId, config } = input;
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
-    const active = new Map<string, { stop: () => void; turnId: string; broker?: ReturnType<typeof createPermissionBroker> }>();
+    const active = new Map<string, { stop: () => void; turnId: string; steer: (text: string) => Promise<void>; broker?: ReturnType<typeof createPermissionBroker> }>();
 
     const emit = (event: RuntimeEvent) => {
       for (const l of [...listeners]) l(event);
@@ -319,7 +319,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         args.push("--allowedTools", allowed.join(","));
       }
 
-      const env: Record<string, string | undefined> = { ...process.env, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
+      const env: Record<string, string | undefined> = { ...process.env, ...input.environment, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
       // subscription users get billed pay-as-you-go if this leaks through;
       // and a nested CLI must not inherit this session's identity (agentcal)
       delete env.ANTHROPIC_API_KEY;
@@ -338,6 +338,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (settled) return;
         settled = true;
         broker?.close();
+        child.stdin.end();
         active.delete(threadId);
         emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost, failure });
       };
@@ -461,13 +462,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
 
       const stop = () => killCliTree(child);
-      active.set(threadId, { stop, turnId, broker });
+      const steer = async (text: string) => {
+        if (settled || !child.stdin.writable) throw new Error("The turn has ended");
+        const msg = { type: "user", message: { role: "user", content: text } };
+        await new Promise<void>((resolve, reject) => child.stdin.write(JSON.stringify(msg) + "\n", err => err ? reject(err) : resolve()));
+        appendNative(threadId, { dir: "out", source: "claude.sdk.message", msg });
+      };
+      child.stdin.on("error", () => {}); // write callbacks surface steering failures
+      active.set(threadId, { stop, turnId, broker, steer });
       emit({ ...base(threadId, turnId), type: "turn.started" });
 
       // prompt over stdin as a stream-json message — never argv (ARG_MAX)
       const promptMsg = { type: "user", message: { role: "user", content: turn.text } };
       child.stdin.write(JSON.stringify(promptMsg) + "\n");
-      child.stdin.end();
       appendNative(threadId, { dir: "out", source: "claude.sdk.message", msg: promptMsg });
 
       return { turnId };
@@ -506,6 +513,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         sendTurn,
         refreshUsage,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
+        steerTurn: async (threadId, text) => {
+          const turn = active.get(threadId);
+          if (!turn) throw new Error("The turn has ended");
+          await turn.steer(text);
+        },
         respondToRequest: async (threadId, requestId, decision) => {
           const broker = active.get(threadId)?.broker;
           if (!broker) throw new Error("no active turn with a permission broker on this thread");

@@ -146,6 +146,8 @@ export interface ProviderAdapter {
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;
+  /** Add input to a live turn; reject if it has already ended. */
+  steerTurn?(threadId: ThreadId, text: string): Promise<void>;
   respondToRequest(
     threadId: ThreadId,
     requestId: string,

@@ -95,6 +95,7 @@ const Transcript = memo(function Transcript({
                   title={new Date(m.at).toLocaleString()}
                 >
                   <AttachmentList attachments={m.attachments} />
+                  {m.steered && <span className="mb-1 block text-[11px] text-ink-secondary" title={m.steered === "native" ? "Picked up at the next step" : undefined}>{m.steered === "failed" ? "Correction saved · delivery failed" : m.steered === "cancelled" ? "Correction saved · delivery stopped" : m.steered === "pending" ? "Sending correction…" : m.steered === "restarted" ? "Stopped and redirected" : m.steered === "queued" ? "Sent as the next turn" : "Sent mid-turn"}</span>}
                   {m.scheduled && <span className="mb-1 flex items-center gap-1 text-[11px] text-ink-secondary"><AlarmClock size={11} /> Scheduled</span>}
                   {m.text && (user ? <ProjectMentionText text={m.text} /> : <ChatMarkdown text={m.text} />)}
                 </div>

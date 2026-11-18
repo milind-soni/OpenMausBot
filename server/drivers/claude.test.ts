@@ -88,6 +88,17 @@ posixOnly("ClaudeDriver turns (fake CLI)", () => {
     rmSync(scratch, { recursive: true, force: true });
   });
 
+  it("accepts a correction through open stdin and closes on result", async () => {
+    await create("steer");
+    await instance.adapter.sendTurn({ threadId: "t-steer", text: "start" });
+    await recorder.until(e => e.type === "content.delta");
+    await instance.adapter.steerTurn!("t-steer", "redirect-now");
+    expect(await recorder.until(e => e.type === "item.completed")).toMatchObject({ text: "Before correction. redirect-now" });
+    await recorder.until(e => e.type === "turn.completed");
+    await expect(instance.adapter.steerTurn!("t-steer", "too late")).rejects.toThrow(/ended/);
+    expect(recorder.events.filter(e => e.type === "turn.started")).toHaveLength(1);
+  });
+
   it("normalizes a full turn into the canonical event sequence", async () => {
     await create();
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-happy", text: "hi", model: "claude-sonnet-5" });

@@ -13,6 +13,8 @@
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { writeFileSync } from "node:fs";
 
+if (process.argv.includes("--version")) { process.stdout.write("fake-cli 1.0\n"); process.exit(0); }
+
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 
 const argv = process.argv.slice(2);
@@ -24,11 +26,24 @@ const argAfter = (flag: string): string | null => {
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 
 let stdin = "";
+let started = false;
+let inputBuffer = "";
 process.stdin.on("data", (c) => {
   stdin += c;
-  for (const line of String(c).split("\n")) {
+  inputBuffer += c;
+  let boundary;
+  while ((boundary = inputBuffer.indexOf("\n")) !== -1) {
+    const line = inputBuffer.slice(0, boundary);
+    inputBuffer = inputBuffer.slice(boundary + 1);
     try {
       const message = JSON.parse(line);
+      if (message.type === "user") {
+        if (!started) { started = true; run(message); }
+        else if (mode === "steer") {
+          out({ type: "assistant", message: { content: [{ type: "text", text: "Before correction. " + message.message.content }] } });
+          out({ type: "result", is_error: false });
+        }
+      }
       if (message.type === "control_request" && message.request?.subtype === "initialize") {
         const models = JSON.parse(process.env.FAKE_CLAUDE_MODELS ?? '[{"value":"default","displayName":"Default"},{"value":"sonnet","displayName":"Claude Sonnet"}]');
         out({ type: "control_response", response: { request_id: message.request_id, subtype: "success", response: { models } } });
@@ -36,8 +51,8 @@ process.stdin.on("data", (c) => {
     } catch { /* ordinary streaming prompt */ }
   }
 });
-process.stdin.on("end", () => {
-  let prompt: unknown = null;
+function run(firstPrompt: unknown) {
+  let prompt: unknown = firstPrompt;
   try {
     prompt = JSON.parse(stdin.split("\n").find((l) => l.trim()) ?? "null");
   } catch {
@@ -64,6 +79,10 @@ process.stdin.on("end", () => {
     return;
   }
 
+  if (mode === "steer") {
+    out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "Before correction. " } } });
+    return;
+  }
   if (mode === "hang") {
     // stay alive until killed — lets tests exercise interrupt + the
     // permission broker while a turn is officially in flight
@@ -101,4 +120,4 @@ process.stdin.on("end", () => {
   out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu-1", is_error: false }] } });
   out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01 });
   process.exit(0);
-});
+}

@@ -1,6 +1,6 @@
 # Implementation plan: course-correct a bot mid-response
 
-Status: **awaiting approval**
+Status: **implemented; awaiting user review (2026-11-18)**
 
 ## Objective
 
@@ -45,3 +45,12 @@ Let the user send a message while a bot is working and have the bot take it into
 - Driver unit tests: Claude stdin stays open and closes on result; Codex sends `turn/steer` with the live turn id; ACP reports no steering support.
 - Server tests with fake CLIs: DM steer, room steer of the busy bot, room message to another bot keeps cut-in, steer after the turn ended becomes a new turn.
 - Desktop QA on an isolated instance: steer a real Claude bot mid-command (cheapest model), and a Codex bot; queue with ⌥Enter still waits.
+
+## Implementation notes
+
+- Steering uses text plus the existing attachment file context; it does not resend base64 attachment data to the native stdin/RPC surface.
+- Corrections are persisted once before delivery and receive pending/native/restarted/queued/cancelled/failed states. Native refusals wait for the old turn, then deliver the saved message once. Stop cancels pending delivery.
+- Streamed text is checkpointed before the correction and on interrupted completion; the final whole-message event contributes only its unsaved remainder.
+- Room fallback preserves other saved user requests. Mentions addressing only other bots retain the room cut-in path.
+- Configured per-instance environment overrides are now honored by Claude and Codex turn processes, as ACP already does; API-key billing variables are still stripped afterwards.
+- UI verification used an isolated Electron renderer after Studio Preview failed to initialize and marked its session stopped. Alt+Enter queue, Enter fallback, tooltip and transcript label passed. A real Codex run accepted steering during `sleep 20` and answered `CORRECTED` with one start/completion. Live Claude was blocked by the account's five-hour limit; its native protocol and server tests pass against the fake CLI.

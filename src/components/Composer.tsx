@@ -56,9 +56,10 @@ export function Composer({
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers the members (Buzz rule: only mentioned bots reply).
   const busy = group ? Boolean(group.busyBotId) : Boolean(bot?.busy);
-  // rooms take the message now: the server answers it right after the
-  // current turn, ahead of any bot-to-bot handoffs. DMs still hold it here.
-  const queueLocally = busy && !group;
+  const activeBot = group ? members?.find(b => b.id === group.busyBotId) : bot;
+  const activeSelection = activeBot?.usingBackup ? activeBot.backupModelSelection ?? activeBot.modelSelection : activeBot?.modelSelection;
+  const driver = state.instances.find(i => i.instanceId === activeSelection?.instanceId)?.driverKind;
+  const nativeSteering = driver === "claudeAgent" || driver === "codex";
   const busyName = group
     ? (members?.find((b) => b.id === group.busyBotId)?.name ?? "A bot")
     : (bot?.name ?? "The bot");
@@ -248,8 +249,8 @@ export function Composer({
     }
   };
 
-  // In DMs, one message may be queued while the bot works; it auto-sends
-  // when the turn settles. Rooms send immediately to take priority over handoffs.
+  // Alt+Enter holds one message locally until the turn settles. Enter sends
+  // a correction immediately; the server owns native steering or restart.
   // The queue lives in composerDrafts and is drained by the app shell, so it
   // still sends if the user switches to another conversation meanwhile.
   const queueTarget = useMemo(() => (group ? { groupId: group.id } : { botId: bot?.id ?? "" }), [group, bot?.id]);
@@ -259,7 +260,7 @@ export function Composer({
   // the server refuses oversized bodies; catch that here so the draft stays put
   const [sizeError, setSizeError] = useState<string | null>(null);
   useEffect(() => setSizeError(null), [text, attachments]);
-  const send = () => {
+  const send = (queue = false) => {
     const t = text.trim();
     if (!t && attachments.length === 0) return;
     const currentAttachments = attachments.length > 0 ? [...attachments] : undefined;
@@ -268,17 +269,17 @@ export function Composer({
       setSizeError(tooLarge);
       return;
     }
-    if (queueLocally) {
+    if (busy && queue) {
       setQueued({ text: t, attachments: attachments });
       setText("");
       setAttachments([]);
       return;
     }
     if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, text: t, attachments: currentAttachments });
+      dispatch({ type: "sendGroup", groupId: group.id, text: t, attachments: currentAttachments, steer: busy });
       track("message_sent", { room: true, hasAttachments: Boolean(currentAttachments?.length) });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, text: t, attachments: currentAttachments });
+      dispatch({ type: "send", botId: bot.id, text: t, attachments: currentAttachments, steer: busy });
       track("message_sent", { driver: bot.modelSelection?.instanceId, hasAttachments: Boolean(currentAttachments?.length) });
     }
     setText("");
@@ -491,7 +492,7 @@ export function Composer({
             // Shift+Enter inserts a newline; plain Enter sends
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              send();
+              send(e.altKey);
             }
             if (e.key === "Escape" && recording) setRecording(false);
           }}
@@ -501,9 +502,7 @@ export function Composer({
               : isDragging
                 ? "Drop files to attach…"
                 : busy
-                  ? group
-                    ? `${busyName} is working — your message goes next`
-                    : `${busyName} is working — Enter queues your message`
+                  ? `${busyName} is working — Enter to steer, ⌥Enter to queue`
                   : group
                     ? `Message ${group.name} — @ for bots, # for projects`
                     : `Message ${bot?.name ?? ""} — # for projects`
@@ -542,15 +541,15 @@ export function Composer({
         {hasContent && <button type="button" disabled={!text.trim() || attachments.length > 0} onClick={() => setScheduleOpen(true)} aria-label="Send later…" title={attachments.length ? "Scheduled messages currently support text only" : "Send later…"} className="rounded-full p-2 text-ink-secondary hover:bg-raised disabled:opacity-40"><Clock size={16} /></button>}
         {hasContent && (
           <button
-            onClick={send}
-            aria-label={queueLocally ? "Queue message" : "Send message"}
-            title={queueLocally ? "Queue — sends when the bot finishes" : busy ? `Send — answered after ${busyName}'s turn, before any handoffs` : "Send"}
+            onClick={() => send()}
+            aria-label={busy ? "Steer bot" : "Send message"}
+            title={busy ? nativeSteering ? "Steer — picked up at the next step. Alt+Enter queues instead." : "Steer — stops the current turn and restarts with your correction. Alt+Enter queues instead." : "Send"}
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              queueLocally ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent hover:brightness-110",
+              "bg-accent hover:brightness-110",
             )}
           >
-            {queueLocally ? <Clock size={15} /> : <ArrowUp size={17} />}
+            <ArrowUp size={17} />
           </button>
         )}
         </div>

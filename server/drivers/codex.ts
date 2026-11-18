@@ -97,6 +97,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     interface Turn {
       stop: () => void;
       turnId: string;
+      steer: (text: string) => Promise<void>;
       asks: Map<string, (behavior: string, message?: string) => void>;
     }
     const active = new Map<string, Turn>();
@@ -137,7 +138,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       const turnId = newId();
 
-      const env: Record<string, string | undefined> = { ...process.env, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
+      const env: Record<string, string | undefined> = { ...process.env, ...input.environment, PATH: augmentedPath(), NPM_CONFIG_LOGLEVEL: "error" };
       // the CLI owns its own ChatGPT login; a leaked API key silently flips
       // billing to pay-as-you-go (agentcal)
       delete env.OPENAI_API_KEY;
@@ -410,11 +411,20 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         }
       });
 
-      active.set(threadId, { stop, turnId, asks });
+      let nativeThreadId: string | null = null;
+      let nativeTurnId: string | null = null;
+      let ready: Promise<void>;
+      const steer = async (text: string) => {
+        await ready;
+        if (state.settled || !nativeThreadId || !nativeTurnId) throw new Error("The turn has ended or is not ready");
+        await request("turn/steer", { threadId: nativeThreadId, expectedTurnId: nativeTurnId, input: [{ type: "text", text }] });
+      };
+      child.stdin.on("error", () => {});
+      active.set(threadId, { stop, turnId, asks, steer });
       emit({ ...base(threadId, turnId), type: "turn.started" });
 
       // handshake + kickoff; any refusal surfaces as failure, not a hang
-      (async () => {
+      ready = (async () => {
         try {
           await request("initialize", { clientInfo: { name: "gerer-build-studio", version: "1" } });
           send({ jsonrpc: "2.0", method: "initialized", params: {} });
@@ -443,10 +453,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             startedModel = started?.model ?? null;
           }
           emit({ ...base(threadId, turnId), type: "session.started", sessionId: codexThreadId, model: startedModel ?? turn.model ?? null });
-          await request("turn/start", {
+          nativeThreadId = codexThreadId;
+          const startedTurn = await request("turn/start", {
             threadId: codexThreadId,
             input: [{ type: "text", text: turn.system ? `${turn.system}\n\n${turn.text}` : turn.text }],
           });
+          nativeTurnId = startedTurn?.turn?.id ?? null;
         } catch (e) {
           if (!state.settled) {
             emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
@@ -482,6 +494,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         sendTurn,
         refreshUsage,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
+        steerTurn: async (threadId, text) => {
+          const turn = active.get(threadId);
+          if (!turn) throw new Error("The turn has ended");
+          await turn.steer(text);
+        },
         respondToRequest: async (threadId, requestId, decision) => {
           const turn = active.get(threadId);
           const finish = turn?.asks.get(requestId);

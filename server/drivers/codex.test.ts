@@ -71,6 +71,26 @@ posixOnly("CodexDriver turns (fake app-server)", () => {
     rmSync(scratch, { recursive: true, force: true });
   });
 
+  it("steers the provider-native turn id and surfaces rejected input", async () => {
+    await create({ mode: "steer" });
+    const dump = join(scratch, "steer.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-steer", text: "start" });
+    await recorder.until(e => e.type === "content.delta");
+    await instance.adapter.steerTurn!("t-steer", "redirect-now");
+    await recorder.until(e => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).calls.find((c: any) => c.method === "turn/steer").params).toEqual({ threadId: "codex-thread-1", expectedTurnId: "native-turn-1", input: [{ type: "text", text: "redirect-now" }] });
+    await expect(instance.adapter.steerTurn!("t-steer", "too late")).rejects.toThrow(/ended/);
+  });
+
+  it("rejects a steering RPC refusal without claiming delivery", async () => {
+    await create({ mode: "steer-reject" });
+    await instance.adapter.sendTurn({ threadId: "t-reject", text: "start" });
+    await recorder.until(e => e.type === "content.delta");
+    await expect(instance.adapter.steerTurn!("t-reject", "redirect-now")).rejects.toThrow(/already ended/);
+    await recorder.until(e => e.type === "turn.completed");
+  });
+
   it("reads idle usage without creating a thread or sending a model prompt", async () => {
     await create();
     const dump = join(scratch, "usage.json");

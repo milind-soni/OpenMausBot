@@ -311,6 +311,7 @@ function Bubble({
           {user ? (
             <>
               <AttachmentList attachments={message.attachments} />
+              {message.steered && <span className="mb-1 block text-[11px] text-ink-secondary" title={message.steered === "native" ? "Picked up at the next step" : undefined}>{message.steered === "failed" ? "Correction saved · delivery failed" : message.steered === "cancelled" ? "Correction saved · delivery stopped" : message.steered === "pending" ? "Sending correction…" : message.steered === "restarted" ? "Stopped and redirected" : message.steered === "queued" ? "Sent as the next turn" : "Sent mid-turn"}</span>}
               {message.scheduled && <span className="mb-1 flex items-center gap-1 text-[11px] text-ink-secondary"><AlarmClock size={11} /> Scheduled</span>}
               {text && (
                 <div

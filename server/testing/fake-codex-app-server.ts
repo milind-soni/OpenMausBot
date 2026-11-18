@@ -11,6 +11,8 @@
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { readFileSync, writeFileSync } from "node:fs";
 
+if (process.argv.includes("--version")) { process.stdout.write("fake-cli 1.0\n"); process.exit(0); }
+
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
 const calls: Array<{ method: string; params: unknown }> = [];
 let decision: unknown = null;
@@ -28,7 +30,7 @@ const dump = () => {
 };
 
 const finishTurn = () => {
-  if (mode === "usage-limit") {
+  if (mode === "usage-limit" || mode === "steer-usage") {
     notify("account/rateLimits/updated", { rateLimits: { limitId: "codex", primary: { usedPercent: 100, resetsAt: 4102444800, windowDurationMins: 300 } } });
     notify("error", { error: { message: "Usage is used up", codexErrorInfo: "usageLimitExceeded" }, willRetry: false });
     dump();
@@ -105,8 +107,27 @@ process.stdin.on("data", (chunk) => {
       case "thread/start":
         out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model" } });
         break;
+      case "turn/steer":
+        dump();
+        if (mode === "steer-reject" || mode === "steer-reject-hang") {
+          out({ id: msg.id, error: { code: -1, message: "Turn already ended" } });
+          if (mode !== "steer-reject-hang") finishTurn();
+        } else {
+          out({ id: msg.id, result: { turnId: "native-turn-1" } });
+          if (mode === "steer-usage") { setTimeout(finishTurn, 100); break; }
+          if (msg.params.input[0].text === "hold-for-more") break;
+          notify("item/agentMessage/delta", { itemId: "m1", delta: msg.params.input[0].text });
+          notify("item/completed", { item: { id: "m1", type: "agentMessage", text: "Before correction. " + msg.params.input[0].text } });
+          notify("turn/completed", { turn: { status: "completed" } });
+        }
+        break;
       case "turn/start":
-        out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
+        out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: "native-turn-1" } } });
+        if (mode === "steer-reject" && msg.params.input[0].text.includes("redirect-now")) { finishTurn(); break; }
+        if (mode === "steer" || mode === "steer-reject" || mode === "steer-reject-hang" || mode === "steer-usage") {
+          notify("item/agentMessage/delta", { itemId: "m1", delta: "Before correction. " });
+          break;
+        }
         notify("item/started", { item: { id: "i1", type: "commandExecution", command: "ls -la" } });
         if (mode === "approval") {
           out({ jsonrpc: "2.0", id: 100, method: "execCommandApproval", params: { command: "rm -rf scratch" } });

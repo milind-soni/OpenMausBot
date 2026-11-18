@@ -57,6 +57,7 @@ export interface Message {
   png?: string;
   mime?: string;
   scheduled?: { scheduleId: string; deliveryId: string };
+  steered?: "pending" | "native" | "restarted" | "queued" | "cancelled" | "failed";
   at: number;
   /** the message this one follows; null = thread root. Edited messages
    * share a parentId with the version they replace — that's a fork. */

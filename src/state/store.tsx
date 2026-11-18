@@ -58,6 +58,7 @@ export interface Message {
   png?: string;
   mime?: string;
   scheduled?: { scheduleId: string; deliveryId: string };
+  steered?: "pending" | "native" | "restarted" | "queued" | "cancelled" | "failed";
   at: number;
   /** the message this one follows; null = thread root. Edited messages
    * share a parentId with the version they replace — that's a fork. */
@@ -235,7 +236,7 @@ export type Action =
   | { type: "groupPatched"; group: Partial<Group> & { id: string } }
   | { type: "groupDeleted"; groupId: string }
   | { type: "createGroup"; memberIds: string[]; name?: string }
-  | { type: "sendGroup"; groupId: string; text: string; attachments?: Attachment[] }
+  | { type: "sendGroup"; groupId: string; text: string; attachments?: Attachment[]; steer?: boolean }
   | { type: "patchGroup"; groupId: string; patch: Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "handoffs" | "defaultResponderId" | "maxHops" | "turnIdleMinutes" | "projectId">> }
   | { type: "deleteGroup"; groupId: string }
   | { type: "clearChat"; threadId: string }
@@ -246,7 +247,7 @@ export type Action =
   | { type: "instances"; instances: InstanceInfo[] }
   | { type: "configStatus"; config: ConfigStatus }
   | { type: "select"; id: string }
-  | { type: "send"; botId: string; text: string; attachments?: Attachment[] }
+  | { type: "send"; botId: string; text: string; attachments?: Attachment[]; steer?: boolean }
   | { type: "editMessage"; botId: string; messageId: string; text: string; attachments?: Attachment[] }
   | { type: "switchBranch"; botId: string; messageId: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
@@ -893,7 +894,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "send":
           api(`/api/bots/${action.botId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text, attachments: action.attachments }),
+            body: JSON.stringify({ text: action.text, attachments: action.attachments, steer: action.steer }),
           }).catch(showError);
           break;
         case "editMessage":
@@ -1008,7 +1009,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "sendGroup":
           api(`/api/groups/${action.groupId}/messages`, {
             method: "POST",
-            body: JSON.stringify({ text: action.text, attachments: action.attachments }),
+            body: JSON.stringify({ text: action.text, attachments: action.attachments, steer: action.steer }),
           }).catch(showError);
           break;
         case "patchGroup":

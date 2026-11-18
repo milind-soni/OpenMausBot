@@ -268,6 +268,17 @@ function deleteThreadLogs(threadId: string) {
 const toolMessageByItem = new Map<string, string>(); // itemId -> messageId
 const askMessageByRequest = new Map<string, string>(); // requestId -> messageId
 const autoApprovedRequests = new Set<string>();
+// Persist text before a correction; the eventual whole-message event then
+// contributes only the remainder, preserving order without repeating text.
+const liveText = new Map<string, { text: string; saved: number }>();
+const liveTurnIds = new Map<string, string>();
+function checkpointText(threadId: string) {
+  const partial = liveText.get(threadId);
+  if (!partial || partial.saved >= partial.text.length) return;
+  const message = store.appendMessage(threadId, { role: "bot", kind: "text", text: partial.text.slice(partial.saved), from: groupSpeakers.get(threadId) });
+  partial.saved = partial.text.length;
+  broadcast({ kind: "message", threadId, message });
+}
 const requestKey = (threadId: string, requestId: string) => `${threadId}:${requestId}`;
 
 // Group threads: the fold needs to know WHO is talking — the turn engine
@@ -300,6 +311,17 @@ bus.subscribe((event: RuntimeEvent) => {
   };
 
   switch (event.type) {
+    case "turn.started":
+      if (event.turnId) liveTurnIds.set(event.threadId, event.turnId);
+      liveText.delete(event.threadId);
+      break;
+    case "content.delta":
+      if (event.streamKind === "assistant_text") {
+        const partial = liveText.get(event.threadId) ?? { text: "", saved: 0 };
+        partial.text += event.delta;
+        liveText.set(event.threadId, partial);
+      }
+      break;
     case "session.started":
       if (bot && event.sessionId && event.providerInstanceId) {
         store.setResumeCursor(bot.id, event.providerInstanceId, event.sessionId);
@@ -307,7 +329,11 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "item.completed":
       if (event.itemType === "assistant_text") {
-        pushMessage({ role: "bot", kind: "text", text: event.text });
+        const partial = liveText.get(event.threadId);
+        const text = partial?.saved && event.text.startsWith(partial.text.slice(0, partial.saved))
+          ? event.text.slice(partial.saved) : event.text;
+        liveText.delete(event.threadId);
+        if (text) pushMessage({ role: "bot", kind: "text", text });
       } else if (event.itemType === "tool" && event.itemId) {
         const messageId = toolMessageByItem.get(event.itemId);
         if (messageId) {
@@ -363,12 +389,15 @@ bus.subscribe((event: RuntimeEvent) => {
       pushMessage({ role: "bot", kind: "activity", tool: { name: event.failure?.kind === "usage_limit" ? "This AI app’s usage ran out." : `error: ${event.message.slice(0, 160)}`, ok: false } });
       break;
     case "turn.completed": {
+      checkpointText(event.threadId);
+      liveText.delete(event.threadId);
+      liveTurnIds.delete(event.threadId);
       if (bot) {
         const context = turnContexts.get(event.threadId);
         turnContexts.delete(event.threadId);
         activeSelections.delete(event.threadId);
         queueMicrotask(() => void (async () => {
-          if (!event.ok && event.failure && context) await handleUsageFailure(bot.id, context, event.failure);
+          if (!event.ok && event.failure && context && !steeringDeliveries.has(event.threadId)) await handleUsageFailure(bot.id, context, event.failure);
           else if (event.ok) schedules.cancelResume(event.threadId);
           await scheduler.wake();
         })().catch(e => console.error("schedule continuation:", e instanceof Error ? e.message : "failed")));
@@ -848,6 +877,7 @@ async function stopRoomActivity(group: GroupRecord, botId: string): Promise<"ok"
   const bot = store.bot(botId);
   const instance = registry.get((activeSelections.get(group.threadId) ?? bot?.modelSelection)?.instanceId ?? "");
   if (!instance) return "no-provider";
+  cancelSteering(group.threadId);
   stoppedConversations.add(group.threadId); schedules.cancelResume(group.threadId);
   await instance.adapter.interruptTurn(group.threadId).catch(() => {});
   return "ok";
@@ -1018,10 +1048,15 @@ async function runGroupMemberTurn(
       });
   });
   activeSelections.delete(group.threadId);
-  if (!timedOut && !stoppedConversations.has(group.threadId) && usageFailure && latestUserMessage) {
+  const newestUser = [...store.messagesFor(group.threadId)].reverse().find(m => m.role === "user");
+  const correction = newestUser?.steered === "native" ? newestUser : undefined;
+  const recoveryMessage = correction ?? latestUserMessage;
+  if (!timedOut && !stoppedConversations.has(group.threadId) && usageFailure && recoveryMessage && !steeringDeliveries.has(group.threadId)
+    && (userMessageCount() === userMessagesAtStart || correction)) {
     const resume = roomResumes.get(group.threadId);
-    const context: ActiveTurnContext = retry?.context ?? { botId, message: latestUserMessage, request: resume?.request ?? latestUserText,
-      originalMessageId: resume?.userMessageId ?? latestUserMessage.id, attempt: resume?.attempt ?? 0, selection, usedBackup: selection.instanceId !== bot.modelSelection.instanceId };
+    const context: ActiveTurnContext = correction ? { botId, message: correction, request: correction.text ?? "", originalMessageId: correction.id, attempt: 0, selection, usedBackup: false }
+      : retry?.context ?? { botId, message: recoveryMessage, request: resume?.request ?? latestUserText,
+      originalMessageId: resume?.userMessageId ?? recoveryMessage.id, attempt: resume?.attempt ?? 0, selection, usedBackup: selection.instanceId !== bot.modelSelection.instanceId };
     if (await handleUsageFailure(botId, { ...context, selection, usedBackup: Boolean(retry) || context.usedBackup }, usageFailure, groupId, { hop, spoken, epoch })) return;
   }
   if (timedOut) {
@@ -1089,15 +1124,17 @@ async function runGroupMemberTurn(
 }
 
 const roomResumes = new Map<string, ResumeContext>();
-function startGroupTurn(groupId: string, text: string, attachments?: Attachment[], options?: { scheduled?: Message["scheduled"]; resume?: ResumeContext }) {
+function startGroupTurn(groupId: string, text: string, attachments?: Attachment[], options?: { scheduled?: Message["scheduled"]; resume?: ResumeContext; userMessage?: Message; responderId?: string }) {
   const group = store.group(groupId);
   if (!group) throw Object.assign(new Error("no such group"), { status: 404 });
   if (!options?.resume) { schedules.cancelResume(group.threadId); roomResumes.delete(group.threadId); }
   else roomResumes.set(group.threadId, options.resume);
   stoppedConversations.delete(group.threadId);
-  const savedAttachments = saveAttachmentsToWorkspace(group.threadId, attachments);
-  const userMessage = store.appendMessage(group.threadId, { role: "user", kind: "text", text, scheduled: options?.scheduled, attachments: savedAttachments });
-  broadcast({ kind: "message", threadId: group.threadId, message: userMessage });
+  if (!options?.userMessage) {
+    const savedAttachments = saveAttachmentsToWorkspace(group.threadId, attachments);
+    const userMessage = store.appendMessage(group.threadId, { role: "user", kind: "text", text, scheduled: options?.scheduled, attachments: savedAttachments });
+    broadcast({ kind: "message", threadId: group.threadId, message: userMessage });
+  }
 
   const members = group.memberIds
     .map((id) => store.bot(id))
@@ -1107,7 +1144,7 @@ function startGroupTurn(groupId: string, text: string, attachments?: Attachment[
   // where the single bot obviously IS the addressee, or a room with a
   // default responder
   const fallback = members.length === 1 ? members : members.filter((b) => b.id === group.defaultResponderId);
-  let responders = options?.resume ? members.filter(b => b.id === options.resume!.botId) : mentioned.length ? mentioned : fallback;
+  let responders = options?.responderId ? members.filter(b => b.id === options.responderId) : options?.resume ? members.filter(b => b.id === options.resume!.botId) : mentioned.length ? mentioned : fallback;
   // bot⇄bot channels: chipping in without a tag addresses the last speaker
   if (!responders.length && group.dm) {
     const lastSpeakerId = [...store.messagesFor(group.threadId)]
@@ -1139,6 +1176,77 @@ function startGroupTurn(groupId: string, text: string, attachments?: Attachment[
     void scheduler.wake();
   });
   groupQueues.set(groupId, settled);
+}
+
+// Corrections are saved before delivery, and serialized per conversation.
+const steeringDeliveries = new Map<string, Promise<void>>();
+const steeringEpoch = new Map<string, number>();
+function cancelSteering(threadId: string) { steeringEpoch.set(threadId, (steeringEpoch.get(threadId) ?? 0) + 1); }
+function steerMessage(botId: string, text: string, attachments?: Attachment[], groupId?: string): boolean {
+  const bot = store.bot(botId);
+  const group = groupId ? store.group(groupId) : undefined;
+  if (!bot || (groupId && !group)) return false;
+  const threadId = group?.threadId ?? bot.threadId;
+  const busy = () => groupId ? Boolean(store.group(groupId)?.busyBotId) : Boolean(store.bot(botId)?.busy);
+  if (!busy()) return false;
+  const expectedTurn = liveTurnIds.get(threadId);
+  const epoch = steeringEpoch.get(threadId) ?? 0;
+  checkpointText(threadId);
+  const message = store.appendMessage(threadId, { role: "user", kind: "text", text, steered: "pending", attachments: saveAttachmentsToWorkspace(threadId, attachments) });
+  broadcast({ kind: "message", threadId, message });
+  const patch = (steered: Message["steered"]) => {
+    const updated = store.patchMessage(threadId, message.id, { steered });
+    if (updated) broadcast({ kind: "message.patch", threadId, message: updated });
+  };
+  const previous = steeringDeliveries.get(threadId) ?? Promise.resolve();
+  let unsubscribe = () => {};
+  const delivery = previous.then(async () => {
+    if ((steeringEpoch.get(threadId) ?? 0) !== epoch) { patch("cancelled"); return; }
+    const selection = activeSelections.get(threadId) ?? bot.modelSelection;
+    const adapter = registry.get(selection.instanceId)?.adapter;
+    const sameTurn = busy() && expectedTurn && expectedTurn === liveTurnIds.get(threadId);
+    if (sameTurn && adapter?.steerTurn) {
+      try {
+        const context = turnContexts.get(threadId);
+        if (context) { context.message = message; context.request = text; context.originalMessageId = message.id; }
+        await adapter.steerTurn(threadId, [text, formatAttachmentContext(message.attachments)].filter(Boolean).join("\n\n"));
+        patch("native");
+        return;
+      } catch { /* the turn may have ended; deliver as a new turn below */ }
+    }
+    const restart = Boolean(sameTurn && !adapter?.steerTurn);
+    // Subscribe before interrupting: some providers complete synchronously.
+    const ended = busy() ? new Promise<void>(resolve => {
+      unsubscribe = bus.subscribe(event => {
+        if (event.threadId === threadId && event.type === "turn.completed") { unsubscribe(); resolve(); }
+      });
+    }) : Promise.resolve();
+    if (restart) {
+      stoppedConversations.add(threadId);
+      await adapter?.interruptTurn(threadId);
+    }
+    await ended;
+    unsubscribe();
+    if ((steeringEpoch.get(threadId) ?? 0) !== epoch) { patch("cancelled"); return; }
+    if (groupId) {
+      await groupQueues.get(groupId);
+      if ((steeringEpoch.get(threadId) ?? 0) !== epoch) { patch("cancelled"); return; }
+      if (!store.group(groupId)?.memberIds.includes(botId)) throw new Error("The addressed bot is no longer in this room");
+      startGroupTurn(groupId, text, undefined, { userMessage: message, responderId: botId });
+    } else {
+      await startTurn(botId, text, { userMessage: message });
+    }
+    patch(restart ? "restarted" : "queued");
+  }).catch(error => {
+    patch("failed");
+    const failure = store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `Your correction is saved but could not be delivered: ${error instanceof Error ? error.message.slice(0, 140) : "try again"}`, ok: false } });
+    broadcast({ kind: "message", threadId, message: failure });
+  }).finally(() => {
+    unsubscribe();
+    if (steeringDeliveries.get(threadId) === delivery) steeringDeliveries.delete(threadId);
+  });
+  steeringDeliveries.set(threadId, delivery);
+  return true;
 }
 
 function configStatus() {
@@ -1804,6 +1912,13 @@ const server = createServer(async (req, res) => {
       if (!text && (!attachments || attachments.length === 0)) {
         return json(res, 400, { error: "text or attachment required" });
       }
+      const group = store.group(m[1]);
+      const busyBot = group?.busyBotId ? store.bot(group.busyBotId) : undefined;
+      const members = group?.memberIds.map(id => store.bot(id)).filter((b): b is NonNullable<typeof b> => Boolean(b)) ?? [];
+      const targets = mentionedBots(text, members);
+      if (body.steer === true && busyBot && (!targets.length || targets.some(b => b.id === busyBot.id)) && steerMessage(busyBot.id, text, attachments, m[1])) {
+        return json(res, 202, { ok: true });
+      }
       startGroupTurn(m[1], text, attachments);
       return json(res, 202, { ok: true });
     }
@@ -1814,6 +1929,7 @@ const server = createServer(async (req, res) => {
       const busy = group.busyBotId ? store.bot(group.busyBotId) : undefined;
       if (busy) previewTesting.stopOwner(busy.id);
       const instance = busy ? registry.get((activeSelections.get(group.threadId) ?? busy.modelSelection).instanceId) : undefined;
+      cancelSteering(group.threadId);
       stoppedConversations.add(group.threadId); schedules.cancelResume(group.threadId);
       groupQueueEpoch.set(group.id, (groupQueueEpoch.get(group.id) ?? 0) + 1);
       store.patchGroup(group.id, { queuedBotIds: [] });
@@ -1961,6 +2077,7 @@ const server = createServer(async (req, res) => {
       if (!text && (!attachments || attachments.length === 0)) {
         return json(res, 400, { error: "text or attachment required" });
       }
+      if (body.steer === true && steerMessage(m[1], text, attachments)) return json(res, 202, { ok: true });
       await startTurn(m[1], text, { attachments });
       return json(res, 202, { ok: true });
     }
@@ -2058,6 +2175,7 @@ const server = createServer(async (req, res) => {
       if (!bot) return json(res, 404, { error: "no such bot" });
       const instance = registry.get((activeSelections.get(bot.threadId) ?? bot.modelSelection).instanceId);
       previewTesting.stopOwner(bot.id);
+      cancelSteering(bot.threadId);
       stoppedConversations.add(bot.threadId); schedules.cancelResume(bot.threadId); turnContexts.delete(bot.threadId);
       if (!instance?.adapter.hasSession(bot.threadId)) { activeSelections.delete(bot.threadId); store.patchBot(bot.id, { busy: false }); publishBot(bot.id); void scheduler.wake(); }
       await instance?.adapter.interruptTurn(bot.threadId);
