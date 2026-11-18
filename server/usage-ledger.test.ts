@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "./testing/cleanup.ts";
 import {
   appendUsage,
@@ -85,6 +85,62 @@ describe("usage ledger files", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ input: 0, output: 12, cachedInput: 0, costUsd: null });
     expect(readUsage(dataDir, { from: new Date("2026-09-04T00:00:00Z"), to: new Date("2026-09-30T23:59:59Z") })).toHaveLength(0);
+  });
+
+  it("reuses settled immutable rows but sees appends, rewrites, replacements and deletion", async () => {
+    const at = "2026-09-03T10:00:00.000Z";
+    const range = { from: new Date("2026-09-01"), to: new Date("2026-09-30") };
+    const file = usageFileFor(dataDir, new Date(at));
+    await appendUsage(dataDir, row({ at, botId: "b1" }));
+    const wallClock = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => wallClock() + 3_000);
+    try {
+      const first = readUsage(dataDir, range)[0]!;
+      expect(readUsage(dataDir, range)[0]).toBe(first);
+      expect(Object.isFrozen(first.trigger)).toBe(true);
+
+      clock.mockImplementation(wallClock);
+      void appendUsage(dataDir, row({ at, botId: "b2" }));
+      await flushUsageLedger(dataDir);
+      expect(readUsage(dataDir, range).map((record) => record.botId)).toEqual(["b1", "b2"]);
+
+      clock.mockImplementation(() => wallClock() + 3_000);
+      expect(readUsage(dataDir, range)).toHaveLength(2);
+      clock.mockImplementation(wallClock);
+      writeFileSync(file, readFileSync(file, "utf8").replace('"b1"', '"b3"'));
+      expect(readUsage(dataDir, range).map((record) => record.botId)).toEqual(["b3", "b2"]);
+
+      clock.mockImplementation(() => wallClock() + 3_000);
+      expect(readUsage(dataDir, range)).toHaveLength(2);
+      writeFileSync(file + ".new", JSON.stringify(row({ at, botId: "b4" })));
+      renameSync(file + ".new", file);
+      expect(readUsage(dataDir, range).map((record) => record.botId)).toEqual(["b4"]);
+      unlinkSync(file);
+      expect(readUsage(dataDir, range)).toEqual([]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("evicts the least recently read month when the snapshot cache fills", async () => {
+    const ranges = Array.from({ length: 5 }, (_, index) => {
+      const month = String(index + 1).padStart(2, "0");
+      return { from: new Date(`2026-${month}-01`), to: new Date(`2026-${month}-02`) };
+    });
+    for (const { from } of ranges) await appendUsage(dataDir, row({ at: from.toISOString() }));
+    const settled = Date.now() + 60_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(settled);
+    try {
+      const firstFour = ranges.slice(0, 4).map((range) => readUsage(dataDir, range)[0]);
+      expect(readUsage(dataDir, ranges[0]!)[0]).toBe(firstFour[0]);
+      readUsage(dataDir, ranges[4]!);
+      expect(readUsage(dataDir, ranges[0]!)[0]).toBe(firstFour[0]);
+      const reread = readUsage(dataDir, ranges[1]!)[0];
+      expect(reread).toEqual(firstFour[1]);
+      expect(reread).not.toBe(firstFour[1]);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("keeps a full disk or a missing directory from failing the turn", async () => {

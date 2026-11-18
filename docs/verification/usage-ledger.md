@@ -121,6 +121,23 @@ directory never failing the turn, range parsing, every grouping, spreadsheet
 formula neutralisation in the CSV, the localized person labels, and the admin
 scope on both routes.
 
+## Read performance
+
+```sh
+node --experimental-strip-types scripts/bench-usage-ledger.ts
+```
+
+The benchmark seeds 40,000 synthetic rows in a disposable server and times the
+two Usage group requests together. It reports the first pair, the median of
+nine repeated pairs, server RSS on macOS/Linux, and the first pair after an
+append. Each response must account for every expected row.
+
+The server can reuse parsed rows for up to four settled month files within a
+32 MiB estimated cache budget (file bytes plus an allowance per parsed row).
+Files changed in the last two seconds bypass the cache. That keeps the next
+read fresh after appends or replacements, including during active turn traffic.
+The benchmark's repeated pairs measure a stable ledger.
+
 ## Gotchas
 
 - Rows are appended when `turn.completed` folds, whether the turn succeeded

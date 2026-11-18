@@ -1,6 +1,6 @@
 // Append-only usage rows under <data>/usage/ (0600): bookkeeping never fails the turn, and rows never carry message text.
 import { personOf } from "./usage-attribution.ts";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { TraceParent, TraceStatus, TraceUsageStatus } from "../shared/usage-trace.ts";
@@ -172,26 +172,86 @@ export function monthsBetween(from: Date, to: Date): string[] {
   return keys;
 }
 
-export function readUsage(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
-  const rows: UsageRow[] = [];
+const MAX_CACHED_MONTHS = 4;
+const MAX_SNAPSHOT_WEIGHT = 32 * 1024 * 1024;
+type DatedRow = { at: number; row: Readonly<UsageRow> };
+const monthSnapshots = new Map<string, { stamp: string; weight: number; rows: DatedRow[] }>();
+
+function settledMonth(path: string) {
+  try {
+    const file = statSync(path, { bigint: true });
+    if (!file.isFile() || file.size > MAX_SNAPSHOT_WEIGHT) return null;
+    // Coarse file timestamps can miss rewrites within the same tick.
+    if (Date.now() - Math.max(Number(file.mtimeMs), Number(file.ctimeMs)) < 2_000) return null;
+    return { bytes: Number(file.size), stamp: `${file.dev}:${file.ino}:${file.size}:${file.mtimeNs}:${file.ctimeNs}` };
+  } catch {
+    return null;
+  }
+}
+
+function freezeRows(rows: DatedRow[]): void {
+  for (const { row } of rows) {
+    const pending: object[] = [row];
+    while (pending.length > 0) {
+      const value = pending.pop()!;
+      for (const child of Object.values(value)) {
+        if (child && typeof child === "object") pending.push(child);
+      }
+      Object.freeze(value);
+    }
+  }
+}
+
+function readMonth(path: string): DatedRow[] {
+  const before = settledMonth(path);
+  const cached = monthSnapshots.get(path);
+  monthSnapshots.delete(path);
+  if (cached && before?.stamp === cached.stamp) {
+    monthSnapshots.set(path, cached);
+    return cached.rows;
+  }
+
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return [];
+  }
+  const rows: DatedRow[] = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try {
+      const row: unknown = JSON.parse(line);
+      if (!isUsageRow(row)) continue;
+      const at = Date.parse(row.at);
+      if (Number.isFinite(at)) rows.push({ at, row });
+    } catch {
+    }
+  }
+  if (before && settledMonth(path)?.stamp === before.stamp) {
+    const weight = before.bytes + rows.length * 256;
+    if (weight <= MAX_SNAPSHOT_WEIGHT) {
+      freezeRows(rows);
+      monthSnapshots.set(path, { stamp: before.stamp, weight, rows });
+      let total = 0;
+      for (const entry of monthSnapshots.values()) total += entry.weight;
+      for (const [oldest, entry] of monthSnapshots) {
+        if (monthSnapshots.size <= MAX_CACHED_MONTHS && total <= MAX_SNAPSHOT_WEIGHT) break;
+        monthSnapshots.delete(oldest);
+        total -= entry.weight;
+      }
+    }
+  }
+  return rows;
+}
+
+export function readUsage(dataDir: string, range: { from: Date; to: Date }): Readonly<UsageRow>[] {
+  const rows: Readonly<UsageRow>[] = [];
   const from = range.from.getTime();
   const to = range.to.getTime();
   for (const key of monthsBetween(range.from, range.to)) {
-    let text: string;
-    try {
-      text = readFileSync(join(dataDir, DIR, `${key}.jsonl`), "utf8");
-    } catch {
-      continue;
-    }
-    for (const line of text.split("\n")) {
-      if (!line) continue;
-      try {
-        const value: unknown = JSON.parse(line);
-        if (!isUsageRow(value)) continue;
-        const at = Date.parse(value.at);
-        if (at >= from && at <= to) rows.push(value);
-      } catch {
-      }
+    for (const { at, row } of readMonth(join(dataDir, DIR, `${key}.jsonl`))) {
+      if (at >= from && at <= to) rows.push(row);
     }
   }
   return rows;
