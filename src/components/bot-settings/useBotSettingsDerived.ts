@@ -37,6 +37,7 @@ export type BotPatch = Partial<
     | "teamFilesEdit"
     | "toolsOff"
     | "voice"
+    | "liveVoice"
     | "chiefOfStaff"
     | "managedSections"
     | "composio"

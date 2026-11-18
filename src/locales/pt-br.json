@@ -918,6 +918,8 @@
   "voice.yourVoice": "Sua voz de {provider}",
   "voice.usesYours": "Este bot fala com sua voz do {provider}. Escolha outra acima para dar a ele uma voz própria.",
   "voice.usesOwn": "Este bot fala com a própria voz.",
+  "voice.liveCall.title": "Voz nas chamadas ao vivo",
+  "voice.liveCall.help": "As chamadas ao vivo usam vozes próprias, separadas da voz de leitura acima.",
   "voice.notifications.title": "Notificações",
   "voice.notifications.help": "Receba uma notificação quando este agente terminar ou precisar de você",
   "voice.notifications.label": "Notificações do agente",
