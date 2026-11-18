@@ -200,6 +200,33 @@ describe("export", () => {
     expect(readdirSync(join(out, firstFolders[0]!))).toEqual(["notes.txt"]);
   });
 
+  it("keeps a trailing standalone file when forced exports retain report notes", async () => {
+    const out = join(dir, "report-force-standalone");
+    const first = await exportReports(out, false, "last");
+    expect(first.code).toBe(0);
+    const firstFolders = checkReportFiles(out, first.result);
+    const original = first.result.files.find((file: { link: string }) => file.link === "plain/report");
+    expect(original.file).toBe("files/conversation-lead-thr/report (3)");
+    const notes = join(out, firstFolders[0]!, "notes.txt");
+    writeFileSync(notes, "Keep these notes");
+
+    const updated = await exportReports(out, true, "last");
+    expect(updated.code, JSON.stringify(updated.result)).toBe(0);
+    const nextFolders = checkReportFiles(out, updated.result);
+    expect(nextFolders).not.toContain(firstFolders[0]);
+    const standalone = updated.result.files.find((file: { link: string }) => file.link === "plain/report");
+    expect(standalone.file).toBe("files/conversation-lead-thr/report (4)");
+    expect(readFileSync(join(out, standalone.file), "utf8")).toBe("A standalone report");
+    expect(readFileSync(notes, "utf8")).toBe("Keep these notes");
+    expect(readdirSync(join(out, firstFolders[0]!))).toEqual(["notes.txt"]);
+
+    const again = await exportReports(out, true, "last");
+    expect(again.code).toBe(0);
+    expect(checkReportFiles(out, again.result)).toEqual(nextFolders);
+    expect(again.result.files.find((file: { link: string }) => file.link === "plain/report").file).toBe(standalone.file);
+    expect(readFileSync(notes, "utf8")).toBe("Keep these notes");
+  });
+
   it("writes the job, every transcript, the linked files and folders and the screens, within the byte limit", async () => {
     const out = join(dir, "first");
     const { code, result } = await run(["export", "--thread", LEAD, "--out", out, "--max-bytes", "2KB", "--json"]);

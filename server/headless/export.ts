@@ -49,7 +49,7 @@ function unused(dir: string, name: string, taken: Set<string>): string {
   const ext = extname(name);
   const stem = name.slice(0, name.length - ext.length);
   let candidate = name;
-  for (let n = 2; taken.has(join(dir, candidate)); n++) candidate = `${stem} (${n})${ext}`;
+  for (let n = 2; taken.has(join(dir, candidate)) || existsSync(join(dir, candidate)); n++) candidate = `${stem} (${n})${ext}`;
   taken.add(join(dir, candidate));
   return candidate;
 }
