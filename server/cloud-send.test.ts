@@ -93,6 +93,15 @@ describe("a bot sent from the person's other computer keeps its id", () => {
     expect(keptBotIds({ threadId: "thread-0001" }, store)).toHaveProperty("error");
   });
 
+  it("refuses an id shaped like another place's address, so a bot here is never also an address", () => {
+    // bot-link/protocol.ts addresses a bot of another place as `link-<that place's key>-<its id there>`.
+    for (const id of ["link-0123abcd-local-writer", "LINK-0123abcd-local-writer", "Link-0123abcd-writer"]) {
+      expect(keptBotIds({ id }, store), id).toEqual({ error: "id must not begin with \"link-\": that is how a bot in another place is addressed here" });
+    }
+    // The reserved shape only: an id that merely contains or ends in it is taken as usual.
+    for (const id of ["my-link-0001", "linker-00001", "bot-link-0001"]) expect(keptBotIds({ id }, store), id).toEqual({ id });
+  });
+
   it("refuses an id that differs from one here only by case, so no case-variant twin can be brought in beside a bot", () => {
     const here = { bot: () => null, botByThread: () => null, groupByThread: () => undefined, bots: [{ id: "ember-0001-4eea-ac52" }] };
     expect(keptBotIds({ id: "EMBER-0001-4eea-ac52" }, here)).toEqual({ error: "a bot with this id already exists here" });

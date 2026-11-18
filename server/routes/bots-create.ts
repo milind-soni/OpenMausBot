@@ -1,5 +1,6 @@
 import type { BotCreateResponse, WireBot } from "../../shared/wire.ts";
 import { freshLook } from "../bot-look.ts";
+import { LINK_PREFIX } from "../bot-link/protocol.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
 import { parseVisibility } from "../bot-visibility.ts";
@@ -67,6 +68,12 @@ export function keptBotIds(body: Record<string, unknown>, store: Pick<Store, "bo
   if (id === undefined && threadId === undefined) return {};
   if (typeof id !== "string" || !OWN_ID.test(id) || (threadId !== undefined && (typeof threadId !== "string" || !OWN_ID.test(threadId)))) {
     return { error: "id and threadId must be ids of letters, digits, - and _ (8 to 128)" };
+  }
+  // This place admits no id shaped like another place's address (`link-<place key>-<id there>`): everything that settles
+  // an address reads such an id as a bot elsewhere, so no bot here may carry one. In any case, as this route compares
+  // ids case-insensitively too.
+  if (id.toLowerCase().startsWith(LINK_PREFIX)) {
+    return { error: `id must not begin with "${LINK_PREFIX}": that is how a bot in another place is addressed here` };
   }
   if (store.bot(id) || store.botByThread(id) || store.groupByThread(id)) return { error: "a bot with this id already exists here" };
   const folded = id.toLowerCase();

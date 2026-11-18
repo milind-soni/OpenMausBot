@@ -8,26 +8,49 @@ const B = { people: ["mara@acme.test"] };
 const rooms: RosterMember = { id: "rooms", name: "Rooms", visibility: B };
 const hours: RosterMember = { id: "hours", name: "Staff Hours", visibility: B };
 const books: RosterMember = { id: "books", name: "Bookkeeping", visibility: "admins" };
+const ledger: RosterMember = { id: "ledger", name: "Ledger", visibility: "admins" };
 const mausbot: RosterMember = { id: "maus", name: "MausBot", visibility: { people: ["olive@acme.test"] }, defaultBot: { person: "olive@acme.test" } };
-const bots = [rooms, hours, books, mausbot];
+const bots = [rooms, hours, books, ledger, mausbot];
 
-function fixture(over: { writer?: string; asked?: string | null; run?: boolean; own?: boolean; roster?: RosterMember[] } = {}) {
+function fixture(over: { writer?: string; asked?: string | null; run?: boolean; own?: boolean; roster?: RosterMember[]; listed?: boolean } = {}) {
   const lines: Array<{ to: string; delivery: Delivery }> = [];
   const refused = createRefusedHandoffs({
     bots: () => over.roster ?? bots, runOf: () => (over.run === false ? undefined : { routineId: "r1", botId: "rooms" }), writerOf: () => over.writer,
+    listed: (_from, target) => over.listed === true && target.id === ledger.id,
     askedPerson: () => over.asked ?? null, theirOwn: () => over.own === true, inbox: () => ({ deliver: (to, delivery) => { lines.push({ to, delivery }); } }), language: () => undefined,
   });
   return { refused, lines };
 }
 
+/** The line a refusal names nobody in: the run still says a hand-off was refused, and whose it was is not in it. */
+const UNNAMED = "Rooms couldn't hand this work to a teammate it named, so nothing was sent.";
+
 describe("a routine's refused hand-off", () => {
   it("makes the run say so, once, whether the bot was named by id or by name", () => {
-    for (const named of ["books", "Bookkeeping", "@bookkeeping"]) {
-      const { refused } = fixture();
+    // Ledger is in another audience, and the person's own reach lists it for this bot: a bot `list_bots` shows it.
+    for (const named of ["ledger", "Ledger", "@ledger"]) {
+      const { refused } = fixture({ listed: true });
       refused.settled("t", rooms, [named], 403);
-      expect(refused.take("t")).toBe("Rooms couldn't hand this to Bookkeeping, because they're shared with different people. Nothing was sent.");
+      expect(refused.take("t")).toBe("Rooms couldn't hand this work to Ledger, so nothing was sent.");
       expect(refused.take("t")).toBeNull();
     }
+  });
+
+  it("names no bot the caller may not identify, in the run's failure or the writer's notice", () => {
+    const { refused, lines } = fixture({ writer: "p_olive", asked: "p_mara" });
+    // Bookkeeping and Ledger are other audiences' bots here, and nothing lists them for Rooms: `list_bots` shows neither,
+    // so the refusal is the run's to report and neither name is in it.
+    refused.settled("t", rooms, ["books", "Bookkeeping", "@bookkeeping", "Ledger"], 403);
+    const said = refused.take("t");
+    expect(said).toBe(UNNAMED);
+    expect(said).not.toMatch(/Bookkeeping|bookkeeping|books|Ledger|ledger/u);
+    refused.settled("t2", rooms, ["Bookkeeping"], 403);
+    refused.take("t2");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.to).toBe("p_olive");
+    expect(lines[0]!.delivery).toMatchObject({ kind: "notice", quiet: false, title: "Rooms's routine couldn't hand off its work", text: UNNAMED });
+    // No name, id, count or owner of a bot the caller may not identify is anywhere in the notice.
+    expect(JSON.stringify(lines[0]!.delivery)).not.toMatch(/Bookkeeping|bookkeeping|books|Ledger|ledger/u);
   });
 
   it("stays quiet about anything that wasn't the refusal: a hand-off that went through, a typo, the bot itself, someone's own MausBot", () => {
@@ -64,7 +87,7 @@ describe("a routine's refused hand-off", () => {
     const { refused } = fixture({ roster });
     refused.settled("t", rooms, ["Bookkeeping"], 403);
     refused.settled("t", rooms, ["Staff Hours"], 202, [{ botId: hours.id, outcome: "injected" }]);
-    expect(refused.take("t")).toContain("Bookkeeping");
+    expect(refused.take("t")).toBe(UNNAMED);
   });
 
   it("leaves a refusal standing when the success went to a different bot that shares its id prefix", () => {
@@ -82,7 +105,7 @@ describe("a routine's refused hand-off", () => {
     const { refused } = fixture({ roster });
     refused.settled("t", rooms, ["Bookkeeping"], 403);
     refused.settled("t", rooms, [near.id], 200, [{ botId: near.id, outcome: "injected" }]);
-    expect(refused.take("t")).toBe("Rooms couldn't hand this to Bookkeeping, because they're shared with different people. Nothing was sent.");
+    expect(refused.take("t")).toBe(UNNAMED);
   });
 
   it("keeps nothing for a conversation that isn't a routine's run", () => {
@@ -97,7 +120,7 @@ describe("a routine's refused hand-off", () => {
     refused.take("t");
     expect(lines).toHaveLength(1);
     expect(lines[0]!.to).toBe("p_olive");
-    expect(lines[0]!.delivery).toMatchObject({ kind: "notice", quiet: false, title: "Rooms's routine couldn't hand off its work", text: "Rooms couldn't hand this to Bookkeeping, because they're shared with different people. Nothing was sent." });
+    expect(lines[0]!.delivery).toMatchObject({ kind: "notice", quiet: false, title: "Rooms's routine couldn't hand off its work", text: UNNAMED });
     refused.settled("t2", rooms, ["Bookkeeping"], 403);
     refused.take("t2");
     expect(lines, "the next day's run says the same").toHaveLength(1);

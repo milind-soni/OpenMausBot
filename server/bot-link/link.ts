@@ -313,6 +313,16 @@ export function createBotLink(deps: BotLinkDeps) {
     return address && bot ? { peer: address.peer, bot } : undefined;
   };
   const fold = (value: string) => value.replace(/^@/u, "").replace(/[-_]+/gu, " ").replace(/\s+/gu, " ").trim().toLowerCase();
+  /** Whether a bot of this place answers to this id — exactly, in any case. Local identity comes before any address,
+   * whatever the id is shaped like: this place admits no id shaped like one (`link-<place key>-<id there>`), and a bot
+   * here carrying one from before keeps it. */
+  const isLocalId = (raw: string | undefined): boolean => {
+    if (typeof raw !== "string") return false;
+    const lower = raw.trim().toLowerCase();
+    return Boolean(lower) && deps.bots().some((bot) => bot.id.toLowerCase() === lower);
+  };
+  /** A bot of another place, addressed here. A bot here that answers to the same id is never one. */
+  const awayId = (raw: string | undefined): boolean => isLinkedId(raw) && !isLocalId(raw);
   /** The bot of another place `raw` names: by its address here, or by a name no bot here answers to. A spelling that is a
    * bot's id here — in any case — or the start of one, is local identity and is left to the local resolver, so a bot
    * elsewhere named after that id, or after its first eight characters, never takes that bot's work or its files. */
@@ -320,9 +330,11 @@ export function createBotLink(deps: BotLinkDeps) {
     if (!state) return undefined;
     const wanted = raw.trim();
     const lower = wanted.toLowerCase();
+    // A bot here answers to its own id first, whatever it is shaped like: its work, its files and its result stay here, and
+    // a bot of another place later given that address never takes them.
+    if (isLocalId(wanted)) return undefined;
     if (isLinkedId(wanted)) return remoteOf(wanted);
     const local = deps.bots();
-    if (local.some((bot) => bot.id === wanted || bot.id.toLowerCase() === lower)) return undefined;
     if (isIdStart(wanted) && local.some((bot) => bot.id.toLowerCase().startsWith(lower))) return undefined;
     const named = fold(wanted);
     if (!named || local.some((bot) => !bot.hidden && fold(bot.name) === named)) return undefined;
@@ -699,7 +711,7 @@ export function createBotLink(deps: BotLinkDeps) {
   }
   /** The coordinator's host with other places' bots in it: their nodes run there, every other node as before. */
   function host(inner: CoordinatorHost): CoordinatorHost {
-    const awayNode = (node: HandoffView) => isLinkedId(node.botId);
+    const awayNode = (node: HandoffView) => awayId(node.botId);
     const peerOf = (node: HandoffView) => parseLinked(node.botId)?.peer ?? "";
     const workOf = (parent: HandoffView | undefined) => (parent && awayNode(parent) ? state?.work[handoffOfRoot(parent.id)] : undefined);
     const nameOf = (linked: string) => { const remote = remoteOf(linked); return remote ? `${remote.bot.name} (${placeName(remote.peer)})` : "Teammate"; };
@@ -747,11 +759,11 @@ export function createBotLink(deps: BotLinkDeps) {
       },
       park: (node, question, restored) => { if (!awayNode(node)) inner.park(node, question, restored); },
       remind: (node, closesAt) => { if (!awayNode(node)) inner.remind?.(node, closesAt); },
-      levelOf: (target, source) => (isLinkedId(target.botId) ? { level: remoteOf(target.botId)?.bot.level ?? "full" } : inner.levelOf(target, source)),
-      chiefOf: (address) => (isLinkedId(address.botId) ? false : inner.chiefOf(address)),
+      levelOf: (target, source) => (awayId(target.botId) ? { level: remoteOf(target.botId)?.bot.level ?? "full" } : inner.levelOf(target, source)),
+      chiefOf: (address) => (awayId(address.botId) ? false : inner.chiefOf(address)),
       outward: (node) => (awayNode(node) ? [] : inner.outward?.(node) ?? []),
       shareAnswer: (first, joiner) => (awayNode(first) || awayNode(joiner) ? false : inner.shareAnswer?.(first, joiner) ?? false),
-      statusReply: (requester, prompt, signal) => (isLinkedId(requester) ? Promise.resolve(undefined) : inner.statusReply?.(requester, prompt, signal) ?? Promise.resolve(undefined)),
+      statusReply: (requester, prompt, signal) => (awayId(requester) ? Promise.resolve(undefined) : inner.statusReply?.(requester, prompt, signal) ?? Promise.resolve(undefined)),
     };
   }
 

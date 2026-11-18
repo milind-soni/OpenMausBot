@@ -339,6 +339,29 @@ describe("the link between a computer and its Cloud", () => {
     await until(() => cloud.runs.some((run) => run.botId === "cloud-prefix"), "the Cloud's local-wr works");
   });
 
+  it("a bot here whose id is shaped like another place's address keeps its work, and never becomes that address", async () => {
+    const { computer, cloud } = await two();
+    // The Cloud's own Atlas answers to exactly this address here; this place is then given a bot of its own carrying it.
+    const shaped = onCloud("shared");
+    computer.bots.push({ id: shaped, name: "Importer" });
+    computer.link.botsChanged();
+    // A bot here answers to its own id first, in any case: the address never names the Cloud's Atlas again.
+    expect(computer.link.resolve(shaped)).toBeUndefined();
+    expect(computer.link.resolve(shaped.toUpperCase())).toBeUndefined();
+    // Every other address resolves as it did.
+    expect(computer.link.resolve(onCloud("cloud-analyst"))?.bot.id).toBe("cloud-analyst");
+    let asked: CoordinateBotsCall | undefined;
+    const { receipts, answer } = await computer.handOff("shared", call([shaped], "Draft the summary"), async (input) => {
+      asked = input;
+      return { status: 200, body: { receipts: [{ botId: shaped, outcome: "queued", detail: "here" }], message: "Sent to Importer." } };
+    });
+    expect(asked?.botIds).toEqual([shaped]);
+    expect(answer.status).toBe(200);
+    expect(receipts).toEqual([{ botId: shaped, outcome: "queued", detail: "here" }]);
+    // Nothing crossed: the brief and its files stayed with the bot here.
+    expect(cloud.runs).toEqual([]);
+  });
+
   it("work goes from the computer to the Cloud and its result resumes the requester once, as the person's own work", async () => {
     const { computer, cloud } = await two();
     const { receipts, answer } = await computer.handOff("local-writer", call(["Analyst"], "Count the orders", { doneWhen: "a number" }));

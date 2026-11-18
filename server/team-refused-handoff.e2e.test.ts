@@ -1,6 +1,7 @@
-// A real Team Cloud with the fake engine: a routine that hands work to a bot shared with different people says so to the
-// person who owns it, and nothing arrives. The engine's tool call is scripted, so this proves the rule and the report, not
-// that a model would write that call.
+// A real Team Cloud with the fake engine: a routine that hands work to a bot it may not reach (one nobody shares with it)
+// says so to the person who owns it, and nothing arrives. The refusal names no bot: that one is not in the routine's
+// audience, so its name is not in the run's failure or the notice. The engine's tool call is scripted, so this proves the
+// rule and the report, not that a model would write that call.
 import { randomBytes } from "node:crypto";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,7 +11,7 @@ import { hostTimeout } from "./testing/host-timeout.ts";
 
 const OWNER = { email: "olive@acme.test", role: "owner" as const }, MEMBER = { email: "mara@acme.test", role: "member" as const };
 const ENGINE = `process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/tool-calls.json";`;
-const REFUSED = "Rooms couldn't hand this to Bookkeeping, because they're shared with different people. Nothing was sent.";
+const REFUSED = "Rooms couldn't hand this work to a teammate it named, so nothing was sent.";
 const ONLY_MARA = { everyone: "none", people: { [MEMBER.email]: "chat" } };
 type Bot = { id: string; name: string; threadId: string; mainThreadId?: string };
 let fx: CloudSendFixture, team: CloudTeamFixture, owner = "", member = "";
@@ -71,7 +72,7 @@ it("reaches who wrote the routine when the bot's failures go to someone else", a
   const before = refusedLine(await inbox(owner)).length;
   const run = await runRoutine(owner, hours, "Hours", [handOff(books.id)]);
   expect(run).toMatchObject({ status: "failed" });
-  await expect.poll(async () => (await inbox(owner)).filter((row) => row.text.includes("Staff Hours couldn't hand this to Bookkeeping")).length, { timeout: 10_000 }).toBeGreaterThan(0);
+  await expect.poll(async () => (await inbox(owner)).filter((row) => row.text.includes("Staff Hours couldn't hand this work to a teammate it named")).length, { timeout: 10_000 }).toBeGreaterThan(0);
   expect(refusedLine(await inbox(owner)).length).toBe(before);
 }, hostTimeout(120_000));
 

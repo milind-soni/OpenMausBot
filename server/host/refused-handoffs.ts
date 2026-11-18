@@ -1,11 +1,14 @@
 // A routine's run that tried to hand work to a bot it may not reach. coordinate_bots refuses while the turn runs, and the
 // model may say anything after, so the run keeps who it was refused and ends saying so plainly, instead of "completed":
 // nothing arrived. The person who wrote the routine reads it in their inbox, whoever else the bot's failures reach.
-import { unreachableTeammate, type RosterMember } from "../peer-roster.ts";
+import { resolveTeammate, unreachableTeammate, type RosterMember } from "../peer-roster.ts";
 import { serverLine } from "../server-lines.ts";
 import type { Delivery } from "./person-inbox.ts";
 
-type Refused = { target: RosterMember; from: RosterMember };
+/** `shown`: this caller may already identify the bot, so its name may be said. A bot it may not be shown (another
+ * audience's, an archived one, one a person's reach keeps from it) is recorded without a name: the refusal is still the
+ * run's to report, but the bot is never named in it. */
+type Refused = { target: RosterMember; from: RosterMember; shown: boolean };
 
 /** One receipt from the call this bookkeeping is fed: the id the call really delivered to, and whether it arrived. The
  * text the model wrote is never used to decide that, since an id prefix can be shared. */
@@ -15,6 +18,9 @@ export interface RefusedHandoffDeps {
   bots(): readonly RosterMember[];
   /** A bot `from` may never be told of (personal-reach.ts hides). */
   hides?(from: RosterMember, target: RosterMember): boolean;
+  /** A bot the person's own reach shows `from` (personal-reach.ts listed): the coordinate route resolves a spelling to it,
+   * so this bookkeeping names it too, and a bot it does not show stays unnamed. */
+  listed?(from: RosterMember, target: RosterMember, threadId: string): boolean;
   /** The run this conversation is, when it is one. */
   runOf(threadId: string): { routineId: string; botId: string } | undefined;
   /** The person key of who wrote this routine; absent off a Cloud and for a routine nobody wrote. */
@@ -33,10 +39,30 @@ export function createRefusedHandoffs(deps: RefusedHandoffDeps) {
   const refused = new Map<string, Map<string, Refused>>();
   const toldWriter = new Map<string, string>();
 
+  /** The bot `raw` names that this caller may not reach, and whether it may identify it. A bot here that only another
+   * audience answers to, or that a person's reach keeps from this bot, is a refusal that names nobody (`shown: false`):
+   * it is still the run's to report, but its name never reaches the run's failure or the writer's notice. Whether the
+   * caller may identify it is settled by the coordinate route's own rule (`resolveTeammate`, with the same reach), so a
+   * bot `list_bots` shows is named and one it does not is not. A spelling naming no bot here at all — a typo — or a bot
+   * this caller may reach records nothing: the call's own receipts are the only account of what was sent. */
+  function identify(raw: string, from: RosterMember, threadId: string): Refused | null {
+    const bots = deps.bots();
+    const hides = (bot: RosterMember) => deps.hides?.(from, bot) === true;
+    const apart = unreachableTeammate(bots, from, raw, hides);
+    if (!apart) return null;
+    const resolved = resolveTeammate(bots, from, raw, () => null, {
+      reaches: (bot) => deps.listed?.(from, bot, threadId) === true,
+      hides,
+      refusal: () => null,
+    });
+    return { target: apart, from, shown: !("error" in resolved) && resolved.id === apart.id };
+  }
+
   function words(threadId: string, seen: readonly Refused[]): string {
     const language = deps.language(threadId), bot = seen[0]!.from.name;
-    const named = (some: readonly Refused[]) => some.map(({ target }) => target.name).join(", ");
-    return serverLine(language, "server.runs.handoffApart", { bot, target: named(seen) });
+    const shown = seen.filter((one) => one.shown).map(({ target }) => target.name).join(", ");
+    return [seen.some((one) => !one.shown) ? serverLine(language, "server.runs.handoffApartUnnamed", { bot }) : "",
+      shown ? serverLine(language, "server.runs.handoffApart", { bot, target: shown }) : ""].filter(Boolean).join(" ");
   }
 
   return {
@@ -46,8 +72,8 @@ export function createRefusedHandoffs(deps: RefusedHandoffDeps) {
       if (!deps.runOf(threadId)) return;
       const seen = refused.get(threadId) ?? new Map<string, Refused>();
       for (const raw of named) {
-        const target = status >= 400 ? unreachableTeammate(deps.bots(), from, raw, (bot) => deps.hides?.(from, bot) === true) : null;
-        if (target) seen.set(target.id, { target, from });
+        const target = status >= 400 ? identify(raw, from, threadId) : null;
+        if (target) seen.set(target.target.id, target);
       }
       // Which bot a retry went to comes from the delivery itself: a receipt's canonical id, never the text the model wrote.
       // Text matching here let one bot's id prefix clear a refusal for a bot nothing was ever sent to.
