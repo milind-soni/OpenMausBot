@@ -66,6 +66,15 @@ describe("the Team map's Browsing chip", () => {
     expect(nextWorkingTurns(first, "", next)).toEqual({});
   });
 
+  it("reads only a bot's own entries, so an id such as constructor gets a new turn and no inherited site", () => {
+    let turn = 0;
+    const next = () => ++turn;
+    const first = nextWorkingTurns({}, "constructor", next);
+    expect(first).toEqual({ constructor: 1 });
+    expect(nextWorkingTurns(nextWorkingTurns(first, "", next), "constructor", next)).toEqual({ constructor: 2 });
+    expect(browsingSiteOf({ ...bot, id: "constructor" }, {})).toBeUndefined();
+  });
+
   it("opens the bot's chat with its Browser panel open", () => {
     const storage = memoryStorage();
     const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");

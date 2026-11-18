@@ -5,9 +5,12 @@ import type { MapBrowsingPayload } from "../../shared/map-computer";
 
 export const MAP_BROWSING_POLL_MS = 5_000;
 
+/** A bot's own entry only: an id such as `constructor` never reads what every object inherits. */
+const ownEntry = <T>(record: Readonly<Record<string, T>>, id: string): T | undefined => (Object.hasOwn(record, id) ? record[id] : undefined);
+
 /** The site a bot's chip names: only while it works, so a read from before its turn ended never lingers. */
 export function browsingSiteOf(bot: { id: string; busy?: boolean }, sites: Readonly<Record<string, string>>): string | undefined {
-  return bot.busy ? sites[bot.id] : undefined;
+  return bot.busy ? ownEntry(sites, bot.id) : undefined;
 }
 
 /** The reads of bots still working: one that stopped never starts its next turn with the last turn's site. */
@@ -21,7 +24,7 @@ export type WorkingTurns = Readonly<Record<string, number>>;
 
 /** The working bots after `busyBotIds` changed: a bot keeps its number while it works and gets a new one each time it starts. */
 export function nextWorkingTurns(current: WorkingTurns, busyBotIds: string, nextTurn: () => number): WorkingTurns {
-  return Object.fromEntries(busyBotIds.split(" ").filter(Boolean).map((id) => [id, current[id] ?? nextTurn()]));
+  return Object.fromEntries(busyBotIds.split(" ").filter(Boolean).map((id) => [id, ownEntry(current, id) ?? nextTurn()]));
 }
 
 /** One read of the bots' sites, in the background so it never wakes a Cloud home that went to sleep. A site counts only
@@ -30,7 +33,7 @@ export async function readMapBrowsing(working: () => WorkingTurns): Promise<Read
   const sent = working();
   const next: MapBrowsingPayload = await api("/api/computers/browsing", { background: true, timeoutMs: 10_000 });
   const now = working();
-  return Object.fromEntries(next.bots.filter(({ botId }) => sent[botId] !== undefined && now[botId] === sent[botId]).map((entry) => [entry.botId, entry.site]));
+  return Object.fromEntries(next.bots.filter(({ botId }) => ownEntry(sent, botId) !== undefined && ownEntry(now, botId) === ownEntry(sent, botId)).map((entry) => [entry.botId, entry.site]));
 }
 
 /** The chip's click: the bot's chat, with the Browser view of its panel open. */
