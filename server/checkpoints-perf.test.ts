@@ -437,6 +437,37 @@ describe("incremental shadow index", () => {
     expect(commitExists(bot, cwd, before!)).toBe(false);
   });
 
+  it("keeps a running turn's pin when a digest is cut off while the folder's cache directories are listed again", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "before A");
+    const hashA = await snapshot(bot, cwd, "turn A", undefined, { pin: "dispatch-A" });
+    await drain(bot, cwd);
+    mkdirSync(join(cwd, "cache"));
+    writeFileSync(join(cwd, "cache", "CACHEDIR.TAG"), "Signature: 8a477f597d28d172789f06886806bc55\n");
+    writeFileSync(join(cwd, "cache", "blob.bin"), "cached");
+    let scans = 0;
+    hooks.inject = args => args[0] === "ls-files" && args.includes("**/CACHEDIR.TAG") && (scans += 1) === 2 ? { until: new Promise(() => {}) } : undefined;
+    const cutOff = new AbortController();
+    const digest = diffWorkingTree(bot, cwd, hashA!, cutOff.signal);
+    await vi.waitFor(() => expect(scans).toBe(2));
+    cutOff.abort();
+    expect(await digest).toBeNull();
+    // A sibling turn starts in the folder, and a collection runs behind it.
+    hooks.inject = args => args[0] === "count-objects" ? { stdout: countObjects({ count: 7000 }) } : undefined;
+    writeFileSync(join(cwd, "a.txt"), "A edited");
+    const hashB = await snapshot(bot, cwd, "turn B", undefined, { pin: "dispatch-B" });
+    await drain(bot, cwd);
+    hooks.inject = null;
+    expect(await diffWorkingTree(bot, cwd, hashB!)).toEqual({ changed: [], added: [], deleted: [] });
+    await release(bot, cwd, "dispatch-B");
+    await drain(bot, cwd);
+    expect(subcommands()).toContain("gc");
+    expect(commitExists(bot, cwd, hashA!)).toBe(true);
+    expect(shadowGit(bot, cwd, "ls-tree", "-r", "--name-only", hashB!).trim()).toBe("a.txt");
+    expect(await diffWorkingTree(bot, cwd, hashA!)).toEqual({ changed: ["a.txt"], added: [], deleted: [] });
+    await release(bot, cwd, "dispatch-A");
+  });
+
   it("keeps a pinned commit through a collection and reclaims it once released", async () => {
     const { bot, cwd } = workspace();
     const collectionDue = () => {

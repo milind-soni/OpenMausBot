@@ -276,12 +276,17 @@ function liveRef(pin: string): string {
 /** The pins this process took and has not released, per shadow. */
 const heldPins = new Map<string, Set<string>>();
 
+/** The shadows this process has taken over from the one before it: once each, or it would sweep its own turns' pins. */
+const takenOver = new Set<string>();
+
 // Pins outlive a crashed process, so the first use of a shadow in this process drops every leftover pin.
 const droppedPins = new Set<string>();
 async function sweepLiveRefs(cwd: string, env: NodeJS.ProcessEnv, shadow: string, signal?: AbortSignal): Promise<void> {
+  if (takenOver.has(shadow)) return;
   const stale = (await runGit(["for-each-ref", "--format=%(refname)", LIVE_REFS], cwd, env, signal)).split("\n").filter(Boolean);
   for (const ref of stale) await runGit(["update-ref", "-d", ref], cwd, env, signal);
   if (stale.length > 0) droppedPins.add(shadow);
+  takenOver.add(shadow);
 }
 
 /** A lock on the index at a shadow's first use belongs to a git this process never started: one cut off with the last
@@ -290,7 +295,7 @@ async function sweepLiveRefs(cwd: string, env: NodeJS.ProcessEnv, shadow: string
 function leaveLockedIndex(shadow: string, env: NodeJS.ProcessEnv): void {
   const dir = join(shadow, ".git");
   const current = indexName(shadow);
-  if (!existsSync(join(dir, `${current}.lock`))) return;
+  if (takenOver.has(shadow) || !existsSync(join(dir, `${current}.lock`))) return;
   const next = `index-${Date.now().toString(36)}`;
   let before = "";
   try {
@@ -386,6 +391,7 @@ type Prepared = { head: Head; staged: string | null; ignored: string | null };
  * beside the scan that checks it, and run again only when the scan disagrees. */
 async function prepare(cwd: string, env: NodeJS.ProcessEnv, shadow: string, signal?: AbortSignal): Promise<Prepared> {
   signal?.throwIfAborted();
+  env.GIT_INDEX_FILE = join(shadow, ".git", indexName(shadow));
   const list = (args: string[]) => runGit(args, cwd, env, signal).catch((e: unknown) => {
     if (e instanceof GitTimeoutError || signal?.aborted) throw e;
     return null;
@@ -484,14 +490,16 @@ async function indexNeedsRebuild(cwd: string, { staged, ignored }: Prepared): Pr
   return (process.platform === "darwin" || process.platform === "win32") && (await caseRenamed(cwd, paths));
 }
 
-/** An index filled from nothing takes every file of the project at once, so its files go into one pack as they are read,
- * not into an object file each: several times faster, and nothing left over to collect. */
+/** A folder no snapshot has been made of is read whole, so its files go into one pack as they are read, not into an object
+ * file each: about twice as fast, and nothing left over to collect. Not for an index rebuilt over objects the shadow
+ * already holds: git compresses a file into the pack before it finds the object is there. */
 const WHOLE_PROJECT = { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.bigFileThreshold", GIT_CONFIG_VALUE_0: "1" };
 
 async function stageWorkTree(cwd: string, env: NodeJS.ProcessEnv, prepared: Prepared, signal?: AbortSignal): Promise<void> {
   const rebuild = await indexNeedsRebuild(cwd, prepared);
   if (rebuild) await runGit(["read-tree", "--empty"], cwd, env, signal);
-  await runGit(["add", "-A", "--ignore-errors", "."], cwd, rebuild || prepared.staged === "" ? { ...env, ...WHOLE_PROJECT } : env, signal);
+  const unread = prepared.staged === "" && prepared.head.hash === prepared.head.base;
+  await runGit(["add", "-A", "--ignore-errors", "."], cwd, unread ? { ...env, ...WHOLE_PROJECT } : env, signal);
 }
 
 /** The checksum git ends its index file with: equal checksums are the same index, so the same tree. Null when there is none. */

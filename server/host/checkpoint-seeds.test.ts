@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createCheckpointSeeds, STARTUP_FOLDERS, type SeedBot, type SeedChange } from "./checkpoint-seeds.ts";
-import { refusalReason } from "./checkpoints.ts";
-import { removeTempDir } from "./testing/cleanup.ts";
+import { refusalReason } from "../checkpoints.ts";
+import { removeTempDir } from "../testing/cleanup.ts";
 
 const scratch: string[] = [];
 afterAll(async () => {
@@ -24,7 +24,7 @@ type Read = { botId: string; cwd: string; signal: AbortSignal; end: () => void }
 function setup(options: { bots?: SeedBot[]; chatOnly?: string[]; ownRoots?: string[] } = {}) {
   const bots = new Map((options.bots ?? []).map((bot) => [bot.id, bot]));
   const reads: Read[] = [];
-  let clock = 1_000_000_000_000;
+  const clock = 1_000_000_000_000;
   let listener: (change: SeedChange) => void = () => {};
   let startUp: (() => void) | null = null;
   const seeds = createCheckpointSeeds({
@@ -54,7 +54,6 @@ function setup(options: { bots?: SeedBot[]; chatOnly?: string[]; ownRoots?: stri
       bots.delete(botId);
       listener({ type: "bot.deleted", botId });
     },
-    advance(ms: number) { clock += ms; },
     now: () => clock,
     runStartUp() { startUp?.(); },
     started: () => startUp !== null,
@@ -101,16 +100,26 @@ describe("checkpoint seeds", () => {
     expect(host.reads).toEqual([]);
   });
 
-  it("looks again at a folder that did not qualify only after a while, and reads it once it holds a repository", () => {
-    const later = folder("plain");
-    const host = setup();
-    host.set({ id: "bob", cwd: later });
-    mkdirSync(join(later, ".git"));
-    host.set({ id: "bob", cwd: later });
+  it("reads nothing because something else about a bot changed: not for bots already on their folders at start-up, not for a conversation pinned to its bot's folder", async () => {
+    const project = folder("project");
+    const other = folder("project");
+    const onProject: SeedBot = { id: "bob", cwd: project, tasks: [{ threadId: "thread-1", cwd: other }, { threadId: "thread-2" }] };
+    const host = setup({ bots: [onProject, { id: "amy", cwd: other }] });
+    host.set(onProject);
+    host.set(onProject, "thread-1");
+    host.set({ id: "amy", cwd: other }, "main");
+    host.set({ ...onProject, tasks: [{ threadId: "thread-1", cwd: other }, { threadId: "thread-2", cwd: project }] }, "thread-2");
     expect(host.reads).toEqual([]);
-    host.advance(61_000);
-    host.set({ id: "bob", cwd: later });
-    expect(read(host.reads)).toEqual([`bob:${later}`]);
+    // A folder being set is what reads one: on a conversation, then on a bot.
+    host.set({ ...onProject, tasks: [{ threadId: "thread-1", cwd: other }, { threadId: "thread-2", cwd: other }] }, "thread-2");
+    host.set({ id: "amy", cwd: project });
+    expect(read(host.reads)).toEqual([`bob:${other}`]);
+    host.reads[0]!.end();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(read(host.reads)).toEqual([`bob:${other}`, `amy:${project}`]);
+    host.reads[1]!.end();
+    await host.seeds.settled();
   });
 
   it("reads one folder at a time, in the order they were set", async () => {

@@ -1,5 +1,6 @@
 // Reads a bot's project folder into its checkpoint shadow before the first turn there, so that turn's own snapshot finds the
-// files already read. Only a folder a bot is set to work in, only one that holds a repository, and one folder at a time.
+// files already read: when the folder is set, and once after start-up for the folders in recent use. Only a folder a bot is
+// set to work in, only one that holds a repository, and one folder at a time.
 import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
@@ -23,9 +24,9 @@ export interface CheckpointSeedsDeps<Bot extends SeedBot = SeedBot> {
   bot(id: string): Bot | null | undefined;
   /** Does the bot's engine work in a folder at all? */
   worksInFolders(bot: Bot): boolean;
-  /** checkpoints.refusalReason: why a folder is never snapshotted. */
+  /** Why a folder is never snapshotted, or null. */
   refusal(cwd: string): string | null;
-  /** checkpoints.prime. */
+  /** Reads the folder into the bot's shadow without taking a snapshot. */
   prime(botId: string, cwd: string, signal: AbortSignal): Promise<unknown>;
   onChange(listener: (change: SeedChange) => void): unknown;
   /** The app's own folders: a bot's private task folders and the shadows themselves live under these. */
@@ -39,8 +40,6 @@ export interface CheckpointSeedsDeps<Bot extends SeedBot = SeedBot> {
 export const STARTUP_FOLDERS = 6;
 const RECENT_MS = 7 * 24 * 60 * 60 * 1000;
 const STARTUP_DELAY_MS = 20_000;
-/** A folder that did not qualify is looked at again after this long, not on every change to its bot. */
-const RECHECK_MS = 60_000;
 
 function inside(root: string, path: string): boolean {
   const rel = relative(root, path);
@@ -50,8 +49,20 @@ function inside(root: string, path: string): boolean {
 export function createCheckpointSeeds<Bot extends SeedBot>(deps: CheckpointSeedsDeps<Bot>) {
   const now = deps.now ?? Date.now;
   const later = deps.later ?? ((run) => { setTimeout(run, STARTUP_DELAY_MS).unref?.(); });
-  /** Bot and folder, as set: when to look again (never, once queued). */
-  const looked = new Map<string, number>();
+  /** Bot and folder, once queued. */
+  const queued = new Set<string>();
+  /** The folder each bot, and each conversation with one of its own, was last seen set to: a change to anything else about a
+   * bot reads nothing. */
+  const folders = new Map<string, string | null | undefined>();
+  for (const bot of deps.bots()) {
+    folders.set(bot.id, bot.cwd);
+    for (const task of bot.tasks ?? []) folders.set(`${bot.id}\0${task.threadId}`, task.cwd);
+  }
+  const moved = (id: string, folder: string | null | undefined): boolean => {
+    const before = folders.get(id);
+    folders.set(id, folder);
+    return Boolean(folder) && before !== folder;
+  };
   const queue: Array<{ botId: string; folder: string }> = [];
   let running: { botId: string; folder: string; stop: AbortController } | null = null;
   let stopped = false;
@@ -80,21 +91,15 @@ export function createCheckpointSeeds<Bot extends SeedBot>(deps: CheckpointSeeds
     running = mine;
     void deps.prime(next.botId, next.folder, mine.stop.signal).catch(() => {}).then(() => {
       // Cut short: the folder may be read again when the bot is next set to it.
-      if (mine.stop.signal.aborted) looked.delete(key(next.botId, next.folder));
+      if (mine.stop.signal.aborted) queued.delete(key(next.botId, next.folder));
       if (running === mine) running = null;
       pump();
     });
   };
 
   const consider = (bot: Bot, folder: string | null | undefined): void => {
-    if (stopped || !folder) return;
-    const at = looked.get(key(bot.id, folder));
-    if (at !== undefined && now() < at) return;
-    if (!deps.worksInFolders(bot) || !qualifies(folder)) {
-      looked.set(key(bot.id, folder), now() + RECHECK_MS);
-      return;
-    }
-    looked.set(key(bot.id, folder), Infinity);
+    if (stopped || !folder || queued.has(key(bot.id, folder)) || !deps.worksInFolders(bot) || !qualifies(folder)) return;
+    queued.add(key(bot.id, folder));
     queue.push({ botId: bot.id, folder });
     pump();
   };
@@ -107,20 +112,24 @@ export function createCheckpointSeeds<Bot extends SeedBot>(deps: CheckpointSeeds
       const one = queue[at]!;
       if (one.botId !== botId || keep(one.folder)) continue;
       queue.splice(at, 1);
-      looked.delete(key(botId, one.folder));
+      queued.delete(key(botId, one.folder));
     }
     if (running?.botId === botId && !keep(running.folder)) running.stop.abort();
   };
 
   deps.onChange((change) => {
-    if (change.type === "bot.deleted" && "botId" in change) return forget(change.botId);
-    if (change.type !== "bot" || !("botId" in change)) return;
-    const bot = deps.bot(change.botId);
-    if (!bot) return forget(change.botId);
+    if (change.type !== "bot" && change.type !== "bot.deleted") return;
+    if (!("botId" in change)) return;
+    const bot = change.type === "bot" ? deps.bot(change.botId) : undefined;
+    if (!bot) {
+      for (const id of folders.keys()) if (id === change.botId || id.startsWith(`${change.botId}\0`)) folders.delete(id);
+      return forget(change.botId);
+    }
     forget(bot.id, (folder) => worksIn(bot, folder));
-    consider(bot, bot.cwd);
-    const threadId = "threadId" in change ? change.threadId : undefined;
-    if (threadId) consider(bot, bot.tasks?.find((task) => task.threadId === threadId)?.cwd);
+    if (moved(bot.id, bot.cwd)) consider(bot, bot.cwd);
+    const task = "threadId" in change && change.threadId ? bot.tasks?.find((one) => one.threadId === change.threadId) : undefined;
+    // A conversation pinned to its bot's own folder is pinned as its turn starts: that turn reads the folder itself.
+    if (task && moved(`${bot.id}\0${task.threadId}`, task.cwd) && task.cwd !== bot.cwd) consider(bot, task.cwd);
   });
 
   return {
