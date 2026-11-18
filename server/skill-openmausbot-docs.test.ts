@@ -44,6 +44,13 @@ describe("openmausbot-docs skill guide", () => {
   });
 
   it("sends questions about more than one device to the multi-device page", () => {
+    for (const text of [
+      "Why can't I see my bots on my second computer?",
+      "what syncs between devices",
+      "using it on multiple devices",
+    ]) {
+      expect(ids(text), text).toContain("openmausbot-docs");
+    }
     expect(guide).toContain("`multi-device.md`");
     expect(existsSync(join(process.cwd(), "docs", "multi-device.md"))).toBe(true);
   });

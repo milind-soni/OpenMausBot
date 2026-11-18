@@ -33,11 +33,15 @@ with. See [ios-companion.md](ios-companion.md).
 
 After a move to My Cloud or your own server, the computer you moved from stops running its copy, so no routine runs
 twice. The computer still lends the new home its folders, screen and Chrome while the desktop app runs and is signed in.
+On your own server this happens by itself only when you are its one owner; on a server with other members or admins,
+lending also needs `features.sharedComputers` set to `true` (see [feature-flags.md](feature-flags.md)).
 
 ## Moving bots by hand
 
 To copy one computer's bots to another home without a move, export a backup on the old one with **Settings → Import &
-export → Export backup** and import it on the new one with **Import backup**. API keys, engine sign-ins and paired
+export → Export backup** and import it on the new one with **Import backup**. Importing replaces the bots and chats
+already on the new home: they move to a safety copy under `.backups/` in its data folder, so export the new home's own
+backup first if you still need what is on it. API keys, engine sign-ins and paired
 devices stay where they are on both sides, and routines arrive paused: sign in to your AI on the new home and turn the
 routines you want back on.
 
