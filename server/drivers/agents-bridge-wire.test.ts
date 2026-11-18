@@ -249,6 +249,7 @@ describe("agents proxy tools/list golden with the tool bridge on", () => {
   });
 
   it("every bridged profile matches its pinned tool names, byte count and sha256", () => {
+    console.log(`W5-BRIDGED-MANIFEST ${JSON.stringify(Object.fromEntries(Object.entries(manifestOf(wires)).map(([name, one]) => [name, { bytes: (one as { bytes: number }).bytes, sha256: (one as { sha256: string }).sha256 }])))}`);
     expect(manifestOf(wires)).toEqual(readJson(manifestPath));
   });
 
