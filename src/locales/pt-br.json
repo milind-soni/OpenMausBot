@@ -1532,7 +1532,7 @@
   "cloudWelcome.skip": "Pular configuração",
   "cloudWelcome.step.bring": "Trazer suas coisas",
   "cloudWelcome.step.bringHint": "Seus bots e conversas",
-  "cloudWelcome.step.engineHint": "Claude ou ChatGPT",
+  "cloudWelcome.step.engineHint": "Claude, ChatGPT ou OpenCode",
   "cloudWelcome.step.files": "Arquivos e apps",
   "cloudWelcome.step.filesHint": "Opcional",
   "cloudWelcome.bring.title": "Com o que {name} deve começar?",

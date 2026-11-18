@@ -1333,7 +1333,6 @@
   "cloudWelcome.skip": "설정 건너뛰기",
   "cloudWelcome.step.bring": "내 것 가져오기",
   "cloudWelcome.step.bringHint": "봇과 채팅",
-  "cloudWelcome.step.engineHint": "Claude 또는 ChatGPT",
   "cloudWelcome.step.files": "파일과 앱",
   "cloudWelcome.step.filesHint": "선택",
   "cloudWelcome.bring.title": "{name}을(를) 무엇으로 시작할까요?",

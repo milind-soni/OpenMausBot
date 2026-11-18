@@ -1276,7 +1276,6 @@
   "cloudWelcome.skip": "Пропустить настройку",
   "cloudWelcome.step.bring": "Перенесите своё",
   "cloudWelcome.step.bringHint": "Ваши боты и чаты",
-  "cloudWelcome.step.engineHint": "Claude или ChatGPT",
   "cloudWelcome.step.files": "Файлы и приложения",
   "cloudWelcome.step.filesHint": "Необязательно",
   "cloudWelcome.bring.title": "С чего {name} следует начать?",

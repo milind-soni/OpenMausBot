@@ -1410,7 +1410,6 @@
   "cloudWelcome.skip": "セットアップをスキップ",
   "cloudWelcome.step.bring": "データを移行",
   "cloudWelcome.step.bringHint": "ボットとチャット",
-  "cloudWelcome.step.engineHint": "ClaudeまたはChatGPT",
   "cloudWelcome.step.files": "ファイルとアプリ",
   "cloudWelcome.step.filesHint": "任意",
   "cloudWelcome.bring.title": "{name}を何から始めますか？",

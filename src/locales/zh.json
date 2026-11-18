@@ -1648,7 +1648,6 @@
   "cloudWelcome.skip": "跳过设置",
   "cloudWelcome.step.bring": "迁移你的内容",
   "cloudWelcome.step.bringHint": "你的机器人和聊天",
-  "cloudWelcome.step.engineHint": "Claude 或 ChatGPT",
   "cloudWelcome.step.files": "文件和连接",
   "cloudWelcome.step.filesHint": "可选",
   "cloudWelcome.bring.title": "{name} 该从什么开始？",

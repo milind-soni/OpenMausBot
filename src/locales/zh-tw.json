@@ -1536,7 +1536,6 @@
   "cloudWelcome.skip": "略過設定",
   "cloudWelcome.step.bring": "帶入你的東西",
   "cloudWelcome.step.bringHint": "你的機器人和聊天",
-  "cloudWelcome.step.engineHint": "Claude 或 ChatGPT",
   "cloudWelcome.step.files": "檔案與應用程式",
   "cloudWelcome.step.filesHint": "選填",
   "cloudWelcome.bring.title": "{name} 要從什麼開始？",

@@ -1135,7 +1135,6 @@
   "cloudWelcome.skip": "Omitir la configuración",
   "cloudWelcome.step.bring": "Trae tus cosas",
   "cloudWelcome.step.bringHint": "Tus bots y chats",
-  "cloudWelcome.step.engineHint": "Claude o ChatGPT",
   "cloudWelcome.step.files": "Archivos y apps",
   "cloudWelcome.step.filesHint": "Opcional",
   "cloudWelcome.bring.title": "¿Con qué debería empezar {name}?",
