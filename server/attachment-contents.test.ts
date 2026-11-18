@@ -49,7 +49,7 @@ describe("withAttachmentContents", () => {
   it("inlines a text upload, cut at the per-message budget", () => {
     writeFileSync(join(uploads, "11111111-2222-4333-8444-555555555555.csv"), "a,b\n1,2\n");
     writeFileSync(join(uploads, "11111111-2222-4333-8444-666666666666.txt"), "é".repeat(40_000));
-    const [csv, txt] = envelopes(run(`${tag("11111111-2222-4333-8444-555555555555.csv")}\n${tag("11111111-2222-4333-8444-666666666666.txt")}`));
+    const [txt, csv] = envelopes(run(`${tag("11111111-2222-4333-8444-666666666666.txt")}\n${tag("11111111-2222-4333-8444-555555555555.csv")}`));
     expect(csv).toEqual(expect.objectContaining({ text: "a,b\n1,2\n" }));
     expect(csv.truncated).toBeUndefined();
     expect(txt.truncated).toBe(true);
@@ -62,7 +62,7 @@ describe("withAttachmentContents", () => {
     zip([{ name: "secret.txt", data: "PERIWINKLE" }]);
     const [older, newest] = envelopes(run(`${tag("11111111-2222-4333-8444-666666666666.txt")}\n\nnow this one\n${tag(ZIP)}`));
     expect(newest.files).toEqual([{ path: "secret.txt", bytes: 10, text: "PERIWINKLE" }]);
-    expect(older?.truncated ?? true).toBe(true);
+    expect(older.truncated).toBe(true);
   });
 
   it.each([
@@ -121,7 +121,7 @@ describe("withAttachmentContents", () => {
     expect(extractTurnImages(out, { attachmentsDir: uploads }).images).toEqual([]);
     const dataDir = root, cwd = join(root, "task-workspaces", "bot", "thread");
     mkdirSync(cwd, { recursive: true });
-    const boxed = attachmentsForBox(out, cwd, true, dataDir, uploads);
+    const boxed = attachmentsForBox(out, cwd, undefined, true, dataDir, uploads);
     expect(boxed.match(/<attached-file path="/g)).toHaveLength(1);
     expect(boxed.slice(boxed.indexOf("<attachment-contents>"))).toBe(out.slice(out.indexOf("<attachment-contents>")));
   });

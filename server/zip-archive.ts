@@ -1,12 +1,13 @@
 // Reads a ZIP that was already checked against a pinned SHA-256, without loading it into memory: the central directory
 // is parsed from the end of the file, and each member is inflated straight to disk, never past the size it declares.
-// No ZIP64, no encryption, no links: a pinned vendor archive needs none of them.
-import { createReadStream, createWriteStream } from "node:fs";
+// No ZIP64, no encryption, no links: a pinned vendor archive needs none of them. listZipSync and readZipMemberSync
+// read archives nobody vouched for, in slices the caller bounds.
+import { closeSync, createReadStream, createWriteStream, fstatSync, openSync, readSync } from "node:fs";
 import { mkdir, open, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { createInflateRaw } from "node:zlib";
+import { createInflateRaw, inflateRawSync } from "node:zlib";
 
 export interface ZipMember {
   name: string;
@@ -25,6 +26,76 @@ const UNIX_TYPE_MASK = 0o170000;
 const UNIX_FILE = 0o100000;
 const UNIX_DIRECTORY = 0o040000;
 
+/** A central-directory record; `member` is null for one that cannot be read plainly (encrypted, ZIP64, on another
+ * disk, or compressed some other way). */
+export interface ZipRecord {
+  name: string;
+  uncompressedBytes: number;
+  member: ZipMember | null;
+}
+
+function endOfDirectory(tail: Buffer, tailOffset: number): { entryCount: number; directoryBytes: number; directoryOffset: number } {
+  let eocd = -1;
+  for (let cursor = tail.length - 22; cursor >= 0; cursor -= 1) {
+    if (
+      tail.readUInt32LE(cursor) === EOCD_SIGNATURE
+      && cursor + 22 + tail.readUInt16LE(cursor + 20) === tail.length
+    ) {
+      eocd = cursor;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("The verified archive has no valid ZIP directory.");
+  const disk = tail.readUInt16LE(eocd + 4);
+  const directoryDisk = tail.readUInt16LE(eocd + 6);
+  const diskEntries = tail.readUInt16LE(eocd + 8);
+  const entryCount = tail.readUInt16LE(eocd + 10);
+  const directoryBytes = tail.readUInt32LE(eocd + 12);
+  const directoryOffset = tail.readUInt32LE(eocd + 16);
+  if (
+    disk !== 0 || directoryDisk !== 0 || diskEntries !== entryCount
+    || directoryBytes === 0xffffffff || directoryOffset === 0xffffffff
+    || directoryOffset + directoryBytes > tailOffset + eocd
+  ) throw new Error("The verified archive uses an unsupported ZIP layout.");
+  return { entryCount, directoryBytes, directoryOffset };
+}
+
+/** At most `limit` records from the start of a central directory. */
+function directoryRecords(directory: Buffer, limit: number): ZipRecord[] {
+  const records: ZipRecord[] = [];
+  let cursor = 0;
+  while (cursor < directory.length && records.length < limit) {
+    if (cursor + 46 > directory.length || directory.readUInt32LE(cursor) !== CENTRAL_SIGNATURE) {
+      throw new Error("The verified archive directory is invalid.");
+    }
+    const flags = directory.readUInt16LE(cursor + 8);
+    const compression = directory.readUInt16LE(cursor + 10);
+    const compressedBytes = directory.readUInt32LE(cursor + 20);
+    const uncompressedBytes = directory.readUInt32LE(cursor + 24);
+    const nameBytes = directory.readUInt16LE(cursor + 28);
+    const extraBytes = directory.readUInt16LE(cursor + 30);
+    const commentBytes = directory.readUInt16LE(cursor + 32);
+    const startDisk = directory.readUInt16LE(cursor + 34);
+    const externalAttributes = directory.readUInt32LE(cursor + 38);
+    const localHeaderOffset = directory.readUInt32LE(cursor + 42);
+    const next = cursor + 46 + nameBytes + extraBytes + commentBytes;
+    if (next > directory.length) throw new Error("The verified archive directory is invalid.");
+    const name = directory.subarray(cursor + 46, cursor + 46 + nameBytes).toString("utf8");
+    const plain = startDisk === 0 && (flags & 1) === 0
+      && compressedBytes !== 0xffffffff && uncompressedBytes !== 0xffffffff
+      && localHeaderOffset !== 0xffffffff;
+    records.push({
+      name,
+      uncompressedBytes,
+      member: plain && (compression === 0 || compression === 8)
+        ? { name, compression, compressedBytes, uncompressedBytes, localHeaderOffset, externalAttributes }
+        : null,
+    });
+    cursor = next;
+  }
+  return records;
+}
+
 /** The members a ZIP's central directory lists; more than `maxEntries` is refused. */
 export async function readZipDirectory(path: string, maxEntries: number): Promise<ZipMember[]> {
   const handle = await open(path, "r");
@@ -36,71 +107,73 @@ export async function readZipDirectory(path: string, maxEntries: number): Promis
     if ((await handle.read(tail, 0, tailBytes, tailOffset)).bytesRead !== tailBytes) {
       throw new Error("The verified archive was truncated.");
     }
-    let eocd = -1;
-    for (let cursor = tail.length - 22; cursor >= 0; cursor -= 1) {
-      if (
-        tail.readUInt32LE(cursor) === EOCD_SIGNATURE
-        && cursor + 22 + tail.readUInt16LE(cursor + 20) === tail.length
-      ) {
-        eocd = cursor;
-        break;
-      }
-    }
-    if (eocd < 0) throw new Error("The verified archive has no valid ZIP directory.");
-    const disk = tail.readUInt16LE(eocd + 4);
-    const directoryDisk = tail.readUInt16LE(eocd + 6);
-    const diskEntries = tail.readUInt16LE(eocd + 8);
-    const entryCount = tail.readUInt16LE(eocd + 10);
-    const directoryBytes = tail.readUInt32LE(eocd + 12);
-    const directoryOffset = tail.readUInt32LE(eocd + 16);
-    const eocdOffset = tailOffset + eocd;
-    if (
-      disk !== 0 || directoryDisk !== 0 || diskEntries !== entryCount || entryCount > maxEntries
-      || directoryBytes === 0xffffffff || directoryOffset === 0xffffffff
-      || directoryOffset + directoryBytes > eocdOffset
-    ) throw new Error("The verified archive uses an unsupported ZIP layout.");
+    const { entryCount, directoryBytes, directoryOffset } = endOfDirectory(tail, tailOffset);
+    if (entryCount > maxEntries) throw new Error("The verified archive uses an unsupported ZIP layout.");
 
     const directory = Buffer.alloc(directoryBytes);
     if ((await handle.read(directory, 0, directoryBytes, directoryOffset)).bytesRead !== directoryBytes) {
       throw new Error("The verified archive directory was truncated.");
     }
-    const entries: ZipMember[] = [];
-    let cursor = 0;
-    while (cursor < directory.length) {
-      if (cursor + 46 > directory.length || directory.readUInt32LE(cursor) !== CENTRAL_SIGNATURE) {
-        throw new Error("The verified archive directory is invalid.");
-      }
-      const flags = directory.readUInt16LE(cursor + 8);
-      const compression = directory.readUInt16LE(cursor + 10);
-      const compressedBytes = directory.readUInt32LE(cursor + 20);
-      const uncompressedBytes = directory.readUInt32LE(cursor + 24);
-      const nameBytes = directory.readUInt16LE(cursor + 28);
-      const extraBytes = directory.readUInt16LE(cursor + 30);
-      const commentBytes = directory.readUInt16LE(cursor + 32);
-      const startDisk = directory.readUInt16LE(cursor + 34);
-      const externalAttributes = directory.readUInt32LE(cursor + 38);
-      const localHeaderOffset = directory.readUInt32LE(cursor + 42);
-      const next = cursor + 46 + nameBytes + extraBytes + commentBytes;
-      if (
-        next > directory.length || startDisk !== 0 || (flags & 1) !== 0
-        || (compression !== 0 && compression !== 8)
-        || compressedBytes === 0xffffffff || uncompressedBytes === 0xffffffff
-        || localHeaderOffset === 0xffffffff
-      ) throw new Error("The verified archive contains an unsupported ZIP member.");
-      entries.push({
-        name: directory.subarray(cursor + 46, cursor + 46 + nameBytes).toString("utf8"),
-        compression,
-        compressedBytes,
-        uncompressedBytes,
-        localHeaderOffset,
-        externalAttributes,
-      });
-      cursor = next;
-    }
-    if (entries.length !== entryCount) throw new Error("The verified archive member count is invalid.");
-    return entries;
+    const records = directoryRecords(directory, Infinity);
+    if (records.length !== entryCount) throw new Error("The verified archive member count is invalid.");
+    return records.map(({ member }) => {
+      if (!member) throw new Error("The verified archive contains an unsupported ZIP member.");
+      return member;
+    });
   } finally {
     await handle.close();
+  }
+}
+
+/** The first `maxEntries` records of a ZIP, reading at most `maxDirectoryBytes` of its directory, and how many it holds. */
+export function listZipSync(path: string, limits: { maxEntries: number; maxDirectoryBytes: number }): { total: number; records: ZipRecord[] } {
+  const fd = openSync(path, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const tail = Buffer.alloc(Math.min(size, MAX_EOCD_BYTES));
+    if (readSync(fd, tail, 0, tail.length, size - tail.length) !== tail.length) throw new Error("The archive was truncated.");
+    const { entryCount, directoryBytes, directoryOffset } = endOfDirectory(tail, size - tail.length);
+    const directory = Buffer.alloc(Math.min(directoryBytes, limits.maxDirectoryBytes));
+    if (readSync(fd, directory, 0, directory.length, directoryOffset) !== directory.length) throw new Error("The archive directory was truncated.");
+    const wanted = Math.min(entryCount, limits.maxEntries);
+    const records = directoryRecords(directory, wanted);
+    if (records.length !== wanted) throw new Error("The archive directory is invalid.");
+    return { total: entryCount, records };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function localHeaderLengths(header: Buffer, entry: ZipMember): { nameBytes: number; extraBytes: number } {
+  if (
+    header.readUInt32LE(0) !== LOCAL_SIGNATURE
+    || header.readUInt16LE(8) !== entry.compression
+    || (header.readUInt16LE(6) & 1) !== 0
+  ) throw new Error("A verified archive member header is invalid.");
+  return { nameBytes: header.readUInt16LE(26), extraBytes: header.readUInt16LE(28) };
+}
+
+/** One member's bytes, read synchronously; the caller bounds its declared sizes, and inflating past them is refused. */
+export function readZipMemberSync(archivePath: string, entry: ZipMember): Buffer {
+  const fd = openSync(archivePath, "r");
+  try {
+    const header = Buffer.alloc(30);
+    if (readSync(fd, header, 0, header.length, entry.localHeaderOffset) !== header.length) throw new Error("An archive member header was truncated.");
+    const { nameBytes, extraBytes } = localHeaderLengths(header, entry);
+    const name = Buffer.alloc(nameBytes);
+    if (readSync(fd, name, 0, nameBytes, entry.localHeaderOffset + 30) !== nameBytes || name.toString("utf8") !== entry.name) {
+      throw new Error("An archive member name did not match its directory.");
+    }
+    const data = Buffer.alloc(entry.compressedBytes);
+    if (readSync(fd, data, 0, data.length, entry.localHeaderOffset + 30 + nameBytes + extraBytes) !== data.length) {
+      throw new Error("An archive member was truncated.");
+    }
+    // zlib refuses a maxOutputLength of 0.
+    const bytes = entry.compression === 8 ? inflateRawSync(data, { maxOutputLength: Math.max(entry.uncompressedBytes, 1) }) : data;
+    if (bytes.length !== entry.uncompressedBytes) throw new Error("An archive member did not match its declared size.");
+    return bytes;
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -111,13 +184,7 @@ async function memberDataOffset(path: string, entry: ZipMember): Promise<number>
     if ((await handle.read(header, 0, header.length, entry.localHeaderOffset)).bytesRead !== header.length) {
       throw new Error("A verified archive member header was truncated.");
     }
-    const nameBytes = header.readUInt16LE(26);
-    const extraBytes = header.readUInt16LE(28);
-    if (
-      header.readUInt32LE(0) !== LOCAL_SIGNATURE
-      || header.readUInt16LE(8) !== entry.compression
-      || (header.readUInt16LE(6) & 1) !== 0
-    ) throw new Error("A verified archive member header is invalid.");
+    const { nameBytes, extraBytes } = localHeaderLengths(header, entry);
     const name = Buffer.alloc(nameBytes);
     if ((await handle.read(name, 0, nameBytes, entry.localHeaderOffset + 30)).bytesRead !== nameBytes) {
       throw new Error("A verified archive member name was truncated.");

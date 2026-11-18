@@ -12,7 +12,7 @@ import { z } from "zod";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { BOT_API_UPGRADE, botApiEndpoint, type BotApiReply } from "../shared/bot-api.ts";
 import type { AdminActionRow } from "./admin-activity.ts";
-import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiOwnerPrompt, botApiPrompt, withoutAttachedImages, type BotApiAttempt, type BotApiStatus } from "./bot-api.ts";
+import { BOT_API_MAX_MESSAGE_CHARS, BOT_API_MAX_PENDING, BotApiManager, botApiOwnerPrompt, botApiPrompt, withoutAttachmentTags, type BotApiAttempt, type BotApiStatus } from "./bot-api.ts";
 import { personKey } from "./person-key.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { PASS, type RouteHandler } from "./routes/table.ts";
@@ -168,7 +168,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
       if (deps.threadBusy(botId, threadId)) return { status: 409, body: { thread: threadId, status: "working" } };
     }
     if (!deps.canStart(botId, threadId ?? "")) fail(409, BUSY, "The bot already had as many conversations going as it may");
-    const message = withoutAttachedImages(call.message);
+    const message = withoutAttachmentTags(call.message);
     let opened = false;
     if (threadId === undefined) {
       // Asks from the start, with none of the bot's saved allowances: nothing may answer an approval for an outside caller.
