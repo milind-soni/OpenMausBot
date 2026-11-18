@@ -6977,6 +6977,9 @@
   "voice.deepseek.stella": "Stella (femminile)",
   "voice.deepseek.tide": "Tide (maschile)",
   "call.capability.turnsNeedDeepSeekKey": "Aggiungi una chiave DeepSeek per parlare a turni nelle chiamate",
+  "alwaysOn.section": "Casa sempre accesa",
+  "alwaysOn.title": "Usa questo computer come casa sempre accesa",
+  "alwaysOn.add.title": "Aggiungi un Mac mini o un altro computer sempre acceso",
   "inbox.settled.title": "Completato",
   "inbox.settled.read": "Letto"
 }

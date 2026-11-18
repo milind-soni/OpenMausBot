@@ -10176,6 +10176,9 @@
   "voice.deepseek.stella": "Stella（女聲）",
   "voice.deepseek.tide": "Tide（男聲）",
   "call.capability.turnsNeedDeepSeekKey": "新增 DeepSeek 金鑰即可在通話中輪流對話",
+  "alwaysOn.section": "常開的家",
+  "alwaysOn.title": "將這台電腦當作常開的家",
+  "alwaysOn.add.title": "加入 Mac mini 或其他常開的電腦",
   "inbox.settled.title": "已完成",
   "inbox.settled.read": "已讀"
 }

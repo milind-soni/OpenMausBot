@@ -54,7 +54,7 @@ const assignmentSchema = z.object({
   outcome: z.enum(["done", "needs_input", "cap_continued", "stalled", "interrupted", "budget", "provider_error", "denied",
     "expired", "stopped", "refused", "duplicate"]).optional(),
   outcomeDetail: z.string().optional(),
-  fault: z.enum(["process_start", "out_of_room", "disk_full", "tool_server", "signed_out"]).optional(),
+  fault: z.enum(["process_start", "out_of_room", "disk_full", "tool_server", "signed_out", "bot_memory"]).optional(),
   level: z.enum(APPROVAL_MODES),
   levelSource: z.enum(["own", "chief", "engine_cap"]),
   executions: z.number().int().nonnegative(),

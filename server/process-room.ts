@@ -28,6 +28,8 @@ const BROWSER_WAIT_MS = 20_000;
 export const BROWSER_NO_ROOM = "This server is close to its limit on running programs, so another browser cannot open now. " +
   "Try the browser again in a few minutes, or carry on without it.";
 
+const MIN_HEADROOM = 0.1;
+
 /** Kept below the limit for what nobody counts ahead: a command's own children, a probe, a thread pool growing. */
 export const margin = (limit: number) => Math.max(32, Math.round(limit * 0.1));
 /** How many engines fit under a pids limit. */
@@ -97,6 +99,15 @@ export class ProcessBudget {
     if (this.now() < this.holdUntil) return true;
     const limit = this.limit(), { current } = this.state();
     return limit !== null && current !== null && current + held + this.browsersHeld() + tasks > limit - margin(limit);
+  }
+
+  /** How much room for processes is left, for how long an idle engine stays loaded (idle-policy.ts): 1 with half the limit
+   * or more free below its margin, down to a tenth as it fills; 1 where no limit is known. */
+  headroom(): number {
+    if (this.now() < this.holdUntil) return MIN_HEADROOM;
+    const limit = this.limit(), { current } = this.state();
+    if (limit === null || current === null) return 1;
+    return Math.min(1, Math.max(MIN_HEADROOM, (limit - margin(limit) - this.browsersHeld() - current) / (limit / 2)));
   }
 
   /** What the browsers let in still hold against the limit beyond what the count shows of them: each counts at its full

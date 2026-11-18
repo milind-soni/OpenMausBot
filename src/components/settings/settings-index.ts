@@ -154,6 +154,8 @@ export interface SettingsIndexEntry {
   page: SettingsPageId;
   anchor?: string;
   labelKey: LocaleKey;
+  /** the row's own name on a Mac, where it says Mac rather than computer */
+  macLabelKey?: LocaleKey;
   /** the section the row sits in, for its location line */
   sectionKey?: LocaleKey;
   synonyms?: string[];
@@ -179,6 +181,10 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "relay", page: "phone", anchor: "reach", labelKey: "devices.route.relay", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["anywhere", "relay", "away"] },
   { id: "keep-awake", page: "phone", anchor: "reach", labelKey: "remote.keepAwake", sectionKey: "phone.reach.title", when: hereOnly, synonyms: ["sleep", "awake", "overnight", "scheduled"] },
   { id: "wake-automations", page: "phone", labelKey: "settings.search.wakeAutomations", jump: "automations", when: hereOnly, topFor: ["sleep", "overnight", "scheduled"], synonyms: ["awake"] },
+  { id: "always-on", page: "phone", anchor: "always-on", labelKey: "alwaysOn.title", macLabelKey: "alwaysOn.titleMac", sectionKey: "alwaysOn.section", when: hereOnly,
+    topFor: ["always on", "always-on", "home server", "spare computer", "mac mini"], synonyms: ["mini", "server at home", "run all day", "24/7", "open at login", "awake"] },
+  { id: "add-always-on", page: "phone", anchor: "always-on", labelKey: "alwaysOn.add.title", sectionKey: "alwaysOn.section", when: hereOnly,
+    topFor: ["add a mac mini", "add mac mini", "add a computer", "add always-on computer"], synonyms: ["mac mini", "mini", "home server", "spare computer", "move my bots"] },
   { id: "other-computers", page: "phone", anchor: "computers", labelKey: "devices.computers.title", when: hereOnly, topFor: ["tailscale", "other computers", "another computer", "other computer", "my other computer"],
     synonyms: ["computer", "computers", "laptop", "desktop", "mac", "pc", "share", "tailnet", "connect to a server"] },
   { id: "tailscale", page: "phone", anchor: "reach", labelKey: "devices.moreWays", sectionKey: "phone.reach.title", when: hereOnly, advanced: true, synonyms: ["tailscale", "https", "tailnet"] },

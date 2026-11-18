@@ -25,10 +25,11 @@ export const outOfProcesses = (cause: string): boolean => NO_ROOM_NOTICE.test(ca
 
 const OWN_CAUSES: ReadonlySet<string> = new Set(["auth", "quota", "unknown_model", "provider_safety"]);
 
-/** Whether a failure names its own cause (a usage limit, a sign-in, the provider's refusal, a tool server, a full disk): it
+/** Whether a failure names its own cause (a usage limit, a sign-in, the provider's refusal, a tool server, a full disk, a
+ * bot's memory cap): it
  * is never relabelled as the server's shortage, though one was seen during the same turn. */
 export function namesOwnCause(failure: string): boolean {
   if (engineFailureKind(failure) !== null || OWN_CAUSES.has(classifyError({ text: failure }).reason)) return true;
   const fault = hostFaultOf(failure);
-  return fault === "signed_out" || fault === "tool_server" || fault === "disk_full";
+  return fault === "signed_out" || fault === "tool_server" || fault === "disk_full" || fault === "bot_memory";
 }

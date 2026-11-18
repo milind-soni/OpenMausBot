@@ -3665,6 +3665,9 @@
   "voice.deepseek.stella": "Stella (महिला)",
   "voice.deepseek.tide": "Tide (पुरुष)",
   "call.capability.turnsNeedDeepSeekKey": "कॉल में बारी-बारी से बात करने के लिए DeepSeek कुंजी जोड़ें",
+  "alwaysOn.section": "हमेशा चालू घर",
+  "alwaysOn.title": "इस कंप्यूटर को हमेशा चालू घर की तरह इस्तेमाल करें",
+  "alwaysOn.add.title": "Mac mini या कोई और हमेशा चालू कंप्यूटर जोड़ें",
   "inbox.settled.title": "पूर्ण",
   "inbox.settled.read": "पढ़ा गया"
 }

@@ -7111,6 +7111,9 @@
   "voice.deepseek.stella": "Stella (kobiecy)",
   "voice.deepseek.tide": "Tide (męski)",
   "call.capability.turnsNeedDeepSeekKey": "Dodaj klucz DeepSeek, aby rozmawiać po kolei w połączeniach",
+  "alwaysOn.section": "Zawsze włączony dom",
+  "alwaysOn.title": "Używaj tego komputera jako zawsze włączonego domu",
+  "alwaysOn.add.title": "Dodaj Maca mini lub inny zawsze włączony komputer",
   "inbox.settled.title": "Zakończone",
   "inbox.settled.read": "Przeczytane"
 }

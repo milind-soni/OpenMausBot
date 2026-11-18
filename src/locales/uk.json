@@ -4085,6 +4085,9 @@
   "voice.deepseek.stella": "Stella (жіночий)",
   "voice.deepseek.tide": "Tide (чоловічий)",
   "call.capability.turnsNeedDeepSeekKey": "Додайте ключ DeepSeek, щоб говорити по черзі в дзвінках",
+  "alwaysOn.section": "Завжди увімкнений дім",
+  "alwaysOn.title": "Використовувати цей комп’ютер як завжди увімкнений дім",
+  "alwaysOn.add.title": "Додати Mac mini або інший завжди увімкнений комп’ютер",
   "inbox.settled.title": "Завершено",
   "inbox.settled.read": "Прочитано"
 }

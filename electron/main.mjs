@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildErrorPage, desktopViewerErrorPage } from "./error-pages.mjs";
+import { buildErrorPage, desktopViewerErrorPage, showBootFailure } from "./error-pages.mjs";
 import { startCua, stopCua, registerCuaIpc, requestComputerUse, setCuaStateListener, grantLocalComputer } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
 import { finishSpeech, speechBusy, startSpeech, stopSpeech } from "./speech.mjs";
@@ -13,7 +13,7 @@ import { installTalk, isTalkPanel } from "./talk-main.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { linuxDisablesGpu, SOFTWARE_RENDERING_ARG } from "./linux-gpu.mjs";
 import { contextMenuTemplate, createMediaDownloads } from "./context-menu.mjs";
-import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState, reopenedOutOfSight, quietSignals } from "./updater.mjs";
+import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState, reopenedOutOfSight, quietSignals, unattendedUpdates } from "./updater.mjs"; import { installAlwaysOnHome } from "./always-on-home.mjs";
 import {
   appendDesktopCrashRecord,
   buildDiagnosticsReport,
@@ -297,7 +297,7 @@ const desktopLaunchId = randomUUID();
 const companionMutationToken = randomBytes(32).toString("base64url");
 const serverSupervisor = createServerSupervisor({
   restart: () => startServerOn(SERVER_PORT),
-  stop: stopUtilityServer,
+  stop: stopUtilityServer, keepTrying: () => alwaysOnHome.on(),
   onReady(proc) {
     serverProc = proc;
     serverReady = true;
@@ -1456,7 +1456,7 @@ function reconnectCloud(origin) {
   return signInCloudSession({ origin, mine: other ? origin : myCloud(), pair: () => ensureCloudAccount().pairHome(other?.id ?? null), fetch: (...args) => session.defaultSession.fetch(...args) });
 }
 const loginItem = createOpenAtLogin({ app, file: path.join(app.getPath("userData"), "open-at-login.json"), home: os.homedir() });
-installOpenAtLogin({ ipcMain, guard: localOrHome, loginItem, changed: refreshApplicationMenu });
+installOpenAtLogin({ ipcMain, guard: localOrHome, loginItem, changed: refreshApplicationMenu }); const alwaysOnHome = installAlwaysOnHome({ ipcMain, guard: localOnly, loginItem, changed: refreshApplicationMenu, file: path.join(app.getPath("userData"), "always-on-home.json"), blocker: powerSaveBlocker, isOnBattery: () => powerMonitor.isOnBatteryPower(), updates: unattendedUpdates, lending: () => computerSharing?.lendingSomewhere() === true, log: slog });
 let hiddenStart = false;
 
 async function openCloudSettings() {
@@ -2164,7 +2164,7 @@ function createWindow({ deferNavigation = false } = {}) {
   } else if (remote) {
     void win.loadURL(remote.origin).catch(() => {});
   } else if (app.isPackaged) {
-    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly, logDir: LOG_DIR }, nativeText));
+    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly, logDir: LOG_DIR, keepTrying: alwaysOnHome.on() }, nativeText));
   } else {
     win.loadURL(DEV_URL);
   }
@@ -2982,20 +2982,9 @@ app.whenReady().then(async () => {
         app.quit();
         return;
       }
-      const retried = await startServerPackaged();
-      if (retried) {
-        dialog.showErrorBox(
-          nativeT("native.boot.unhealthy.title"),
-          nativeT("native.boot.unhealthy.body", { folder: bootDataDir }),
-        );
-      } else {
-        dialog.showErrorBox(
-          nativeT("native.boot.failed.title"),
-          nativeT("native.boot.failed.body", { folder: bootDataDir }),
-        );
-        app.quit();
-      }
+      if (showBootFailure(dialog, nativeT, { retried: await startServerPackaged(), folder: bootDataDir })) app.quit();
     }
+    if (!serverReady && !desktopShutdownStarted) serverSupervisor.startLater(startServerPackaged); // an always-on home keeps trying
   }
   if (desktopShutdownStarted) return;
   if (app.isPackaged && !desktopRemoteAccess) { void ensureManagedDesktop().start().then(() => companyBackupSchedule.start()).catch(() => {}); void managedDesktop.whenRestored().then(() => tailnetShare.recheck()); }
@@ -3045,7 +3034,7 @@ app.whenReady().then(async () => {
     slog("skipping connected-apps registration: the credential store was unreadable this launch");
   }
   checkInManagedComposio();
-  startUpdater(quietSignals({ powerMonitor, window: () => mainWindow, lastInput: oneHome.lastInput, local: localServerRequest, place: () => homeWindow.placeOrigin(), cloudFetch: (...args) => session.defaultSession.fetch(...args), asleep: origin => homeWindow.asleepAt(origin), busy: () => ((oneHome.oneHome.busy() || ownHome?.busy()) && "move") || (computerSharing?.busy() && "lending") || (talk.busy() && "talk") || (companyBackupController || companyRestoreCommitting ? "backup" : null) }));
+  startUpdater(quietSignals({ powerMonitor, window: () => mainWindow, lastInput: oneHome.lastInput, local: localServerRequest, place: () => homeWindow.placeOrigin(), cloudFetch: (...args) => session.defaultSession.fetch(...args), asleep: origin => homeWindow.asleepAt(origin), busy: () => ((oneHome.oneHome.busy() || ownHome?.busy()) && "move") || (computerSharing?.busy() && "lending") || (talk.busy() && "talk") || (companyBackupController || companyRestoreCommitting ? "backup" : null) })); alwaysOnHome.start(powerMonitor);
   refreshApplicationMenu();
   openWindowForLink = () => {
     if (!mainWindow || mainWindow.isDestroyed()) createWindow({ deferNavigation: homeWindow.current().kind !== "computer" });
@@ -3059,7 +3048,7 @@ app.whenReady().then(async () => {
 
 const allWindowsClosedQuit = createAllWindowsClosedQuit({
   app,
-  allWindows: () => appWindows(), stayOpen: () => hiddenStart,
+  allWindows: () => appWindows(), stayOpen: () => hiddenStart || alwaysOnHome.on(),
 });
 
 // The embedded CUA daemon's async cleanup cannot run after the host exits, so the first quit waits for it (capped).

@@ -5904,6 +5904,9 @@
   "voice.deepseek.stella": "Stella (nữ)",
   "voice.deepseek.tide": "Tide (nam)",
   "call.capability.turnsNeedDeepSeekKey": "Thêm khóa DeepSeek để nói luân phiên trong cuộc gọi",
+  "alwaysOn.section": "Nhà luôn bật",
+  "alwaysOn.title": "Dùng máy tính này làm nhà luôn bật",
+  "alwaysOn.add.title": "Thêm Mac mini hoặc máy tính luôn bật khác",
   "inbox.settled.title": "Đã xong",
   "inbox.settled.read": "Đã đọc"
 }

@@ -3811,6 +3811,9 @@
   "voice.deepseek.stella": "Stella (féminine)",
   "voice.deepseek.tide": "Tide (masculine)",
   "call.capability.turnsNeedDeepSeekKey": "Ajoutez une clé DeepSeek pour parler à tour de rôle pendant les appels",
+  "alwaysOn.section": "Maison toujours allumée",
+  "alwaysOn.title": "Utiliser cet ordinateur comme maison toujours allumée",
+  "alwaysOn.add.title": "Ajouter un Mac mini ou un autre ordinateur toujours allumé",
   "inbox.settled.title": "Terminé",
   "inbox.settled.read": "Lu"
 }

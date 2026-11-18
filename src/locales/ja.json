@@ -7948,6 +7948,9 @@
   "voice.deepseek.stella": "Stella（女性）",
   "voice.deepseek.tide": "Tide（男性）",
   "call.capability.turnsNeedDeepSeekKey": "通話で交互に話すには DeepSeek キーを追加してください",
+  "alwaysOn.section": "常時オンの拠点",
+  "alwaysOn.title": "このコンピュータを常時オンの拠点として使う",
+  "alwaysOn.add.title": "Mac mini などの常時オンのコンピュータを追加",
   "inbox.settled.title": "完了",
   "inbox.settled.read": "既読"
 }

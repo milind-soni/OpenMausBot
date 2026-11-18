@@ -4,6 +4,9 @@
   "0.1.136"
  ],
  "paths": [
+  "alwaysOnHome",
+  "alwaysOnHome.set",
+  "alwaysOnHome.state",
   "androidDevice",
   "androidDevice.frame",
   "androidDevice.input",
@@ -246,6 +249,7 @@
   "workspaces",
   "workspaces.add",
   "workspaces.color",
+  "workspaces.homeOffers",
   "workspaces.line",
   "workspaces.look",
   "workspaces.makeHome",

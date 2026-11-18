@@ -5904,6 +5904,9 @@
   "voice.deepseek.stella": "Stella (kadın)",
   "voice.deepseek.tide": "Tide (erkek)",
   "call.capability.turnsNeedDeepSeekKey": "Aramalarda sırayla konuşmak için bir DeepSeek anahtarı ekle",
+  "alwaysOn.section": "Her zaman açık ev",
+  "alwaysOn.title": "Bu bilgisayarı her zaman açık ev olarak kullan",
+  "alwaysOn.add.title": "Mac mini veya her zaman açık başka bir bilgisayar ekle",
   "inbox.settled.title": "Tamamlandı",
   "inbox.settled.read": "Okundu"
 }
