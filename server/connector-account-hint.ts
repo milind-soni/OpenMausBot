@@ -6,6 +6,7 @@
 // something the bot can act on; this one names the other accounts of the same app, so the bot tries them before it
 // tells the person it has no access.
 
+import { toolkitOf } from "../shared/connector-scopes.ts";
 import { annotateFailedCall } from "./connector-scope-hint.ts";
 
 /** GitHub's wording when the connected account's app installation cannot reach what the call asks for. */
@@ -23,12 +24,6 @@ export interface ConnectedAccount {
 
 /** The accounts of every connected app, by app slug. */
 export type ConnectedAccounts = Record<string, readonly ConnectedAccount[]>;
-
-/** The app a Composio tool slug belongs to: the part before the first underscore, lower case. */
-export function toolkitOf(slug: string): string {
-  const cut = slug.indexOf("_");
-  return (cut > 0 ? slug.slice(0, cut) : slug).toLowerCase();
-}
 
 function appName(toolkit: string): string {
   if (toolkit === "gmail") return "Gmail";
