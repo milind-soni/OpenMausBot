@@ -8,7 +8,7 @@ import { progressKey, type TurnProgressActivity, type TurnProgressFields } from 
 
 export type LiveStatus =
   | ({ activity: TurnProgressActivity } & Omit<TurnProgressFields, "type" | "activity">)
-  | { activity: "thinking" | "reply"; itemId?: undefined };
+  | { activity: "thinking" | "reply" | "summarizing"; itemId?: undefined };
 
 export interface TurnLive {
   turnId?: string;
@@ -70,6 +70,9 @@ export function noteTurnEvent(event: RuntimeEvent): void {
     case "item.completed":
     case "request.opened":
       return put(threadId, { ...live, status: null });
+    case "context.summarizing":
+      if (event.active) return put(threadId, { ...live, ended: false, status: { activity: "summarizing" } });
+      return put(threadId, { ...live, status: live.status?.activity === "summarizing" ? null : live.status });
     default:
       if (live !== current) put(threadId, live);
   }

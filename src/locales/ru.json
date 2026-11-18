@@ -2149,6 +2149,7 @@
   "chat.voiceNote.onLiveCall": "Голосовые сообщения нельзя воспроизводить во время живого звонка.",
   "chat.voiceNote.transcript": "Расшифровка",
   "chat.activity.thinking": "Думает",
+  "chat.activity.summarizing": "Подводит итог прошлых сообщений…",
   "chat.activity.working": "Работает",
   "chat.activity.runCommand": "Выполняет команду",
   "chat.activity.readFile": "Читает файл",

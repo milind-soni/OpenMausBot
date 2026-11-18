@@ -1690,6 +1690,7 @@
   "chat.voiceNote.seek": "Sesli notu sar",
   "chat.voiceNote.onLiveCall": "Canlı arama sırasında sesli notlar oynatılamaz.",
   "chat.activity.thinking": "Düşünüyor",
+  "chat.activity.summarizing": "Önceki mesajları özetliyor…",
   "chat.activity.working": "Çalışıyor",
   "chat.activity.runCommand": "Bir komut çalıştırıyor",
   "chat.activity.readFile": "Bir dosya okuyor",

@@ -1690,6 +1690,7 @@
   "chat.voiceNote.seek": "Tua ghi chú thoại",
   "chat.voiceNote.onLiveCall": "Không thể phát tin nhắn thoại trong cuộc gọi trực tiếp.",
   "chat.activity.thinking": "Đang suy nghĩ",
+  "chat.activity.summarizing": "Đang tóm tắt các tin nhắn trước…",
   "chat.activity.working": "Đang xử lý",
   "chat.activity.runCommand": "Đang chạy lệnh",
   "chat.activity.readFile": "Đang đọc tệp",

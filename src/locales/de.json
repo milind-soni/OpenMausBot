@@ -1082,6 +1082,7 @@
   "chat.speak.stop": "Vorlesen stoppen",
   "chat.speak.read": "Das vorlesen",
   "chat.activity.thinking": "Denkt nach",
+  "chat.activity.summarizing": "Fasst frühere Nachrichten zusammen…",
   "chat.activity.working": "Arbeitet",
   "chat.activity.runCommand": "Führt einen Befehl aus",
   "chat.activity.readFile": "Liest eine Datei",

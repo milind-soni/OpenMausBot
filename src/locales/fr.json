@@ -886,6 +886,7 @@
   "chat.speak.stop": "Arrêter la lecture",
   "chat.speak.read": "Lire ceci à voix haute",
   "chat.activity.thinking": "Réflexion",
+  "chat.activity.summarizing": "Résumé des messages précédents…",
   "chat.activity.working": "Au travail",
   "chat.activity.runCommand": "Exécute une commande",
   "chat.activity.readFile": "Lit un fichier",

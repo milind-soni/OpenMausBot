@@ -2277,6 +2277,7 @@
   "chat.voiceNote.onLiveCall": "실시간 통화 중에는 음성 메모를 재생할 수 없어요.",
   "chat.voiceNote.transcript": "녹취록",
   "chat.activity.thinking": "생각 중",
+  "chat.activity.summarizing": "이전 메시지 요약 중…",
   "chat.activity.working": "작업 중",
   "chat.typing": "입력 중…",
   "chat.teammatesWorking": "팀원들이 작업 중",

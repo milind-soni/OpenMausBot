@@ -886,6 +886,7 @@
   "chat.speak.stop": "पढ़ना रोकें",
   "chat.speak.read": "इसे ज़ोर से पढ़ें",
   "chat.activity.thinking": "सोच रहा है",
+  "chat.activity.summarizing": "पिछले संदेशों का सारांश बना रहा है…",
   "chat.activity.working": "काम कर रहा है",
   "chat.activity.runCommand": "कमांड चला रहा है",
   "chat.activity.readFile": "फ़ाइल पढ़ रहा है",
