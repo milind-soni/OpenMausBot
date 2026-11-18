@@ -145,6 +145,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   unpublish_page: "activity.tool.team.unpublishPage",
   update_html: "activity.tool.team.updateHtml",
   update_widget: "activity.tool.team.updateWidget",
+  usage: "activity.tool.team.usage",
   usage_limits: "activity.tool.team.usageLimits",
   use_tool: "activity.tool.team.useTool",
   vm_exec: "activity.tool.team.vmExec",
