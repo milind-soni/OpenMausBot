@@ -152,3 +152,19 @@ describe("the apps' sandbox", () => {
     expect(connectorToolAdvertised("SLACK_POST_MESSAGE", full)).toBe(false);
   });
 });
+
+it.each(["_1password", "_" + "a".repeat(80)])("round-trips connector grants for %s", (slug) => {
+  const record = grants({ [slug]: { tools: "*" } });
+  expect(parseConnectorAllowedToolsEnv(serializeConnectorAllowedTools(record).env)).toEqual(record);
+});
+it("round-trips and advertises a leading-underscore toolkit's own tool names", () => {
+  const record = grants({ _1password: { tools: ["_1PASSWORD_GET_ITEM", "_1PASSWORD_LIST_VAULTS"] } });
+  expect(parseConnectorAllowedToolsEnv(serializeConnectorAllowedTools(record).env)).toEqual(record);
+  expect(connectorToolAdvertised("_1PASSWORD_GET_ITEM", record)).toBe(true);
+  expect(connectorToolAdvertised("_1PASSWORD_LIST_VAULTS", record)).toBe(true);
+  expect(connectorToolAdvertised("_1PASSWORD_DELETE_ITEM", record)).toBe(false);
+  expect(connectorToolAdvertised("_1PASSWORD_GET_ITEM", grants({ _1password: { tools: "*" } }))).toBe(true);
+});
+it.each(["", "-x", "Bad Slug", "a/b", "__proto__", "Uppercase", "a".repeat(82)])("rejects invalid connector grant slug %s", (slug) => {
+  expect(parseConnectorAllowedToolsEnv(JSON.stringify({ [slug]: { tools: "*" } }))).toBeNull();
+});

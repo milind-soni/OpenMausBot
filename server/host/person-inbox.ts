@@ -215,6 +215,13 @@ export function createPersonInbox(deps: PersonInboxDeps) {
 
   const line = (item: Item) => store.messagesFor(item.threadId).find((message) => message.id === item.id);
 
+  /** The message a line points at in the conversation it came from: the newest one there, so a client can put the person
+   * at it when they open the line. */
+  const focusOf = (threadId: string): { messageId?: string } => {
+    const newest = store.messagesFor(threadId).at(-1)?.id;
+    return newest ? { messageId: newest } : {};
+  };
+
   /** The card that asked, in the conversation it was asked in; undefined once that conversation is gone. An ask that
    * came from no conversation (someone asking for access to a bot) is its own card. */
   const asking = (item: Item) => !item.requestId ? undefined : item.origin
@@ -287,7 +294,10 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     }
     const wire: InboxItem = {
       kind: delivery.kind, from: delivery.from, ...(delivery.via ? { via: delivery.via } : {}),
-      ...(origin && deps.sees(to, origin.threadId) ? { origin: { ...origin, title: titleOf(origin) } } : {}),
+      ...(origin && deps.sees(to, origin.threadId)
+        // The message it points at: the newest one in the conversation it came from, so a client can put the person there.
+        ? { origin: { ...origin, title: titleOf(origin), ...(origin.messageId ? {} : focusOf(origin.threadId)) } }
+        : {}),
       ...(delivery.to ? { replies: true as const } : {}),
       ...(delivery.assistant ? { assistant: true as const } : {}),
     };

@@ -181,6 +181,17 @@ describe("asks routed to a person", () => {
   });
 });
 
+describe("finished work in a person's inbox", () => {
+  const report = (): Notification => ({ kind: "done", botId: "scout", botName: "Scout", threadId: "ben-private", title: "Scout finished", body: "Daily digest: 3 new leads." });
+
+  it("points the line at the message it came from, so a client can open the conversation there", () => {
+    const f = fixture();
+    const said = f.said("ben-private", "Can you look at the deck?", BEN);
+    f.team.route(report(), { routine: true });
+    expect(f.team.inbox.view(key(BEN.email))!.rows[0]!.origin?.messageId).toBe(said.id);
+  });
+});
+
 describe("what still waits on the person", () => {
   const question = (requestId: string) => ({ title: "Your bot has a question", subtitle: "Which landing page?", options: ["Home", "Pricing"], requestId, requestType: "question" as const });
   const asked = (f: ReturnType<typeof fixture>, threadId: string, requestId: string, made: ReturnType<typeof card | typeof question> = card(requestId)) => {

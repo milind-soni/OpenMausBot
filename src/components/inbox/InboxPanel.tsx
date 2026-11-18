@@ -27,7 +27,7 @@ export function InboxPanel() {
   const markingAll = useInboxMarkingAll();
   const phone = useMediaQuery(PHONE_LAYOUT);
   const simple = !useAdvancedMode();
-  const { run } = useInboxActions(view);
+  const { run, openInChat } = useInboxActions(view);
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
   useEffect(() => {
@@ -41,7 +41,13 @@ export function InboxPanel() {
     else closeInbox();
   };
   const reading = panel.reading ? view?.rows.find((row) => row.id === panel.reading) : undefined;
-  const open = (row: InboxRow) => { readInboxRow(row); readInboxLine(row.id); };
+  /** An ask waits for an answer here and a message waits for a reply, so those open in the panel; finished work opens
+   * the conversation it came from, at the message it is about. */
+  const open = (row: InboxRow) => {
+    readInboxRow(row);
+    if (row.tab === "needs-you" || row.replies) { readInboxLine(row.id); return; }
+    openInChat(row);
+  };
   // The notice list is upstream's: a read line stays until the person marks it done. Reading a conversation moves the
   // conversation to Finished; it does not remove the notice it came from.
   const listed = listedRows(view);
@@ -65,7 +71,7 @@ export function InboxPanel() {
 
   const step = (by: -1 | 1) => {
     const row = rows[at + by];
-    if (row) open(row);
+    if (row) { readInboxRow(row); readInboxLine(row.id); }
   };
   const pinnedThreads = new Set(pinnedThreadRows(state.bots, state.groups, state.pendingQueued).map((row) => row.task.threadId));
   const count = waitingCount(view) + unreadConversations(inboxAttentionEntries(state, view), view);

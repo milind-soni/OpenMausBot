@@ -166,7 +166,7 @@ const playbookSchema = z.object({
 });
 const requirementsSchema = z.object({
   apps: z.array(z.object({
-    slug: key,
+    slug: requiredText(64).regex(/^(?!__proto__$)[a-z0-9_][a-z0-9_-]*$/, { message: "may only contain lowercase letters, numbers, - and _" }),
     label: requiredText(100),
     reason: requiredText(240),
     optional: z.boolean().optional(),

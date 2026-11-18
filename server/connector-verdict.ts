@@ -62,10 +62,12 @@ export interface ConnectorVerdict {
   rule: string;
 }
 
-/** Composio's upper-snake prefix before the first underscore, lowercased (GMAIL_SEND_EMAIL → gmail); no underscore, no service. */
+/** Composio's upper-snake prefix before the first underscore, lowercased (GMAIL_SEND_EMAIL → gmail); no underscore, no service.
+ * A leading underscore is part of the slug (`_1PASSWORD_GET_ITEM` → `_1password`). */
 export function serviceSlugFor(tool: string): string | null {
-  const underscore = tool.indexOf("_");
-  if (underscore <= 0) return null;
+  const start = tool.startsWith("_") ? 1 : 0;
+  const underscore = tool.indexOf("_", start);
+  if (underscore <= start) return null;
   return tool.slice(0, underscore).toLowerCase();
 }
 

@@ -16,3 +16,10 @@ describe("connector card requests", () => {
     }
   });
 });
+
+it.each(["_1password", "_" + "a".repeat(80), "_1PASSWORD"])("keeps toolkit request %s in every input shape", (slug) => {
+  expect(connectorRequestItems([slug, { slug }, { toolkit: slug }])).toEqual(Array(3).fill({ slug: slug.toLowerCase() }));
+});
+it.each(["", "-x", "Bad Slug", "a/b", "__proto__", "a".repeat(82)])("skips invalid toolkit request %s", (slug) => {
+  expect(connectorRequestItems([slug, { slug }, { toolkit: slug }])).toEqual([]);
+});
