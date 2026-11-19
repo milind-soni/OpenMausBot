@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, useStore, type Bot } from "@/state/store";
 import { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
 import { permissionCell, permissionPatch, type PermissionReason, type PermissionResource } from "@/lib/bot-permission-board";
@@ -33,6 +33,7 @@ export function BotPermissionBoard() {
   const [notice, setNotice] = useState("");
   const pending = useRef(new Set<string>());
   const generation = useRef(0);
+  const boardId = useId();
 
   const load = useCallback(async () => {
     const run = ++generation.current;
@@ -81,12 +82,16 @@ export function BotPermissionBoard() {
       const current = fresh.bots.find(entry => entry.id === bot.id);
       if (!current) throw new Error(t("permissionBoard.botGone"));
       dispatch({ type: "botPatched", bot: current });
+      if (resource.kind === "service" && !on && emailError && !current.connectorScopes && permissionCell(current, resource, []).checked) {
+        throw new Error(t("permissionBoard.emailError"));
+      }
       const patch = permissionPatch(current, resource, on, connected, servers ?? []);
       if (patch === null) {
         const reason = permissionCell(current, resource, servers ?? []).reason;
         if (reason) throw new Error(t(reasonKeys[reason]));
         return;
       }
+      if (Object.keys(patch).length === 0) return;
       const result = await api<{ bot: Bot }>(`/api/bots/${encodeURIComponent(bot.id)}`, { method: "PATCH", body: JSON.stringify(patch) });
       if (!result.bot || result.bot.id !== bot.id) throw new Error(t("permissionBoard.invalidResponse"));
       dispatch({ type: "botPatched", bot: result.bot });
@@ -103,10 +108,10 @@ export function BotPermissionBoard() {
     <p className="text-[13px] leading-relaxed text-ink-secondary">{t("permissionBoard.intro")}</p>
     <div className="flex flex-wrap items-end gap-2">
       <label className="flex min-w-36 flex-1 flex-col gap-1 text-[12px] text-ink-secondary">{t("permissionBoard.searchBots")}
-        <input type="search" value={botQuery} onChange={event => setBotQuery(event.target.value)} className={cn(field, "w-full")} />
+        <input type="search" dir="auto" value={botQuery} onChange={event => setBotQuery(event.target.value)} className={cn(field, "w-full")} />
       </label>
       <label className="flex min-w-36 flex-1 flex-col gap-1 text-[12px] text-ink-secondary">{t("permissionBoard.searchResources")}
-        <input type="search" value={resourceQuery} onChange={event => setResourceQuery(event.target.value)} className={cn(field, "w-full")} />
+        <input type="search" dir="auto" value={resourceQuery} onChange={event => setResourceQuery(event.target.value)} className={cn(field, "w-full")} />
       </label>
       <label className="flex flex-col gap-1 text-[12px] text-ink-secondary">{t("permissionBoard.category")}
         <Select variant="field" size="md" value={category} onChange={event => setCategory(event.target.value as Category)}>
@@ -130,24 +135,25 @@ export function BotPermissionBoard() {
           <thead>
             <tr>
               <th scope="col" rowSpan={2} className="sticky start-0 top-0 z-30 min-w-32 border-b border-hairline/40 bg-card px-2 py-1.5 text-start">{t("permissionBoard.bot")}</th>
-              {shown.some(resource => resource.kind === "service") && <th scope="colgroup" colSpan={shown.filter(resource => resource.kind === "service").length} className="sticky top-0 z-20 h-6 border-b border-hairline/40 bg-card px-2 text-center text-[10px] font-medium uppercase tracking-wide text-ink-secondary">{t("permissionBoard.services")}</th>}
-              {shown.some(resource => resource.kind === "mcp") && <th scope="colgroup" colSpan={shown.filter(resource => resource.kind === "mcp").length} className="sticky top-0 z-20 h-6 border-b border-hairline/40 bg-card px-2 text-center text-[10px] font-medium uppercase tracking-wide text-ink-secondary">MCP</th>}
+              {shown.some(resource => resource.kind === "service") && <th scope="colgroup" colSpan={shown.filter(resource => resource.kind === "service").length} className="sticky top-0 z-20 h-6 border-b border-hairline/40 bg-card px-2 text-center text-[12px] font-medium text-ink-secondary">{t("permissionBoard.services")}</th>}
+              {shown.some(resource => resource.kind === "mcp") && <th scope="colgroup" colSpan={shown.filter(resource => resource.kind === "mcp").length} className="sticky top-0 z-20 h-6 border-b border-hairline/40 bg-card px-2 text-center text-[12px] font-medium text-ink-secondary">MCP</th>}
             </tr>
             <tr>
               {shown.map(resource => <th key={`${resource.kind}:${resource.key}`} scope="col" className="sticky top-6 z-20 min-w-24 max-w-44 border-b border-hairline/40 bg-card px-2 py-1.5 text-center">
-                <span className="block break-words font-medium">{resource.label}</span>
+                <span dir="auto" className="block max-w-44 truncate font-medium" title={resource.label}>{resource.label}</span>
               </th>)}
             </tr>
           </thead>
           <tbody>{bots.map((bot, index) => {
             const granted = shown.filter(resource => permissionCell(bot, resource, servers ?? []).checked).length;
             const shade = index % 2 === 1 ? "bg-ink/[0.02]" : "";
-            return <tr key={bot.id} data-permission-bot={bot.id} className="group/row">
-            <th scope="row" className={cn("sticky start-0 z-10 max-w-44 border-b border-hairline/30 bg-card px-2 py-1 text-start font-medium group-hover/row:bg-ink/[0.05]", shade)}>
-              <span className="block truncate" title={bot.name}>{bot.name}</span>
+            const busyId = `${boardId}-${encodeURIComponent(bot.id)}-busy`;
+            return <tr key={bot.id} data-permission-bot={bot.id} aria-busy={saving.has(bot.id)} className="group/row">
+            <th scope="row" className="sticky start-0 z-10 max-w-44 border-b border-hairline/30 bg-card px-2 py-1 text-start font-medium">
+              <span dir="auto" className="block truncate" title={bot.name}>{bot.name}</span>
               {bot.busy
-                ? <span aria-hidden="true" className="block truncate text-[10px] font-normal text-ink-secondary" title={t("botAccess.nextTurn")}>{t("botAccess.nextTurn")}</span>
-                : <span aria-hidden="true" className="block truncate text-[10px] font-normal text-ink-secondary">
+                ? <span id={busyId} className="block truncate text-[12px] font-normal text-ink-secondary" title={t("botAccess.nextTurn")}>{t("botAccess.nextTurn")}</span>
+                : <span className="block truncate text-[12px] font-normal tabular-nums text-ink-secondary" title={bot.section}>
                     {bot.section ? `${bot.section} · ` : ""}{granted}/{shown.length}
                   </span>}
             </th>
@@ -156,24 +162,26 @@ export function BotPermissionBoard() {
               const reason = cell.reason ? t(reasonKeys[cell.reason]) : "";
               const warning = cell.warning ? t(reasonKeys[cell.warning]) : "";
               const unavailable = loading || saving.has(bot.id) || (resource.kind === "service" ? !servicesReady : !mcpReady);
-              return <td key={`${resource.kind}:${resource.key}`} className={cn("border-b border-hairline/30 px-1 py-1 text-center align-middle group-hover/row:bg-ink/[0.05]", shade)}>
-                <label className={cn("flex min-h-7 flex-col items-center justify-center gap-0.5", !cell.reason && !unavailable && "cursor-pointer")} title={reason || warning || t("permissionBoard.toggle", { bot: bot.name, resource: resource.label })}>
+              const detail = reason || warning || (cell.checked && (cell.readOnly || cell.limited) ? t(cell.readOnly ? "permissionBoard.readOnly" : "permissionBoard.limited") : "");
+              const detailId = `${boardId}-${encodeURIComponent(bot.id)}-${resource.kind}-${encodeURIComponent(resource.key)}`;
+              const describedBy = [detail && detailId, bot.busy && busyId].filter(Boolean).join(" ") || undefined;
+              return <td key={`${resource.kind}:${resource.key}`} className={cn("border-b border-hairline/30 px-1 py-1 text-center align-middle group-hover/row:bg-ink/[0.06] group-focus-within/row:bg-ink/[0.06]", shade)}>
+                <label className={cn("flex min-h-8 touch:min-h-11 flex-col items-center justify-center gap-1", !cell.reason && !unavailable && "cursor-pointer")} title={detail || t("permissionBoard.toggle", { bot: bot.name, resource: resource.label })}>
                   <input type="checkbox" checked={cell.checked} disabled={Boolean(cell.reason) || unavailable}
-                    aria-label={t("permissionBoard.toggle", { bot: bot.name, resource: resource.label })}
-                    onChange={event => void apply(bot, resource, event.target.checked)} className="size-3.5 accent-accent disabled:cursor-not-allowed disabled:opacity-50" />
-                  {reason || warning ? <span className="max-w-32 text-[9px] leading-tight text-ink-secondary">{reason || warning}</span>
-                    : cell.checked && (cell.readOnly || cell.limited) ? <span className="text-[9px] text-ink-secondary">{t(cell.readOnly ? "permissionBoard.readOnly" : "permissionBoard.limited")}</span> : null}
+                    aria-label={t("permissionBoard.toggle", { bot: bot.name, resource: resource.label })} aria-describedby={describedBy}
+                    onChange={event => void apply(bot, resource, event.target.checked)} className="size-4 accent-accent disabled:cursor-not-allowed disabled:opacity-50" />
+                  {detail && <span id={detailId} className="max-w-32 text-[12px] leading-4 text-ink-secondary">{detail}</span>}
                 </label>
               </td>;
             })}
           </tr>; })}</tbody>
         </table>
       </div>}
+    {emailError && <p role="alert" className="text-[13px] text-danger">{t("permissionBoard.emailError")}</p>}
     <details className="rounded-lg bg-inset px-3 py-1.5">
       <summary className="cursor-pointer text-[12px] font-medium text-ink-secondary">{t("permissionBoard.notes")}</summary>
       <p className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("permissionBoard.scopeNote")}</p>
       <p className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("permissionBoard.mcpNote")}</p>
-      {emailError && <p role="alert" className="mt-1.5 text-[12px] text-ink-secondary">{t("permissionBoard.emailError")}</p>}
     </details>
   </div>;
 }

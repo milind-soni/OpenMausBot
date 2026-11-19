@@ -6934,7 +6934,7 @@
   "permissionBoard.intro": "Wiersze to boty; kolumny to połączone usługi i serwery MCP. Zaznacz komórkę, aby zezwolić, lub odznacz, aby cofnąć. Obowiązują te same uprawnienia co w ustawieniach każdego bota.",
   "permissionBoard.notes": "Uwagi",
   "permissionBoard.scopeNote": "Nowe uprawnienia do usług dają standardowy dostęp do odczytu i zapisu. Istniejące ograniczenia tylko-do-odczytu i konkretnych narzędzi są zachowane. Ta tablica zarządza uprawnieniami po stronie bota; nie udostępnia prywatnych połączeń ani danych logowania innych osób.",
-  "permissionBoard.mcpNote": "Globalne ustawienia MCP i ograniczenia narzędzi nadal obowiązują. Globalnie wyłączone lub należące do innego bota serwery nie zmieniają się tutaj. „Niedostępny” opisuje stan połączenia; zaznaczenie oznacza uprawnienie. Pierwsza zmiana MCP tworzy jawny wybór. Zmiany obowiązują od następnej tury bota; usunięty dostęp może wygasnąć wcześniej.",
+  "permissionBoard.mcpNote": "Globalne ustawienia MCP i ograniczenia narzędzi nadal obowiązują. Nie można tu zmieniać serwerów wyłączonych globalnie ani należących do innego bota. „Niedostępny” opisuje stan połączenia; zaznaczenie oznacza uprawnienie. Pierwsza zmiana MCP tworzy jawny wybór. Uprawnienia można edytować również wtedy, gdy bot pracuje. Dodany dostęp obowiązuje od jego następnej tury; cofnięty dostęp może przestać działać wcześniej.",
   "permissionBoard.searchBots": "Szukaj botów lub działów",
   "permissionBoard.searchResources": "Szukaj usług lub serwerów MCP",
   "permissionBoard.category": "Pokaż",

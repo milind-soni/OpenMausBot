@@ -5731,7 +5731,7 @@
   "permissionBoard.intro": "Hàng là bot; cột là dịch vụ đã kết nối và máy chủ MCP. Đánh dấu ô để cho phép truy cập hoặc bỏ dấu để thu hồi. Áp dụng đúng quyền như trong cài đặt của từng bot.",
   "permissionBoard.notes": "Ghi chú",
   "permissionBoard.scopeNote": "Quyền dịch vụ mới cho phép đọc/ghi tiêu chuẩn. Các giới hạn chỉ-đọc và theo công cụ hiện có được giữ nguyên. Bảng này quản lý quyền phía bot; nó không chia sẻ kết nối riêng tư hay thông tin đăng nhập của người khác.",
-  "permissionBoard.mcpNote": "Cài đặt MCP toàn cục và giới hạn theo công cụ vẫn được áp dụng. Máy chủ tắt toàn cục hoặc của bot khác không thể thay đổi ở đây. “Không khả dụng” mô tả trạng thái kết nối; dấu kiểm thể hiện quyền. Thay đổi MCP đầu tiên tạo lựa chọn rõ ràng. Thay đổi có hiệu lực từ lượt tiếp theo của bot; quyền bị thu hồi có thể dừng sớm hơn.",
+  "permissionBoard.mcpNote": "Cài đặt MCP toàn cục và giới hạn theo công cụ vẫn được áp dụng. Máy chủ tắt toàn cục hoặc của bot khác không thể thay đổi ở đây. “Không khả dụng” mô tả trạng thái kết nối; dấu kiểm thể hiện quyền. Thay đổi MCP đầu tiên tạo lựa chọn rõ ràng. Bạn có thể chỉnh sửa quyền khi bot đang bận. Quyền truy cập mới có hiệu lực từ lượt tiếp theo của bot; quyền truy cập bị thu hồi có thể ngừng hiệu lực sớm hơn.",
   "permissionBoard.searchBots": "Tìm bot hoặc bộ phận",
   "permissionBoard.searchResources": "Tìm dịch vụ hoặc máy chủ MCP",
   "permissionBoard.category": "Hiển thị",

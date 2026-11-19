@@ -5731,7 +5731,7 @@
   "permissionBoard.intro": "Satırlar botlar; sütunlar bağlı hizmetler ve MCP sunucularıdır. Erişime izin için hücreyi işaretleyin, geri almak için işareti kaldırın. Her botun kendi ayarlarıyla aynı izinler geçerlidir.",
   "permissionBoard.notes": "Notlar",
   "permissionBoard.scopeNote": "Yeni hizmet izinleri standart okuma/yazma erişimi verir. Mevcut salt-okunur ve araç bazlı kısıtlamalar korunur. Bu pano bot tarafındaki izinleri yönetir; başkalarının özel bağlantılarını veya kimlik bilgilerini paylaşmaz.",
-  "permissionBoard.mcpNote": "Genel MCP ayarları ve araç bazlı kısıtlamalar geçerliliğini sürdürür. Genel olarak kapalı veya başka bir bota ait sunucular buradan değiştirilemez. “Kullanılamıyor” bağlantı durumunu, işaret ise izni belirtir. İlk MCP değişikliği açık bir seçim oluşturur. Bot MCP erişimini değiştirmeden önce etkin turunu durdurun.",
+  "permissionBoard.mcpNote": "Genel MCP ayarları ve araç bazlı kısıtlamalar geçerliliğini sürdürür. Genel olarak kapalı veya başka bir bota ait sunucular buradan değiştirilemez. “Kullanılamıyor” bağlantı durumunu, işaret ise izni belirtir. İlk MCP değişikliği açık bir seçim oluşturur. Bot çalışırken de izinleri düzenleyebilirsiniz. Eklenen erişim botun sonraki turundan itibaren geçerli olur; iptal edilen erişim daha erken durabilir.",
   "permissionBoard.searchBots": "Bot veya departman ara",
   "permissionBoard.searchResources": "Hizmet veya MCP sunucusu ara",
   "permissionBoard.category": "Göster",

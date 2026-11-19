@@ -3581,7 +3581,7 @@
   "permissionBoard.intro": "Les lignes sont des bots ; les colonnes, des services connectés et des serveurs MCP. Cochez une case pour autoriser l’accès, décochez-la pour le révoquer. Les permissions sont celles des réglages de chaque bot.",
   "permissionBoard.notes": "Remarques",
   "permissionBoard.scopeNote": "Les nouvelles autorisations de service permettent la lecture et l’écriture standard. Les restrictions existantes en lecture seule et par outil sont conservées. Ce tableau gère les permissions côté bot ; il ne partage ni connexions privées ni identifiants d’autrui.",
-  "permissionBoard.mcpNote": "Les réglages MCP globaux et les restrictions par outil s’appliquent toujours. Les serveurs désactivés globalement ou d’un autre bot ne se modifient pas ici. « Indisponible » décrit l’état de la connexion ; la case représente l’autorisation. Le premier changement MCP crée une sélection explicite. Les changements s’appliquent au tour suivant du bot ; un accès révoqué peut cesser plus tôt.",
+  "permissionBoard.mcpNote": "Les réglages MCP globaux et les restrictions par outil s’appliquent toujours. Les serveurs désactivés globalement ou d’un autre bot ne se modifient pas ici. « Indisponible » décrit l’état de la connexion ; la case représente l’autorisation. Le premier changement MCP crée une sélection explicite. Vous pouvez modifier les autorisations pendant que le bot est occupé. Les accès ajoutés s’appliquent dès son prochain tour ; un accès révoqué peut cesser plus tôt.",
   "permissionBoard.searchBots": "Rechercher des bots ou départements",
   "permissionBoard.searchResources": "Rechercher des services ou serveurs MCP",
   "permissionBoard.category": "Afficher",

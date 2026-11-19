@@ -10361,7 +10361,7 @@
   "permissionBoard.intro": "As linhas são bots; as colunas, serviços conectados e servidores MCP. Marque uma célula para permitir o acesso ou desmarque para revogar. As permissões são as mesmas das configurações de cada bot.",
   "permissionBoard.notes": "Observações",
   "permissionBoard.scopeNote": "Novas permissões de serviço concedem leitura e escrita padrão. Restrições existentes somente leitura e por ferramenta são preservadas. Este quadro gerencia permissões do lado do bot; ele não compartilha conexões privadas ou credenciais de outras pessoas.",
-  "permissionBoard.mcpNote": "Configurações MCP globais e restrições por ferramenta continuam valendo. Servidores desativados globalmente ou de outro bot não podem ser alterados aqui. “Indisponível” descreve o estado da conexão; a marcação representa a permissão. A primeira alteração de MCP cria uma seleção explícita. As alterações valem a partir do próximo turno do bot; o acesso revogado pode parar antes.",
+  "permissionBoard.mcpNote": "Configurações MCP globais e restrições por ferramenta continuam valendo. Servidores desativados globalmente ou de outro bot não podem ser alterados aqui. “Indisponível” descreve o estado da conexão; a marcação representa a permissão. A primeira alteração de MCP cria uma seleção explícita. Você pode editar as permissões enquanto o bot está ocupado. O acesso adicionado vale a partir do próximo turno dele; o acesso revogado pode parar antes.",
   "permissionBoard.searchBots": "Pesquisar bots ou departamentos",
   "permissionBoard.searchResources": "Pesquisar serviços ou servidores MCP",
   "permissionBoard.category": "Mostrar",

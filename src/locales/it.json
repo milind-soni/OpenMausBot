@@ -6804,7 +6804,7 @@
   "permissionBoard.intro": "Le righe sono bot; le colonne sono servizi connessi e server MCP. Spunta una cella per consentire l’accesso o deselezionala per revocarlo. Vengono applicati gli stessi permessi delle impostazioni di ogni bot.",
   "permissionBoard.notes": "Note",
   "permissionBoard.scopeNote": "Le nuove concessioni dei servizi permettono lettura e scrittura standard. Le restrizioni esistenti di sola lettura e per strumento restano invariate. Questa tabella gestisce i permessi lato bot; non condivide connessioni private o credenziali di altri.",
-  "permissionBoard.mcpNote": "Le impostazioni MCP globali e le restrizioni per strumento continuano ad applicarsi. I server disattivati globalmente o di altri bot non si modificano qui. «Non disponibile» descrive lo stato della connessione; la casella rappresenta il permesso. La prima modifica MCP crea una selezione esplicita. Le modifiche si applicano dal turno successivo del bot; l’accesso rimosso può interrompersi prima.",
+  "permissionBoard.mcpNote": "Le impostazioni MCP globali e le restrizioni per strumento continuano ad applicarsi. I server disattivati globalmente o di altri bot non si modificano qui. «Non disponibile» descrive lo stato della connessione; la casella rappresenta il permesso. La prima modifica MCP crea una selezione esplicita. Puoi modificare i permessi mentre il bot è occupato. L’accesso aggiunto si applica dal suo turno successivo; l’accesso revocato può interrompersi prima.",
   "permissionBoard.searchBots": "Cerca bot o dipartimenti",
   "permissionBoard.searchResources": "Cerca servizi o server MCP",
   "permissionBoard.category": "Mostra",

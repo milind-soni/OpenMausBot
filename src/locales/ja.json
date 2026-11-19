@@ -3,7 +3,7 @@
   "permissionBoard.intro": "行がBot、列が接続済みサービス・MCPです。チェックで利用を許可／解除します。個別のBot設定と同じ権限に反映されます。",
   "permissionBoard.notes": "注意事項",
   "permissionBoard.scopeNote": "サービスを新しく許可すると、標準の読み書き権限が付きます。既存の読み取り専用・ツール指定は維持します。この表はBot側の許可を管理するもので、他の人の非公開接続やログイン情報を共有するものではありません。",
-  "permissionBoard.mcpNote": "MCPの全体設定・ツール単位の制限は引き続き適用されます。全体でオフ・他のBot専用のMCPはここでは変更できません。起動不可の表示は接続状態で、チェックは利用許可を表します。MCPの初回変更後は選んだサーバーだけを許可します。実行中のBotのMCPを変える場合は、先に実行を止めてください。",
+  "permissionBoard.mcpNote": "MCPの全体設定・ツール単位の制限は引き続き適用されます。全体でオフ・他のBot専用のMCPはここでは変更できません。起動不可の表示は接続状態で、チェックは利用許可を表します。MCPの初回変更後は選んだサーバーだけを許可します。Botの実行中でも権限を変更できます。追加した利用許可は次のターンから有効になり、取り消した利用許可はそれより早く無効になる場合があります。",
   "permissionBoard.searchBots": "Bot・部署を検索",
   "permissionBoard.searchResources": "サービス・MCPを検索",
   "permissionBoard.category": "表示対象",

@@ -38,7 +38,7 @@ It prints an evidence directory containing `receipt.json`, `electron.log` and
 screenshots. Its temporary profile and fake server are removed afterwards.
 
 The HTTP integration test also runs fake turns and invokes the real internal
-connector gate against a loopback stand-in: withheld, excluded-todo and write
+connector gate against a loopback stand-in: withheld, excluded-tool and write
 operations on read-only apps are denied, an immediate app revocation blocks
 further calls, and a bot with services globally off starts with only the newly
 selected app granted. MCP narrowing persists while a bot works: changes apply
@@ -52,16 +52,17 @@ re-tested here.
   patch, and waits for the server's response before showing a changed check.
   A per-bot synchronous in-flight guard prevents lost compound grants from
   simultaneous cells; other bots can still be edited.
-- Services reuse `botAppScope` and `appSwitchPatch`. Existing read-only scopes
-  and exact-tool restrictions are retained. An app newly switched on receives
+- Services reuse `botAppScope` and `appSwitchPatch`. Existing read-only scopes,
+  account limits on the remaining apps, and exact-tool restrictions are
+  retained. An app newly switched on receives
   normal **write** scope; switching a read-only app off and back on also grants
   write, still subject to any retained exact-tool list. Unknown grant formats
   are read-only. A bot with services globally off starts with only the newly
   selected app granted, never every connected one.
-- A missing MCP list inherits the effective eligible servers; its first edit
-  materializes an explicit selection that keeps granted (even globally
-  disabled) servers and excludes another bot's servers. A list never enables
-  a globally disabled server. Globally disabled and foreign-owned cells are
+- The first edit of an inherited MCP list retains other enabled, eligible
+  servers and excludes globally disabled servers and those owned by another
+  bot. Editing an existing explicit list preserves its disabled entries but
+  does not enable those servers. Globally disabled and foreign-owned cells are
   read-only; tool-scope ceilings remain enforced elsewhere.
 - `offFor` is connection health, not permission: its warning shows without
   blocking revocation. A busy bot stays editable; its row shows the standard

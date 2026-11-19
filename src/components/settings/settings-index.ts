@@ -197,7 +197,7 @@ export const SETTINGS_INDEX: readonly SettingsIndexEntry[] = [
   { id: "backup-model", page: "ai", anchor: "backup-model", labelKey: "settings.recovery.title", sectionKey: "settings.ai.backupModel", advanced: true, synonyms: ["backup model", "fallback", "recovery"] },
   { id: "routing", page: "ai", anchor: "routing", labelKey: "settings.ai.routing", advanced: true, synonyms: ["decision and extraction", "decision", "extraction", "routing", "who answers", "jev", "typesafe", "cloudflare", "workers ai"] },
   { id: "images", page: "ai", anchor: "images", labelKey: "settings.ai.images", advanced: true, synonyms: ["image generation", "images", "generate", "picture"] },
-  { id: "bot-permissions", page: "bots", anchor: "bot-permissions", labelKey: "permissionBoard.title", advanced: true, synonyms: ["permissions", "allow", "deny", "revoke", "services", "mcp", "matrix", "access", "connected apps", "tools"] },
+  { id: "bot-permissions", page: "bots", anchor: "bot-permissions", labelKey: "permissionBoard.title", advanced: true, when: (ctx) => ctx.admin, synonyms: ["permissions", "allow", "deny", "revoke", "services", "mcp", "matrix", "access", "connected apps", "tools"] },
   { id: "about-you", page: "bots", anchor: "about-you", labelKey: "settings.bots.aboutYou", topFor: ["name", "my name", "photo", "avatar", "picture", "profile", "profile picture", "about me"], synonyms: ["rules", "rules for every bot"] },
   { id: "away-emails", page: "bots", anchor: "about-you", labelKey: "settings.profile.awayEmails", sectionKey: "settings.bots.aboutYou", synonyms: ["away", "emails", "email me"] },
   { id: "new-bots", page: "bots", anchor: "new-bots", labelKey: "settings.bots.newBots", synonyms: ["defaults", "effort", "reasoning", "preset", "share as preset"] },

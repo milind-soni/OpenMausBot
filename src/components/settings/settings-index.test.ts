@@ -23,6 +23,13 @@ const PEOPLE = {
   "a team admin": fullContext({ desktop: false, here: false, cloud: true, team: true, admin: true, plan: false, environments: false }),
 };
 
+it("offers bot permission search only to admins, including in Simple mode", () => {
+  const hasBoard = (ctx: SettingsContext) => find("permissions", ctx).some(({ entry }) => entry.id === "bot-permissions");
+  expect(hasBoard({ ...PEOPLE["a team admin"], advanced: false })).toBe(true);
+  expect(hasBoard(PEOPLE["a team member"])).toBe(false);
+  expect(hasBoard(fullContext({ admin: false }))).toBe(false);
+});
+
 describe("the pages", () => {
   it("lists the place's pages, then Your account, then This app, in one fixed order", () => {
     expect(ids(fullContext())).toEqual([...PLACE_PAGES, "account", "plan", "app", "general", "appearance"]);

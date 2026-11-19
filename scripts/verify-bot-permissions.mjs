@@ -54,6 +54,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
       assert.equal(await checked(id, resource), expected);
     };
     const screen = async name => {
+      await evaluate("document.querySelector('[data-permission-board]').scrollIntoView({block:'start', behavior:'instant'})");
       await evaluate("new Promise(resolve => { for (const animation of document.getAnimations()) { try { animation.finish(); } catch {} } requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))); })");
       writeFileSync(join(output, name), (await win.webContents.capturePage()).toPNG());
     };
@@ -69,7 +70,8 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await screen("permissions-advanced.png");
     // Simple mode: the board comes back through Settings search, which turns Advanced on for what needs it.
     await win.loadURL(`${url}?advanced=0`);
-    await ready();
+    await until(() => evaluate("Boolean(document.querySelector('[data-settings-search]'))"), "Simple settings opens");
+    assert.equal(await evaluate("Boolean(document.querySelector('[data-permission-board]'))"), false);
     await evaluate(`(() => { const el = document.querySelector('[data-settings-search]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'permissions'); el.dispatchEvent(new Event('input', { bubbles: true })); })()`);
     await until(() => evaluate("Boolean(document.querySelector('[data-settings-hit=\"bot-permissions\"]'))"), "search offers the board in Simple mode");
     await evaluate("document.querySelector('[data-settings-hit=\"bot-permissions\"]').click()");
@@ -98,6 +100,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await toggle(benId, "Gmail", true);
     const stateBefore = [adaId, benId].map(id => { const row = saved(id); return { id, composio: row.composio, connectorScopes: row.connectorScopes, connectorTools: row.connectorTools, mcpServers: row.mcpServers }; });
     await screen("permissions-advanced.png");
+    await evaluate("history.replaceState(null, '', '?advanced=1')");
     await win.reload();
     await ready();
     assert.equal(await checked(adaId, "Gmail"), true);
@@ -121,14 +124,30 @@ if (process.versions.electron && process.argv.includes(flag)) {
     assert.equal(await evaluate("document.documentElement.lang"), "ja");
     assert.equal(await evaluate("document.body.textContent.includes('Botのサービス・MCP権限')"), true);
     await screen("permissions-japanese.png");
-    win.setSize(390, 844);
+    win.setContentSize(390, 844);
     await until(() => evaluate("innerWidth === 390"), "narrow viewport");
     assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, "no horizontal document overflow");
     assert.equal(await evaluate("(() => { const region = document.querySelector('[data-permission-board] [role=region]'); return region.scrollWidth > region.clientWidth; })()"), true, "wide matrix scroll is confined to its region");
     await screen("permissions-narrow.png");
+    for (const skin of ["midnight", "daylight"]) {
+      await evaluate(`document.documentElement.dataset.skin = ${JSON.stringify(skin)}`);
+      for (const direction of ["ltr", "rtl"]) {
+        await evaluate(`document.documentElement.dir = ${JSON.stringify(direction)}`);
+        assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, `${skin} ${direction}: no page overflow`);
+        await evaluate("document.querySelector('[data-permission-board]').scrollIntoView({block:'start'})");
+        await screen(`permissions-${skin}-${direction}-narrow.png`);
+      }
+    }
+    await evaluate("document.documentElement.dir = 'ltr'");
+    win.setContentSize(1180, 900);
+    await until(() => evaluate("innerWidth === 1180"), "desktop viewport restored");
+    for (const skin of ["midnight", "daylight"]) {
+      await evaluate(`document.documentElement.dataset.skin = ${JSON.stringify(skin)}`);
+      await screen(`permissions-${skin}.png`);
+    }
     assert.deepEqual(blocked, [], "no external network request attempted");
     assert.deepEqual(errors, [], "no renderer errors");
-    const receipt = { passed: true, renderer: ["SettingsModal", "StoreProvider", "BotPermissionBoard"], navigation: receipts, checks: ["two-bot initial ticks", "disabled global MCP", "real DOM service/MCP switches", "fresh HTTP and on-disk saved grants", "exact-tool grant preserved", "reload persistence", "bot search", "resource search", "MCP category", "Japanese locale loaded and rendered", "390px document overflow absent", "region contains horizontal matrix scroll", "external requests absent"], state: stateBefore, screenshots: ["permissions-advanced.png", "permissions-search-simple.png", "permissions-mcp-filter.png", "permissions-japanese.png", "permissions-narrow.png"], limitation: "Mounts the real Settings modal and production store directly, not the entire app shell or packaged preload. All HTTP routes are real in a disposable fake-engine workspace with a loopback connected-app stand-in. No native dialogs, live credentials, or external service tested." };
+    const receipt = { passed: true, renderer: ["SettingsModal", "StoreProvider", "BotPermissionBoard"], navigation: receipts, checks: ["two-bot initial ticks", "disabled global MCP", "real DOM service/MCP switches", "fresh HTTP and on-disk saved grants", "exact-tool grant preserved", "reload persistence", "bot search", "resource search", "MCP category", "Japanese locale loaded and rendered", "390px document overflow absent", "Midnight and Daylight in LTR and RTL", "region contains horizontal matrix scroll", "external requests absent"], state: stateBefore, screenshots: ["permissions-advanced.png", "permissions-search-simple.png", "permissions-mcp-filter.png", "permissions-japanese.png", "permissions-narrow.png", "permissions-midnight.png", "permissions-daylight.png", ...["midnight", "daylight"].flatMap(skin => ["ltr", "rtl"].map(direction => `permissions-${skin}-${direction}-narrow.png`))], limitation: "Mounts the real Settings modal and production store directly, not the entire app shell or packaged preload. All HTTP routes are real in a disposable fake-engine workspace with a loopback connected-app stand-in. No native dialogs, live credentials, or external service tested." };
     writeFileSync(join(output, "receipt.json"), JSON.stringify(receipt, null, 2));
     console.log(JSON.stringify({ passed: true, output, checks: receipt.checks }));
     app.exit(0);
@@ -165,7 +184,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
       resolveId(id) { if (id === "virtual:bot-permissions") return `\0${id}`; },
       load(id) {
         if (id !== "\0virtual:bot-permissions") return;
-        return `import React, { useEffect } from 'react'; import { createRoot } from 'react-dom/client'; import { StoreProvider, useStore } from '/src/state/store.tsx'; import { SettingsModal } from '/src/components/SettingsModal.tsx'; import { useOwnerOrAdmin } from '/src/lib/use-owner-or-admin.ts'; import { loadLocale } from '/src/lib/i18n.ts'; import '/src/styles.css'; await loadLocale(new URLSearchParams(location.search).get('locale') || 'en'); localStorage.setItem('omb-analytics-opt-out', '1'); localStorage.setItem('omb-advanced-mode', new URLSearchParams(location.search).get('advanced') || '0'); function Fixture() { const { state, dispatch } = useStore(); const allowed = useOwnerOrAdmin(); useEffect(() => { if (state.bots.length && state.config && allowed) dispatch({type:'toggleAppSettings', open:true, section:'bots'}); }, [Boolean(state.bots.length && state.config && allowed)]); return state.appSettingsOpen ? React.createElement(SettingsModal) : null; } createRoot(document.getElementById('root')).render(React.createElement(StoreProvider, null, React.createElement(Fixture)));`;
+        return `import React, { useEffect } from 'react'; import { createRoot } from 'react-dom/client'; import { StoreProvider, useStore } from '/src/state/store.tsx'; import { SettingsModal } from '/src/components/SettingsModal.tsx'; import { useOwnerOrAdmin } from '/src/lib/use-owner-or-admin.ts'; import { loadLocale } from '/src/lib/i18n.ts'; import '/src/styles.css'; await loadLocale(new URLSearchParams(location.search).get('locale') || 'en'); localStorage.setItem('omb-analytics-opt-out', '1'); localStorage.setItem('omb-advanced-mode', new URLSearchParams(location.search).get('advanced') || '0'); function Fixture() { const { state, dispatch } = useStore(); const allowed = useOwnerOrAdmin(); useEffect(() => { if (state.bots.length && state.config && allowed) dispatch({type:'toggleAppSettings', open:true, section:new URLSearchParams(location.search).get('advanced') === '1' ? 'bots' : 'overview'}); }, [Boolean(state.bots.length && state.config && allowed)]); return state.appSettingsOpen ? React.createElement(SettingsModal) : null; } createRoot(document.getElementById('root')).render(React.createElement(StoreProvider, null, React.createElement(Fixture)));`;
       },
       configureServer(server) {
         server.middlewares.use((req, res, next) => {

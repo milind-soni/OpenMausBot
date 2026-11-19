@@ -4,12 +4,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
+import type { McpServerSummary } from "@/lib/mcp-servers";
 import { BotPermissionBoard } from "./BotPermissionBoard";
 
 const f = vi.hoisted(() => ({
   state: { bots: [] as Bot[] }, listeners: new Set<() => void>(),
   api: vi.fn(), inventory: vi.fn(), dispatch: vi.fn(),
-  mcp: { servers: [{ name: "files", enabled: true }], error: false, refresh: vi.fn() },
+  mcp: { servers: [{ name: "files", enabled: true }] as McpServerSummary[], error: false, refresh: vi.fn() },
 }));
 vi.mock("@/state/store", () => ({
   api: (...args: unknown[]) => f.api(...args),
@@ -54,6 +55,8 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); })
 const render = async () => { await act(async () => root.render(createElement(BotPermissionBoard))); };
 const cell = (bot: string, resource: string) => host.querySelector<HTMLInputElement>(`input[aria-label="${bot}: allow ${resource}"]`)!;
 const patches = () => f.api.mock.calls.filter(([, init]) => init?.method === "PATCH");
+const description = (input: HTMLInputElement) => (input.getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean)
+  .map(id => { const element = document.getElementById(id); expect(element).not.toBeNull(); expect(element?.getAttribute("aria-hidden")).not.toBe("true"); return element?.textContent; }).join(" ");
 
 it("renders all bots as rows, with grouped service and MCP column bands", async () => {
   await render();
@@ -125,6 +128,8 @@ it("keeps a busy bot editable and explains that its changes apply from the next 
   expect(cell("Alpha", "files").disabled).toBe(false);
   expect(cell("Alpha", "Mail").disabled).toBe(false);
   expect(host.textContent).toContain("Added access applies from its next turn");
+  expect(description(cell("Alpha", "Mail"))).toContain("Added access applies from its next turn");
+  expect(description(cell("Beta", "Mail"))).toBe("");
 });
 
 it("still saves for a bot that became busy before the click, applying from its next turn", async () => {
@@ -145,6 +150,69 @@ it("refresh retries an unavailable inventory without pretending grants were clea
   await act(async () => { [...host.querySelectorAll("button")].find(button => button.textContent === "Refresh list")!.click(); });
   expect(cell("Alpha", "Mail").checked).toBe(true);
   expect(cell("Alpha", "Mail").disabled).toBe(false);
+  expect(patches()).toHaveLength(0);
+});
+
+it("associates permission restrictions and warnings with their checkbox", async () => {
+  saved[0] = makeBot("a", { connectorScopes: { apps: { mail: "read" } } });
+  f.state = { bots: structuredClone(saved) };
+  f.mcp.servers = [{ name: "files", enabled: true, offFor: ["a"] }, { name: "private", enabled: true, bot: "a" }];
+  await render();
+  expect(description(cell("Alpha", "Mail"))).toBe("Read only");
+  expect(description(cell("Alpha", "files"))).not.toBe("");
+  expect(cell("Alpha", "files").disabled).toBe(false);
+  expect(description(cell("Beta", "private"))).not.toBe("");
+  expect(cell("Beta", "private").disabled).toBe(true);
+  const ids = [...host.querySelectorAll("[id]")].map(element => element.id);
+  expect(new Set(ids).size).toBe(ids.length);
+});
+
+it("shows email read failures outside collapsed notes and refresh can recover", async () => {
+  const normal = f.api.getMockImplementation()!;
+  f.api.mockImplementation((path, init) => path === "/api/email" ? Promise.reject(new Error("Fixture email failure")) : normal(path, init));
+  await render();
+  const alert = host.querySelector("[role=alert]");
+  expect(alert).not.toBeNull();
+  expect(alert?.closest("details")).toBeNull();
+  f.api.mockImplementation(normal);
+  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Refresh list")!.click());
+  expect(host.querySelector("[role=alert]")).toBeNull();
+  expect(patches()).toHaveLength(0);
+});
+
+it("blocks an inherited service revoke while email status is unknown, but allows explicit edits", async () => {
+  saved[1] = makeBot("b", { connectorScopes: { apps: { mail: "read", email: "write" } } });
+  f.state = { bots: structuredClone(saved) };
+  const normal = f.api.getMockImplementation()!;
+  f.api.mockImplementation((path, init) => path === "/api/email" ? Promise.reject(new Error("Fixture email failure")) : normal(path, init));
+  await render();
+  await act(async () => cell("Alpha", "Mail").click());
+  expect(cell("Alpha", "Mail").checked).toBe(true);
+  expect(patches()).toHaveLength(0);
+  expect(host.textContent).toContain("Alpha · Mail:");
+  await act(async () => cell("Beta", "Mail").click());
+  expect(patches()).toHaveLength(1);
+  expect(saved[1]!.connectorScopes).toEqual({ apps: { email: "write" } });
+});
+
+it("filters without writing permissions or including hidden bots", async () => {
+  f.state = { bots: [...saved, makeBot("hidden", { name: "Hidden", hidden: true })] };
+  await render();
+  expect(host.querySelectorAll("tbody tr")).toHaveLength(2);
+  const searches = host.querySelectorAll<HTMLInputElement>('input[type="search"]');
+  const setQuery = async (input: HTMLInputElement, value: string) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+  await setQuery(searches[0]!, "alpha");
+  expect(host.querySelectorAll("tbody tr")).toHaveLength(1);
+  await setQuery(searches[1]!, "MAIL");
+  expect(host.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+  expect(cell("Alpha", "Mail").checked).toBe(true);
+  await act(async () => { const select = host.querySelector("select")!; select.value = "mcp"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(host.querySelector("table")).toBeNull();
   expect(patches()).toHaveLength(0);
 });
 
