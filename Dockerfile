@@ -271,3 +271,17 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # and collects the server's orphans as a subreaper instead of warning.
 ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "dist-server/server-launcher.js"]
+
+FROM server AS railway
+USER root
+RUN command -v setpriv && npm install -g @openai/codex && codex --version
+COPY --from=edge /caddy /usr/local/bin/caddy
+COPY Caddyfile /etc/caddy/Caddyfile
+COPY start.sh /usr/local/bin/start-railway
+
+ENV CODEX_HOME=/data/.codex \
+    OMB_TUNNEL_SOCKET=/run/openmausbot/http.sock \
+    PORT=8080
+
+EXPOSE 8080
+CMD ["/bin/bash", "/usr/local/bin/start-railway"]

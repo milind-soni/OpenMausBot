@@ -1,0 +1,6 @@
+:{$PORT:8080} {
+    reverse_proxy unix//run/openmausbot/http.sock {
+        header_up X-Forwarded-Proto https
+        flush_interval -1
+    }
+}
