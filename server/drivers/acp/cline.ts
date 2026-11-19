@@ -140,7 +140,9 @@ export const CLINE_SUPPORT: AcpSupport = {
     return oauthSignedIn(savedProvider(env, config.cli)?.settings);
   },
   requireAuthenticationBeforeSpawn: true,
-  resolveModels: async () => ({ default: DEFAULT_OPTION.id, options: [DEFAULT_OPTION, ...await clineTierModels()] }),
+  // Cline's list is read only for someone signed in to Cline: nobody else's server calls Cline.
+  resolveModels: async (env, config, instanceId) => ({ default: DEFAULT_OPTION.id,
+    options: [DEFAULT_OPTION, ...await CLINE_SUPPORT.isAuthenticated(env, config, instanceId) ? await clineTierModels() : []] }),
   resolveTurnModel(model, env) {
     if (clineTierProvider(model)) return model;
     if (model && model !== DEFAULT_OPTION.id) {
