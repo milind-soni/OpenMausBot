@@ -81,6 +81,33 @@ export function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknow
   else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
 }
 
+/** Words the person can see: the turn has replied, and the wordless window after a tool is closed. */
+export function trackAssistantWords(state: AcpTurn["state"]): void {
+  state.producedItem = true;
+  state.repliedText = true;
+  state.toolsSinceShown = false;
+  state.thoughtSinceTool = false;
+}
+
+/** An assistant image is itself a reply the person sees, so it closes the wordless window after a tool. */
+export function trackAssistantImage(state: AcpTurn["state"]): void {
+  state.producedItem = true;
+  state.toolsSinceShown = false;
+  state.thoughtSinceTool = false;
+}
+
+/** A tool end that is actually emitted opens the wordless window; a repeat that names an already-ended tool emits nothing. */
+export function trackToolEndShown(state: AcpTurn["state"]): void {
+  state.producedItem = true;
+  state.toolsSinceShown = true;
+  state.thoughtSinceTool = false;
+}
+
+/** Reasoning in the wordless window: if no reply lands after it, the turn ends midstream (#6684). */
+export function trackThoughtAfterTool(state: AcpTurn["state"]): void {
+  if (state.toolsSinceShown) state.thoughtSinceTool = true;
+}
+
 export interface AcpTurnEnd {
   ok: boolean;
   stopReason: string | null;
