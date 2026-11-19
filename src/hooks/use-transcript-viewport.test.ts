@@ -162,7 +162,17 @@ function mount(initial: Partial<Props> = {}) {
       react.render(draw, commit);
       flushFrames();
     },
+    unmount,
   };
+}
+
+/** Runs every committed effect's cleanup, as an unmount does. */
+function unmount() {
+  for (const slot of react.runtime.slots) {
+    const cleanup = (slot as { cleanup?: unknown } | undefined)?.cleanup;
+    if (typeof cleanup === "function") cleanup();
+  }
+  react.runtime.slots = [];
 }
 
 beforeEach(() => {
@@ -200,7 +210,10 @@ beforeEach(() => {
   });
   vi.stubGlobal("HTMLTextAreaElement", class {});
   vi.stubGlobal("HTMLInputElement", class {});
-  return () => vi.unstubAllGlobals();
+  return () => {
+    unmount();
+    vi.unstubAllGlobals();
+  };
 });
 
 const press = (key: string, target: unknown = {}) => {
@@ -810,5 +823,48 @@ describe("following a reply and coming back to a conversation", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("a switch draws the newest rows first", () => {
+  it("draws from the twentieth newest row, and the rest once the frame is painted", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const view = mount({ messages: rows(80) });
+      view.rerender({ threadId: "other", messages: rows(80, 500) });
+      expect(view.current.drawFrom).toBe("m560");
+      view.act(() => {});
+      expect(view.current.drawFrom, "the frame callback only queues the fill").toBe("m560");
+      vi.advanceTimersByTime(0);
+      view.rerender({});
+      expect(view.current.drawFrom).toBeUndefined();
+      expect(scroller.scrollTop, "still at the end").toBeGreaterThanOrEqual(scroller.bottom);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves no frame or timer behind when the chat goes away before the paint", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const view = mount({ messages: rows(80) });
+      view.rerender({ threadId: "other", messages: rows(80, 500) });
+      expect(view.current.drawFrom).toBe("m560");
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      expect(frames).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("draws a short chat, or a jump to an older message, at once", () => {
+    const view = mount({ messages: rows(80) });
+    view.rerender({ threadId: "other", messages: rows(15, 500) });
+    expect(view.current.drawFrom).toBeUndefined();
+    store.state.focusMessage = { threadId: "third", messageId: "m700", nonce: 7, consumed: false };
+    view.rerender({ threadId: "third", messages: rows(80, 700) });
+    expect(view.current.drawFrom).toBeUndefined();
   });
 });
