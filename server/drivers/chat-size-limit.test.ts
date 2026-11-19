@@ -8,8 +8,9 @@ import type { SendTurnInput } from "../contracts.ts";
 import { recordEvents } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
-import { IMAGE_OMITTED, refusesRequestSize, shareThatFits, smallerResend, TOOL_OUTPUT_SHORTENED } from "./chat-size-limit.ts";
+import { IMAGE_OMITTED, refusesRequestSize, shareThatFits, smallerResend, TOOL_OUTPUT_OMITTED, TOOL_OUTPUT_SHORTENED } from "./chat-size-limit.ts";
 import type { OpenAIChatMessage } from "./openai-chat.ts";
+import { RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
 const NGINX_413 = "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n";
@@ -150,6 +151,27 @@ describe("smallerResend", () => {
     expect(notes).toEqual([{ role: "assistant", content: `[${10 - earlier} earlier messages omitted to fit the provider's size limit; full history remains in the app.]` }]);
     expect(second.messages[1]).toBe(notes[0]);
     expect(10 - earlier).toBeGreaterThan(10 - (first.messages.indexOf(request) - 2));
+  });
+
+  it("omits this turn's oldest tool output last, keeping every call's pairing and the newest round whole", () => {
+    const rounds = Array.from({ length: 6 }, (_, index): OpenAIChatMessage[] => [
+      { role: "assistant", content: null, tool_calls: [{ id: `read-${index}`, type: "function", function: { name: "read_page", arguments: `{"page":${index}}` } }] },
+      { role: "tool", tool_call_id: `read-${index}`, content: JSON.stringify({ ok: true, result: `page ${index} ${"p".repeat(3_000)}` }) },
+    ]).flat();
+    const { request, messages, refused } = turn(history(2, 500), rounds);
+    const plain = { ...request, content: "Read the six pages." };
+    const sent = messages.map((message) => message === request ? plain : message);
+    const resend = smallerResend(sent, plain, refused - 40_000, 0.6)!;
+    expect(resend.after.bytes).toBeLessThanOrEqual((refused - 40_000) * 0.6);
+    expect(resend.messages.indexOf(plain)).toBe(2);
+    const outputs = resend.messages.filter((message) => message.role === "tool").map((message) => JSON.parse(String(message.content)) as { ok: boolean; result: string });
+    const omitted = outputs.findIndex((output) => output.result !== TOOL_OUTPUT_OMITTED);
+    expect(omitted).toBeGreaterThan(0);
+    expect(outputs.slice(0, omitted).every((output) => output.ok && output.result === TOOL_OUTPUT_OMITTED)).toBe(true);
+    expect(outputs.slice(omitted).map((output) => output.result.slice(0, 6))).toEqual(Array.from({ length: 6 - omitted }, (_, index) => `page ${omitted + index}`));
+    expect(resend.messages.slice(3).map((message) => message.role)).toEqual(Array.from({ length: 6 }, () => ["assistant", "tool"]).flat());
+    expect(resend.messages.slice(3).filter((message) => message.role === "tool").map((message) => message.tool_call_id)).toEqual(Array.from({ length: 6 }, (_, index) => `read-${index}`));
+    expect(smallerResend(resend.messages, plain, resend.after.bytes, 0.01)!.messages.at(-1)).toBe(resend.messages.at(-1));
   });
 
   it("offers nothing to resend when only an omission note stands before the request", () => {
@@ -313,6 +335,16 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
     const kept = sent.messages.length - 3;
     expect(notes[0]!.content).toMatch(new RegExp(`^\\[${20 - kept} earlier messages omitted`));
     expect(f.errors()).toEqual([]);
+  });
+
+  it("stops after as many requests as any retried turn when llama.cpp refuses every smaller copy", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = await provider(llamaCpp(() => 999, () => 1_000));
+    const done = await f.run({ system: "Fixture system prompt.", transcript: transcript(20, 3_000) });
+    expect(done).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(RETRY_MAX_ATTEMPTS);
+    expect(f.retries().map((retry) => (retry as { attempt: number }).attempt)).toEqual([1, 2]);
+    expect(f.errors()).toEqual([requestTooLargeMessage("Fixture Flash")]);
   });
 
   it("fails with one plain message when not even the newest message fits llama.cpp's window", async () => {
