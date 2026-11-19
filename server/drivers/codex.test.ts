@@ -1631,6 +1631,27 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(expect.arrayContaining(["OMB_CODEX_AUTH_SECRET", "OMB_CODEX_AUTH_SOCKET"]));
     });
 
+    it("gives the bot box the token socket, since the box's /tmp is its own", async () => {
+      process.env.FAKE_CODEX_VERSION = "codex-cli 0.165.0";
+      plan();
+      await create({ authMode: "chatgpt-plan" });
+      const realSpawnCli = procs.spawnCli;
+      const spawns: Parameters<typeof procs.spawnCli>[] = [];
+      const spawnSpy = vi.spyOn(procs, "spawnCli").mockImplementation((...args: Parameters<typeof procs.spawnCli>) => {
+        spawns.push(args);
+        return realSpawnCli(...args);
+      });
+      try {
+        await instance.adapter.sendTurn({ threadId: "plan-box", text: "go", model: "gpt-6.1-sol" });
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "plan-box")).toMatchObject({ ok: true });
+        const appServer = spawns.find(([, args]) => args.includes("app-server"))?.[2];
+        expect(appServer?.env?.OMB_CODEX_AUTH_SOCKET).toBeTruthy();
+        expect(appServer?.box).toEqual({ rw: [appServer!.env!.OMB_CODEX_AUTH_SOCKET] });
+      } finally {
+        spawnSpy.mockRestore();
+      }
+    });
+
     it.each(["new login", "sign out"])("revokes a running task's token capability on %s", async (action) => {
       process.env.FAKE_CODEX_VERSION = "codex-cli 0.165.0";
       plan();

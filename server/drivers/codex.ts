@@ -551,7 +551,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const connection = reused?.connection ?? new CodexConnection(spawnHoldingSlot(releaseSlot, () => spawnCli(...codexLaunch(config.cli, appServerArgs), {
           cwd: turn.cwd ?? homedir(),
           env,
-          stdio: ["pipe", "pipe", "pipe"], ...customBox,
+          stdio: ["pipe", "pipe", "pipe"], ...(authBridge ? { box: { ...customBox.box, rw: [authBridge.socketPath] } } : customBox),
         }, "bot")));
         const child = connection.child;
 
