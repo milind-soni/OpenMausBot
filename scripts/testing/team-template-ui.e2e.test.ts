@@ -69,8 +69,8 @@ describe("additive template imports in the real renderer", () => {
       await click("New or share");
       if (source === "library") {
         await click("Templates");
-        await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Load"');
-        await click("Load");
+        await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Add Sales crew"');
+        await click("Add Sales crew");
         await expect.poll(snapshot, { timeout: 10_000 }).toContain("Outreach writer");
         await click("Add team");
       } else {
