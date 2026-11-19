@@ -203,14 +203,15 @@ describe("a room on screen", () => {
     expect(renders.chips).toBe(chips);
   });
 
-  it("draws every bubble and tool chip again in a new language", async () => {
-    const before = renders.bubbles, chips = renders.chips;
+  it("draws every bubble, tool chip and speaker line again in a new language", async () => {
+    const before = renders.bubbles, chips = renders.chips, mark = renderMark();
     setLocale("de");
     try {
       flushSync(() => dispatch({ type: "connected", value: false }));
       await settle();
       expect(renders.bubbles - before).toBeGreaterThanOrEqual(120);
       expect(renders.chips).toBeGreaterThan(chips);
+      expect(renderedSince(mark).filter((entry) => entry.component === "ClusterLabel").length, "speaker lines").toBeGreaterThan(20);
     } finally {
       setLocale("en");
       flushSync(() => dispatch({ type: "connected", value: true }));
