@@ -15,7 +15,7 @@ const fixture = vi.hoisted(() => ({
   framed: [] as string[],
   api: vi.fn(async (_path: string, _init?: unknown): Promise<unknown> => ({ framing: "allowed" })),
 }));
-vi.mock("@/lib/web-panel-preferences", () => ({ useWebPanels: () => fixture.panels, setWebPanels: fixture.setWebPanels }));
+vi.mock("@/lib/web-panel-preferences", () => ({ useWebPanels: () => fixture.panels, latestWebPanels: () => fixture.panels, setWebPanels: fixture.setWebPanels }));
 vi.mock("./app/app-api", () => ({
   AppDocumentError: class AppDocumentError extends Error {
     failure: unknown;

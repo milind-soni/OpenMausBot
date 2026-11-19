@@ -7129,6 +7129,7 @@
   "webPanels.page.cantEmbed": "This page can't be shown inside the app",
   "webPanels.page.cantEmbedBody": "Some sites refuse to be embedded. Open it in your browser instead.",
   "webPanels.page.pageGone": "This page can't be shown right now",
+  "webPanels.page.openInChat": "Open in chat",
   "webPanels.page.refusedBody": "{site} doesn't allow other apps to show it. Open it in your browser instead.",
   "sidebar.nav.publishedApps": "Published apps",
   "sidebar.nav.teamFiles": "Team files",
