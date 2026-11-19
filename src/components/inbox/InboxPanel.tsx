@@ -94,7 +94,7 @@ export function InboxPanel() {
         if (document.activeElement === document.body) statusControl.current?.focus();
         return;
       }
-      statusControl.current?.focus();
+      if (document.activeElement === document.body) statusControl.current?.focus();
       readInboxLine(null);
     } else if (view && at < 0) {
       if (document.activeElement === document.body) statusControl.current?.focus();

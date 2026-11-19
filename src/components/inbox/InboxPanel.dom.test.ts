@@ -203,6 +203,23 @@ describe("the inbox panel", () => {
     expect(document.activeElement).toBe(document.querySelector('select[aria-label="Inbox status"]'));
   });
 
+  it("keeps focus on search when the last matching ask settles", async () => {
+    shown(inboxView([{ ...approvalRow, unread: false }, settledRow]));
+    openInbox({ reading: approvalRow.id });
+    await mount(createElement(InboxPanel));
+    await click('[data-inbox-reading] [data-inbox-action="allow"]');
+
+    const search = document.querySelector<HTMLInputElement>('input[type="search"]')!;
+    search.focus();
+    expect(document.activeElement).toBe(search);
+
+    await act(async () => {
+      shown(inboxView(currentInbox()!.rows.map((row) => row.id === approvalRow.id ? { ...row, tab: "done" } : row)));
+    });
+    expect(document.querySelector("[data-inbox-reading]")).toBeNull();
+    expect(document.activeElement).toBe(search);
+  });
+
   it("is a sheet at phone width", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
     openInbox();
