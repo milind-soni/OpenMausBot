@@ -92,6 +92,7 @@ export const SETTINGS_PLACES = [
   {"id":"light-dark","path":"Settings → Appearance → Light or dark","words":["dark mode","night mode","light mode","dark","light","system"]},
   {"id":"theme","path":"Settings → Appearance → Theme","words":["skin","looks","themes"]},
   {"id":"bubbles","path":"Settings → Appearance → Use the bot's color for my messages","words":["message color","my messages","bubbles"]},
+  {"id":"message-times","path":"Settings → Appearance → Always show message times","words":["timestamps","message time","time stamps","clock"]},
   {"id":"tool-calls","path":"Settings → Appearance → Chat","words":["tool calls","this run","chat width","font","typeface"]},
   {"id":"layout","path":"Settings → Appearance → Layout","words":["show your computers","rail","window frame","title bar","threads","tools layout","pinned","circles","universal pins","pinned panels"],"advanced":true},
   {"id":"apps","path":"the Apps panel (Connect apps, at the bottom of the sidebar)","words":["apps","gmail","slack","calendar","notion","connect app","integrations"]},

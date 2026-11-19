@@ -10,6 +10,7 @@ import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { cn } from "@/lib/cn";
+import { useAlwaysShowMessageTimes } from "@/lib/message-time-preference";
 import { formatTime, type Bot, type Message } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useStoreRef } from "@/state/store-ref";
@@ -93,6 +94,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
   const mentionPerson = useMemo(() => ({ profileName }), [profileName]);
   const user = m.role === "user";
   const reactor = useReactor();
+  const alwaysTime = useAlwaysShowMessageTimes();
   const speaker = otherSpeaker(m, reactor !== "user" ? reactor : null);
   const rawText = user ? (m.text ?? "") : stripLeakedSystemHarnessMessages(m.text ?? "");
   const cited = user && m.text ? splitTranscriptCitations(m.text) : null;
@@ -231,7 +233,7 @@ export const RoomTextMessage = memo(function RoomTextMessage({
           )}
         </div>
         {!tabled && botActions}
-        <span className="self-end pb-1 text-[11px] tabular-nums text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
+        <span className={cn("self-end pb-1 text-[11px] tabular-nums text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100", alwaysTime && "opacity-100")}>
           {formatTime(m.at)}
         </span>
       </div>
