@@ -9,6 +9,7 @@ import { buildDevsReport } from "../devs-report.ts";
 import type { StoreChange } from "../store.ts";
 import { createPerfHost, PERF_FILE } from "./perf-host.ts";
 import { PERF_HEALTH_MAX_BYTES, perfHealth } from "./perf-report.ts";
+import { SETUP_STEPS } from "./setup-steps.ts";
 import { createProcessSampler, type ProcessList } from "./process-sampler.ts";
 import { createTurnTimings, RING_CAP } from "./turn-timings.ts";
 
@@ -168,6 +169,7 @@ describe("the perf field's size", () => {
       for (let retry = 0; retry < 4; retry++) big.noteEvent({ eventId: "e", provider: "p", threadId, createdAt: "", turnId: `t${turn}`, type: "turn.retrying", attempt: retry, delayMs: 1000, reason: `reason_${(turn * 4 + retry) % 20}` });
       big.noteEvent({ eventId: "e", provider: `engine${turn % 20}`, threadId, createdAt: "", turnId: `t${turn}`, type: "runtime.error", message: "m", limit: (["engine", "model", "credits"] as const)[turn % 3] });
       clock += 1_234_567;
+      big.noteSetup(`thread_${turn + 1}`, Object.fromEntries(SETUP_STEPS.map((step, index) => [step, 1_234_567 + index])));
       if (turn < 250) big.noteEvent({ eventId: "e", provider: "p", threadId, createdAt: "", turnId: `t${turn}`, type: "turn.completed", ok: turn % 2 === 0 });
     }
     clock = START + 250 * 1_234_567;
@@ -181,6 +183,8 @@ describe("the perf field's size", () => {
     console.log(`perf health, every part full: ${bytes} bytes (budget ${PERF_HEALTH_MAX_BYTES})`);
     expect(bytes).toBeLessThanOrEqual(PERF_HEALTH_MAX_BYTES);
     expect(body.h24.tools.length).toBeGreaterThan(0);
+    expect(Object.keys(body.h24.setup)).toHaveLength(7);
+    expect(Object.keys(body.h1.setup)).toHaveLength(7);
   });
 });
 
