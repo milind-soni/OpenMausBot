@@ -109,11 +109,13 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     idle?.addEventListener("abort", () => controller.abort(), { once: true });
     if (idle?.aborted) controller.abort();
     deps.controllers.set(threadId, { generation, controller });
+    // Someone waits on this summary (not an idle one): the status line says so until every way out below, in the finally.
+    let shown = false;
     try {
       if (manual && engineCompacts && await deps.engineCompact({ botId: bot.id, threadId, instanceId: instance.instanceId }, controller.signal)) return;
       controller.signal.throwIfAborted();
-      const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: deps.generateText(bot.id, instance),
-        ...(idle || !deps.summarizing ? {} : { onSummarizing: (active: boolean) => deps.summarizing?.(threadId, active) }) });
+      if (!idle && deps.summarizing) { shown = true; deps.summarizing(threadId, true); }
+      const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: deps.generateText(bot.id, instance) });
       if (!idle && !deps.claimIsCurrent(bot.id, generation, threadId)) throw deps.cancelled("context summarization stopped");
       controller.signal.throwIfAborted();
       if (prefix !== JSON.stringify(sinceFreshStart(store.activePath(threadId)).slice(0, messages.length))) {
@@ -126,6 +128,7 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
           tokensBefore: measurement?.tokens ?? Math.ceil(bytes / 4), by: manual ? "person" : "harness" },
       }, { kind: "compaction.append", key: `${threadId}:${messages.at(-1)?.id}:${fold.firstKeptId}` });
     } finally {
+      if (shown) deps.summarizing?.(threadId, false);
       if (deps.controllers.get(threadId)?.generation === generation) deps.controllers.delete(threadId);
     }
   };
