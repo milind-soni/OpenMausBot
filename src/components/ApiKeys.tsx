@@ -6,17 +6,12 @@ import { Check, Loader2 } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "composio" | "composioApi" | "xai" | "trello";
+export type ConfigSection = "xai" | "trello";
 
 const SECTIONS: Record<
   ConfigSection,
   { body: (value: string) => unknown; flag: (config: ConfigStatus) => boolean }
 > = {
-  composio: { body: (v) => ({ composio: { key: v } }), flag: (c) => c.composio.configured },
-  composioApi: {
-    body: (v) => ({ composio: { apiKey: v } }),
-    flag: (c) => c.composio.apiKeyConfigured ?? false,
-  },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
   trello: { body: (v) => ({ trello: { key: v } }), flag: (c) => c.trello?.keyConfigured ?? false },
 };

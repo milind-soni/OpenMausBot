@@ -161,7 +161,6 @@ export function messageVersions(bot: Bot, message: Message): Message[] {
 export interface ConfigStatus {
   usageDisplay?: UsagePreferences;
   xai?: { configured: boolean };
-  composio: { configured: boolean; apiKeyConfigured?: boolean };
   trello?: { configured: boolean; keyConfigured: boolean };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
@@ -1236,7 +1235,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "config":
           rawDispatch({
             type: "configStatus",
-            config: { usageDisplay: frame.usageDisplay, xai: frame.xai, composio: frame.composio, trello: frame.trello, profile: frame.profile,
+            config: { usageDisplay: frame.usageDisplay, xai: frame.xai, trello: frame.trello, profile: frame.profile,
               autoHandoffs: frame.autoHandoffs, autoApprovePermissions: frame.autoApprovePermissions, autoApproveDelaySeconds: frame.autoApproveDelaySeconds },
           });
           api("/api/instances")

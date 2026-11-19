@@ -13,6 +13,16 @@ describe("saveConfig instances merge", () => {
     saveConfig({ autoApprovePermissions: false, autoApproveDelaySeconds: 25 });
     expect(loadConfig()).toMatchObject({ autoApprovePermissions: false, autoApproveDelaySeconds: 25 });
   });
+  it("deletes a stored Composio key left by older builds", () => {
+    const file = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(file, JSON.stringify({ composio: { key: "ck_old", apiKey: "ak_old" }, profile: { name: "TEST · Person" } }));
+    const cfg = loadConfig();
+    expect(cfg).not.toHaveProperty("composio");
+    const disk = JSON.parse(readFileSync(file, "utf8"));
+    expect(disk).not.toHaveProperty("composio");
+    expect(disk.profile).toEqual({ name: "TEST · Person" });
+  });
   it("writes a brand-new instances entry", () => {
     saveConfig({ instances: { claude: { driver: "claudeAgent", config: { permissionMode: "bypassPermissions" } } } });
     const cfg = loadConfig();

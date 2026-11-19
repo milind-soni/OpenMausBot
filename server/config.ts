@@ -1,6 +1,6 @@
 import type { UsagePreferences } from "./usage-types.ts";
 // Config + data dirs. One file, ~/.gbs/config.json, env fallbacks:
-//   { "xai": {"key":"xai-…"}, "composio": {"key":"ck_…"},
+//   { "xai": {"key":"xai-…"},
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
 // `instances.<id>` entries are hand-editable but also written by the app
 // itself (e.g. the Settings permission toggle), via saveConfig's per-id merge.
@@ -13,10 +13,6 @@ import type { InstanceConfigMap } from "./contracts.ts";
 
 export interface AppConfig {
   xai?: { key?: string; url?: string };
-  /** key = ck_… Connect consumer key (connections + agent tools);
-   * apiKey = ak_… project API key — optional, unlocks the full toolkit
-   * catalog with official logos in the plugins marketplace. */
-  composio?: { key?: string; apiKey?: string; url?: string };
   /** key = a Trello Power-Up API key (identifies this app, not secret);
    * token = the connected user's personal Trello token, obtained through
    * Trello's own browser authorize flow. Powers per-project board linking
@@ -52,8 +48,13 @@ export function loadConfig(): AppConfig {
   restrictToOwner(p);
   // first run (or a corrupt file, which is kept aside) — env fallbacks below
   const cfg = readJsonFile<AppConfig>(p, {});
+  // Composio was removed (curated apps replaced it): drop its stored keys
+  // from disk rather than leaving an unused secret behind.
+  if ("composio" in cfg) {
+    delete (cfg as Record<string, unknown>).composio;
+    writeJsonAtomic(p, cfg);
+  }
   cfg.xai = { key: process.env.XAI_API_KEY, ...cfg.xai };
-  cfg.composio = { key: process.env.COMPOSIO_KEY, ...cfg.composio };
   delete (cfg as Record<string, unknown>).box;
   cfg.trello = { key: process.env.TRELLO_API_KEY, ...cfg.trello };
   cfg.autoHandoffs = cfg.autoHandoffs ?? true;
@@ -72,7 +73,8 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   const p = join(DATA_DIR, "config.json");
   const disk = readJsonFile<Record<string, unknown>>(p, {});
   delete disk.box;
-  for (const key of ["xai", "composio", "trello", "profile"] as const) {
+  delete disk.composio;
+  for (const key of ["xai", "trello", "profile"] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };
     }

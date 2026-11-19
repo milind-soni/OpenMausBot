@@ -21,4 +21,5 @@ response as soon as possible, normally within a few days.
   `cmd.exe` string-building you find.
 
 - Computer use runs locally through the desktop app and its operating system permissions.
-  Connected apps use Composio; the app no longer provisions cloud computers.
+  Apps connect to local MCP servers on this computer (loopback only); their access tokens are stored
+  owner-only and never returned by the API. The app no longer provisions cloud computers.

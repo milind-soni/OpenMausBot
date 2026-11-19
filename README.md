@@ -46,8 +46,8 @@ already have:
   existing logins and subscriptions, no new accounts, no proxy in the middle.
 - **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
   events live in `~/.gerer-build-studio`, not a cloud.
-- **Agents with hands.** Each bot can get a real computer — a cloud Linux desktop it drives while you watch
-  live, or your own Mac — plus 500+ apps through Composio Connect.
+- **Agents with hands.** Each bot can drive your own Mac and use curated apps such as Edits, set up in a
+  minute from the Apps screen.
 
 ## Features
 
@@ -92,8 +92,8 @@ permission broker turns every risky action into a decision you make, for cloud a
 
 ### 🔌 Connected apps
 
-A one-click marketplace over Composio Connect: Gmail, Slack, GitHub, Notion, Linear and hundreds more.
-OAuth once, and every bot can use them as tools.
+A curated set of apps with simple setup, starting with Edits for video editing. Each app shows whether
+it's ready and which models can use it. Tag one with `+edits` to choose it for a task.
 
 <img src="docs/screenshots/marketplace.png" alt="Connected apps marketplace" width="100%">
 
@@ -215,7 +215,7 @@ flowchart LR
     BUS -- "one SSE stream" --> UI
     REG --> CL & CX
     CL & CX -- "MCP" --> BROKER
-    server -- "Composio Connect" --> APPS[("Gmail · Slack · GitHub · …")]
+    server -- "local MCP" --> APPS[("Apps · Edits · …")]
 ```
 
 | Layer | Where | What it does |
@@ -253,8 +253,9 @@ Optional, pasted once in **App Settings** (gear in the sidebar footer):
 
 | Key | Unlocks |
 |---|---|
-| Composio Connect key (`ck_…`) | The connected-apps marketplace |
-| Composio API key (`ak_…`) | The full 500+ app catalog with official logos |
+| xAI API key (`xai-…`) | The direct Grok API driver |
+
+Apps (such as Edits) need no keys here: set them up from the **Apps** screen.
 
 ```sh
 pnpm typecheck     # app + server

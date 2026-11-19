@@ -16,7 +16,7 @@ body:
         - Harness server / API (server/)
         - Provider drivers (claude / codex / grok)
         - Computer use (cloud box / local)
-        - Connected apps (Composio)
+        - Apps (Edits and other curated apps)
         - Desktop shell / packaging (electron/)
         - Docs
         - Not sure

@@ -21,7 +21,6 @@ import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProjectService } from "../electron/projects.mjs";
 
-import * as composio from "./composio.ts";
 import * as trello from "./trello.ts";
 import { TrelloLinkStore } from "./trelloLinks.ts";
 import { TrelloSync } from "./trelloSync.ts";
@@ -525,7 +524,6 @@ async function computerAndAppIntegrations(
   bot: { id: string; name: string; computer?: string },
 ): Promise<TurnIntegrations> {
   const integrations: TurnIntegrations = {};
-  if (cfg.composio?.key) integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
   if (bot.computer !== "off") {
     const cua = readCuaConnection();
     if (cua) integrations.localComputer = cua;
@@ -769,8 +767,6 @@ async function startTurn(
           )
         : [];
 
-      const composioPrompt = await composio.formatConnectedAppsPrompt(cfg);
-
       if (turnContexts.get(bot.threadId) !== context || stoppedConversations.has(bot.threadId)) return;
       await instance.adapter.sendTurn({
         threadId: bot.threadId,
@@ -785,7 +781,6 @@ async function startTurn(
           `\n\n${CHAT_FORMATTING_HINT}` +
           (projectContext.system ? `\n\n${projectContext.system}` : "") +
           (taskContext.system ? `\n\n${taskContext.system}` : "") +
-          composioPrompt +
           (computerHint ? ` ${computerHint}` : "") +
           (integrations.agents
             ? ` ${PREVIEW_BROWSER_RULES} You can create_schedule, list_schedules, and cancel_schedule for your own conversation or rooms you belong to. Schedules remain visible to the user and are capped at 20 active schedules per bot. You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
@@ -974,7 +969,6 @@ async function runGroupMemberTurn(
   const attPrompt = formatAttachmentContext(latestUserMessage?.attachments);
   const projectContext = resolveProjectContext([latestUserText, group.bulletin, bot.description]);
   const taskContext = resolveTaskContext([latestUserText, group.bulletin, bot.description], taskStore.list());
-  const composioPrompt = await composio.formatConnectedAppsPrompt(cfg);
   const system = [
     `You are ${bot.name}, a bot in the room "${group.name}" in Gerer Build Studio.`,
     bot.title && `Role: ${bot.title}.`,
@@ -983,7 +977,6 @@ async function runGroupMemberTurn(
     group.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${group.bulletin.trim()}`,
     projectContext.system,
     taskContext.system,
-    composioPrompt.trim(),
     computerPromptHint(integrations),
     integrations.agents && PREVIEW_BROWSER_RULES,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
@@ -1252,7 +1245,6 @@ function steerMessage(botId: string, text: string, attachments?: Attachment[], g
 function configStatus() {
   return {
     xai: { configured: Boolean(cfg.xai?.key) },
-    composio: { configured: Boolean(cfg.composio?.key), apiKeyConfigured: Boolean(cfg.composio?.apiKey) },
     trello: { keyConfigured: Boolean(cfg.trello?.key), configured: Boolean(cfg.trello?.token) },
     // not a secret — the sidebar shows it
     profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
@@ -1573,11 +1565,6 @@ const server = createServer(async (req, res) => {
             description: b.description || undefined,
           }));
         return json(res, 200, { bots });
-      }
-      if (method === "GET" && path === "/api/internal/connectors/active") {
-        if (!cfg.composio?.key) return json(res, 200, { configured: false, activeConnections: [] });
-        const activeConnections = await composio.listActiveConnections(cfg);
-        return json(res, 200, { configured: true, activeConnections });
       }
       const callerId = String(req.headers["x-gbs-bot-id"] ?? "");
       const caller = taskActorForBot(callerId);
@@ -2367,7 +2354,7 @@ const server = createServer(async (req, res) => {
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
       const patch: Record<string, unknown> = {};
-      for (const key of ["xai", "composio", "trello", "profile"] as const) {
+      for (const key of ["xai", "trello", "profile"] as const) {
         if (body[key] && typeof body[key] === "object") patch[key] = body[key];
       }
       if (typeof body.autoHandoffs === "boolean") patch.autoHandoffs = body.autoHandoffs;
@@ -2459,26 +2446,6 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
 
-    // ── connectors (Composio) ──
-    if (method === "GET" && path === "/api/connectors/active") {
-      if (!cfg.composio?.key) return json(res, 200, { configured: false, activeConnections: [] });
-      const activeConnections = await composio.listActiveConnections(cfg);
-      return json(res, 200, { configured: true, activeConnections });
-    }
-    if (method === "GET" && path === "/api/connectors/catalog") {
-      const { cards, source } = await composio.listToolkits(cfg);
-      return json(res, 200, { configured: Boolean(cfg.composio?.key), source, cards });
-    }
-    if (method === "GET" && path === "/api/connectors") {
-      const services = (url.searchParams.get("services") ?? "").split(",").filter(Boolean);
-      if (!cfg.composio?.key) return json(res, 200, { configured: false, services: {} });
-      const status = await composio.connectionStatus(cfg, services.length ? services : composio.CURATED_SLUGS);
-      return json(res, 200, { configured: true, services: status });
-    }
-    m = path.match(/^\/api\/connectors\/([\w-]+)\/authorize$/);
-    if (m && method === "POST") return json(res, 200, await composio.authorizeService(cfg, m[1]));
-    m = path.match(/^\/api\/connectors\/([\w-]+)$/);
-    if (m && method === "DELETE") return json(res, 200, await composio.removeService(cfg, m[1]));
 
     // packaged app: the server serves the built UI too (window → :8899 for
     // everything, no dev proxy to die). GBS_STATIC_DIR is set by Electron.

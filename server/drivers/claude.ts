@@ -7,8 +7,7 @@ import type { UsageLimitFailure } from "../usage-types.ts";
 // claude 2.1.211 by agentcal). Per-turn CLI process; the conversation
 // continues across turns via --resume <sessionId> (the resumeCursor).
 //
-// Integrations become MCP servers on the CLI:
-//   - Composio Connect (connected apps → tools) over streamable HTTP
+// Integrations become MCP servers on the CLI.
 import { existsSync, unlinkSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { homedir } from "node:os";
@@ -260,14 +259,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // acceptEdits run silently denies anything unlisted)
       const mcpServers: Record<string, unknown> = {};
       const allowed: string[] = [];
-      if (turn.integrations?.composio?.key) {
-        mcpServers.composio = {
-          type: "http",
-          url: turn.integrations.composio.url || "https://connect.composio.dev/mcp",
-          headers: { "x-consumer-api-key": turn.integrations.composio.key },
-        };
-        allowed.push("mcp__composio");
-      }
       if (turn.integrations?.localComputer) {
         // this Mac, via the Electron-owned cua-driver daemon (spawn config
         // read from cua-connection.json — same "computer" name either way,

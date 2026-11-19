@@ -231,28 +231,6 @@ function ConnectionsSection() {
         <div className="mt-6 space-y-6">
           <div className="rounded-xl border border-hairline/40 bg-panel/60 p-4">
             <ApiKeyRow
-              section="composio"
-              label="Composio Connect Key"
-              placeholder="ck_…  Connects 100+ tools and web services"
-            />
-            <p className="mt-2 text-[12px] text-ink-secondary">
-              Powers tool execution and web services like GitHub, Google, Slack, and Jira across your bots.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-hairline/40 bg-panel/60 p-4">
-            <ApiKeyRow
-              section="composioApi"
-              label="Composio API Key (Optional)"
-              placeholder="ak_…  Unlocks the full toolkit catalog & custom actions"
-            />
-            <p className="mt-2 text-[12px] text-ink-secondary">
-              Required only if you wish to query the complete unbounded Composio catalog or use advanced developer action triggers.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-hairline/40 bg-panel/60 p-4">
-            <ApiKeyRow
               section="xai"
               label="xAI API Key"
               placeholder="xai-…  Direct Grok model authentication"
