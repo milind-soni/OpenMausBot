@@ -31,6 +31,7 @@ import {
 } from "../shared/share-folder.ts";
 import { admitSkillFiles, skillFileRefusalWords } from "../shared/skill-files.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { productName } from "./brand.ts";
 import { createTeamPackageExport, TeamExportError, type ExportablePackageSkill, type TeamExportSkip } from "./package-export.ts";
 import type { Routine } from "./routines.ts";
 import { COMMUNITY_MAX_BYTES, COMMUNITY_MAX_FILES, type CommunityPublisher } from "./share-publish.ts";
@@ -90,6 +91,11 @@ const SKIP_WORDS: Record<string, string> = {
   lead_not_in_group_chat: "a group chat goal whose lead isn't in the chat", skill_changed: "a skill that changed while it was being shared",
   skill_conflict: "a skill two bots have in different versions", bot_skill_limit: "skills past a bot's limit", team_skill_limit: "skills past the department's limit",
 };
+/** The line a template gets when its bot or department has no words of its own; a card leaves it out. */
+const plainTagline = (scope: TemplateScope) => `A ${scope === "bot" ? "bot" : "department"} shared from ${productName()}.`;
+const plainSummary = (scope: TemplateScope) => scope === "bot"
+  ? `Shared from ${productName()}. The bot arrives as a new copy with its skills and routines; routines start paused and chat history never travels.`
+  : `Shared from ${productName()}. Its bots, skills, group chats and routines arrive as new copies; routines start paused and chat history never travels.`;
 const skipWords = (skip: TeamExportSkip) => `${SKIP_WORDS[skip.reason] ?? "an item that can't be shared"} (${skip.part})`;
 
 const slugOf = (name: string) => name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "template";
@@ -270,7 +276,7 @@ export function createShareHost(deps: ShareHostDeps) {
       id: record.id,
       scope: record.scope,
       name: pkg?.name ?? record.slug,
-      tagline: pkg?.tagline ?? "",
+      tagline: pkg && pkg.tagline !== plainTagline(record.scope) ? pkg.tagline : "",
       avatars: record.avatars,
       counts: {
         bots: pkg?.agents.length ?? record.avatars.length,
@@ -337,9 +343,9 @@ export function createShareHost(deps: ShareHostDeps) {
       exported = createTeamPackageExport({
         team: target.scope === "bot" ? "" : target.section,
         name: lead ? lead.name : target.scope === "department" ? target.section : undefined,
-        tagline: lead ? firstLine(lead.title || lead.description, 160) || undefined : firstLine(brief, 160) || undefined,
-        summary: lead ? (lead.description?.trim().slice(0, 2_000) || undefined) : brief?.slice(0, 2_000) || undefined,
-        authorName: "MausBot user",
+        tagline: (lead && firstLine(lead.title || lead.description, 160)) || plainTagline(target.scope),
+        summary: lead?.description?.trim().slice(0, 2_000) || plainSummary(target.scope),
+        authorName: `${productName()} user`,
         bots,
         groups: target.scope === "bot" ? [] : deps.groups(),
         routines: target.scope === "bot" ? routines.filter((routine) => routine.botId === target.bot.id && routine.target !== "room-goal") : routines,

@@ -1,6 +1,6 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api";
-import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceOlderMessages } from "./message-history";
+import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
 export { MESSAGE_PAGE_SIZE } from "./message-history";
 import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -673,8 +673,8 @@ export type Action =
   | { type: "editMessage"; botId: string; messageId: string; text: string; threadId?: string; sendId?: string }
   | { type: "switchBranch"; botId: string; messageId: string; threadId?: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
-  | { type: "loadOlderMessages"; threadId: string }
-  | { type: "olderMessages"; threadId: string; generation: number; messages: Message[]; hasMore: boolean }
+  | { type: "loadOlderMessages"; threadId: string } | { type: "trimHeldMessages"; threadId: string; keepFromId?: string }
+  | { type: "olderMessages"; threadId: string; generation: number; before?: string; messages: Message[]; hasMore: boolean }
   | { type: "answerCard"; botId: string; messageId: string; answer: string; threadId?: string; groupId?: string }
   | { type: "answerCardFailed"; botId: string; messageId: string; answer: string; threadId?: string; groupId?: string }
   | { type: "dismissCard"; botId: string; messageId: string; threadId?: string; groupId?: string }
@@ -909,8 +909,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return state.loadingOlder[action.threadId]
         ? state
         : { ...state, loadingOlder: { ...state.loadingOlder, [action.threadId]: true } };
-    case "olderMessages":
-      return reduceOlderMessages(state, action);
+    case "olderMessages": return reduceOlderMessages(state, action);
+    case "trimHeldMessages": return reduceTrimHeldMessages(state, action);
     case "sectionDeleted":
       return {
         ...state, sections: action.sections,

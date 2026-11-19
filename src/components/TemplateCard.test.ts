@@ -181,6 +181,14 @@ describe("a template's details", () => {
     expect(markup.match(/aria-expanded="false"/g)).toHaveLength(6);
   });
 
+  it("shows a picture the folder carries, and the mascot for a bot without one", () => {
+    const picture = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const markup = renderToStaticMarkup(createElement(TemplateDetailsBody, { details: { ...details, bots: [{ ...details.bots[0]!, picture }, details.bots[1]!] } }));
+    expect(markup.match(/data-template-picture/g)).toHaveLength(1);
+    expect(markup).toContain(`src="${picture}"`);
+    expect(renderToStaticMarkup(createElement(TemplateDetailsBody, { details: { ...details, bots: [{ ...details.bots[0]!, picture: "https://example.com/x.png" }] } }))).not.toContain("example.com");
+  });
+
   it("leaves out the rows a template has nothing for", () => {
     const words = text(renderToStaticMarkup(createElement(TemplateDetailsBody, { details: { ...details, skills: [], routines: [], apps: [], groupChats: [], brief: undefined } })));
     expect(words).not.toContain("Routines (paused)");

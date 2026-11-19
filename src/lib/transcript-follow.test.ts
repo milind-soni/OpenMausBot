@@ -6,6 +6,7 @@ import {
   initialTranscriptFollow,
   readTranscriptPosition,
   rememberTranscriptPosition,
+  rowsInView,
   transitionTranscriptFollow,
   wantsJumpToLatest,
   type TranscriptFollow,
@@ -55,5 +56,18 @@ describe("remembered positions", () => {
     for (let index = 0; index < 100; index++) rememberTranscriptPosition(`k${index}`, { atEnd: true });
     expect(readTranscriptPosition("a")).toBeUndefined();
     expect(readTranscriptPosition("k99")).toEqual({ atEnd: true });
+  });
+});
+
+describe("rows held across a window step", () => {
+  const view = { getBoundingClientRect: () => ({ top: 100, bottom: 500 }) } as unknown as HTMLElement;
+  const list = (tops: [string, number][]) => ({
+    querySelectorAll: () => tops.map(([mid, top]) => ({ dataset: { mid }, getBoundingClientRect: () => ({ top, bottom: top + 150, height: 150 }) })),
+  }) as unknown as HTMLElement;
+
+  it("offers rows wholly on screen first and the window's first row last, skipping the pinned card and live rows", () => {
+    const rows = rowsInView(view, list([["first", 40], ["card", 60], ["a", 190], ["live:x", 250], ["b", 340], ["c", 490], ["below", 520]]), "card");
+    expect(rows.map((row) => row.rowId)).toEqual(["a", "b", "c", "first"]);
+    expect(rows[0]).toEqual({ rowId: "a", offsetWithinRow: -90 });
   });
 });
