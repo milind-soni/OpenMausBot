@@ -135,6 +135,15 @@ describe("loading the binding", () => {
     expect(e.unavailable()).toContain(broken);
   });
 
+  it("tells its listeners when a binding whose files were not found loads after all", async () => {
+    const changed = vi.fn();
+    const e = engine({ confirmInstalledMs: 0, filesFound: () => false });
+    e.onInstalledChange(changed);
+    expect(e.installed()).toBe(false);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(e.installed()).toBe(true);
+  });
+
   it("ships a default engine that loads nothing until asked", () => {
     expect(typeof dataEngine.forBot).toBe("function");
     expect(dataEngine.unavailable()).toBeNull();

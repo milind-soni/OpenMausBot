@@ -102,6 +102,8 @@ export function createLaunchRecord({ processStart, launchId = null, appVersion, 
       });
     },
     part,
+    /** No record will be written for this launch: the probes are put back. */
+    giveUp() { if (!done) stop(); },
     get done() { return done; },
   };
 }

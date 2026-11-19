@@ -51,6 +51,8 @@ export interface DataEngineOptions {
   binding?: Binding;
   /** Tests: the wait before a status read's answer is confirmed by loading the binding. */
   confirmInstalledMs?: number;
+  /** Tests: the look for the binding's files. */
+  filesFound?: (directory: string | null) => boolean;
 }
 
 /** Null means the server's own node_modules. */
@@ -733,6 +735,7 @@ class Engine implements DataEngine {
   private confirming: ReturnType<typeof setTimeout> | null = null;
   private readonly installedListeners = new Set<() => void>();
   private readonly confirmInstalledMs: number;
+  private readonly filesFound: (directory: string | null) => boolean;
   readonly env: NodeJS.ProcessEnv;
   readonly dataDir: string;
   readonly idleMs: number;
@@ -743,6 +746,7 @@ class Engine implements DataEngine {
     this.dataDir = options.dataDir ?? DATA_DIR;
     this.idleMs = options.idleMs ?? IDLE_CLOSE_MS;
     this.confirmInstalledMs = options.confirmInstalledMs ?? CONFIRM_INSTALLED_MS;
+    this.filesFound = options.filesFound ?? bindingFilesFound;
     this.folder = options.botFolder ?? defaultBotFolder;
     if (options.binding) this.loaded = { binding: options.binding };
   }
@@ -776,9 +780,9 @@ class Engine implements DataEngine {
 
   installed(): boolean {
     if (this.loaded) return "binding" in this.loaded;
-    const found = bindingFilesFound(duckdbDirectory(this.env));
-    if (found && !this.confirming) {
-      this.confirming = setTimeout(() => { if (this.unavailable() !== null) for (const listener of this.installedListeners) listener(); }, this.confirmInstalledMs);
+    const found = this.filesFound(duckdbDirectory(this.env));
+    if (!this.confirming) {
+      this.confirming = setTimeout(() => { if ((this.unavailable() === null) !== found) for (const listener of this.installedListeners) listener(); }, this.confirmInstalledMs);
       this.confirming.unref?.();
     }
     return found;

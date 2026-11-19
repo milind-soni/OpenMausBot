@@ -15,10 +15,12 @@ const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"]);
 /** A launch that starts this many programs or requests is no longer being measured. */
 const KEPT = 200;
 
-/** The name a started program is kept under: its file name without folder or extension when it is a known one. */
-export function programName(command) {
+/** The name a started program is kept under: its file name without folder or extension when it is a known one.
+ * `shell`: the command is a whole command line (exec), whose first word is the program. */
+export function programName(command, { shell = false } = {}) {
   if (typeof command !== "string") return "other";
-  const base = path.win32.basename(command.trim().split(/\s+/)[0] ?? "").toLowerCase().replace(/\.(?:exe|cmd|bat|sh|js|mjs|ts)$/, "");
+  const file = shell ? command.trim().split(/\s+/)[0] ?? "" : command;
+  const base = path.win32.basename(file).toLowerCase().replace(/\.(?:exe|cmd|bat|sh|js|mjs|ts)$/, "");
   return PROGRAMS.has(base) ? base : "other";
 }
 
@@ -44,16 +46,17 @@ export function watchLaunchWork({ childProcess, sync = () => {}, fetchOwners = [
   const net = {};
   const restore = [];
   let open = true;
-  const child = (command, ms) => { if (open && children.length < KEPT) children.push({ name: programName(command), ms: Math.max(0, ms) }); };
+  const child = (command, ms, shell = false) => { if (open && children.length < KEPT) children.push({ name: programName(command, { shell }), ms: Math.max(0, ms) }); };
   const request = (kind, ms) => {
     if (!open || !kind) return;
     const entry = (net[kind] ??= { n: 0, ms: 0 });
     entry.n += 1; entry.ms += Math.max(0, ms);
   };
   const quietly = (work) => { try { work(); } catch {} };
-  const whenOver = (command, at, started) => quietly(() => {
-    if (typeof started?.once === "function") started.once("exit", () => child(command, now() - at));
-    else if (typeof started?.then === "function") started.then(() => child(command, now() - at), () => child(command, now() - at));
+  const whenOver = (command, at, started, shell) => quietly(() => {
+    const over = () => child(command, now() - at, shell);
+    if (typeof started?.once === "function") started.once("exit", over);
+    else if (typeof started?.then === "function") started.then(over, over);
   });
 
   if (childProcess) {
@@ -61,11 +64,12 @@ export function watchLaunchWork({ childProcess, sync = () => {}, fetchOwners = [
       const original = childProcess[name];
       if (typeof original !== "function" || !STARTERS.test(name)) continue;
       const blocking = name.endsWith("Sync");
+      const shell = name.startsWith("exec") && !name.startsWith("execFile");
       const wrapper = function (...args) {
         const at = now();
         let started;
         try { started = original.apply(this, args); return started; } finally {
-          if (blocking) child(args[0], now() - at); else whenOver(args[0], at, started);
+          if (blocking) child(args[0], now() - at, shell); else whenOver(args[0], at, started, shell);
         }
       };
       quietly(() => Object.defineProperties(wrapper, Object.getOwnPropertyDescriptors(original)));
@@ -74,7 +78,7 @@ export function watchLaunchWork({ childProcess, sync = () => {}, fetchOwners = [
         quietly(() => Object.defineProperty(wrapper, promisify.custom, { configurable: true, value(...args) {
           const at = now();
           const pending = promised.apply(this, args);
-          whenOver(args[0], at, pending);
+          whenOver(args[0], at, pending, shell);
           return pending;
         } }));
       }

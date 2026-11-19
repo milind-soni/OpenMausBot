@@ -13,5 +13,7 @@ export const launchRecord = createLaunchRecord({
   processStart, appVersion: app.getVersion(), platform: process.platform, arch: process.arch,
   watch: watchLaunchWork({ childProcess, sync: syncBuiltinESMExports, fetchOwners: [globalThis, net] }),
 });
+// A launch whose record is not written by then (no server came up) stops being counted.
+setTimeout(() => launchRecord.giveUp(), 120_000).unref();
 launchRecord.mark("codeStart");
 launchRecord.watchWindows(app);
