@@ -52,9 +52,11 @@ if (!globalThis[LOADED]) {
     process.stdout.write = function (chunk, ...rest) {
       if (!done && String(chunk).includes("openmausbot server on ")) {
         done = true;
-        session.post("Profiler.stop", (error, result) => {
+        const stop = () => session.post("Profiler.stop", (error, result) => {
           if (!error) try { fs.mkdirSync(profDir, { recursive: true }); fs.writeFileSync(`${profDir}/server-${process.pid}.cpuprofile`, JSON.stringify(result.profile)); } catch {}
         });
+        const tailMs = Number(process.env.OMB_BENCH_SERVER_PROF_TAIL_MS) || 0;
+        if (tailMs) setTimeout(stop, tailMs); else stop();
       }
       return write.call(this, chunk, ...rest);
     };
