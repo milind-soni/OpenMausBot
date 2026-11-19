@@ -14,7 +14,7 @@ function roomFieldsOnly({
   return { ...room, section: room.section };
 }
 
-function foldSnapshotOntoStreamed(
+export function foldSnapshotOntoStreamed(
   current: readonly Message[],
   heldAtStart: ReadonlySet<Message>,
   snapshot: readonly Message[],
@@ -46,6 +46,8 @@ export function patchedGroups(groups: Group[], group: GroupPatch): Group[] {
     tasks: patch.tasks ? mergeTaskStamps(g.tasks, patch.tasks) : g.tasks,
     turnTimeoutMinutes: Object.hasOwn(patch, "turnTimeoutMinutes") ? (patch.turnTimeoutMinutes ?? undefined) : g.turnTimeoutMinutes,
     messages: patch.messages ?? g.messages,
+    needsHistory: patch.messages ? false : g.needsHistory,
+    previewText: patch.threadId && patch.threadId !== g.threadId ? undefined : g.previewText,
     hasMore: patch.messages ? Boolean(patch.hasMore) : g.hasMore,
   } : g));
 }

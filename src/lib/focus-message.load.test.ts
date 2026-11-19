@@ -9,13 +9,15 @@ vi.mock("@/state/store", async (original) => ({
 }));
 
 const { landOnSearchHit } = await import("./focus-message");
+const { initialState, reducer } = await import("@/state/store");
 
 const message = (n: number): Message => ({ id: `m${n}`, role: "bot", kind: "text", text: `message ${n}`, at: n });
 const range = (from: number, to: number) => Array.from({ length: to - from }, (_, index) => message(from + index));
 const bot = { id: "scout", name: "Scout", threadId: "t", tasks: [], messages: range(400, 600), hasMore: true } as unknown as Bot;
 const group = { id: "room", name: "Room", threadId: "rt", memberIds: [], messages: range(400, 600), hasMore: true } as unknown as Group;
 const hit = { name: "Scout", role: "bot" as const, kind: "text", at: 50, snippet: "message 50", matchStart: 0, matchLength: 7, onActivePath: true, messageId: "m50" };
-const pages: Record<string, { messages: Message[]; hasMore: boolean }> = {
+const pages: Record<string, { messages: Message[]; hasMore: boolean; activeLeafId?: string }> = {
+  tail: { messages: range(400, 600), hasMore: true, activeLeafId: "m599" },
   m400: { messages: range(200, 400), hasMore: true },
   m200: { messages: range(0, 200), hasMore: false },
 };
@@ -27,7 +29,7 @@ const state = { bots: [bot], groups: [group], transcriptGeneration: { t: 3, rt: 
 beforeEach(() => {
   actions = [];
   fixture.api.mockReset();
-  fixture.api.mockImplementation(async (path: string) => pages[new URL(path, "http://x").searchParams.get("before")!]);
+  fixture.api.mockImplementation(async (path: string) => pages[new URL(path, "http://x").searchParams.get("before") ?? "tail"]);
 });
 
 describe("landing on a search hit older than the loaded page", () => {
@@ -51,6 +53,27 @@ describe("landing on a search hit older than the loaded page", () => {
     await landOnSearchHit({ ...hit, botId: "scout", threadId: "t", messageId: "m300" }, state, dispatch, true);
     expect(fixture.api).toHaveBeenCalledOnce();
     expect(actions[1]).toEqual({ type: "olderMessages", threadId: "t", generation: 3, messages: range(200, 400), hasMore: true });
+  });
+
+
+  it.each(["bot", "room"] as const)("lands on an older hit in a cold %s without a pagination cursor", async (kind) => {
+    const cold = {
+      ...initialState,
+      bots: [{ ...bot, needsHistory: true, messages: [], hasMore: undefined }],
+      groups: [{ ...group, needsHistory: true, messages: [], hasMore: undefined }],
+      transcriptGeneration: state.transcriptGeneration,
+    };
+    const target = kind === "bot" ? { botId: "scout", threadId: "t" } : { groupId: "room", threadId: "rt" };
+    await landOnSearchHit({ ...hit, ...target }, cold, dispatch, true);
+    expect(fixture.api.mock.calls.map(([path]) => path)).toEqual([
+      `/api/threads/${target.threadId}/messages?limit=200`,
+      `/api/threads/${target.threadId}/messages?limit=200&before=m400`,
+      `/api/threads/${target.threadId}/messages?limit=200&before=m200`,
+    ]);
+    const landed = actions.reduce(reducer, cold);
+    const owner = kind === "bot" ? landed.bots[0] : landed.groups[0];
+    expect(owner).toMatchObject({ needsHistory: false, hasMore: false, messages: range(0, 600) });
+    expect(landed.focusMessage).toMatchObject({ threadId: target.threadId, messageId: "m50" });
   });
 
   it("asks for nothing when the hit is already loaded", async () => {

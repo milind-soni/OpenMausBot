@@ -44,6 +44,7 @@ let root: Root;
 let container: HTMLDivElement;
 let snapshot: ReturnType<typeof deferred>;
 let switchResponse: ReturnType<typeof deferred> | undefined;
+let reconnectHistory: ReturnType<typeof deferred> | undefined;
 let newTaskResponse: ReturnType<typeof deferred> | undefined;
 let snapshots: number;
 let sends: unknown[];
@@ -70,6 +71,7 @@ beforeEach(async () => {
   snapshot = deferred();
   switchResponse = undefined;
   newTaskResponse = undefined;
+  reconnectHistory = undefined;
   const stored = new Map<string, string>();
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, String(value)); },
@@ -86,6 +88,10 @@ beforeEach(async () => {
     if (path === "/api/bots/bot/tasks" || path === "/api/groups/room/tasks") return newTaskResponse?.promise ?? json({});
     if (path.startsWith("/api/groups/room/tasks/room-b")) return json({ group: room("b", "fresh-room-b") });
     if (path === "/api/bots/bot/messages" || path === "/api/groups/room/messages") sends.push(JSON.parse(String(init?.body)));
+    if (path === "/api/threads/a/messages?limit=200") {
+      if (snapshots === 1) return json({ messages: [line("a")], activeLeafId: "a", hasMore: false });
+      return reconnectHistory?.promise ?? new Promise<Response>(() => {});
+    }
     if (path === "/api/instances") return json({ instances: [] });
     if (path.startsWith("/api/routines?since=")) return json({ routines: [], runs: [] });
     if (path === "/api/webhooks") return json({ webhooks: [], attempts: [] });
@@ -96,7 +102,10 @@ beforeEach(async () => {
   root = createRoot(container);
   flushSync(() => root.render(createElement(StoreProvider, null, createElement(Probe))));
   FixtureEventSource.current.send({ kind: "hello", resumed: false, cursor: "fixture:0" });
-  await vi.waitFor(() => expect(state.hydrated).toBe(true));
+  await vi.waitFor(() => {
+    expect(state.hydrated).toBe(true);
+    expect(shown().needsHistory).toBe(false);
+  });
 });
 afterEach(() => {
   flushSync(() => root.unmount());
@@ -187,8 +196,10 @@ describe("navigation while a reconnect snapshot is in flight", () => {
     await resync();
     flushSync(() => dispatch({ type: "switchGroupTask", groupId: "room", threadId: "room-b" }));
     await vi.waitFor(() => expect(state.groups[0]?.threadId).toBe("room-b"));
+    reconnectHistory = deferred();
     await applySnapshot();
-    expect(shown().messages.map(message => message.id)).toEqual(["snapshot"]);
+    reconnectHistory.resolve(json({ messages: [line("snapshot")], activeLeafId: "snapshot", hasMore: false }));
+    await vi.waitFor(() => expect(shown().messages.map(message => message.id)).toEqual(["snapshot"]));
     expect(state.groups[0]?.messages.map(message => message.id)).toEqual(["fresh-room-b"]);
   });
 });

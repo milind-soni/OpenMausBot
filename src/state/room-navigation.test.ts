@@ -55,7 +55,7 @@ const switchTo = async (threadId: string) => {
   flushSync(() => dispatch({ type: "switchGroupTask", groupId: "room", threadId }));
   await settle();
 };
-const switchPath = (threadId: string) => `/api/groups/room/tasks/${threadId}?messages=80`;
+const switchPath = (threadId: string, count = 80) => `/api/groups/room/tasks/${threadId}?messages=${count}`;
 
 beforeAll(async () => {
   vi.stubGlobal("EventSource", FixtureEventSource);
@@ -108,14 +108,14 @@ describe("switching a room's thread", () => {
   it("keeps a message streamed while reopening the thread already shown", async () => {
     await switchTo("one");
     await send({ kind: "message", threadId: "one", message: line("o3", "one") });
-    await answer(switchPath("one"), { group: room("one", [line("o1", "one"), line("o2", "one")]) });
+    await answer(switchPath("one", 0), { group: room("one") });
     expect(shown().messages.map((message) => message.id)).toEqual(["o1", "o2", "o3"]);
   });
 
   it("keeps an edit streamed while the snapshot was out", async () => {
     await switchTo("one");
     await send({ kind: "message.patch", threadId: "one", message: { ...line("o2", "one"), text: "edited" } });
-    await answer(switchPath("one"), { group: room("one", [line("o1", "one"), line("o2", "one"), line("o3", "one")]) });
+    await answer(switchPath("one", 0), { group: room("one", [line("o1", "one"), line("o2", "one"), line("o3", "one")]) });
     expect(shown().messages.map((message) => message.text)).toEqual(["one o1", "edited", "one o3"]);
   });
 
@@ -124,7 +124,7 @@ describe("switching a room's thread", () => {
     await answer(switchPath("three"), { group: room("three", []) });
     await switchTo("three");
     await send({ kind: "message", threadId: "three", message: line("t2", "three") });
-    await answer(switchPath("three"), { group: room("three", []) });
+    await answer(switchPath("three", 0), { group: room("three", []) });
     expect(shown().messages.map((message) => message.id)).toEqual(["t2"]);
   });
 
@@ -133,7 +133,7 @@ describe("switching a room's thread", () => {
     flushSync(() => dispatch({ type: "sendGroup", groupId: "room", text: "hello", sendId: "s1" }));
     await settle();
     expect(shown().messages.map((message) => message.id)).toEqual(["t2", "optimistic-s1"]);
-    await answer(switchPath("three"), { group: room("three", [line("t2", "three"), { ...line("sent", "three"), role: "user", sendId: "s1" }]) });
+    await answer(switchPath("three", 0), { group: room("three", [line("t2", "three"), { ...line("sent", "three"), role: "user", sendId: "s1" }]) });
     expect(shown().messages.map((message) => message.id)).toEqual(["t2", "sent"]);
   });
 
@@ -152,7 +152,7 @@ describe("switching a room's thread", () => {
     await settle();
     await send({ kind: "message", threadId: "one", message: line("r1", "one") });
     expect(shown().messages.map((message) => message.id)).toEqual(["optimistic-s2", "r1"]);
-    await answer(switchPath("one"), { group: room("one", [line("r1", "one")]) });
+    await answer(switchPath("one", 0), { group: room("one", [line("r1", "one")]) });
     expect(shown().messages.map((message) => message.id)).toEqual(["r1", "optimistic-s2"]);
   });
 });

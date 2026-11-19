@@ -8,27 +8,33 @@ import { t } from "@/lib/i18n";
 const FLASH_CLASSES = ["ring-2", "ring-accent/70", "rounded-2xl", "transition-shadow"];
 
 async function loadThroughMessage(
-  owner: { threadId: string; messages: Message[]; hasMore?: boolean },
+  owner: { threadId: string; messages: Message[]; hasMore?: boolean; needsHistory?: boolean },
   messageId: string,
   generation: number,
   dispatch: React.Dispatch<Action>,
 ): Promise<void> {
-  if (!owner.hasMore || owner.messages.some((message) => message.id === messageId)) return;
+  if (owner.messages.some((message) => message.id === messageId)) return;
   const older: Message[] = [];
-  let before = owner.messages[0]?.id;
-  let hasMore = true;
-  let found = false;
-  while (before && hasMore && !found) {
-    const page = await api<{ messages?: Message[]; hasMore?: boolean }>(
-      `/api/threads/${owner.threadId}/messages?limit=${MESSAGE_PAGE_SIZE}&before=${encodeURIComponent(before)}`,
+  const cold = owner.needsHistory === true;
+  let before = cold ? undefined : owner.messages[0]?.id;
+  let hasMore = cold || Boolean(before && owner.hasMore);
+  let activeLeafId: string | null | undefined;
+  while (hasMore) {
+    const cursor = before ? `&before=${encodeURIComponent(before)}` : "";
+    const page = await api<{ messages?: Message[]; hasMore?: boolean; activeLeafId?: string | null }>(
+      `/api/threads/${owner.threadId}/messages?limit=${MESSAGE_PAGE_SIZE}${cursor}`,
     );
     const messages = page.messages ?? [];
     older.unshift(...messages);
-    found = messages.some((message) => message.id === messageId);
+    if (!before) activeLeafId = page.activeLeafId;
     hasMore = Boolean(page.hasMore) && messages.length > 0;
+    if (messages.some((message) => message.id === messageId)) break;
     before = messages[0]?.id;
   }
-  if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, messages: older, hasMore });
+  if (older.length) dispatch({
+    type: "olderMessages", threadId: owner.threadId, generation, messages: older, hasMore,
+    ...(cold ? { tailLoaded: true, activeLeafId } : {}),
+  });
 }
 
 export async function landOnSearchHit(

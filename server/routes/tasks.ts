@@ -58,7 +58,7 @@ export interface TaskRouteDeps {
   wireBot(bot: BotRecord): WireBot;
   wireTask(task: TaskRecord, botModel: ModelSelection): WireTask;
   pageSize(raw: string | null): number | null | undefined;
-  messagePage(threadId: string, limit: number | undefined): MessagePage;
+  messagePage(threadId: string, limit: number | undefined, chat?: boolean): MessagePage;
   checkedModelSelection(raw: unknown, current?: { selection: ModelSelection; busy: boolean }, requireAvailableModel?: boolean):
     | { ok: true; selection: ModelSelection }
     | ({ ok: false; status: number } & ServerErrorBody);
@@ -257,7 +257,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).
       const responseBot = requestedMessages === "0"
         ? switchedSettings
-        : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit) };
+        : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit, url.searchParams.get("view") === "chat") };
       return json(res, 200, { bot: responseBot });
     }
     if (m && method === "PATCH") {

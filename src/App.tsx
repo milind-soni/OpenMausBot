@@ -92,8 +92,9 @@ import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
-  const [chatV2, setChatV2] = useState(false);
   const { state, dispatch } = useStore();
+  const chatV2 = state.chatV2;
+  const setChatV2 = (v2: boolean) => dispatch({ type: "chatView", v2 });
   useTeamChats(state.config);
   const needsYou = needsYouVersion(state.bots, state.groups, state.notifications);
   useTeamPeopleLoader(state.config, needsYou);

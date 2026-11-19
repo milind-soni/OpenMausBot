@@ -52,9 +52,9 @@ export interface ThreadRouteDeps {
   cliOwnerToken(): string | undefined;
   defaultPage: number;
   pageSize(raw: string | null): number | null | undefined;
-  messagePage(threadId: string, limit: number | undefined): MessagePage;
-  messagePageBefore(threadId: string, before: string, limit: number): MessagePage | null;
-  messageWindow(threadId: string, messageId: string, limit: number): { messages: Array<Message | Record<string, unknown>>; hasMore: boolean } | null;
+  messagePage(threadId: string, limit: number | undefined, chat?: boolean, preview?: boolean): MessagePage;
+  messagePageBefore(threadId: string, before: string, limit: number, chat?: boolean): MessagePage | null;
+  messageWindow(threadId: string, messageId: string, limit: number, chat?: boolean): { messages: Array<Message | Record<string, unknown>>; hasMore: boolean } | null;
   publicBotQueuedMessages(): ReturnType<typeof queuedSteerSnapshot>;
   publicGroupState(record: GroupRecord): WireGroup;
   wireBot(bot: BotRecord): WireBot;
@@ -84,11 +84,11 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
   } = deps;
   const mediaLinks = new MessageMediaLinks();
   // tasks stays explicit: clients expect [] where wireBot() would omit the key.
-  const shownBot = (bot: BotRecord, visible: VisibleSet, limit: number | undefined) => {
+  const shownBot = (bot: BotRecord, visible: VisibleSet, limit: number | undefined, chat = false, preview = false) => {
     const wired = wireBot(bot);
     // Narrowed first: on a Team Cloud the selected conversation may be someone else's, and its words never go out.
     const shown = memberBot({ ...wired, tasks: wired.tasks ?? [] }, visible);
-    return { ...shown, ...(typeof shown.threadId === "string" ? messagePage(shown.threadId, limit) : { messages: [], hasMore: false, activeLeafId: null }) };
+    return { ...shown, ...(typeof shown.threadId === "string" ? messagePage(shown.threadId, limit, chat, preview) : { messages: [], hasMore: false, activeLeafId: null }) };
   };
   const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions });
   const handle = async ({ req, res, url, path, method, auth, json, readBody }: RouteContext): Promise<unknown> => {
@@ -108,12 +108,12 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       const shownBots = (deps.botOrderFor?.(auth, store.bots) ?? store.bots).filter((bot) => visible.bot(bot.id));
       const queued = publicBotQueuedMessages();
       return json(res, 200, {
-        bots: shownBots.map((bot) => shownBot(bot, visible, limit)),
+        bots: shownBots.map((bot) => shownBot(bot, visible, limit, url.searchParams.get("view") === "chat", url.searchParams.get("preview") === "1")),
         botQueuedMessages: visible.everything ? queued : Object.fromEntries(Object.entries(queued).filter(([threadId]) => visible.thread(threadId))),
         sections: visible.sections(store.sections),
         groups: store.groups.filter((g) => visible.group(g.id)).map((g) => {
           const group = publicGroupState(g);
-          const room = { ...(deps.groupFor?.(auth, group) ?? group), ...messagePage(g.threadId, limit) };
+          const room = { ...(deps.groupFor?.(auth, group) ?? group), ...messagePage(g.threadId, limit, url.searchParams.get("view") === "chat", url.searchParams.get("preview") === "1") };
           return visible.everything || !visible.member ? room : memberGroup(room);
         }),
         computerControl: Object.fromEntries(
@@ -134,7 +134,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       if (!bot || !visible.bot(bot.id)) return json(res, 404, { error: NO_SUCH_BOT });
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
-      return json(res, 200, { bot: shownBot(bot, visible, limit) });
+      return json(res, 200, { bot: shownBot(bot, visible, limit, url.searchParams.get("view") === "chat") });
     }
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages$/);
@@ -149,16 +149,16 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       const around = url.searchParams.get("around");
       if (before && around) return json(res, 400, { error: "before and around cannot be combined" });
       if (around) {
-        const window = messageWindow(threadId, around, limit ?? DEFAULT_PAGE);
+        const window = messageWindow(threadId, around, limit ?? DEFAULT_PAGE, url.searchParams.get("view") === "chat");
         if (!window) return json(res, 404, { error: "no such message" });
         return json(res, 200, { ...window, activeLeafId: store.activeLeaf(threadId) });
       }
       // An unknown cursor must not answer with the newest page: the client would paginate in a circle.
       if (before) {
-        const page = messagePageBefore(threadId, before, limit ?? DEFAULT_PAGE);
+        const page = messagePageBefore(threadId, before, limit ?? DEFAULT_PAGE, url.searchParams.get("view") === "chat");
         return page ? json(res, 200, page) : json(res, 404, { error: "no such message" });
       }
-      return json(res, 200, { ...messagePage(threadId, limit ?? DEFAULT_PAGE), activeLeafId: store.activeLeaf(threadId) });
+      return json(res, 200, { ...messagePage(threadId, limit ?? DEFAULT_PAGE, url.searchParams.get("view") === "chat"), activeLeafId: store.activeLeaf(threadId) });
     }
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/image$/);

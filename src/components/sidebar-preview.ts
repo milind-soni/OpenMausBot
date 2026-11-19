@@ -44,7 +44,7 @@ function quotedLine(messages: readonly Message[], last: Message, advanced: boole
 /** The conversation's newest line as a preview shows it, whatever the bot is doing now. */
 export function lastLine(bot: Bot, visible: Message[], instances: InstanceInfo[], advanced: boolean): string {
   const newest = lastPreviewable(visible);
-  if (!newest) return "";
+  if (!newest) return plainPreviewText(bot.previewText ?? "");
   const last = quotedLine(visible, newest, advanced);
   if (last.kind === "options" && last.card) {
     // MausBot's intro by its first line, as each mode's intro says it.
@@ -81,7 +81,7 @@ export function groupPreview(group: Group, bots: Bot[], instances: InstanceInfo[
   if (working) return working;
   if (group.working) return t("sidebar.preview.teamWorking");
   const newest = lastPreviewable(group.messages);
-  if (!newest) return t("sidebar.preview.noMessages");
+  if (!newest) return group.previewText ? plainPreviewText(group.previewText) : t("sidebar.preview.noMessages");
   const last = quotedLine(group.messages, newest, advanced);
   if (last.kind === "text" && last.role !== "user" && isClientCancellation(last.text ?? "")) {
     const stopped = t("chat.turnStopped");

@@ -1,3 +1,4 @@
+import { inChatHistory } from "../../shared/chat-history.ts";
 import type { Message, Store } from "../store.ts";
 import { toolResultPrefix } from "../tool-results.ts";
 
@@ -33,8 +34,34 @@ export function pageMessage(message: Message): Message | Record<string, unknown>
 }
 
 /** A conversation's messages one page at a time (newest first when `before` is absent), and the page around one message. */
-export function messagePages(store: Pick<Store, "messagesFor" | "messagesTail" | "messagesBefore" | "activeLeaf">) {
-  function messagePage(threadId: string, limit: number | undefined) {
+export function messagePages(store: Pick<Store, "activePath" | "messagesFor" | "messagesTail" | "messagesBefore" | "activeLeaf">) {
+  function chatPage(threadId: string, limit: number | undefined, before?: string, around?: string) {
+    const path = store.activePath(threadId);
+    const anchor = before ?? around;
+    const index = anchor === undefined ? path.length : path.findIndex(m => m.id === anchor);
+    if (index < 0) return null;
+    const visible = (before ? path.slice(0, index) : path).filter(m => inChatHistory(m) || m.id === around);
+    const size = limit ?? visible.length;
+    const start = around
+      ? Math.max(0, Math.min(visible.length - size, visible.findIndex(m => m.id === around) - Math.floor(size / 2)))
+      : Math.max(0, visible.length - size);
+    return { messages: visible.slice(start, start + size).map(pageMessage), hasMore: start > 0, activeLeafId: store.activeLeaf(threadId) };
+  }
+  function messagePage(threadId: string, limit: number | undefined, chat = false, preview = false) {
+    if (preview && limit === 0) {
+      const tail = store.messagesTail(threadId, 8);
+      const byId = new Map(tail.messages.map(m => [m.id, m]));
+      let at = tail.activeLeafId;
+      while (at) {
+        const m = byId.get(at);
+        if (!m) break;
+        if (m.kind === "text" && m.text?.trim()) return { messages: [], activeLeafId: tail.activeLeafId, previewText: m.text.slice(0, 240) };
+        at = m.parentId ?? null;
+      }
+      const last = at ? store.activePath(threadId).findLast(m => m.kind === "text" && m.text?.trim()) : undefined;
+      return { messages: [], activeLeafId: tail.activeLeafId, previewText: last?.text?.slice(0, 240) };
+    }
+    if (chat) return chatPage(threadId, limit)!;
     if (limit === undefined) {
       return { messages: store.messagesFor(threadId), activeLeafId: store.activeLeaf(threadId) };
     }
@@ -42,12 +69,14 @@ export function messagePages(store: Pick<Store, "messagesFor" | "messagesTail" |
     return { ...tail, messages: tail.messages.map(pageMessage) };
   }
 
-  function messagePageBefore(threadId: string, before: string, limit: number) {
+  function messagePageBefore(threadId: string, before: string, limit: number, chat = false) {
+    if (chat) return chatPage(threadId, limit, before);
     const page = store.messagesBefore(threadId, before, limit);
     return page ? { ...page, messages: page.messages.map(pageMessage) } : null;
   }
 
-  function messageWindow(threadId: string, messageId: string, limit: number) {
+  function messageWindow(threadId: string, messageId: string, limit: number, chat = false) {
+    if (chat) return chatPage(threadId, limit, undefined, messageId);
     const all = store.messagesFor(threadId);
     const index = all.findIndex((message) => message.id === messageId);
     if (index < 0) return null;

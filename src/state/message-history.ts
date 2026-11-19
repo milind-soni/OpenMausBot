@@ -10,15 +10,22 @@ type LoadOlderMessages = Extract<Action, { type: "loadOlderMessages" }>;
 export function reduceOlderMessages(state: AppState, action: OlderMessages): AppState {
   const { [action.threadId]: _done, ...loadingOlder } = state.loadingOlder;
   if ((state.transcriptGeneration[action.threadId] ?? 0) !== action.generation) return { ...state, loadingOlder };
-  const prepend = <T extends { messages: Message[]; threadId: string; hasMore?: boolean }>(owner: T): T => {
+  const prepend = <T extends { messages: Message[]; threadId: string; hasMore?: boolean; needsHistory?: boolean }>(owner: T): T => {
     const held = new Set(owner.messages.map((message) => message.id));
     return {
       ...owner,
       messages: [...action.messages.filter((message) => !held.has(message.id)), ...owner.messages],
       hasMore: action.hasMore,
+      ...(action.tailLoaded ? { needsHistory: false } : {}),
     };
   };
-  const bots = state.bots.map((bot) => (bot.threadId === action.threadId ? prepend(bot) : bot));
+  const bots = state.bots.map((bot) => {
+    if (bot.threadId !== action.threadId) return bot;
+    const loaded = prepend(bot);
+    return action.tailLoaded && bot.needsHistory && bot.activeLeafId === undefined
+      ? { ...loaded, activeLeafId: action.activeLeafId }
+      : loaded;
+  });
   const groups = state.groups.map((group) => (group.threadId === action.threadId ? prepend(group) : group));
   const owner = [...bots, ...groups].find((candidate) => candidate.threadId === action.threadId);
   const unreadDivider = placeUnreadDivider(state.unreadDivider, action.threadId, owner ? visibleMessages(owner) : [], action.hasMore);

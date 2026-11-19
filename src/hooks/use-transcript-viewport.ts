@@ -66,6 +66,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   pinOn,
   transcriptShown = true,
   hasMore = false,
+  historyPage,
   rests,
 }: {
   ownerId: string;
@@ -74,11 +75,14 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   pinOn: DependencyList;
   transcriptShown?: boolean;
   hasMore?: boolean;
+  historyPage?: { pending: boolean; load: () => void };
   /** A card work rests on until the person answers it; the newest one stays drawn when the window has left it behind. */
   rests?: (row: T) => boolean;
 }) {
   const focusMessage = useStoreSelector((state) => state.focusMessage);
-  const olderPending = useStoreSelector((state) => Boolean(state.loadingOlder[threadId]));
+  const storePending = useStoreSelector((state) => Boolean(state.loadingOlder[threadId]));
+  const olderPending = historyPage?.pending ?? storePending;
+  const loadPage = historyPage?.load;
   const dispatch = useStoreDispatch();
   const scrollRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -256,7 +260,8 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   };
   const loadOlder = () => {
     holdRowForPrepend();
-    dispatch({ type: "loadOlderMessages", threadId });
+    if (loadPage) loadPage();
+    else dispatch({ type: "loadOlderMessages", threadId });
   };
 
   useEffect(() => {
@@ -273,9 +278,10 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     } else if (hasMore && !olderPending && !expandingRef.current) {
       expandingRef.current = true;
       holdRowForPrepend();
-      dispatch({ type: "loadOlderMessages", threadId });
+      if (loadPage) loadPage();
+      else dispatch({ type: "loadOlderMessages", threadId });
     }
-  }, [hiddenCount, startIndex, hasMore, olderPending, threadId, dispatch, transcriptKey, transcriptWindow.start]);
+  }, [loadPage, hiddenCount, startIndex, hasMore, olderPending, threadId, dispatch, transcriptKey, transcriptWindow.start]);
 
   useEffect(() => {
     const sentinel = topSentinelRef.current;

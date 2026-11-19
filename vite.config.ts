@@ -47,7 +47,7 @@ const include = [
 
 function backendProxy(mode: string, port: number, env: Record<string, string>): ProxyOptions {
   if (mode !== "railway") {
-    return { target: `http://127.0.0.1:${process.env.OMB_PORT || process.env.OGB_PORT || 8799}` };
+    return { target: `http://127.0.0.1:${env.OMB_PORT || process.env.OGB_PORT || 8799}` };
   }
   const target = URL.parse(env.OMB_RAILWAY_ORIGIN ?? "");
   if (!target || target.protocol !== "https:" || target.href !== `${target.origin}/`) {

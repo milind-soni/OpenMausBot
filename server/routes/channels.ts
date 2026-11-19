@@ -85,7 +85,7 @@ export interface ChannelRouteDeps {
   /** A room as this person has read it (a Team Cloud); the room itself anywhere else. */
   groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
   pageSize(raw: string | null): number | null | undefined;
-  messagePage(threadId: string, limit: number | undefined): MessagePage;
+  messagePage(threadId: string, limit: number | undefined, chat?: boolean): MessagePage;
   resolveReplyTarget(threadId: string, value: unknown): Message | undefined;
   runningTurnInstance(bot: BotRecord | null | undefined, threadId: string): ProviderInstance | null;
   engineSteersImages(instance: ProviderInstance | null | undefined): boolean;
@@ -230,7 +230,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       // "0": settings only (no `messages` key); a positive page: that tail; omitted: the whole transcript.
       const responseGroup = requestedMessages === "0"
         ? switchedSettings
-        : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit) };
+        : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit, url.searchParams.get("view") === "chat") };
       return json(res, 200, { group: responseGroup });
     }
     if (m && method === "PATCH") {

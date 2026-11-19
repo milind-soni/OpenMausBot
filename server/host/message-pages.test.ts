@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Message } from "../store.ts";
-import { pageMessage, TOOL_OUTPUT_PREVIEW } from "./message-pages.ts";
+import { messagePages, pageMessage, TOOL_OUTPUT_PREVIEW } from "./message-pages.ts";
 
 const step = (output: string | undefined, extra: Partial<Message> = {}): Message => ({
   id: "m1", role: "bot", kind: "activity", at: 1, text: "", turnId: "t1",
@@ -53,4 +53,19 @@ describe("pageMessage", () => {
     const screen = { id: "s1", role: "bot", kind: "screen", at: 1, text: "", png: "iVBOR" } as Message;
     expect(pageMessage(screen)).toEqual({ id: "s1", role: "bot", kind: "screen", at: 1, text: "", hasImage: true });
   });
+});
+
+it("paginates chat rows across ordinary tool calls and keeps coordination", () => {
+  const rows = [step("", { id: "a", kind: "text" }), step(""), step("", { id: "b", roomRequest: { id: "q", phase: "result" } })];
+  const pages = messagePages({ activePath: () => rows, activeLeaf: () => "b", messagesFor: vi.fn(), messagesBefore: vi.fn(), messagesTail: vi.fn() });
+  expect(pages.messagePage("t", 1, true)).toMatchObject({ messages: [{ id: "b" }], hasMore: true });
+  expect(pages.messagePageBefore("t", "b", 1, true)).toMatchObject({ messages: [{ id: "a" }], hasMore: false });
+});
+
+it("returns just the latest text preview for a metadata list", () => {
+  const text = step("", { id: "said", kind: "text", text: "Saved", parentId: null });
+  const tool = step("output", { parentId: text.id });
+  const pages = messagePages({ activePath: vi.fn(), activeLeaf: vi.fn(), messagesFor: vi.fn(), messagesBefore: vi.fn(),
+    messagesTail: () => ({ messages: [text, tool], activeLeafId: tool.id, hasMore: false }) });
+  expect(pages.messagePage("t", 0, false, true)).toEqual({ messages: [], previewText: "Saved", activeLeafId: tool.id });
 });

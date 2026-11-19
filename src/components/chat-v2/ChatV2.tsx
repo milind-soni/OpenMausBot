@@ -1,7 +1,8 @@
 import { memo, useMemo, useState } from "react";
 import { ArrowDown, Loader2, Monitor, Reply } from "lucide-react";
-import { currentTaskBot, visibleMessages, type Bot, type Message } from "@/state/store";
+import { currentTaskBot, type Bot, type Message } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useChatHistory } from "@/state/use-chat-history";
 import { useLiveTranscript } from "@/state/live-reply";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
@@ -75,9 +76,10 @@ export function ChatV2({ profile, onClose }: { profile: Bot; onClose: () => void
   const writable = useCanWriteIn(bot.threadId, bot.yourAccess) !== false;
   const error = useStoreSelector(s => s.error);
   const focused = useStoreSelector(s => s.focusMessage);
-  const history = useMemo(() => visibleMessages(bot), [bot.messages, bot.activeLeafId]);
+  const historyPage = useChatHistory(bot);
+  const { history } = historyPage;
   const viewport = useTranscriptViewport({ ownerId: bot.id, threadId: bot.threadId, messages: history,
-    hasMore: bot.hasMore, rests: staysInView, pinOn: [bot.busy] });
+    hasMore: historyPage.hasMore, historyPage, rests: staysInView, pinOn: [bot.busy] });
   const messages = useLiveTranscript(bot.threadId, viewport.windowedMessages, history);
   const unread = useUnreadDivider({ threadId: bot.threadId, messages: history, following: viewport.following });
   const items = useMemo(() => messages.map(message => ({ kind: "message" as const, message })), [messages]);
