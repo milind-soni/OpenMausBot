@@ -8101,6 +8101,7 @@
   "computer.problem.localNeedsApp": "Só o app {app} neste computador pode permitir que um bot use a máquina. Abra o app aqui para isso.",
   "computer.problem.localWindows": "Os bots não conseguem usar este PC agora. Reinicie o app {app}. Se não resolver, abra Configurações → Este app → Ajuda.",
   "computer.problem.localMac": "Os bots ainda não conseguem usar este Mac. Confira se o app {app} tem permissão em Gravação de Tela e Acessibilidade, em Ajustes do Sistema → Privacidade e Segurança, e reinicie o app.",
+  "computer.problem.localMacTooOld": "Os bots não conseguem usar este Mac: o controle local da área de trabalho precisa do macOS 13 Ventura ou posterior. Atualize o macOS para usá-lo.",
   "computer.problem.localRemoteServer": "Os bots no seu próprio servidor não conseguem usar este computador. Volte para Este computador para usá-lo.",
   "ask.header.asks": "{name} pergunta",
   "ask.settled.chose": "Você escolheu:",
