@@ -103,7 +103,7 @@ export function trackToolEndShown(state: AcpTurn["state"]): void {
   state.thoughtSinceTool = false;
 }
 
-/** Reasoning in the wordless window: if no reply lands after it, the turn ends midstream (#6684). */
+/** Reasoning in the wordless window: if no reply lands after it, the turn ends midstream and the person sees nothing. */
 export function trackThoughtAfterTool(state: AcpTurn["state"]): void {
   if (state.toolsSinceShown) state.thoughtSinceTool = true;
 }
