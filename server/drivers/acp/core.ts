@@ -822,6 +822,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const finished = u.status === "completed" || u.status === "failed";
           const toolEnded = (itemId: string | undefined) => {
             current.state.producedItem = true;
+            current.state.toolsSinceShown = true;
+            current.state.thoughtSinceTool = false;
             for (const event of acpToolEndEvents(u, itemId, current.endedToolIds)) emit({ ...base(threadId, current.turnId), ...event });
           };
           switch (u.sessionUpdate) {
@@ -831,6 +833,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               if (content?.type === "image" && typeof content.data === "string" && content.data) {
                 current.flushAssistantText();
                 current.state.producedItem = true;
+                current.state.toolsSinceShown = false;
+                current.state.thoughtSinceTool = false;
                 emit({
                   ...base(threadId, current.turnId),
                   type: "item.completed",
@@ -855,7 +859,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             case "agent_thought_chunk": {
               const delta = u.content?.text;
-              if (typeof delta === "string" && delta) emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "reasoning_text", delta });
+              if (typeof delta === "string" && delta) {
+                // Reasoning in the wordless window after a tool is the model at work again; if no reply follows it,
+                // the turn ends midstream and the person sees nothing.
+                if (current.state.toolsSinceShown) current.state.thoughtSinceTool = true;
+                emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "reasoning_text", delta });
+              }
               break;
             }
             case "tool_call": {
@@ -1081,7 +1090,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           signIn.refused(session.host) ?? session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
-        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false, cancelling: false };
+        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, toolsSinceShown: false, thoughtSinceTool: false, usagePeak: null, usageLast: null, usageCompacted: false, cancelling: false };
         let acknowledge = () => {};
         let rejectStartup = (_error: TurnNotStartedError) => {};
         const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {
@@ -1110,6 +1119,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (!text.trim()) return;
           state.producedItem = true;
           state.repliedText = true;
+          state.toolsSinceShown = false;
+          state.thoughtSinceTool = false;
           emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
         };
         const current: AcpTurn = {
