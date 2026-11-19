@@ -98,6 +98,28 @@ describe("warm summary scheduling", () => {
     expect(waited).toEqual([]);
   });
 
+  it("writes ahead only once for a person who answers faster than the summary takes, then waits for the idle time", async () => {
+    const { time, warm, runs } = setup({}, { way: "native", soon: false, ahead: true });
+    warm.turnCompleted(target, { ok: true, contextTokens: 145_000 });
+    await time.advance(WARM_SUMMARY_SOON_MS);
+    expect(runs).toHaveLength(1);
+    expect(await warm.beforeTurn("t1")).toBe("abandoned");
+    runs[0]!.finish({ ok: false, reason: "a turn started while summarizing" });
+    warm.turnStarted("t1");
+    await time.advance(0);
+    warm.turnCompleted(target, { ok: true, contextTokens: 150_000 });
+    await time.advance(WARM_SUMMARY_IDLE_MS - 1);
+    expect(runs).toHaveLength(1);
+    await time.advance(1);
+    expect(runs).toHaveLength(2);
+    runs[1]!.finish({ ok: true });
+    await time.advance(0);
+    // Summarized once: the next approach is written ahead again.
+    warm.turnCompleted(target, { ok: true, contextTokens: 145_000 });
+    await time.advance(WARM_SUMMARY_SOON_MS);
+    expect(runs).toHaveLength(3);
+  });
+
   it("tells the host once when a turn begins waiting, and lets the turn go on when the summary fails", async () => {
     const waited: string[] = [];
     const { time, warm, runs } = setup({ waiting: (t) => { waited.push(t.threadId); } }, { way: "native", soon: true, ahead: true });

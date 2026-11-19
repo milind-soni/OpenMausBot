@@ -91,6 +91,14 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
     .map((ms) => Math.max(1, Math.round(ms * scale)));
   const pending = new Map<string, Pending>();
   const last = new Map<string, { at: number; outcome: string }>();
+  /** Conversations whose summary written ahead was dropped for a turn: their person answers within the minute it takes,
+   * so the next one waits for the idle time rather than spend a second summary call the same way. */
+  const overtaken = new Set<string>();
+  const overtake = (p: Pending) => {
+    if (!p.plan.ahead || p.plan.soon) return;
+    overtaken.add(p.target.threadId);
+    if (overtaken.size > 500) overtaken.delete(overtaken.values().next().value!);
+  };
   let disposed = false;
 
   const note = (threadId: string, outcome: string) => {
@@ -139,7 +147,7 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
       }
       if (p.run === run) p.run = null;
       if (pending.get(p.target.threadId) !== p) return;
-      if (outcome.ok) return drop(p, "summarized");
+      if (outcome.ok) { overtaken.delete(p.target.threadId); return drop(p, "summarized"); }
       if (outcome.retry && !controller.signal.aborted && deps.now() + retryMs - p.turnEndedAt < giveUpMs) {
         note(p.target.threadId, `waiting: ${outcome.reason}`);
         return schedule(p, retryMs);
@@ -158,10 +166,11 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
       if (existing) drop(existing);
       if (!turn.ok) return;
       const plan = deps.plan(target, turn.contextTokens);
+      if (!plan?.ahead) overtaken.delete(target.threadId);
       if (!plan) return;
       const p: Pending = { target, plan, turnEndedAt: deps.now(), dueAt: null, timer: null, run: null };
       pending.set(target.threadId, p);
-      schedule(p, plan.soon ? nowMs : plan.ahead ? soonMs : idleMs);
+      schedule(p, plan.soon ? nowMs : plan.ahead && !overtaken.has(target.threadId) ? soonMs : idleMs);
     },
 
     /** A turn began on this conversation: what the summary would cover is no longer the whole of it. */
@@ -170,6 +179,7 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
       if (!p) return;
       if (p.run && !p.run.awaited) {
         deps.log?.(`warm summary ${threadId}: a turn started while it was being written`);
+        overtake(p);
         p.run.controller.abort();
       }
       if (!p.run) drop(p);
@@ -187,6 +197,7 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
       const run = p.run;
       if (!p.plan.soon) {
         deps.log?.(`warm summary ${threadId}: a turn that does not need it starts now`);
+        overtake(p);
         run.controller.abort();
         return "abandoned";
       }
@@ -213,6 +224,7 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
     },
 
     forget(threadId: string): void {
+      overtaken.delete(threadId);
       const p = pending.get(threadId);
       if (!p) return;
       p.run?.controller.abort();
