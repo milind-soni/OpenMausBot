@@ -148,13 +148,13 @@ export class LimitResetClock {
     return until > now ? until : null;
   }
 
-  /** The engine's usage reading when its meter covers `model` (every model when none is named): OpenCode's meter is
-   * the Go subscription's and never covers Zen's free models. */
   /** Whether only the usage meter holds this engine now, with no refusal of its own. */
   meterOnly(engine: string, model?: string): boolean {
     return this.refusal(engine) === null && this.blockedUntil(engine, model) !== null;
   }
 
+  /** The engine's usage reading when its meter covers `model` (every model when none is named): OpenCode's meter is
+   * the Go subscription's and never covers Zen's free models. */
   private meterFor(engine: string, model?: string): EngineLimit | undefined {
     const usage = this.reading(engine);
     return usage?.driver !== "opencode" || !model || (typedOpenCodeModel(model) ?? model).startsWith(OPENCODE_GO_MODEL_PREFIX) ? usage : undefined;
