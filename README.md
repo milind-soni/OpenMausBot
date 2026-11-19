@@ -16,8 +16,8 @@ Application updates are paused during the alpha. To install a newer build, quit 
 
 1. Select **Get started** and save your display name. Email is optional.
 2. Review the AI engines Studio detects. Follow the setup instructions for your engine and select **Recheck**. Each card shows installation, sign-in, and any subscription information the engine makes available.
-3. Choose how you want to use Studio. Pick Development, Design, Research, Finance, or describe a custom goal.
-4. Review and edit your suggested Buddies. You can change their names, roles, responsibilities, and models, and add or remove Buddies before approving the workspace.
+3. Choose how you want to use Studio. Pick Development, Design, Research, or Finance. To describe a custom goal, connect an AI engine first. Studio uses it to suggest a team for that goal.
+4. Review and edit your suggested Buddies. Each one comes with detailed instructions covering its role, how it works, and the rules it follows. You can change their names, roles, instructions, and models, and add or remove Buddies before approving the workspace.
 5. Start the guided tour or go straight to your new workspace. To reopen it, select **Restart Studio tour** in **Settings → System**.
 
 | Personal details | AI engines |

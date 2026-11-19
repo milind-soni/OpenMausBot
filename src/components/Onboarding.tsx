@@ -359,6 +359,9 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
   });
 
   const preferredModel = options.find((item) => item.recommended)?.selection ?? null;
+  // A custom goal needs a working AI engine to turn it into a team, so the
+  // Custom purpose is only offered once one is available.
+  const customAvailable = options.length > 0;
   const readyEngineCount = (engines ?? []).filter(
     (engine) => engine.snapshot.state === "available" && engine.snapshot.authenticated === true,
   ).length;
@@ -438,7 +441,12 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
 
   const profileValid = Boolean(name.trim()) && (!email.trim() || isValidOnboardingEmail(email));
 
+  useEffect(() => {
+    if (engines && !customAvailable && focus.includes("Custom")) update({ focus: focus.filter((value) => value !== "Custom") });
+  }, [engines, customAvailable, focus]);
+
   function changePurpose(purpose: Purpose) {
+    if (purpose === "Custom" && !customAvailable) return;
     update({ focus: focus.includes(purpose) ? focus.filter((value) => value !== purpose) : [...focus, purpose] });
   }
 
@@ -757,6 +765,7 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
                     const isPrimary = focus[0] === purpose;
                     const { icon: Icon, copy, iconBg, iconText } = purposeDetails[purpose];
                     const isCustom = purpose === "Custom";
+                    const unavailable = isCustom && !customAvailable;
 
                     return (
                       <button
@@ -764,9 +773,11 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
                         key={purpose}
                         aria-pressed={selected}
                         aria-label={purpose}
+                        aria-describedby={unavailable ? "custom-purpose-unavailable" : undefined}
+                        disabled={unavailable}
                         onClick={() => changePurpose(purpose)}
                         className={cn(
-                          "gbs-purpose-card group flex min-w-0 cursor-pointer flex-col rounded-2xl border p-5 text-left transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                          "gbs-purpose-card group flex min-w-0 cursor-pointer flex-col rounded-2xl border p-5 text-left transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50",
                           isCustom && "sm:col-span-2",
                         )}
                       >
@@ -803,6 +814,11 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
 
                         <span className="mt-4 block text-[15px] font-semibold text-ink">{purpose}</span>
                         <span className="mt-1 block text-[13px] leading-relaxed text-ink-secondary">{copy}</span>
+                        {unavailable && (
+                          <span id="custom-purpose-unavailable" className="mt-2 block text-[12px] leading-relaxed text-ink-secondary">
+                            {engines ? "Connect an AI engine in the previous step to suggest a team for a custom goal." : "Checking your AI engines…"}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -970,7 +986,7 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
                                 className={inputClass}
                                 disabled={saving}
                                 maxLength={2400}
-                                rows={3}
+                                rows={10}
                                 placeholder="Describe what this Buddy owns and how it should help."
                                 value={buddy.description}
                                 onChange={(event) => patchBuddy(buddy.id, { description: event.target.value })}
