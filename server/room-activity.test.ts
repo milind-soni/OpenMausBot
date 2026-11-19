@@ -205,7 +205,7 @@ posixOnly("room activity runtime", () => {
       "room approval card",
     );
     expect(prompt.message.from.botId).toBe(alpha.id);
-    expect(prompt.message.card.options).toEqual(["Allow", "Deny"]);
+    expect(prompt.message.card.options).toEqual(["Allow", "Deny", "Always allow"]);
     expect(prompt.message.card.requestType).toBe("permission");
 
     const settings = await api("GET", "/api/config");
@@ -270,6 +270,41 @@ posixOnly("room activity runtime", () => {
     );
     expect(cleared.group.queuedBotIds).toEqual([]);
   }, 20_000);
+
+  it("remembers Always allow per Buddy and tool, then approves that tool without a card", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { name: "TEST · Always", modelSelection: { instanceId: "permission", model: "fake-model" } });
+
+    let start = frames.length;
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "first check" })).status).toBeLessThan(300);
+    const card = await waitForFrame(
+      (frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message.kind === "options",
+      "first approval card", 12_000, start,
+    );
+    expect(card.message.card.options).toEqual(["Allow", "Deny", "Always allow"]);
+    const tool = card.message.card.tool;
+    expect(typeof tool).toBe("string");
+    expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.message.card.requestId, behavior: "allow", always: true })).status).toBe(200);
+    const remembered = await waitForFrame(
+      (frame) => frame.kind === "bot" && frame.bot.id === bot.id && frame.bot.alwaysAllowedTools?.includes(tool),
+      "remembered tool", 12_000, start,
+    );
+    expect(remembered.bot.alwaysAllowedTools).toEqual([tool]);
+    await waitForFrame((frame) => frame.kind === "runtime" && frame.event.type === "turn.completed" && frame.event.threadId === bot.threadId, "first turn", 12_000, start);
+
+    start = frames.length;
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "second check" })).status).toBeLessThan(300);
+    await waitForFrame(
+      (frame) => frame.kind === "message" && frame.threadId === bot.threadId && frame.message.kind === "activity" && frame.message.tool?.name === `Always allowed: ${tool}`,
+      "always-allowed activity", 12_000, start,
+    );
+    await waitForFrame((frame) => frame.kind === "runtime" && frame.event.type === "turn.completed" && frame.event.threadId === bot.threadId, "second turn", 12_000, start);
+    expect(frames.slice(start).some((frame) => frame.kind === "message" && frame.message.kind === "options")).toBe(false);
+
+    // removing it from Buddy settings brings the card back
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { alwaysAllowedTools: [] })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { alwaysAllowedTools: "Bash" })).status).toBe(400);
+  }, 30_000);
 
   it("runs Markdown-formatted agent handoffs when global autoHandoffs setting is enabled", async () => {
     const alpha = (await api("POST", "/api/bots")).body.bot;

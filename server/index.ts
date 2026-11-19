@@ -360,15 +360,28 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "request.opened": {
       const permission = event.requestType === "permission";
+      // "Always allow": approve this Buddy's ask for a remembered tool right
+      // away, leaving a visible activity line instead of a card
+      const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
+      if (permission && event.tool && event.requestId && asker?.alwaysAllowedTools?.includes(event.tool)) {
+        const instance = registry.get((activeSelections.get(event.threadId) ?? asker.modelSelection).instanceId);
+        if (instance) {
+          pushMessage({ role: "bot", kind: "activity", tool: { name: `Always allowed: ${event.tool}` } });
+          void instance.adapter.respondToRequest(event.threadId, event.requestId, { behavior: "allow" })
+            .catch((e) => console.error("always-allow:", e instanceof Error ? e.message : "failed"));
+          break;
+        }
+      }
       const message = pushMessage({
         role: "bot",
         kind: "options",
         card: {
           title: permission ? "Approval needed" : "Your bot has a question",
           subtitle: event.summary,
-          options: permission ? ["Allow", "Deny"] : event.choices ?? [],
+          options: permission ? (event.tool ? ["Allow", "Deny", "Always allow"] : ["Allow", "Deny"]) : event.choices ?? [],
           requestId: event.requestId,
           requestType: event.requestType,
+          ...(permission && event.tool ? { tool: event.tool } : {}),
         },
       });
       if (event.requestId) askMessageByRequest.set(event.requestId, message.id);
@@ -2011,8 +2024,15 @@ const server = createServer(async (req, res) => {
     if (m && method === "PATCH") {
       const body = await readBody(req);
       const patch: Record<string, unknown> = {};
-      for (const key of ["name", "title", "description", "notifications", "modelSelection", "backupModelSelection", "onUsageLimit", "unread", "computer", "color", "mascotExpression", "pinned", "hidden"] as const) {
+      for (const key of ["name", "title", "description", "notifications", "modelSelection", "backupModelSelection", "onUsageLimit", "unread", "computer", "color", "mascotExpression", "pinned", "hidden", "alwaysAllowedTools"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
+      }
+      if (patch.alwaysAllowedTools !== undefined) {
+        const tools = patch.alwaysAllowedTools;
+        if (!Array.isArray(tools) || tools.length > 100 || tools.some((t) => typeof t !== "string" || !t || t.length > 200)) {
+          return json(res, 400, { error: "alwaysAllowedTools must be a list of tool names." });
+        }
+        patch.alwaysAllowedTools = [...new Set(tools as string[])];
       }
       const current = store.bot(m[1]);
       if (!current) return json(res, 404, { error: "no such bot" });
@@ -2169,6 +2189,17 @@ const server = createServer(async (req, res) => {
       }
       const requestId = String(body.requestId);
       const autoApproved = body.autoApproved === true;
+      // "Always allow" = allow now + remember the card's tool for this Buddy
+      if (body.always === true) {
+        const pending = store.messagesFor(requestedThreadId).find((message) => message.card?.requestId === requestId);
+        const tool = pending?.card?.requestType === "permission" ? pending.card.tool : undefined;
+        if (!tool || body.behavior !== "allow") return json(res, 400, { error: "Always allow is only available for approval requests." });
+        const remembered = [...new Set([...(bot.alwaysAllowedTools ?? []), tool])];
+        store.patchBot(bot.id, { alwaysAllowedTools: remembered });
+        broadcast({ kind: "bot", bot: store.bot(bot.id) });
+        const patched = store.patchMessage(requestedThreadId, pending!.id, { card: { ...pending!.card!, answered: "Always allow" } });
+        if (patched) broadcast({ kind: "message.patch", threadId: requestedThreadId, message: patched });
+      }
       const autoKey = requestKey(requestedThreadId, requestId);
       if (autoApproved) {
         const pending = store.messagesFor(requestedThreadId).find((message) => message.card?.requestId === requestId);

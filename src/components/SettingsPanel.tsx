@@ -39,7 +39,7 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const patch = (
     p: Partial<
-      Pick<Bot, "name" | "title" | "description" | "notifications" | "computer" | "color" | "mascotExpression">
+      Pick<Bot, "name" | "title" | "description" | "notifications" | "computer" | "color" | "mascotExpression" | "alwaysAllowedTools">
     >,
   ) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
   // The picker marks the resting look, not whatever the Buddy is doing right now.
@@ -230,6 +230,30 @@ export function SettingsPanel({ bot }: { bot: Bot }) {
               ))}
             </div>
           </div>
+
+          {(bot.alwaysAllowedTools?.length ?? 0) > 0 && (
+            <div className="rounded-xl bg-card p-4">
+              <div className="text-[15px] font-medium text-ink">Always allowed</div>
+              <div className="mt-0.5 text-[13px] text-ink-secondary">
+                This Buddy uses these without asking. Remove one to get approval prompts for it again.
+              </div>
+              <ul className="mt-3 flex flex-wrap gap-2">
+                {bot.alwaysAllowedTools!.map((tool) => (
+                  <li key={tool} className="flex items-center gap-1 rounded-lg border border-hairline/40 bg-raised py-1 pl-2.5 pr-1 text-[13px] text-ink">
+                    <span className="font-mono text-[12px]">{tool}</span>
+                    <button
+                      type="button"
+                      aria-label={`Stop always allowing ${tool}`}
+                      onClick={() => patch({ alwaysAllowedTools: bot.alwaysAllowedTools!.filter((t) => t !== tool) })}
+                      className="rounded p-0.5 text-ink-secondary hover:bg-raised-hover hover:text-ink"
+                    >
+                      <X size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
             <div>

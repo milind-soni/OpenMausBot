@@ -43,6 +43,8 @@ export interface OptionCardData {
   requestId?: string;
   requestType?: "permission" | "question";
   autoApproved?: boolean;
+  /** permission cards: the tool asking (what "Always allow" remembers) */
+  tool?: string;
 }
 
 export interface Message {
@@ -123,6 +125,8 @@ export interface Bot {
   usingBackup?: boolean;
   /** Where this bot's computer runs; unset uses this computer in the desktop app. */
   computer?: "local" | "off";
+  /** Tools approved with "Always allow" (removable in Buddy settings). */
+  alwaysAllowedTools?: string[];
   pinned?: boolean;
   hidden?: boolean;
   messages: Message[];
@@ -916,13 +920,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : stateRef.current.bots.find((bot) => bot.id === action.botId);
           const card = owner?.messages.find((message) => message.id === action.messageId)?.card;
           if (card?.requestId) {
+            const always = card.requestType === "permission" && action.answer === "Always allow";
             const behavior =
-              action.answer === "Allow" ? "allow" : action.answer === "Deny" ? "deny" : "answer";
+              action.answer === "Allow" || always ? "allow" : action.answer === "Deny" ? "deny" : "answer";
             api(`/api/bots/${action.botId}/respond`, {
               method: "POST",
               body: JSON.stringify({
                 requestId: card.requestId,
                 behavior,
+                always: always || undefined,
                 message: behavior === "answer" ? action.answer : undefined,
                 threadId: action.threadId,
               }),

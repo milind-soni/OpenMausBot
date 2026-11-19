@@ -43,6 +43,8 @@ export interface OptionCardData {
   requestId?: string;
   requestType?: "permission" | "question";
   autoApproved?: boolean;
+  /** permission cards: the tool asking (what "Always allow" remembers) */
+  tool?: string;
 }
 
 export interface Message {
@@ -130,6 +132,8 @@ export interface BotRecord {
   resumeCursors: Record<string, unknown>;
   /** Unset uses this computer when the desktop bridge is available. */
   computer?: "local" | "off";
+  /** Tools the user chose "Always allow" for; their permission asks are approved without a card. */
+  alwaysAllowedTools?: string[];
   /** true after an edit/branch-switch rewound the visible conversation:
    * provider sessions still hold the abandoned branch, so the next turn
    * must start fresh (drop cursors) and replay the surviving path. */
