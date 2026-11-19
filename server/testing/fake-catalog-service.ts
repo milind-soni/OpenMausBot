@@ -13,9 +13,15 @@ export interface FakeCatalogService {
   /** The catalog page (from 1) answered with HTTP 500, or whose connection is dropped. */
   failPage: number;
   dropPage: number;
+  /** The catalog page (from 1) answered HTTP 200 with a body that is not JSON. */
+  garblePage: number;
+  /** Whether pages report the catalog's totals; without them a walk can only end on a page with no cursor. */
+  totals: boolean;
   /** Every request answers HTTP 503. */
   down: boolean;
   connected: Record<string, { connected: boolean; status: string }>;
+  /** What the connected list says of itself; unset, it says nothing, as an older service does. */
+  inventoryComplete?: boolean;
   /** Holds every answer until the returned function is called. */
   hold(): () => void;
   /** Resolves when the next request arrives. */
@@ -27,7 +33,7 @@ export async function startFakeCatalogService(): Promise<FakeCatalogService> {
   let gate: Promise<void> | null = null;
   let arrived = () => {};
   const fake: Omit<FakeCatalogService, "url" | "close"> = {
-    pages: [3, 3, 2], edition: 0, requests: { catalog: 0, connected: 0, status: 0 }, failPage: 0, dropPage: 0, down: false,
+    pages: [3, 3, 2], edition: 0, requests: { catalog: 0, connected: 0, status: 0 }, failPage: 0, dropPage: 0, garblePage: 0, totals: true, down: false,
     connected: { gmail: { connected: true, status: "ACTIVE" } },
     hold() {
       let open = () => {};
@@ -55,17 +61,18 @@ export async function startFakeCatalogService(): Promise<FakeCatalogService> {
         return res.end(JSON.stringify({ error: "page unavailable" }));
       }
       if (fake.dropPage === page) return void req.socket.destroy();
+      if (fake.garblePage === page) return res.end("<html>bad gateway</html>");
       const start = fake.pages.slice(0, page - 1).reduce((sum, size) => sum + size, 0);
       const items = Array.from({ length: fake.pages[page - 1] ?? 0 }, (_, index) => ({ slug: `app${start + index}`, name: `App ${start + index} v${fake.edition}` }));
       return res.end(JSON.stringify({
         items,
-        total_items: fake.pages.reduce((sum, size) => sum + size, 0),
-        current_page: page,
-        total_pages: fake.pages.length,
+        ...(fake.totals ? { total_items: fake.pages.reduce((sum, size) => sum + size, 0), current_page: page, total_pages: fake.pages.length } : {}),
         ...(page < fake.pages.length ? { next_cursor: `p${page + 1}` } : {}),
       }));
     }
-    if (url.pathname === "/v1/connectors/connected") return res.end(JSON.stringify({ services: fake.connected }));
+    if (url.pathname === "/v1/connectors/connected") {
+      return res.end(JSON.stringify({ services: fake.connected, ...(fake.inventoryComplete === undefined ? {} : { complete: fake.inventoryComplete }) }));
+    }
     if (url.pathname === "/v1/connectors") {
       const asked = (url.searchParams.get("services") ?? "").split(",").filter(Boolean);
       return res.end(JSON.stringify({ services: Object.fromEntries(asked.map((slug) => [slug, fake.connected[slug] ?? { connected: false, status: "not_connected" }])) }));

@@ -1,6 +1,7 @@
 // The marketplace catalog: one walk of its pages, and the copy the Apps page is answered from. A reader gets the copy held
 // for its backend at once, whatever its age; an old copy is read again behind it, by one walk however many readers ask.
-// The newest copy is also kept in the data folder, so a restart starts from it.
+// The newest copy is also kept in the data folder, so a restart starts from it. A walk that failed or came up short never
+// takes the place of a whole list: the list held stays, and the walk is tried again later, less often each time.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -65,29 +66,35 @@ export function toolkitCategories(raw: unknown): string[] | undefined {
 export const CATALOG_FRESH_MS = 10 * 60_000;
 const MAX_HELD_CATALOGS = 4;
 
+/** How long after each walk in a row that failed or came up short the next one waits. */
+const RETRY_AFTER_MS = [30_000, 60_000, 2 * 60_000, 5 * 60_000, CATALOG_FRESH_MS];
+const retryAfter = (failures: number) => RETRY_AFTER_MS[Math.min(failures, RETRY_AFTER_MS.length) - 1]!;
+
 interface HeldCatalog {
   at: number;
   cards: ToolkitCard[];
   pagination: CatalogPagination;
   digest: string;
+  /** When the next reader starts a walk behind its answer. */
+  walkAgainAt: number;
+  failures: number;
 }
 
 export const CATALOG_FILE = "connector-catalog.json";
-const MAX_SAVED_CARDS = 20_000;
 const savedCatalogSchema = z.object({
   version: z.literal(1),
   /** Names the backend without holding its credential. */
   key: z.string().length(64),
   at: z.number().finite().nonnegative(),
   cards: z.array(z.object({
-    slug: z.string().min(1).max(200),
-    label: z.string().max(400),
-    blurb: z.string().max(400),
-    logo: z.string().max(2_000).nullable(),
+    slug: z.string().min(1),
+    label: z.string(),
+    blurb: z.string(),
+    logo: z.string().nullable(),
     noAuth: z.boolean().optional(),
-    domain: z.string().max(400).nullable(),
-    categories: z.array(z.string().max(80)).max(8).optional(),
-  })).min(1).max(MAX_SAVED_CARDS),
+    domain: z.string().nullable(),
+    categories: z.array(z.string()).optional(),
+  })).min(1),
   pagination: z.object({
     items: z.number(),
     totalItems: z.number().optional(),
@@ -112,15 +119,26 @@ const savedKey = (identity: string) => createHash("sha256").update("catalog-file
 function loadSaved(identity: string): HeldCatalog | null {
   if (!savedFile || savedFileRead) return null;
   savedFileRead = true;
-  let parsed;
+  let text: string;
   try {
-    parsed = savedCatalogSchema.safeParse(JSON.parse(readFileSync(savedFile, "utf8")));
+    text = readFileSync(savedFile, "utf8");
   } catch {
     return null;
   }
-  if (!parsed.success || parsed.data.key !== savedKey(identity)) return null;
+  let parsed;
+  try {
+    parsed = savedCatalogSchema.safeParse(JSON.parse(text));
+  } catch {
+    parsed = null;
+  }
+  if (!parsed?.success) {
+    console.warn("[composio] the saved catalog could not be read; the catalog is read from the service instead");
+    return null;
+  }
+  if (parsed.data.key !== savedKey(identity)) return null;
   const { cards, pagination, at } = parsed.data;
-  const catalog: HeldCatalog = { at: Math.min(at, Date.now()), cards, pagination, digest: digestOf(cards) };
+  const readAt = Math.min(at, Date.now());
+  const catalog: HeldCatalog = { at: readAt, cards, pagination, digest: digestOf(cards), walkAgainAt: pagination.complete ? readAt + CATALOG_FRESH_MS : 0, failures: 0 };
   keep(identity, catalog);
   return catalog;
 }
@@ -143,6 +161,16 @@ export function onCatalogChange(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+function announceChange(): void {
+  for (const listener of listeners) {
+    try {
+      listener();
+    } catch (error) {
+      console.warn(`[composio] a catalog listener failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
 const digestOf = (cards: readonly ToolkitCard[]) => createHash("sha256").update(JSON.stringify(cards)).digest("hex");
 
 async function walkCatalog(readPage: CatalogPageReader): Promise<{ cards: ToolkitCard[]; pagination: CatalogPagination } | null> {
@@ -154,13 +182,13 @@ async function walkCatalog(readPage: CatalogPageReader): Promise<{ cards: Toolki
   let reportedTotalPages: number | undefined;
   let stop: CatalogStopReason = "limit";
   for (let page = 0; page < MAX_CONNECTED_ACCOUNT_PAGES; page += 1) {
-    const res = await readPage(cursor);
-    if (!res.ok) {
+    const res = await readPage(cursor).catch(() => null);
+    if (!res?.ok) {
       stop = "http-error";
       break;
     }
-    const json: any = await res.json();
-    const pageItems = json.items ?? json.data ?? [];
+    const json: any = await res.json().catch(() => null);
+    const pageItems = json && typeof json === "object" ? json.items ?? json.data ?? [] : null;
     if (!Array.isArray(pageItems)) {
       stop = "bad-page";
       break;
@@ -247,11 +275,23 @@ function refresh(identity: string, readPage: CatalogPageReader): Promise<HeldCat
   if (running) return running;
   const walk = walkCatalog(readPage).catch(() => null).then((found) => {
     const previous = held.get(identity) ?? null;
-    if (!found) return previous;
-    const next: HeldCatalog = { at: Date.now(), cards: found.cards, pagination: found.pagination, digest: digestOf(found.cards) };
+    const now = Date.now();
+    const whole = found?.pagination.complete === true;
+    if (!found || (previous && !whole && (previous.pagination.complete || found.cards.length < previous.cards.length))) {
+      if (previous) {
+        previous.failures += 1;
+        previous.walkAgainAt = now + retryAfter(previous.failures);
+      }
+      return previous;
+    }
+    const failures = whole ? 0 : (previous?.failures ?? 0) + 1;
+    const next: HeldCatalog = {
+      at: now, cards: found.cards, pagination: found.pagination, digest: digestOf(found.cards),
+      walkAgainAt: now + (whole ? CATALOG_FRESH_MS : retryAfter(failures)), failures,
+    };
     keep(identity, next);
     save(identity, next);
-    if (previous && previous.digest !== next.digest) for (const listener of listeners) listener();
+    if (previous && previous.digest !== next.digest) announceChange();
     return next;
   }).finally(() => {
     if (walks.get(identity) === walk) walks.delete(identity);
@@ -271,7 +311,7 @@ const answer = (catalog: HeldCatalog): Catalog => ({
 export async function catalogFor(identity: string, readPage: CatalogPageReader): Promise<Catalog | null> {
   const known = held.get(identity) ?? loadSaved(identity);
   if (known) {
-    if (Date.now() - known.at >= CATALOG_FRESH_MS) void refresh(identity, readPage);
+    if (Date.now() >= known.walkAgainAt) void refresh(identity, readPage);
     return answer(known);
   }
   const first = await refresh(identity, readPage);
